@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { verifyToken } from "./src/lib/jwt";
 
-const PUBLIC_PATHS = ["/login", "/register", "/api/auth"];
+const PUBLIC_PATHS = ["/", "/login", "/register", "/api/auth", "/api/chat", "/gallery"];
 
 export async function middleware(request: {
   nextUrl: { pathname: string; origin: string; href: string };
