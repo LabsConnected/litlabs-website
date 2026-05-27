@@ -3,19 +3,21 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "◈" },
-  { href: "/social", label: "Social Hub", icon: "👥" },
+  { href: "/dashboard", label: "Home", icon: "◈" },
+  { href: "/gallery", label: "Agent Gallery", icon: "🏛" },
+  { href: "/marketplace", label: "Bot Forge", icon: "🔧" },
+  { href: "/builder", label: "Build Agent", icon: "🛠" },
   { href: "/agent-chat", label: "AI Chat", icon: "⚡" },
-  { href: "/marketplace", label: "Bot Forge", icon: "◉" },
+  { href: "/social", label: "Social Hub", icon: "👥" },
   { href: "/settings", label: "Settings", icon: "⚙" },
 ];
 
 export default function Sidebar() {
   const pathname = usePathname();
   return (
-    <aside className="w-56 border-r border-cyber-border bg-cyber-surface p-4 hidden lg:block">
+    <aside className="w-56 border-r border-cyber-border bg-cyber-surface p-4 hidden lg:block shrink-0">
       <nav className="space-y-1">
-        {ITEMS.map(item => (
+        {ITEMS.map((item) => (
           <Link
             key={item.href}
             href={item.href}

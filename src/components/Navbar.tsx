@@ -3,11 +3,12 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 
 const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "◈" },
-  { href: "/social", label: "Social", icon: "👥" },
+  { href: "/dashboard", label: "Home", icon: "◈" },
+  { href: "/gallery", label: "Agents", icon: "🏛" },
+  { href: "/marketplace", label: "Bot Forge", icon: "🔧" },
+  { href: "/builder", label: "Build", icon: "🛠" },
   { href: "/agent-chat", label: "AI Chat", icon: "⚡" },
-  { href: "/marketplace", label: "Bot Forge", icon: "◉" },
-  { href: "/settings", label: "Settings", icon: "⚙" },
+  { href: "/social", label: "Social", icon: "👥" },
 ];
 
 export default function Navbar({ onLogout, user }: { onLogout: () => void; user?: any }) {
@@ -16,11 +17,11 @@ export default function Navbar({ onLogout, user }: { onLogout: () => void; user?
   return (
     <nav className="sticky top-0 z-50 border-b border-cyber-border bg-cyber-bg/80 backdrop-blur-md">
       <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-        <Link href="/dashboard" className="font-heading text-lg font-bold tracking-wider text-neon-cyan text-glow-cyan">
+        <Link href="/dashboard" className="text-lg font-bold tracking-wider text-neon-cyan text-glow-cyan">
           LITLABS
         </Link>
         <ul className="hidden items-center gap-1 md:flex">
-          {NAV_ITEMS.map(item => (
+          {NAV_ITEMS.map((item) => (
             <li key={item.href}>
               <Link
                 href={item.href}
@@ -36,15 +37,15 @@ export default function Navbar({ onLogout, user }: { onLogout: () => void; user?
           ))}
         </ul>
         <div className="flex items-center gap-3">
-          <span className="text-sm text-text-muted hidden sm:block">{user?.email}</span>
+          <span className="text-sm text-text-muted hidden sm:block">{user?.name || user?.email?.split("@")[0]}</span>
           <button onClick={onLogout} className="text-xs text-text-muted hover:text-neon-cyan transition-colors font-code">
             LOGOUT
           </button>
         </div>
       </div>
       {/* Mobile nav */}
-      <div className="flex overflow-x-auto border-t border-cyber-border px-2 py-1.5 md:hidden">
-        {NAV_ITEMS.map(item => (
+      <div className="flex overflow-x-auto border-t border-cyber-border px-2 py-1.5 md:hidden gap-1">
+        {NAV_ITEMS.map((item) => (
           <Link
             key={item.href}
             href={item.href}

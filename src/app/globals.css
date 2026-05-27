@@ -1,6 +1,10 @@
 @import "tailwindcss";
 
 :root {
+  --font-inter: "Inter", system-ui, sans-serif;
+  --font-orbitron: "Orbitron", sans-serif;
+  --font-jetbrains: "JetBrains Mono", monospace;
+
   --neon-cyan: #00f2fe;
   --neon-purple: #9b51e0;
   --neon-gold: #ffd700;
@@ -16,18 +20,24 @@
 * { box-sizing: border-box; margin: 0; padding: 0; }
 
 body {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: var(--font-inter);
   background: var(--cyber-bg);
   color: var(--text-primary);
   min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
 
-.font-heading { font-family: 'Orbitron', sans-serif; }
-.font-code { font-family: 'JetBrains Mono', monospace; }
+/* === Typography === */
+.font-sans { font-family: var(--font-inter); }
+.font-heading { font-family: var(--font-orbitron); }
+.font-code { font-family: var(--font-jetbrains), monospace; }
 
+/* === Colors === */
 .text-neon-cyan { color: var(--neon-cyan); }
 .text-neon-purple { color: var(--neon-purple); }
 .text-neon-gold { color: var(--neon-gold); }
+.text-text-primary { color: var(--text-primary); }
 .text-text-secondary { color: var(--text-secondary); }
 .text-text-muted { color: var(--text-muted); }
 
@@ -37,10 +47,12 @@ body {
 
 .border-cyber-border { border-color: var(--cyber-border); }
 
-.text-glow-cyan { text-shadow: 0 0 10px var(--neon-cyan), 0 0 20px var(--neon-cyan); }
-.text-glow-purple { text-shadow: 0 0 10px var(--neon-purple), 0 0 20px var(--neon-purple); }
-.text-glow-gold { text-shadow: 0 0 10px var(--neon-gold), 0 0 20px var(--neon-gold); }
+/* === Glow effects === */
+.text-glow-cyan { text-shadow: 0 0 10px var(--neon-cyan), 0 0 30px var(--neon-cyan); }
+.text-glow-purple { text-shadow: 0 0 10px var(--neon-purple), 0 0 30px var(--neon-purple); }
+.text-glow-gold { text-shadow: 0 0 10px var(--neon-gold), 0 0 30px var(--neon-gold); }
 
+/* === Gradient text === */
 .gradient-text {
   background: linear-gradient(135deg, var(--neon-cyan), var(--neon-purple));
   -webkit-background-clip: text;
@@ -48,6 +60,7 @@ body {
   background-clip: text;
 }
 
+/* === Cards === */
 .card {
   background: var(--cyber-surface);
   border: 1px solid var(--cyber-border);
@@ -60,6 +73,7 @@ body {
   box-shadow: 0 0 16px rgba(0, 242, 254, 0.1);
 }
 
+/* === Buttons === */
 .btn-primary {
   background: var(--neon-cyan);
   color: var(--cyber-bg);
@@ -71,6 +85,7 @@ body {
   transition: all 0.15s;
   font-family: inherit;
   font-size: 14px;
+  display: inline-block;
 }
 .btn-primary:hover {
   background: rgba(0, 242, 254, 0.9);
@@ -88,12 +103,14 @@ body {
   transition: all 0.15s;
   font-family: inherit;
   font-size: 14px;
+  display: inline-block;
 }
 .btn-secondary:hover {
   background: rgba(155, 81, 224, 0.1);
   border-color: var(--neon-purple);
 }
 
+/* === Inputs === */
 .input {
   background: var(--cyber-surface);
   border: 1px solid var(--cyber-border);
@@ -111,6 +128,7 @@ body {
   box-shadow: 0 0 0 2px rgba(0, 242, 254, 0.1);
 }
 
+/* === Badges === */
 .badge {
   display: inline-flex;
   align-items: center;
@@ -120,14 +138,22 @@ body {
   font-weight: 500;
   border: 1px solid;
 }
-
 .badge-cyan { background: rgba(0, 242, 254, 0.1); color: var(--neon-cyan); border-color: rgba(0, 242, 254, 0.3); }
 .badge-purple { background: rgba(155, 81, 224, 0.1); color: var(--neon-purple); border-color: rgba(155, 81, 224, 0.3); }
 .badge-gold { background: rgba(255, 215, 0, 0.1); color: var(--neon-gold); border-color: rgba(255, 215, 0, 0.3); }
 .badge-green { background: rgba(0, 255, 136, 0.1); color: #00ff88; border-color: rgba(0, 255, 136, 0.3); }
 .badge-red { background: rgba(255, 80, 80, 0.1); color: #ff5050; border-color: rgba(255, 80, 80, 0.3); }
 
+/* === Scrollbar === */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: var(--cyber-bg); }
 ::-webkit-scrollbar-thumb { background: var(--cyber-border); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* === Line clamp === */
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
