@@ -199,7 +199,7 @@ export default function RegisterPage() {
           <input
             type="checkbox"
             checked={acceptTerms}
-            onChange={e => setAcceptTerms(e.target.value)}
+            onChange={e => setAcceptTerms(e.target.checked)}
             className="w-4 h-4 mt-0.5 rounded border-cyber-border bg-cyber-surface accent-neon-cyan"
           />
           <span className="text-text-secondary text-sm">
