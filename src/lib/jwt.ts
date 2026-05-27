@@ -4,14 +4,14 @@ const SECRET = new TextEncoder().encode(
   process.env.AUTH_SECRET || "homebase-dev-secret-change-in-production"
 );
 
-export async function signToken(payload) {
+export async function signToken(payload: Record<string, unknown>) {
   return await new SignJWT(payload)
     .setProtectedHeader({ alg: "HS256" })
     .setExpirationTime("7d")
     .sign(SECRET);
 }
 
-export async function verifyToken(token) {
+export async function verifyToken(token: string) {
   try {
     const { payload } = await jwtVerify(token, SECRET);
     return payload;
