@@ -11,9 +11,14 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
   const router = useRouter();
 
   useEffect(() => {
-    if (!loading && !user) router.push("/login");
+    // Only redirect if we're sure the user is not authenticated
+    // (loading is false and user is null)
+    if (!loading && !user) {
+      router.push("/login");
+    }
   }, [user, loading, router]);
 
+  // Show loading state while checking auth
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-cyber-bg">
@@ -22,6 +27,7 @@ export default function DashboardLayout({ children }: { children: React.ReactNod
     );
   }
 
+  // Don't render anything if not authenticated (will redirect)
   if (!user) return null;
 
   return (

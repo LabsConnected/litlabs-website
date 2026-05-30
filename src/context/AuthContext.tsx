@@ -20,9 +20,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const router = useRouter();
 
   useEffect(() => {
-    fetch("/api/auth/session")
+    fetch("/api/auth/session", { credentials: "include" })
       .then(r => r.json())
-      .then(data => { setUser(data.user); setLoading(false); })
+      .then(data => {
+        setUser(data.user);
+        setLoading(false);
+      })
       .catch(() => setLoading(false));
   }, []);
 
@@ -30,34 +33,40 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const res = await fetch("/api/auth/login", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password, rememberMe: (days ?? 7) > 7 }),
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Server error ${res.status}` }));
+      throw new Error(err.error || "Login failed");
+    }
     const data = await res.json();
     setUser(data.user);
-    router.push("/dashboard");
-    router.refresh();
-  }, [router]);
+    // Use window.location for a full page reload to avoid client-side routing issues
+    window.location.href = "/dashboard";
+  }, []);
 
   const register = useCallback(async (email: string, password: string, name: string) => {
     const res = await fetch("/api/auth/register", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ email, password, name }),
     });
-    if (!res.ok) { const err = await res.json(); throw new Error(err.error); }
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ error: `Server error ${res.status}` }));
+      throw new Error(err.error || "Registration failed");
+    }
     const data = await res.json();
     setUser(data.user);
-    router.push("/dashboard");
-    router.refresh();
-  }, [router]);
+    window.location.href = "/dashboard";
+  }, []);
 
   const logout = useCallback(async () => {
-    await fetch("/api/auth/logout", { method: "POST" });
+    await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
     setUser(null);
-    router.push("/login");
-    router.refresh();
-  }, [router]);
+    window.location.href = "/login";
+  }, []);
 
   return (
     <AuthContext.Provider value={{ user, loading, login, register, logout }}>
