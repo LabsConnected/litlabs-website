@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import Navbar from "@/components/Navbar";
 
 interface Agent {
   id: string;
@@ -108,50 +109,48 @@ export default function GalleryPage() {
   });
 
   return (
-    <div className="min-h-screen bg-cyber-bg">
-      {/* Nav */}
-      <nav className="sticky top-0 z-50 border-b border-cyber-border bg-cyber-bg/80 backdrop-blur-md">
-        <div className="mx-auto flex h-14 max-w-7xl items-center justify-between px-4 sm:px-6">
-          <Link href="/" className="text-lg font-bold tracking-wider text-neon-cyan text-glow-cyan">
-            LITLABS<span className="text-neon-purple">.AI</span>
-          </Link>
-          <div className="flex items-center gap-3">
-            <Link href="/login" className="text-sm text-text-secondary hover:text-neon-cyan transition-colors">
-              Sign In
-            </Link>
-            <Link href="/login" className="btn-primary text-sm">Get Started</Link>
-          </div>
-        </div>
-      </nav>
+    <div className="min-h-screen bg-cyber-bg selection:bg-neon-cyan/30">
+      <Navbar />
 
-      <div className="mx-auto max-w-6xl px-4 py-12">
+      <div className="mx-auto max-w-7xl px-4 pt-8 pb-8 sm:px-6 sm:py-20">
         {/* Header */}
-        <div className="mb-10 text-center">
-          <h1 className="mb-3 text-4xl font-bold">
-            Agent <span className="gradient-text">Gallery</span>
+        <div className="mb-8 sm:mb-16 text-center sm:text-left">
+          <div className="inline-block text-[10px] font-bold text-neon-cyan tracking-[0.3em] uppercase mb-1 sm:mb-2">
+            Champion_Registry_v3.0
+          </div>
+          <h1 className="mb-2 sm:mb-4 text-3xl sm:text-6xl font-bold font-heading uppercase tracking-tight">
+            AGENT <span className="gradient-text">GALLERY</span>
           </h1>
-          <p className="text-text-secondary max-w-lg mx-auto">
-            Browse, try, and deploy AI agents built by LitLabs and the community.
+          <p className="text-text-secondary max-w-2xl font-medium text-sm sm:text-lg">
+            Browse and deploy elite AI champions. Each agent is pre-configured with specialized cyber-daemons and dual-agent workflows.
           </p>
         </div>
 
         {/* Search + Filter */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-          <input
-            className="input max-w-sm"
-            placeholder="Search agents..."
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-          <div className="flex flex-wrap gap-2">
+        <div className="mb-8 sm:mb-12 flex flex-col gap-4 sm:gap-6 p-3 sm:p-6 glass-panel border-white/5">
+          {/* Search */}
+          <div className="relative w-full sm:max-w-md">
+            <span className="absolute left-3 sm:left-4 top-1/2 -translate-y-1/2 text-text-muted opacity-50 text-sm">
+              🔍
+            </span>
+            <input
+              className="input pl-10 sm:pl-12"
+              placeholder="Search agents..."
+              value={search}
+              onChange={(e) => setSearch(e.target.value)}
+            />
+          </div>
+
+          {/* Category filters — horizontally scrollable on mobile */}
+          <div className="flex gap-2 overflow-x-auto pb-1 sm:pb-0 sm:flex-wrap no-scrollbar scrollbar-hide">
             {CATEGORIES.map((cat) => (
               <button
                 key={cat}
                 onClick={() => setActive(cat)}
-                className={`rounded-full px-3 py-1 text-xs font-medium transition-all ${
+                className={`shrink-0 rounded-lg px-3 sm:px-4 py-1.5 sm:py-2 text-[10px] font-bold tracking-widest transition-all uppercase min-h-[36px] ${
                   active === cat
-                    ? "bg-neon-cyan text-cyber-bg"
-                    : "border border-cyber-border text-text-secondary hover:border-neon-cyan/40 hover:text-neon-cyan"
+                    ? "bg-neon-cyan text-cyber-bg shadow-[0_0_15px_rgba(0,242,254,0.3)]"
+                    : "bg-white/5 border border-white/5 text-text-muted hover:border-neon-cyan/40 hover:text-neon-cyan"
                 }`}
               >
                 {cat}
@@ -160,85 +159,143 @@ export default function GalleryPage() {
           </div>
         </div>
 
-        {/* Grid */}
-        <div className="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
+        {/* Agent Grid: 1 col mobile, 2 col tablet, 3 col desktop */}
+        <div className="grid grid-cols-1 gap-3 sm:gap-6 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((bot) => (
             <div
               key={bot.id}
-              className="card group cursor-pointer"
+              className="card group cursor-pointer relative overflow-hidden hover:border-neon-cyan/40 hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,242,254,0.1)] transition-all duration-300 p-3 sm:p-6"
               onClick={() => setSelected(bot)}
             >
-              <div className="flex items-start justify-between mb-3">
-                <span className="text-3xl">{bot.avatar}</span>
-                <span className={`badge badge-${bot.tagColor}`}>{bot.tag}</span>
+              {/* Compact mobile card: avatar + name + tag + rating in tight layout */}
+              <div className="flex items-center gap-3 mb-2 sm:mb-6 sm:block">
+                <div className="w-10 h-10 sm:w-14 sm:h-14 rounded-xl sm:rounded-2xl bg-white/5 border border-white/5 flex items-center justify-center text-xl sm:text-3xl shrink-0 group-hover:scale-110 transition-transform duration-500">
+                  {bot.avatar}
+                </div>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-0.5 sm:mb-2">
+                    <h3 className="text-sm sm:text-xl font-bold group-hover:text-neon-cyan transition-colors font-heading uppercase tracking-tight truncate">
+                      {bot.name}
+                    </h3>
+                    <span className={`badge badge-${bot.tagColor} shrink-0`}>{bot.tag}</span>
+                  </div>
+                  {/* Rating visible on mobile under name, hidden from main desktop layout */}
+                  <div className="flex sm:hidden items-center gap-1 text-[10px] font-bold uppercase tracking-widest text-text-muted">
+                    <span className="text-neon-cyan">★</span> {bot.rating} · {bot.uses}
+                  </div>
+                </div>
               </div>
-              <h3 className="text-lg font-semibold group-hover:text-neon-cyan transition-colors mb-1">
-                {bot.name}
-              </h3>
-              <p className="text-sm text-text-secondary mb-4 line-clamp-2">{bot.desc}</p>
-              <div className="flex items-center justify-between text-xs text-text-muted">
-                <span>by {bot.author}</span>
-                <span>★ {bot.rating} · {bot.uses} uses</span>
+              {/* Full layout for sm+ */}
+              <div className="hidden sm:block">
+                <h3 className="text-xl font-bold group-hover:text-neon-cyan transition-colors mb-2 font-heading uppercase tracking-tight">
+                  {bot.name}
+                </h3>
+                <p className="text-sm text-text-secondary mb-8 font-medium line-clamp-2 leading-relaxed">
+                  {bot.desc}
+                </p>
+                <div className="flex items-center justify-between pt-4 border-t border-white/5 text-[10px] font-bold uppercase tracking-widest text-text-muted">
+                  <span className="flex items-center gap-1.5">
+                    <span className="text-neon-cyan">★</span> {bot.rating}
+                  </span>
+                  <span>{bot.uses} DEPLOYMENTS</span>
+                </div>
               </div>
+              {/* Desc truncated on mobile */}
+              <p className="sm:hidden text-xs text-text-secondary font-medium line-clamp-2 leading-relaxed">
+                {bot.desc}
+              </p>
             </div>
           ))}
         </div>
 
+        {/* Empty state */}
         {filtered.length === 0 && (
-          <div className="card text-center py-16">
-            <div className="text-4xl mb-4">🔍</div>
-            <h3 className="text-lg font-semibold mb-2">No agents found</h3>
-            <p className="text-text-secondary text-sm">Try a different search or category.</p>
+          <div className="card text-center py-16 sm:py-24 border-dashed border-white/10">
+            <div className="text-4xl sm:text-5xl mb-4 sm:mb-6 grayscale">🔍</div>
+            <h3 className="text-lg sm:text-xl font-bold font-heading mb-2 uppercase">No matches in Matrix</h3>
+            <p className="text-text-secondary text-xs sm:text-sm font-medium">
+              Refine your search parameters or select a different sector.
+            </p>
           </div>
         )}
       </div>
 
-      {/* Detail Modal */}
+      {/* Detail Modal: full-screen on mobile, centered card on desktop */}
       {selected && (
         <div
-          className="fixed inset-0 z-[100] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4"
+          className="fixed inset-0 z-[100] flex items-end sm:items-center justify-center bg-black/80 backdrop-blur-xl animate-fade-in"
           onClick={() => setSelected(null)}
         >
           <div
-            className="card max-w-lg w-full relative"
+            className="relative w-full sm:max-w-xl bg-cyber-surface border border-white/10 rounded-t-2xl sm:rounded-2xl p-5 sm:p-12 overflow-y-auto max-h-[100dvh] sm:max-h-[90vh]"
             onClick={(e) => e.stopPropagation()}
           >
+            {/* Gradient accent line */}
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-transparent via-neon-cyan to-transparent" />
+
+            {/* Close button — 44px+ touch target */}
             <button
               onClick={() => setSelected(null)}
-              className="absolute top-4 right-4 text-text-muted hover:text-white text-xl"
+              className="absolute top-3 right-3 sm:top-6 sm:right-6 w-11 h-11 flex items-center justify-center rounded-xl bg-white/5 border border-white/5 text-text-muted hover:text-white hover:border-neon-cyan/40 hover:bg-white/10 transition-all"
             >
-              ✕
+              <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+              </svg>
             </button>
 
-            <div className="flex items-center gap-4 mb-4">
-              <span className="text-5xl">{selected.avatar}</span>
-              <div>
-                <h2 className="text-xl font-bold">{selected.name}</h2>
+            {/* Avatar + Name */}
+            <div className="flex items-center gap-4 sm:gap-6 mb-6 sm:mb-8 pr-12 sm:pr-0">
+              <div className="w-14 h-14 sm:w-20 sm:h-20 rounded-2xl sm:rounded-3xl bg-white/5 border border-white/10 flex items-center justify-center text-3xl sm:text-5xl shrink-0">
+                {selected.avatar}
+              </div>
+              <div className="min-w-0">
+                <h2 className="text-xl sm:text-3xl font-bold font-heading uppercase tracking-tight mb-1 truncate">
+                  {selected.name}
+                </h2>
                 <span className={`badge badge-${selected.tagColor}`}>{selected.tag}</span>
               </div>
             </div>
 
-            <p className="text-text-secondary text-sm mb-4">{selected.desc}</p>
+            {/* Details */}
+            <div className="space-y-4 sm:space-y-6 mb-6 sm:mb-10">
+              <div>
+                <div className="text-[10px] font-bold text-text-muted uppercase tracking-widest mb-1 sm:mb-2">
+                  Capability_Description
+                </div>
+                <p className="text-sm text-text-secondary font-medium leading-relaxed">{selected.desc}</p>
+              </div>
 
-            <div className="bg-cyber-surface-2 rounded-lg p-3 mb-4">
-              <div className="text-xs text-text-muted mb-1">Personality</div>
-              <div className="text-sm">&ldquo;{selected.personality}&rdquo;</div>
+              <div className="p-3 sm:p-4 rounded-xl bg-black/40 border border-white/5">
+                <div className="text-[10px] font-bold text-neon-cyan uppercase tracking-widest mb-1 sm:mb-2">
+                  Persona_Matrix
+                </div>
+                <div className="text-xs sm:text-sm font-medium italic text-text-primary">
+                  &ldquo;{selected.personality}&rdquo;
+                </div>
+              </div>
+
+              <div className="flex flex-col sm:flex-row sm:items-center gap-2 sm:justify-between text-[10px] font-bold text-text-muted uppercase tracking-[0.2em]">
+                <span>FORGED BY: {selected.author.toUpperCase()}</span>
+                <span className="flex items-center gap-4">
+                  <span>RANK: ★ {selected.rating}</span>
+                  <span>USAGE: {selected.uses}</span>
+                </span>
+              </div>
             </div>
 
-            <div className="flex items-center justify-between text-sm text-text-muted mb-6">
-              <span>by {selected.author}</span>
-              <span>★ {selected.rating} · {selected.uses} uses</span>
-            </div>
-
-            <div className="flex gap-3">
+            {/* Action buttons */}
+            <div className="flex flex-col sm:flex-row gap-3 sm:gap-4">
               <Link
                 href={`/gallery/${selected.id}`}
-                className="btn-primary flex-1 text-center"
+                className="btn-primary flex-1 py-3 sm:py-4 text-center text-xs sm:text-sm uppercase tracking-widest"
               >
-                Chat Now →
+                Deploy →
               </Link>
-              <Link href="/login" className="btn-secondary flex-1 text-center">
-                Build Copy
+              <Link
+                href="/login"
+                className="btn-secondary flex-1 py-3 sm:py-4 text-center text-xs sm:text-sm uppercase tracking-widest"
+              >
+                Preview
               </Link>
             </div>
           </div>

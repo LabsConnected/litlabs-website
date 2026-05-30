@@ -1,63 +1,132 @@
 "use client";
+
 import Link from "next/link";
 import JobQueueMonitor from "@/components/JobQueueMonitor";
 
 export default function DashboardPage() {
   const quickActions = [
-    { href: "/agent-chat", icon: "⚡", title: "AI Chat", desc: "Talk to any agent", color: "cyan" },
-    { href: "/marketplace", icon: "🔧", title: "Bot Forge", desc: "Browse agents", color: "purple" },
-    { href: "/social", icon: "👥", title: "Social Hub", desc: "Connect & share", color: "gold" },
-    { href: "/builder", icon: "🛠", title: "Build Agent", desc: "Create your own", color: "green" },
-    { href: "/gallery", icon: "🏛", title: "Agent Gallery", desc: "Explore all agents", color: "purple" },
-    { href: "/settings", icon: "⚙", title: "Settings", desc: "Configure workspace", color: "cyan" },
+    { href: "/agent-chat", icon: "⚡", title: "Neural Link", desc: "Direct AI connection", color: "cyan" },
+    { href: "/marketplace", icon: "🔧", title: "Bot Forge", desc: "Acquire new daemons", color: "purple" },
+    { href: "/social", icon: "👥", title: "The Matrix", desc: "Builder network", color: "gold" },
+    { href: "/builder", icon: "🛠", title: "Forge Agent", desc: "Construct custom AI", color: "green" },
+    { href: "/gallery", icon: "🏛", title: "Champions", desc: "Elite registry", color: "purple" },
+    { href: "/settings", icon: "⚙", title: "System Config", desc: "Workspace params", color: "cyan" },
+  ];
+
+  const onboardingSteps = [
+    {
+      step: "01",
+      color: "neon-cyan",
+      title: "Establish Neural Link",
+      desc: "Connect with pre-built champions through the Neural Link. Test their capabilities before full deployment.",
+    },
+    {
+      step: "02",
+      color: "neon-purple",
+      title: "Forge Custom Daemons",
+      desc: "Utilize the Bot Forge to construct agents tailored to your specific technical requirements and persona.",
+    },
+    {
+      step: "03",
+      color: "neon-gold",
+      title: "Sync with Matrix",
+      desc: "Enter the social hub to exchange technical logs and reputation with the global builder collective.",
+    },
   ];
 
   return (
-    <div className="max-w-6xl mx-auto">
-      <div className="grid md:grid-cols-3 gap-8 mb-10">
-        <div className="md:col-span-2">
-          <h1 className="font-heading text-2xl font-bold mb-1">
-            Welcome back, <span className="text-neon-cyan">Builder</span>
-          </h1>
-          <p className="text-text-secondary">Your AI workspace is ready.</p>
-        </div>
-        <JobQueueMonitor />
-      </div>
-
-      <h2 className="font-heading text-lg font-semibold mb-4">Quick Actions</h2>
-      <div className="grid grid-cols-2 lg:grid-cols-3 gap-4 mb-10">
-        {quickActions.map((a) => (
-          <Link key={a.href} href={a.href} className="glass-panel group">
-            <div className="text-2xl mb-2">{a.icon}</div>
-            <div className="text-sm font-semibold group-hover:text-neon-cyan transition-colors">{a.title}</div>
-            <div className="text-xs text-text-secondary">{a.desc}</div>
-          </Link>
-        ))}
-      </div>
-
-      <div className="glass-panel border-neon-cyan/20">
-        <h2 className="font-heading text-lg font-semibold mb-2">🚀 Get Started</h2>
-        <p className="text-text-secondary text-sm mb-4">
-          New to LitLabs? Here&apos;s how to get the most out of your AI workspace.
-        </p>
-        <div className="grid sm:grid-cols-3 gap-4">
-          <div className="bg-black/20 rounded-lg p-4 border border-white/5">
-            <div className="text-neon-cyan font-code text-lg mb-1">01</div>
-            <div className="font-medium text-sm mb-1">Chat with Agents</div>
-            <p className="text-xs text-text-muted">Try the floating chat bubble or visit the Agent Gallery to talk to pre-built AI agents.</p>
+    <div className="max-w-6xl mx-auto space-y-10 pb-20">
+      {/* Welcome Header */}
+      <section>
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-8">
+          <div>
+            <div className="text-[10px] font-bold text-neon-cyan tracking-[0.4em] uppercase mb-2">
+              System_Status: Online
+            </div>
+            <h1 className="font-heading text-3xl sm:text-4xl font-bold mb-2 uppercase tracking-tight">
+              Welcome back, <span className="gradient-text">Builder</span>
+            </h1>
+            <p className="text-text-secondary font-medium">
+              Your CEO Operating System is initialized and ready.
+            </p>
           </div>
-          <div className="bg-black/20 rounded-lg p-4 border border-white/5">
-            <div className="text-neon-purple font-code text-lg mb-1">02</div>
-            <div className="font-medium text-sm mb-1">Build Your Own</div>
-            <p className="text-xs text-text-muted">Use the Bot Builder to create a custom agent. Set its personality, skills, and deploy.</p>
-          </div>
-          <div className="bg-black/20 rounded-lg p-4 border border-white/5">
-            <div className="text-neon-gold font-code text-lg mb-1">03</div>
-            <div className="font-medium text-sm mb-1">Join the Community</div>
-            <p className="text-xs text-text-muted">Share wins, post in Social Hub, and enter agents in weekly Arena challenges.</p>
+          <div className="w-full lg:w-auto">
+            <JobQueueMonitor />
           </div>
         </div>
-      </div>
+        <div className="h-px mt-8 bg-gradient-to-r from-neon-cyan/20 via-neon-purple/20 to-transparent" />
+      </section>
+
+      {/* Quick Actions Grid */}
+      <section>
+        <div className="flex items-center gap-3 mb-6">
+          <h2 className="font-heading text-sm font-bold uppercase tracking-[0.2em] text-text-muted">
+            Quick_Initialization
+          </h2>
+          <div className="h-px flex-1 bg-gradient-to-r from-white/10 to-transparent" />
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+          {quickActions.map((a) => (
+            <Link
+              key={a.href}
+              href={a.href}
+              className="card group hover:border-neon-cyan/30 hover:scale-[1.02] transition-all duration-300"
+            >
+              <div className="flex items-start gap-4">
+                <div className="w-12 h-12 min-w-[48px] min-h-[48px] rounded-xl bg-white/5 border border-white/5 flex items-center justify-center text-2xl group-hover:scale-110 transition-transform">
+                  {a.icon}
+                </div>
+                <div>
+                  <div className="text-base font-bold group-hover:text-neon-cyan transition-colors uppercase tracking-tight">
+                    {a.title}
+                  </div>
+                  <div className="text-xs text-text-muted font-medium uppercase tracking-wider">
+                    {a.desc}
+                  </div>
+                </div>
+              </div>
+            </Link>
+          ))}
+        </div>
+
+        <div className="h-px mt-8 bg-gradient-to-r from-neon-purple/20 via-neon-cyan/10 to-transparent" />
+      </section>
+
+      {/* Onboarding / Getting Started */}
+      <section className="glass-panel p-8 sm:p-12 border-neon-cyan/10 relative overflow-hidden">
+        {/* Subtle background glow */}
+        <div className="absolute top-0 right-0 w-64 h-64 bg-neon-cyan/5 blur-[100px]" />
+        <div className="absolute bottom-0 left-0 w-48 h-48 bg-neon-purple/5 blur-[80px]" />
+
+        <div className="relative">
+          <h2 className="font-heading text-xl font-bold mb-2 uppercase">
+            🚀 System_Initialization_Guide
+          </h2>
+          <p className="text-text-secondary text-sm mb-10 font-medium max-w-2xl">
+            Optimize your workflow by mastering the core dual-agent orchestration protocols.
+          </p>
+
+          {/* Gradient divider under description */}
+          <div className="h-px mb-10 bg-gradient-to-r from-neon-cyan/20 via-neon-purple/20 to-transparent" />
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
+            {onboardingSteps.map((s) => (
+              <div key={s.step} className="space-y-4">
+                <div className={`font-heading text-4xl font-bold opacity-20 text-${s.color}`}>
+                  {s.step}
+                </div>
+                <div className="font-bold text-base uppercase tracking-tight">
+                  {s.title}
+                </div>
+                <p className="text-xs text-text-muted font-medium leading-relaxed">
+                  {s.desc}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
     </div>
   );
 }
