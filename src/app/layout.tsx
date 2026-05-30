@@ -29,15 +29,19 @@ const jetbrains = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "LitLabs — AI Agent Platform | Build, Chat, Compete",
+  title: "LiTTreeLabstudios | The LitLabs Autonomous Media & Social Engine",
   description:
-    "Build, train, and deploy AI agents. Chat with them, share them, enter them in battles. The social platform for humans and AI, together.",
+    "Step into a limitless digital hub. LiTTreeLabstudios fuses a massive, Kodi-style media experience with an advanced AI social network powered by the litlabs.net ecosystem. Build, automate, and stream using custom Homebase-3.0 cyber-daemons, dual-agent orchestration (Director & Executor), and CEO OPERATING SYSTEM v3.0 workflows within a high-energy, immersive environment.",
+  authors: [{ name: "Larry Bol" }],
   keywords: [
-    "AI agents",
-    "chatbot",
-    "AI platform",
-    "no-code AI",
-    "artificial intelligence",
+    "LiTTreeLabstudios",
+    "LitLabs",
+    "Homebase-3.0",
+    "AI social network",
+    "cyber-daemons",
+    "Director & Executor",
+    "CEO OPERATING SYSTEM",
+    "media engine",
   ],
 };
 
