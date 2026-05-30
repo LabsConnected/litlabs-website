@@ -4,7 +4,7 @@ export default async function LoginPage({
   searchParams: Promise<{ error?: string }>;
 }) {
   const params = await searchParams;
-  const error = params.error;
+  const error = params.error || null;
 
   return (
     <div className="min-h-screen flex items-center justify-center bg-cyber-bg p-4">
@@ -28,7 +28,7 @@ export default async function LoginPage({
             </div>
           )}
 
-          <form action="/api/auth/login" method="POST" className="space-y-4">
+          <form method="POST" action="/api/auth/login" className="space-y-4">
             <div>
               <label className="block text-text-secondary text-sm mb-1">Email</label>
               <input
@@ -36,6 +36,7 @@ export default async function LoginPage({
                 type="email"
                 name="email"
                 required
+                autoComplete="email"
                 placeholder="you@example.com"
               />
             </div>
@@ -49,6 +50,7 @@ export default async function LoginPage({
                 type="password"
                 name="password"
                 required
+                autoComplete="current-password"
                 placeholder="••••••••"
               />
             </div>
@@ -57,15 +59,6 @@ export default async function LoginPage({
               Sign In
             </button>
           </form>
-
-          <div className="text-center mt-4">
-            <a
-              href="/register"
-              className="text-neon-cyan text-sm hover:underline"
-            >
-              Don&apos;t have an account? Register
-            </a>
-          </div>
         </div>
       </div>
     </div>
