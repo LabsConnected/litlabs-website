@@ -29,7 +29,7 @@ export default async function DashboardLayout({
   };
 
   return (
-    <div className="min-h-screen flex flex-col bg-cyber-bg">
+    <div className="min-h-screen flex flex-col bg-[#0a0a0f]">
       <Navbar user={user} />
       <div className="flex flex-1">
         <Sidebar />
