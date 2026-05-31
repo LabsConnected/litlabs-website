@@ -36,7 +36,7 @@ const TIERS: PricingTier[] = [
     price: "$19",
     period: "per month",
     description: "For serious builders and teams",
-    priceId: "pro_monthly",
+    priceId: "price_1TYs4AJ53kgx4fp5RgAChEmk",
     highlighted: true,
     badge: "★ MOST POPULAR ★",
     features: [

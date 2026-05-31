@@ -161,7 +161,7 @@ export default function Home() {
                   </li>
                 ))}
               </ul>
-              <Link href="/login" className="btn-primary w-full py-4 min-h-[48px] uppercase tracking-wider text-sm text-center relative z-10">
+              <Link href="/settings/billing" className="btn-primary w-full py-4 min-h-[48px] uppercase tracking-wider text-sm text-center relative z-10">
                 Upgrade to Pro →
               </Link>
             </div>
