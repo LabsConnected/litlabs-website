@@ -15,7 +15,12 @@ export async function verifyPassword(
   password: string
 ): Promise<User | null> {
   if (!ADMIN_EMAIL || !ADMIN_PASSWORD_HASH) return null;
-  if (email.toLowerCase() !== ADMIN_EMAIL.toLowerCase()) return null;
+  const identifier = email.toLowerCase();
+  const adminEmail = ADMIN_EMAIL.toLowerCase();
+  const adminUsername = ADMIN_EMAIL.split("@")[0].toLowerCase();
+  
+  if (identifier !== adminEmail && identifier !== adminUsername) return null;
+  
   const valid = await bcrypt.compare(password, ADMIN_PASSWORD_HASH);
   if (!valid) return null;
   return { id: "admin", email: ADMIN_EMAIL, name: ADMIN_NAME };
@@ -23,7 +28,11 @@ export async function verifyPassword(
 
 export async function findUserByEmail(email: string): Promise<User | null> {
   if (!ADMIN_EMAIL) return null;
-  if (email.toLowerCase() === ADMIN_EMAIL.toLowerCase()) {
+  const identifier = email.toLowerCase();
+  const adminEmail = ADMIN_EMAIL.toLowerCase();
+  const adminUsername = ADMIN_EMAIL.split("@")[0].toLowerCase();
+
+  if (identifier === adminEmail || identifier === adminUsername) {
     return { id: "admin", email: ADMIN_EMAIL, name: ADMIN_NAME };
   }
   return null;
