@@ -274,23 +274,92 @@ textarea.input { resize: vertical; }
   opacity: 0.3;
 }
 
-/* Badass Borders */
-.border-gradient {
-  position: relative;
+/* Antigravity Floating Animations */
+@keyframes antigravity {
+  0% { transform: translateY(0) rotate(0deg); }
+  25% { transform: translateY(-8px) rotate(0.5deg); }
+  50% { transform: translateY(-12px) rotate(0deg); }
+  75% { transform: translateY(-8px) rotate(-0.5deg); }
+  100% { transform: translateY(0) rotate(0deg); }
 }
 
-.border-gradient::before {
+@keyframes pulse-hologram {
+  0% { opacity: 0.3; filter: hue-rotate(0deg) brightness(1); }
+  50% { opacity: 0.6; filter: hue-rotate(90deg) brightness(1.2); }
+  100% { opacity: 0.3; filter: hue-rotate(0deg) brightness(1); }
+}
+
+.animate-antigravity {
+  animation: antigravity 6s ease-in-out infinite;
+}
+
+.hologram-glow {
+  position: relative;
+  overflow: hidden;
+}
+
+.hologram-glow::after {
   content: "";
   position: absolute;
   inset: 0;
-  border-radius: inherit;
-  padding: 1px;
-  background: linear-gradient(135deg, var(--neon-cyan), transparent, var(--neon-purple));
-  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-  -webkit-mask-composite: xor;
-  mask-composite: exclude;
+  background: linear-gradient(
+    45deg,
+    transparent 40%,
+    rgba(0, 242, 254, 0.1) 50%,
+    transparent 60%
+  );
+  background-size: 200% 200%;
+  animation: shimmer 4s linear infinite;
   pointer-events: none;
+}
+
+/* Technical HUD Components */
+.hud-border {
+  border: 1px solid var(--cyber-border);
+  position: relative;
+}
+
+.hud-border::before, .hud-border::after {
+  content: "";
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: var(--neon-cyan);
+  border-style: solid;
+  pointer-events: none;
+}
+
+.hud-border::before {
+  top: -1px;
+  left: -1px;
+  border-width: 2px 0 0 2px;
+}
+
+.hud-border::after {
+  bottom: -1px;
+  right: -1px;
+  border-width: 0 2px 2px 0;
+}
+
+/* Badass Section Headers */
+.section-header {
+  font-family: var(--font-orbitron);
+  font-weight: 900;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--text-primary);
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+
+.section-header::after {
+  content: "";
+  height: 2px;
+  flex: 1;
+  background: linear-gradient(90deg, var(--neon-cyan), transparent);
+  opacity: 0.3;
 }
 
 /* Custom Scrollbar */
