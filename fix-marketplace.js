@@ -1,4 +1,6 @@
-'use client';
+const fs = require('fs');
+
+const content = `'use client';
 
 import { useState, useCallback } from 'react';
 import Link from 'next/link';
@@ -209,3 +211,7 @@ function AgentCard({ agent, isInstalled, onInstall, onPreview, theme }: { agent:
     </div>
   );
 }
+`;
+
+fs.writeFileSync('C:/home/litbit/LiTTreeLabstudios/home/litbit/LiTTreeLabstudios/src/app/marketplace/page.tsx', content);
+console.log('Marketplace written:', content.length, 'chars');
