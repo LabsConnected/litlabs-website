@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 
@@ -8,6 +8,39 @@ export default function LandingPage() {
   const { theme, resolvedColors, setMode, setSkin } = useTheme();
   const [showThemeEditor, setShowThemeEditor] = useState(false);
   const [musicUrl, setMusicUrl] = useState("");
+  const [directorInput, setDirectorInput] = useState("");
+  const [directorMessages, setDirectorMessages] = useState<{role: string; text: string}[]>([]);
+  const [directorLoading, setDirectorLoading] = useState(false);
+  const directorEndRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    directorEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [directorMessages]);
+
+  async function sendDirectorMessage() {
+    if (!directorInput.trim() || directorLoading) return;
+    const msg = directorInput.trim();
+    setDirectorInput("");
+    setDirectorMessages(prev => [...prev, { role: "user", text: msg }]);
+    setDirectorLoading(true);
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: "director",
+          message: msg,
+          systemPrompt: "You are Director, the master orchestrator of LiTTree Lab Studios — a MySpace-meets-Facebook-meets-AI-agent platform. You help users build AI agents, plan automation workflows, and navigate the platform. Be strategic, direct, and inspiring. Keep replies concise (2-3 sentences max).",
+        }),
+      });
+      const data = await res.json();
+      setDirectorMessages(prev => [...prev, { role: "agent", text: data.response || "I'm thinking on that..." }]);
+    } catch {
+      setDirectorMessages(prev => [...prev, { role: "agent", text: "Connection issue. Try again in a moment!" }]);
+    } finally {
+      setDirectorLoading(false);
+    }
+  }
 
   const skinPresets = ["cyberpunk", "retro", "ocean", "sunset", "matrix", "pink"] as const;
 
@@ -172,19 +205,47 @@ export default function LandingPage() {
                     <p className="text-xs" style={{ color: resolvedColors.accentColor }}>● Online now</p>
                   </div>
                 </div>
-                <div className="border p-3 mb-3" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.bgColor }}>
-                  <p className="text-sm italic" style={{ color: resolvedColors.textColor }}>
-                    "Hi! I'm Director. I can build any AI agent you describe. What do you want to create today?"
-                  </p>
+                <div className="overflow-y-auto mb-3" style={{ maxHeight: "200px", minHeight: "60px" }}>
+                  {directorMessages.length === 0 && (
+                    <div className="border p-3" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.bgColor }}>
+                      <p className="text-sm italic" style={{ color: resolvedColors.textColor }}>
+                        "Hi! I'm Director. I can build any AI agent you describe. What do you want to create today?"
+                      </p>
+                    </div>
+                  )}
+                  {directorMessages.map((msg, i) => (
+                    <div key={i} className="mb-2 p-2 text-sm" style={{
+                      borderLeft: `3px solid ${msg.role === "user" ? resolvedColors.accentColor : resolvedColors.linkColor}`,
+                      backgroundColor: msg.role === "user" ? "rgba(0,0,0,0.2)" : "rgba(255,0,128,0.07)",
+                      color: resolvedColors.textColor
+                    }}>
+                      <span className="font-bold text-xs" style={{ color: msg.role === "user" ? resolvedColors.accentColor : resolvedColors.linkColor }}>
+                        {msg.role === "user" ? "You: " : "🎯 Director: "}
+                      </span>
+                      {msg.text}
+                    </div>
+                  ))}
+                  {directorLoading && (
+                    <div className="text-xs p-2" style={{ color: resolvedColors.accentColor }}>⏳ Director is thinking...</div>
+                  )}
+                  <div ref={directorEndRef} />
                 </div>
                 <div className="flex gap-2">
                   <input 
                     type="text" 
+                    value={directorInput}
+                    onChange={e => setDirectorInput(e.target.value)}
+                    onKeyDown={e => e.key === "Enter" && sendDirectorMessage()}
                     placeholder="Ask Director anything..."
                     className="flex-1 p-2 text-sm"
-                    style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, border: `1px solid ${resolvedColors.borderColor}` }}
+                    style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, border: `1px solid ${resolvedColors.borderColor}`, outline: "none" }}
                   />
-                  <button className="px-4 py-2 text-sm font-bold" style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}>
+                  <button 
+                    onClick={sendDirectorMessage}
+                    disabled={directorLoading}
+                    className="px-4 py-2 text-sm font-bold" 
+                    style={{ backgroundColor: resolvedColors.linkColor, color: "white", opacity: directorLoading ? 0.6 : 1, cursor: directorLoading ? "not-allowed" : "pointer" }}
+                  >
                     Send
                   </button>
                 </div>

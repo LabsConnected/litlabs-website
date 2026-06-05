@@ -1,24 +1,9 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
-import dynamic from "next/dynamic";
-
-const NavAuth = dynamic(
-  () => import("@/components/ClerkAuth").then(m => ({ default: m.NavAuth })),
-  { ssr: false }
-);
-
-const theme = {
-  bgColor: "#0a0a0f",
-  textColor: "#00ff41",
-  linkColor: "#ff0080",
-  headerColor: "#00ffff",
-  borderColor: "#ff00ff",
-  accentColor: "#ffff00",
-  boxBg: "#1a0a2e",
-};
+import { useTheme } from "@/context/ThemeContext";
 
 type Agent = {
   id: string;
@@ -36,15 +21,61 @@ type Agent = {
 export default function AgentDetail() {
   const params = useParams();
   const slug = params.slug as string;
+  const { resolvedColors: theme } = useTheme();
   const [agent, setAgent] = useState<Agent | null>(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
+  const [chatInput, setChatInput] = useState("");
+  const [chatMessages, setChatMessages] = useState<{role: string; text: string}[]>([]);
+  const [chatLoading, setChatLoading] = useState(false);
+  const chatEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     if (slug) {
       fetchAgent();
     }
   }, [slug]);
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [chatMessages]);
+
+  async function sendChat() {
+    if (!chatInput.trim() || !agent) return;
+    const userMsg = chatInput.trim();
+    setChatInput("");
+    setChatMessages(prev => [...prev, { role: "user", text: userMsg }]);
+    setChatLoading(true);
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: agent.id,
+          message: userMsg,
+          systemPrompt: agent.system_prompt || `You are ${agent.name}. ${agent.personality}`,
+        }),
+      });
+      const data = await res.json();
+      setChatMessages(prev => [...prev, { role: "agent", text: data.response || data.error || "..." }]);
+    } catch {
+      setChatMessages(prev => [...prev, { role: "agent", text: "Connection error. Try again." }]);
+    } finally {
+      setChatLoading(false);
+    }
+  }
+
+  const DEMO_FALLBACK: Record<string, Agent> = {
+    director:       { id: "1",  slug: "director",         name: "Director",         description: "The master orchestrator. Coordinates strategy, builds agent systems, and delegates tasks across your entire platform.", category: "orchestrator", avatar_url: "🎯", system_prompt: "You are Director, the master orchestrator of LiTTree Lab Studios. You coordinate all AI agents, assign tasks, and ensure smooth operation.", personality: "Strategic, decisive, concise", price_cents: 0, features: ["Multi-agent orchestration", "Strategy planning", "Workflow automation"] },
+    champion:       { id: "2",  slug: "champion",         name: "Champion",          description: "Your all-purpose AI partner. Brainstorm, research, plan, and execute any task with unlimited versatility.", category: "general",      avatar_url: "🏆", system_prompt: "You are Champion, a versatile AI assistant. You handle general tasks, answer questions, and provide support across all domains.", personality: "Helpful, thorough, direct", price_cents: 0, features: ["General assistance", "Brainstorming", "Research"] },
+    "code-champion":{ id: "3",  slug: "code-champion",    name: "Code Champion",     description: "Senior software engineer. Writes, reviews, debugs, and explains code across all languages and frameworks.", category: "developer",    avatar_url: "💻", system_prompt: "You are Code Champion, an expert software developer. You write clean, production-ready code.", personality: "Precise, clean, practical", price_cents: 0, features: ["Code generation", "Debugging", "Architecture"] },
+    "social-dominator":{ id:"4",slug: "social-dominator", name: "Social Dominator",  description: "Growth hacker and content creator. Writes viral posts, crafts strategies, and helps you dominate social media.", category: "marketing",   avatar_url: "📱", system_prompt: "You are Social Dominator, a marketing and social media expert.", personality: "Bold, creative, results-driven", price_cents: 0, features: ["Viral content", "Growth strategy", "Analytics"] },
+    "data-slayer":  { id: "5",  slug: "data-slayer",      name: "Data Slayer",       description: "Data scientist. Analyzes data, builds models, creates visualizations, and surfaces actionable insights.", category: "analytics",   avatar_url: "📊", system_prompt: "You are Data Slayer, a data analytics expert.", personality: "Precise, analytical, data-driven", price_cents: 0, features: ["Data analysis", "Modeling", "Visualization"] },
+    "writing-coach":{ id: "6",  slug: "writing-coach",    name: "Writing Coach",     description: "Master copywriter. Elevates writing quality — editing, tone adjustment, copywriting, and storytelling.", category: "content",     avatar_url: "✍️", system_prompt: "You are Writing Coach, a content creation expert.", personality: "Constructive, articulate, refined", price_cents: 0, features: ["Editing", "Tone adjustment", "Copywriting"] },
+    "music-producer":{ id: "7", slug: "music-producer",   name: "Music Producer",    description: "Creates original music from text prompts and lyrics. Generates songs, instrumentals, and covers with AI.", category: "music",       avatar_url: "🎵", system_prompt: "You are Music Producer, a creative music expert.", personality: "Creative, musical, expressive", price_cents: 0, features: ["Music generation", "Lyrics writing", "Style guidance"] },
+    "pixel-forge":  { id: "8",  slug: "pixel-forge",      name: "Pixel Forge",       description: "AI image and 3D world generation specialist. Creates stunning visuals, textures, and immersive environments.", category: "design",      avatar_url: "🎨", system_prompt: "You are Pixel Forge, an AI image and world generation expert.", personality: "Visionary, artistic, detailed", price_cents: 0, features: ["Image generation", "360 worlds", "Texture design"] },
+    "legal-shield": { id: "10", slug: "legal-shield",     name: "Legal Shield",      description: "Legal assistant for contracts, compliance, and regulatory guidance. Not a lawyer, but a powerful research aide.", category: "legal",       avatar_url: "⚖️", system_prompt: "You are Legal Shield, a legal research assistant.", personality: "Cautious, precise, thorough", price_cents: 499, features: ["Contract review", "Compliance", "Legal research"] },
+  };
 
   async function fetchAgent() {
     try {
@@ -54,9 +85,15 @@ export default function AgentDetail() {
       if (data.agent) {
         setAgent(data.agent);
         checkIfInstalled(data.agent.id);
+      } else {
+        // Fallback to demo data
+        const fallback = DEMO_FALLBACK[slug];
+        if (fallback) setAgent(fallback);
       }
-    } catch (error) {
-      console.error("Error fetching agent:", error);
+    } catch {
+      // Fallback to demo data on network error
+      const fallback = DEMO_FALLBACK[slug];
+      if (fallback) setAgent(fallback);
     } finally {
       setIsLoading(false);
     }
@@ -137,16 +174,13 @@ export default function AgentDetail() {
               </p>
             </div>
           </div>
-          <div className="flex gap-4 items-center">
-            <NavAuth linkColor={theme.linkColor} />
-            <Link 
-              href="/marketplace" 
-              style={{ color: theme.linkColor, fontSize: "12px" }}
-              className="hover:underline"
-            >
-              ← Back to Marketplace
-            </Link>
-          </div>
+          <Link 
+            href="/marketplace" 
+            style={{ color: theme.linkColor, fontSize: "12px" }}
+            className="hover:underline"
+          >
+            ← Back to Marketplace
+          </Link>
         </div>
       </div>
 
@@ -194,23 +228,55 @@ export default function AgentDetail() {
             </div>
           </div>
 
-          {/* Demo Chat Preview */}
+          {/* Live Chat */}
           <div className="myspace-box" style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}>
-            <div className="myspace-header" style={{ color: "white" }}>💬 TRY DEMO</div>
+            <div className="myspace-header" style={{ color: "white" }}>💬 CHAT WITH {agent.name.toUpperCase()}</div>
             <div className="p-4">
-              <div className="mb-4 p-3" style={{ backgroundColor: "rgba(0,0,0,0.3)" }}>
-                <div style={{ color: theme.textColor, fontSize: "11px", marginBottom: "4px" }}>
-                  <strong>You:</strong> Can you help me with a project?
-                </div>
+              <div className="mb-4 overflow-y-auto" style={{ maxHeight: "280px", minHeight: "100px" }}>
+                {chatMessages.length === 0 && (
+                  <div className="p-3" style={{ backgroundColor: "rgba(255,0,128,0.08)", borderLeft: `3px solid ${theme.linkColor}` }}>
+                    <div style={{ color: theme.linkColor, fontSize: "11px", marginBottom: "4px" }}>
+                      <strong>{agent.name}:</strong>
+                    </div>
+                    <p style={{ color: theme.textColor, fontSize: "11px" }}>
+                      Hey! I'm {agent.name}. {agent.description} Ask me anything!
+                    </p>
+                  </div>
+                )}
+                {chatMessages.map((msg, i) => (
+                  <div key={i} className="mb-3 p-3" style={{
+                    backgroundColor: msg.role === "user" ? "rgba(0,0,0,0.3)" : "rgba(255,0,128,0.08)",
+                    borderLeft: `3px solid ${msg.role === "user" ? theme.borderColor : theme.linkColor}`
+                  }}>
+                    <div style={{ color: msg.role === "user" ? theme.accentColor : theme.linkColor, fontSize: "11px", marginBottom: "4px", fontWeight: "bold" }}>
+                      {msg.role === "user" ? "You" : agent.name}:
+                    </div>
+                    <p style={{ color: theme.textColor, fontSize: "11px", lineHeight: 1.5 }}>{msg.text}</p>
+                  </div>
+                ))}
+                {chatLoading && (
+                  <div className="p-3" style={{ color: theme.accentColor, fontSize: "11px" }}>⏳ {agent.name} is typing...</div>
+                )}
+                <div ref={chatEndRef} />
               </div>
-              <div className="p-3" style={{ backgroundColor: "rgba(255,0,128,0.1)" }}>
-                <div style={{ color: theme.linkColor, fontSize: "11px", marginBottom: "4px" }}>
-                  <strong>{agent.name}:</strong> 
-                </div>
-                <p style={{ color: theme.textColor, fontSize: "11px" }}>
-                  {agent.personality.split(',')[0]}! I'd be happy to help you with your project. 
-                  What kind of assistance do you need?
-                </p>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={chatInput}
+                  onChange={e => setChatInput(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && sendChat()}
+                  placeholder={`Ask ${agent.name}...`}
+                  className="flex-1 p-2 text-xs"
+                  style={{ backgroundColor: theme.bgColor, color: theme.textColor, border: `1px solid ${theme.borderColor}`, outline: "none" }}
+                />
+                <button
+                  onClick={sendChat}
+                  disabled={chatLoading}
+                  className="px-4 py-2 text-xs font-bold"
+                  style={{ backgroundColor: theme.linkColor, color: "white", border: "none", cursor: chatLoading ? "not-allowed" : "pointer", opacity: chatLoading ? 0.6 : 1 }}
+                >
+                  Send
+                </button>
               </div>
             </div>
           </div>

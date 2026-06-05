@@ -6,7 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 
 export default function SocialPage() {
-  const { theme, resolvedColors, setMode } = useTheme();
+  const { resolvedColors } = useTheme();
   const { profile } = useProfile();
   const [newPost, setNewPost] = useState("");
   const [posts, setPosts] = useState([
@@ -124,25 +124,6 @@ export default function SocialPage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor }}>
-      {/* Navigation */}
-      <nav className="border-b-2 sticky top-0 z-50" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-        <div className="max-w-6xl mx-auto px-4 py-3 flex justify-between items-center">
-          <h1 className="text-xl font-bold" style={{ color: resolvedColors.headerColor }}>📱 Social Feed</h1>
-          <div className="flex gap-3 items-center">
-            <button
-              onClick={() => setMode(theme.mode === "dark" ? "light" : "dark")}
-              className="px-3 py-1 text-sm font-bold border-2"
-              style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
-            >
-              {theme.mode === "dark" ? "☀️" : "🌙"}
-            </button>
-            <Link href="/profile" className="text-sm px-3 py-1 border-2" style={{ borderColor: resolvedColors.borderColor, color: resolvedColors.linkColor }}>
-              👤 Profile
-            </Link>
-          </div>
-        </div>
-      </nav>
-
       {/* Main Content */}
       <div className="max-w-6xl mx-auto px-4 py-6">
         <div className="grid md:grid-cols-12 gap-6">

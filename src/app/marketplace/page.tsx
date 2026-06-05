@@ -1,12 +1,21 @@
 'use client';
 
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/context/ThemeContext';
 
 function formatPrice(cents: number): string {
   if (cents === 0) return 'FREE';
-  return '$' + (cents / 100).toFixed(0) + '/mo';
+  return cents + ' 🪙'; // price in LitCoins
+}
+
+function getLitCoinBalance(): number {
+  if (typeof window === 'undefined') return 500;
+  return parseInt(localStorage.getItem('litcoins') || '500', 10);
+}
+
+function setLitCoinBalance(val: number) {
+  if (typeof window !== 'undefined') localStorage.setItem('litcoins', String(Math.max(0, val)));
 }
 
 type Agent = {
@@ -43,6 +52,26 @@ export default function Marketplace() {
   const [searchQuery, setSearchQuery] = useState('');
   const [sortBy, setSortBy] = useState('featured');
   const [previewAgent, setPreviewAgent] = useState<Agent | null>(null);
+  const [litCoins, setLitCoins] = useState(500);
+  const [toast, setToast] = useState<{ msg: string; type: 'success' | 'error' | 'info' } | null>(null);
+  const [sellModalAgent, setSellModalAgent] = useState<Agent | null>(null);
+  const [sellPrice, setSellPrice] = useState('');
+  const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
+
+  useEffect(() => { setLitCoins(getLitCoinBalance()); }, []);
+
+  const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
+    setToast({ msg, type });
+    setTimeout(() => setToast(null), 3000);
+  };
+
+  const earnCoins = () => {
+    const earned = 50;
+    const newBal = litCoins + earned;
+    setLitCoins(newBal);
+    setLitCoinBalance(newBal);
+    showToast(`+${earned} 🪙 LitCoins earned! Balance: ${newBal}`, 'success');
+  };
 
   const categories = Array.from(new Set(agents.map(a => a.category)));
 
@@ -62,25 +91,62 @@ export default function Marketplace() {
   const regularAgents = filteredAgents.filter(a => !a.is_featured);
 
   const installAgent = useCallback((agentId: string) => {
+    const agent = agents.find(a => a.id === agentId);
+    if (!agent) return;
+    if (agent.price_cents > 0) {
+      const cost = agent.price_cents;
+      if (litCoins < cost) {
+        showToast(`Not enough 🪙 LitCoins! Need ${cost}, have ${litCoins}. Earn more below.`, 'error');
+        return;
+      }
+      const newBal = litCoins - cost;
+      setLitCoins(newBal);
+      setLitCoinBalance(newBal);
+      showToast(`✅ Installed ${agent.name}! -${cost} 🪙 · Balance: ${newBal}`, 'success');
+    } else {
+      showToast(`✅ ${agent.name} installed for free!`, 'success');
+    }
     setInstalledAgents(prev => new Set([...prev, agentId]));
-  }, []);
+  }, [agents, litCoins]);
 
-  const stats = {
+  const listForSale = useCallback((agentId: string, price: number) => {
+    setListedAgents(prev => new Set([...prev, agentId]));
+    const earned = Math.floor(price * 0.1);
+    const newBal = litCoins + earned;
+    setLitCoins(newBal);
+    setLitCoinBalance(newBal);
+    showToast(`🏪 Agent listed! You earned ${earned} 🪙 listing bonus.`, 'info');
+    setSellModalAgent(null);
+    setSellPrice('');
+  }, [litCoins]);
+
+  const stats: Record<string, number | string> = {
     total: agents.length,
     free: agents.filter(a => a.price_cents === 0).length,
     installed: installedAgents.size,
-    categories: categories.length,
+    coins: litCoins + ' 🪙',
   };
 
   return (
     <div style={{ backgroundColor: T.bgColor, minHeight: '100vh', color: T.textColor, fontFamily: 'monospace' }}>
+      {/* Toast notification */}
+      {toast && (
+        <div style={{ position: 'fixed', top: '80px', right: '20px', zIndex: 200, padding: '12px 20px', backgroundColor: toast.type === 'success' ? '#0a2e0a' : toast.type === 'error' ? '#2e0a0a' : '#0a1a2e', border: '2px solid ' + (toast.type === 'success' ? T.accentColor : toast.type === 'error' ? '#ff4444' : T.linkColor), color: toast.type === 'success' ? T.accentColor : toast.type === 'error' ? '#ff4444' : T.linkColor, fontSize: '12px', fontWeight: 'bold', maxWidth: '320px' }}>
+          {toast.msg}
+        </div>
+      )}
+
       <div style={{ borderBottom: '2px solid ' + T.borderColor, padding: '32px 24px', textAlign: 'center', background: 'linear-gradient(180deg, ' + T.boxBg + ' 0%, ' + T.bgColor + ' 100%)' }}>
         <h1 style={{ color: T.headerColor, fontSize: '32px', fontWeight: 'bold', letterSpacing: '3px', marginBottom: '8px' }}>🤖 AGENT MARKETPLACE</h1>
-        <p style={{ color: T.textColor, fontSize: '13px', opacity: 0.7, maxWidth: '500px', margin: '0 auto 20px' }}>Discover, install, and deploy AI agents to your workspace</p>
+        <p style={{ color: T.textColor, fontSize: '13px', opacity: 0.7, maxWidth: '500px', margin: '0 auto 12px' }}>Discover, install, and deploy AI agents to your workspace</p>
+        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
+          <button onClick={earnCoins} style={{ padding: '6px 14px', backgroundColor: 'rgba(255,215,0,0.15)', border: '1px solid gold', color: 'gold', fontSize: '11px', cursor: 'pointer', fontFamily: 'monospace', fontWeight: 'bold' }}>🪙 Daily Bonus</button>
+          <button onClick={() => showToast('Buy LitCoins: connect wallet coming soon!', 'info')} style={{ padding: '6px 14px', backgroundColor: 'rgba(255,215,0,0.1)', border: '1px solid ' + T.borderColor, color: T.textColor, fontSize: '11px', cursor: 'pointer', fontFamily: 'monospace' }}>💳 Buy LitCoins</button>
+        </div>
         <div style={{ display: 'flex', gap: '16px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          {[{ label: 'Total Agents', value: stats.total }, { label: 'Free', value: stats.free }, { label: 'Installed', value: stats.installed }, { label: 'Categories', value: stats.categories }].map(stat => (
-            <div key={stat.label} style={{ padding: '8px 16px', border: '1px solid ' + T.borderColor, backgroundColor: 'rgba(0,0,0,0.3)' }}>
-              <div style={{ color: T.accentColor, fontSize: '18px', fontWeight: 'bold' }}>{stat.value}</div>
+          {[{ label: 'Total Agents', value: stats.total }, { label: 'Free', value: stats.free }, { label: 'Installed', value: stats.installed }, { label: 'Your Wallet', value: stats.coins }].map(stat => (
+            <div key={stat.label} style={{ padding: '8px 16px', border: '1px solid ' + (stat.label === 'Your Wallet' ? 'gold' : T.borderColor), backgroundColor: stat.label === 'Your Wallet' ? 'rgba(255,215,0,0.08)' : 'rgba(0,0,0,0.3)' }}>
+              <div style={{ color: stat.label === 'Your Wallet' ? 'gold' : T.accentColor, fontSize: '18px', fontWeight: 'bold' }}>{stat.value}</div>
               <div style={{ fontSize: '9px', color: T.textColor, opacity: 0.7 }}>{stat.label}</div>
             </div>
           ))}
@@ -88,7 +154,7 @@ export default function Marketplace() {
       </div>
 
       <div style={{ padding: '16px 24px', borderBottom: '1px solid ' + T.borderColor, display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', backgroundColor: T.boxBg }}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1 }}>
           <button onClick={() => setSelectedCategory('')} style={{ padding: '6px 12px', fontSize: '11px', border: '1px solid ' + (selectedCategory === '' ? T.accentColor : T.borderColor), backgroundColor: selectedCategory === '' ? 'rgba(255,255,0,0.15)' : 'transparent', color: selectedCategory === '' ? T.accentColor : T.textColor, cursor: 'pointer', fontFamily: 'monospace' }}>
             🌟 All ({agents.length})
           </button>
@@ -108,6 +174,7 @@ export default function Marketplace() {
             <option value='name'>🔤 Name</option>
           </select>
           <Link href='/builder' style={{ padding: '8px 14px', backgroundColor: T.linkColor, color: 'white', textDecoration: 'none', fontSize: '11px', fontWeight: 'bold' }}>🚀 My Dock</Link>
+          <div style={{ padding: '8px 12px', border: '1px solid gold', color: 'gold', fontSize: '11px', fontWeight: 'bold', backgroundColor: 'rgba(255,215,0,0.08)' }}>🪙 {litCoins}</div>
         </div>
       </div>
 
@@ -165,14 +232,60 @@ export default function Marketplace() {
               </div>
               <div style={{ display: 'flex', gap: '8px' }}>
                 {installedAgents.has(previewAgent.id) ? (
-                  <button disabled style={{ flex: 1, padding: '12px', backgroundColor: '#333', color: '#666', border: 'none', fontWeight: 'bold' }}>✓ Installed</button>
+                  <>
+                    <button disabled style={{ flex: 1, padding: '12px', backgroundColor: '#333', color: '#666', border: 'none', fontWeight: 'bold' }}>✓ Installed</button>
+                    {!listedAgents.has(previewAgent.id) && (
+                      <button onClick={() => { setPreviewAgent(null); setSellModalAgent(previewAgent); }} style={{ padding: '12px 16px', border: '2px solid gold', color: 'gold', backgroundColor: 'rgba(255,215,0,0.1)', cursor: 'pointer', fontWeight: 'bold', fontSize: '12px' }}>🏪 Sell</button>
+                    )}
+                  </>
                 ) : (
-                  <button onClick={() => { installAgent(previewAgent.id); setPreviewAgent(null); }} style={{ flex: 1, padding: '12px', backgroundColor: T.linkColor, color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
-                    {previewAgent.price_cents === 0 ? '🚀 Install Free' : '💰 Buy ' + formatPrice(previewAgent.price_cents)}
+                  <button onClick={() => { installAgent(previewAgent.id); if (previewAgent.price_cents === 0 || litCoins >= previewAgent.price_cents) setPreviewAgent(null); }} style={{ flex: 1, padding: '12px', backgroundColor: T.linkColor, color: 'white', border: 'none', cursor: 'pointer', fontWeight: 'bold' }}>
+                    {previewAgent.price_cents === 0 ? '🚀 Install Free' : '🪙 Buy — ' + formatPrice(previewAgent.price_cents)}
                   </button>
                 )}
                 <Link href='/builder' onClick={() => setPreviewAgent(null)} style={{ padding: '12px 20px', border: '2px solid ' + T.linkColor, color: T.linkColor, textDecoration: 'none', fontWeight: 'bold', fontSize: '12px', display: 'flex', alignItems: 'center' }}>Open Builder</Link>
               </div>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Sell Modal */}
+      {sellModalAgent && (
+        <div onClick={() => setSellModalAgent(null)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>
+          <div onClick={e => e.stopPropagation()} style={{ maxWidth: '400px', width: '100%', backgroundColor: T.boxBg, border: '2px solid gold', padding: '28px' }}>
+            <h2 style={{ color: 'gold', fontSize: '18px', fontWeight: 'bold', marginBottom: '8px' }}>🏪 List Agent for Sale</h2>
+            <p style={{ color: T.textColor, fontSize: '12px', marginBottom: '20px', opacity: 0.8 }}>
+              List <strong style={{ color: T.headerColor }}>{sellModalAgent.name}</strong> on the marketplace. Other users can buy it with 🪙 LitCoins. You earn 90% of each sale.
+            </p>
+            <div style={{ marginBottom: '16px' }}>
+              <label style={{ color: T.accentColor, fontSize: '10px', letterSpacing: '1px', display: 'block', marginBottom: '6px' }}>SET PRICE (🪙 LitCoins)</label>
+              <input
+                type='number'
+                min='1'
+                max='9999'
+                value={sellPrice}
+                onChange={e => setSellPrice(e.target.value)}
+                placeholder='e.g. 250'
+                style={{ width: '100%', padding: '10px', backgroundColor: T.bgColor, border: '1px solid gold', color: T.textColor, fontSize: '14px', fontFamily: 'monospace', outline: 'none', boxSizing: 'border-box' }}
+              />
+              {sellPrice && (
+                <p style={{ color: T.textColor, fontSize: '10px', marginTop: '4px', opacity: 0.6 }}>
+                  You earn ~{Math.floor(Number(sellPrice) * 0.9)} 🪙 per sale (10% platform fee)
+                </p>
+              )}
+            </div>
+            <div style={{ display: 'flex', gap: '8px' }}>
+              <button
+                onClick={() => { if (sellPrice && Number(sellPrice) > 0) listForSale(sellModalAgent.id, Number(sellPrice)); }}
+                disabled={!sellPrice || Number(sellPrice) <= 0}
+                style={{ flex: 1, padding: '12px', backgroundColor: Number(sellPrice) > 0 ? 'gold' : '#333', color: Number(sellPrice) > 0 ? 'black' : '#666', border: 'none', cursor: Number(sellPrice) > 0 ? 'pointer' : 'not-allowed', fontWeight: 'bold', fontSize: '13px' }}
+              >
+                🚀 List Now
+              </button>
+              <button onClick={() => setSellModalAgent(null)} style={{ padding: '12px 20px', border: '1px solid ' + T.borderColor, color: T.textColor, backgroundColor: 'transparent', cursor: 'pointer', fontSize: '12px' }}>
+                Cancel
+              </button>
             </div>
           </div>
         </div>

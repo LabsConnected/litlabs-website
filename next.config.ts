@@ -94,16 +94,7 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Cache _next assets for 1 year
-      {
-        source: "/_next/static/(.*)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
+      // Note: /_next/static is handled by Next.js automatically
     ];
   },
 
