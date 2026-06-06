@@ -5,6 +5,11 @@ const nextConfig: NextConfig = {
   // PERFORMANCE OPTIMIZATIONS
   // ============================================
 
+  // Turbopack workspace root (fixes lockfile detection warning)
+  turbopack: {
+    root: __dirname,
+  },
+
   experimental: {
     optimizePackageImports: ["@supabase/supabase-js"],
   },
