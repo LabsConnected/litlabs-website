@@ -1,91 +1,94 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
-
-const PREFERENCES_COOKIE = "user-preferences";
-
-interface UserPreferences {
-  theme: string;
-  accentColor: string;
-  notifications: boolean;
-  language: string;
-}
-
-const DEFAULT_PREFERENCES: UserPreferences = {
-  theme: "dark",
-  accentColor: "cyan",
-  notifications: true,
-  language: "en",
-};
-
-function parsePreferences(raw: string | undefined): UserPreferences {
-  if (!raw) return DEFAULT_PREFERENCES;
-  try {
-    return { ...DEFAULT_PREFERENCES, ...JSON.parse(raw) };
-  } catch {
-    return DEFAULT_PREFERENCES;
-  }
-}
+import { auth } from "@clerk/nextjs/server";
+import { getUserPreferences, updateUserPreferences } from "@/lib/user-db";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 /**
  * GET /api/settings/preferences
- * Returns the user's preferences from a cookie.
- * TODO: Load from database when user accounts are persisted.
+ * Returns the user's preferences from the database.
  */
-export async function GET(req: NextRequest) {
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
+async function getHandler(req: NextRequest) {
+  try {
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
-  const payload = await verifyToken(token);
-  if (!payload) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
+    const preferences = await getUserPreferences(clerkId);
+    
+    // Return defaults if no preferences found
+    return NextResponse.json({
+      preferences: preferences || {
+        theme_mode: "dark",
+        theme_skin: "cyberpunk",
+        theme_accent: "neon-green",
+        crt_enabled: false,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching preferences:", error);
+    return NextResponse.json(
+      { error: "Failed to fetch preferences" },
+      { status: 500 }
+    );
   }
-
-  const preferences = parsePreferences(req.cookies.get(PREFERENCES_COOKIE)?.value);
-  return NextResponse.json({ preferences });
 }
 
 /**
  * POST /api/settings/preferences
- * Updates user preferences and stores them in a cookie.
- * TODO: Persist to database alongside the user record.
+ * Updates user preferences in the database.
  */
-export async function POST(req: NextRequest) {
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function postHandler(req: NextRequest) {
+  try {
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const body = await req.json().catch(() => null);
+    if (!body || typeof body !== "object") {
+      return NextResponse.json({ error: "Invalid body" }, { status: 400 });
+    }
+
+    // Map client preferences to database fields
+    const updates: Record<string, string | boolean> = {};
+    
+    if (typeof body.theme === "string") {
+      updates.theme_mode = body.theme;
+    }
+    if (typeof body.skin === "string") {
+      updates.theme_skin = body.skin;
+    }
+    if (typeof body.accentColor === "string") {
+      updates.theme_accent = body.accentColor;
+    }
+    if (typeof body.crtEnabled === "boolean") {
+      updates.crt_enabled = body.crtEnabled;
+    }
+    // Support direct DB field names too
+    if (typeof body.theme_mode === "string") updates.theme_mode = body.theme_mode;
+    if (typeof body.theme_skin === "string") updates.theme_skin = body.theme_skin;
+    if (typeof body.theme_accent === "string") updates.theme_accent = body.theme_accent;
+    if (typeof body.crt_enabled === "boolean") updates.crt_enabled = body.crt_enabled;
+
+    if (Object.keys(updates).length === 0) {
+      return NextResponse.json({ error: "No valid fields to update" }, { status: 400 });
+    }
+
+    const updated = await updateUserPreferences(clerkId, updates);
+
+    return NextResponse.json({
+      message: "Preferences updated successfully",
+      preferences: updated,
+    });
+  } catch (error) {
+    console.error("Error updating preferences:", error);
+    return NextResponse.json(
+      { error: "Failed to update preferences" },
+      { status: 500 }
+    );
   }
-
-  const payload = await verifyToken(token);
-  if (!payload) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
-
-  const body = await req.json().catch(() => null);
-  if (!body || typeof body !== "object") {
-    return NextResponse.json({ error: "Invalid body" }, { status: 400 });
-  }
-
-  // Merge with existing preferences (from cookie or defaults)
-  const current = parsePreferences(req.cookies.get(PREFERENCES_COOKIE)?.value);
-
-  const updated: UserPreferences = {
-    ...current,
-    ...(typeof body.theme === "string" ? { theme: body.theme } : {}),
-    ...(typeof body.accentColor === "string" ? { accentColor: body.accentColor } : {}),
-    ...(typeof body.notifications === "boolean" ? { notifications: body.notifications } : {}),
-    ...(typeof body.language === "string" ? { language: body.language } : {}),
-  };
-
-  const res = NextResponse.json({ preferences: updated });
-  res.cookies.set(PREFERENCES_COOKIE, JSON.stringify(updated), {
-    httpOnly: false, // readable by client JS for theme switching
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-    maxAge: 60 * 60 * 24 * 365, // 1 year
-    path: "/",
-  });
-
-  return res;
 }
+
+export const GET = withRateLimit(getHandler, 100, 60);
+export const POST = withRateLimit(postHandler, 50, 60);

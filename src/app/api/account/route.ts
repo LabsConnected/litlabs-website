@@ -1,32 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { verifyToken } from "@/lib/jwt";
+import { auth } from "@clerk/nextjs/server";
+import { supabase } from "@/lib/supabase";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 /**
  * DELETE /api/account
- * Deletes the current user's account.
- * TODO: Implement actual account deletion when using a real database.
- * For now, this is a placeholder that requires manual env var removal.
+ * Deletes the current user's account and all associated data from Supabase.
+ * Requires Clerk authentication.
  */
-export async function DELETE(req: NextRequest) {
-  const token = req.cookies.get("auth-token")?.value;
-  if (!token) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+async function deleteHandler(req: NextRequest) {
+  try {
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    // Find user in our database
+    const { data: user, error: findError } = await supabase
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkId)
+      .single();
+
+    if (findError || !user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Delete all user data (cascade deletes will handle related tables)
+    const { error: deleteError } = await supabase
+      .from("users")
+      .delete()
+      .eq("id", user.id);
+
+    if (deleteError) {
+      console.error("Error deleting user:", deleteError);
+      return NextResponse.json(
+        { error: "Failed to delete account" },
+        { status: 500 }
+      );
+    }
+
+    // Note: Clerk user deletion should be done via Clerk Dashboard
+    // or use Clerk's API to delete the user completely
+    // This endpoint deletes local Supabase data only
+
+    return NextResponse.json({
+      message: "Account data deleted successfully",
+      note: "Your Clerk authentication account must be deleted separately via Clerk Dashboard",
+    });
+  } catch (error) {
+    console.error("Error deleting account:", error);
+    return NextResponse.json(
+      { error: "Failed to delete account" },
+      { status: 500 }
+    );
   }
-
-  const payload = await verifyToken(token);
-  if (!payload) {
-    return NextResponse.json({ error: "Invalid token" }, { status: 401 });
-  }
-
-  // Placeholder: In a real implementation, this would:
-  // 1. Delete the user from the database
-  // 2. Delete all associated data (agents, posts, messages)
-  // 3. Invalidate all active sessions
-
-  const res = NextResponse.json({
-    message: "Account deletion requires manual env var removal. Contact support for full deletion.",
-    placeholder: true,
-  });
-  res.cookies.delete("auth-token");
-  return res;
 }
+
+export const DELETE = withRateLimit(deleteHandler, 10, 60);
