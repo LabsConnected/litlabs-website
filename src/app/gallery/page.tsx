@@ -5,18 +5,18 @@ import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 
-// ─── Demo gallery items (replace with real DB later) ──────────────────────────
+// ─── Demo gallery items ──────────────────────────────────────────────────────
 const DEMO_ITEMS: GalleryItem[] = [
-  { id: "1", title: "Neon Cyber City", artist: "LitBot-7", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop", likes: 234, createdAt: "2026-06-01" },
+  { id: "1", title: "Neon Cyber City", artist: "Pixel Forge", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop", likes: 234, createdAt: "2026-06-01" },
   { id: "2", title: "Ethereal Dreamscape", artist: "DreamWeaver", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-06-02" },
   { id: "3", title: "Lost Temple Ruins", artist: "Explorer-X", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=300&fit=crop", likes: 312, createdAt: "2026-05-28" },
-  { id: "4", title: "Quantum Warrior", artist: "LitBot-3", category: "character", imageUrl: "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=400&h=500&fit=crop", likes: 156, createdAt: "2026-06-03" },
+  { id: "4", title: "Quantum Warrior", artist: "Pixel Forge", category: "character", imageUrl: "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=400&h=500&fit=crop", likes: 156, createdAt: "2026-06-03" },
   { id: "5", title: "Crystal Cavern", artist: "GeoMancer", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop", likes: 278, createdAt: "2026-05-30" },
   { id: "6", title: "Void Entity", artist: "ShadowNet", category: "character", imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&h=500&fit=crop", likes: 421, createdAt: "2026-06-04" },
-  { id: "7", title: "Sunset Megacity", artist: "LitBot-7", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=400&h=300&fit=crop", likes: 198, createdAt: "2026-05-25" },
+  { id: "7", title: "Sunset Megacity", artist: "Pixel Forge", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=400&h=300&fit=crop", likes: 198, createdAt: "2026-05-25" },
   { id: "8", title: "Fractal Mind", artist: "DreamWeaver", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=400&h=400&fit=crop", likes: 267, createdAt: "2026-05-29" },
   { id: "9", title: "Underwater Utopia", artist: "AquaBot", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1582967788606-a171f1080ca8?w=400&h=300&fit=crop", likes: 345, createdAt: "2026-06-01" },
-  { id: "10", title: "Cyber Samurai", artist: "LitBot-3", category: "character", imageUrl: "https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-05-27" },
+  { id: "10", title: "Cyber Samurai", artist: "Pixel Forge", category: "character", imageUrl: "https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-05-27" },
   { id: "11", title: "Starfield Station", artist: "StarWalker", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=400&h=300&fit=crop", likes: 567, createdAt: "2026-06-04" },
   { id: "12", title: "Neural Network", artist: "DataMancer", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1635070041078-e363dbe00518?w=400&h=400&fit=crop", likes: 234, createdAt: "2026-05-26" },
 ];
@@ -56,6 +56,15 @@ export default function Gallery() {
   const [selectedItem, setSelectedItem] = useState<GalleryItem | null>(null);
   const [likedItems, setLikedItems] = useState<Set<string>>(new Set());
   const [viewMode, setViewMode] = useState<"grid" | "masonry">("masonry");
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
+  useEffect(() => {
+    // Check local storage for persistent CRT configuration
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
+    }
+  }, []);
 
   const filteredItems = items
     .filter(i => selectedCategory === "all" || i.category === selectedCategory)
@@ -77,7 +86,25 @@ export default function Gallery() {
   }, [likedItems]);
 
   return (
-    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor, fontFamily: "monospace" }}>
+    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor, fontFamily: "monospace", position: "relative" }}>
+      
+      {/* CRT Scanline Filter */}
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
+
+      {/* Retro Ticker */}
+      <div className="w-full bg-black py-1 border-b-2 overflow-hidden flex" style={{ borderColor: T.borderColor, color: T.accentColor }}>
+        <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
+          <span>🎨 AI GALLERY RENDERS ONLINE // SECTOR 9 IMAGING SECTOR</span>
+          <span>⚡ PIXEL FORGE MODELS LIVE GENERATING 360° SPHERES DAILY</span>
+          <span>🪐 IMMERSIVE CHAT INTEGRATED FOR DESCRIPTIVE SKYBOX CREATIONS</span>
+        </div>
+      </div>
+
       {/* ── Hero Header ── */}
       <div style={{ borderBottom: `2px solid ${T.borderColor}`, padding: "32px 24px", textAlign: "center", background: `linear-gradient(180deg, ${T.boxBg} 0%, ${T.bgColor} 100%)` }}>
         <h1 style={{ color: T.headerColor, fontSize: "32px", fontWeight: "bold", letterSpacing: "3px", marginBottom: "8px" }}>🎨 AI ART GALLERY</h1>
@@ -121,12 +148,12 @@ export default function Gallery() {
             value={searchQuery}
             onChange={e => setSearchQuery(e.target.value)}
             placeholder="🔍 Search art or artist..."
-            style={{ padding: "8px 12px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: "#e0e0e0", fontSize: "12px", fontFamily: "monospace", width: "200px", outline: "none" }}
+            style={{ padding: "8px 12px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: "#e0e0e0", fontSize: "12px", fontFamily: "monospace", width: "170px", outline: "none" }}
           />
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
-            style={{ padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "11px", fontFamily: "monospace", cursor: "pointer" }}
+            style={{ padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "11px", fontFamily: "monospace", cursor: "pointer", outline: "none" }}
           >
             {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
           </select>
@@ -142,16 +169,15 @@ export default function Gallery() {
           <div
             key={item.id}
             onClick={() => setSelectedItem(item)}
+            className="myspace-box"
             style={{
-              border: `1px solid ${T.borderColor}`, backgroundColor: "rgba(0,0,0,0.3)", cursor: "pointer",
-              transition: "transform 0.2s, box-shadow 0.2s", overflow: "hidden",
+              borderColor: T.borderColor, backgroundColor: T.boxBg, cursor: "pointer",
+              padding: "0px", margin: "0", overflow: "hidden"
             }}
-            onMouseEnter={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(-4px)"; (e.currentTarget as HTMLElement).style.boxShadow = `0 8px 24px rgba(0,255,255,0.1)`; }}
-            onMouseLeave={e => { (e.currentTarget as HTMLElement).style.transform = "translateY(0)"; (e.currentTarget as HTMLElement).style.boxShadow = "none"; }}
           >
             <div style={{ position: "relative", width: "100%", height: viewMode === "masonry" ? `${180 + (item.id.charCodeAt(0) % 3) * 60}px` : "200px", overflow: "hidden" }}>
               <Image src={item.imageUrl} alt={item.title} fill style={{ objectFit: "cover" }} sizes="(max-width: 768px) 100vw, 300px" unoptimized />
-              <div style={{ position: "absolute", top: "8px", right: "8px", padding: "4px 8px", backgroundColor: "rgba(0,0,0,0.7)", color: T.accentColor, fontSize: "9px", textTransform: "uppercase" }}>
+              <div style={{ position: "absolute", top: "8px", right: "8px", padding: "4px 8px", backgroundColor: "rgba(0,0,0,0.8)", border: `1px solid ${T.borderColor}`, color: T.accentColor, fontSize: "9px", textTransform: "uppercase" }}>
                 {item.category}
               </div>
             </div>
@@ -182,20 +208,20 @@ export default function Gallery() {
       {selectedItem && (
         <div
           onClick={() => setSelectedItem(null)}
-          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.9)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}
+          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.95)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}
         >
-          <div onClick={e => e.stopPropagation()} style={{ maxWidth: "900px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", backgroundColor: T.boxBg, border: `2px solid ${T.borderColor}` }}>
-            <div style={{ position: "relative", flex: 1, minHeight: "300px" }}>
+          <div onClick={e => e.stopPropagation()} className="myspace-box" style={{ maxWidth: "900px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", backgroundColor: T.boxBg, borderColor: T.borderColor, padding: "0" }}>
+            <div style={{ position: "relative", flex: 1, minHeight: "300px", height: "50vh" }}>
               <Image src={selectedItem.imageUrl} alt={selectedItem.title} fill style={{ objectFit: "contain" }} sizes="900px" unoptimized />
-              <button onClick={() => setSelectedItem(null)} style={{ position: "absolute", top: "12px", right: "12px", backgroundColor: "rgba(0,0,0,0.7)", color: "white", border: "none", padding: "8px 12px", cursor: "pointer", fontSize: "14px" }}>✕</button>
+              <button onClick={() => setSelectedItem(null)} style={{ position: "absolute", top: "12px", right: "12px", backgroundColor: "rgba(0,0,0,0.7)", border: `1px solid ${T.borderColor}`, color: "white", padding: "8px 12px", cursor: "pointer", fontSize: "14px" }}>✕</button>
             </div>
             <div style={{ padding: "16px", borderTop: `1px solid ${T.borderColor}` }}>
               <div style={{ color: T.headerColor, fontSize: "18px", fontWeight: "bold", marginBottom: "8px" }}>{selectedItem.title}</div>
-              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "12px" }}>
-                <span style={{ color: T.textColor }}>👤 <strong style={{ color: T.linkColor }}>{selectedItem.artist}</strong></span>
-                <span style={{ color: T.textColor }}>📂 {selectedItem.category}</span>
-                <span style={{ color: T.textColor }}>❤️ {selectedItem.likes} likes</span>
-                <span style={{ color: T.textColor }}>📅 {selectedItem.createdAt}</span>
+              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "11px" }}>
+                <span style={{ color: T.textColor }}>👤 ARTIST: <strong style={{ color: T.linkColor }}>{selectedItem.artist}</strong></span>
+                <span style={{ color: T.textColor }}>📂 CATEGORY: <strong style={{ color: T.accentColor }}>{selectedItem.category.toUpperCase()}</strong></span>
+                <span style={{ color: T.textColor }}>❤️ ENGAGEMENTS: {selectedItem.likes} sparks</span>
+                <span style={{ color: T.textColor }}>📅 COMPILED: {selectedItem.createdAt}</span>
               </div>
             </div>
           </div>

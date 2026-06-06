@@ -42,6 +42,16 @@ export default function AgentChat() {
   const [activeTab, setActiveTab] = useState<"chat" | "gallery">("chat");
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
+  useEffect(() => {
+    // Check local storage for persistent CRT configuration
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
+    }
+  }, []);
+
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -177,7 +187,14 @@ export default function AgentChat() {
   };
 
   return (
-    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", display: "flex", flexDirection: "column", color: T.textColor, fontFamily: "monospace" }}>
+    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", display: "flex", flexDirection: "column", color: T.textColor, fontFamily: "monospace", position: "relative" }}>
+      {/* CRT Scanline Filter */}
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
       {/* Top Nav */}
       <nav style={{ backgroundColor: T.boxBg, borderBottom: `2px solid ${T.borderColor}`, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <Link href="/" style={{ textDecoration: "none", color: T.headerColor, fontWeight: "bold", fontSize: "14px", letterSpacing: "2px" }}>⚡ LITLABS</Link>

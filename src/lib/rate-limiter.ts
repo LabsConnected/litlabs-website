@@ -7,6 +7,16 @@ interface RateLimitStore {
 
 const store: RateLimitStore = {};
 
+// Auto-cleanup expired entries every 60 seconds to prevent memory leaks
+setInterval(() => {
+  const now = Date.now();
+  for (const key in store) {
+    if (store[key].resetTime < now) {
+      delete store[key];
+    }
+  }
+}, 60000);
+
 export function rateLimit(
   request: NextRequest,
   limit: number = 100,
@@ -35,7 +45,7 @@ export function rateLimit(
 }
 
 export function withRateLimit(
-  handler: (req: NextRequest) => Promise<NextResponse>,
+  handler: (req: NextRequest) => Promise<NextResponse | Response>,
   limit: number = 100,
   window: number = 60
 ) {

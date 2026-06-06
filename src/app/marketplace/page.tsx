@@ -58,7 +58,16 @@ export default function Marketplace() {
   const [sellPrice, setSellPrice] = useState('');
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
 
-  useEffect(() => { setLitCoins(getLitCoinBalance()); }, []);
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
+  useEffect(() => {
+    setLitCoins(getLitCoinBalance());
+    // Check local storage for persistent CRT configuration
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
+    }
+  }, []);
 
   const showToast = (msg: string, type: 'success' | 'error' | 'info' = 'success') => {
     setToast({ msg, type });
@@ -128,7 +137,14 @@ export default function Marketplace() {
   };
 
   return (
-    <div style={{ backgroundColor: T.bgColor, minHeight: '100vh', color: T.textColor, fontFamily: 'monospace' }}>
+    <div style={{ backgroundColor: T.bgColor, minHeight: '100vh', color: T.textColor, fontFamily: 'monospace', position: 'relative' }}>
+      {/* CRT Scanline Filter */}
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
       {/* Toast notification */}
       {toast && (
         <div style={{ position: 'fixed', top: '80px', right: '20px', zIndex: 200, padding: '12px 20px', backgroundColor: toast.type === 'success' ? '#0a2e0a' : toast.type === 'error' ? '#2e0a0a' : '#0a1a2e', border: '2px solid ' + (toast.type === 'success' ? T.accentColor : toast.type === 'error' ? '#ff4444' : T.linkColor), color: toast.type === 'success' ? T.accentColor : toast.type === 'error' ? '#ff4444' : T.linkColor, fontSize: '12px', fontWeight: 'bold', maxWidth: '320px' }}>

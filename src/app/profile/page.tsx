@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useTheme, darkSkins, lightSkins, type SkinPreset, type AccentColor } from "@/context/ThemeContext";
 import { useProfile, type UserProfile } from "@/context/ProfileContext";
 
@@ -11,8 +11,26 @@ export default function ProfilePage() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [visitorCount, setVisitorCount] = useState(133742);
   const [newInterest, setNewInterest] = useState("");
+  const [crtEnabled, setCrtEnabled] = useState(true);
+  
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
+
+  // Custom User Profile Comments List (local mock database)
+  const [comments, setComments] = useState([
+    { author: "TechBro99", avatar: "💻", time: "2 hours ago", text: "Yo this profile is fire! 🔥 Let's sync on that next-gen orchestrator build." },
+    { author: "CodeQueen", avatar: "👑", time: "5 hours ago", text: "The custom volcano skin variables compile beautifully. Outstanding theme!" },
+    { author: "DesignDave", avatar: "🎨", time: "1 day ago", text: "Love the MySpace nostalgic layout fused with Gemini agents. Absolutely genius design!" },
+  ]);
+  const [newCommentText, setNewCommentText] = useState("");
+
+  useEffect(() => {
+    // Check local storage for persistent CRT configuration
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
+    }
+  }, []);
 
   const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -49,108 +67,146 @@ export default function ProfilePage() {
     updateProfile({ interests: newInterests });
   };
 
+  const handleAddComment = () => {
+    if (!newCommentText.trim()) return;
+    setComments([
+      ...comments,
+      {
+        author: profile.displayName || "You",
+        avatar: "🔥",
+        time: "Just now",
+        text: newCommentText.trim()
+      }
+    ]);
+    setNewCommentText("");
+  };
+
   const moods = ["😀 Happy", "😎 Cool", "💡 Creative", "🔥 Hot", "🎯 Focused", "🌟 Stellar", "💪 Strong", "🎵 Chill", "🚀 Launching", "😴 Tired", "🤔 Thinking", "💭 Dreaming"];
 
-  const skinPresets: SkinPreset[] = ["cyberpunk", "retro", "ocean", "sunset", "matrix", "pink"];
-  const accentColors: AccentColor[] = ["neon-green", "hot-pink", "electric-blue", "cyber-yellow", "matrix-green", "sunset-orange", "ocean-blue", "purple-haze"];
+  const T = resolvedColors;
 
   return (
     <div 
-      className="min-h-screen" 
-      style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor }}
+      className="min-h-screen relative font-mono text-xs pb-12" 
+      style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
-      {/* Cover Image */}
-      <div className="relative h-64 md:h-80 overflow-hidden cursor-pointer group" onClick={() => coverInputRef.current?.click()}>
-        {profile.coverUrl ? (
-          <img src={profile.coverUrl} alt="Cover" className="w-full h-full object-cover" />
-        ) : (
-          <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: resolvedColors.headerColor }}>
-            <span className="text-4xl opacity-50">📷 Add Cover Photo</span>
-          </div>
-        )}
-        <input type="file" ref={coverInputRef} onChange={handleCoverUpload} accept="image/*" className="hidden" />
-        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-          <span className="text-white font-bold">Click to Change Cover</span>
+      {/* CRT Scanline Filter */}
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
+
+      {/* Marquee Ticker */}
+      <div className="w-full bg-black py-1.5 border-b-2 overflow-hidden flex" style={{ borderColor: T.borderColor, color: T.accentColor }}>
+        <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
+          <span>👤 USER PROFILE MODULE ACTIVE // SECURE SECTOR CHANNELS</span>
+          <span>⚡ DOUBLE CLICK HEADERS OR EDIT BUTTONS TO OVERRIDE BIOS VARIABLES</span>
+          <span>💾 ALL CUSTOM AVATARS AND BACKDROP COVERS ENCODED DIRECTLY TO LOCAL CLUSTERS</span>
         </div>
       </div>
 
-      {/* Main Content Grid */}
+      {/* Cover Image Backdrop */}
+      <div className="relative h-48 md:h-64 overflow-hidden cursor-pointer group border-b-2" style={{ borderColor: T.borderColor }} onClick={() => coverInputRef.current?.click()}>
+        {profile.coverUrl ? (
+          <img src={profile.coverUrl} alt="Cover" className="w-full h-full object-cover" />
+        ) : (
+          <div className="w-full h-full flex flex-col items-center justify-center bg-gradient-to-r from-purple-950 via-black to-blue-950">
+            <span className="text-2xl font-bold tracking-widest text-white/50 animate-pulse">📷 CHANGE HERO BACKDROP PACKET</span>
+            <span className="text-[10px] text-white/30 uppercase mt-1">Accepts PNG / JPG structures</span>
+          </div>
+        )}
+        <input type="file" ref={coverInputRef} onChange={handleCoverUpload} accept="image/*" className="hidden" />
+        <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: "rgba(0,0,0,0.6)" }}>
+          <span className="text-white text-xs font-bold uppercase tracking-widest border border-white p-2">Click to Upload Cover Image</span>
+        </div>
+      </div>
+
+      {/* Main Grid Content */}
       <div className="max-w-7xl mx-auto px-4 py-6 grid md:grid-cols-12 gap-6">
-        {/* Left Column - Profile Info */}
+        
+        {/* LEFT COLUMN — PROFILE AVATAR & DIRECTIVES */}
         <div className="md:col-span-4 space-y-4">
-          {/* Profile Picture */}
-          <div className="border-2 p-4 text-center" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
+          
+          {/* Avatar & Display Name editable card */}
+          <div className="myspace-box p-4 text-center" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
             <input type="file" ref={avatarInputRef} onChange={handleAvatarUpload} accept="image/*" className="hidden" />
+            
             <div
-              className="w-40 h-40 mx-auto mb-4 cursor-pointer relative group overflow-hidden"
+              className="w-32 h-32 mx-auto mb-4 cursor-pointer relative group overflow-hidden border-2"
               style={{ 
-                backgroundColor: resolvedColors.headerColor,
-                border: `4px solid ${resolvedColors.borderColor}`
+                backgroundColor: T.bgColor,
+                borderColor: T.borderColor
               }}
               onClick={() => avatarInputRef.current?.click()}
             >
               {profile.avatarUrl ? (
                 <img src={profile.avatarUrl} alt="Avatar" className="w-full h-full object-cover" />
               ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <span className="text-6xl">👤</span>
+                <div className="w-full h-full flex flex-col items-center justify-center">
+                  <span className="text-4xl">👤</span>
+                  <span className="text-[8px] opacity-40 uppercase tracking-widest mt-1">No Frame</span>
                 </div>
               )}
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: "rgba(0,0,0,0.5)" }}>
-                <span className="text-white text-sm font-bold">📷 Upload</span>
+              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity" style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+                <span className="text-white text-[10px] font-bold uppercase tracking-widest">UPLOAD PIC</span>
               </div>
             </div>
 
             {/* Display Name - Editable */}
             {editingSection === "name" ? (
-              <div className="space-y-2">
+              <div className="space-y-2 max-w-[200px] mx-auto">
                 <input
                   type="text"
                   value={profile.displayName}
                   onChange={(e) => updateProfile({ displayName: e.target.value })}
-                  className="w-full p-2 text-center font-bold text-xl border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                  className="w-full p-1.5 text-center font-bold text-xs border outline-none"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                 />
                 <button
                   onClick={() => setEditingSection(null)}
-                  className="px-4 py-1 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                  className="px-4 py-1 text-[10px] font-bold border-2"
+                  style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
                 >
-                  Save
+                  Save Override
                 </button>
               </div>
             ) : (
               <h2 
-                className="text-2xl font-bold cursor-pointer hover:opacity-80"
-                style={{ color: resolvedColors.headerColor }}
+                className="text-lg font-bold cursor-pointer hover:underline uppercase tracking-widest mb-1"
+                style={{ color: T.headerColor }}
                 onClick={() => setEditingSection("name")}
               >
                 {profile.displayName} ✏️
               </h2>
             )}
 
-            <p className="text-sm" style={{ color: resolvedColors.accentColor }}>● Online Now</p>
-            <p className="text-xs mt-1" style={{ color: resolvedColors.textColor }}>@{profile.username}</p>
+            <div className="flex justify-center items-center gap-1.5 mt-2">
+              <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-[10px] uppercase font-bold tracking-widest" style={{ color: T.accentColor }}>Node Active</p>
+            </div>
+            <p className="text-[10px] opacity-60 font-mono mt-0.5">@{profile.username}</p>
 
             {/* Mood - Editable */}
-            <div className="mt-3">
+            <div className="mt-4 pt-3 border-t border-dashed" style={{ borderColor: T.borderColor }}>
               {editingSection === "mood" ? (
                 <div className="space-y-2">
                   <input
                     type="text"
                     value={profile.mood}
                     onChange={(e) => updateProfile({ mood: e.target.value })}
-                    className="w-full p-2 text-sm border-2"
-                    style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                    placeholder="What's your mood?"
+                    className="w-full p-2 text-xs border"
+                    style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
+                    placeholder="Enter custom node mood..."
                   />
-                  <div className="flex flex-wrap gap-1 justify-center">
+                  <div className="flex flex-wrap gap-1 justify-center max-h-[80px] overflow-y-auto p-1.5 border border-dashed border-gray-800">
                     {moods.map((mood) => (
                       <button
                         key={mood}
                         onClick={() => { updateProfile({ mood }); setEditingSection(null); }}
-                        className="px-2 py-1 text-xs border"
-                        style={{ borderColor: resolvedColors.borderColor }}
+                        className="px-1.5 py-0.5 text-[9px] border"
+                        style={{ borderColor: T.borderColor }}
                       >
                         {mood}
                       </button>
@@ -158,290 +214,112 @@ export default function ProfilePage() {
                   </div>
                   <button
                     onClick={() => setEditingSection(null)}
-                    className="px-4 py-1 text-sm font-bold"
-                    style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                    className="px-3 py-1 text-[10px] font-bold border-2"
+                    style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
                   >
-                    Save
+                    Lock Mood
                   </button>
                 </div>
               ) : (
-                <p 
-                  className="text-sm cursor-pointer hover:opacity-80"
+                <div 
+                  className="text-xs cursor-pointer hover:underline inline-block p-1 bg-black/40 border border-gray-900 rounded"
                   onClick={() => setEditingSection("mood")}
-                  style={{ color: resolvedColors.accentColor }}
+                  style={{ color: T.accentColor }}
                 >
-                  Mood: <strong>{profile.mood}</strong> ✏️
-                </p>
+                  Mood: <strong className="text-white">{profile.mood}</strong> ✏️
+                </div>
               )}
             </div>
           </div>
 
-          {/* Contact & Actions */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>Actions</h3>
-            <div className="grid grid-cols-2 gap-2 text-xs">
-              <button className="p-2 border-2 hover:scale-105 transition-transform" style={{ borderColor: resolvedColors.borderColor }}>
-                📧 Message
+          {/* Quick Actions Panel */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>Node Interactions</div>
+            <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
+              <button className="p-2 border hover:scale-105 active:scale-95 transition-transform" style={{ borderColor: T.borderColor, backgroundColor: "transparent" }}>
+                📧 SEND MSG
               </button>
-              <button className="p-2 border-2 hover:scale-105 transition-transform" style={{ borderColor: resolvedColors.borderColor }}>
-                👥 Add Friend
+              <button className="p-2 border hover:scale-105 active:scale-95 transition-transform" style={{ borderColor: T.borderColor, backgroundColor: "transparent" }}>
+                👥 ADD LINK
               </button>
-              <button className="p-2 border-2 hover:scale-105 transition-transform" style={{ borderColor: resolvedColors.borderColor }}>
-                ⭐ Favorite
+              <button className="p-2 border hover:scale-105 active:scale-95 transition-transform" style={{ borderColor: T.borderColor, backgroundColor: "transparent" }}>
+                ⭐ BOOKMARK
               </button>
-              <button className="p-2 border-2 hover:scale-105 transition-transform" style={{ borderColor: resolvedColors.borderColor }}>
-                🔗 Share
+              <button className="p-2 border hover:scale-105 active:scale-95 transition-transform" style={{ borderColor: T.borderColor, backgroundColor: "transparent" }}>
+                🔗 FORWARD
               </button>
             </div>
           </div>
 
-          {/* Music Links */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>🎵 Music</h3>
+          {/* Persistent Music Station */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>🎵 Audio Deck</div>
             {editingSection === "music" ? (
-              <div className="space-y-2">
+              <div className="space-y-1.5">
                 <input
                   type="url"
-                  placeholder="Spotify URL"
+                  placeholder="Spotify Playlist URL"
                   value={profile.musicLinks.spotify || ""}
                   onChange={(e) => updateProfile({ musicLinks: { ...profile.musicLinks, spotify: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                  className="w-full p-2 text-[10px] border outline-none font-mono"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                 />
                 <input
                   type="url"
                   placeholder="YouTube Music URL"
                   value={profile.musicLinks.youtube || ""}
                   onChange={(e) => updateProfile({ musicLinks: { ...profile.musicLinks, youtube: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="SoundCloud URL"
-                  value={profile.musicLinks.soundcloud || ""}
-                  onChange={(e) => updateProfile({ musicLinks: { ...profile.musicLinks, soundcloud: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="Apple Music URL"
-                  value={profile.musicLinks.appleMusic || ""}
-                  onChange={(e) => updateProfile({ musicLinks: { ...profile.musicLinks, appleMusic: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                  className="w-full p-2 text-[10px] border outline-none font-mono"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                 />
                 <button
                   onClick={() => setEditingSection(null)}
-                  className="w-full px-4 py-2 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                  className="w-full px-4 py-1.5 text-xs font-bold border-2"
+                  style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
                 >
-                  Save
+                  Save Stream Registries
                 </button>
               </div>
             ) : (
-              <div className="space-y-2 text-xs">
+              <div className="space-y-2 text-[10px] font-bold">
                 {profile.musicLinks.spotify && (
-                  <a href={profile.musicLinks.spotify} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>🎧</span> Spotify
+                  <a href={profile.musicLinks.spotify} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: T.borderColor, backgroundColor: "rgba(0,255,0,0.03)" }}>
+                    <span>🎧</span> Spotify Stream Array
                   </a>
                 )}
                 {profile.musicLinks.youtube && (
-                  <a href={profile.musicLinks.youtube} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>🎵</span> YouTube Music
+                  <a href={profile.musicLinks.youtube} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: T.borderColor, backgroundColor: "rgba(255,0,0,0.03)" }}>
+                    <span>▶️</span> YouTube Audio Buffer
                   </a>
                 )}
-                {profile.musicLinks.soundcloud && (
-                  <a href={profile.musicLinks.soundcloud} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>☁️</span> SoundCloud
-                  </a>
-                )}
-                {profile.musicLinks.appleMusic && (
-                  <a href={profile.musicLinks.appleMusic} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>🍎</span> Apple Music
-                  </a>
-                )}
-                {!profile.musicLinks.spotify && !profile.musicLinks.youtube && !profile.musicLinks.soundcloud && !profile.musicLinks.appleMusic && (
-                  <p 
-                    className="cursor-pointer hover:opacity-80 text-center p-2 border-2 border-dashed"
-                    style={{ borderColor: resolvedColors.borderColor, color: resolvedColors.accentColor }}
+                {!profile.musicLinks.spotify && !profile.musicLinks.youtube && (
+                  <div 
+                    className="cursor-pointer text-center p-3 border-2 border-dashed hover:bg-black/20"
+                    style={{ borderColor: T.borderColor, color: T.accentColor }}
                     onClick={() => setEditingSection("music")}
                   >
-                    + Add Music Links ✏️
-                  </p>
+                    + Bind Custom Audio Links ✏️
+                  </div>
                 )}
-                {(profile.musicLinks.spotify || profile.musicLinks.youtube || profile.musicLinks.soundcloud || profile.musicLinks.appleMusic) && (
+                {(profile.musicLinks.spotify || profile.musicLinks.youtube) && (
                   <button
                     onClick={() => setEditingSection("music")}
-                    className="w-full p-2 text-xs border-2"
-                    style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
+                    className="w-full p-2 text-[9px] border hover:bg-black/20 font-bold uppercase tracking-wider"
+                    style={{ borderColor: T.accentColor, color: T.accentColor }}
                   >
-                    ✏️ Edit Music
+                    ✏️ Re-Configure Audio Channels
                   </button>
                 )}
               </div>
             )}
           </div>
 
-          {/* Video Links */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>🎥 Videos</h3>
-            {editingSection === "video" ? (
-              <div className="space-y-2">
-                <input
-                  type="url"
-                  placeholder="YouTube URL"
-                  value={profile.videoLinks.youtube || ""}
-                  onChange={(e) => updateProfile({ videoLinks: { ...profile.videoLinks, youtube: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="Vimeo URL"
-                  value={profile.videoLinks.vimeo || ""}
-                  onChange={(e) => updateProfile({ videoLinks: { ...profile.videoLinks, vimeo: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="w-full px-4 py-2 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
-                >
-                  Save
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2 text-xs">
-                {profile.videoLinks.youtube && (
-                  <a href={profile.videoLinks.youtube} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>▶️</span> YouTube
-                  </a>
-                )}
-                {profile.videoLinks.vimeo && (
-                  <a href={profile.videoLinks.vimeo} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>🎬</span> Vimeo
-                  </a>
-                )}
-                {!profile.videoLinks.youtube && !profile.videoLinks.vimeo && (
-                  <p 
-                    className="cursor-pointer hover:opacity-80 text-center p-2 border-2 border-dashed"
-                    style={{ borderColor: resolvedColors.borderColor, color: resolvedColors.accentColor }}
-                    onClick={() => setEditingSection("video")}
-                  >
-                    + Add Video Links ✏️
-                  </p>
-                )}
-                {(profile.videoLinks.youtube || profile.videoLinks.vimeo) && (
-                  <button
-                    onClick={() => setEditingSection("video")}
-                    className="w-full p-2 text-xs border-2"
-                    style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
-                  >
-                    ✏️ Edit Videos
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Social Links */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>🔗 Social</h3>
-            {editingSection === "social" ? (
-              <div className="space-y-2">
-                <input
-                  type="url"
-                  placeholder="Twitter URL"
-                  value={profile.socialLinks.twitter || ""}
-                  onChange={(e) => updateProfile({ socialLinks: { ...profile.socialLinks, twitter: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="Instagram URL"
-                  value={profile.socialLinks.instagram || ""}
-                  onChange={(e) => updateProfile({ socialLinks: { ...profile.socialLinks, instagram: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="GitHub URL"
-                  value={profile.socialLinks.github || ""}
-                  onChange={(e) => updateProfile({ socialLinks: { ...profile.socialLinks, github: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <input
-                  type="url"
-                  placeholder="LinkedIn URL"
-                  value={profile.socialLinks.linkedin || ""}
-                  onChange={(e) => updateProfile({ socialLinks: { ...profile.socialLinks, linkedin: e.target.value } })}
-                  className="w-full p-2 text-xs border-2"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
-                />
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="w-full px-4 py-2 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
-                >
-                  Save
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2 text-xs">
-                {profile.socialLinks.twitter && (
-                  <a href={profile.socialLinks.twitter} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>🐦</span> Twitter
-                  </a>
-                )}
-                {profile.socialLinks.instagram && (
-                  <a href={profile.socialLinks.instagram} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>📸</span> Instagram
-                  </a>
-                )}
-                {profile.socialLinks.github && (
-                  <a href={profile.socialLinks.github} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>💻</span> GitHub
-                  </a>
-                )}
-                {profile.socialLinks.linkedin && (
-                  <a href={profile.socialLinks.linkedin} target="_blank" className="flex items-center gap-2 p-2 border" style={{ borderColor: resolvedColors.borderColor }}>
-                    <span>💼</span> LinkedIn
-                  </a>
-                )}
-                {!profile.socialLinks.twitter && !profile.socialLinks.instagram && !profile.socialLinks.github && !profile.socialLinks.linkedin && (
-                  <p 
-                    className="cursor-pointer hover:opacity-80 text-center p-2 border-2 border-dashed"
-                    style={{ borderColor: resolvedColors.borderColor, color: resolvedColors.accentColor }}
-                    onClick={() => setEditingSection("social")}
-                  >
-                    + Add Social Links ✏️
-                  </p>
-                )}
-                {(profile.socialLinks.twitter || profile.socialLinks.instagram || profile.socialLinks.github || profile.socialLinks.linkedin) && (
-                  <button
-                    onClick={() => setEditingSection("social")}
-                    className="w-full p-2 text-xs border-2"
-                    style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
-                  >
-                    ✏️ Edit Social
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Badges */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>🏆 Badges</h3>
-            <div className="flex flex-wrap gap-2">
+          {/* Earned Achievements */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>🏆 Studio Badges</div>
+            <div className="flex flex-wrap gap-1.5">
               {profile.badges.map((badge, i) => (
-                <span key={i} className="px-2 py-1 text-xs border-2" style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}>
+                <span key={i} className="px-2 py-0.5 border text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: T.accentColor, color: T.accentColor, backgroundColor: `${T.accentColor}11` }}>
                   {badge}
                 </span>
               ))}
@@ -449,172 +327,188 @@ export default function ProfilePage() {
           </div>
         </div>
 
-        {/* Right Column - Content */}
+        {/* RIGHT COLUMN — FEED, PHOTOS, COMMENTS */}
         <div className="md:col-span-8 space-y-4">
-          {/* Status/Mood Box */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
+          
+          {/* Status Indicator */}
+          <div className="border-2 p-3 bg-black/60 shadow-md" style={{ borderColor: T.borderColor }}>
             <div className="flex items-center gap-2">
-              <span className="text-2xl">💭</span>
-              <p className="italic">
-                <strong style={{ color: resolvedColors.accentColor }}>Mood:</strong> {profile.mood} | 
-                <strong style={{ color: resolvedColors.accentColor }}> Currently:</strong> building something awesome
+              <span className="text-xl animate-pulse">💡</span>
+              <p className="italic text-[11px] leading-relaxed">
+                <strong className="uppercase" style={{ color: T.accentColor }}>Status Stream:</strong> {profile.displayName} is actively tweaking client variables inside Sector 7. | 
+                <strong className="uppercase ml-1" style={{ color: T.accentColor }}> Mood:</strong> {profile.mood}
               </p>
             </div>
           </div>
 
           {/* About Me */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-bold" style={{ color: resolvedColors.headerColor }}>About Me</h3>
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3 flex justify-between items-center" style={{ color: "white" }}>
+              <span>Bio & Objectives</span>
               <button 
                 onClick={() => setEditingSection(editingSection === "bio" ? null : "bio")}
-                className="text-xs px-2 py-1 border-2"
-                style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
+                className="text-[9px] px-2 py-0.5 border"
+                style={{ borderColor: T.accentColor, color: T.accentColor, backgroundColor: "black/40" }}
               >
-                ✏️ Edit
+                ✏️ EDIT
               </button>
             </div>
+            
             {editingSection === "bio" ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <textarea
                   value={profile.bio}
                   onChange={(e) => updateProfile({ bio: e.target.value })}
-                  className="w-full p-2 text-sm border-2 min-h-[100px]"
-                  style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                  className="w-full p-2 text-xs border min-h-[100px] outline-none resize-none font-mono"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                 />
-                <div className="flex gap-2">
-                  <div className="flex-1">
-                    <label className="text-xs" style={{ color: resolvedColors.accentColor }}>Location:</label>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.accentColor }}>Grid Sector Location:</label>
                     <input
                       type="text"
                       value={profile.location}
                       onChange={(e) => updateProfile({ location: e.target.value })}
-                      className="w-full p-2 text-sm border-2 mt-1"
-                      style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                      className="w-full p-1.5 text-xs border mt-1 outline-none font-mono"
+                      style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                     />
                   </div>
-                  <div className="flex-1">
-                    <label className="text-xs" style={{ color: resolvedColors.accentColor }}>Website:</label>
+                  <div>
+                    <label className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.accentColor }}>Custom Endpoint Website:</label>
                     <input
                       type="url"
                       value={profile.website}
                       onChange={(e) => updateProfile({ website: e.target.value })}
-                      className="w-full p-2 text-sm border-2 mt-1"
-                      style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                      className="w-full p-1.5 text-xs border mt-1 outline-none font-mono"
+                      style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                     />
                   </div>
                 </div>
                 <button
                   onClick={() => setEditingSection(null)}
-                  className="px-4 py-2 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                  className="px-4 py-2 text-xs font-bold border-2"
+                  style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
                 >
-                  Save
+                  Save Coordinates
                 </button>
               </div>
             ) : (
-              <div className="text-sm leading-relaxed">
-                <p style={{ color: resolvedColors.textColor }}>{profile.bio}</p>
-                <div className="mt-2 flex flex-wrap gap-4 text-xs" style={{ color: resolvedColors.accentColor }}>
-                  <span>📍 {profile.location}</span>
-                  <span>🌐 <a href={profile.website} target="_blank" style={{ color: resolvedColors.linkColor }}>{profile.website}</a></span>
+              <div className="text-[11px] leading-relaxed">
+                <p style={{ color: T.textColor }}>{profile.bio}</p>
+                <div className="mt-3 pt-2 border-t border-dashed flex flex-wrap gap-4 text-[10px]" style={{ borderColor: T.borderColor, color: T.accentColor }}>
+                  <span className="font-bold">📍 LOCATION: <span className="text-white">{profile.location}</span></span>
+                  <span className="font-bold">🌐 WEB TARGET: <a href={profile.website} target="_blank" rel="noopener noreferrer" style={{ color: T.linkColor }} className="hover:underline">{profile.website || "N/A"}</a></span>
                 </div>
               </div>
             )}
           </div>
 
-          {/* Interests */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-bold" style={{ color: resolvedColors.headerColor }}>Interests</h3>
+          {/* Interests Section */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3 flex justify-between items-center" style={{ color: "white" }}>
+              <span>Specialty Tags</span>
               <button 
                 onClick={() => setEditingSection(editingSection === "interests" ? null : "interests")}
-                className="text-xs px-2 py-1 border-2"
-                style={{ borderColor: resolvedColors.accentColor, color: resolvedColors.accentColor }}
+                className="text-[9px] px-2 py-0.5 border"
+                style={{ borderColor: T.accentColor, color: T.accentColor, backgroundColor: "black/40" }}
               >
-                ✏️ Edit
+                ✏️ EDIT
               </button>
             </div>
+            
             {editingSection === "interests" ? (
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex gap-2">
                   <input
                     type="text"
                     value={newInterest}
                     onChange={(e) => setNewInterest(e.target.value)}
                     onKeyPress={(e) => e.key === "Enter" && addInterest()}
-                    placeholder="Add interest..."
-                    className="flex-1 p-2 text-sm border-2"
-                    style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                    placeholder="E.g. Rust, LLM, Synthwave..."
+                    className="flex-1 p-2 text-xs border outline-none font-mono"
+                    style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
                   />
-                  <button onClick={addInterest} className="px-4 py-2 text-sm font-bold" style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}>
-                    Add
+                  <button onClick={addInterest} className="px-4 py-2 text-xs font-bold border-2" style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}>
+                    Append
                   </button>
                 </div>
-                <div className="flex flex-wrap gap-2">
+                <div className="flex flex-wrap gap-1.5">
                   {profile.interests.map((interest, i) => (
-                    <span key={i} className="px-2 py-1 text-xs border-2 flex items-center gap-1" style={{ borderColor: resolvedColors.borderColor }}>
+                    <span key={i} className="px-2 py-1 text-[10px] border flex items-center gap-1.5" style={{ borderColor: T.borderColor, backgroundColor: "rgba(0,0,0,0.3)" }}>
                       {interest}
-                      <button onClick={() => removeInterest(i)} className="ml-1 hover:opacity-70">×</button>
+                      <button onClick={() => removeInterest(i)} className="text-red-500 font-bold hover:scale-110 active:scale-95">×</button>
                     </span>
                   ))}
                 </div>
                 <button
                   onClick={() => setEditingSection(null)}
-                  className="px-4 py-2 text-sm font-bold"
-                  style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                  className="px-4 py-1.5 text-xs font-bold border-2"
+                  style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
                 >
-                  Done
+                  Commit Interests
                 </button>
               </div>
             ) : (
-              <div className="flex flex-wrap gap-2">
+              <div className="flex flex-wrap gap-1.5">
                 {profile.interests.map((interest, i) => (
-                  <span key={i} className="px-3 py-1 text-sm border-2" style={{ borderColor: resolvedColors.borderColor, color: resolvedColors.linkColor }}>
+                  <span key={i} className="px-3 py-1 text-[10px] border-2 uppercase font-bold tracking-wide" style={{ borderColor: T.borderColor, color: T.linkColor, backgroundColor: "black/40" }}>
                     {interest}
                   </span>
                 ))}
+                {profile.interests.length === 0 && (
+                  <p className="text-[10px] text-gray-500 italic">No tags loaded in user index registers.</p>
+                )}
               </div>
             )}
           </div>
 
-          {/* Friends Grid */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-bold" style={{ color: resolvedColors.headerColor }}>Friends (133)</h3>
-              <button className="text-xs" style={{ color: resolvedColors.linkColor }}>View All →</button>
+          {/* Friends list (MySpace style Top Nodes) */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3 flex justify-between items-center" style={{ color: "white" }}>
+              <span>Linked Co-Builder Array</span>
+              <span className="text-[10px] font-mono tracking-widest text-white/50">TOP 8 ACTIVE NODES</span>
             </div>
-            <div className="grid grid-cols-4 md:grid-cols-6 gap-2">
-              {[...Array(12)].map((_, i) => (
-                <div key={i} className="text-center">
+            
+            <div className="grid grid-cols-4 md:grid-cols-8 gap-3">
+              {[
+                { name: "SarahCodes", avatar: "👩‍💻", title: "Specialist" },
+                { name: "DevDave", avatar: "👨‍💻", title: "Database" },
+                { name: "PixelPete", avatar: "🎨", title: "Designer" },
+                { name: "TechTina", avatar: "🤖", title: "A.I." },
+                { name: "WebWizard", avatar: "🧙‍♂️", title: "Frontend" },
+                { name: "CodeNinja", avatar: "🥷", title: "DevOps" },
+                { name: "VoltSlayer", avatar: "⚡", title: "Network" },
+                { name: "Director", avatar: "🎯", title: "System" }
+              ].map((friend, i) => (
+                <div key={i} className="text-center group cursor-pointer">
                   <div 
-                    className="w-full aspect-square flex items-center justify-center border-2 mb-1" 
-                    style={{ borderColor: resolvedColors.borderColor, backgroundColor: "#333" }}
+                    className="w-full aspect-square flex items-center justify-center border-2 mb-1.5 group-hover:scale-105 group-hover:shadow-[0_0_15px_rgba(0,255,255,0.25)] transition-all" 
+                    style={{ borderColor: T.borderColor, backgroundColor: T.bgColor }}
                   >
-                    <span className="text-2xl">👤</span>
+                    <span className="text-2xl">{friend.avatar}</span>
                   </div>
-                  <span className="text-xs" style={{ color: resolvedColors.linkColor }}>
-                    {["SarahCodes", "DevDave", "PixelPete", "TechTina", "WebWizard", "CodeNinja"][i % 6]}
-                  </span>
+                  <div className="text-[9px] font-bold truncate tracking-wide" style={{ color: T.linkColor }}>{friend.name}</div>
+                  <div className="text-[7px] opacity-40 uppercase tracking-widest">{friend.title}</div>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Photo Gallery */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <div className="flex justify-between items-center mb-3">
-              <h3 className="font-bold" style={{ color: resolvedColors.headerColor }}>Photos</h3>
-              <button className="text-xs" style={{ color: resolvedColors.linkColor }}>View All →</button>
+          {/* Photo Gallery Grid */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3 flex justify-between items-center" style={{ color: "white" }}>
+              <span>Captured Visual Buffers</span>
+              <span className="text-[9px] opacity-50">GALLERY DISK ARRAY</span>
             </div>
-            <div className="grid grid-cols-3 md:grid-cols-4 gap-2">
+            
+            <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
               {[...Array(8)].map((_, i) => (
                 <div 
                   key={i}
-                  className="aspect-square flex items-center justify-center border-2 hover:scale-105 transition-transform cursor-pointer"
-                  style={{ borderColor: resolvedColors.borderColor, backgroundColor: "#333" }}
+                  className="aspect-square flex items-center justify-center border-2 hover:scale-110 hover:shadow-[0_0_10px_rgba(255,0,128,0.3)] transition-all cursor-pointer"
+                  style={{ borderColor: T.borderColor, backgroundColor: T.bgColor }}
                 >
-                  <span className="text-3xl">
+                  <span className="text-2xl">
                     {["🚀", "💻", "🎵", "⚡", "🔥", "🎨", "🌟", "🏆"][i]}
                   </span>
                 </div>
@@ -622,58 +516,66 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Comments Section */}
-          <div className="border-2 p-4" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-            <h3 className="font-bold mb-3" style={{ color: resolvedColors.headerColor }}>Comments</h3>
-            <div className="space-y-3">
-              {[
-                { author: "TechBro99", time: "2 hours ago", text: "Yo this profile is fire! 🔥" },
-                { author: "CodeQueen", time: "5 hours ago", text: "Love the vibes!" },
-                { author: "DesignDave", time: "1 day ago", text: "Custom theme feature is genius!" },
-              ].map((comment, i) => (
-                <div key={i} className="border-b border-dashed pb-3" style={{ borderColor: resolvedColors.borderColor }}>
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-xl">👤</span>
-                    <span className="font-bold text-sm" style={{ color: resolvedColors.linkColor }}>{comment.author}</span>
-                    <span className="text-xs" style={{ color: resolvedColors.accentColor }}>- {comment.time}</span>
+          {/* Comments Section (MySpace Retro Style) */}
+          <div className="myspace-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+            <div className="myspace-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>Public Node Comment Registry</div>
+            
+            <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1 mb-4">
+              {comments.map((comment, i) => (
+                <div key={i} className="border-b border-dashed pb-3 last:border-b-0 last:pb-0" style={{ borderColor: T.borderColor }}>
+                  <div className="flex items-center gap-2 mb-1.5">
+                    <span className="w-6 h-6 rounded-full bg-gray-900 border flex items-center justify-center text-sm" style={{ borderColor: T.borderColor }}>
+                      {comment.avatar}
+                    </span>
+                    <span className="font-bold text-xs" style={{ color: T.linkColor }}>{comment.author}</span>
+                    <span className="text-[9px] opacity-50 ml-auto">- {comment.time}</span>
                   </div>
-                  <p className="text-sm ml-8" style={{ color: resolvedColors.textColor }}>{comment.text}</p>
+                  <p className="text-[11px] ml-8 leading-relaxed" style={{ color: T.textColor }}>{comment.text}</p>
                 </div>
               ))}
             </div>
-            <div className="mt-4">
+
+            <div className="pt-3 border-t border-dashed" style={{ borderColor: T.borderColor }}>
               <textarea
-                placeholder="Write a comment..."
-                className="w-full p-2 text-sm border-2 min-h-[60px]"
-                style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor, borderColor: resolvedColors.borderColor }}
+                value={newCommentText}
+                onChange={e => setNewCommentText(e.target.value)}
+                placeholder="Compose public comment packet..."
+                className="w-full p-2 text-xs border-2 min-h-[60px] outline-none font-mono resize-none"
+                style={{ backgroundColor: T.bgColor, color: T.textColor, borderColor: T.borderColor }}
               />
               <button 
-                className="mt-2 px-4 py-2 text-sm font-bold"
-                style={{ backgroundColor: resolvedColors.linkColor, color: "white" }}
+                onClick={handleAddComment}
+                className="mt-2 px-4 py-2 text-xs font-bold border-2 hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
+                style={{ backgroundColor: T.linkColor, color: "black", borderColor: T.borderColor }}
               >
-                Post Comment
+                Inject Packet ⚡
               </button>
             </div>
           </div>
+
         </div>
       </div>
 
-      {/* Footer */}
-      <div className="border-t-2 mt-6 p-4 text-center text-xs" style={{ borderColor: resolvedColors.borderColor, backgroundColor: resolvedColors.boxBg }}>
-        <div className="mb-2">
-          <span className="font-bold text-lg" style={{ color: resolvedColors.accentColor }}>{visitorCount.toLocaleString()}</span> visitors
+      {/* Footer statistics and metadata */}
+      <div className="border-t-2 mt-8 p-6 text-center text-[10px] font-mono" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
+        <div className="mb-3">
+          <span className="font-bold text-base px-2 py-0.5 bg-black border text-green-400" style={{ borderColor: T.borderColor }}>
+            {visitorCount.toLocaleString()}
+          </span> 
+          <span className="ml-2 uppercase tracking-widest opacity-60 font-bold">Captured Telemetry Nodes</span>
           <button 
             onClick={() => setVisitorCount(v => v + 1)}
-            className="ml-2 px-2 py-1 text-xs border-2"
-            style={{ borderColor: resolvedColors.borderColor }}
+            className="ml-3 px-2 py-0.5 text-[10px] font-bold border-2 active:scale-90 transition-transform"
+            style={{ borderColor: T.borderColor, backgroundColor: "black" }}
           >
-            +1
+            PING +1
           </button>
         </div>
-        <div style={{ color: resolvedColors.textColor }}>
-          © {new Date().getFullYear()} LiTTree Lab Studios | Powered by ⚡GOD-CORE
+        <div style={{ color: T.textColor }} className="opacity-50">
+          © {new Date().getFullYear()} LITLABS NETWORK HUB | SYSTEM CORE v5.24 | POWERED BY ⚡GOD-CORE SPECIALISTS
         </div>
       </div>
+
     </div>
   );
 }

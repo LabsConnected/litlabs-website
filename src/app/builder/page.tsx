@@ -145,7 +145,17 @@ export default function Builder() {
   const [isGeneratingMusic, setIsGeneratingMusic] = useState(false);
   const [isInstrumental, setIsInstrumental] = useState(false);
 
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
   const messages = chatMap[selectedAgent.id] || [];
+
+  useEffect(() => {
+    // Load global CRT config
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
+    }
+  }, []);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -350,7 +360,14 @@ export default function Builder() {
 
 
   return (
-    <div style={{ backgroundColor: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", color: T.text, fontFamily: "monospace" }}>
+    <div style={{ backgroundColor: T.bg, minHeight: "100vh", display: "flex", flexDirection: "column", color: T.text, fontFamily: "monospace", position: "relative" }}>
+      {/* CRT Scanline Filter */}
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
       {/* ── Top Nav ── */}
       <nav style={{ backgroundColor: T.box, borderBottom: `2px solid ${T.border}`, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
         <Link href="/" style={{ textDecoration: "none", color: T.header, fontWeight: "bold", fontSize: "14px", letterSpacing: "2px" }}>

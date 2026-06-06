@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const { messages, systemPrompt, stream = true } = await req.json();
 
@@ -105,3 +106,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
+
+export const POST = withRateLimit(handler, 20, 60);

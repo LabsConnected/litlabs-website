@@ -30,9 +30,16 @@ export default function AgentDetail() {
   const [chatLoading, setChatLoading] = useState(false);
   const chatEndRef = useRef<HTMLDivElement>(null);
 
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
   useEffect(() => {
     if (slug) {
       fetchAgent();
+    }
+    // Check local storage for persistent CRT configuration
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) {
+      setCrtEnabled(val === "true");
     }
   }, [slug]);
 

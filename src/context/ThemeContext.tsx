@@ -173,7 +173,7 @@ const defaultTheme: Theme = {
 // Context
 interface ThemeContextType {
   theme: Theme;
-  resolvedColors: { bgColor: string; textColor: string; linkColor: string; headerColor: string; borderColor: string; accentColor: string; boxBg: string };
+  resolvedColors: { bgColor: string; textColor: string; textMuted: string; linkColor: string; headerColor: string; borderColor: string; accentColor: string; boxBg: string; success: string; warning: string };
   setMode: (mode: ThemeMode) => void;
   setSkin: (skin: SkinPreset) => void;
   setAccent: (accent: AccentColor) => void;
@@ -231,11 +231,14 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       bgColor: custom.bgColor || skinColors.bgColor,
       textColor: custom.textColor || skinColors.textColor,
+      textMuted: "#8a8aa3",
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor: accent?.headerColor || custom.headerColor || skinColors.headerColor,
       borderColor: custom.borderColor || skinColors.borderColor,
       accentColor: accent?.accentColor || custom.accentColor || skinColors.accentColor,
       boxBg: custom.boxBg || skinColors.boxBg,
+      success: "#25e08a",
+      warning: "#ffb020",
     };
   };
 
