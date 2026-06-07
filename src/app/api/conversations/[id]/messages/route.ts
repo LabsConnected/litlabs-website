@@ -2,10 +2,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
-import { GoogleGenerativeAI } from "@google/generative-ai";
-
-const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || "");
-const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
+import { generateText } from "@/lib/llm";
 
 // GET: Load messages for conversation
 export async function GET(
@@ -151,11 +148,11 @@ User: ${content}
 
 Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and stay true to your personality.`;
 
-    // Generate AI response
+    // Generate AI response via unified LLM client (auto-failover)
     let aiResponse = "I'm processing your request...";
     try {
-      const result = await model.generateContent(prompt);
-      aiResponse = result.response.text() || "I'm thinking...";
+      const r = await generateText(prompt, { task: "chat", maxTokens: 1024 });
+      aiResponse = r.text || "I'm thinking...";
     } catch (aiError) {
       console.error("AI error:", aiError);
       aiResponse = `${agent.name} is temporarily unavailable. Please try again.`;

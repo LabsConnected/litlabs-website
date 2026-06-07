@@ -171,13 +171,20 @@ export default function Builder() {
       });
   }, []);
 
-  // Music generation state
-  const [musicPrompt, setMusicPrompt] = useState("");
-  const [musicLyrics, setMusicLyrics] = useState("");
-  const [musicModel, setMusicModel] = useState("music-2.6-free");
-  const [musicResult, setMusicResult] = useState<{audio?: string; status?: number; extraInfo?: Record<string, unknown>} | null>(null);
-  const [isGeneratingMusic, setIsGeneratingMusic] = useState(false);
-  const [isInstrumental, setIsInstrumental] = useState(false);
+  useEffect(() => {
+    fetch("/api/wallet")
+      .then(r => r.json())
+      .then(data => {
+        if (typeof data.balance === "number") {
+          setCoins(data.balance);
+        }
+      })
+      .catch(() => {
+        // ignore
+      });
+  }, []);
+
+  const [coins, setCoins] = useState<number | null>(null);
 
   const [crtEnabled, setCrtEnabled] = useState(true);
 
@@ -348,49 +355,6 @@ export default function Builder() {
     }
   };
 
-  const generateMusic = useCallback(async () => {
-    if (!musicPrompt.trim() || isGeneratingMusic) return;
-    setIsGeneratingMusic(true);
-    setMusicResult(null);
-    try {
-      const res = await fetch("/api/music/generate", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          model: musicModel,
-          prompt: musicPrompt.trim(),
-          lyrics: musicLyrics.trim() || undefined,
-          isInstrumental,
-          outputFormat: "url",
-        }),
-      });
-      const data = await res.json();
-      if (data.success) {
-        setMusicResult({
-          audio: data.audio,
-          status: data.status,
-          extraInfo: data.extraInfo,
-        });
-      } else {
-        setChatMap(prev => ({
-          ...prev,
-          [selectedAgent.id]: [
-            ...(prev[selectedAgent.id] || []),
-            { id: crypto.randomUUID(), role: "assistant", content: `🎵 Music generation failed: ${data.error || "Unknown error"}`, ts: new Date().toLocaleTimeString() },
-          ],
-        }));
-      }
-    } catch {
-      setChatMap(prev => ({
-        ...prev,
-        [selectedAgent.id]: [
-          ...(prev[selectedAgent.id] || []),
-          { id: crypto.randomUUID(), role: "assistant", content: "🎵 Music generation error. Check MINIMAX_API_KEY configuration.", ts: new Date().toLocaleTimeString() },
-        ],
-      }));
-    }
-    setIsGeneratingMusic(false);
-  }, [musicPrompt, musicLyrics, musicModel, isInstrumental, isGeneratingMusic, selectedAgent]);
 
   // Require authentication (after all hooks to respect Rules of Hooks)
   if (!isLoaded) {
@@ -582,6 +546,10 @@ export default function Builder() {
 
         {/* ── Right Panel - Agent Info ── */}
         <div className="hidden lg:block" style={{ width: "200px", flexShrink: 0, backgroundColor: T.box, borderLeft: `2px solid ${T.border}`, overflowY: "auto" }}>
+          {/* Studio links */}
+          <Link href="/studio" style={{ display: "block", padding: "10px 12px", backgroundColor: T.accent + "20", borderBottom: `1px solid ${T.border}`, textDecoration: "none", color: T.accent, fontSize: "11px", fontWeight: "bold", textAlign: "center", letterSpacing: "0.5px" }}>
+            ⚡ OPEN STUDIO →
+          </Link>
           <div style={{ padding: "12px", textAlign: "center", borderBottom: `1px solid ${T.border}` }}>
             <div style={{ fontSize: "40px", marginBottom: "8px" }}>{selectedAgent.icon}</div>
             <div style={{ color: selectedAgent.color, fontSize: "13px", fontWeight: "bold" }}>{selectedAgent.name}</div>
@@ -589,69 +557,19 @@ export default function Builder() {
             <div style={{ width: "8px", height: "8px", borderRadius: "50%", backgroundColor: T.accent, margin: "6px auto 0", boxShadow: `0 0 6px ${T.accent}` }} />
           </div>
           <div style={{ padding: "12px" }}>
-            {selectedAgent.id === "music-producer" ? (
-              <>
-                <div style={{ color: T.accent, fontSize: "9px", letterSpacing: "1px", marginBottom: "6px" }}>🎵 MUSIC STUDIO</div>
-                <div style={{ display: "flex", flexDirection: "column", gap: "8px", marginBottom: "12px" }}>
-                  <select
-                    value={musicModel}
-                    onChange={e => setMusicModel(e.target.value)}
-                    style={{ padding: "6px", backgroundColor: T.input, border: `1px solid ${T.border}`, color: T.text, fontSize: "10px", fontFamily: "monospace" }}
-                  >
-                    <option value="music-2.6-free">music-2.6-free</option>
-                    <option value="music-2.6">music-2.6 (paid)</option>
-                  </select>
-                  <label style={{ display: "flex", alignItems: "center", gap: "6px", fontSize: "10px", color: T.text, cursor: "pointer" }}>
-                    <input type="checkbox" checked={isInstrumental} onChange={e => setIsInstrumental(e.target.checked)} />
-                    Instrumental (no vocals)
-                  </label>
-                  <textarea
-                    value={musicPrompt}
-                    onChange={e => setMusicPrompt(e.target.value)}
-                    placeholder="Describe the music style, mood, scenario..."
-                    rows={3}
-                    style={{ padding: "8px", backgroundColor: T.input, border: `1px solid ${T.border}`, color: "#e0e0e0", fontSize: "11px", resize: "none", fontFamily: "monospace" }}
-                  />
-                  {!isInstrumental && (
-                    <textarea
-                      value={musicLyrics}
-                      onChange={e => setMusicLyrics(e.target.value)}
-                      placeholder="[Verse]&#10;Your lyrics here...&#10;[Chorus]&#10;Your chorus here..."
-                      rows={4}
-                      style={{ padding: "8px", backgroundColor: T.input, border: `1px solid ${T.border}`, color: "#e0e0e0", fontSize: "11px", resize: "none", fontFamily: "monospace" }}
-                    />
-                  )}
-                  <button
-                    onClick={generateMusic}
-                    disabled={!musicPrompt.trim() || isGeneratingMusic}
-                    style={{ padding: "8px", backgroundColor: musicPrompt.trim() && !isGeneratingMusic ? "#9b59b6" : "#2a1a2e", color: "white", border: "none", cursor: musicPrompt.trim() && !isGeneratingMusic ? "pointer" : "not-allowed", fontWeight: "bold", fontSize: "11px" }}
-                  >
-                    {isGeneratingMusic ? "⏳ Generating..." : "🎵 GENERATE MUSIC"}
-                  </button>
-                </div>
+            <div style={{ color: T.accent, fontSize: "9px", letterSpacing: "1px", marginBottom: "6px" }}>ABOUT</div>
+            <p style={{ color: T.text, fontSize: "10px", lineHeight: 1.6, marginBottom: "12px" }}>{selectedAgent.desc}</p>
 
-                {musicResult && (
-                  <div style={{ border: `1px solid ${T.border}`, padding: "8px", backgroundColor: "rgba(155,89,182,0.08)" }}>
-                    <div style={{ color: T.accent, fontSize: "9px", marginBottom: "4px" }}>RESULT</div>
-                    {musicResult.status === 2 && musicResult.audio ? (
-                      <audio controls style={{ width: "100%", marginBottom: "6px" }} src={musicResult.audio} />
-                    ) : (
-                      <div style={{ color: T.text, fontSize: "10px" }}>Status: {musicResult.status === 1 ? "Processing..." : "Unknown"}</div>
-                    )}
-                    {musicResult.extraInfo && (
-                      <div style={{ color: T.text, fontSize: "8px", opacity: 0.7 }}>
-                        Duration: {((musicResult.extraInfo as {music_duration?: number})?.music_duration ?? 0) / 1000}s · Sample rate: {(musicResult.extraInfo as {music_sample_rate?: number})?.music_sample_rate ?? "N/A"}Hz
-                      </div>
-                    )}
-                  </div>
-                )}
-              </>
-            ) : (
-              <>
-                <div style={{ color: T.accent, fontSize: "9px", letterSpacing: "1px", marginBottom: "6px" }}>ABOUT</div>
-                <p style={{ color: T.text, fontSize: "10px", lineHeight: 1.6, marginBottom: "12px" }}>{selectedAgent.desc}</p>
-              </>
-            )}
+            <div style={{ color: T.accent, fontSize: "9px", letterSpacing: "1px", marginBottom: "6px", marginTop: "12px" }}>STUDIO TOOLS</div>
+            <div style={{ display: "flex", flexDirection: "column", gap: "4px", marginBottom: "12px" }}>
+              <Link href="/studio?tool=image" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>🖼 Image Gen</Link>
+              <Link href="/studio?tool=video" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>🎬 Video Gen</Link>
+              <Link href="/studio?tool=audio" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>🎵 Audio Gen</Link>
+              <Link href="/studio?tool=chat" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>💬 AI Chat</Link>
+              <Link href="/studio?tool=flow" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>🎬 Flow</Link>
+              <Link href="/studio?tool=gallery" style={{ padding: "6px 8px", border: `1px solid ${T.border}`, textDecoration: "none", color: T.text, fontSize: "10px", borderRadius: "4px", backgroundColor: T.bg }}>🖼 Gallery</Link>
+            </div>
+
             <div style={{ color: T.accent, fontSize: "9px", letterSpacing: "1px", marginBottom: "6px", marginTop: "12px" }}>ALL AGENTS</div>
             {allAgents.map(a => (
               <button key={a.id} onClick={() => switchAgent(a)} style={{ width: "100%", textAlign: "left", padding: "5px 6px", marginBottom: "2px", display: "flex", alignItems: "center", gap: "6px", backgroundColor: "transparent", border: "none", cursor: "pointer" }}>

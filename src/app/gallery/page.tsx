@@ -63,6 +63,8 @@ export default function Gallery() {
   const [userItems, setUserItems] = useState<GalleryItem[]>([]);
   const [showUpload, setShowUpload] = useState(false);
   const [uploadForm, setUploadForm] = useState({ title: "", imageUrl: "", artist: "", category: "abstract" });
+  const [uploadFile, setUploadFile] = useState<File | null>(null);
+  const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
 
   // Merge demo + real API + user items
@@ -137,26 +139,75 @@ export default function Gallery() {
     });
   }, [items]);
 
-  const handleUpload = () => {
-    if (!uploadForm.title.trim() || !uploadForm.imageUrl.trim()) {
-      showToast("Title and Image URL are required", "error");
+  const handleUpload = async () => {
+    if (!uploadForm.title.trim()) {
+      showToast("Title is required", "error");
       return;
     }
-    const newItem: GalleryItem = {
-      id: `user_${Date.now()}`,
-      title: uploadForm.title.trim(),
-      artist: uploadForm.artist.trim() || "You",
-      category: uploadForm.category,
-      imageUrl: uploadForm.imageUrl.trim(),
-      likes: 0,
-      createdAt: new Date().toISOString().split("T")[0],
-    };
-    const updated = [newItem, ...userItems];
-    setUserItems(updated);
-    localStorage.setItem("litlabs-gallery-user", JSON.stringify(updated));
-    setUploadForm({ title: "", imageUrl: "", artist: "", category: "abstract" });
-    setShowUpload(false);
-    showToast("Your creation has been shared to the gallery!");
+    if (!uploadForm.imageUrl.trim() && !uploadFile) {
+      showToast("Provide an image URL or select a file", "error");
+      return;
+    }
+    if (uploading) return;
+
+    setUploading(true);
+    try {
+      let imageUrl = uploadForm.imageUrl.trim();
+
+      // 1) If a file was chosen, upload to /api/upload first to get a hosted URL
+      if (uploadFile) {
+        const fd = new FormData();
+        fd.append("file", uploadFile);
+        const upRes = await fetch("/api/upload", { method: "POST", body: fd });
+        const upData = await upRes.json();
+        if (!upRes.ok) throw new Error(upData.error || "File upload failed");
+        imageUrl = upData.url;
+      }
+
+      // 2) Persist the record to /api/gallery (Supabase user_media)
+      let serverId: string | null = null;
+      try {
+        const saveRes = await fetch("/api/gallery", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            url: imageUrl,
+            caption: uploadForm.title.trim(),
+          }),
+        });
+        const saveData = await saveRes.json();
+        if (saveRes.ok && saveData?.item?.id) {
+          serverId = saveData.item.id;
+        } else {
+          // Not fatal — keep the local copy so the user sees their work
+          showToast(`Saved locally — server: ${saveData?.error || "unavailable"}`, "error");
+        }
+      } catch {
+        showToast("Offline — saved locally only", "error");
+      }
+
+      // 3) Add to local state (immediately visible) + cache in localStorage
+      const newItem: GalleryItem = {
+        id: serverId ?? `user_${Date.now()}`,
+        title: uploadForm.title.trim(),
+        artist: uploadForm.artist.trim() || "You",
+        category: uploadForm.category,
+        imageUrl,
+        likes: 0,
+        createdAt: new Date().toISOString().split("T")[0],
+      };
+      const updated = [newItem, ...userItems];
+      setUserItems(updated);
+      localStorage.setItem("litlabs-gallery-user", JSON.stringify(updated));
+      setUploadForm({ title: "", imageUrl: "", artist: "", category: "abstract" });
+      setUploadFile(null);
+      setShowUpload(false);
+      if (serverId) showToast("Your creation has been shared to the gallery!");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Upload failed", "error");
+    } finally {
+      setUploading(false);
+    }
   };
 
   const handleDeleteUserItem = (id: string) => {
@@ -182,7 +233,7 @@ export default function Gallery() {
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
           <span>🎨 AI GALLERY RENDERS ONLINE // SECTOR 9 IMAGING SECTOR</span>
           <span>⚡ PIXEL FORGE MODELS LIVE GENERATING 360° SPHERES DAILY</span>
-          <span>🪐 IMMERSIVE CHAT INTEGRATED FOR DESCRIPTIVE SKYBOX CREATIONS</span>
+          <span>🪐 IMMERSIVE AI IMAGE GENERATION ACROSS MULTIPLE PROVIDERS</span>
         </div>
       </div>
 
@@ -265,8 +316,18 @@ export default function Gallery() {
                 <input type="text" value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} placeholder="Name your piece..." style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }} />
               </div>
               <div>
-                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Image URL</label>
-                <input type="text" value={uploadForm.imageUrl} onChange={e => setUploadForm({ ...uploadForm, imageUrl: e.target.value })} placeholder="https://..." style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }} />
+                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Image File (optional)</label>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
+                  style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }}
+                />
+                {uploadFile && <div style={{ fontSize: "10px", color: T.accentColor, marginTop: "4px" }}>Selected: {uploadFile.name}</div>}
+              </div>
+              <div>
+                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>— or Image URL</label>
+                <input type="text" value={uploadForm.imageUrl} onChange={e => setUploadForm({ ...uploadForm, imageUrl: e.target.value })} placeholder="https://..." disabled={!!uploadFile} style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px", opacity: uploadFile ? 0.4 : 1 }} />
               </div>
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>
@@ -283,8 +344,8 @@ export default function Gallery() {
                   </select>
                 </div>
               </div>
-              <button onClick={handleUpload} style={{ padding: "10px", backgroundColor: T.accentColor, color: "#0a0a0f", border: "none", cursor: "pointer", fontSize: "12px", fontWeight: "bold" }}>
-                🚀 Publish to Gallery
+              <button onClick={handleUpload} disabled={uploading} style={{ padding: "10px", backgroundColor: T.accentColor, color: "#0a0a0f", border: "none", cursor: uploading ? "wait" : "pointer", fontSize: "12px", fontWeight: "bold", opacity: uploading ? 0.6 : 1 }}>
+                {uploading ? "⏳ Uploading..." : "🚀 Publish to Gallery"}
               </button>
             </div>
           </div>
@@ -365,8 +426,8 @@ export default function Gallery() {
       )}
 
       {/* ── Floating Create Button ── */}
-      <Link href="/agent-chat" style={{ position: "fixed", bottom: "24px", right: "24px", width: "56px", height: "56px", borderRadius: "50%", backgroundColor: T.linkColor, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", textDecoration: "none", boxShadow: `0 4px 16px ${T.linkColor}40`, zIndex: 50, cursor: "pointer" }} title="Generate 360° World">
-        🌍
+      <Link href="/generate" style={{ position: "fixed", bottom: "24px", right: "24px", width: "56px", height: "56px", borderRadius: "50%", backgroundColor: T.linkColor, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", textDecoration: "none", boxShadow: `0 4px 16px ${T.linkColor}40`, zIndex: 50, cursor: "pointer" }} title="AI Image Generator">
+        🎨
       </Link>
 
       <style>{`

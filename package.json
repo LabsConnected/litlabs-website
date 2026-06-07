@@ -7,18 +7,15 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "dev:loop": "./bin/dev.sh",
-    "sync": "./bin/sync.sh",
-    "save": "./bin/save.sh",
-    "auto-fix": "./bin/auto-fix.sh"
+    "pages:build": "npx @cloudflare/next-on-pages@1",
+    "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
+    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat"
   },
   "dependencies": {
     "@clerk/nextjs": "^6.39.5",
     "@google/generative-ai": "^0.24.1",
     "@stripe/stripe-js": "^5.10.0",
     "@supabase/supabase-js": "^2.106.2",
-    "@vercel/analytics": "^2.0.1",
-    "@vercel/speed-insights": "^2.0.0",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.3",
     "lucide-react": "^1.17.0",
@@ -30,6 +27,7 @@
     "svix": "^1.95.1"
   },
   "devDependencies": {
+    "@cloudflare/next-on-pages": "^1.13.16",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
@@ -37,6 +35,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
-    "typescript": "^5"
+    "typescript": "^5",
+    "wrangler": "^4.86.0"
   }
 }

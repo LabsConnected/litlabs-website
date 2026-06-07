@@ -1,0 +1,94 @@
+
+> frontend@0.1.0 build
+> next build
+
+Γû▓ Next.js 16.2.6 (Turbopack)
+- Environments: .env.local
+- Experiments (use with caution):
+  ┬╖ optimizePackageImports
+
+  Creating an optimized production build ...
+Γ£ô Compiled successfully in 7.3s
+  Running TypeScript ...
+  Finished TypeScript in 10.1s ...
+  Collecting page data using 7 workers ...
+  Generating static pages using 7 workers (0/55) ...
+  Generating static pages using 7 workers (13/55) 
+  Generating static pages using 7 workers (27/55) 
+  Generating static pages using 7 workers (41/55) 
+Γ£ô Generating static pages using 7 workers (55/55) in 757ms
+  Finalizing page optimization ...
+
+Route (app)
+Γöî Γùï /
+Γö£ Γùï /_not-found
+Γö£ Γùï /agent-chat
+Γö£ Γùï /agents
+Γö£ ╞Æ /agents/[slug]
+Γö£ Γùï /ai-builder
+Γö£ ╞Æ /api/account
+Γö£ ╞Æ /api/agents
+Γö£ ╞Æ /api/agents/[slug]
+Γö£ ╞Æ /api/agents/backlog
+Γö£ ╞Æ /api/agents/commits
+Γö£ ╞Æ /api/agents/completed
+Γö£ ╞Æ /api/agents/services
+Γö£ ╞Æ /api/agents/status
+Γö£ ╞Æ /api/agents/task
+Γö£ ╞Æ /api/auth/login
+Γö£ ╞Æ /api/auth/logout
+Γö£ ╞Æ /api/auth/session
+Γö£ ╞Æ /api/chat
+Γö£ ╞Æ /api/conversations
+Γö£ ╞Æ /api/conversations/[id]/messages
+Γö£ ╞Æ /api/flow
+Γö£ ╞Æ /api/gallery
+Γö£ ╞Æ /api/gemini
+Γö£ ╞Æ /api/gemini/build
+Γö£ ╞Æ /api/gemini/chat
+Γö£ ╞Æ /api/media/generate
+Γö£ ╞Æ /api/music/generate
+Γö£ ╞Æ /api/orchestrate
+Γö£ ╞Æ /api/posts
+Γö£ ╞Æ /api/posts/[id]/comments
+Γö£ ╞Æ /api/posts/[id]/like
+Γö£ ╞Æ /api/settings/preferences
+Γö£ ╞Æ /api/settings/profile
+Γö£ ╞Æ /api/skybox/generate
+Γö£ ╞Æ /api/skybox/poll/[id]
+Γö£ ╞Æ /api/storage
+Γö£ ╞Æ /api/stripe/checkout
+Γö£ ╞Æ /api/stripe/webhook
+Γö£ ╞Æ /api/telemetry
+Γö£ ╞Æ /api/upload
+Γö£ ╞Æ /api/user-agents
+Γö£ ╞Æ /api/users/[userId]/credits
+Γö£ ╞Æ /api/users/[userId]/plan
+Γö£ ╞Æ /api/wallet
+Γö£ ╞Æ /api/webhook/agent-action
+Γö£ ╞Æ /api/webhook/clerk
+Γö£ Γùï /builder
+Γö£ Γùï /cookies
+Γö£ Γùï /flow
+Γö£ Γùï /gallery
+Γö£ ╞Æ /gallery/[id]
+Γö£ Γùï /generate
+Γö£ ╞Æ /login
+Γö£ Γùï /marketplace
+Γö£ Γùï /privacy
+Γö£ Γùï /profile
+Γö£ Γùï /robots.txt
+Γö£ Γùï /settings
+Γö£ Γùï /showcase
+Γö£ ╞Æ /sign-in/[[...sign-in]]
+Γö£ ╞Æ /sign-up/[[...sign-up]]
+Γö£ Γùï /sitemap.xml
+Γö£ Γùï /social
+Γöö Γùï /terms
+
+
+╞Æ Proxy (Middleware)
+
+Γùï  (Static)   prerendered as static content
+╞Æ  (Dynamic)  server-rendered on demand
+

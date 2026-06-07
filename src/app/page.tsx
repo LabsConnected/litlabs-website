@@ -38,11 +38,28 @@ interface FeedPost {
   handle: string;
   avatar: string;
   time: string;
+  createdAt?: string;
   content: string;
   likes: number;
   liked: boolean;
   mood: string;
-  comments: { author: string; avatar: string; text: string; time: string }[];
+  shares?: number;
+  isAI?: boolean;
+  media_urls?: string[];
+  comments: { id?: string; author: string; avatar: string; text: string; time: string; createdAt?: string }[];
+}
+
+/** Format an ISO timestamp as a relative "Xm ago" string. */
+function formatTime(iso: string | undefined): string {
+  if (!iso) return "Just now";
+  const then = new Date(iso).getTime();
+  const now = Date.now();
+  if (isNaN(then)) return "Just now";
+  const diff = Math.floor((now - then) / 1000);
+  if (diff < 60) return "Just now";
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
+  return `${Math.floor(diff / 86400)}d ago`;
 }
 
 interface FloatingChat {
@@ -76,6 +93,10 @@ export default function LandingPage() {
   const [claimedToday, setClaimedToday] = useState(false);
   const [postComposerText, setPostComposerText] = useState("");
   const [postComposerMood, setPostComposerMood] = useState("Focused");
+  const [postComposerImage, setPostComposerImage] = useState("");
+  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
+  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
+  const [commentSubmitting, setCommentSubmitting] = useState<Record<string, boolean>>({});
 
   const [activeChats, setActiveChats] = useState<FloatingChat[]>([]);
 
@@ -148,11 +169,31 @@ export default function LandingPage() {
     } else {
       localStorage.setItem("litlabs_visitor_count", "133742");
     }
-    const storedCoins = localStorage.getItem("litbitcoins");
-    if (storedCoins) setLitBitCoins(parseInt(storedCoins));
-    else localStorage.setItem("litbitcoins", "500");
+
+    // 1) Optimistic local cache for instant render
+    const cachedCoins = localStorage.getItem("litbitcoins");
+    if (cachedCoins) setLitBitCoins(parseInt(cachedCoins));
     const lastClaim = localStorage.getItem("litbitcoins_last_claimed");
     if (lastClaim === new Date().toISOString().split("T")[0]) setClaimedToday(true);
+
+    // 2) Authoritative fetch from /api/wallet (Clerk auth required server-side)
+    //    This syncs balance across devices once the user signs in.
+    fetch("/api/wallet")
+      .then(r => r.json())
+      .then(d => {
+        if (typeof d.balance === "number") {
+          setLitBitCoins(d.balance);
+          localStorage.setItem("litbitcoins", String(d.balance));
+        }
+        if (d.last_claim_date) {
+          const claimed = d.last_claim_date.startsWith(new Date().toISOString().split("T")[0]);
+          if (claimed) {
+            setClaimedToday(true);
+            localStorage.setItem("litbitcoins_last_claimed", new Date().toISOString().split("T")[0]);
+          }
+        }
+      })
+      .catch(() => { /* offline / unauthenticated — keep cached value */ });
   }, []);
 
   // Poll telemetry
@@ -187,18 +228,140 @@ export default function LandingPage() {
     telemetryEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [telemetry]);
 
-  const claimDailyBonus = () => {
+  // Fetch real feed from /api/posts on mount (merges with the demo posts)
+  useEffect(() => {
+    let cancelled = false;
+    fetch("/api/posts")
+      .then(r => r.json())
+      .then((data: { posts?: Array<{ id: string; content: string; media_urls?: string[]; likes_count?: number; comments_count?: number; is_ai_post?: boolean; created_at?: string; users?: { name?: string; username?: string; avatar_url?: string } }> }) => {
+        if (cancelled || !data?.posts || data.posts.length === 0) return;
+        const apiPosts: FeedPost[] = data.posts.map((p) => {
+          const u = p.users;
+          return {
+            id: p.id,
+            author: u?.name || "Anonymous",
+            handle: "@" + (u?.username || "user"),
+            avatar: u?.avatar_url || "👤",
+            time: formatTime(p.created_at),
+            createdAt: p.created_at,
+            content: p.content,
+            likes: p.likes_count ?? 0,
+            liked: false,
+            mood: "Live",
+            shares: 0,
+            isAI: p.is_ai_post,
+            media_urls: p.media_urls,
+            comments: [],
+          };
+        });
+        // Append API posts after the demo ones so the demo stays on top
+        setFeeds(prev => {
+          const existingIds = new Set(prev.map(p => p.id));
+          return [...prev, ...apiPosts.filter(p => !existingIds.has(p.id))];
+        });
+      })
+      .catch(() => { /* silent — demo posts still show */ });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  const toggleComments = (postId: string) => {
+    setExpandedComments(prev => ({ ...prev, [postId]: !prev[postId] }));
+  };
+
+  const handleAddComment = async (postId: string) => {
+    const text = commentInputs[postId]?.trim();
+    if (!text || commentSubmitting[postId]) return;
+
+    // Optimistic insert
+    const optimistic = {
+      author: profile.displayName || "You",
+      avatar: profile.avatarUrl || "🧑",
+      text,
+      time: "Just now",
+    };
+    setFeeds(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, optimistic] } : p));
+    setCommentInputs(prev => ({ ...prev, [postId]: "" }));
+    setCommentSubmitting(prev => ({ ...prev, [postId]: true }));
+
+    try {
+      const res = await fetch(`/api/posts/${postId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: text }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.comment) {
+        // Replace the optimistic comment with the server one
+        setFeeds(prev => prev.map(p => p.id === postId ? {
+          ...p,
+          comments: p.comments.map((c, i) => i === p.comments.length - 1
+            ? {
+                author: data.comment.users?.name || optimistic.author,
+                avatar: data.comment.users?.avatar_url || optimistic.avatar,
+                text: data.comment.content,
+                time: formatTime(data.comment.created_at),
+                createdAt: data.comment.created_at,
+              }
+            : c),
+        } : p));
+      } else {
+        // Comment persisted locally only — log telemetry
+        setTelemetry(prev => [
+          ...prev.slice(-8),
+          { time: new Date().toTimeString().split(" ")[0], agent: "System", text: `Comment not synced: ${data?.error || "unknown"}`, icon: "⚠️" }
+        ]);
+      }
+    } catch {
+      setTelemetry(prev => [
+        ...prev.slice(-8),
+        { time: new Date().toTimeString().split(" ")[0], agent: "System", text: "Offline — comment saved locally only.", icon: "📡" }
+      ]);
+    } finally {
+      setCommentSubmitting(prev => ({ ...prev, [postId]: false }));
+    }
+  };
+
+  const claimDailyBonus = async () => {
     if (claimedToday) return;
-    const newBal = litBitCoins + 50;
-    setLitBitCoins(newBal);
-    localStorage.setItem("litbitcoins", newBal.toString());
-    localStorage.setItem("litbitcoins_last_claimed", new Date().toISOString().split("T")[0]);
+
+    // Optimistic update so the UI feels instant
+    const optimistic = litBitCoins + 50;
+    setLitBitCoins(optimistic);
+    localStorage.setItem("litbitcoins", String(optimistic));
     setClaimedToday(true);
+    const today = new Date().toISOString().split("T")[0];
+    localStorage.setItem("litbitcoins_last_claimed", today);
     const timeStr = new Date().toTimeString().split(" ")[0];
     setTelemetry(prev => [
       ...prev,
       { time: timeStr, agent: "System", text: `Claimed daily LiTBit Coins bonus: +50 coins!`, icon: "🪙" }
     ]);
+
+    // Authoritative claim via API. Roll back on failure.
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "daily" }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Claim failed");
+      if (typeof data.balance === "number") {
+        setLitBitCoins(data.balance);
+        localStorage.setItem("litbitcoins", String(data.balance));
+      }
+    } catch (err) {
+      // Roll back optimistic update on failure
+      setLitBitCoins(litBitCoins);
+      setClaimedToday(false);
+      localStorage.setItem("litbitcoins", String(litBitCoins));
+      localStorage.removeItem("litbitcoins_last_claimed");
+      setTelemetry(prev => [
+        ...prev,
+        { time: new Date().toTimeString().split(" ")[0], agent: "System", text: `Daily claim failed: ${err instanceof Error ? err.message : "unknown"}`, icon: "⚠️" }
+      ]);
+    }
   };
 
   const openMessengerChat = (agent: UIAgent) => {
@@ -247,17 +410,35 @@ export default function LandingPage() {
   const closeMessengerChat = (agentId: string) => setActiveChats(activeChats.filter(c => c.agentId !== agentId));
   const toggleMinimizeMessenger = (agentId: string) => setActiveChats(prev => prev.map(c => c.agentId === agentId ? { ...c, isMinimized: !c.isMinimized } : c));
 
-  const handleLikePost = (id: string) => {
-    setFeeds(prev => prev.map(f =>
-      f.id === id ? { ...f, liked: !f.liked, likes: f.liked ? f.likes - 1 : f.likes + 1 } : f
-    ));
+  const handleLikePost = async (id: string) => {
+    // Optimistic toggle
+    let wasLiked = false;
+    setFeeds(prev => prev.map(f => {
+      if (f.id !== id) return f;
+      wasLiked = f.liked;
+      return { ...f, liked: !f.liked, likes: f.liked ? f.likes - 1 : f.likes + 1 };
+    }));
+    // Only POST for real (non-temp) ids — temp ids start with "feed_"
+    if (id.startsWith("feed_")) return;
+    try {
+      if (wasLiked) {
+        await fetch(`/api/posts/${id}/like`, { method: "DELETE" });
+      } else {
+        await fetch(`/api/posts/${id}/like`, { method: "POST" });
+      }
+    } catch {
+      // Silent — optimistic UI already updated
+    }
   };
 
-  const submitStatusPost = () => {
+  const submitStatusPost = async () => {
     if (!postComposerText.trim()) return;
     const cleanText = postComposerText.trim();
+    const imageUrl = postComposerImage.trim();
     const newPostId = `feed_${Date.now()}`;
-    const newPost: FeedPost = {
+
+    // 1) Optimistic local insert so the UI feels instant
+    const optimisticPost: FeedPost = {
       id: newPostId,
       author: profile.displayName || "LiTreeCeo",
       handle: "@" + (profile.username || "litree_ceo"),
@@ -267,10 +448,49 @@ export default function LandingPage() {
       likes: 0,
       liked: false,
       mood: postComposerMood,
+      shares: 0,
+      media_urls: imageUrl ? [imageUrl] : undefined,
       comments: []
     };
-    setFeeds([newPost, ...feeds]);
+    setFeeds([optimisticPost, ...feeds]);
     setPostComposerText("");
+    setPostComposerImage("");
+
+    // 2) Persist to the real backend
+    let serverPostId = newPostId;
+    try {
+      const res = await fetch("/api/posts", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          content: cleanText,
+          media_urls: imageUrl ? [imageUrl] : [],
+        }),
+      });
+      const data = await res.json();
+      if (res.ok && data?.post?.id) {
+        serverPostId = data.post.id;
+        // Swap local id with server id so future actions (like/comment) hit the real record
+        setFeeds(prev => prev.map(f => f.id === newPostId ? { ...f, id: serverPostId } : f));
+      } else if (res.ok && data?.id) {
+        // Fallback for mock / different response shape
+        serverPostId = data.id;
+        setFeeds(prev => prev.map(f => f.id === newPostId ? { ...f, id: serverPostId } : f));
+      } else {
+        // Surface the failure as a telemetry line — keep optimistic post visible
+        setTelemetry(prev => [
+          ...prev.slice(-8),
+          { time: new Date().toTimeString().split(" ")[0], agent: "System", text: `Post not synced to server: ${data?.error || "unknown error"}`, icon: "⚠️" }
+        ]);
+      }
+    } catch {
+      setTelemetry(prev => [
+        ...prev.slice(-8),
+        { time: new Date().toTimeString().split(" ")[0], agent: "System", text: "Offline mode — post saved locally only.", icon: "📡" }
+      ]);
+    }
+
+    // 3) Async agent reply (unchanged behavior)
     setTimeout(async () => {
       const lower = cleanText.toLowerCase();
       let replyingAgent = UI_AGENTS[1];
@@ -290,11 +510,11 @@ export default function LandingPage() {
         });
         const data = await res.json();
         setFeeds(prev => prev.map(f =>
-          f.id === newPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: data.response || "Incredible thoughts!", time: "1s ago" }] } : f
+          f.id === serverPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: data.response || "Incredible thoughts!", time: "1s ago" }] } : f
         ));
       } catch {
         setFeeds(prev => prev.map(f =>
-          f.id === newPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: "Great automation goal. Let me know how I can optimize this.", time: "1s ago" }] } : f
+          f.id === serverPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: "Great automation goal. Let me know how I can optimize this.", time: "1s ago" }] } : f
         ));
       }
     }, 1500);
@@ -880,10 +1100,26 @@ export default function LandingPage() {
                 <div className="flex-1">
                   <textarea value={postComposerText} onChange={e => setPostComposerText(e.target.value)}
                     placeholder={`What are you building today, ${profile.displayName || "CEO"}?`}
-                    className="textarea text-sm mb-3" rows={3} />
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
+                    className="textarea text-sm mb-2" rows={3} />
+                  {postComposerImage && (
+                    <div className="relative mb-2 inline-block">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={postComposerImage} alt="Preview" className="max-h-32 rounded border border-white/10" />
+                      <button type="button" onClick={() => setPostComposerImage("")}
+                        className="absolute top-1 right-1 bg-black/80 text-white text-[10px] w-5 h-5 rounded-full leading-none">✕</button>
+                    </div>
+                  )}
+                  <div className="flex items-center justify-between gap-2 flex-wrap">
+                    <div className="flex items-center gap-2 flex-1 min-w-[200px]">
                       <span className="badge text-[10px]">{postComposerMood}</span>
+                      <input
+                        type="text"
+                        value={postComposerImage}
+                        onChange={e => setPostComposerImage(e.target.value)}
+                        placeholder="🖼 Image URL (optional)"
+                        className="bg-transparent border border-white/10 rounded px-2 py-0.5 text-[10px] flex-1 min-w-[140px] outline-none"
+                        style={{ color: resolvedColors.textColor }}
+                      />
                     </div>
                     <button onClick={submitStatusPost} disabled={!postComposerText.trim()}
                       className="btn btn-primary text-xs">
@@ -896,50 +1132,102 @@ export default function LandingPage() {
 
             {/* Feed */}
             <div className="space-y-4">
-              {feeds.map(post => (
-                <article key={post.id} className="post">
-                  <div className="post-header">
-                    <img src={post.avatar} alt={post.author} className="w-10 h-10 rounded-lg object-cover border border-white/10" />
-                    <div className="post-meta">
-                      <div className="post-author">
-                        {post.author}
-                        <span className="badge-success badge text-[8px] px-1.5 py-0.5">Verified</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <span className="post-handle">{post.handle}</span>
-                        <span className="text-muted">·</span>
-                        <span className="post-time">{post.time}</span>
-                      </div>
-                      <span className="font-mono text-[10px]" style={{ color: resolvedColors.accentColor }}>{post.mood}</span>
-                    </div>
-                  </div>
-                  <div className="post-body">{post.content}</div>
-                  <div className="post-stats">
-                    <span>{post.likes} reactions</span>
-                    <span>{post.comments.length} reviews</span>
-                  </div>
-                  <div className="post-actions">
-                    <button className={`post-action ${post.liked ? "liked" : ""}`} onClick={() => handleLikePost(post.id)}>
-                      {post.liked ? "Reacted" : "React"}
-                    </button>
-                    <button className="post-action">Review</button>
-                  </div>
-                  {post.comments.length > 0 && (
-                    <div className="post-comments">
-                      {post.comments.map((c, i) => (
-                        <div key={i} className="comment">
-                          <img src={c.avatar} alt={c.author} className="w-6 h-6 rounded object-cover border border-white/10" />
-                          <div className="comment-bubble">
-                            <div className="comment-author">{c.author}</div>
-                            <div className="comment-text">{c.text}</div>
-                            <div className="comment-time">{c.time}</div>
-                          </div>
+              {feeds.map(post => {
+                const isExpanded = !!expandedComments[post.id];
+                return (
+                  <article key={post.id} className="post">
+                    <div className="post-header">
+                      <img src={post.avatar} alt={post.author} className="w-10 h-10 rounded-lg object-cover border border-white/10" />
+                      <div className="post-meta">
+                        <div className="post-author">
+                          {post.author}
+                          {post.isAI ? (
+                            <span className="badge text-[8px] px-1.5 py-0.5 ml-1" style={{ backgroundColor: resolvedColors.accentColor, color: "#000" }}>AI</span>
+                          ) : (
+                            <span className="badge-success badge text-[8px] px-1.5 py-0.5">Verified</span>
+                          )}
                         </div>
-                      ))}
+                        <div className="flex items-center gap-2">
+                          <span className="post-handle">{post.handle}</span>
+                          <span className="text-muted">·</span>
+                          <span className="post-time">{post.time}</span>
+                        </div>
+                        <span className="font-mono text-[10px]" style={{ color: resolvedColors.accentColor }}>{post.mood}</span>
+                      </div>
                     </div>
-                  )}
-                </article>
-              ))}
+                    <div className="post-body">{post.content}</div>
+                    {post.media_urls && post.media_urls.length > 0 && (
+                      <div className="mt-2">
+                        {post.media_urls.map((url, i) => (
+                          // eslint-disable-next-line @next/next/no-img-element
+                          <img key={i} src={url} alt={`media ${i}`} className="max-h-64 rounded border border-white/10" />
+                        ))}
+                      </div>
+                    )}
+                    <div className="post-stats">
+                      <span>{post.likes} reactions</span>
+                      <button onClick={() => toggleComments(post.id)} className="hover:underline" style={{ color: resolvedColors.linkColor }}>
+                        {post.comments.length} review{post.comments.length === 1 ? "" : "s"}
+                      </button>
+                      <span>{post.shares ?? 0} shares</span>
+                    </div>
+                    <div className="post-actions">
+                      <button className={`post-action ${post.liked ? "liked" : ""}`} onClick={() => handleLikePost(post.id)}>
+                        {post.liked ? "Reacted" : "React"}
+                      </button>
+                      <button className="post-action" onClick={() => toggleComments(post.id)}>
+                        {isExpanded ? "Hide Reviews" : "Review"}
+                      </button>
+                      <button className="post-action" onClick={() => {
+                        if (navigator.share) {
+                          navigator.share({ text: post.content }).catch(() => {});
+                        } else {
+                          navigator.clipboard?.writeText(post.content).catch(() => {});
+                        }
+                        // Optimistic share count
+                        setFeeds(prev => prev.map(f => f.id === post.id ? { ...f, shares: (f.shares ?? 0) + 1 } : f));
+                      }}>
+                        Share
+                      </button>
+                    </div>
+                    {(isExpanded || post.comments.length > 0) && (
+                      <div className="post-comments">
+                        {post.comments.map((c, i) => (
+                          <div key={i} className="comment">
+                            <img src={c.avatar} alt={c.author} className="w-6 h-6 rounded object-cover border border-white/10" />
+                            <div className="comment-bubble">
+                              <div className="comment-author">{c.author}</div>
+                              <div className="comment-text">{c.text}</div>
+                              <div className="comment-time">{c.time}</div>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    {isExpanded && (
+                      <div className="mt-3 flex gap-2">
+                        <input
+                          type="text"
+                          value={commentInputs[post.id] ?? ""}
+                          onChange={e => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
+                          onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleAddComment(post.id))}
+                          placeholder="Add a review..."
+                          className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1 text-xs outline-none"
+                          style={{ color: resolvedColors.textColor }}
+                          disabled={commentSubmitting[post.id]}
+                        />
+                        <button
+                          onClick={() => handleAddComment(post.id)}
+                          disabled={!commentInputs[post.id]?.trim() || commentSubmitting[post.id]}
+                          className="btn btn-primary text-[10px] py-1 px-3 disabled:opacity-50"
+                        >
+                          {commentSubmitting[post.id] ? "..." : "Send"}
+                        </button>
+                      </div>
+                    )}
+                  </article>
+                );
+              })}
             </div>
           </div>
 

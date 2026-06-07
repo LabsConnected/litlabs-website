@@ -1,7 +1,5 @@
 import type { Metadata } from "next";
 import { ClerkProvider } from "@clerk/nextjs";
-import { Analytics } from "@vercel/analytics/next";
-import { SpeedInsights } from "@vercel/speed-insights/next";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import Navbar from "@/components/Navbar";
@@ -74,14 +72,10 @@ export default function RootLayout({
         {clerkReady ? (
           <ClerkProvider>
             {inner}
-            <Analytics />
-            <SpeedInsights />
           </ClerkProvider>
         ) : (
           <>
             {inner}
-            <Analytics />
-            <SpeedInsights />
           </>
         )}
       </body>

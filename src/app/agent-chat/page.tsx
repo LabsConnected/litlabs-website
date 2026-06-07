@@ -57,25 +57,16 @@ export default function AgentChat() {
   }, [messages]);
 
   const generateWorld = useCallback(async (prompt: string) => {
-    const res = await fetch("/api/skybox/generate", {
+    const res = await fetch("/api/media/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, negativePrompt: "blurry, low quality, distorted" }),
+      body: JSON.stringify({ prompt, negativePrompt: "blurry, low quality, distorted", providerId: "pollinations", format: "image", width: 1024, height: 1024 }),
     });
     const data = await res.json();
     if (data.success) {
-      return { id: data.id, status: data.status, fileUrl: data.fileUrl, thumbUrl: data.thumbUrl };
+      return { id: data.id, status: "complete", fileUrl: data.downloadUrl, thumbUrl: data.thumbUrl };
     }
-    throw new Error(data.error || "Skybox generation failed");
-  }, []);
-
-  const pollWorld = useCallback(async (id: string) => {
-    const res = await fetch(`/api/skybox/poll/${id}`);
-    const data = await res.json();
-    if (data.success) {
-      return { status: data.status, fileUrl: data.fileUrl, thumbUrl: data.thumbUrl };
-    }
-    return null;
+    throw new Error(data.error || "Image generation failed");
   }, []);
 
   const sendMessage = useCallback(async () => {
@@ -94,7 +85,7 @@ export default function AgentChat() {
     setMessages(prev => [...prev, userMsg]);
 
     // Check if user wants to generate a world
-    const wantsWorld = /\b(generate|create|make|build|skybox|world|scene|environment|360)\b/i.test(content);
+    const wantsWorld = /\b(generate|create|make|build|world|scene|environment|image|render)\b/i.test(content);
 
     if (wantsWorld) {
       const assistantMsg: Message = {
@@ -109,37 +100,21 @@ export default function AgentChat() {
 
       try {
         const world = await generateWorld(content);
-        const newWorld: GeneratedWorld = { id: world.id, prompt: content, status: world.status, createdAt: new Date().toISOString(), fileUrl: world.fileUrl, thumbUrl: world.thumbUrl };
+        const newWorld: GeneratedWorld = { id: world.id, prompt: content, status: "complete", createdAt: new Date().toISOString(), fileUrl: world.fileUrl, thumbUrl: world.thumbUrl };
         setWorlds(prev => [newWorld, ...prev]);
-
-        // Poll for completion
-        let completed = world.status === 2;
-        let attempts = 0;
-        let currentWorld = world;
-        while (!completed && attempts < 30) {
-          await new Promise(r => setTimeout(r, 3000));
-          const poll = await pollWorld(world.id);
-          if (poll) {
-            currentWorld = { ...currentWorld, status: poll.status, fileUrl: poll.fileUrl, thumbUrl: poll.thumbUrl };
-            completed = poll.status === 2;
-          }
-          attempts++;
-        }
-
-        setWorlds(prev => prev.map(w => w.id === world.id ? { ...w, status: currentWorld.status, fileUrl: currentWorld.fileUrl, thumbUrl: currentWorld.thumbUrl } : w));
 
         setMessages(prev => prev.map(m => m.id === assistantMsg.id ? {
           ...m,
-          content: completed ? `✅ World generated!` : `⏳ World is still processing. Check the Gallery tab.`,
-          worldUrl: currentWorld.fileUrl,
-          thumbUrl: currentWorld.thumbUrl,
-          status: completed ? "done" : "pending",
+          content: `✅ Image generated!`,
+          worldUrl: world.fileUrl,
+          thumbUrl: world.thumbUrl,
+          status: "done",
         } : m));
       } catch (err) {
         setMessages(prev => [...prev, {
           id: crypto.randomUUID(),
           role: "assistant",
-          content: `❌ Generation failed: ${err instanceof Error ? err.message : "Unknown error"}. Make sure SKYBOX_API_KEY is configured.`,
+          content: `❌ Generation failed: ${err instanceof Error ? err.message : "Unknown error"}.`,
           agentId: selectedAgent.id,
           ts: new Date().toLocaleTimeString(),
         }]);
@@ -177,7 +152,7 @@ export default function AgentChat() {
     }
 
     setIsLoading(false);
-  }, [input, isLoading, selectedAgent, generateWorld, pollWorld]);
+  }, [input, isLoading, selectedAgent, generateWorld]);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -301,7 +276,7 @@ export default function AgentChat() {
                 <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey} placeholder={`Describe a world for ${selectedAgent.name} to generate...`} rows={1} disabled={isLoading} style={{ flex: 1, padding: "10px 12px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: "#e0e0e0", fontSize: "13px", resize: "none", minHeight: "42px", maxHeight: "120px", fontFamily: "monospace", outline: "none" }} />
                 <button onClick={sendMessage} disabled={!input.trim() || isLoading} style={{ padding: "0 20px", backgroundColor: input.trim() && !isLoading ? T.linkColor : "#2a1a2e", color: "white", border: "none", cursor: input.trim() && !isLoading ? "pointer" : "not-allowed", fontWeight: "bold", fontSize: "16px", flexShrink: 0 }}>➤</button>
               </div>
-              <div style={{ color: T.textColor, fontSize: "9px", marginTop: "5px", opacity: 0.5 }}>Powered by Gemini · Skybox 360° · Shift+Enter for new line</div>
+              <div style={{ color: T.textColor, fontSize: "9px", marginTop: "5px", opacity: 0.5 }}>Powered by Gemini · Pollinations AI · Shift+Enter for new line</div>
             </div>
           </div>
         </div>

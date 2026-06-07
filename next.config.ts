@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Required for Docker deployment
+  output: "standalone",
+
   // ============================================
   // PERFORMANCE OPTIMIZATIONS
   // ============================================
@@ -126,7 +129,12 @@ const nextConfig: NextConfig = {
   // ============================================
 
   async redirects() {
-    return [];
+    return [
+      { source: "/generate", destination: "/studio?tool=image", permanent: false },
+      { source: "/flow", destination: "/studio?tool=flow", permanent: false },
+      { source: "/gallery", destination: "/studio?tool=gallery", permanent: false },
+      { source: "/builder", destination: "/studio?tool=agents", permanent: false },
+    ];
   },
 
   async rewrites() {

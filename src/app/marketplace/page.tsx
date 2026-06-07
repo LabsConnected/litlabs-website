@@ -23,7 +23,7 @@ const CREDIT_PACKS: { id: string; coins: number; price: number; priceId: string;
 
 // SPEND COINS — interactive features with real coin deduction
 const SPEND_FEATURES: { id: string; title: string; desc: string; cost: number; action: string }[] = [
-  { id: 'generate', title: 'AI Generate', desc: 'Generate an image, music track, or 3D skybox with AI', cost: 50, action: 'Generate' },
+  { id: 'generate', title: 'AI Generate', desc: 'Generate an image, music track, or video with AI', cost: 50, action: 'Generate' },
   { id: 'slot', title: 'Extra Agent Slot', desc: 'Expand your dock to run +1 agent simultaneously', cost: 200, action: 'Unlock' },
   { id: 'boost', title: 'Social Boost', desc: 'Feature your post at the top of the social feed for 24h', cost: 100, action: 'Boost' },
   { id: 'priority', title: 'Priority Mode', desc: 'Get faster agent responses and higher rate limits', cost: 150, action: 'Activate' },

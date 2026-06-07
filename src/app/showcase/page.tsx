@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
@@ -9,6 +9,12 @@ export default function ShowcasePage() {
   const { resolvedColors: T } = useTheme();
   const [activeTab, setActiveTab] = useState<"images" | "architecture" | "case-study">("images");
   const [lightboxImg, setLightboxImg] = useState<string | null>(null);
+  const [crtEnabled, setCrtEnabled] = useState(true);
+
+  useEffect(() => {
+    const val = localStorage.getItem("crt_global_scanlines");
+    if (val !== null) setCrtEnabled(val === "true");
+  }, []);
 
   const showcaseImages = [
     {
@@ -38,7 +44,22 @@ export default function ShowcasePage() {
   ];
 
   return (
-    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor }}>
+    <div className="relative font-mono" style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor }}>
+      {crtEnabled && (
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
+          background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
+          boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
+        }} />
+      )}
+
+      <div className="w-full bg-black py-1.5 border-b-2 overflow-hidden flex" style={{ borderColor: T.borderColor, color: T.accentColor }}>
+        <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
+          <span>AUTOMATION SHOWCASE // PORTFOLIO &amp; PROOF</span>
+          <span>SYSTEM ARCHITECTURE MAPS // CASE STUDIES</span>
+          <span>ENTERPRISE-GRADE INFRASTRUCTURE VISUALS</span>
+        </div>
+      </div>
+
       {/* Hero Header */}
       <div style={{
         borderBottom: `1px solid rgba(255,255,255,0.06)`,
