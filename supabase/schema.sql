@@ -132,6 +132,9 @@ create table if not exists public.user_media (
 -- policies are explicit for security compliance.
 -- ============================================
 
+-- Enable RLS on all tables.
+-- No extra policies needed — all access uses SUPABASE_SERVICE_ROLE_KEY
+-- server-side (Next.js API routes), which has bypassrls by design.
 alter table public.users                enable row level security;
 alter table public.user_preferences     enable row level security;
 alter table public.user_agents          enable row level security;
@@ -142,18 +145,6 @@ alter table public.posts                enable row level security;
 alter table public.post_likes           enable row level security;
 alter table public.post_comments        enable row level security;
 alter table public.user_media           enable row level security;
-
--- Service role full access (Next.js API routes use this key)
-create policy "service_role_all_users"         on public.users         for all to service_role using (true) with check (true);
-create policy "service_role_all_prefs"         on public.user_preferences for all to service_role using (true) with check (true);
-create policy "service_role_all_user_agents"   on public.user_agents   for all to service_role using (true) with check (true);
-create policy "service_role_all_subscriptions" on public.subscriptions for all to service_role using (true) with check (true);
-create policy "service_role_all_wallets"       on public.wallets       for all to service_role using (true) with check (true);
-create policy "service_role_all_transactions"  on public.transactions  for all to service_role using (true) with check (true);
-create policy "service_role_all_posts"         on public.posts         for all to service_role using (true) with check (true);
-create policy "service_role_all_post_likes"    on public.post_likes    for all to service_role using (true) with check (true);
-create policy "service_role_all_post_comments" on public.post_comments for all to service_role using (true) with check (true);
-create policy "service_role_all_user_media"    on public.user_media    for all to service_role using (true) with check (true);
 
 -- ============================================
 -- Indexes for performance
