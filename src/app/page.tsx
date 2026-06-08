@@ -316,8 +316,8 @@ export default function LandingPage() {
 
         {/* HERO SECTION */}
         <main className="relative z-10">
-          <div className="max-w-7xl mx-auto px-6 py-20 md:py-32">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20 md:py-28">
+            <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
               
               {/* Left: Value Prop */}
               <div className="space-y-8">
@@ -326,11 +326,11 @@ export default function LandingPage() {
                   <span className="text-xs font-mono text-cyan-300">{UI_AGENTS.filter(a => a.status === "online").length} AI Agents Online</span>
                 </div>
                 
-                <h1 className="font-display text-4xl md:text-6xl font-bold leading-tight">
+                <h1 className="font-display text-3xl sm:text-4xl md:text-6xl font-bold leading-tight">
                   Your <span style={{ color: resolvedColors.linkColor }}>AI Workforce</span> is Ready
                 </h1>
                 
-                <p className="text-lg md:text-xl text-white/70 max-w-xl leading-relaxed">
+                <p className="text-base md:text-xl text-white/70 max-w-xl leading-relaxed">
                   Join thousands of creators, developers, and entrepreneurs using LiTreeLabStudios to build, automate, and scale with AI agents that actually get work done.
                 </p>
 
@@ -398,9 +398,9 @@ export default function LandingPage() {
           </div>
 
           {/* WHAT WE DO SECTION */}
-          <div className="max-w-7xl mx-auto px-6 py-20 border-t border-white/5">
-            <div className="text-center mb-16">
-              <h2 className="font-display text-3xl md:text-4xl font-bold mb-4">What We Do</h2>
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-16 border-t border-white/5">
+            <div className="text-center mb-10 sm:mb-16">
+              <h2 className="font-display text-2xl sm:text-3xl md:text-4xl font-bold mb-4">What We Do</h2>
               <p className="text-white/60 max-w-2xl mx-auto">LiTreeLabStudios is your complete AI workspace — build custom agents, join a thriving creator community, and automate your workflow.</p>
             </div>
 
@@ -542,8 +542,8 @@ export default function LandingPage() {
 
       {/* ── TOP CONTROLS ── */}
       <header className="relative z-10 border-b glass-card" style={{ borderColor: "rgba(255,255,255,0.06)", borderRadius: 0, borderWidth: '0 0 1px 0' }}>
-        <div className="max-w-7xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
             <button onClick={() => setShowThemeEditor(!showThemeEditor)} className="btn btn-ghost text-xs hover-lift" style={{ color: resolvedColors.textMuted }}>
               {showThemeEditor ? "Hide" : "Theme"} Editor
             </button>
@@ -553,8 +553,8 @@ export default function LandingPage() {
           </div>
 
           {/* Playlist selector */}
-          <div className="flex items-center gap-1">
-            <span className="font-mono text-[11px] text-muted mr-2">Audio</span>
+          <div className="flex items-center gap-1 flex-wrap">
+            <span className="font-mono text-[11px] text-muted mr-1 hidden sm:inline">Audio</span>
             {[
               { name: "Cyberpunk", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX0r3x8OtiYiJ" },
               { name: "Coding", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX5trt9i14XVe" },
@@ -613,11 +613,11 @@ export default function LandingPage() {
       )}
 
       {/* ── MAIN CONTENT ── */}
-      <main className="relative z-10 max-w-7xl mx-auto px-6 py-8">
-        <div className="grid md:grid-cols-12 gap-6 items-start">
+      <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
+        <div className="grid lg:grid-cols-12 gap-4 sm:gap-6 items-start">
 
           {/* ── LEFT SIDEBAR ── */}
-          <aside className="md:col-span-3 space-y-5">
+          <aside className="lg:col-span-3 space-y-4 sm:space-y-5">
 
             {/* Profile card */}
             <div className="card glass-card glow-box">
@@ -753,7 +753,7 @@ export default function LandingPage() {
           </aside>
 
           {/* ── CENTER: WORKSPACE HUB ── */}
-          <div className="md:col-span-6 space-y-5">
+          <div className="lg:col-span-6 space-y-4 sm:space-y-5">
 
             {/* Operations header */}
             <div className="card glass-card glow-box">
@@ -866,7 +866,7 @@ export default function LandingPage() {
           </div>
 
           {/* ── RIGHT SIDEBAR ── */}
-          <aside className="md:col-span-3 space-y-5">
+          <aside className="lg:col-span-3 space-y-4 sm:space-y-5">
 
             {/* Top Agents */}
             <div className="card glass-card glow-box">
@@ -935,7 +935,7 @@ export default function LandingPage() {
       </main>
 
       {/* ── FLOATING CHATS ── */}
-      <div className="fixed bottom-0 right-4 z-50 hidden md:flex items-end gap-3">
+      <div className="chat-window-dock fixed bottom-0 right-4 z-50 hidden md:flex items-end gap-3">
         {activeChats.map(chat => (
           <div key={chat.agentId} className="chat-window"
             style={{ height: chat.isMinimized ? "44px" : "400px" }}>
