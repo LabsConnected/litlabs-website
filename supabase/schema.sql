@@ -126,21 +126,34 @@ create table if not exists public.user_media (
 );
 
 -- ============================================
--- RLS: DISABLED (Server uses service role key)
--- Auth enforced in Next.js API routes via Clerk
+-- RLS: ENABLED with service_role bypass
+-- Auth enforced in Next.js API routes via Clerk.
+-- Service role key bypasses RLS natively, but
+-- policies are explicit for security compliance.
 -- ============================================
 
--- Disable RLS on all tables (service role key bypasses anyway)
-alter table public.users disable row level security;
-alter table public.user_preferences disable row level security;
-alter table public.user_agents disable row level security;
-alter table public.subscriptions disable row level security;
-alter table public.wallets disable row level security;
-alter table public.transactions disable row level security;
-alter table public.posts disable row level security;
-alter table public.post_likes disable row level security;
-alter table public.post_comments disable row level security;
-alter table public.user_media disable row level security;
+alter table public.users                enable row level security;
+alter table public.user_preferences     enable row level security;
+alter table public.user_agents          enable row level security;
+alter table public.subscriptions        enable row level security;
+alter table public.wallets              enable row level security;
+alter table public.transactions         enable row level security;
+alter table public.posts                enable row level security;
+alter table public.post_likes           enable row level security;
+alter table public.post_comments        enable row level security;
+alter table public.user_media           enable row level security;
+
+-- Service role full access (Next.js API routes use this key)
+create policy "service_role_all_users"         on public.users         for all to service_role using (true) with check (true);
+create policy "service_role_all_prefs"         on public.user_preferences for all to service_role using (true) with check (true);
+create policy "service_role_all_user_agents"   on public.user_agents   for all to service_role using (true) with check (true);
+create policy "service_role_all_subscriptions" on public.subscriptions for all to service_role using (true) with check (true);
+create policy "service_role_all_wallets"       on public.wallets       for all to service_role using (true) with check (true);
+create policy "service_role_all_transactions"  on public.transactions  for all to service_role using (true) with check (true);
+create policy "service_role_all_posts"         on public.posts         for all to service_role using (true) with check (true);
+create policy "service_role_all_post_likes"    on public.post_likes    for all to service_role using (true) with check (true);
+create policy "service_role_all_post_comments" on public.post_comments for all to service_role using (true) with check (true);
+create policy "service_role_all_user_media"    on public.user_media    for all to service_role using (true) with check (true);
 
 -- ============================================
 -- Indexes for performance
