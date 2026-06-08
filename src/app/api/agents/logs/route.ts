@@ -1,12 +1,5 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
-
-/* ── Attempt to read real log files, fall back to live generated demo logs ── */
-const LOG_SOURCES = [
-  "/home/litbit/LiTTreeLabstudios/logs/agent.log",
-  "/tmp/agent-monitor.log",
-  "/var/log/agent-monitor.log",
-];
+import { supabaseAdmin } from "@/lib/supabase";
 
 function makeDemoLogs() {
   const now = Date.now();
@@ -48,24 +41,23 @@ function makeDemoLogs() {
 }
 
 export async function GET() {
-  /* Try real log file first */
-  for (const src of LOG_SOURCES) {
-    try {
-      if (fs.existsSync(src)) {
-        const raw = fs.readFileSync(src, "utf-8");
-        const lines = raw.trim().split("\n").slice(-50); // last 50 lines
-        const parsed = lines.map(line => {
-          const match = line.match(/^\[(.+?)\]\s+\[(.+?)\]\s+(\w+):\s+(.+)$/);
-          if (match) {
-            return { timestamp: match[1], agent: match[2], level: match[3].toLowerCase() as "info" | "warn" | "error" | "success", message: match[4] };
-          }
-          return { timestamp: new Date().toLocaleTimeString(), agent: "System", level: "info" as const, message: line };
-        });
-        return NextResponse.json(parsed);
-      }
-    } catch { /* try next */ }
-  }
+  try {
+    const { data: rows, error } = await supabaseAdmin
+      .from("agent_logs")
+      .select("id, level, message, metadata, created_at, agent_id, agents(display_name)")
+      .order("created_at", { ascending: false })
+      .limit(50);
 
-  /* Fall back to generated demo logs */
+    if (!error && rows && rows.length > 0) {
+      const logs = rows.map(r => ({
+        timestamp: new Date(r.created_at).toLocaleTimeString(),
+        agent: (r.agents as { display_name?: string } | null)?.display_name ?? "System",
+        level: (r.level ?? "info") as "info" | "warn" | "error" | "success",
+        message: r.message ?? "",
+      }));
+      return NextResponse.json(logs);
+    }
+  } catch { /* fall through to demo */ }
+
   return NextResponse.json(makeDemoLogs());
 }

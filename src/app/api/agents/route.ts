@@ -7,57 +7,62 @@ import { withRateLimit } from "@/lib/rate-limiter";
 async function getHandler(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
-    const category = searchParams.get("category");
-    const featured = searchParams.get("featured");
-    const includePrivate = searchParams.get("mine") === "true";
+    const roleFilter = searchParams.get("category");
+    const coreOnly = searchParams.get("featured") === "true";
+    const includeOwn = searchParams.get("mine") === "true";
 
     let query = supabase
       .from("agents")
-      .select("*")
-      .order("is_featured", { ascending: false })
+      .select("id, slug, display_name, description, role, system_prompt, model, is_core, owner_id, created_at, updated_at")
+      .order("is_core", { ascending: false })
       .order("created_at", { ascending: false });
 
-    if (includePrivate) {
+    if (includeOwn) {
       const { userId } = await auth();
-      if (!userId) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
+      if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
       const { data: user } = await supabase.from("users").select("id").eq("clerk_id", userId).single();
-      if (!user) return NextResponse.json({ agents: [] });
-      query = query.or(`is_public.eq.true,and(is_public.eq.false,created_by.eq.${user.id})`);
+      if (user) query = query.or(`is_core.eq.true,owner_id.eq.${user.id}`);
+      else query = query.eq("is_core", true);
     } else {
-      query = query.eq("is_public", true);
+      query = query.eq("is_core", true);
     }
 
-    if (category) {
-      query = query.eq("category", category);
-    }
+    if (roleFilter) query = query.eq("role", roleFilter);
+    if (coreOnly)   query = query.eq("is_core", true);
 
-    if (featured === "true") {
-      query = query.eq("is_featured", true);
-    }
-
-    const { data: agents, error } = await query;
+    const { data: rows, error } = await query;
 
     if (error) {
       console.error("Supabase error:", error);
-      return NextResponse.json(
-        { error: "Failed to fetch agents from database" },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: "Failed to fetch agents" }, { status: 500 });
     }
 
+    const agents = (rows || []).map(a => ({
+      id:            a.id,
+      slug:          a.slug,
+      name:          a.display_name,
+      description:   a.description ?? "",
+      category:      a.role ?? "general",
+      avatar_url:    "",
+      system_prompt: a.system_prompt ?? "",
+      personality:   "",
+      price_cents:   0,
+      is_public:     true,
+      is_featured:   a.is_core ?? false,
+      features:      [],
+      model:         a.model,
+      created_at:    a.created_at,
+    }));
+
     return NextResponse.json({
-      agents: agents || [],
-      total: agents?.length || 0,
-      categories: [...new Set(agents?.map(a => a.category) || [])],
+      agents,
+      total: agents.length,
+      categories: [...new Set(agents.map(a => a.category))],
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
     console.error("Error fetching agents:", error);
-    return NextResponse.json(
-      { error: "Failed to fetch agents" },
-      { status: 500 }
+    return NextResponse.json({ error: "Failed to fetch agents" }, { status: 500 }
     );
   }
 }
@@ -94,18 +99,13 @@ async function postHandler(req: NextRequest) {
     const { data: agent, error } = await supabase
       .from("agents")
       .insert({
-        name: String(name).trim(),
-        slug: slugClean,
-        description: description ? String(description).trim() : null,
-        category: category ? String(category).trim() : "general",
+        display_name:  String(name).trim(),
+        slug:          slugClean,
+        description:   description ? String(description).trim() : null,
+        role:          category ? String(category).trim() : "general",
         system_prompt: String(system_prompt).trim(),
-        personality: personality ? String(personality).trim() : null,
-        avatar_url: avatar_url ? String(avatar_url).trim() : "🤖",
-        is_public: false,
-        is_featured: false,
-        created_by: user.id,
-        price_cents: 0,
-        features: [],
+        owner_id:      user.id,
+        is_core:       false,
       })
       .select()
       .single();

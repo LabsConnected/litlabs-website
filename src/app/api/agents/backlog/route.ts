@@ -1,12 +1,15 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export async function GET() {
   try {
-    const dir = "/home/litbit/LiTTreeLabstudios/tasks/backlog";
-    if (!fs.existsSync(dir)) return NextResponse.json(0);
-    const count = fs.readdirSync(dir).filter(f => f.endsWith(".json")).length;
-    return NextResponse.json(count);
+    const { count, error } = await supabaseAdmin
+      .from("active_tasks")
+      .select("id", { count: "exact", head: true })
+      .eq("status", "pending");
+
+    if (error) return NextResponse.json(0);
+    return NextResponse.json(count ?? 0);
   } catch {
     return NextResponse.json(0);
   }

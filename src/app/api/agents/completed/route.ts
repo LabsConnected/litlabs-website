@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import fs from "fs";
+import { supabaseAdmin } from "@/lib/supabase";
 
 const FALLBACK_COMPLETED = [
   "Merge social feed into Home page",
@@ -16,18 +16,22 @@ const FALLBACK_COMPLETED = [
 
 export async function GET() {
   try {
-    const dir = "/home/litbit/LiTTreeLabstudios/tasks/completed";
-    if (!fs.existsSync(dir)) return NextResponse.json(FALLBACK_COMPLETED);
-    const files = fs.readdirSync(dir).filter(f => f.endsWith(".json"));
-    if (files.length === 0) return NextResponse.json(FALLBACK_COMPLETED);
-    const tasks = files.map(f => {
-      try {
-        const data = JSON.parse(fs.readFileSync(`${dir}/${f}`, "utf-8"));
-        return data.milestone || f;
-      } catch { return f; }
-    });
-    return NextResponse.json(tasks.reverse());
-  } catch {
-    return NextResponse.json(FALLBACK_COMPLETED);
-  }
+    const { data, error } = await supabaseAdmin
+      .from("active_tasks")
+      .select("output, updated_at, agents(display_name)")
+      .eq("status", "completed")
+      .order("updated_at", { ascending: false })
+      .limit(20);
+
+    if (!error && data && data.length > 0) {
+      const tasks = data.map(t => {
+        const output = t.output as Record<string, string> | null;
+        const agentName = (t.agents as { display_name?: string } | null)?.display_name ?? "Agent";
+        return output?.milestone ?? output?.summary ?? `${agentName} — task completed`;
+      });
+      return NextResponse.json(tasks);
+    }
+  } catch { /* fall through */ }
+
+  return NextResponse.json(FALLBACK_COMPLETED);
 }

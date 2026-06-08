@@ -22,6 +22,27 @@ export const supabase = new Proxy({} as SupabaseClient, {
   },
 });
 
+// Server-only admin client using service role key (bypasses RLS — server routes only)
+let _supabaseAdmin: SupabaseClient | null = null;
+export function getSupabaseAdmin(): SupabaseClient {
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!supabaseUrl || !serviceKey) {
+    throw new Error("Supabase admin client requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  }
+  if (!_supabaseAdmin) {
+    _supabaseAdmin = createClient(supabaseUrl, serviceKey, {
+      auth: { autoRefreshToken: false, persistSession: false },
+    });
+  }
+  return _supabaseAdmin;
+}
+
+export const supabaseAdmin = new Proxy({} as SupabaseClient, {
+  get(_target, prop) {
+    return (getSupabaseAdmin() as unknown as Record<string | symbol, unknown>)[prop];
+  },
+});
+
 // Types for database tables
 export type Agent = {
   id: string;
