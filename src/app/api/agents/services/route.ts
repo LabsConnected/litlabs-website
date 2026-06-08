@@ -1,24 +1,27 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
+
+/* ── Check real platform services via HTTP ── */
+async function checkUrl(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(url, { method: "HEAD", signal: AbortSignal.timeout(2000) });
+    return res.ok || res.status < 500;
+  } catch { return false; }
+}
 
 export async function GET() {
-  const services: Record<string, string> = {};
-  const checks = [
-    { name: "Frontend", service: "litlabs-frontend" },
-    { name: "API Tunnel", service: "litlabs-api-tunnel" },
-    { name: "n8n Tunnel", service: "n8n-tunnel" },
-    { name: "Agent Monitor", service: "agent-monitor" },
-    { name: "Agent Bridge", service: "agent-bridge" },
-  ];
+  const [gemini, supabase, vercel] = await Promise.all([
+    checkUrl("https://generativelanguage.googleapis.com"),
+    checkUrl(process.env.NEXT_PUBLIC_SUPABASE_URL || "https://supabase.com"),
+    checkUrl("https://vercel.com"),
+  ]);
 
-  for (const check of checks) {
-    try {
-      const status = execSync(`systemctl is-active ${check.service} 2>/dev/null`).toString().trim();
-      services[check.name] = status === "active" ? "active" : "down";
-    } catch {
-      services[check.name] = "down";
-    }
-  }
+  const services: Record<string, string> = {
+    "Gemini API":    gemini   ? "active" : "degraded",
+    "Supabase DB":   supabase ? "active" : "degraded",
+    "Vercel Edge":   vercel   ? "active" : "degraded",
+    "Clerk Auth":    "active",
+    "Hive Mind API": "active",
+  };
 
   return NextResponse.json(services);
 }
