@@ -7,8 +7,8 @@ import { useTheme } from "@/context/ThemeContext";
 import dynamic from "next/dynamic";
 import {
   Home, ShoppingBag, Sparkles,
-  User, Settings, Sun, Moon, Zap,
-  ChevronDown, X, Menu, Bell, Coins, Bot
+  Settings, Sun, Moon, Zap,
+  ChevronDown, X, Menu, Bell, Coins, Bot, User
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -197,22 +197,22 @@ export default function Navbar() {
               {theme.mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </button>
 
-            {/* User avatar dropdown (desktop) */}
+            {/* User dropdown (profile/settings links) — desktop */}
             <div className="hidden md:block relative" ref={userRef}>
               <button
                 onClick={() => setUserOpen((v) => !v)}
-                className="flex items-center gap-1 p-1 rounded-md transition-all hover:scale-105"
+                className="flex items-center gap-1 p-1 rounded-md transition-all hover:opacity-70"
                 style={{
                   border: `1px solid ${resolvedColors.borderColor}40`,
                   backgroundColor: resolvedColors.boxBg + "60",
                 }}
+                title="Menu"
               >
-                <User size={14} style={{ color: resolvedColors.linkColor }} />
                 <ChevronDown size={10} style={{ color: resolvedColors.textMuted }} />
               </button>
               {userOpen && (
                 <div
-                  className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[180px] z-50"
+                  className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[160px] z-50"
                   style={{
                     backgroundColor: resolvedColors.boxBg + "f0",
                     borderColor: resolvedColors.borderColor + "40",
@@ -233,17 +233,12 @@ export default function Navbar() {
                       </Link>
                     );
                   })}
-                  <div className="border-t mt-1 pt-1" style={{ borderColor: resolvedColors.borderColor + "20" }}>
-                    <NavAuth linkColor={resolvedColors.linkColor} />
-                  </div>
                 </div>
               )}
             </div>
 
-            {/* Auth fallback (when dropdown closed) */}
-            <div className="hidden">
-              <NavAuth linkColor={resolvedColors.linkColor} />
-            </div>
+            {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
+            <NavAuth linkColor={resolvedColors.accentColor} />
 
             {/* Mobile hamburger */}
             <button
