@@ -1,0 +1,33 @@
+name: "LiTTree Lab Studios"
+slug: "littree-lab-studios"
+description: "AI Agent Platform for Home Assistant — control your home with natural language via AI agents"
+version: "1.0.0"
+url: "https://litlabs.net"
+arch:
+  - amd64
+  - aarch64
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 3000
+ingress_entry: /
+panel_icon: mdi:robot-excited
+panel_title: "LiTree Labs"
+options:
+  gemini_api_key: ""
+  openrouter_api_key: ""
+  ha_supervisor_token: ""
+  debug: false
+schema:
+  gemini_api_key: str?
+  openrouter_api_key: str?
+  ha_supervisor_token: str?
+  debug: bool?
+map:
+  - config:rw
+  - ssl
+ports:
+  3000/tcp: 3000
+ports_description:
+  3000/tcp: "LiTree Labs web UI"

@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
+import PageShell from "@/components/PageShell";
 
 export default function ShowcasePage() {
   const { resolvedColors: T } = useTheme();
@@ -44,7 +45,7 @@ export default function ShowcasePage() {
   ];
 
   return (
-    <div className="relative font-mono" style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor }}>
+    <PageShell title="Showcase" subtitle="Featured projects and architecture" className="font-mono relative">
       {crtEnabled && (
         <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
           background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
@@ -443,6 +444,6 @@ export default function ShowcasePage() {
           ← Back to Studio
         </Link>
       </div>
-    </div>
+    </PageShell>
   );
 }

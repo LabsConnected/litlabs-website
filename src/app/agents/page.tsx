@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import PageShell from "@/components/PageShell";
 
 interface AgentStatus {
   name: string;
@@ -74,7 +75,7 @@ export default function AgentsDashboard() {
   const logColor = (l: string) => l === "error" ? "text-red-400" : l === "warn" ? "text-yellow-400" : l === "success" ? "text-green-400" : "text-zinc-400";
 
   return (
-    <div className="min-h-screen relative font-mono text-xs pb-12" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+    <PageShell title="Hive Mind" subtitle="Real-time agent monitoring and orchestration" className="font-mono text-xs relative">
       {crtEnabled && (
         <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
           background: "repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.1), rgba(0, 0, 0, 0.1) 1px, transparent 1px, transparent 2px)",
@@ -207,6 +208,6 @@ export default function AgentsDashboard() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

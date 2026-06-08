@@ -381,19 +381,6 @@ export default function Builder() {
           boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
         }} />
       )}
-      {/* ── Top Nav ── */}
-      <nav style={{ backgroundColor: T.box, borderBottom: `2px solid ${T.border}`, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <Link href="/" style={{ textDecoration: "none", color: T.header, fontWeight: "bold", fontSize: "14px", letterSpacing: "2px" }}>
-          ⚡ LITLABS BUILDER
-        </Link>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ color: T.accent, fontSize: "10px" }}>● ONLINE</span>
-          <Link href="/marketplace" style={{ color: T.link, fontSize: "11px", textDecoration: "none" }}>MARKETPLACE</Link>
-          <Link href="/" style={{ color: T.text, fontSize: "11px", textDecoration: "none" }}>HOME</Link>
-          <ClerkUserCompact />
-        </div>
-      </nav>
-
       {/* ── Body ── */}
       <div className="flex flex-col md:flex-row" style={{ flex: 1, overflow: "hidden" }}>
 

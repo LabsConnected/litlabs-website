@@ -6,9 +6,9 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import dynamic from "next/dynamic";
 import {
-  Home, Wrench, ShoppingBag, Image, Sparkles,
-  User, Settings, Sun, Moon, Zap, Wand2, Film,
-  ChevronDown, X, Menu
+  Home, ShoppingBag, Sparkles,
+  User, Settings, Sun, Moon, Zap,
+  ChevronDown, X, Menu, Bell, Coins, Bot, MessagesSquare
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -17,36 +17,50 @@ const NavAuth = dynamic(
 );
 
 /* ------------------------------------------------------------------ */
-/*  Primary nav links (always visible)                                 */
+/*  Primary nav links — ALL surfaced, no hidden dropdown               */
 /* ------------------------------------------------------------------ */
-const primaryLinks = [
+const navLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/studio", label: "Studio", icon: Zap },
   { href: "/marketplace", label: "Market", icon: ShoppingBag },
+  { href: "/social", label: "Social", icon: MessagesSquare },
 ];
 
 /* ------------------------------------------------------------------ */
-/*  "More" dropdown items                                              */
+/*  Utility items for mobile / user dropdown                           */
 /* ------------------------------------------------------------------ */
-const moreItems = [
-  { href: "/showcase", label: "Showcase", icon: Sparkles },
+const userLinks = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/showcase", label: "Showcase", icon: Sparkles },
 ];
+
+function useLocalStorageNumber(key: string, fallback: number) {
+  const [val, setVal] = useState(fallback);
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw) setVal(Number(raw));
+    } catch {}
+  }, [key]);
+  return val;
+}
 
 export default function Navbar() {
   const { theme, resolvedColors, setMode } = useTheme();
   const pathname = usePathname();
-  const [moreOpen, setMoreOpen] = useState(false);
   const [mobileOpen, setMobileOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
+  const [userOpen, setUserOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
+  const userRef = useRef<HTMLDivElement>(null);
+  const notifRef = useRef<HTMLDivElement>(null);
+  const litcoins = useLocalStorageNumber("litcoins", 500);
 
-  /* Close dropdown on outside click */
+  /* Close dropdowns on outside click */
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
-        setMoreOpen(false);
-      }
+      if (userRef.current && !userRef.current.contains(e.target as Node)) setUserOpen(false);
+      if (notifRef.current && !notifRef.current.contains(e.target as Node)) setNotifOpen(false);
     };
     document.addEventListener("mousedown", handleClick);
     return () => document.removeEventListener("mousedown", handleClick);
@@ -55,13 +69,12 @@ export default function Navbar() {
   /* Close mobile menu on route change */
   useEffect(() => {
     setMobileOpen(false);
-    setMoreOpen(false);
+    setUserOpen(false);
+    setNotifOpen(false);
   }, [pathname]);
 
   const isActive = (href: string) =>
     href === "/" ? pathname === "/" : pathname.startsWith(href);
-
-  const studioActive = pathname === "/studio" || pathname.startsWith("/studio");
 
   return (
     <nav
@@ -83,38 +96,30 @@ export default function Navbar() {
                 className="transition-all duration-300 group-hover:scale-110 group-hover:rotate-12"
                 style={{ color: resolvedColors.accentColor }}
               />
-              <div
-                className="absolute inset-0 blur-md opacity-40"
-                style={{ color: resolvedColors.accentColor }}
-              />
+              <div className="absolute inset-0 blur-md opacity-40" style={{ color: resolvedColors.accentColor }} />
             </div>
-            <span
-              className="font-black text-sm hidden sm:inline tracking-tight"
-              style={{ color: resolvedColors.headerColor }}
-            >
-              LiTree Lab's
+            <span className="font-black text-sm hidden sm:inline tracking-tight" style={{ color: resolvedColors.headerColor }}>
+              LiTree Labs
             </span>
           </Link>
 
-          {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-0.5">
-            {primaryLinks.map((link) => {
-              const active = link.href === "/studio" ? studioActive : isActive(link.href);
+          {/* Desktop Nav — all pages surfaced */}
+          <div className="hidden lg:flex items-center gap-0.5">
+            {navLinks.map((link) => {
+              const active = isActive(link.href);
               const Icon = link.icon;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="relative flex items-center gap-1.5 px-3 py-2 text-xs font-bold rounded-md transition-all duration-200 hover:opacity-80"
-                  style={{
-                    color: active ? resolvedColors.headerColor : resolvedColors.linkColor,
-                  }}
+                  className="relative flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold rounded-md transition-all duration-200 hover:opacity-80"
+                  style={{ color: active ? resolvedColors.headerColor : resolvedColors.linkColor }}
                 >
-                  <Icon size={14} strokeWidth={active ? 2.5 : 2} />
+                  <Icon size={13} strokeWidth={active ? 2.5 : 2} />
                   <span>{link.label}</span>
                   {active && (
                     <span
-                      className="absolute bottom-0 left-2 right-2 h-[2px] rounded-full"
+                      className="absolute bottom-0 left-1.5 right-1.5 h-[2px] rounded-full"
                       style={{
                         background: `linear-gradient(90deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`,
                         boxShadow: `0 0 8px ${resolvedColors.accentColor}60`,
@@ -124,52 +129,11 @@ export default function Navbar() {
                 </Link>
               );
             })}
-
-            {/* More dropdown */}
-            <div className="relative" ref={moreRef}>
-              <button
-                onClick={() => setMoreOpen((v) => !v)}
-                className="flex items-center gap-1 px-3 py-2 text-xs font-bold rounded-md transition-all duration-200 hover:opacity-80"
-                style={{ color: resolvedColors.linkColor }}
-              >
-                <span>More</span>
-                <ChevronDown
-                  size={12}
-                  className={`transition-transform duration-200 ${moreOpen ? "rotate-180" : ""}`}
-                />
-              </button>
-
-              {moreOpen && (
-                <div
-                  className="absolute top-full right-0 mt-1 py-1 rounded-lg border min-w-[160px] z-50"
-                  style={{
-                    backgroundColor: resolvedColors.boxBg + "f0",
-                    borderColor: resolvedColors.borderColor + "40",
-                    backdropFilter: "blur(12px)",
-                  }}
-                >
-                  {moreItems.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
-                        style={{ color: resolvedColors.textColor }}
-                      >
-                        <Icon size={13} />
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
           </div>
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LiTBit mini badge */}
+            {/* LitCoins wallet */}
             <span
               className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold"
               style={{
@@ -177,10 +141,49 @@ export default function Navbar() {
                 color: resolvedColors.accentColor,
                 border: `1px solid ${resolvedColors.accentColor}30`,
               }}
+              title="Your LitCoins balance"
             >
-              <Zap size={10} /> LiTBit
+              <Coins size={10} /> {litcoins.toLocaleString()}
             </span>
 
+            {/* Notification bell */}
+            <div className="relative" ref={notifRef}>
+              <button
+                onClick={() => setNotifOpen((v) => !v)}
+                className="p-1.5 rounded-md transition-all duration-200 hover:scale-110 relative"
+                style={{
+                  border: `1px solid ${resolvedColors.accentColor}30`,
+                  color: resolvedColors.accentColor,
+                  backgroundColor: resolvedColors.accentColor + "08",
+                }}
+                title="Notifications"
+              >
+                <Bell size={14} />
+                <span
+                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
+                  style={{ backgroundColor: resolvedColors.headerColor }}
+                />
+              </button>
+              {notifOpen && (
+                <div
+                  className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-[240px] z-50"
+                  style={{
+                    backgroundColor: resolvedColors.boxBg + "f0",
+                    borderColor: resolvedColors.borderColor + "40",
+                    backdropFilter: "blur(12px)",
+                  }}
+                >
+                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: resolvedColors.textMuted }}>
+                    Notifications
+                  </div>
+                  <div className="px-3 py-4 text-[11px] text-center" style={{ color: resolvedColors.textMuted }}>
+                    No new notifications
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Theme toggle */}
             <button
               onClick={() => setMode(theme.mode === "dark" ? "light" : "dark")}
               className="p-1.5 rounded-md transition-all duration-200 hover:scale-110"
@@ -194,14 +197,58 @@ export default function Navbar() {
               {theme.mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </button>
 
-            <div className="hidden md:block">
+            {/* User avatar dropdown (desktop) */}
+            <div className="hidden md:block relative" ref={userRef}>
+              <button
+                onClick={() => setUserOpen((v) => !v)}
+                className="flex items-center gap-1 p-1 rounded-md transition-all hover:scale-105"
+                style={{
+                  border: `1px solid ${resolvedColors.borderColor}40`,
+                  backgroundColor: resolvedColors.boxBg + "60",
+                }}
+              >
+                <User size={14} style={{ color: resolvedColors.linkColor }} />
+                <ChevronDown size={10} style={{ color: resolvedColors.textMuted }} />
+              </button>
+              {userOpen && (
+                <div
+                  className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[180px] z-50"
+                  style={{
+                    backgroundColor: resolvedColors.boxBg + "f0",
+                    borderColor: resolvedColors.borderColor + "40",
+                    backdropFilter: "blur(12px)",
+                  }}
+                >
+                  {userLinks.map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <Link
+                        key={item.href}
+                        href={item.href}
+                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
+                        style={{ color: resolvedColors.textColor }}
+                      >
+                        <Icon size={13} />
+                        <span>{item.label}</span>
+                      </Link>
+                    );
+                  })}
+                  <div className="border-t mt-1 pt-1" style={{ borderColor: resolvedColors.borderColor + "20" }}>
+                    <NavAuth linkColor={resolvedColors.linkColor} />
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Auth fallback (when dropdown closed) */}
+            <div className="hidden">
               <NavAuth linkColor={resolvedColors.linkColor} />
             </div>
 
             {/* Mobile hamburger */}
             <button
               onClick={() => setMobileOpen((v) => !v)}
-              className="md:hidden p-1.5 rounded-md"
+              className="lg:hidden p-1.5 rounded-md"
               style={{ color: resolvedColors.linkColor }}
             >
               {mobileOpen ? <X size={18} /> : <Menu size={18} />}
@@ -210,38 +257,65 @@ export default function Navbar() {
         </div>
       </div>
 
-      {/* Mobile menu */}
+      {/* Mobile full-screen overlay */}
       {mobileOpen && (
         <div
-          className="md:hidden border-t px-4 py-3 space-y-1"
+          className="lg:hidden fixed inset-0 z-40 flex flex-col"
           style={{
-            borderColor: resolvedColors.borderColor + "30",
-            backgroundColor: resolvedColors.boxBg + "f0",
-            backdropFilter: "blur(16px)",
+            backgroundColor: resolvedColors.bgColor + "f0",
+            backdropFilter: "blur(24px)",
+            top: "48px",
           }}
         >
-          {[...primaryLinks, ...moreItems].map((link) => {
-            const Icon = link.icon;
-            const active = link.href === "/studio" ? studioActive : isActive(link.href);
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="flex items-center gap-2 px-3 py-2 text-sm font-bold rounded-md"
-                style={{
-                  color: active ? resolvedColors.headerColor : resolvedColors.textColor,
-                  backgroundColor: active ? resolvedColors.accentColor + "10" : "transparent",
-                }}
-              >
-                <Icon size={16} />
-                {link.label}
-              </Link>
-            );
-          })}
-          <div className="pt-2 border-t" style={{ borderColor: resolvedColors.borderColor + "20" }}>
-            <div className="px-3 py-1">
-              <NavAuth linkColor={resolvedColors.linkColor} />
+          <div className="flex-1 overflow-y-auto px-4 py-6 space-y-1">
+            {navLinks.map((link) => {
+              const Icon = link.icon;
+              const active = isActive(link.href);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-all"
+                  style={{
+                    color: active ? resolvedColors.headerColor : resolvedColors.textColor,
+                    backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent",
+                    borderLeft: active ? `3px solid ${resolvedColors.accentColor}` : "3px solid transparent",
+                  }}
+                >
+                  <Icon size={18} />
+                  {link.label}
+                </Link>
+              );
+            })}
+
+            <div className="border-t my-3" style={{ borderColor: resolvedColors.borderColor + "20" }} />
+
+            {userLinks.map((link) => {
+              const Icon = link.icon;
+              const active = isActive(link.href);
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-lg transition-all"
+                  style={{
+                    color: active ? resolvedColors.headerColor : resolvedColors.textColor,
+                    backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent",
+                  }}
+                >
+                  <Icon size={18} />
+                  {link.label}
+                </Link>
+              );
+            })}
+          </div>
+
+          <div className="px-4 py-4 border-t" style={{ borderColor: resolvedColors.borderColor + "20" }}>
+            <div className="flex items-center justify-between mb-3">
+              <span className="text-xs font-bold" style={{ color: resolvedColors.textMuted }}>LitCoins</span>
+              <span className="text-xs font-bold" style={{ color: resolvedColors.accentColor }}>{litcoins.toLocaleString()}</span>
             </div>
+            <NavAuth linkColor={resolvedColors.linkColor} />
           </div>
         </div>
       )}

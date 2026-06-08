@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, use } from "react";
-import Navbar from "@/components/Navbar";
+import PageShell from "@/components/PageShell";
 import { AGENT_AVATARS } from "@/lib/avatars";
 
 interface Message {
@@ -95,9 +95,7 @@ export default function AgentDeploymentPage({ params }: { params: Promise<{ id: 
   };
 
   return (
-    <div className="min-h-screen bg-cyber-bg flex flex-col selection:bg-neon-cyan/30">
-      <Navbar />
-
+    <PageShell title={agent.name} subtitle="Gallery Agent Chat" fullWidth className="bg-cyber-bg selection:bg-neon-cyan/30">
       <main className="flex-1 max-w-4xl w-full mx-auto flex flex-col p-4 sm:p-6 lg:py-10">
         {/* Agent Info Header */}
         <div className="flex items-center justify-between gap-4 p-4 sm:p-6 glass-panel rounded-2xl border-white/5 mb-6">
@@ -214,6 +212,6 @@ export default function AgentDeploymentPage({ params }: { params: Promise<{ id: 
           </form>
         </div>
       </main>
-    </div>
+    </PageShell>
   );
 }

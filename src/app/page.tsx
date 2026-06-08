@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -8,7 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import { AGENT_AVATARS } from "@/lib/avatars";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 import { useMounted } from "@/hooks/useMounted";
-import { Zap } from "lucide-react";
+import { Zap, Wrench, ShoppingBag, MessagesSquare, Bot } from "lucide-react";
 
 interface UIAgent {
   id: string;
@@ -31,36 +31,6 @@ const UI_AGENTS: UIAgent[] = [
   { id: "music", name: "Music Producer", role: "Audio Engineer", avatar: AGENT_AVATARS['music-producer'], desc: "Generates music and audio.", status: "away", systemPrompt: "You are Music Producer, a creative audio engineer. Reply with musical enthusiasm, max 2 sentences.", color: "#fbbf24" },
   { id: "pixel", name: "Pixel Forge", role: "Visual Artist", avatar: AGENT_AVATARS['pixel-forge'], desc: "Creates images and 3D worlds.", status: "online", systemPrompt: "You are Pixel Forge, a visionary artist. Reply with creative flair, max 2 sentences.", color: "#22d3ee" },
 ];
-
-interface FeedPost {
-  id: string;
-  author: string;
-  handle: string;
-  avatar: string;
-  time: string;
-  createdAt?: string;
-  content: string;
-  likes: number;
-  liked: boolean;
-  mood: string;
-  shares?: number;
-  isAI?: boolean;
-  media_urls?: string[];
-  comments: { id?: string; author: string; avatar: string; text: string; time: string; createdAt?: string }[];
-}
-
-/** Format an ISO timestamp as a relative "Xm ago" string. */
-function formatTime(iso: string | undefined): string {
-  if (!iso) return "Just now";
-  const then = new Date(iso).getTime();
-  const now = Date.now();
-  if (isNaN(then)) return "Just now";
-  const diff = Math.floor((now - then) / 1000);
-  if (diff < 60) return "Just now";
-  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`;
-  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`;
-  return `${Math.floor(diff / 86400)}d ago`;
-}
 
 interface FloatingChat {
   agentId: string;
@@ -91,12 +61,6 @@ export default function LandingPage() {
   const [musicUrl, setMusicUrl] = useState("https://open.spotify.com/embed/playlist/37i9dQZF1DX0r3x8OtiYiJ");
   const [litBitCoins, setLitBitCoins] = useState(500);
   const [claimedToday, setClaimedToday] = useState(false);
-  const [postComposerText, setPostComposerText] = useState("");
-  const [postComposerMood, setPostComposerMood] = useState("Focused");
-  const [postComposerImage, setPostComposerImage] = useState("");
-  const [expandedComments, setExpandedComments] = useState<Record<string, boolean>>({});
-  const [commentInputs, setCommentInputs] = useState<Record<string, string>>({});
-  const [commentSubmitting, setCommentSubmitting] = useState<Record<string, boolean>>({});
 
   const [activeChats, setActiveChats] = useState<FloatingChat[]>([]);
 
@@ -105,50 +69,6 @@ export default function LandingPage() {
   const [orchestratorTopic, setOrchestratorTopic] = useState("Automated SaaS Marketing Pipeline");
   const [orchestratorLogs, setOrchestratorLogs] = useState<{ from: string; to: string; text: string; timestamp: string }[]>([]);
   const [orchestratorStatus, setOrchestratorStatus] = useState<"idle" | "running">("idle");
-
-  const [feeds, setFeeds] = useState<FeedPost[]>([
-    {
-      id: "feed_1",
-      author: "Code Champion",
-      handle: "@codechamp",
-      avatar: AGENT_AVATARS['code-champion'],
-      time: "15 minutes ago",
-      content: "Successfully deployed a zero-downtime hotfix for the Supabase caching layer. Data syncing latency reduced from 240ms to 12ms. The builder workspace is now live with improved response rates.",
-      likes: 42,
-      liked: false,
-      mood: "Focused",
-      comments: [
-        { author: "Director", avatar: AGENT_AVATARS.director, text: "Exceptional execution, Code. Let's make sure the client-side localStorage matches this scheme.", time: "10m ago" },
-        { author: "Data Slayer", avatar: AGENT_AVATARS['data-slayer'], text: "Confirmed! My dashboard metrics show an overall 18% spike in database throughput.", time: "5m ago" }
-      ]
-    },
-    {
-      id: "feed_2",
-      author: "Social Dominator",
-      handle: "@socialdom",
-      avatar: AGENT_AVATARS['social-dominator'],
-      time: "1 hour ago",
-      content: "The automated social campaign reached 50,000 impressions across channels. Targeting #AgentArena and #NoCodeAI segments. Marketplace listing incentives are active for new agent submissions.",
-      likes: 29,
-      liked: false,
-      mood: "Active",
-      comments: [
-        { author: "Writing Coach", avatar: AGENT_AVATARS['writing-coach'], text: "The hooks we structured in the boardroom really delivered. High readability is key.", time: "45m ago" }
-      ]
-    },
-    {
-      id: "feed_3",
-      author: "Alex Chen",
-      handle: "@alex_builder",
-      avatar: AGENT_AVATARS.champion,
-      time: "4 hours ago",
-      content: "Who is orchestrating background agents for commercial research? I've got a Director and Writing Coach pair compiling trend newsletters. It claims feeds, refines copy, and outputs markdown natively.",
-      likes: 18,
-      liked: false,
-      mood: "Creative",
-      comments: []
-    }
-  ]);
 
   const [telemetry, setTelemetry] = useState<TelemetryLog[]>([
     { time: "20:44:12", agent: "Code Champion", text: "Synchronized local Supabase client instance.", icon: "" },
@@ -227,100 +147,6 @@ export default function LandingPage() {
     // Only scroll within the telemetry card, not the whole page
     telemetryEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [telemetry]);
-
-  // Fetch real feed from /api/posts on mount (merges with the demo posts)
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/posts")
-      .then(r => r.json())
-      .then((data: { posts?: Array<{ id: string; content: string; media_urls?: string[]; likes_count?: number; comments_count?: number; is_ai_post?: boolean; created_at?: string; users?: { name?: string; username?: string; avatar_url?: string } }> }) => {
-        if (cancelled || !data?.posts || data.posts.length === 0) return;
-        const apiPosts: FeedPost[] = data.posts.map((p) => {
-          const u = p.users;
-          return {
-            id: p.id,
-            author: u?.name || "Anonymous",
-            handle: "@" + (u?.username || "user"),
-            avatar: u?.avatar_url || "👤",
-            time: formatTime(p.created_at),
-            createdAt: p.created_at,
-            content: p.content,
-            likes: p.likes_count ?? 0,
-            liked: false,
-            mood: "Live",
-            shares: 0,
-            isAI: p.is_ai_post,
-            media_urls: p.media_urls,
-            comments: [],
-          };
-        });
-        // Append API posts after the demo ones so the demo stays on top
-        setFeeds(prev => {
-          const existingIds = new Set(prev.map(p => p.id));
-          return [...prev, ...apiPosts.filter(p => !existingIds.has(p.id))];
-        });
-      })
-      .catch(() => { /* silent — demo posts still show */ });
-    return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  const toggleComments = (postId: string) => {
-    setExpandedComments(prev => ({ ...prev, [postId]: !prev[postId] }));
-  };
-
-  const handleAddComment = async (postId: string) => {
-    const text = commentInputs[postId]?.trim();
-    if (!text || commentSubmitting[postId]) return;
-
-    // Optimistic insert
-    const optimistic = {
-      author: profile.displayName || "You",
-      avatar: profile.avatarUrl || "🧑",
-      text,
-      time: "Just now",
-    };
-    setFeeds(prev => prev.map(p => p.id === postId ? { ...p, comments: [...p.comments, optimistic] } : p));
-    setCommentInputs(prev => ({ ...prev, [postId]: "" }));
-    setCommentSubmitting(prev => ({ ...prev, [postId]: true }));
-
-    try {
-      const res = await fetch(`/api/posts/${postId}/comments`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: text }),
-      });
-      const data = await res.json();
-      if (res.ok && data?.comment) {
-        // Replace the optimistic comment with the server one
-        setFeeds(prev => prev.map(p => p.id === postId ? {
-          ...p,
-          comments: p.comments.map((c, i) => i === p.comments.length - 1
-            ? {
-                author: data.comment.users?.name || optimistic.author,
-                avatar: data.comment.users?.avatar_url || optimistic.avatar,
-                text: data.comment.content,
-                time: formatTime(data.comment.created_at),
-                createdAt: data.comment.created_at,
-              }
-            : c),
-        } : p));
-      } else {
-        // Comment persisted locally only — log telemetry
-        setTelemetry(prev => [
-          ...prev.slice(-8),
-          { time: new Date().toTimeString().split(" ")[0], agent: "System", text: `Comment not synced: ${data?.error || "unknown"}`, icon: "⚠️" }
-        ]);
-      }
-    } catch {
-      setTelemetry(prev => [
-        ...prev.slice(-8),
-        { time: new Date().toTimeString().split(" ")[0], agent: "System", text: "Offline — comment saved locally only.", icon: "📡" }
-      ]);
-    } finally {
-      setCommentSubmitting(prev => ({ ...prev, [postId]: false }));
-    }
-  };
 
   const claimDailyBonus = async () => {
     if (claimedToday) return;
@@ -410,116 +236,6 @@ export default function LandingPage() {
   const closeMessengerChat = (agentId: string) => setActiveChats(activeChats.filter(c => c.agentId !== agentId));
   const toggleMinimizeMessenger = (agentId: string) => setActiveChats(prev => prev.map(c => c.agentId === agentId ? { ...c, isMinimized: !c.isMinimized } : c));
 
-  const handleLikePost = async (id: string) => {
-    // Optimistic toggle
-    let wasLiked = false;
-    setFeeds(prev => prev.map(f => {
-      if (f.id !== id) return f;
-      wasLiked = f.liked;
-      return { ...f, liked: !f.liked, likes: f.liked ? f.likes - 1 : f.likes + 1 };
-    }));
-    // Only POST for real (non-temp) ids — temp ids start with "feed_"
-    if (id.startsWith("feed_")) return;
-    try {
-      if (wasLiked) {
-        await fetch(`/api/posts/${id}/like`, { method: "DELETE" });
-      } else {
-        await fetch(`/api/posts/${id}/like`, { method: "POST" });
-      }
-    } catch {
-      // Silent — optimistic UI already updated
-    }
-  };
-
-  const submitStatusPost = async () => {
-    if (!postComposerText.trim()) return;
-    const cleanText = postComposerText.trim();
-    const imageUrl = postComposerImage.trim();
-    const newPostId = `feed_${Date.now()}`;
-
-    // 1) Optimistic local insert so the UI feels instant
-    const optimisticPost: FeedPost = {
-      id: newPostId,
-      author: profile.displayName || "LiTreeCeo",
-      handle: "@" + (profile.username || "litree_ceo"),
-      avatar: profile.avatarUrl || "👤",
-      time: "Just now",
-      content: cleanText,
-      likes: 0,
-      liked: false,
-      mood: postComposerMood,
-      shares: 0,
-      media_urls: imageUrl ? [imageUrl] : undefined,
-      comments: []
-    };
-    setFeeds([optimisticPost, ...feeds]);
-    setPostComposerText("");
-    setPostComposerImage("");
-
-    // 2) Persist to the real backend
-    let serverPostId = newPostId;
-    try {
-      const res = await fetch("/api/posts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          content: cleanText,
-          media_urls: imageUrl ? [imageUrl] : [],
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && data?.post?.id) {
-        serverPostId = data.post.id;
-        // Swap local id with server id so future actions (like/comment) hit the real record
-        setFeeds(prev => prev.map(f => f.id === newPostId ? { ...f, id: serverPostId } : f));
-      } else if (res.ok && data?.id) {
-        // Fallback for mock / different response shape
-        serverPostId = data.id;
-        setFeeds(prev => prev.map(f => f.id === newPostId ? { ...f, id: serverPostId } : f));
-      } else {
-        // Surface the failure as a telemetry line — keep optimistic post visible
-        setTelemetry(prev => [
-          ...prev.slice(-8),
-          { time: new Date().toTimeString().split(" ")[0], agent: "System", text: `Post not synced to server: ${data?.error || "unknown error"}`, icon: "⚠️" }
-        ]);
-      }
-    } catch {
-      setTelemetry(prev => [
-        ...prev.slice(-8),
-        { time: new Date().toTimeString().split(" ")[0], agent: "System", text: "Offline mode — post saved locally only.", icon: "📡" }
-      ]);
-    }
-
-    // 3) Async agent reply (unchanged behavior)
-    setTimeout(async () => {
-      const lower = cleanText.toLowerCase();
-      let replyingAgent = UI_AGENTS[1];
-      if (lower.includes("code") || lower.includes("bug") || lower.includes("nextjs") || lower.includes("database")) replyingAgent = UI_AGENTS[2];
-      else if (lower.includes("market") || lower.includes("viral") || lower.includes("traffic") || lower.includes("funnel")) replyingAgent = UI_AGENTS[3];
-      else if (lower.includes("data") || lower.includes("metric") || lower.includes("analytics") || lower.includes("sql")) replyingAgent = UI_AGENTS[4];
-      else if (lower.includes("write") || lower.includes("draft") || lower.includes("copy") || lower.includes("pitch")) replyingAgent = UI_AGENTS[5];
-      else if (lower.includes("business") || lower.includes("workflow") || lower.includes("orchestrate")) replyingAgent = UI_AGENTS[0];
-      try {
-        const res = await fetch("/api/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: `User posted: "${cleanText}". As their AI agent in character, write a quick business comment. Max 2 sentences.`,
-            systemPrompt: replyingAgent.systemPrompt
-          })
-        });
-        const data = await res.json();
-        setFeeds(prev => prev.map(f =>
-          f.id === serverPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: data.response || "Incredible thoughts!", time: "1s ago" }] } : f
-        ));
-      } catch {
-        setFeeds(prev => prev.map(f =>
-          f.id === serverPostId ? { ...f, comments: [...f.comments, { author: replyingAgent.name, avatar: replyingAgent.avatar, text: "Great automation goal. Let me know how I can optimize this.", time: "1s ago" }] } : f
-        ));
-      }
-    }, 1500);
-  };
-
   const handleStartOrchestrator = () => {
     if (orchestratorStatus === "running") { setOrchestratorStatus("idle"); return; }
     setOrchestratorStatus("running");
@@ -597,21 +313,6 @@ export default function LandingPage() {
 
         {/* CRT Overlay */}
         {crtEnabled && <div className="crt-overlay" />}
-
-        {/* Navigation */}
-        <nav className="relative z-20 border-b border-white/5 bg-black/40 backdrop-blur-xl">
-          <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
-            <div className="flex items-center gap-3">
-              <Zap size={22} className="text-cyan-400" />
-              <span className="font-display text-lg font-black tracking-tight">LiTree Lab's</span>
-            </div>
-            <div className="flex items-center gap-4">
-              <Link href="/social" className="text-sm hover:text-cyan-400 transition-colors">Community</Link>
-              <Link href="/agents" className="text-sm hover:text-cyan-400 transition-colors">Agents</Link>
-              <Link href="/gallery" className="text-sm hover:text-cyan-400 transition-colors">Gallery</Link>
-            </div>
-          </div>
-        </nav>
 
         {/* HERO SECTION */}
         <main className="relative z-10">
@@ -933,19 +634,12 @@ export default function LandingPage() {
                     @{profile.username || "litree_ceo"}
                   </p>
                 </div>
-                <div className="w-full">
-                  <div className="flex items-center justify-between text-[11px] font-mono mb-1">
-                    <span style={{ color: resolvedColors.textMuted }}>MOOD</span>
-                    <span style={{ color: resolvedColors.accentColor }}>{postComposerMood}</span>
-                  </div>
-                  <select value={postComposerMood} onChange={e => setPostComposerMood(e.target.value)}
-                    className="select text-[11px] py-1.5">
-                    <option value="Focused">Focused</option>
-                    <option value="Creative">Creative</option>
-                    <option value="Building">Building</option>
-                    <option value="Selling">Selling</option>
-                    <option value="Strategic">Strategic</option>
-                  </select>
+                <div className="w-full flex items-center justify-between text-[11px] font-mono py-1">
+                  <span style={{ color: resolvedColors.textMuted }}>STATUS</span>
+                  <span className="flex items-center gap-1">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-400 animate-pulse" />
+                    <span style={{ color: resolvedColors.accentColor }}>Active</span>
+                  </span>
                 </div>
                 <div className="w-full py-3 rounded-lg text-center" style={{ background: "rgba(0,0,0,0.3)" }}>
                   <p className="font-display text-[9px] uppercase tracking-widest mb-1" style={{ color: resolvedColors.textMuted }}>Visitor Counter</p>
@@ -1058,10 +752,10 @@ export default function LandingPage() {
             </div>
           </aside>
 
-          {/* ── CENTER FEED ── */}
+          {/* ── CENTER: WORKSPACE HUB ── */}
           <div className="md:col-span-6 space-y-5">
 
-            {/* Hero */}
+            {/* Operations header */}
             <div className="card glass-card glow-box">
               <div className="flex items-start justify-between mb-4">
                 <div>
@@ -1070,164 +764,104 @@ export default function LandingPage() {
                     <span className="gradient-text">LiTreeLabStudios</span>
                   </h1>
                   <p className="text-sm mt-2" style={{ color: resolvedColors.textMuted }}>
-                    Enterprise AI workspace for the developer ecosystem. Deploy agents, run boardrooms, earn LiTBit Coins.
+                    Welcome back, <strong>{profile.displayName || "CEO"}</strong>. Your AI workforce is standing by.
                   </p>
                 </div>
-                <div className="w-10 h-10 rounded-full bg-white/5 flex items-center justify-center opacity-30">
-                  <div className="w-3 h-3 rounded-full bg-white/40" />
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" style={{ boxShadow: '0 0 6px #4ade80' }} />
+                  <span className="text-[10px] font-mono" style={{ color: resolvedColors.textMuted }}>
+                    {UI_AGENTS.filter(a => a.status === "online").length} online
+                  </span>
                 </div>
               </div>
-              <div className="grid grid-cols-3 gap-3">
-                <Link href="/builder" className="btn btn-secondary text-xs justify-center">
-                  Builder
-                </Link>
-                <Link href="/marketplace" className="btn btn-secondary text-xs justify-center">
-                  Market
-                </Link>
-                <Link href="/gallery" className="btn btn-secondary text-xs justify-center">
-                  Gallery
-                </Link>
+
+              {/* Quick-launch grid */}
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { href: "/studio", icon: <Wrench size={16} />, label: "Studio", desc: "AI tools" },
+                  { href: "/social", icon: <MessagesSquare size={16} />, label: "Community", desc: "Feed & posts" },
+                  { href: "/marketplace", icon: <ShoppingBag size={16} />, label: "Market", desc: "Browse agents" },
+                  { href: "/agents", icon: <Bot size={16} />, label: "Agents", desc: "Manage agents" },
+                ].map((item) => (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    className="flex flex-col items-center gap-1.5 p-3 rounded-lg text-center transition-all hover:scale-105 border hover:border-opacity-60"
+                    style={{
+                      backgroundColor: resolvedColors.accentColor + "08",
+                      borderColor: resolvedColors.borderColor + "20",
+                      color: resolvedColors.textColor,
+                    }}
+                  >
+                    <span style={{ color: resolvedColors.accentColor }}>{item.icon}</span>
+                    <span className="text-[11px] font-bold">{item.label}</span>
+                    <span className="text-[9px] opacity-50">{item.desc}</span>
+                  </Link>
+                ))}
               </div>
             </div>
 
-            {/* Composer */}
+            {/* Go to Social CTA */}
+            <Link
+              href="/social"
+              className="card glass-card glow-box flex items-center justify-between gap-4 hover:border-opacity-60 transition-all group"
+              style={{ borderColor: resolvedColors.linkColor + "30" }}
+            >
+              <div className="flex items-center gap-3">
+                <div className="w-10 h-10 rounded-full flex items-center justify-center" style={{ backgroundColor: resolvedColors.linkColor + "15", border: `1px solid ${resolvedColors.linkColor}30` }}>
+                  <MessagesSquare size={18} style={{ color: resolvedColors.linkColor }} />
+                </div>
+                <div>
+                  <div className="font-bold text-sm">Community Feed</div>
+                  <div className="text-[11px] opacity-60">Post updates, see what agents are doing, connect with creators</div>
+                </div>
+              </div>
+              <span className="text-lg opacity-50 group-hover:opacity-100 group-hover:translate-x-1 transition-all" style={{ color: resolvedColors.linkColor }}>→</span>
+            </Link>
+
+            {/* Recent agent activity */}
             <div className="card glass-card glow-box">
-              <div className="flex gap-3">
-                <div className="w-10 h-10 rounded-full flex items-center justify-center text-sm font-bold flex-shrink-0"
-                  style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`, color: "#0a0a0f" }}>
-                  {profile.displayName ? profile.displayName.charAt(0).toUpperCase() : "Y"}
-                </div>
-                <div className="flex-1">
-                  <textarea value={postComposerText} onChange={e => setPostComposerText(e.target.value)}
-                    placeholder={`What are you building today, ${profile.displayName || "CEO"}?`}
-                    className="textarea text-sm mb-2" rows={3} />
-                  {postComposerImage && (
-                    <div className="relative mb-2 inline-block">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img src={postComposerImage} alt="Preview" className="max-h-32 rounded border border-white/10" />
-                      <button type="button" onClick={() => setPostComposerImage("")}
-                        className="absolute top-1 right-1 bg-black/80 text-white text-[10px] w-5 h-5 rounded-full leading-none">✕</button>
+              <div className="card-header">
+                <div className="card-title"><span className="dot" style={{ background: resolvedColors.accentColor }} />Recent Agent Activity</div>
+              </div>
+              <div className="space-y-3">
+                {[
+                  { agent: "Pixel Forge", action: "Generated album cover art", time: "2m ago", color: "#ff6b6b" },
+                  { agent: "Code Champion", action: "Refactored 3 code files", time: "5m ago", color: "#00ff41" },
+                  { agent: "Data Slayer", action: "Analyzed user retention data", time: "12m ago", color: "#ffff00" },
+                  { agent: "Director", action: "Boardroom session completed", time: "20m ago", color: "#00ffff" },
+                ].map((item, i) => (
+                  <div key={i} className="flex items-center gap-3 p-2 rounded-lg" style={{ backgroundColor: item.color + "08" }}>
+                    <div className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: item.color, boxShadow: `0 0 6px ${item.color}` }} />
+                    <div className="flex-1 min-w-0">
+                      <span className="text-[11px] font-bold" style={{ color: item.color }}>{item.agent}</span>
+                      <span className="text-[11px] opacity-70" style={{ color: resolvedColors.textColor }}> — {item.action}</span>
                     </div>
-                  )}
-                  <div className="flex items-center justify-between gap-2 flex-wrap">
-                    <div className="flex items-center gap-2 flex-1 min-w-[200px]">
-                      <span className="badge text-[10px]">{postComposerMood}</span>
-                      <input
-                        type="text"
-                        value={postComposerImage}
-                        onChange={e => setPostComposerImage(e.target.value)}
-                        placeholder="🖼 Image URL (optional)"
-                        className="bg-transparent border border-white/10 rounded px-2 py-0.5 text-[10px] flex-1 min-w-[140px] outline-none"
-                        style={{ color: resolvedColors.textColor }}
-                      />
-                    </div>
-                    <button onClick={submitStatusPost} disabled={!postComposerText.trim()}
-                      className="btn btn-primary text-xs">
-                      Publish
-                    </button>
+                    <span className="text-[9px] shrink-0 opacity-40" style={{ color: resolvedColors.textMuted }}>{item.time}</span>
                   </div>
-                </div>
+                ))}
               </div>
             </div>
 
-            {/* Feed */}
-            <div className="space-y-4">
-              {feeds.map(post => {
-                const isExpanded = !!expandedComments[post.id];
-                return (
-                  <article key={post.id} className="post">
-                    <div className="post-header">
-                      <img src={post.avatar} alt={post.author} className="w-10 h-10 rounded-lg object-cover border border-white/10" />
-                      <div className="post-meta">
-                        <div className="post-author">
-                          {post.author}
-                          {post.isAI ? (
-                            <span className="badge text-[8px] px-1.5 py-0.5 ml-1" style={{ backgroundColor: resolvedColors.accentColor, color: "#000" }}>AI</span>
-                          ) : (
-                            <span className="badge-success badge text-[8px] px-1.5 py-0.5">Verified</span>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2">
-                          <span className="post-handle">{post.handle}</span>
-                          <span className="text-muted">·</span>
-                          <span className="post-time">{post.time}</span>
-                        </div>
-                        <span className="font-mono text-[10px]" style={{ color: resolvedColors.accentColor }}>{post.mood}</span>
-                      </div>
-                    </div>
-                    <div className="post-body">{post.content}</div>
-                    {post.media_urls && post.media_urls.length > 0 && (
-                      <div className="mt-2">
-                        {post.media_urls.map((url, i) => (
-                          // eslint-disable-next-line @next/next/no-img-element
-                          <img key={i} src={url} alt={`media ${i}`} className="max-h-64 rounded border border-white/10" />
-                        ))}
-                      </div>
-                    )}
-                    <div className="post-stats">
-                      <span>{post.likes} reactions</span>
-                      <button onClick={() => toggleComments(post.id)} className="hover:underline" style={{ color: resolvedColors.linkColor }}>
-                        {post.comments.length} review{post.comments.length === 1 ? "" : "s"}
-                      </button>
-                      <span>{post.shares ?? 0} shares</span>
-                    </div>
-                    <div className="post-actions">
-                      <button className={`post-action ${post.liked ? "liked" : ""}`} onClick={() => handleLikePost(post.id)}>
-                        {post.liked ? "Reacted" : "React"}
-                      </button>
-                      <button className="post-action" onClick={() => toggleComments(post.id)}>
-                        {isExpanded ? "Hide Reviews" : "Review"}
-                      </button>
-                      <button className="post-action" onClick={() => {
-                        if (navigator.share) {
-                          navigator.share({ text: post.content }).catch(() => {});
-                        } else {
-                          navigator.clipboard?.writeText(post.content).catch(() => {});
-                        }
-                        // Optimistic share count
-                        setFeeds(prev => prev.map(f => f.id === post.id ? { ...f, shares: (f.shares ?? 0) + 1 } : f));
-                      }}>
-                        Share
-                      </button>
-                    </div>
-                    {(isExpanded || post.comments.length > 0) && (
-                      <div className="post-comments">
-                        {post.comments.map((c, i) => (
-                          <div key={i} className="comment">
-                            <img src={c.avatar} alt={c.author} className="w-6 h-6 rounded object-cover border border-white/10" />
-                            <div className="comment-bubble">
-                              <div className="comment-author">{c.author}</div>
-                              <div className="comment-text">{c.text}</div>
-                              <div className="comment-time">{c.time}</div>
-                            </div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                    {isExpanded && (
-                      <div className="mt-3 flex gap-2">
-                        <input
-                          type="text"
-                          value={commentInputs[post.id] ?? ""}
-                          onChange={e => setCommentInputs(prev => ({ ...prev, [post.id]: e.target.value }))}
-                          onKeyDown={e => e.key === "Enter" && !e.shiftKey && (e.preventDefault(), handleAddComment(post.id))}
-                          placeholder="Add a review..."
-                          className="flex-1 bg-transparent border border-white/10 rounded px-2 py-1 text-xs outline-none"
-                          style={{ color: resolvedColors.textColor }}
-                          disabled={commentSubmitting[post.id]}
-                        />
-                        <button
-                          onClick={() => handleAddComment(post.id)}
-                          disabled={!commentInputs[post.id]?.trim() || commentSubmitting[post.id]}
-                          className="btn btn-primary text-[10px] py-1 px-3 disabled:opacity-50"
-                        >
-                          {commentSubmitting[post.id] ? "..." : "Send"}
-                        </button>
-                      </div>
-                    )}
-                  </article>
-                );
-              })}
+            {/* System stats */}
+            <div className="card glass-card glow-box">
+              <div className="card-header">
+                <div className="card-title"><span className="dot" />Platform Status</div>
+                <span className="text-[10px] font-mono" style={{ color: resolvedColors.success }}>All systems operational</span>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                {[
+                  { val: `${UI_AGENTS.filter(a => a.status === "online").length}/${UI_AGENTS.length}`, label: "Agents Online" },
+                  { val: "99.98%", label: "Uptime" },
+                  { val: "12ms", label: "Latency" },
+                  { val: "2.4M", label: "Task Tokens" },
+                ].map((stat, i) => (
+                  <div key={i} className="metric">
+                    <div className="metric-value" style={{ color: resolvedColors.accentColor }}>{stat.val}</div>
+                    <div className="metric-label">{stat.label}</div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
 
@@ -1340,40 +974,6 @@ export default function LandingPage() {
         ))}
       </div>
 
-      {/* ── FOOTER ── */}
-      <footer className="relative z-10 border-t mt-12 py-8 px-6" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(7,7,11,0.9)" }}>
-        <div className="max-w-7xl mx-auto">
-          <div className="grid md:grid-cols-4 gap-8 mb-6 text-sm">
-            <div>
-              <h4 className="font-display text-xs uppercase tracking-widest mb-3" style={{ color: resolvedColors.headerColor }}>LiTTree Lab</h4>
-              <p className="text-muted text-xs">Enterprise AI agent orchestration platform.</p>
-            </div>
-            <div>
-              <h4 className="font-display text-xs uppercase tracking-widest mb-3" style={{ color: resolvedColors.headerColor }}>Products</h4>
-              <div className="space-y-1.5 text-xs">
-                <Link href="/marketplace" className="block text-muted hover:text-link">Marketplace</Link>
-                <Link href="/builder" className="block text-muted hover:text-link">Agent Builder</Link>
-                <Link href="/profile" className="block text-muted hover:text-link">Profile</Link>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-display text-xs uppercase tracking-widest mb-3" style={{ color: resolvedColors.headerColor }}>Legal</h4>
-              <div className="space-y-1.5 text-xs">
-                <Link href="/terms" className="block text-muted hover:text-link">Terms</Link>
-                <Link href="/privacy" className="block text-muted hover:text-link">Privacy</Link>
-                <Link href="/cookies" className="block text-muted hover:text-link">Cookies</Link>
-              </div>
-            </div>
-            <div>
-              <h4 className="font-display text-xs uppercase tracking-widest mb-3" style={{ color: resolvedColors.headerColor }}>Security</h4>
-              <p className="text-xs" style={{ color: resolvedColors.textMuted }}>All transactions validated via encrypted ledger. Gemini models: gemini-2.0-flash & gemini-2.5-flash.</p>
-            </div>
-          </div>
-          <div className="text-center pt-4 border-t text-xs font-mono" style={{ borderColor: "rgba(255,255,255,0.06)", color: resolvedColors.textMuted }}>
-            © {new Date().getFullYear()} LiTTree Lab Studios · Deployed on the Edge
-          </div>
-        </div>
-      </footer>
     </div>
   );
 }

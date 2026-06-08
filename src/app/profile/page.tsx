@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme, darkSkins, lightSkins, type SkinPreset, type AccentColor } from "@/context/ThemeContext";
 import { useProfile, type UserProfile } from "@/context/ProfileContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
+import PageShell from "@/components/PageShell";
 
 export default function ProfilePage() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -103,10 +104,7 @@ export default function ProfilePage() {
   }
 
   return (
-    <div 
-      className="min-h-screen relative font-mono text-xs pb-12" 
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
-    >
+    <PageShell title="Profile" className="font-mono text-xs relative">
       {/* CRT Scanline Filter */}
       {crtEnabled && (
         <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.06]" style={{
@@ -593,6 +591,6 @@ export default function ProfilePage() {
         </div>
       </div>
 
-    </div>
+    </PageShell>
   );
 }

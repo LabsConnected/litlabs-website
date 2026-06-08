@@ -4,6 +4,7 @@ import { useState, useEffect, useRef } from "react";
 import { useParams } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
+import PageShell from "@/components/PageShell";
 import { AGENT_AVATARS } from "@/lib/avatars";
 
 type Agent = {
@@ -167,7 +168,7 @@ export default function AgentDetail() {
   }
 
   return (
-    <div style={{ backgroundColor: theme.bgColor, minHeight: "100vh", padding: "20px" }}>
+    <PageShell title={agent?.name || "Agent"} subtitle={agent ? `${agent.category.toUpperCase()} AGENT` : undefined}>
       {/* Header */}
       <div className="lit-box mb-6" style={{ borderColor: theme.borderColor, backgroundColor: theme.boxBg }}>
         <div className="flex justify-between items-center">
@@ -347,6 +348,6 @@ export default function AgentDetail() {
           </div>
         </div>
       </div>
-    </div>
+    </PageShell>
   );
 }

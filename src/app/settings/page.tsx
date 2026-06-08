@@ -5,6 +5,7 @@ import { useTheme, darkSkins, lightSkins, type SkinPreset, type AccentColor } fr
 import type { BackgroundMode } from "@/components/AnimatedBackground";
 import { useProfile, type UserProfile } from "@/context/ProfileContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
+import PageShell from "@/components/PageShell";
 
 export default function SettingsPage() {
   const { isLoaded, isSignedIn } = useAuth();
@@ -96,7 +97,7 @@ export default function SettingsPage() {
   const T = resolvedColors;
 
   return (
-    <div className="min-h-screen pb-20 relative font-mono text-xs" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+    <PageShell title="Settings" className="font-mono text-xs relative">
       
       {/* Local CRT Filter */}
       {crtEnabled && (
@@ -467,6 +468,6 @@ export default function SettingsPage() {
           </div>
         )}
       </div>
-    </div>
+    </PageShell>
   );
 }

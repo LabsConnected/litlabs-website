@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, useEffect, Suspense, memo, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
@@ -61,9 +61,9 @@ function StatusTicker({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] 
 }
 
 /* ------------------------------------------------------------------ */
-/*  Tool Router                                                        */
+/*  Tool Router — memoized so switching CRT etc doesn't remount tools  */
 /* ------------------------------------------------------------------ */
-function ToolRouter({ tool }: { tool: StudioTool }) {
+const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
   switch (tool) {
     case "image":   return <ImageTool />;
     case "video":   return <VideoTool />;
@@ -73,7 +73,7 @@ function ToolRouter({ tool }: { tool: StudioTool }) {
     case "space":   return <SpaceTool />;
     default:         return <ImageTool />;
   }
-}
+});
 
 /* ------------------------------------------------------------------ */
 /*  Main Page                                                          */
@@ -135,22 +135,24 @@ function StudioInner() {
     return <RedirectToSignIn />;
   }
 
+  const crtStyle = useMemo(() => ({
+    background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.12), rgba(0,0,0,0.12) 1px, transparent 1px, transparent 2px)",
+    boxShadow: "inset 0 0 100px rgba(0,255,0,0.15)",
+  }), []);
+
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: T.bgColor, color: T.textColor, fontFamily: "monospace" }}>
       {/* CRT overlay */}
       {crtEnabled && (
-        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.05]" style={{
-          background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.12), rgba(0,0,0,0.12) 1px, transparent 1px, transparent 2px)",
-          boxShadow: "inset 0 0 100px rgba(0,255,0,0.15)"
-        }} />
+        <div className="fixed inset-0 pointer-events-none z-40 opacity-[0.05]" style={crtStyle} />
       )}
 
       {/* Main workspace */}
       <div className="flex flex-1 overflow-hidden">
         <StudioSidebar activeTool={activeTool} onToolChange={(t) => router.push(`/studio?tool=${t}`)} />
 
-        {/* Content area */}
-        <main className="flex-1 overflow-hidden flex flex-col" style={{ backgroundColor: T.bgColor }}>
+        {/* Content area — compositor layer for smooth scroll */}
+        <main className="flex-1 overflow-hidden flex flex-col" style={{ backgroundColor: T.bgColor, willChange: "transform" }}>
           {/* Zed-style top bar */}
           <div
             className="flex items-center justify-between px-3 h-9 shrink-0"
@@ -192,8 +194,8 @@ function StudioInner() {
             </div>
           </div>
 
-          {/* Tool content — canvas */}
-          <div className="flex-1 overflow-auto">
+          {/* Tool content — canvas, GPU composited for smooth scroll */}
+          <div className="flex-1 overflow-auto studio-scroll" style={{ transform: "translateZ(0)", willChange: "transform" }}>
             <Suspense fallback={
               <div className="flex items-center justify-center h-full">
                 <div className="text-center">

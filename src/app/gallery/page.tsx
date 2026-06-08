@@ -5,6 +5,8 @@ import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
+import PageShell from "@/components/PageShell";
+import Lightbox from "@/components/Lightbox";
 
 // ─── Demo gallery items ──────────────────────────────────────────────────────
 const DEMO_ITEMS: GalleryItem[] = [
@@ -218,7 +220,7 @@ export default function Gallery() {
   };
 
   return (
-    <div style={{ backgroundColor: T.bgColor, minHeight: "100vh", color: T.textColor, fontFamily: "monospace", position: "relative" }}>
+    <PageShell title="Gallery" subtitle="AI-generated art, worlds, and creative works" className="font-mono">
       
       {/* CRT Scanline Filter */}
       {crtEnabled && (
@@ -358,6 +360,9 @@ export default function Gallery() {
           <div
             key={item.id}
             onClick={() => setSelectedItem(item)}
+            onKeyDown={(e) => { if (e.key === 'Enter') setSelectedItem(item); }}
+            role="button"
+            tabIndex={0}
             className="lit-box group"
             style={{
               borderColor: T.borderColor, backgroundColor: T.boxBg, cursor: "pointer",
@@ -401,29 +406,21 @@ export default function Gallery() {
         </div>
       )}
 
-      {/* ── Lightbox Modal ── */}
-      {selectedItem && (
-        <div
-          onClick={() => setSelectedItem(null)}
-          style={{ position: "fixed", inset: 0, backgroundColor: "rgba(0,0,0,0.95)", zIndex: 100, display: "flex", alignItems: "center", justifyContent: "center", padding: "24px" }}
-        >
-          <div onClick={e => e.stopPropagation()} className="lit-box" style={{ maxWidth: "900px", width: "100%", maxHeight: "90vh", display: "flex", flexDirection: "column", backgroundColor: T.boxBg, borderColor: T.borderColor, padding: "0" }}>
-            <div style={{ position: "relative", flex: 1, minHeight: "300px", height: "50vh" }}>
-              <Image src={selectedItem.imageUrl} alt={selectedItem.title} fill style={{ objectFit: "contain" }} sizes="900px" unoptimized />
-              <button onClick={() => setSelectedItem(null)} style={{ position: "absolute", top: "12px", right: "12px", backgroundColor: "rgba(0,0,0,0.7)", border: `1px solid ${T.borderColor}`, color: "white", padding: "8px 12px", cursor: "pointer", fontSize: "14px" }}>✕</button>
-            </div>
-            <div style={{ padding: "16px", borderTop: `1px solid ${T.borderColor}` }}>
-              <div style={{ color: T.headerColor, fontSize: "18px", fontWeight: "bold", marginBottom: "8px" }}>{selectedItem.title}</div>
-              <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", fontSize: "11px" }}>
-                <span style={{ color: T.textColor }}>👤 ARTIST: <strong style={{ color: T.linkColor }}>{selectedItem.artist}</strong></span>
-                <span style={{ color: T.textColor }}>📂 CATEGORY: <strong style={{ color: T.accentColor }}>{selectedItem.category.toUpperCase()}</strong></span>
-                <span style={{ color: T.textColor }}>❤️ ENGAGEMENTS: {selectedItem.likes} sparks</span>
-                <span style={{ color: T.textColor }}>📅 COMPILED: {selectedItem.createdAt}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* ── Lightbox ── */}
+      <Lightbox
+        images={filteredItems.map(item => ({ src: item.imageUrl, alt: item.title, caption: `${item.title} — by ${item.artist} · ${item.category.toUpperCase()} · ${item.likes} sparks` }))}
+        currentIndex={selectedItem ? filteredItems.findIndex(i => i.id === selectedItem.id) : 0}
+        isOpen={!!selectedItem}
+        onClose={() => setSelectedItem(null)}
+        onNext={() => {
+          const idx = filteredItems.findIndex(i => i.id === selectedItem!.id);
+          setSelectedItem(filteredItems[(idx + 1) % filteredItems.length]);
+        }}
+        onPrev={() => {
+          const idx = filteredItems.findIndex(i => i.id === selectedItem!.id);
+          setSelectedItem(filteredItems[(idx - 1 + filteredItems.length) % filteredItems.length]);
+        }}
+      />
 
       {/* ── Floating Create Button ── */}
       <Link href="/generate" style={{ position: "fixed", bottom: "24px", right: "24px", width: "56px", height: "56px", borderRadius: "50%", backgroundColor: T.linkColor, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", textDecoration: "none", boxShadow: `0 4px 16px ${T.linkColor}40`, zIndex: 50, cursor: "pointer" }} title="AI Image Generator">
@@ -435,6 +432,6 @@ export default function Gallery() {
         ::-webkit-scrollbar-track { background: ${T.bgColor}; }
         ::-webkit-scrollbar-thumb { background: ${T.borderColor}; }
       `}</style>
-    </div>
+    </PageShell>
   );
 }

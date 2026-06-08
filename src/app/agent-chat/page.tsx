@@ -170,16 +170,12 @@ export default function AgentChat() {
           boxShadow: "inset 0 0 80px rgba(0, 255, 0, 0.3)"
         }} />
       )}
-      {/* Top Nav */}
-      <nav style={{ backgroundColor: T.boxBg, borderBottom: `2px solid ${T.borderColor}`, padding: "8px 16px", display: "flex", alignItems: "center", justifyContent: "space-between", flexShrink: 0 }}>
-        <Link href="/" style={{ textDecoration: "none", color: T.headerColor, fontWeight: "bold", fontSize: "14px", letterSpacing: "2px" }}>⚡ LITLABS</Link>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-          <span style={{ color: T.accentColor, fontSize: "10px" }}>● ONLINE</span>
-          <button onClick={() => setActiveTab("chat")} style={{ backgroundColor: "transparent", border: "none", color: activeTab === "chat" ? T.accentColor : T.textColor, cursor: "pointer", fontSize: "11px", fontFamily: "monospace" }}>💬 Chat</button>
-          <button onClick={() => setActiveTab("gallery")} style={{ backgroundColor: "transparent", border: "none", color: activeTab === "gallery" ? T.accentColor : T.textColor, cursor: "pointer", fontSize: "11px", fontFamily: "monospace" }}>🖼️ Worlds ({worlds.length})</button>
-          <Link href="/builder" style={{ color: T.linkColor, fontSize: "11px", textDecoration: "none" }}>Builder</Link>
-        </div>
-      </nav>
+      {/* Tab bar */}
+      <div style={{ backgroundColor: T.boxBg, borderBottom: `2px solid ${T.borderColor}`, padding: "8px 16px", display: "flex", alignItems: "center", gap: "12px", flexShrink: 0 }}>
+        <span style={{ color: T.accentColor, fontSize: "10px" }}>● ONLINE</span>
+        <button onClick={() => setActiveTab("chat")} style={{ backgroundColor: "transparent", border: "none", color: activeTab === "chat" ? T.accentColor : T.textColor, cursor: "pointer", fontSize: "11px", fontFamily: "monospace" }}>💬 Chat</button>
+        <button onClick={() => setActiveTab("gallery")} style={{ backgroundColor: "transparent", border: "none", color: activeTab === "gallery" ? T.accentColor : T.textColor, cursor: "pointer", fontSize: "11px", fontFamily: "monospace" }}>🖼️ Worlds ({worlds.length})</button>
+      </div>
 
       {activeTab === "chat" ? (
         <div style={{ flex: 1, display: "flex", overflow: "hidden" }}>
