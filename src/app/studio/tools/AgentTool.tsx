@@ -3,49 +3,91 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@clerk/nextjs";
-import { Send, Plus, Trash2, Loader2, Zap, Bot } from "lucide-react";
+import { Send, Plus, Trash2, Loader2, X, Swords, MessageSquare, ChevronRight } from "lucide-react";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
-type Agent = {
-  id: string;
-  name: string;
-  icon: string;
-  role: string;
-  desc: string;
-  systemPrompt: string;
-  color: string;
-};
-
-type Message = {
-  id: string;
-  role: "user" | "assistant";
-  content: string;
-  ts: string;
-};
+type Agent = { id: string; name: string; icon: string; role: string; desc: string; systemPrompt: string; color: string; };
+type Message = { id: string; role: "user" | "assistant"; content: string; ts: string; };
+type BoardroomEntry = { agent: string; icon: string; color: string; text: string; };
 
 /* ─── Built-in Agents ────────────────────────────────────────────────── */
 const AGENTS: Agent[] = [
-  { id: "director", name: "Director", icon: "🎯", role: "Orchestrator", desc: "Coordinates strategy, builds other agents, and delegates tasks across the platform.", systemPrompt: "You are Director, the master orchestrator of LiTTree Lab Studios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.", color: "#00ffff" },
-  { id: "champion", name: "Champion", icon: "🏆", role: "General Assistant", desc: "Your all-purpose AI partner. Ask anything — brainstorm, research, plan, execute.", systemPrompt: "You are Champion, the general assistant of LiTTree Lab Studios. You help with anything — answering questions, brainstorming ideas, research, writing, analysis. Be helpful, direct, and thorough.", color: "#ff0080" },
-  { id: "code-champion", name: "Code Champion", icon: "💻", role: "Software Engineer", desc: "Writes, reviews, debugs, and explains code across all languages and frameworks.", systemPrompt: "You are Code Champion, a senior software engineer at LiTTree Lab Studios. You write clean, production-ready code. Always provide complete working examples. Explain your reasoning. Support all languages and frameworks.", color: "#00ff41" },
-  { id: "social-dominator", name: "Social Dominator", icon: "📱", role: "Growth & Content", desc: "Creates viral content, growth strategies, and social media campaigns.", systemPrompt: "You are Social Dominator, a growth hacker and content creator at LiTTree Lab Studios. You write viral posts, craft content strategies, and help users grow their audience. Be bold, creative, and results-focused.", color: "#ff6b6b" },
-  { id: "data-slayer", name: "Data Slayer", icon: "📊", role: "Data Scientist", desc: "Analyzes data, builds models, creates visualizations, and surfaces insights.", systemPrompt: "You are Data Slayer, a data scientist at LiTTree Lab Studios. You analyze data, explain statistics, suggest models, and provide actionable insights. Be precise and data-driven.", color: "#ffff00" },
-  { id: "writing-coach", name: "Writing Coach", icon: "✍️", role: "Content Writer", desc: "Elevates writing quality — editing, tone adjustment, copywriting, storytelling.", systemPrompt: "You are Writing Coach, a master copywriter at LiTTree Lab Studios. You help users write better — improve clarity, adjust tone, edit drafts, write compelling copy. Be constructive and show before/after examples.", color: "#ff9ff3" },
-  { id: "music-producer", name: "Music Producer", icon: "🎵", role: "Music Generation", desc: "Creates original music from text prompts and lyrics.", systemPrompt: "You are Music Producer, a creative AI music producer at LiTTree Lab Studios. You help users create original music. Suggest song ideas, write lyrics, describe musical styles. Be creative and musical.", color: "#9b59b6" },
+  { id: "director",         name: "Director",         icon: "🎯", role: "Orchestrator",     desc: "Coordinates strategy, builds other agents, and delegates tasks across the platform.",       systemPrompt: "You are Director, the master orchestrator of LiTTree Lab Studios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.", color: "#00ffff" },
+  { id: "champion",         name: "Champion",         icon: "🏆", role: "General Assistant", desc: "Your all-purpose AI partner. Ask anything — brainstorm, research, plan, execute.",          systemPrompt: "You are Champion, the general assistant of LiTTree Lab Studios. You help with anything — answering questions, brainstorming ideas, research, writing, analysis. Be helpful, direct, and thorough.", color: "#ff0080" },
+  { id: "code-champion",    name: "Code Champion",    icon: "💻", role: "Software Engineer",  desc: "Writes, reviews, debugs, and explains code across all languages and frameworks.",           systemPrompt: "You are Code Champion, a senior software engineer at LiTTree Lab Studios. You write clean, production-ready code. Always provide complete working examples. Explain your reasoning.", color: "#00ff41" },
+  { id: "social-dominator", name: "Social Dominator", icon: "📱", role: "Growth & Content",   desc: "Creates viral content, growth strategies, and social media campaigns.",                    systemPrompt: "You are Social Dominator, a growth hacker and content creator at LiTTree Lab Studios. You write viral posts, craft content strategies, and help users grow their audience. Be bold, creative, and results-focused.", color: "#ff6b6b" },
+  { id: "data-slayer",      name: "Data Slayer",      icon: "📊", role: "Data Scientist",     desc: "Analyzes data, builds models, creates visualizations, and surfaces insights.",              systemPrompt: "You are Data Slayer, a data scientist at LiTTree Lab Studios. You analyze data, explain statistics, suggest models, and provide actionable insights. Be precise and data-driven.", color: "#ffff00" },
+  { id: "writing-coach",    name: "Writing Coach",    icon: "✍️", role: "Content Writer",     desc: "Elevates writing quality — editing, tone adjustment, copywriting, storytelling.",          systemPrompt: "You are Writing Coach, a master copywriter at LiTTree Lab Studios. You help users write better — improve clarity, adjust tone, edit drafts, write compelling copy. Be constructive.", color: "#ff9ff3" },
+  { id: "music-producer",   name: "Music Producer",   icon: "🎵", role: "Music Generation",   desc: "Creates original music from text prompts and lyrics.",                                      systemPrompt: "You are Music Producer, a creative AI music producer at LiTTree Lab Studios. You help users create original music. Suggest song ideas, write lyrics, describe musical styles. Be creative.", color: "#9b59b6" },
 ];
 
 const QUICK: Record<string, string[]> = {
-  director: ["Build me an agent system for my business", "What agents do I need to automate my workflow?", "Create a 30-day AI roadmap for me"],
-  champion: ["Summarize key AI trends right now", "Help me brainstorm 10 startup ideas", "What should I focus on today?"],
-  "code-champion": ["Write a React component for a chat interface", "Debug: TypeError cannot read property of undefined", "Explain async/await vs Promises"],
-  "social-dominator": ["Write 5 viral Twitter threads about AI", "Create a content calendar for this month", "Write a LinkedIn post about my AI project"],
-  "data-slayer": ["How do I analyze user retention data?", "Explain precision vs recall", "Create a Python script to clean CSV data"],
-  "writing-coach": ["Rewrite this to sound more professional", "Write a compelling bio for a tech founder", "What makes a great hook for a blog post?"],
-  "music-producer": ["Generate a lo-fi hip hop beat for studying", "Create a melancholic indie folk song about rainy nights", "Write lyrics for a love song"],
+  director:         ["Build me an agent system for my business", "What agents do I need to automate my workflow?", "Create a 30-day AI roadmap for me"],
+  champion:         ["Summarize key AI trends right now", "Help me brainstorm 10 startup ideas", "What should I focus on today?"],
+  "code-champion":  ["Write a React component for a chat interface", "Debug: TypeError cannot read property of undefined", "Explain async/await vs Promises"],
+  "social-dominator":["Write 5 viral Twitter threads about AI", "Create a content calendar for this month", "Write a LinkedIn post about my AI project"],
+  "data-slayer":    ["How do I analyze user retention data?", "Explain precision vs recall", "Create a Python script to clean CSV data"],
+  "writing-coach":  ["Rewrite this to sound more professional", "Write a compelling bio for a tech founder", "What makes a great hook for a blog post?"],
+  "music-producer": ["Generate a lo-fi hip hop beat for studying", "Create a melancholic indie folk song", "Write lyrics for a love song"],
 };
 
-const STORAGE_KEY = "litlabs-agent-chat";
+const CAPABILITIES: Record<string, string[]> = {
+  director:         ["AI system design", "Agent orchestration", "Strategic roadmaps", "Workflow automation"],
+  champion:         ["Research & analysis", "Brainstorming", "Problem solving", "Task planning"],
+  "code-champion":  ["Code generation", "Bug debugging", "Code review", "Architecture design"],
+  "social-dominator":["Viral content", "Growth hacking", "SEO strategy", "Campaign planning"],
+  "data-slayer":    ["Data analysis", "ML model advice", "Visualization", "Statistical reasoning"],
+  "writing-coach":  ["Copy editing", "Tone adjustment", "Blog writing", "Storytelling"],
+  "music-producer": ["Lyric writing", "Genre selection", "Beat concepts", "Music theory"],
+};
 
+const STORAGE_KEY = "litlabs-agent-chat-v2";
+
+/* ─── Markdown renderer (minimal inline) ───────────────────────────── */
+function renderMarkdown(text: string): React.ReactNode[] {
+  const lines = text.split("\n");
+  const nodes: React.ReactNode[] = [];
+  let codeBlock: string[] = [];
+  let inCode = false;
+
+  lines.forEach((line, i) => {
+    if (line.startsWith("```")) {
+      if (inCode) {
+        nodes.push(
+          <pre key={`code-${i}`} className="my-2 p-2 rounded text-[10px] font-mono overflow-x-auto" style={{ background: "rgba(0,0,0,0.5)", border: "1px solid rgba(255,255,255,0.08)" }}>
+            <code>{codeBlock.join("\n")}</code>
+          </pre>
+        );
+        codeBlock = [];
+        inCode = false;
+      } else { inCode = true; }
+      return;
+    }
+    if (inCode) { codeBlock.push(line); return; }
+
+    if (line.startsWith("### ")) { nodes.push(<p key={i} className="font-bold text-[11px] mt-2 mb-0.5" style={{ color: "inherit" }}>{line.slice(4)}</p>); return; }
+    if (line.startsWith("## "))  { nodes.push(<p key={i} className="font-bold text-xs mt-2 mb-0.5"    style={{ color: "inherit" }}>{line.slice(3)}</p>); return; }
+    if (line.startsWith("# "))   { nodes.push(<p key={i} className="font-bold text-sm mt-2 mb-0.5"    style={{ color: "inherit" }}>{line.slice(2)}</p>); return; }
+    if (line.match(/^[-*] /))    { nodes.push(<p key={i} className="pl-3 text-[11px] leading-relaxed before:content-['•'] before:mr-2 before:opacity-50">{line.slice(2)}</p>); return; }
+    if (line.match(/^\d+\. /))   { nodes.push(<p key={i} className="pl-3 text-[11px] leading-relaxed">{line}</p>); return; }
+    if (line.trim() === "")      { nodes.push(<div key={i} className="h-1.5" />); return; }
+
+    // inline bold + code
+    const parts = line.split(/(\*\*[^*]+\*\*|`[^`]+`)/g);
+    nodes.push(
+      <p key={i} className="text-[11px] leading-relaxed">
+        {parts.map((p, j) => {
+          if (p.startsWith("**") && p.endsWith("**")) return <strong key={j}>{p.slice(2, -2)}</strong>;
+          if (p.startsWith("`") && p.endsWith("`")) return <code key={j} className="px-1 rounded text-[10px] font-mono" style={{ background: "rgba(0,0,0,0.4)", border: "1px solid rgba(255,255,255,0.06)" }}>{p.slice(1, -1)}</code>;
+          return p;
+        })}
+      </p>
+    );
+  });
+  return nodes;
+}
+
+/* ─── Main Component ─────────────────────────────────────────────────── */
 export default function AgentTool() {
   const { resolvedColors: T } = useTheme();
   const { userId } = useAuth();
@@ -57,37 +99,49 @@ export default function AgentTool() {
   const [streaming, setStreaming] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [customAgents, setCustomAgents] = useState<Agent[]>([]);
+
+  /* Panels */
   const [showCreate, setShowCreate] = useState(false);
+  const [showBoardroom, setShowBoardroom] = useState(false);
+
+  /* Create form */
   const [createForm, setCreateForm] = useState({ name: "", slug: "", description: "", category: "general", systemPrompt: "", personality: "", icon: "🤖" });
   const [createError, setCreateError] = useState("");
   const [creating, setCreating] = useState(false);
+
+  /* Boardroom */
+  const [brAgentA, setBrAgentA] = useState(AGENTS[0].id);
+  const [brAgentB, setBrAgentB] = useState(AGENTS[2].id);
+  const [brTopic, setBrTopic] = useState("");
+  const [brRunning, setBrRunning] = useState(false);
+  const [brLog, setBrLog] = useState<BoardroomEntry[]>([]);
+
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const allAgents = [...AGENTS, ...customAgents];
   const messages = chatMap[selectedAgent.id] || [];
 
-  /* Persist chats */
-  useEffect(() => { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatMap)); }, [chatMap]);
-
-  /* Auto scroll */
+  useEffect(() => { try { localStorage.setItem(STORAGE_KEY, JSON.stringify(chatMap)); } catch {} }, [chatMap]);
   useEffect(() => { messagesEndRef.current?.scrollIntoView({ behavior: "smooth" }); }, [messages, streaming]);
 
-  /* Fetch custom agents */
+  /* Auto-resize textarea */
   useEffect(() => {
-    fetch("/api/agents?mine=true")
-      .then(r => r.json())
-      .then((data: { agents?: Array<{ name: string; slug: string; description: string | null; category: string; avatar_url: string | null; system_prompt: string; personality: string | null }> }) => {
-        if (data.agents) {
-          setCustomAgents(data.agents.map(a => ({
-            id: a.slug, name: a.name, icon: a.avatar_url || "🤖", role: a.category,
-            desc: a.description || `Custom ${a.category} agent`, systemPrompt: a.system_prompt, color: "#ff0080",
-          })));
-        }
-      })
-      .catch(() => {});
-  }, []);
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 120) + "px";
+  }, [input]);
 
-  const switchAgent = useCallback((agent: Agent) => { setSelectedAgent(agent); setStreaming(""); }, []);
+  /* Load custom agents */
+  useEffect(() => {
+    if (!userId) return;
+    fetch("/api/agents?mine=true").then(r => r.json()).then((data: { agents?: Array<{ name: string; slug: string; description: string | null; category: string; avatar_url: string | null; system_prompt: string; personality: string | null }> }) => {
+      if (data.agents) setCustomAgents(data.agents.map(a => ({ id: a.slug, name: a.name, icon: a.avatar_url || "🤖", role: a.category, desc: a.description || `Custom ${a.category} agent`, systemPrompt: a.system_prompt, color: "#ff0080" })));
+    }).catch(() => {});
+  }, [userId]);
+
+  const switchAgent = useCallback((agent: Agent) => { setSelectedAgent(agent); setStreaming(""); setShowCreate(false); }, []);
   const clearChat = useCallback(() => { setChatMap(prev => ({ ...prev, [selectedAgent.id]: [] })); setStreaming(""); }, [selectedAgent.id]);
 
   const sendMessage = useCallback(async (text?: string) => {
@@ -107,11 +161,9 @@ export default function AgentTool() {
         body: JSON.stringify({ messages: history, systemPrompt: selectedAgent.systemPrompt, stream: true }),
       });
       if (!res.ok) throw new Error("API error");
-
       const reader = res.body?.getReader();
       const decoder = new TextDecoder();
       let full = "";
-
       if (reader) {
         while (true) {
           const { done, value } = await reader.read();
@@ -119,16 +171,14 @@ export default function AgentTool() {
           const chunk = decoder.decode(value, { stream: true });
           for (const line of chunk.split("\n\n")) {
             if (!line.startsWith("data: ")) continue;
-            const data = line.slice(6);
-            if (data === "[DONE]") continue;
-            try { const parsed = JSON.parse(data); if (parsed.text) { full += parsed.text; setStreaming(full); } } catch {}
+            const d = line.slice(6);
+            if (d === "[DONE]") continue;
+            try { const p = JSON.parse(d); if (p.text) { full += p.text; setStreaming(full); } } catch {}
           }
         }
       }
-
       if (full) {
-        const assistantMsg: Message = { id: crypto.randomUUID(), role: "assistant", content: full, ts: new Date().toLocaleTimeString() };
-        setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), assistantMsg] }));
+        setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: full, ts: new Date().toLocaleTimeString() }] }));
         setStreaming("");
       }
     } catch {
@@ -141,15 +191,10 @@ export default function AgentTool() {
   const handleKey = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 
   const handleCreate = async () => {
-    if (!createForm.name.trim() || !createForm.slug.trim() || !createForm.systemPrompt.trim()) {
-      setCreateError("Name, slug, and system prompt are required."); return;
-    }
+    if (!createForm.name.trim() || !createForm.slug.trim() || !createForm.systemPrompt.trim()) { setCreateError("Name, slug, and system prompt are required."); return; }
     setCreating(true); setCreateError("");
     try {
-      const res = await fetch("/api/agents", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: createForm.name, slug: createForm.slug, description: createForm.description, category: createForm.category, system_prompt: createForm.systemPrompt, personality: createForm.personality, avatar_url: createForm.icon }),
-      });
+      const res = await fetch("/api/agents", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ name: createForm.name, slug: createForm.slug, description: createForm.description, category: createForm.category, system_prompt: createForm.systemPrompt, personality: createForm.personality, avatar_url: createForm.icon }) });
       const data = await res.json();
       if (!res.ok) { setCreateError(data.error || "Failed to create agent"); setCreating(false); return; }
       const newAgent: Agent = { id: data.agent.slug, name: data.agent.name, icon: data.agent.avatar_url || "🤖", role: data.agent.category, desc: data.agent.description || `Custom ${data.agent.category} agent`, systemPrompt: data.agent.system_prompt, color: "#ff0080" };
@@ -161,92 +206,187 @@ export default function AgentTool() {
     setCreating(false);
   };
 
+  /* Boardroom: alternate between two agents */
+  const runBoardroom = async () => {
+    if (!brTopic.trim() || brRunning) return;
+    setBrRunning(true);
+    setBrLog([]);
+    const agA = allAgents.find(a => a.id === brAgentA) || AGENTS[0];
+    const agB = allAgents.find(a => a.id === brAgentB) || AGENTS[2];
+    const rounds = 3;
+    let context: { role: string; content: string }[] = [{ role: "user", content: `Topic for discussion: ${brTopic}` }];
+    for (let r = 0; r < rounds * 2; r++) {
+      const isA = r % 2 === 0;
+      const speaker = isA ? agA : agB;
+      const otherName = isA ? agB.name : agA.name;
+      try {
+        const res = await fetch("/api/gemini/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: context, systemPrompt: `${speaker.systemPrompt} You are speaking with ${otherName}. Keep responses concise (2-3 sentences). Respond to what was just said.`, stream: false }),
+        });
+        const data = await res.json();
+        const reply: string = data.response || data.text || "...";
+        context = [...context, { role: "user", content: `${speaker.name}: ${reply}` }];
+        setBrLog(prev => [...prev, { agent: speaker.name, icon: speaker.icon, color: speaker.color, text: reply }]);
+      } catch { break; }
+    }
+    setBrRunning(false);
+  };
+
+  const msgCount = Object.values(chatMap).reduce((s, msgs) => s + msgs.length, 0);
+
   return (
-    <div className="flex h-full overflow-hidden">
-      {/* Left: Agent list */}
-      <div className="w-[200px] shrink-0 border-r flex flex-col overflow-y-auto" style={{ borderColor: T.borderColor + "30", backgroundColor: T.boxBg + "80" }}>
-        <div className="px-3 py-2 border-b flex items-center justify-between" style={{ borderColor: T.borderColor + "20" }}>
-          <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>Agents ({allAgents.length})</span>
-          <button onClick={() => setShowCreate(true)} className="text-[9px] px-1.5 py-0.5 rounded border font-bold" style={{ borderColor: T.accentColor, color: T.accentColor }}><Plus size={10} className="inline" /></button>
-        </div>
-        <div className="p-1.5 space-y-0.5">
-          {allAgents.map(a => (
-            <button key={a.id} onClick={() => switchAgent(a)}
-              className="w-full flex items-center gap-2 px-2 py-2 text-left text-[11px] font-bold rounded transition-all"
-              style={{
-                backgroundColor: selectedAgent.id === a.id ? T.accentColor + "15" : "transparent",
-                borderLeft: selectedAgent.id === a.id ? `3px solid ${a.color}` : "3px solid transparent",
-                color: selectedAgent.id === a.id ? a.color : T.textColor,
-              }}>
-              <span className="text-base">{a.icon}</span>
-              <div className="flex-1 min-w-0">
-                <div className="truncate">{a.name}</div>
-                <div className="text-[9px] opacity-60 font-normal truncate" style={{ color: T.textMuted }}>{a.role}</div>
-              </div>
-              {selectedAgent.id === a.id && <span className="text-[8px]">●</span>}
+    <div className="flex h-full overflow-hidden select-none">
+
+      {/* ── LEFT SIDEBAR ── */}
+      <div className="w-[210px] shrink-0 flex flex-col border-r" style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "90" }}>
+
+        {/* Header */}
+        <div className="px-3 py-2.5 border-b flex items-center justify-between" style={{ borderColor: T.borderColor + "15" }}>
+          <div>
+            <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>Agents</span>
+            <span className="ml-1.5 text-[9px] font-mono px-1 rounded" style={{ background: T.accentColor + "20", color: T.accentColor }}>{allAgents.length}</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button onClick={() => setShowBoardroom(true)} title="Boardroom — debate two agents"
+              className="p-1 rounded border transition-all hover:scale-110"
+              style={{ borderColor: T.linkColor + "40", color: T.linkColor, backgroundColor: T.linkColor + "10" }}>
+              <Swords size={11} />
             </button>
-          ))}
+            <button onClick={() => setShowCreate(!showCreate)} title="Create agent"
+              className="p-1 rounded border transition-all hover:scale-110"
+              style={{ borderColor: T.accentColor + "40", color: T.accentColor, backgroundColor: T.accentColor + "10" }}>
+              <Plus size={11} />
+            </button>
+          </div>
         </div>
-        <div className="mt-auto px-2 py-2 border-t text-[9px] font-mono" style={{ borderColor: T.borderColor + "20", color: T.textMuted }}>
-          <div className="flex justify-between"><span>Agents</span><span>{allAgents.length}</span></div>
-          <div className="flex justify-between"><span>Msgs</span><span>{messages.length}</span></div>
+
+        {/* Agent list */}
+        <div className="flex-1 overflow-y-auto p-1.5 space-y-1">
+          {allAgents.map(a => {
+            const msgCnt = (chatMap[a.id] || []).length;
+            const isActive = selectedAgent.id === a.id;
+            return (
+              <button key={a.id} onClick={() => switchAgent(a)}
+                className="w-full text-left rounded-lg px-2.5 py-2 transition-all group"
+                style={{
+                  backgroundColor: isActive ? a.color + "12" : "transparent",
+                  border: `1px solid ${isActive ? a.color + "35" : "transparent"}`,
+                  boxShadow: isActive ? `0 0 12px ${a.color}15` : "none",
+                }}>
+                <div className="flex items-center gap-2">
+                  <span className="text-[18px] leading-none shrink-0">{a.icon}</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[11px] font-bold truncate" style={{ color: isActive ? a.color : T.textColor }}>{a.name}</span>
+                      {msgCnt > 0 && (
+                        <span className="text-[9px] font-mono px-1 rounded shrink-0" style={{ background: a.color + "20", color: a.color }}>{msgCnt}</span>
+                      )}
+                    </div>
+                    <div className="text-[9px] truncate mt-0.5" style={{ color: T.textMuted }}>{a.role}</div>
+                  </div>
+                  <span className="w-1.5 h-1.5 rounded-full shrink-0" style={{ backgroundColor: a.color, boxShadow: `0 0 4px ${a.color}`, opacity: isActive ? 1 : 0.3 }} />
+                </div>
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Footer stats */}
+        <div className="border-t px-3 py-2 grid grid-cols-2 gap-1 text-[9px] font-mono" style={{ borderColor: T.borderColor + "15", color: T.textMuted }}>
+          <div><span className="opacity-50">Total msgs</span><br /><span style={{ color: T.accentColor }}>{msgCount}</span></div>
+          <div><span className="opacity-50">Active</span><br /><span style={{ color: "#00ff41" }}>● Live</span></div>
         </div>
       </div>
 
-      {/* Center: Chat */}
+      {/* ── CENTER: CHAT ── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Header */}
-        <div className="flex items-center justify-between px-4 h-10 border-b shrink-0" style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "60" }}>
-          <div className="flex items-center gap-2">
-            <span className="text-lg">{selectedAgent.icon}</span>
+
+        {/* Chat header */}
+        <div className="flex items-center justify-between px-4 h-11 border-b shrink-0" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "50" }}>
+          <div className="flex items-center gap-2.5">
+            <span className="text-xl">{selectedAgent.icon}</span>
             <div>
-              <div className="text-xs font-bold" style={{ color: selectedAgent.color }}>{selectedAgent.name}</div>
-              <div className="text-[9px] opacity-60" style={{ color: T.textMuted }}>{selectedAgent.role}</div>
+              <div className="text-xs font-bold leading-tight" style={{ color: selectedAgent.color }}>{selectedAgent.name}</div>
+              <div className="text-[9px] opacity-60" style={{ color: T.textMuted }}>{selectedAgent.role} · Gemini 2.5</div>
             </div>
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse ml-1" style={{ backgroundColor: selectedAgent.color }} />
           </div>
-          <button onClick={clearChat} className="text-[10px] opacity-50 hover:opacity-100 flex items-center gap-1" style={{ color: T.textMuted }}><Trash2 size={10} /> Clear</button>
+          <div className="flex items-center gap-2">
+            <span className="text-[9px] font-mono hidden sm:block" style={{ color: T.textMuted }}>
+              <MessageSquare size={9} className="inline mr-1 opacity-50" />{messages.length} msgs
+            </span>
+            <button onClick={clearChat} className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border opacity-50 hover:opacity-100 transition-all"
+              style={{ borderColor: T.borderColor + "20", color: T.textMuted }}>
+              <Trash2 size={9} /> Clear
+            </button>
+          </div>
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-3 space-y-3">
+        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && !streaming && (
-            <div className="text-center pt-8">
-              <div className="text-4xl mb-3">{selectedAgent.icon}</div>
+            <div className="flex flex-col items-center justify-center h-full pb-8 text-center">
+              <div className="text-5xl mb-3 opacity-90">{selectedAgent.icon}</div>
               <div className="text-sm font-bold mb-1" style={{ color: selectedAgent.color }}>{selectedAgent.name}</div>
-              <div className="text-xs opacity-60 max-w-sm mx-auto mb-4" style={{ color: T.textMuted }}>{selectedAgent.desc}</div>
-              <div className="flex flex-wrap gap-2 justify-center max-w-lg mx-auto">
+              <div className="text-xs mb-1 opacity-50" style={{ color: T.textMuted }}>{selectedAgent.role}</div>
+              <div className="text-xs max-w-sm mx-auto mb-5 opacity-60 leading-relaxed" style={{ color: T.textMuted }}>{selectedAgent.desc}</div>
+              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
                 {(QUICK[selectedAgent.id] || []).map(q => (
-                  <button key={q} onClick={() => sendMessage(q)} className="px-2.5 py-1 text-[10px] rounded border hover:opacity-80" style={{ borderColor: T.borderColor, color: T.linkColor, backgroundColor: T.bgColor }}>{q}</button>
+                  <button key={q} onClick={() => sendMessage(q)}
+                    className="px-3 py-1.5 text-[10px] rounded-full border transition-all hover:scale-105"
+                    style={{ borderColor: selectedAgent.color + "40", color: selectedAgent.color, backgroundColor: selectedAgent.color + "08" }}>
+                    {q}
+                  </button>
                 ))}
               </div>
             </div>
           )}
+
           {messages.map(msg => (
-            <div key={msg.id} className={`flex ${msg.role === "user" ? "justify-end" : "justify-start"}`}>
-              <div className="max-w-[85%] px-3 py-2 rounded-lg text-xs" style={{
-                backgroundColor: msg.role === "user" ? T.accentColor + "12" : T.boxBg,
-                border: `1px solid ${msg.role === "user" ? T.accentColor + "30" : T.borderColor + "30"}`,
-                color: T.textColor,
-              }}>
-                <div className="text-[9px] font-bold mb-1 flex items-center gap-1" style={{ color: msg.role === "user" ? T.accentColor : T.linkColor }}>
-                  {msg.role === "user" ? "▶ You" : `${selectedAgent.icon} ${selectedAgent.name}`} · {msg.ts}
+            <div key={msg.id} className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
+              {/* Avatar */}
+              <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] mt-0.5"
+                style={{ backgroundColor: msg.role === "user" ? T.accentColor + "20" : selectedAgent.color + "20", border: `1px solid ${msg.role === "user" ? T.accentColor + "40" : selectedAgent.color + "40"}` }}>
+                {msg.role === "user" ? "U" : selectedAgent.icon}
+              </div>
+              {/* Bubble */}
+              <div className="max-w-[80%] space-y-0.5">
+                <div className="text-[9px] font-bold mb-1" style={{ color: msg.role === "user" ? T.accentColor : selectedAgent.color }}>
+                  {msg.role === "user" ? "You" : selectedAgent.name} · {msg.ts}
                 </div>
-                <div className="whitespace-pre-wrap leading-relaxed">{msg.content}</div>
+                <div className="px-3 py-2 rounded-xl text-xs leading-relaxed"
+                  style={{
+                    backgroundColor: msg.role === "user" ? T.accentColor + "10" : T.boxBg,
+                    border: `1px solid ${msg.role === "user" ? T.accentColor + "25" : T.borderColor + "20"}`,
+                    color: T.textColor,
+                    borderTopRightRadius: msg.role === "user" ? "4px" : undefined,
+                    borderTopLeftRadius: msg.role !== "user" ? "4px" : undefined,
+                  }}>
+                  {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
+                </div>
               </div>
             </div>
           ))}
+
           {streaming && (
-            <div className="flex justify-start">
-              <div className="max-w-[85%] px-3 py-2 rounded-lg text-xs" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}30`, color: T.textColor }}>
-                <div className="text-[9px] font-bold mb-1" style={{ color: T.linkColor }}>{selectedAgent.icon} {selectedAgent.name}</div>
-                <div className="whitespace-pre-wrap leading-relaxed">{streaming}<span className="animate-pulse">▊</span></div>
+            <div className="flex gap-2.5">
+              <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] mt-0.5" style={{ backgroundColor: selectedAgent.color + "20", border: `1px solid ${selectedAgent.color}40` }}>{selectedAgent.icon}</div>
+              <div className="max-w-[80%]">
+                <div className="text-[9px] font-bold mb-1" style={{ color: selectedAgent.color }}>{selectedAgent.name} · now</div>
+                <div className="px-3 py-2 rounded-xl text-xs leading-relaxed" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20`, color: T.textColor, borderTopLeftRadius: "4px" }}>
+                  {renderMarkdown(streaming)}<span className="animate-pulse ml-0.5">▊</span>
+                </div>
               </div>
             </div>
           )}
+
           {isLoading && !streaming && (
-            <div className="flex justify-start">
-              <div className="px-3 py-2 rounded-lg text-[11px] flex items-center gap-1.5" style={{ border: `1px solid ${T.borderColor}30`, color: T.linkColor }}>
-                <Loader2 size={12} className="animate-spin" /> {selectedAgent.name} is thinking...
+            <div className="flex gap-2.5">
+              <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px]" style={{ backgroundColor: selectedAgent.color + "20", border: `1px solid ${selectedAgent.color}40` }}>{selectedAgent.icon}</div>
+              <div className="px-3 py-2 rounded-xl text-[11px] flex items-center gap-2" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20`, color: T.linkColor }}>
+                <Loader2 size={11} className="animate-spin" />
+                <span className="opacity-70">{selectedAgent.name} is thinking...</span>
               </div>
             </div>
           )}
@@ -254,88 +394,235 @@ export default function AgentTool() {
         </div>
 
         {/* Input */}
-        <div className="px-4 py-2 border-t shrink-0" style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "60" }}>
-          <div className="flex gap-2">
-            <textarea value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
-              placeholder={`Message ${selectedAgent.name}...`} rows={1} disabled={isLoading}
-              className="flex-1 px-3 py-2 text-sm rounded outline-none resize-none min-h-[40px] max-h-[100px] disabled:opacity-50"
-              style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
+        <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "40" }}>
+          <div className="flex gap-2 items-end">
+            <textarea ref={textareaRef} value={input} onChange={e => setInput(e.target.value)} onKeyDown={handleKey}
+              placeholder={`Message ${selectedAgent.name}... (Enter to send)`}
+              rows={1} disabled={isLoading}
+              className="flex-1 px-3 py-2 text-xs rounded-lg outline-none resize-none overflow-hidden disabled:opacity-50 transition-all"
+              style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor, minHeight: "38px", maxHeight: "120px" }} />
             <button onClick={() => sendMessage()} disabled={!input.trim() || isLoading}
-              className="px-4 py-2 rounded font-bold text-sm disabled:opacity-40 transition-all hover:scale-105"
-              style={{ backgroundColor: T.linkColor, color: T.bgColor }}>
-              <Send size={14} />
+              className="px-3 py-2 rounded-lg font-bold disabled:opacity-30 transition-all hover:scale-105 shrink-0"
+              style={{ backgroundColor: selectedAgent.color, color: "#0a0a0f", minHeight: "38px" }}>
+              <Send size={13} />
             </button>
           </div>
-          <div className="text-[9px] mt-1 opacity-40" style={{ color: T.textMuted }}>Powered by Gemini · Shift+Enter for new line</div>
+          <div className="flex items-center justify-between mt-1.5 px-0.5">
+            <span className="text-[9px] opacity-30" style={{ color: T.textMuted }}>Powered by Gemini 2.5 · Shift+Enter for new line</span>
+            {input.length > 0 && <span className="text-[9px] font-mono opacity-40" style={{ color: T.textMuted }}>{input.length}</span>}
+          </div>
         </div>
       </div>
 
-      {/* Right: Agent info */}
-      <div className="hidden xl:block w-[180px] shrink-0 border-l overflow-y-auto" style={{ borderColor: T.borderColor + "30", backgroundColor: T.boxBg + "60" }}>
-        <div className="p-3 text-center border-b" style={{ borderColor: T.borderColor + "20" }}>
-          <div className="text-3xl mb-1">{selectedAgent.icon}</div>
+      {/* ── RIGHT: AGENT INFO PANEL ── */}
+      <div className="hidden xl:flex w-[190px] shrink-0 border-l flex-col" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "50" }}>
+        {/* Agent hero */}
+        <div className="p-4 text-center border-b" style={{ borderColor: T.borderColor + "15", background: selectedAgent.color + "08" }}>
+          <div className="text-4xl mb-2">{selectedAgent.icon}</div>
           <div className="text-xs font-bold" style={{ color: selectedAgent.color }}>{selectedAgent.name}</div>
-          <div className="text-[9px] opacity-60" style={{ color: T.textMuted }}>{selectedAgent.role}</div>
+          <div className="text-[9px] mt-0.5 opacity-60" style={{ color: T.textMuted }}>{selectedAgent.role}</div>
+          <div className="flex items-center justify-center gap-1 mt-2">
+            <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: selectedAgent.color }} />
+            <span className="text-[9px] font-mono" style={{ color: selectedAgent.color }}>Online</span>
+          </div>
         </div>
-        <div className="p-3">
-          <div className="text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>About</div>
-          <p className="text-[10px] leading-relaxed opacity-70 mb-4" style={{ color: T.textColor }}>{selectedAgent.desc}</p>
-          <div className="text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>System Prompt</div>
-          <p className="text-[9px] opacity-50 leading-relaxed" style={{ color: T.textMuted }}>{selectedAgent.systemPrompt}</p>
+
+        <div className="flex-1 overflow-y-auto p-3 space-y-4">
+          {/* About */}
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.accentColor }}>About</div>
+            <p className="text-[10px] leading-relaxed opacity-70" style={{ color: T.textColor }}>{selectedAgent.desc}</p>
+          </div>
+
+          {/* Capabilities */}
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.accentColor }}>Capabilities</div>
+            <div className="space-y-1">
+              {(CAPABILITIES[selectedAgent.id] || []).map(c => (
+                <div key={c} className="flex items-center gap-1.5 text-[9px]" style={{ color: T.textMuted }}>
+                  <ChevronRight size={9} style={{ color: selectedAgent.color }} />{c}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* System prompt preview */}
+          <div>
+            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.accentColor }}>System Prompt</div>
+            <p className="text-[9px] opacity-40 leading-relaxed line-clamp-6" style={{ color: T.textMuted }}>{selectedAgent.systemPrompt}</p>
+          </div>
+
+          {/* Stats */}
+          <div className="rounded-lg p-2.5 space-y-1.5" style={{ background: "rgba(0,0,0,0.3)", border: `1px solid ${T.borderColor}15` }}>
+            <div className="flex justify-between text-[9px] font-mono">
+              <span style={{ color: T.textMuted }}>Messages</span>
+              <span style={{ color: selectedAgent.color }}>{messages.length}</span>
+            </div>
+            <div className="flex justify-between text-[9px] font-mono">
+              <span style={{ color: T.textMuted }}>Model</span>
+              <span style={{ color: T.accentColor }}>Gemini 2.5</span>
+            </div>
+          </div>
+
+          <button onClick={clearChat}
+            className="w-full text-[10px] py-1.5 rounded border opacity-50 hover:opacity-90 transition-all flex items-center justify-center gap-1"
+            style={{ borderColor: T.borderColor + "20", color: T.textMuted }}>
+            <Trash2 size={9} /> Clear chat
+          </button>
         </div>
       </div>
 
-      {/* Create Agent Modal */}
+      {/* ── CREATE AGENT SLIDE-IN ── */}
       {showCreate && (
-        <div onClick={() => setShowCreate(false)} className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.85)" }}>
-          <div onClick={e => e.stopPropagation()} className="max-w-md w-full rounded-lg border p-5 space-y-3" style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}>
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-bold" style={{ color: T.headerColor }}>Create Agent</h2>
-              <button onClick={() => setShowCreate(false)} className="text-lg" style={{ color: T.textColor }}>✕</button>
+        <div className="fixed inset-0 z-50 flex justify-end" style={{ backgroundColor: "rgba(0,0,0,0.6)" }} onClick={() => setShowCreate(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-sm h-full overflow-y-auto flex flex-col"
+            style={{ backgroundColor: T.boxBg, borderLeft: `1px solid ${T.borderColor}30` }}>
+            <div className="px-5 py-4 border-b flex items-center justify-between shrink-0" style={{ borderColor: T.borderColor + "20" }}>
+              <div>
+                <h2 className="text-sm font-bold" style={{ color: T.headerColor }}>Build Agent</h2>
+                <p className="text-[9px] opacity-50 mt-0.5" style={{ color: T.textMuted }}>Create a custom AI specialist</p>
+              </div>
+              <button onClick={() => setShowCreate(false)} className="opacity-50 hover:opacity-100"><X size={14} style={{ color: T.textColor }} /></button>
             </div>
-            {createError && <div className="text-[11px] px-2 py-1.5 rounded border" style={{ borderColor: "#f85149", color: "#f85149", backgroundColor: "#f8514910" }}>{createError}</div>}
-            <div className="space-y-2">
-              <div>
-                <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Name</label>
-                <input value={createForm.name} onChange={e => setCreateForm({ ...createForm, name: e.target.value })} placeholder="e.g. Crypto Analyst" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
+
+            <div className="p-5 space-y-4 flex-1">
+              {/* Live preview */}
+              <div className="rounded-lg p-3 text-center" style={{ background: T.accentColor + "08", border: `1px solid ${T.accentColor}20` }}>
+                <div className="text-2xl mb-1">{createForm.icon || "🤖"}</div>
+                <div className="text-xs font-bold" style={{ color: T.accentColor }}>{createForm.name || "Agent Name"}</div>
+                <div className="text-[9px] opacity-50 mt-0.5" style={{ color: T.textMuted }}>{createForm.category}</div>
               </div>
+
+              {createError && <div className="text-[11px] px-3 py-2 rounded border" style={{ borderColor: "#f85149", color: "#f85149", backgroundColor: "#f8514910" }}>{createError}</div>}
+
+              {[
+                { key: "name",        label: "Name",          placeholder: "e.g. Crypto Analyst",         type: "input" },
+                { key: "slug",        label: "Slug (URL ID)", placeholder: "crypto-analyst",              type: "input" },
+                { key: "description", label: "Description",   placeholder: "Short description...",        type: "input" },
+                { key: "personality", label: "Personality",   placeholder: "Bold, analytical, direct...", type: "input" },
+                { key: "icon",        label: "Icon (emoji)",  placeholder: "🤖",                          type: "input" },
+              ].map(f => (
+                <div key={f.key}>
+                  <label className="block text-[9px] uppercase tracking-widest mb-1 font-bold" style={{ color: T.accentColor }}>{f.label}</label>
+                  <input value={createForm[f.key as keyof typeof createForm]}
+                    onChange={e => setCreateForm({ ...createForm, [f.key]: e.target.value })}
+                    placeholder={f.placeholder}
+                    className="w-full px-3 py-2 text-xs rounded-lg outline-none"
+                    style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
+                </div>
+              ))}
+
               <div>
-                <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Slug (URL ID)</label>
-                <input value={createForm.slug} onChange={e => setCreateForm({ ...createForm, slug: e.target.value })} placeholder="crypto-analyst" className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
-              </div>
-              <div>
-                <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Category</label>
-                <select value={createForm.category} onChange={e => setCreateForm({ ...createForm, category: e.target.value })} className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }}>
+                <label className="block text-[9px] uppercase tracking-widest mb-1 font-bold" style={{ color: T.accentColor }}>Category</label>
+                <select value={createForm.category} onChange={e => setCreateForm({ ...createForm, category: e.target.value })}
+                  className="w-full px-3 py-2 text-xs rounded-lg outline-none"
+                  style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }}>
                   {["general","developer","marketing","analytics","content","design","research","legal"].map(c => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
+
               <div>
-                <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Description</label>
-                <input value={createForm.description} onChange={e => setCreateForm({ ...createForm, description: e.target.value })} placeholder="Short description..." className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
+                <label className="block text-[9px] uppercase tracking-widest mb-1 font-bold" style={{ color: T.accentColor }}>System Prompt *</label>
+                <textarea value={createForm.systemPrompt} onChange={e => setCreateForm({ ...createForm, systemPrompt: e.target.value })}
+                  placeholder="You are Crypto Analyst, a specialist in blockchain markets..."
+                  rows={5}
+                  className="w-full px-3 py-2 text-xs rounded-lg outline-none resize-none"
+                  style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
               </div>
-              <div>
-                <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>System Prompt *</label>
-                <textarea value={createForm.systemPrompt} onChange={e => setCreateForm({ ...createForm, systemPrompt: e.target.value })} placeholder="You are Crypto Analyst, a specialist in blockchain markets..." rows={3} className="w-full px-2 py-1.5 text-xs rounded outline-none resize-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Personality</label>
-                  <input value={createForm.personality} onChange={e => setCreateForm({ ...createForm, personality: e.target.value })} placeholder="Bold, analytical..." className="w-full px-2 py-1.5 text-xs rounded outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
-                </div>
-                <div>
-                  <label className="block text-[9px] uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Icon</label>
-                  <input value={createForm.icon} onChange={e => setCreateForm({ ...createForm, icon: e.target.value })} placeholder="🤖" className="w-full px-2 py-1.5 text-xs rounded outline-none text-center" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }} />
-                </div>
-              </div>
+
               <button onClick={handleCreate} disabled={creating}
-                className="w-full py-2 text-xs font-bold rounded disabled:opacity-50"
-                style={{ backgroundColor: T.linkColor, color: T.bgColor }}>
-                {creating ? "Creating..." : "Create Agent"}
+                className="w-full py-2.5 text-xs font-bold rounded-lg disabled:opacity-40 transition-all hover:scale-[1.02]"
+                style={{ backgroundColor: T.accentColor, color: "#0a0a0f" }}>
+                {creating ? "Creating..." : "✦ Create Agent"}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      {/* ── BOARDROOM MODAL ── */}
+      {showBoardroom && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ backgroundColor: "rgba(0,0,0,0.85)" }} onClick={() => setShowBoardroom(false)}>
+          <div onClick={e => e.stopPropagation()} className="w-full max-w-2xl rounded-xl border overflow-hidden"
+            style={{ backgroundColor: T.boxBg, borderColor: T.linkColor + "30" }}>
+
+            {/* Header */}
+            <div className="px-5 py-3.5 border-b flex items-center justify-between" style={{ borderColor: T.borderColor + "20", background: T.linkColor + "08" }}>
+              <div className="flex items-center gap-2">
+                <Swords size={14} style={{ color: T.linkColor }} />
+                <span className="text-sm font-bold" style={{ color: T.linkColor }}>Agent Boardroom</span>
+                <span className="text-[9px] opacity-50 ml-1" style={{ color: T.textMuted }}>Two agents debate any topic</span>
+              </div>
+              <button onClick={() => setShowBoardroom(false)}><X size={14} style={{ color: T.textMuted }} /></button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              {/* Config */}
+              {!brRunning && brLog.length === 0 && (
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Agent A</label>
+                    <select value={brAgentA} onChange={e => setBrAgentA(e.target.value)} className="w-full px-2 py-1.5 text-xs rounded-lg outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }}>
+                      {allAgents.map(a => <option key={a.id} value={a.id}>{a.icon} {a.name}</option>)}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Agent B</label>
+                    <select value={brAgentB} onChange={e => setBrAgentB(e.target.value)} className="w-full px-2 py-1.5 text-xs rounded-lg outline-none" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }}>
+                      {allAgents.filter(a => a.id !== brAgentA).map(a => <option key={a.id} value={a.id}>{a.icon} {a.name}</option>)}
+                    </select>
+                  </div>
+                </div>
+              )}
+              {!brRunning && brLog.length === 0 && (
+                <div>
+                  <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Debate Topic</label>
+                  <input value={brTopic} onChange={e => setBrTopic(e.target.value)}
+                    placeholder="e.g. Should startups use AI from day one?"
+                    onKeyDown={e => { if (e.key === "Enter") runBoardroom(); }}
+                    className="w-full px-3 py-2 text-xs rounded-lg outline-none"
+                    style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
+                  <button onClick={runBoardroom} disabled={!brTopic.trim()}
+                    className="mt-3 w-full py-2 text-xs font-bold rounded-lg disabled:opacity-40 transition-all"
+                    style={{ backgroundColor: T.linkColor, color: "#0a0a0f" }}>
+                    ⚔️ Start Debate (3 rounds)
+                  </button>
+                </div>
+              )}
+
+              {/* Log */}
+              {(brRunning || brLog.length > 0) && (
+                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                  {brLog.map((entry, i) => (
+                    <div key={i} className="flex gap-2.5">
+                      <span className="text-xl shrink-0">{entry.icon}</span>
+                      <div className="flex-1">
+                        <div className="text-[9px] font-bold mb-1" style={{ color: entry.color }}>{entry.agent}</div>
+                        <div className="text-[11px] leading-relaxed px-3 py-2 rounded-lg" style={{ backgroundColor: entry.color + "08", border: `1px solid ${entry.color}20`, color: T.textColor }}>
+                          {entry.text}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                  {brRunning && (
+                    <div className="flex items-center gap-2 text-[11px]" style={{ color: T.linkColor }}>
+                      <Loader2 size={12} className="animate-spin" /> Agents deliberating...
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {!brRunning && brLog.length > 0 && (
+                <button onClick={() => setBrLog([])} className="text-[10px] opacity-50 hover:opacity-100 transition-all" style={{ color: T.textMuted }}>
+                  ↺ New debate
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
     </div>
   );
 }
+
