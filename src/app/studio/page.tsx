@@ -7,33 +7,46 @@ import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
 import dynamic from "next/dynamic";
 import { Zap, Command, Monitor, Coins } from "lucide-react";
 import StudioSidebar, { StudioTool } from "./components/StudioSidebar";
+import { llmHealth } from "@/lib/llm";
 
 /* Lazy-load tools to keep bundle reasonable */
 const ImageTool  = dynamic(() => import("./tools/ImageTool"), { ssr: false });
 const VideoTool  = dynamic(() => import("./tools/VideoTool"), { ssr: false });
 const AudioTool  = dynamic(() => import("./tools/AudioTool"), { ssr: false });
 const AgentTool  = dynamic(() => import("./tools/AgentTool"), { ssr: false });
+const AgentsTerminalTool = dynamic(() => import("./tools/AgentsTerminalTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("./tools/GalleryTool"), { ssr: false });
 const SpaceTool  = dynamic(() => import("./tools/SpaceTool"), { ssr: false });
 
 /* ------------------------------------------------------------------ */
 /*  Model Badge — shows active provider per tool                        */
 /* ------------------------------------------------------------------ */
-const MODEL_MAP: Record<StudioTool, { label: string; provider: string; color: string }> = {
-  image:   { label: "FLUX Schnell", provider: "Pollinations", color: "#00ff41" },
-  video:   { label: "Wan 2.1", provider: "Pollinations", color: "#ff6b6b" },
-  audio:   { label: "TTS / Music", provider: "Pollinations", color: "#9b59b6" },
-  agents:  { label: "Gemini 2.5", provider: "Google", color: "#ffff00" },
-  gallery: { label: "Asset Bucket", provider: "Local", color: "#d2a8ff" },
-  space:   { label: "MiniMax Space", provider: "MiniMax", color: "#ff6b35" },
+const STATIC_MODEL_MAP: Record<StudioTool, { provider: string; color: string }> = {
+  image:   { provider: "Pollinations", color: "#00ff41" },
+  video:   { provider: "Pollinations", color: "#ff6b6b" },
+  audio:   { provider: "Pollinations", color: "#9b59b6" },
+  agents:  { provider: "Google", color: "#ffff00" },
+  terminal:{ provider: "Google", color: "#00ffff" },
+  gallery: { provider: "Local", color: "#d2a8ff" },
+  space:   { provider: "MiniMax", color: "#ff6b35" },
 };
 
 function ModelBadge({ tool, T }: { tool: StudioTool; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const info = MODEL_MAP[tool];
+  const info = STATIC_MODEL_MAP[tool];
+  const health = useMemo(() => llmHealth(), []);
+  // Dynamic label: use real model from llm.ts health check for agent tools
+  const label = (tool === "agents" || tool === "terminal")
+    ? health.gemini.model.replace("gemini-", "Gemini ")
+    : tool === "image"   ? "FLUX Schnell"
+    : tool === "video"   ? "Wan 2.1"
+    : tool === "audio"   ? "TTS / Music"
+    : tool === "gallery" ? "Asset Bucket"
+    : tool === "space"   ? "MiniMax Space"
+    : info.provider;
   return (
     <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold" style={{ backgroundColor: info.color + "12", border: `1px solid ${info.color}25`, color: info.color }}>
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: info.color }} />
-      {info.provider} · {info.label}
+      {info.provider} · {label}
     </div>
   );
 }
@@ -65,12 +78,13 @@ function StatusTicker({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] 
 /* ------------------------------------------------------------------ */
 const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
   switch (tool) {
-    case "image":   return <ImageTool />;
-    case "video":   return <VideoTool />;
-    case "audio":   return <AudioTool />;
-    case "agents":  return <AgentTool />;
-    case "gallery": return <GalleryTool />;
-    case "space":   return <SpaceTool />;
+    case "image":    return <ImageTool />;
+    case "video":    return <VideoTool />;
+    case "audio":    return <AudioTool />;
+    case "agents":   return <AgentTool />;
+    case "terminal": return <AgentsTerminalTool />;
+    case "gallery":  return <GalleryTool />;
+    case "space":    return <SpaceTool />;
     default:         return <ImageTool />;
   }
 });
@@ -86,9 +100,9 @@ function StudioInner() {
 
   const [crtEnabled, setCrtEnabled] = useState(true);
 
-  const toolParam = searchParams.get("tool") as StudioTool | null;
+const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
-    toolParam && ["image", "video", "audio", "agents", "gallery", "space"].includes(toolParam)
+    toolParam && ["image", "video", "audio", "agents", "terminal", "gallery", "space"].includes(toolParam)
       ? toolParam
       : "image";
 
@@ -107,8 +121,9 @@ function StudioInner() {
           "2": "video",
           "3": "audio",
           "4": "agents",
-          "5": "gallery",
-          "6": "space",
+          "5": "terminal",
+          "6": "gallery",
+          "7": "space",
         };
         if (map[e.key]) {
           e.preventDefault();

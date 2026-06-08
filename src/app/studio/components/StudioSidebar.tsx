@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Image, Film, Music, LayoutGrid, Bot, Rocket,
-  ChevronLeft, ChevronRight, Zap, Sparkles
+  ChevronLeft, ChevronRight, Zap, Sparkles, Terminal
 } from "lucide-react";
 
-export type StudioTool = "image" | "video" | "audio" | "agents" | "gallery" | "space";
+export type StudioTool = "image" | "video" | "audio" | "agents" | "terminal" | "gallery" | "space";
 
 type ToolItem = { id: StudioTool; label: string; icon: typeof Image; shortcut: string };
 
@@ -18,15 +18,16 @@ const CREATE_TOOLS: ToolItem[] = [
 ];
 
 const AI_TOOLS: ToolItem[] = [
-  { id: "agents", label: "Agents", icon: Bot, shortcut: "4" },
+  { id: "agents",  label: "Agents",  icon: Bot,      shortcut: "4" },
+  { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "5" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "5" },
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "6" },
 ];
 
 const EXTERNAL_TOOLS: ToolItem[] = [
-  { id: "space", label: "Space", icon: Rocket, shortcut: "6" },
+  { id: "space", label: "Space", icon: Rocket, shortcut: "7" },
 ];
 
 function ToolGroup({
