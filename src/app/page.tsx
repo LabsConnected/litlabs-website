@@ -8,7 +8,7 @@ import { useAuth } from "@clerk/nextjs";
 import { AGENT_AVATARS } from "@/lib/avatars";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 import { useMounted } from "@/hooks/useMounted";
-import { Zap, Wrench, ShoppingBag, Bot, Heart, MessageCircle, Share2, Send, Image as ImageIcon, Flame, Clock, Users, X as XIcon, ChevronDown } from "lucide-react";
+import { Zap, Wrench, ShoppingBag, Bot, Heart, MessageCircle, Share2, Send, Image as ImageIcon, Flame, Clock, Users, X as XIcon, ChevronDown, Palette, Monitor, Music } from "lucide-react";
 
 /* ── Social Feed Types ── */
 interface PostAuthor { name: string; username: string; avatar_url: string; is_ai?: boolean; }
@@ -648,77 +648,6 @@ export default function LandingPage() {
       {/* CRT Overlay */}
       {crtEnabled && <div className="crt-overlay" />}
 
-      {/* ── TOP CONTROLS ── */}
-      <header className="relative z-10 border-b glass-card" style={{ borderColor: "rgba(255,255,255,0.06)", borderRadius: 0, borderWidth: '0 0 1px 0' }}>
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-2 sm:py-3 flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2">
-            <button onClick={() => setShowThemeEditor(!showThemeEditor)} className="btn btn-ghost text-xs hover-lift" style={{ color: resolvedColors.textMuted }}>
-              {showThemeEditor ? "Hide" : "Theme"} Editor
-            </button>
-            <button onClick={() => setCrtEnabled(!crtEnabled)} className="btn btn-ghost text-xs hover-lift" style={{ color: resolvedColors.textMuted }}>
-              CRT: {crtEnabled ? "ON" : "OFF"}
-            </button>
-          </div>
-
-          {/* Playlist selector */}
-          <div className="flex items-center gap-1 flex-wrap">
-            <span className="font-mono text-[11px] text-muted mr-1 hidden sm:inline">Audio</span>
-            {[
-              { name: "Cyberpunk", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX0r3x8OtiYiJ" },
-              { name: "Coding", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX5trt9i14XVe" },
-              { name: "Synthwave", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX9Z3vMB2b8im" }
-            ].map(p => (
-              <button key={p.name} onClick={() => setMusicUrl(p.url)}
-                className="btn btn-ghost text-[11px] hover-lift"
-                style={{ color: musicUrl === p.url ? resolvedColors.accentColor : resolvedColors.textMuted }}>
-                {p.name}
-              </button>
-            ))}
-          </div>
-        </div>
-      </header>
-
-      {/* ── THEME EDITOR DRAWER ── */}
-      {showThemeEditor && (
-        <div className="relative z-10 border-b" style={{ borderColor: "rgba(255,255,255,0.06)", background: "rgba(15,15,23,0.9)", backdropFilter: "blur(16px)" }}>
-          <div className="max-w-7xl mx-auto px-6 py-4">
-            <div className="grid md:grid-cols-2 gap-6">
-              <div>
-                <p className="section-eyebrow mb-3">Display Mode</p>
-                <div className="flex gap-3">
-                  {(["dark", "light"] as const).map(m => (
-                    <button key={m} onClick={() => setMode(m)}
-                      className="btn text-xs"
-                      style={{
-                        background: theme.mode === m ? resolvedColors.linkColor : "transparent",
-                        color: theme.mode === m ? "#0a0a0f" : resolvedColors.textColor,
-                        borderColor: theme.mode === m ? resolvedColors.linkColor : "rgba(255,255,255,0.1)"
-                      }}>
-                      {m === "dark" ? "Dark" : "Light"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-              <div>
-                <p className="section-eyebrow mb-3">Skin Preset</p>
-                <div className="flex flex-wrap gap-2">
-                  {skinPresets.map(skin => (
-                    <button key={skin} onClick={() => setSkin(skin)}
-                      className="btn text-[11px]"
-                      style={{
-                        background: theme.skin === skin ? resolvedColors.accentColor : "transparent",
-                        color: theme.skin === skin ? "#0a0a0f" : resolvedColors.textColor,
-                        borderColor: theme.skin === skin ? resolvedColors.accentColor : "rgba(255,255,255,0.1)"
-                      }}>
-                      {skin}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* ── MAIN CONTENT ── */}
       <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">
@@ -753,9 +682,48 @@ export default function LandingPage() {
                   <p className="font-display text-[9px] uppercase tracking-widest mb-1" style={{ color: resolvedColors.textMuted }}>Visitor Counter</p>
                   <p className="font-mono text-2xl font-bold" style={{ color: resolvedColors.success }}>{visitorCount.toLocaleString()}</p>
                 </div>
-                <Link href="/profile" className="btn btn-secondary w-full text-xs">
-                  My Profile →
-                </Link>
+                <div className="w-full flex items-center gap-2">
+                  <Link href="/profile" className="btn btn-secondary flex-1 text-xs">My Profile →</Link>
+                  <button onClick={() => setShowThemeEditor(!showThemeEditor)} title="Theme Editor"
+                    className="p-2 rounded border transition-all hover:scale-110"
+                    style={{ borderColor: showThemeEditor ? resolvedColors.accentColor + "60" : resolvedColors.borderColor + "30", color: showThemeEditor ? resolvedColors.accentColor : resolvedColors.textMuted, backgroundColor: showThemeEditor ? resolvedColors.accentColor + "10" : "transparent" }}>
+                    <Palette size={13} />
+                  </button>
+                  <button onClick={() => setCrtEnabled(!crtEnabled)} title={`CRT ${crtEnabled ? "ON" : "OFF"}`}
+                    className="p-2 rounded border transition-all hover:scale-110"
+                    style={{ borderColor: crtEnabled ? resolvedColors.linkColor + "60" : resolvedColors.borderColor + "30", color: crtEnabled ? resolvedColors.linkColor : resolvedColors.textMuted, backgroundColor: crtEnabled ? resolvedColors.linkColor + "10" : "transparent" }}>
+                    <Monitor size={13} />
+                  </button>
+                </div>
+                {/* Theme Editor inline panel */}
+                {showThemeEditor && (
+                  <div className="w-full rounded-lg p-3 space-y-3" style={{ background: "rgba(0,0,0,0.3)", border: `1px solid ${resolvedColors.accentColor}20` }}>
+                    <div>
+                      <p className="text-[9px] font-mono uppercase tracking-widest mb-2" style={{ color: resolvedColors.textMuted }}>Mode</p>
+                      <div className="flex gap-2">
+                        {(["dark", "light"] as const).map(m => (
+                          <button key={m} onClick={() => setMode(m)}
+                            className="flex-1 text-[10px] font-bold py-1 rounded border transition-all"
+                            style={{ background: theme.mode === m ? resolvedColors.linkColor : "transparent", color: theme.mode === m ? "#0a0a0f" : resolvedColors.textMuted, borderColor: theme.mode === m ? resolvedColors.linkColor : resolvedColors.borderColor + "30" }}>
+                            {m === "dark" ? "🌙 Dark" : "☀️ Light"}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div>
+                      <p className="text-[9px] font-mono uppercase tracking-widest mb-2" style={{ color: resolvedColors.textMuted }}>Skin</p>
+                      <div className="flex flex-wrap gap-1">
+                        {skinPresets.map(skin => (
+                          <button key={skin} onClick={() => setSkin(skin)}
+                            className="text-[9px] font-bold px-2 py-0.5 rounded border transition-all capitalize"
+                            style={{ background: theme.skin === skin ? resolvedColors.accentColor : "transparent", color: theme.skin === skin ? "#0a0a0f" : resolvedColors.textMuted, borderColor: theme.skin === skin ? resolvedColors.accentColor : resolvedColors.borderColor + "20" }}>
+                            {skin}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -780,8 +748,20 @@ export default function LandingPage() {
             {musicUrl && (
               <div className="card glass-card glow-box">
                 <div className="card-header">
-                  <div className="card-title"><span className="dot" />Audio Deck</div>
-                  <span className="status-dot online" />
+                  <div className="card-title"><span className="dot" /><Music size={11} className="inline mr-1" />Audio Deck</div>
+                  <div className="flex items-center gap-1">
+                    {[
+                      { name: "Cyber", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX0r3x8OtiYiJ" },
+                      { name: "Code", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX5trt9i14XVe" },
+                      { name: "Synth", url: "https://open.spotify.com/embed/playlist/37i9dQZF1DX9Z3vMB2b8im" },
+                    ].map(p => (
+                      <button key={p.name} onClick={() => setMusicUrl(p.url)}
+                        className="text-[9px] font-bold px-1.5 py-0.5 rounded border transition-all"
+                        style={{ background: musicUrl === p.url ? resolvedColors.accentColor + "20" : "transparent", color: musicUrl === p.url ? resolvedColors.accentColor : resolvedColors.textMuted, borderColor: musicUrl === p.url ? resolvedColors.accentColor + "40" : "transparent" }}>
+                        {p.name}
+                      </button>
+                    ))}
+                  </div>
                 </div>
                 {/* Visualizer bars */}
                 <div className="flex items-end justify-center gap-0.5 h-8 mb-3 px-2">
