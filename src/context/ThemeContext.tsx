@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useContext, useState, useEffect, ReactNode } from "react";
+import { createContext, useContext, useState, useEffect, useCallback, ReactNode } from "react";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
 
 // Skin presets
@@ -506,3 +506,25 @@ export const ACCENT_MAP: Record<AccentColor, { hex: string }> = {
 };
 
 export { darkSkins, lightSkins, accentOverrides };
+
+/* ------------------------------------------------------------------ */
+/*  Global CRT Toggle — single source of truth for scanline overlay    */
+/* ------------------------------------------------------------------ */
+export function useCrtToggle() {
+  const [crtEnabled, setCrtEnabled] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
+
+  useEffect(() => {
+    const val = localStorage.getItem("crt_global_scanlines");
+    setCrtEnabled(val === null ? true : val === "true");
+    setHydrated(true);
+  }, []);
+
+  const toggleCrt = useCallback((next?: boolean) => {
+    const nextVal = next !== undefined ? next : !crtEnabled;
+    setCrtEnabled(nextVal);
+    localStorage.setItem("crt_global_scanlines", String(nextVal));
+  }, [crtEnabled]);
+
+  return { crtEnabled: hydrated ? crtEnabled : true, toggleCrt };
+}

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense, memo, useMemo } from "react";
+import { useEffect, Suspense, memo, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
@@ -8,6 +8,8 @@ import dynamic from "next/dynamic";
 import { Zap, Command, Monitor, Coins } from "lucide-react";
 import StudioSidebar, { StudioTool } from "./components/StudioSidebar";
 import { llmHealth } from "@/lib/llm";
+import { MEDIA_PROVIDERS } from "@/lib/media";
+import { useCrtToggle } from "@/context/ThemeContext";
 
 /* Lazy-load tools to keep bundle reasonable */
 const ImageTool  = dynamic(() => import("./tools/ImageTool"), { ssr: false });
@@ -22,13 +24,13 @@ const SpaceTool  = dynamic(() => import("./tools/SpaceTool"), { ssr: false });
 /*  Model Badge — shows active provider per tool                        */
 /* ------------------------------------------------------------------ */
 const STATIC_MODEL_MAP: Record<StudioTool, { provider: string; color: string }> = {
-  image:   { provider: "Pollinations", color: "#00ff41" },
-  video:   { provider: "Pollinations", color: "#ff6b6b" },
-  audio:   { provider: "Pollinations", color: "#9b59b6" },
-  agents:  { provider: "Google", color: "#ffff00" },
-  terminal:{ provider: "Google", color: "#00ffff" },
-  gallery: { provider: "Local", color: "#d2a8ff" },
-  space:   { provider: "MiniMax", color: "#ff6b35" },
+  image:   { provider: "FLUX Schnell", color: "#00ff41" },
+  video:   { provider: "Wan 2.1", color: "#ff6b6b" },
+  audio:   { provider: "TTS / Music", color: "#9b59b6" },
+  agents:  { provider: "Gemini 2.5 Flash", color: "#ffff00" },
+  terminal:{ provider: "Gemini 2.5 Flash", color: "#00ffff" },
+  gallery: { provider: "Asset Bucket", color: "#d2a8ff" },
+  space:   { provider: "MiniMax Space", color: "#ff6b35" },
 };
 
 function ModelBadge({ tool, T }: { tool: StudioTool; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
@@ -36,17 +38,21 @@ function ModelBadge({ tool, T }: { tool: StudioTool; T: ReturnType<typeof useThe
   const health = useMemo(() => llmHealth(), []);
   // Dynamic label: use real model from llm.ts health check for agent tools
   const label = (tool === "agents" || tool === "terminal")
-    ? health.gemini.model.replace("gemini-", "Gemini ")
-    : tool === "image"   ? "FLUX Schnell"
+    ? health.gemini.model.replace("gemini-", "Gemini ").replace("openrouter/", "OR ")
+    : tool === "image"   ? MEDIA_PROVIDERS.find(p => p.id === "together")?.label.split(" ")[0] ?? "FLUX" + " Schnell"
     : tool === "video"   ? "Wan 2.1"
     : tool === "audio"   ? "TTS / Music"
     : tool === "gallery" ? "Asset Bucket"
     : tool === "space"   ? "MiniMax Space"
     : info.provider;
+  // Dynamic provider name for agents/terminal from health check
+  const providerLabel = (tool === "agents" || tool === "terminal")
+    ? health.gemini.available ? "Google Gemini" : health.openrouter.available ? "OpenRouter" : "Unavailable"
+    : info.provider;
   return (
     <div className="flex items-center gap-1.5 px-2 py-0.5 rounded-md text-[9px] font-bold" style={{ backgroundColor: info.color + "12", border: `1px solid ${info.color}25`, color: info.color }}>
       <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: info.color }} />
-      {info.provider} · {label}
+      {providerLabel} · {label}
     </div>
   );
 }
@@ -97,20 +103,13 @@ function StudioInner() {
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useAuth();
+  const { crtEnabled, toggleCrt } = useCrtToggle();
 
-  const [crtEnabled, setCrtEnabled] = useState(true);
-
-const toolParam = searchParams.get("tool") as StudioTool | null;
+  const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
     toolParam && ["image", "video", "audio", "agents", "terminal", "gallery", "space"].includes(toolParam)
       ? toolParam
       : "image";
-
-  /* Load CRT preference */
-  useEffect(() => {
-    const val = localStorage.getItem("crt_global_scanlines");
-    if (val !== null) setCrtEnabled(val === "true");
-  }, []);
 
   /* Keyboard shortcuts */
   useEffect(() => {
@@ -196,7 +195,7 @@ const toolParam = searchParams.get("tool") as StudioTool | null;
 
               {/* CRT toggle */}
               <button
-                onClick={() => { const next = !crtEnabled; setCrtEnabled(next); localStorage.setItem("crt_global_scanlines", String(next)); }}
+                onClick={() => toggleCrt()}
                 className="flex items-center gap-1 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded transition-all hover:opacity-80"
                 style={{
                   backgroundColor: crtEnabled ? T.accentColor + "12" : "transparent",
