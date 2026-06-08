@@ -15,19 +15,33 @@ export const maxDuration = 60;
  */
 async function handler(req: NextRequest) {
   try {
-    const { message, systemPrompt, task, stream = false, preferFree } = await req.json();
-    if (!message) {
-      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    const body = await req.json();
+    const { systemPrompt, task, stream = false, preferFree } = body;
+
+    /* Support both single message and multi-turn history array */
+    let prompt: string;
+    if (Array.isArray(body.messages) && body.messages.length > 0) {
+      /* Flatten history into a single prompt Gemini can understand */
+      prompt = body.messages
+        .map((m: { role: string; content: string }) =>
+          `${m.role === "user" ? "User" : "Assistant"}: ${m.content}`
+        )
+        .join("\n\n");
+    } else if (typeof body.message === "string") {
+      prompt = body.message;
+    } else {
+      return NextResponse.json({ error: "Missing message or messages" }, { status: 400 });
     }
 
     if (!stream) {
       const r = await generateText(
-        message,
+        prompt,
         { task: task || "chat", preferFree: !!preferFree, maxTokens: 2048 },
         systemPrompt,
       );
       return NextResponse.json({
         response: r.text,
+        text: r.text,
         provider: r.provider,
         model: r.model,
         latencyMs: r.latencyMs,
@@ -35,13 +49,13 @@ async function handler(req: NextRequest) {
       });
     }
 
-    // Streaming response
+    /* Streaming SSE response */
     const encoder = new TextEncoder();
     const sse = new ReadableStream({
       async start(controller) {
         try {
           const r = await streamText(
-            message,
+            prompt,
             (chunk) => {
               controller.enqueue(encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`));
             },
