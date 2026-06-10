@@ -1,14 +1,19 @@
 "use client";
 
-import { useAuth, useUser, UserButton, SignInButton } from "@clerk/nextjs";
+import { useUser, UserButton, SignInButton } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 type NavAuthProps = {
   linkColor?: string;
 };
 
 export function NavAuth({ linkColor = "#ff0080" }: NavAuthProps) {
-  const { isSignedIn, isLoaded } = useAuth();
-  const { user } = useUser();
+  const { isSignedIn, isLoaded } = useClerkAuth();
+  let user = null;
+  try {
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    ({ user } = useUser());
+  } catch { user = null; }
 
   if (!isLoaded) {
     return (
