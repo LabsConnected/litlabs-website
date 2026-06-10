@@ -23,7 +23,7 @@ export default function AIBuilder() {
   const messagesEndRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages, streamingMessage]);
 
   const systemPrompt = `You are the LitLabs Hive Mind -- an AI architect and code generator. You help build and improve the LitLabs platform.

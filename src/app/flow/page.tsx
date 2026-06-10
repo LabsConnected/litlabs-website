@@ -43,7 +43,7 @@ export default function FlowPage() {
   const bottomRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [terminalLogs]);
 
   const logTerminal = (msg: string) => {

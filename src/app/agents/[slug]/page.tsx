@@ -46,7 +46,7 @@ export default function AgentDetail() {
   }, [slug]);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [chatMessages]);
 
   async function sendChat() {

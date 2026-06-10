@@ -53,7 +53,7 @@ export default function AgentChat() {
   }, []);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
   const generateWorld = useCallback(async (prompt: string) => {
