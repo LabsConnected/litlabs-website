@@ -352,8 +352,8 @@ a:hover {
 }
 
 @keyframes ping {
-  0%   { transform: scale(1);   opacity: 0.5; }
-  80%, 100% { transform: scale(2.2); opacity: 0; }
+  0%   { transform: scale(1) translateZ(0);   opacity: 0.5; }
+  80%, 100% { transform: scale(2.2) translateZ(0); opacity: 0; }
 }
 
 /* ============================================================
@@ -431,7 +431,7 @@ a:hover {
 }
 
 .animate-float { animation: float 4s ease-in-out infinite; will-change: transform; transform: translateZ(0); }
-.animate-glow  { animation: glow 2.5s ease-in-out infinite; will-change: opacity; }
+.animate-glow  { animation: glow 2.5s ease-in-out infinite; will-change: opacity; transform: translateZ(0); }
 .animate-marquee { animation: marquee 30s linear infinite; will-change: transform; transform: translateZ(0); }
 .animate-pulse-opacity { animation: pulse-opacity 2s ease-in-out infinite; will-change: opacity; }
 
@@ -1144,6 +1144,7 @@ a:hover {
 .typewriter-cursor::after {
   content: '|';
   animation: blink 1s step-end infinite;
+  will-change: opacity;
   color: var(--accent-color);
   margin-left: 2px;
 }
@@ -1511,6 +1512,8 @@ body, #__next, main {
 /* Status dot pulse animation */
 .status-dot {
   animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+  will-change: opacity;
+  transform: translateZ(0);
 }
 
 @keyframes pulse {

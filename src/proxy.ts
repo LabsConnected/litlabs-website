@@ -36,17 +36,6 @@ export default clerkMiddleware(async (auth, req) => {
     response.headers.set("Cache-Control", "no-store, must-revalidate");
   }
 
-  // Security headers
-  response.headers.set("X-Content-Type-Options", "nosniff");
-  response.headers.set("X-Frame-Options", "DENY");
-  response.headers.set("X-XSS-Protection", "1; mode=block");
-  response.headers.set("Strict-Transport-Security", "max-age=31536000; includeSubDomains");
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
-  const supabaseHost = supabaseUrl ? new URL(supabaseUrl).host : "";
-  response.headers.set(
-    "Content-Security-Policy",
-    `default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.com https://*.clerk.accounts.dev https://*.stripe.com https://js.stripe.com; style-src 'self' 'unsafe-inline' https://*.clerk.com; connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.stripe.com${supabaseHost ? ` https://${supabaseHost}` : ""}; img-src 'self' data: blob: https://*.unsplash.com https://*.clerk.com; font-src 'self' https://*.clerk.com; frame-src 'self' https://*.stripe.com https://js.stripe.com;`
-  );
   response.headers.set("Vary", "Accept-Encoding");
 
   // Protect private routes
