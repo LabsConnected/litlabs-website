@@ -80,9 +80,6 @@ const UI_AGENTS: UIAgent[] = [
   { id: "pixel", name: "Pixel Forge", role: "Visual Artist", avatar: AGENT_AVATARS['pixel-forge'], desc: "Creates images and 3D worlds.", status: "online", systemPrompt: "You are Pixel Forge, a visionary artist. Reply with creative flair, max 2 sentences.", color: "#22d3ee" },
 ];
 
-const AGENT_EMOJI: Record<string, string> = {
-  director: "🎯", champion: "🏆", code: "💻", social: "📱", data: "📊", writer: "✍️", music: "🎵", pixel: "🎨",
-};
 
 interface FloatingChat {
   agentId: string;
@@ -422,7 +419,7 @@ export default function LandingPage() {
               left: `${8 + (i * 11)}%`, top: `${15 + (i % 4) * 20}%`,
               animationDelay: `${i * 0.7}s`, animationDuration: `${3 + i * 0.4}s`,
               fontSize: `${28 + (i % 3) * 10}px`, opacity: 0.07,
-            }}>{AGENT_EMOJI[agent.id] ?? "🤖"}</div>
+            }}>{agent.avatar}</div>
           ))}
         </div>
 
@@ -467,7 +464,7 @@ export default function LandingPage() {
 
                 {/* Live stats row */}
                 <div className="flex flex-wrap items-center gap-5 justify-center lg:justify-start pt-4" style={{ borderTop: `1px solid ${resolvedColors.borderColor}30` }}>
-                  {[{val: `${UI_AGENTS.filter(a=>a.status==='online').length}/8`, label: 'Agents Live', color: '#4ade80'}, {val: '500', label: 'Free LitCoins', color: resolvedColors.accentColor}, {val: 'Beta', label: 'Access Tier', color: resolvedColors.linkColor}].map(s => (
+                  {[{val: `${UI_AGENTS.filter(a=>a.status==='online').length}/8`, label: 'Agents Live', color: '#4ade80'}, {val: '∞', label: 'Free LitCoins', color: '#4ade80'}, {val: 'Beta', label: 'Access Tier', color: resolvedColors.linkColor}].map(s => (
                     <div key={s.label} className="text-center">
                       <div className="text-xl font-black" style={{ color: s.color }}>{s.val}</div>
                       <div className="text-[10px] uppercase tracking-widest" style={{ color: resolvedColors.textMuted }}>{s.label}</div>
@@ -490,7 +487,7 @@ export default function LandingPage() {
                   <div className="p-4 space-y-2">
                     {UI_AGENTS.slice(0, 6).map((agent) => (
                       <div key={agent.id} className="flex items-center gap-3 p-2.5 rounded-lg transition-all" style={{ backgroundColor: resolvedColors.bgColor + '80', border: `1px solid ${resolvedColors.borderColor}20` }}>
-                        <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full" />
+                        <div className="w-8 h-8 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: agent.color + "18", border: `1px solid ${agent.color}40` }}>{agent.avatar}</div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-xs">{agent.name}</span>
@@ -547,7 +544,7 @@ export default function LandingPage() {
             </div>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               {[
-                { tier: 'Beta', price: 'FREE', highlight: false, color: resolvedColors.accentColor, features: ['8 AI Agents', '500 LitCoins/month', 'Studio Tools', 'Community Access', 'Builder Workspace'], cta: 'Start Free', href: '/sign-up' },
+                { tier: 'Beta', price: 'FREE', highlight: false, color: '#4ade80', features: ['8 AI Agents', '∞ Unlimited LitCoins', 'Studio Tools', 'Community Access', 'Builder Workspace'], cta: 'Start Free', href: '/sign-up' },
                 { tier: 'Pro', price: 'Coming Soon', highlight: true, color: resolvedColors.linkColor, features: ['All Beta features', 'Unlimited LitCoins', 'Priority AI models', 'API access', 'Custom agent slugs', 'Priority support'], cta: 'Join Waitlist', href: '/sign-up' },
                 { tier: 'Team', price: 'Coming Soon', highlight: false, color: resolvedColors.headerColor, features: ['All Pro features', 'Multi-user workspace', 'Agent marketplace seller', 'Analytics dashboard', 'White-label options', 'Dedicated support'], cta: 'Join Waitlist', href: '/sign-up' },
               ].map((p) => (
@@ -1129,7 +1126,7 @@ export default function LandingPage() {
             style={{ height: chat.isMinimized ? "44px" : "400px" }}>
             <div className="chat-header" onClick={() => toggleMinimizeMessenger(chat.agentId)}>
               <div className="flex items-center gap-2">
-                <img src={chat.avatar} alt={chat.name} className="w-6 h-6 rounded object-cover border border-white/10" />
+                <div className="w-6 h-6 rounded flex items-center justify-center text-sm" style={{ backgroundColor: "rgba(255,255,255,0.08)" }}>{chat.avatar}</div>
                 <span className="text-sm font-bold">{chat.name}</span>
               </div>
               <div className="flex items-center gap-2">
