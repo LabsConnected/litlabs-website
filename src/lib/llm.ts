@@ -93,8 +93,8 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   "openrouter-trinity": "microsoft/trinity-large-preview:free",
 };
 
-// Gemini also has 2.0-flash-lite as a cheaper fallback
-const GEMINI_FALLBACK_MODEL = "gemini-2.0-flash-lite";
+// Gemini 2.0-flash as stable fallback
+const GEMINI_FALLBACK_MODEL = "gemini-2.0-flash";
 
 /* Lazy singleton — don't construct until first use. */
 let _genAI: GoogleGenerativeAI | null = null;
