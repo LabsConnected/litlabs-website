@@ -9,7 +9,7 @@ import dynamic from "next/dynamic";
 import {
   Home, ShoppingBag, Sparkles,
   Settings, Sun, Moon, Zap,
-  ChevronDown, X, Menu, Bell, Coins, Bot, User, Image
+  ChevronDown, X, Menu, Bell, Coins, User, Image
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -24,7 +24,6 @@ const navLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/studio", label: "Studio", icon: Zap },
   { href: "/marketplace", label: "Market", icon: ShoppingBag },
-  { href: "/agents", label: "Agents", icon: Bot },
   { href: "/generate", label: "Generate", icon: Image },
 ];
 

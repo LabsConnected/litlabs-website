@@ -111,6 +111,10 @@ function StudioInner() {
   const { crtEnabled, toggleCrt } = useCrtToggle();
   const [litcoins, setLitcoins] = useState(500);
   useEffect(() => { try { const raw = localStorage.getItem("litcoins"); if (raw) setLitcoins(Number(raw)); } catch {} }, []);
+  const crtStyle = useMemo(() => ({
+    background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.12), rgba(0,0,0,0.12) 1px, transparent 1px, transparent 2px)",
+    boxShadow: "inset 0 0 100px rgba(0,255,0,0.15)",
+  }), []);
 
   const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
@@ -156,11 +160,6 @@ function StudioInner() {
   if (!isSignedIn) {
     return <RedirectToSignIn />;
   }
-
-  const crtStyle = useMemo(() => ({
-    background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.12), rgba(0,0,0,0.12) 1px, transparent 1px, transparent 2px)",
-    boxShadow: "inset 0 0 100px rgba(0,255,0,0.15)",
-  }), []);
 
   return (
     <div className="flex flex-col h-screen overflow-hidden" style={{ backgroundColor: T.bgColor, color: T.textColor, fontFamily: "monospace" }}>
