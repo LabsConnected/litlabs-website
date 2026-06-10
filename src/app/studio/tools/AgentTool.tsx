@@ -3,7 +3,9 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth } from "@clerk/nextjs";
-import { Send, Plus, Trash2, Loader2, X, Swords, MessageSquare, ChevronRight } from "lucide-react";
+import { Send, Plus, Trash2, Loader2, X, Swords, MessageSquare, ChevronRight, Zap } from "lucide-react";
+
+const ACTIVEPIECES_WEBHOOK = "https://cloud.activepieces.com/api/v1/webhooks/VoccE3SEr4bciLvkThTlO";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 type Agent = { id: string; name: string; icon: string; role: string; desc: string; systemPrompt: string; color: string; };
@@ -200,6 +202,24 @@ export default function AgentTool() {
 
   const handleKey = (e: React.KeyboardEvent) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); sendMessage(); } };
 
+  const triggerFlow = useCallback(async () => {
+    const content = input.trim();
+    if (!content || isLoading) return;
+    setInput("");
+    setIsLoading(true);
+    const userMsg: Message = { id: crypto.randomUUID(), role: "user", content: `⚡ Sent to ActivePieces: "${content}"`, ts: new Date().toLocaleTimeString() };
+    setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), userMsg] }));
+    try {
+      const res = await fetch(ACTIVEPIECES_WEBHOOK, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ message: content, agent: selectedAgent.name, source: "litlabs-studio" }) });
+      const data = await res.json().catch(() => ({}));
+      const reply = data?.output ?? data?.response ?? data?.result ?? "✅ Flow triggered — check ActivePieces for results.";
+      setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: String(reply), ts: new Date().toLocaleTimeString() }] }));
+    } catch {
+      setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: "⚠️ ActivePieces webhook error. Check that the flow is published.", ts: new Date().toLocaleTimeString() }] }));
+    }
+    setIsLoading(false);
+  }, [input, isLoading, selectedAgent]);
+
   const handleCreate = async () => {
     if (!createForm.name.trim() || !createForm.slug.trim() || !createForm.systemPrompt.trim()) { setCreateError("Name, slug, and system prompt are required."); return; }
     setCreating(true); setCreateError("");
@@ -325,6 +345,15 @@ export default function AgentTool() {
             <span className="w-1.5 h-1.5 rounded-full animate-pulse ml-1" style={{ backgroundColor: selectedAgent.color }} />
           </div>
           <div className="flex items-center gap-2">
+            {/* ActivePieces FLOW trigger — Director only */}
+            {selectedAgent.id === "director" && (
+              <button onClick={triggerFlow} disabled={!input.trim() || isLoading}
+                title="Send to ActivePieces multi-agent flow"
+                className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded font-bold transition-all disabled:opacity-30"
+                style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}40` }}>
+                <Zap size={9} /> FLOW
+              </button>
+            )}
             {/* Provider toggle */}
             {PROVIDER_OPTIONS.map(opt => (
               <button key={opt.id} onClick={() => setProvider(opt.id as "gemini" | "openrouter-free")}

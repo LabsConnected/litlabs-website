@@ -23,7 +23,7 @@ const NavAuth = dynamic(
 const navLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/studio", label: "Studio", icon: Zap },
-  { href: "/builder", label: "Builder", icon: Wrench },
+  { href: "/studio?tool=agents", label: "Builder", icon: Wrench },
   { href: "/marketplace", label: "Market", icon: ShoppingBag },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/generate", label: "Generate", icon: Image },
