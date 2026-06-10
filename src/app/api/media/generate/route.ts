@@ -212,16 +212,8 @@ async function handlePollinationsImage(
   });
   if (negativePrompt.trim()) params.set("negative", negativePrompt.trim());
   const url = `${POLLINATIONS_BASE}/${encodeURIComponent(prompt.trim())}?${params}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) {
-    const err = await res.text().catch(() => "");
-    throw new Error(`Pollinations error: ${err.slice(0, 200) || res.statusText}`);
-  }
-  const contentType = res.headers.get("content-type") || "image/jpeg";
-  const buffer = await res.arrayBuffer();
-  const base64 = arrayBufferToBase64(buffer);
   return {
-    downloadUrl: `data:${contentType};base64,${base64}`,
+    downloadUrl: url,
     id: `pollinations_${Date.now()}`,
     status: "complete",
     title: prompt.slice(0, 60),

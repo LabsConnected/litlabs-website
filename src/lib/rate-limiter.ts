@@ -65,10 +65,11 @@ export function withRateLimit(
     }
 
     const response = await handler(request);
-    response.headers.set("X-RateLimit-Limit", String(limit));
-    response.headers.set("X-RateLimit-Remaining", String(remaining));
-    response.headers.set("X-RateLimit-Reset", String(resetTime));
-
+    try {
+      response.headers.set("X-RateLimit-Limit", String(limit));
+      response.headers.set("X-RateLimit-Remaining", String(remaining));
+      response.headers.set("X-RateLimit-Reset", String(resetTime));
+    } catch { /* immutable headers on plain Response — ignore */ }
     return response;
   };
 }
