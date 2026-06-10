@@ -1,18 +1,26 @@
+
+> frontend@0.1.0 build
+> next build
+
+Warning: Custom Cache-Control headers detected for the following routes:
+  - /_next/static/(.*)
+
+Setting a custom Cache-Control header can break Next.js development behavior.
 Γû▓ Next.js 16.2.6 (Turbopack)
 - Environments: .env.local
 - Experiments (use with caution):
   ┬╖ optimizePackageImports
 
   Creating an optimized production build ...
-Γ£ô Compiled successfully in 7.3s
+Γ£ô Compiled successfully in 9.9s
   Running TypeScript ...
-  Finished TypeScript in 10.5s ...
+  Finished TypeScript in 15.7s ...
   Collecting page data using 7 workers ...
-  Generating static pages using 7 workers (0/51) ...
-  Generating static pages using 7 workers (12/51) 
-  Generating static pages using 7 workers (25/51) 
-  Generating static pages using 7 workers (38/51) 
-Γ£ô Generating static pages using 7 workers (51/51) in 703ms
+  Generating static pages using 7 workers (0/62) ...
+  Generating static pages using 7 workers (15/62) 
+  Generating static pages using 7 workers (30/62) 
+  Generating static pages using 7 workers (46/62) 
+Γ£ô Generating static pages using 7 workers (62/62) in 1012ms
   Finalizing page optimization ...
 
 Route (app)
@@ -25,9 +33,11 @@ Route (app)
 Γö£ ╞Æ /api/account
 Γö£ ╞Æ /api/agents
 Γö£ ╞Æ /api/agents/[slug]
+Γö£ ╞Æ /api/agents/activity
 Γö£ ╞Æ /api/agents/backlog
 Γö£ ╞Æ /api/agents/commits
 Γö£ ╞Æ /api/agents/completed
+Γö£ ╞Æ /api/agents/logs
 Γö£ ╞Æ /api/agents/services
 Γö£ ╞Æ /api/agents/status
 Γö£ ╞Æ /api/agents/task
@@ -37,10 +47,16 @@ Route (app)
 Γö£ ╞Æ /api/chat
 Γö£ ╞Æ /api/conversations
 Γö£ ╞Æ /api/conversations/[id]/messages
+Γö£ ╞Æ /api/flow
 Γö£ ╞Æ /api/gallery
 Γö£ ╞Æ /api/gemini
 Γö£ ╞Æ /api/gemini/build
 Γö£ ╞Æ /api/gemini/chat
+Γö£ ╞Æ /api/ha/devices
+Γö£ ╞Æ /api/ha/service
+Γö£ ╞Æ /api/ha/state
+Γö£ ╞Æ /api/llm/health
+Γö£ ╞Æ /api/media/generate
 Γö£ ╞Æ /api/music/generate
 Γö£ ╞Æ /api/orchestrate
 Γö£ ╞Æ /api/posts
@@ -63,8 +79,10 @@ Route (app)
 Γö£ ╞Æ /api/webhook/clerk
 Γö£ Γùï /builder
 Γö£ Γùï /cookies
+Γö£ Γùï /flow
 Γö£ Γùï /gallery
 Γö£ ╞Æ /gallery/[id]
+Γö£ Γùï /generate
 Γö£ ╞Æ /login
 Γö£ Γùï /marketplace
 Γö£ Γùï /privacy
@@ -76,6 +94,7 @@ Route (app)
 Γö£ ╞Æ /sign-up/[[...sign-up]]
 Γö£ Γùï /sitemap.xml
 Γö£ Γùï /social
+Γö£ Γùï /studio
 Γöö Γùï /terms
 
 

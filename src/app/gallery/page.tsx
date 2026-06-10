@@ -1,4 +1,5 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
@@ -47,6 +48,8 @@ type GalleryItem = {
   imageUrl: string;
   likes: number;
   createdAt: string;
+  mediaType?: "image" | "video" | "audio";
+  videoUrl?: string;
 };
 
 // ─── Component ───────────────────────────────────────────────────────────────
@@ -64,7 +67,14 @@ export default function Gallery() {
   const [crtEnabled, setCrtEnabled] = useState(true);
   const [userItems, setUserItems] = useState<GalleryItem[]>([]);
   const [showUpload, setShowUpload] = useState(false);
-  const [uploadForm, setUploadForm] = useState({ title: "", imageUrl: "", artist: "", category: "abstract" });
+  const [uploadForm, setUploadForm] = useState({
+    title: "",
+    imageUrl: "",
+    videoUrl: "",
+    artist: "",
+    category: "abstract",
+    mediaType: "image" as "image" | "video",
+  });
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
@@ -146,18 +156,27 @@ export default function Gallery() {
       showToast("Title is required", "error");
       return;
     }
-    if (!uploadForm.imageUrl.trim() && !uploadFile) {
-      showToast("Provide an image URL or select a file", "error");
-      return;
+    if (uploadForm.mediaType === "image") {
+      if (!uploadForm.imageUrl.trim() && !uploadFile) {
+        showToast("Provide an image URL or select a file", "error");
+        return;
+      }
+    } else if (uploadForm.mediaType === "video") {
+      if (!uploadForm.videoUrl.trim()) {
+        showToast("Provide a video URL (e.g. YouTube)", "error");
+        return;
+      }
     }
     if (uploading) return;
 
     setUploading(true);
     try {
+      const isImage = uploadForm.mediaType === "image";
       let imageUrl = uploadForm.imageUrl.trim();
+      let videoUrl = uploadForm.videoUrl.trim();
 
-      // 1) If a file was chosen, upload to /api/upload first to get a hosted URL
-      if (uploadFile) {
+      // 1) If image mode and a file was chosen, upload to /api/upload first to get a hosted URL
+      if (isImage && uploadFile) {
         const fd = new FormData();
         fd.append("file", uploadFile);
         const upRes = await fetch("/api/upload", { method: "POST", body: fd });
@@ -166,6 +185,8 @@ export default function Gallery() {
         imageUrl = upData.url;
       }
 
+      const finalUrl = isImage ? imageUrl : videoUrl;
+
       // 2) Persist the record to /api/gallery (Supabase user_media)
       let serverId: string | null = null;
       try {
@@ -173,8 +194,9 @@ export default function Gallery() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            url: imageUrl,
+            url: finalUrl,
             caption: uploadForm.title.trim(),
+            type: isImage ? "image" : "video",
           }),
         });
         const saveData = await saveRes.json();
@@ -194,14 +216,25 @@ export default function Gallery() {
         title: uploadForm.title.trim(),
         artist: uploadForm.artist.trim() || "You",
         category: uploadForm.category,
-        imageUrl,
+        imageUrl: isImage
+          ? imageUrl
+          : "https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop",
         likes: 0,
         createdAt: new Date().toISOString().split("T")[0],
+        mediaType: isImage ? "image" : "video",
+        videoUrl: isImage ? undefined : videoUrl,
       };
       const updated = [newItem, ...userItems];
       setUserItems(updated);
       localStorage.setItem("litlabs-gallery-user", JSON.stringify(updated));
-      setUploadForm({ title: "", imageUrl: "", artist: "", category: "abstract" });
+      setUploadForm({
+        title: "",
+        imageUrl: "",
+        videoUrl: "",
+        artist: "",
+        category: "abstract",
+        mediaType: "image",
+      });
       setUploadFile(null);
       setShowUpload(false);
       if (serverId) showToast("Your creation has been shared to the gallery!");
@@ -314,23 +347,50 @@ export default function Gallery() {
             <div className="lit-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>Share Your Creation</div>
             <div style={{ display: "grid", gap: "12px" }}>
               <div>
+                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Media Type</label>
+                <select
+                  value={uploadForm.mediaType}
+                  onChange={e => setUploadForm({ ...uploadForm, mediaType: e.target.value as "image" | "video" })}
+                  style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }}
+                >
+                  <option value="image">Image</option>
+                  <option value="video">Video (YouTube / MP4 URL)</option>
+                </select>
+              </div>
+              <div>
                 <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Title</label>
                 <input type="text" value={uploadForm.title} onChange={e => setUploadForm({ ...uploadForm, title: e.target.value })} placeholder="Name your piece..." style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }} />
               </div>
-              <div>
-                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Image File (optional)</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
-                  style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }}
-                />
-                {uploadFile && <div style={{ fontSize: "10px", color: T.accentColor, marginTop: "4px" }}>Selected: {uploadFile.name}</div>}
-              </div>
-              <div>
-                <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>— or Image URL</label>
-                <input type="text" value={uploadForm.imageUrl} onChange={e => setUploadForm({ ...uploadForm, imageUrl: e.target.value })} placeholder="https://..." disabled={!!uploadFile} style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px", opacity: uploadFile ? 0.4 : 1 }} />
-              </div>
+              {uploadForm.mediaType === "image" && (
+                <>
+                  <div>
+                    <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Image File (optional)</label>
+                    <input
+                      type="file"
+                      accept="image/*"
+                      onChange={e => setUploadFile(e.target.files?.[0] ?? null)}
+                      style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }}
+                    />
+                    {uploadFile && <div style={{ fontSize: "10px", color: T.accentColor, marginTop: "4px" }}>Selected: {uploadFile.name}</div>}
+                  </div>
+                  <div>
+                    <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>— or Image URL</label>
+                    <input type="text" value={uploadForm.imageUrl} onChange={e => setUploadForm({ ...uploadForm, imageUrl: e.target.value })} placeholder="https://..." disabled={!!uploadFile} style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px", opacity: uploadFile ? 0.4 : 1 }} />
+                  </div>
+                </>
+              )}
+              {uploadForm.mediaType === "video" && (
+                <div>
+                  <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Video URL</label>
+                  <input
+                    type="text"
+                    value={uploadForm.videoUrl}
+                    onChange={e => setUploadForm({ ...uploadForm, videoUrl: e.target.value })}
+                    placeholder="https://youtu.be/... or https://...mp4"
+                    style={{ width: "100%", padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "12px", outline: "none", marginTop: "4px" }}
+                  />
+                </div>
+              )}
               <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
                 <div>
                   <label style={{ fontSize: "10px", color: T.textMuted, textTransform: "uppercase", letterSpacing: "0.1em" }}>Artist</label>
@@ -359,8 +419,22 @@ export default function Gallery() {
         {filteredItems.map(item => (
           <div
             key={item.id}
-            onClick={() => setSelectedItem(item)}
-            onKeyDown={(e) => { if (e.key === 'Enter') setSelectedItem(item); }}
+            onClick={() => {
+              if (item.mediaType === "video" && item.videoUrl) {
+                window.open(item.videoUrl, "_blank", "noopener,noreferrer");
+              } else {
+                setSelectedItem(item);
+              }
+            }}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') {
+                if (item.mediaType === "video" && item.videoUrl) {
+                  window.open(item.videoUrl, "_blank", "noopener,noreferrer");
+                } else {
+                  setSelectedItem(item);
+                }
+              }
+            }}
             role="button"
             tabIndex={0}
             className="lit-box group"

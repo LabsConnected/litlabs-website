@@ -397,238 +397,245 @@ export default function LandingPage() {
   // ── LANDING PAGE FOR NON-LOGGED-IN USERS ──
   if (!isSignedIn) {
     return (
-      <div className="min-h-screen relative overflow-hidden grid-bg" style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor }}>
-        {/* Ambient glow orbs */}
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
-          <div className="glow-orb w-[500px] h-[500px]" style={{ background: resolvedColors.linkColor, top: '-10%', left: '-10%', animationDelay: '0s' }} />
-          <div className="glow-orb w-[400px] h-[400px]" style={{ background: resolvedColors.headerColor, bottom: '-5%', right: '-5%', animationDelay: '2s' }} />
-          <div className="glow-orb w-[300px] h-[300px]" style={{ background: resolvedColors.accentColor, top: '40%', left: '60%', animationDelay: '4s', opacity: 0.08 }} />
-        </div>
+      <div className="min-h-screen relative overflow-hidden" style={{ backgroundColor: resolvedColors.bgColor, color: resolvedColors.textColor }}>
+        {/* Animated mesh gradient background */}
+        <div className="fixed inset-0 pointer-events-none z-0" style={{
+          background: `radial-gradient(ellipse 80% 60% at 20% 10%, ${resolvedColors.linkColor}18 0%, transparent 60%),
+                       radial-gradient(ellipse 60% 50% at 80% 90%, ${resolvedColors.headerColor}14 0%, transparent 60%),
+                       radial-gradient(ellipse 40% 40% at 50% 50%, ${resolvedColors.accentColor}08 0%, transparent 70%)`,
+        }} />
+        {/* Grid overlay */}
+        <div className="fixed inset-0 pointer-events-none z-0 opacity-[0.04]" style={{
+          backgroundImage: `linear-gradient(${resolvedColors.accentColor} 1px, transparent 1px), linear-gradient(90deg, ${resolvedColors.accentColor} 1px, transparent 1px)`,
+          backgroundSize: '60px 60px',
+        }} />
 
-        {/* Floating agent avatars in background */}
+        {/* Floating agent emoji orbs */}
         <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden">
           {UI_AGENTS.map((agent, i) => (
-            <div key={agent.id} className="absolute opacity-[0.06] animate-pulse" style={{
-              left: `${15 + (i * 10)}%`,
-              top: `${20 + (i % 3) * 25}%`,
-              animationDelay: `${i * 0.5}s`,
-              transform: `scale(${randomScales.current[i]})`,
-            }}>
-              <img src={agent.avatar} alt="" className="w-24 h-24 filter blur-[3px] opacity-20 rounded-lg object-cover" />
-            </div>
+            <div key={agent.id} className="absolute animate-pulse" style={{
+              left: `${8 + (i * 11)}%`, top: `${15 + (i % 4) * 20}%`,
+              animationDelay: `${i * 0.7}s`, animationDuration: `${3 + i * 0.4}s`,
+              fontSize: `${28 + (i % 3) * 10}px`, opacity: 0.07,
+            }}>{agent.avatar}</div>
           ))}
         </div>
 
         {/* CRT Overlay */}
         {crtEnabled && <div className="crt-overlay" />}
 
-        {/* HERO SECTION */}
         <main className="relative z-10">
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-20 md:py-28">
-            <div className="grid md:grid-cols-2 gap-8 md:gap-12 items-center">
-              
-              {/* Left: Value Prop */}
-              <div className="space-y-8">
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-cyan-500/30 bg-cyan-500/10">
-                  <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse"></span>
-                  <span className="text-xs font-mono text-cyan-300">{UI_AGENTS.filter(a => a.status === "online").length} AI Agents Online</span>
-                </div>
-                
-                <h1 className="font-display text-3xl sm:text-4xl md:text-6xl font-bold leading-tight">
-                  Your <span style={{ color: resolvedColors.linkColor }}>AI Workforce</span> is Ready
+          {/* ── HERO ── */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 pt-16 sm:pt-24 pb-12">
+            {/* Beta badge */}
+            <div className="flex justify-center mb-8">
+              <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-mono font-bold" style={{ backgroundColor: resolvedColors.accentColor + '18', border: `1px solid ${resolvedColors.accentColor}40`, color: resolvedColors.accentColor }}>
+                <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: resolvedColors.accentColor }} />
+                🚀 BETA — FREE while we build · No credit card needed
+              </div>
+            </div>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-10 lg:gap-16 items-center">
+              {/* Left */}
+              <div className="space-y-7 text-center lg:text-left">
+                <h1 className="font-display text-4xl sm:text-5xl md:text-6xl font-black leading-[1.08] tracking-tight">
+                  <span style={{ color: resolvedColors.textColor }}>Your</span>{" "}
+                  <span style={{
+                    background: `linear-gradient(135deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`,
+                    WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent",
+                  }}>AI Workforce</span>
+                  <br />is Ready
                 </h1>
-                
-                <p className="text-base md:text-xl text-white/70 max-w-xl leading-relaxed">
-                  Join thousands of creators, developers, and entrepreneurs using LiTreeLabStudios to build, automate, and scale with AI agents that actually get work done.
+
+                <p className="text-base sm:text-lg leading-relaxed max-w-lg mx-auto lg:mx-0" style={{ color: resolvedColors.textColor + 'b0' }}>
+                  Build, deploy, and manage custom AI agents in one unified platform. Automate your workflow, generate content, and scale your creativity — all for free during beta.
                 </p>
 
-                <div className="flex flex-wrap gap-4">
-                  <Link href="/sign-up" className="btn btn-primary text-base px-8 py-4 font-bold" style={{ background: resolvedColors.linkColor, boxShadow: `0 0 30px ${resolvedColors.linkColor}50` }}>
-                    Start Building — Free
+                <div className="flex flex-wrap gap-3 justify-center lg:justify-start">
+                  <Link href="/sign-up" className="btn btn-primary text-sm sm:text-base px-7 py-3.5 font-bold" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`, boxShadow: `0 0 32px ${resolvedColors.linkColor}40`, border: 'none' }}>
+                    Start Free — No Card Needed
                   </Link>
-                  <Link href="/agents" className="btn btn-outline text-base px-6 py-4">
-                    Explore Agents
+                  <Link href="/studio" className="btn btn-outline text-sm sm:text-base px-6 py-3.5">
+                    ⚡ Open Studio
                   </Link>
                 </div>
 
-                {/* Stats */}
-                <div className="flex flex-wrap gap-8 pt-6 border-t border-white/10">
-                  <div>
-                    <div className="text-2xl font-bold text-cyan-400">{UI_AGENTS.length}+</div>
-                    <div className="text-xs text-white/50 uppercase tracking-wider">AI Agents</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-pink-400">50K+</div>
-                    <div className="text-xs text-white/50 uppercase tracking-wider">Users</div>
-                  </div>
-                  <div>
-                    <div className="text-2xl font-bold text-yellow-400">2M+</div>
-                    <div className="text-xs text-white/50 uppercase tracking-wider">Tasks Done</div>
-                  </div>
+                {/* Live stats row */}
+                <div className="flex flex-wrap items-center gap-5 justify-center lg:justify-start pt-4" style={{ borderTop: `1px solid ${resolvedColors.borderColor}30` }}>
+                  {[{val: `${UI_AGENTS.filter(a=>a.status==='online').length}/8`, label: 'Agents Live', color: '#4ade80'}, {val: '500', label: 'Free LitCoins', color: resolvedColors.accentColor}, {val: 'Beta', label: 'Access Tier', color: resolvedColors.linkColor}].map(s => (
+                    <div key={s.label} className="text-center">
+                      <div className="text-xl font-black" style={{ color: s.color }}>{s.val}</div>
+                      <div className="text-[10px] uppercase tracking-widest" style={{ color: resolvedColors.textMuted }}>{s.label}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
-              {/* Right: Agent Showcase */}
+              {/* Right: Live Agent Dashboard card */}
               <div className="relative reveal">
-                <div className="absolute inset-0 bg-gradient-to-r from-cyan-500/20 to-pink-500/20 rounded-3xl blur-3xl"></div>
-                <div className="relative glass-card rounded-2xl p-6 glow-box">
-                  <div className="flex items-center justify-between mb-6">
-                    <span className="text-sm font-mono text-white/50">LIVE AGENT DASHBOARD</span>
-                    <span className="text-xs text-green-400 animate-pulse">● System Online</span>
+                <div className="absolute -inset-4 rounded-3xl opacity-30 blur-2xl" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}40, ${resolvedColors.headerColor}30)` }} />
+                <div className="relative rounded-2xl overflow-hidden" style={{ backgroundColor: resolvedColors.boxBg, border: `1px solid ${resolvedColors.borderColor}50`, boxShadow: `0 0 60px ${resolvedColors.linkColor}15` }}>
+                  <div className="flex items-center justify-between px-4 py-3" style={{ backgroundColor: resolvedColors.bgColor + 'cc', borderBottom: `1px solid ${resolvedColors.borderColor}30` }}>
+                    <div className="flex items-center gap-2">
+                      <div className="flex gap-1"><div className="w-2.5 h-2.5 rounded-full bg-red-500/70" /><div className="w-2.5 h-2.5 rounded-full bg-yellow-500/70" /><div className="w-2.5 h-2.5 rounded-full bg-green-500/70" /></div>
+                      <span className="text-[10px] font-mono opacity-50">litlabs.net/studio</span>
+                    </div>
+                    <span className="text-[10px] font-mono font-bold" style={{ color: '#4ade80' }}>● LIVE</span>
                   </div>
-
-                  <div className="space-y-3">
+                  <div className="p-4 space-y-2">
                     {UI_AGENTS.slice(0, 6).map((agent) => (
-                      <div key={agent.id} className="flex items-center gap-4 p-3 rounded-lg bg-white/[0.03] border border-white/5 hover:border-white/20 hover:bg-white/[0.06] transition-all group cursor-pointer glow-border">
-                        <img src={agent.avatar} alt={agent.name} className="w-10 h-10 rounded-lg object-cover border border-white/10 group-hover:scale-110 transition-transform" />
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2">
-                            <span className="font-bold">{agent.name}</span>
-                            <span className={`w-2 h-2 rounded-full ${agent.status === 'online' ? 'bg-green-400' : 'bg-yellow-400'}`} style={{ boxShadow: agent.status === 'online' ? '0 0 6px #4ade80' : 'none' }}></span>
+                      <div key={agent.id} className="flex items-center gap-3 p-2.5 rounded-lg transition-all" style={{ backgroundColor: resolvedColors.bgColor + '80', border: `1px solid ${resolvedColors.borderColor}20` }}>
+                        <span className="text-xl w-8 text-center">{agent.avatar}</span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-xs">{agent.name}</span>
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: agent.status === 'online' ? '#4ade80' : '#facc15', boxShadow: agent.status === 'online' ? '0 0 4px #4ade80' : 'none' }} />
                           </div>
-                          <div className="text-xs text-white/50">{agent.role}</div>
+                          <div className="text-[10px] opacity-50 truncate">{agent.role}</div>
                         </div>
-                        <div className="text-xs font-mono px-2 py-1 rounded" style={{ background: agent.color + '20', color: agent.color, boxShadow: `0 0 8px ${agent.color}30` }}>
-                          {agent.status === 'online' ? 'ACTIVE' : 'AWAY'}
+                        <div className="text-[9px] font-mono font-bold px-1.5 py-0.5 rounded" style={{ backgroundColor: agent.color + '18', color: agent.color }}>
+                          {agent.status.toUpperCase()}
                         </div>
                       </div>
                     ))}
-                  </div>
-
-                  <div className="mt-6 pt-4 border-t border-white/10 text-center">
-                    <Link href="/sign-up" className="text-sm text-cyan-400 hover:text-cyan-300 transition-colors hover:underline">
-                      + Unlock All 8 Agents →
-                    </Link>
+                    <div className="pt-2 text-center">
+                      <Link href="/sign-up" className="text-[11px] font-mono" style={{ color: resolvedColors.linkColor }}>+ Join to unlock all agents →</Link>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </div>
 
-          {/* WHAT WE DO SECTION */}
-          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-12 sm:py-16 border-t border-white/5">
-            <div className="text-center mb-10 sm:mb-16">
-              <h2 className="font-display text-2xl sm:text-3xl md:text-4xl font-bold mb-4">What We Do</h2>
-              <p className="text-white/60 max-w-2xl mx-auto">LiTreeLabStudios is your complete AI workspace — build custom agents, join a thriving creator community, and automate your workflow.</p>
+          {/* ── WHAT WE DO ── */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14 sm:py-20" style={{ borderTop: `1px solid ${resolvedColors.borderColor}20` }}>
+            <div className="text-center mb-12">
+              <div className="inline-block text-[10px] font-mono font-bold px-3 py-1 rounded-full mb-3" style={{ backgroundColor: resolvedColors.headerColor + '18', border: `1px solid ${resolvedColors.headerColor}40`, color: resolvedColors.headerColor }}>PLATFORM FEATURES</div>
+              <h2 className="font-display text-2xl sm:text-3xl md:text-4xl font-black mb-3">Everything You Need to Scale with AI</h2>
+              <p className="max-w-xl mx-auto text-sm sm:text-base" style={{ color: resolvedColors.textMuted }}>One platform. Unlimited agents. Total creative control.</p>
             </div>
 
-            <div className="grid md:grid-cols-3 gap-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
               {[
-                { title: "Build AI Agents", desc: "Create custom agents with unique personalities, skills, and system prompts. Deploy them to handle specific tasks." },
-                { title: "Generate Content", desc: "AI-powered image generation, music creation, 3D world building, and video production tools." },
-                { title: "Join the Community", desc: "Connect with other AI builders, share agents, collaborate on projects, and grow together." },
-              ].map((feature, i) => (
-                <div key={i} className={`glass-card p-6 rounded-xl hover:border-cyan-500/30 transition-all group reveal reveal-delay-${i + 1}`}>
-                  <div className="w-10 h-10 rounded-lg bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform" style={{ boxShadow: '0 0 12px rgba(6,182,212,0.15)' }}>
-                    <div className="w-3 h-3 rounded-full bg-cyan-400" style={{ boxShadow: '0 0 8px rgba(6,182,212,0.5)' }} />
-                  </div>
-                  <h3 className="font-bold text-lg mb-2">{feature.title}</h3>
-                  <p className="text-sm text-white/60 leading-relaxed">{feature.desc}</p>
+                { icon: '🤖', title: 'Agent Builder', desc: 'Create custom AI agents with unique personas, system prompts, and skill sets tailored to your exact needs.', color: resolvedColors.accentColor },
+                { icon: '🎨', title: 'Studio Tools', desc: 'AI image generation, video creation, music production, and more — all in one unified creative workspace.', color: resolvedColors.linkColor },
+                { icon: '⚡', title: 'Automation Flows', desc: 'Chain agents together into powerful multi-step workflows. Build once, run forever.', color: resolvedColors.headerColor },
+                { icon: '🛒', title: 'Agent Marketplace', desc: 'Buy, sell, and share agents with the community. Earn LitCoins from your creations.', color: '#fbbf24' },
+                { icon: '📊', title: 'Live Telemetry', desc: 'Real-time agent monitoring, task logs, and performance analytics from a unified terminal.', color: '#4ade80' },
+                { icon: '🔗', title: 'Integrations', desc: 'Connect to ActivePieces, Supabase, OpenRouter, and 100+ tools via webhook automation.', color: '#a855f7' },
+              ].map((f, i) => (
+                <div key={i} className={`reveal reveal-delay-${(i%3)+1} rounded-xl p-5 transition-all hover:-translate-y-1 cursor-default`} style={{ backgroundColor: resolvedColors.boxBg, border: `1px solid ${f.color}25`, boxShadow: `0 4px 24px ${f.color}08` }}>
+                  <div className="text-3xl mb-3">{f.icon}</div>
+                  <h3 className="font-bold text-sm mb-1.5" style={{ color: f.color }}>{f.title}</h3>
+                  <p className="text-xs leading-relaxed" style={{ color: resolvedColors.textMuted }}>{f.desc}</p>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* SOCIAL PROOF / COMMUNITY SECTION */}
-          <div className="max-w-7xl mx-auto px-6 py-20 border-t border-white/5">
-            <div className="grid md:grid-cols-2 gap-12 items-center">
-              <div className="reveal">
-                <h2 className="font-display text-3xl font-bold mb-6">Join Our Growing Community</h2>
-                <p className="text-white/60 mb-8 leading-relaxed">
-                  Connect with thousands of AI enthusiasts, developers, and creators. Share your agents, get feedback, collaborate on projects, and stay ahead of the AI curve.
-                </p>
+          {/* ── PRICING / BETA TIERS ── */}
+          <div className="max-w-5xl mx-auto px-4 sm:px-6 py-14 sm:py-20" style={{ borderTop: `1px solid ${resolvedColors.borderColor}20` }}>
+            <div className="text-center mb-12">
+              <div className="inline-block text-[10px] font-mono font-bold px-3 py-1 rounded-full mb-3" style={{ backgroundColor: resolvedColors.accentColor + '18', border: `1px solid ${resolvedColors.accentColor}40`, color: resolvedColors.accentColor }}>PRICING</div>
+              <h2 className="font-display text-2xl sm:text-3xl md:text-4xl font-black mb-3">Free While We Build Together</h2>
+              <p className="max-w-lg mx-auto text-sm" style={{ color: resolvedColors.textMuted }}>We&apos;re in beta — early users get full access free. Help shape the platform, and lock in your founding rate before pricing goes live.</p>
+            </div>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {[
+                { tier: 'Beta', price: 'FREE', highlight: false, color: resolvedColors.accentColor, features: ['8 AI Agents', '500 LitCoins/month', 'Studio Tools', 'Community Access', 'Builder Workspace'], cta: 'Start Free', href: '/sign-up' },
+                { tier: 'Pro', price: 'Coming Soon', highlight: true, color: resolvedColors.linkColor, features: ['All Beta features', 'Unlimited LitCoins', 'Priority AI models', 'API access', 'Custom agent slugs', 'Priority support'], cta: 'Join Waitlist', href: '/sign-up' },
+                { tier: 'Team', price: 'Coming Soon', highlight: false, color: resolvedColors.headerColor, features: ['All Pro features', 'Multi-user workspace', 'Agent marketplace seller', 'Analytics dashboard', 'White-label options', 'Dedicated support'], cta: 'Join Waitlist', href: '/sign-up' },
+              ].map((p) => (
+                <div key={p.tier} className="rounded-2xl p-6 flex flex-col relative" style={{ backgroundColor: p.highlight ? p.color + '12' : resolvedColors.boxBg, border: `2px solid ${p.highlight ? p.color : resolvedColors.borderColor}40`, boxShadow: p.highlight ? `0 0 40px ${p.color}20` : 'none' }}>
+                  {p.highlight && <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-mono font-black px-3 py-0.5 rounded-full" style={{ backgroundColor: p.color, color: '#000' }}>POPULAR</div>}
+                  <div className="mb-4">
+                    <div className="text-[10px] font-mono uppercase tracking-widest mb-1" style={{ color: p.color }}>{p.tier}</div>
+                    <div className="text-3xl font-black" style={{ color: p.highlight ? p.color : resolvedColors.textColor }}>{p.price}</div>
+                  </div>
+                  <ul className="space-y-2 flex-1 mb-5">
+                    {p.features.map(f => (
+                      <li key={f} className="flex items-center gap-2 text-xs" style={{ color: resolvedColors.textColor + 'cc' }}>
+                        <span style={{ color: p.color }}>✓</span> {f}
+                      </li>
+                    ))}
+                  </ul>
+                  <Link href={p.href} className="block text-center text-xs font-bold py-2.5 px-4 rounded-lg transition-all" style={{ backgroundColor: p.highlight ? p.color : 'transparent', color: p.highlight ? '#000' : p.color, border: `1px solid ${p.color}60` }}>
+                    {p.cta}
+                  </Link>
+                </div>
+              ))}
+            </div>
+          </div>
 
-                <div className="space-y-4">
-                  {[
-                    { text: "Daily discussions on AI trends and agent building" },
-                    { text: "Showcase your agents and get community feedback" },
-                    { text: "Learn from experts and share your knowledge" },
-                    { text: "Earn LiTBit Coins and monetize your creations" },
-                  ].map((item, i) => (
-                    <div key={i} className="flex items-center gap-3 group">
-                      <div className="w-1.5 h-1.5 rounded-full bg-cyan-400 shrink-0 group-hover:shadow-[0_0_8px_rgba(34,211,238,0.6)] transition-shadow" />
-                      <span className="text-sm text-white/70">{item.text}</span>
+          {/* ── COMMUNITY ── */}
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-14" style={{ borderTop: `1px solid ${resolvedColors.borderColor}20` }}>
+            <div className="grid md:grid-cols-2 gap-10 items-center">
+              <div className="reveal">
+                <div className="text-[10px] font-mono font-bold px-3 py-1 rounded-full inline-block mb-4" style={{ backgroundColor: resolvedColors.linkColor + '18', border: `1px solid ${resolvedColors.linkColor}40`, color: resolvedColors.linkColor }}>COMMUNITY</div>
+                <h2 className="font-display text-2xl sm:text-3xl font-black mb-4">Build Together, Grow Together</h2>
+                <p className="text-sm leading-relaxed mb-6" style={{ color: resolvedColors.textMuted }}>
+                  LiTTree Lab Studios is more than a tool — it&apos;s an active community of AI builders sharing agents, automations, and breakthroughs daily.
+                </p>
+                <div className="space-y-3 mb-6">
+                  {['Daily AI agent showcases and feedback', 'Earn LitCoins by sharing your agents', 'Collaborate on multi-agent workflows', 'Founding member perks locked in early'].map((item, i) => (
+                    <div key={i} className="flex items-center gap-2.5 text-sm">
+                      <span style={{ color: resolvedColors.accentColor }}>→</span>
+                      <span style={{ color: resolvedColors.textColor + 'cc' }}>{item}</span>
                     </div>
                   ))}
                 </div>
-
-                <Link href="/social" className="btn btn-primary mt-8 inline-flex items-center gap-2 hover-lift" style={{ background: resolvedColors.linkColor, boxShadow: `0 0 20px ${resolvedColors.linkColor}40` }}>
-                  Join the Community
-                  <span className="text-lg">→</span>
+                <Link href="/social" className="btn btn-primary inline-flex items-center gap-2" style={{ background: resolvedColors.linkColor, boxShadow: `0 0 20px ${resolvedColors.linkColor}40` }}>
+                  Explore the Feed →
                 </Link>
               </div>
-
-              {/* Community Preview */}
               <div className="relative reveal reveal-delay-2">
-                <div className="absolute inset-0 bg-gradient-to-br from-cyan-500/10 to-pink-500/10 rounded-2xl blur-xl"></div>
-                <div className="relative glass-card rounded-2xl p-6 space-y-4 glow-box">
-                  <div className="flex items-center gap-3 pb-4 border-b border-white/10">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-cyan-400 to-blue-500 flex items-center justify-center text-sm font-bold shadow-lg">AC</div>
-                    <div>
-                      <div className="font-bold text-sm">Alex Chen</div>
-                      <div className="text-xs text-white/50">2h ago</div>
+                <div className="rounded-2xl p-5 space-y-3" style={{ backgroundColor: resolvedColors.boxBg, border: `1px solid ${resolvedColors.borderColor}30` }}>
+                  {[{init:'AC', name:'Alex Chen', time:'2h ago', text:'"Dual-agent setup — Director plans, Code Champion builds. My dev time cut by 60%."', likes:24, grad:'from-cyan-400 to-blue-500'},{init:'SK', name:'Sarah Kim', time:'4h ago', text:'"Pixel Forge nailed my album art on first try. Instantly understood the vibe."', likes:56, grad:'from-pink-400 to-purple-500'},{init:'MR', name:'Marcus R.', time:'6h ago', text:'"Built a full marketing automation in 20 mins. Social Dominator + Writing Coach combo is 🔥"', likes:38, grad:'from-yellow-400 to-orange-500'}].map((post, i) => (
+                    <div key={i} className="rounded-lg p-3" style={{ backgroundColor: resolvedColors.bgColor + '80', border: `1px solid ${resolvedColors.borderColor}20` }}>
+                      <div className="flex items-center gap-2 mb-2">
+                        <div className={`w-8 h-8 rounded-full bg-gradient-to-br ${post.grad} flex items-center justify-center text-xs font-black text-white`}>{post.init}</div>
+                        <div><div className="text-xs font-bold">{post.name}</div><div className="text-[10px] opacity-40">{post.time}</div></div>
+                      </div>
+                      <p className="text-xs leading-relaxed mb-1.5" style={{ color: resolvedColors.textColor + 'b0' }}>{post.text}</p>
+                      <span className="text-[10px]" style={{ color: resolvedColors.textMuted }}>❤ {post.likes} likes</span>
                     </div>
-                  </div>
-                  <p className="text-sm text-white/80">"Just deployed my first dual-agent setup — Director handles planning, Executor handles the code. Cut my dev workflow time by 60%."</p>
-                  <div className="flex items-center gap-4 text-xs text-white/50">
-                    <span className="hover:text-cyan-400 transition-colors cursor-pointer">❤ 24 likes</span>
-                    <span className="hover:text-cyan-400 transition-colors cursor-pointer">💬 3 comments</span>
-                  </div>
-
-                  <div className="flex items-center gap-3 pt-4 border-t border-white/10">
-                    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-pink-400 to-purple-500 flex items-center justify-center text-sm font-bold shadow-lg">SK</div>
-                    <div>
-                      <div className="font-bold text-sm">Sarah Kim</div>
-                      <div className="text-xs text-white/50">4h ago</div>
-                    </div>
-                  </div>
-                  <p className="text-sm text-white/80">"Pixel Forge just generated the perfect album art for my new EP. The AI understood my vision instantly."</p>
-                  <div className="flex items-center gap-4 text-xs text-white/50">
-                    <span className="hover:text-cyan-400 transition-colors cursor-pointer">❤ 56 likes</span>
-                    <span className="hover:text-cyan-400 transition-colors cursor-pointer">💬 12 comments</span>
-                  </div>
+                  ))}
                 </div>
               </div>
             </div>
           </div>
 
-          {/* CTA SECTION */}
-          <div className="max-w-7xl mx-auto px-6 py-20 reveal">
-            <div className="relative overflow-hidden rounded-3xl p-12 text-center glass-card glow-box" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}15, ${resolvedColors.headerColor}15)` }}>
-              <div className="absolute inset-0 opacity-20" style={{
-                backgroundImage: `radial-gradient(circle at 30% 50%, ${resolvedColors.linkColor} 0%, transparent 50%),
-                                  radial-gradient(circle at 70% 50%, ${resolvedColors.headerColor} 0%, transparent 50%)`,
-              }} />
-
+          {/* ── FINAL CTA ── */}
+          <div className="max-w-4xl mx-auto px-4 sm:px-6 py-16 text-center reveal">
+            <div className="relative rounded-3xl p-10 sm:p-14 overflow-hidden" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}12, ${resolvedColors.headerColor}10)`, border: `1px solid ${resolvedColors.linkColor}30` }}>
+              <div className="absolute inset-0 opacity-10" style={{ backgroundImage: `radial-gradient(circle at 30% 50%, ${resolvedColors.linkColor}, transparent 50%), radial-gradient(circle at 70% 50%, ${resolvedColors.headerColor}, transparent 50%)` }} />
               <div className="relative z-10">
-                <h2 className="font-display text-3xl md:text-5xl font-bold mb-6">Ready to Build the Future?</h2>
-                <p className="text-white/70 text-lg mb-8 max-w-2xl mx-auto">
-                  Join LiTreeLabStudios today and start building with AI agents that work as hard as you do.
+                <div className="text-4xl mb-4">🚀</div>
+                <h2 className="font-display text-2xl sm:text-4xl font-black mb-4">Ready to Build the Future?</h2>
+                <p className="mb-8 text-sm sm:text-base max-w-xl mx-auto" style={{ color: resolvedColors.textMuted }}>
+                  Join LiTTree Lab Studios today — free while in beta. Get 500 LitCoins, full studio access, and your founding member badge.
                 </p>
-
-                <div className="flex flex-wrap justify-center gap-4">
-                  <Link href="/sign-up" className="btn btn-primary text-lg px-10 py-4 font-bold hover-lift" style={{ background: resolvedColors.linkColor, boxShadow: `0 0 40px ${resolvedColors.linkColor}60` }}>
-                    Get Started Free
+                <div className="flex flex-wrap justify-center gap-3">
+                  <Link href="/sign-up" className="btn btn-primary font-black px-10 py-4" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`, boxShadow: `0 0 40px ${resolvedColors.linkColor}50`, border: 'none' }}>
+                    Get Started — It&apos;s Free
                   </Link>
-                  <Link href="/marketplace" className="btn btn-outline text-lg px-8 py-4 hover-lift">
-                    Browse Agents
-                  </Link>
+                  <Link href="/builder" className="btn btn-outline px-8 py-4">View Agent Builder</Link>
                 </div>
-
-                <p className="text-xs text-white/40 mt-6">No credit card required. Start with 500 free LiTBit Coins.</p>
+                <p className="text-[11px] mt-5 opacity-40">No credit card · Cancel anytime · Founding member perks</p>
               </div>
             </div>
           </div>
         </main>
 
         {/* Footer */}
-        <footer className="relative z-10 border-t border-white/5 py-8">
-          <div className="max-w-7xl mx-auto px-6 text-center text-xs text-white/40">
-            <p>© 2025 LiTreeLabStudios. All rights reserved.</p>
-            <div className="flex justify-center gap-4 mt-2">
-              <Link href="/terms" className="hover:text-white/60">Terms</Link>
-              <Link href="/privacy" className="hover:text-white/60">Privacy</Link>
-              <Link href="/cookies" className="hover:text-white/60">Cookies</Link>
+        <footer className="relative z-10 py-8" style={{ borderTop: `1px solid ${resolvedColors.borderColor}20` }}>
+          <div className="max-w-7xl mx-auto px-6 flex flex-wrap justify-between items-center gap-4 text-xs" style={{ color: resolvedColors.textMuted }}>
+            <p>© 2025 LiTTree Lab Studios — All rights reserved.</p>
+            <div className="flex gap-4">
+              <Link href="/terms" className="hover:opacity-80">Terms</Link>
+              <Link href="/privacy" className="hover:opacity-80">Privacy</Link>
+              <Link href="/cookies" className="hover:opacity-80">Cookies</Link>
+              <Link href="/social" className="hover:opacity-80">Community</Link>
             </div>
           </div>
         </footer>

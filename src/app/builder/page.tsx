@@ -1,17 +1,18 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import Link from "next/link";
-import dynamic from "next/dynamic";
+import lazyLoad from "next/dynamic";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
 
-const ClerkUserWidget = dynamic(
+const ClerkUserWidget = lazyLoad(
   () => import("@/components/ClerkUser").then(m => ({ default: m.ClerkUserWidget })),
   { ssr: false }
 );
 
-const ClerkUserCompact = dynamic(
+const ClerkUserCompact = lazyLoad(
   () => import("@/components/ClerkUser").then(m => ({ default: (props: object) => <m.ClerkUserWidget compact {...props} /> })),
   { ssr: false }
 );

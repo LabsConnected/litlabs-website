@@ -1,9 +1,6 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Required for Docker deployment
-  output: "standalone",
-
   // ============================================
   // PERFORMANCE OPTIMIZATIONS
   // ============================================
@@ -42,6 +39,10 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "image.pollinations.ai",
       },
+      {
+        protocol: "https",
+        hostname: "img.youtube.com",
+      },
     ],
   },
 
@@ -73,12 +74,8 @@ const nextConfig: NextConfig = {
             value: "strict-origin-when-cross-origin",
           },
           {
-            key: "X-XSS-Protection",
-            value: "1; mode=block",
-          },
-          {
             key: "Permissions-Policy",
-            value: "geolocation=(), microphone=(), camera=()",
+            value: "geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()",
           },
           {
             key: "Cross-Origin-Opener-Policy",
@@ -92,12 +89,12 @@ const nextConfig: NextConfig = {
             key: "Content-Security-Policy",
             value: [
               "default-src 'self'",
-              "script-src 'self' 'unsafe-inline' https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com",
-              "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
-              "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com",
-              "font-src 'self' https://fonts.gstatic.com",
-              "connect-src 'self' https://api.clerk.dev https://clerk.litlabs.net https://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run",
-              "frame-src 'self' https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.com https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net",
+              "style-src 'self' 'unsafe-inline' https://*.clerk.com",
+              "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com",
+              "font-src 'self' https://*.clerk.com",
+              "connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com",
+              "frame-src 'self' https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev",
               "worker-src 'self' blob:",
               "object-src 'none'",
               "base-uri 'self'",
@@ -108,6 +105,16 @@ const nextConfig: NextConfig = {
           {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
+          },
+        ],
+      },
+      // Prevent caching of HTML pages (force fresh content)
+      {
+        source: "/:path*",
+        headers: [
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, must-revalidate",
           },
         ],
       },
@@ -162,8 +169,6 @@ const nextConfig: NextConfig = {
     return [
       { source: "/generate", destination: "/studio?tool=image", permanent: false },
       { source: "/flow", destination: "/studio?tool=flow", permanent: false },
-      { source: "/gallery", destination: "/studio?tool=gallery", permanent: false },
-      { source: "/builder", destination: "/studio?tool=agents", permanent: false },
     ];
   },
 

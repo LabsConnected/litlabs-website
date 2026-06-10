@@ -1,4 +1,5 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
+import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
@@ -9,37 +10,62 @@ import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import "./globals.css";
 
+const inter = Inter({
+  subsets: ["latin"],
+  variable: "--font-inter",
+  display: "swap",
+});
+
+const jetbrainsMono = JetBrains_Mono({
+  subsets: ["latin"],
+  variable: "--font-jetbrains",
+  display: "swap",
+});
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+  themeColor: "#0d0d0d",
+};
+
 export const metadata: Metadata = {
-  title: "LiTTree Lab Studios — AI Agent Platform",
-  description: "LiTPage — Your AI Universe. Deploy specialized AI agents, build workflows, and dominate your niche.",
-  keywords: ["AI agents", "automation", "workflow", "artificial intelligence", "NoCode", "LiTTree", "LiTPage"],
-  authors: [{ name: "LiTTree Lab Studios" }],
+  metadataBase: new URL("https://litlabs.net"),
+  title: {
+    default: "LiTTree Lab Studios — AI Agent Platform",
+    template: "%s | LiTTree Lab Studios",
+  },
+  description: "Deploy specialized AI agents, build no-code workflows, and automate your business with LiTTree Lab Studios — the AI-first creator platform.",
+  keywords: ["AI agents", "automation", "workflow", "artificial intelligence", "NoCode", "LiTTree", "LiTPage", "Gemini", "AI platform"],
+  authors: [{ name: "LiTTree Lab Studios", url: "https://litlabs.net" }],
   creator: "LiTTree Lab Studios",
   publisher: "LiTTree Lab Studios",
-  robots: { index: true, follow: true },
+  robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   openGraph: {
     type: "website",
     locale: "en_US",
     url: "https://litlabs.net",
     siteName: "LiTTree Lab Studios",
     title: "LiTTree Lab Studios — AI Agent Platform",
-    description: "LiTPage — Your AI Universe. Deploy agents. Automate workflows. Dominate your niche.",
+    description: "Deploy specialized AI agents, build no-code workflows, and automate your business with LiTTree Lab Studios.",
+    images: [{
+      url: "/og-image.png",
+      width: 1200,
+      height: 630,
+      alt: "LiTTree Lab Studios — AI Agent Platform",
+    }],
   },
   twitter: {
     card: "summary_large_image",
     title: "LiTTree Lab Studios — AI Agent Platform",
-    description: "LiTPage — Your AI Universe. Deploy agents. Automate workflows. Dominate your niche.",
+    description: "Deploy specialized AI agents, build no-code workflows, and automate your business.",
     creator: "@litlabs",
-  },
-  verification: {
-    google: "verify-later",
+    images: ["/og-image.png"],
   },
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
-const clerkReady =
-  (clerkKey.startsWith("pk_test_") || clerkKey.startsWith("pk_live_")) &&
-  clerkKey.length > 40;
+const clerkReady = clerkKey.startsWith("pk_") && clerkKey.length > 20;
 
 export default function RootLayout({
   children,
@@ -62,21 +88,12 @@ export default function RootLayout({
   );
 
   return (
-    <html lang="en">
-      <head>
-        <link rel="preconnect" href="https://fonts.googleapis.com" />
-        <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-        <link href="https://fonts.googleapis.com/css2?family=VT323&family=Orbitron:wght@400;500;600;700;800;900&family=Press+Start+2P&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet" />
-      </head>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="antialiased min-h-screen" style={{ backgroundColor: "#0a0a0f" }}>
         {clerkReady ? (
-          <ClerkProvider>
-            {inner}
-          </ClerkProvider>
+          <ClerkProvider publishableKey={clerkKey}>{inner}</ClerkProvider>
         ) : (
-          <>
-            {inner}
-          </>
+          inner
         )}
       </body>
     </html>

@@ -1,10 +1,11 @@
 "use client";
+export const dynamic = "force-dynamic";
 
-import { useEffect, Suspense, memo, useMemo } from "react";
+import { useEffect, useState, Suspense, memo, useMemo } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
-import dynamic from "next/dynamic";
+import lazyLoad from "next/dynamic";
 import { Zap, Command, Monitor, Coins } from "lucide-react";
 import StudioSidebar, { StudioTool } from "./components/StudioSidebar";
 import { llmHealth } from "@/lib/llm";
@@ -12,13 +13,13 @@ import { MEDIA_PROVIDERS } from "@/lib/media";
 import { useCrtToggle } from "@/context/ThemeContext";
 
 /* Lazy-load tools to keep bundle reasonable */
-const ImageTool  = dynamic(() => import("./tools/ImageTool"), { ssr: false });
-const VideoTool  = dynamic(() => import("./tools/VideoTool"), { ssr: false });
-const AudioTool  = dynamic(() => import("./tools/AudioTool"), { ssr: false });
-const AgentTool  = dynamic(() => import("./tools/AgentTool"), { ssr: false });
-const AgentsTerminalTool = dynamic(() => import("./tools/AgentsTerminalTool"), { ssr: false });
-const GalleryTool = dynamic(() => import("./tools/GalleryTool"), { ssr: false });
-const SpaceTool  = dynamic(() => import("./tools/SpaceTool"), { ssr: false });
+const ImageTool  = lazyLoad(() => import("./tools/ImageTool"), { ssr: false });
+const VideoTool  = lazyLoad(() => import("./tools/VideoTool"), { ssr: false });
+const AudioTool  = lazyLoad(() => import("./tools/AudioTool"), { ssr: false });
+const AgentTool  = lazyLoad(() => import("./tools/AgentTool"), { ssr: false });
+const AgentsTerminalTool = lazyLoad(() => import("./tools/AgentsTerminalTool"), { ssr: false });
+const GalleryTool = lazyLoad(() => import("./tools/GalleryTool"), { ssr: false });
+const SpaceTool  = lazyLoad(() => import("./tools/SpaceTool"), { ssr: false });
 
 /* ------------------------------------------------------------------ */
 /*  Model Badge — shows active provider per tool                        */
@@ -104,6 +105,8 @@ function StudioInner() {
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useAuth();
   const { crtEnabled, toggleCrt } = useCrtToggle();
+  const [litcoins, setLitcoins] = useState(500);
+  useEffect(() => { try { const raw = localStorage.getItem("litcoins"); if (raw) setLitcoins(Number(raw)); } catch {} }, []);
 
   const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
@@ -190,7 +193,7 @@ function StudioInner() {
             <div className="flex items-center gap-2">
               {/* Coin balance */}
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: T.accentColor + "10", color: T.accentColor }}>
-                <Coins size={10} /> 500
+                <Coins size={10} /> {litcoins.toLocaleString()}
               </div>
 
               {/* CRT toggle */}

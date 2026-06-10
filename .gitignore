@@ -60,3 +60,6 @@ use-wsl-ssh.ps1
 add-external-ssh.ps1
 
 .env*
+
+# Local Netlify folder
+.netlify

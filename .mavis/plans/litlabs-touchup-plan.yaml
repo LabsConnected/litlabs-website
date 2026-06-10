@@ -1,0 +1,216 @@
+version: 1
+plan:
+  name: LiTTree Lab Studios — Page Audit + Agents Terminal Build
+  max_concurrency: 4
+  max_consecutive_failures: 2
+  max_cycles: 10
+  auto_reject_retries: 1
+  verifier_config:
+    default_verifiers: [verifier]
+    audit_sample_rate: 0.0
+
+tasks:
+  - id: scan-pages
+    title: "Scan all pages — prioritize touch-ups"
+    prompt: |
+      You are in a codebase at: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      Your job: do a thorough scan of every page in src/app and src/app/studio/tools/
+      and produce a prioritized touch-up report. Do NOT write any code — only read and report.
+
+      Scope to check:
+      1. Every file under src/app/ — list pages, note their purpose
+      2. Every tool under src/app/studio/tools/ — list tools, note their purpose
+      3. Navbar/Layout components — src/app/layout.tsx, any Navbar component
+      4. Key shared components: ThemeContext, ProfileContext, AgentChatTool, ChatTool
+
+      For each page/tool, identify:
+      - What it does
+      - Any UI/UX issues (inconsistent styling, broken links, missing states, hardcoded values)
+      - CRT toggle implementation (is it global or per-page?)
+      - Model/provider hardcoding issues (some say "Gemini 2.5", others know OpenRouter)
+      - Navigation consistency issues
+      - Any accessibility or responsiveness gaps
+
+      Sort findings into:
+      - HIGH: security, broken flows, auth issues
+      - MEDIUM: visual polish, UX improvements, consistency fixes
+      - LOW: nice-to-haves
+
+      Output: write your findings to docs/page-audit-report.md
+      Include a summary table at the top.
+
+      Then also write docs/agents-terminal-design.md with your recommendation for:
+      - Where to place the new Agents Terminal in Studio
+      - What components to reuse (AgentTool, ChatTool, /agents page log terminal)
+      - Layout sketch (left agent list, center console, right info/logs)
+      - API calls needed (/api/gemini/chat, /api/media/generate)
+      - What the provider toggles should look like
+      - Image attachment flow (simple version)
+
+      Be specific about file paths and existing code patterns to follow.
+      Stop when both docs are written.
+    assigned_to: explore
+    verify_skip_reason: "Scan output is read-only analysis (markdown docs); downstream tasks build-agents-terminal and apply-touchups both verify the quality by using the docs to guide their implementation. No build risk."
+    max_retries: 2
+
+  - id: build-agents-terminal
+    title: "Build Agents Terminal tool in Studio"
+    prompt: |
+      You are in a codebase at: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      First, read docs/page-audit-report.md and docs/agents-terminal-design.md (created by the scan-pages task).
+      If those don't exist yet, read the existing tools to understand the patterns:
+      - src/app/studio/tools/AgentTool.tsx
+      - src/app/studio/tools/ChatTool.tsx
+      - src/app/agents/page.tsx (the log terminal section)
+
+      Then build the new AgentsTerminalTool component. Here is the specification:
+
+      FILE: src/app/studio/tools/AgentsTerminalTool.tsx
+
+      Layout (3-column, inspired by AgentTool + ChatTool + /agents log terminal):
+      - LEFT (240px): Agent list panel
+        - Use AGENTS from src/lib/agents.ts
+        - Show agent name, role badge, online status dot
+        - Click to switch active agent
+        - "System" section (built-in agents) + "Custom" section (user-created)
+
+      - CENTER (flex): Terminal console
+        - Scrollback area with terminal-style lines:
+          - Prefixes: [HH:MM] [AGENT-NAME] message...
+          - AI messages in a distinct color (blue/cyan)
+          - User messages right-aligned or in a different color
+          - Error messages in red
+        - Auto-scroll to bottom on new messages
+        - Bottom input bar:
+          - Multiline textarea (Enter=send, Shift+Enter=newline)
+          - Send button with spinner when streaming
+          - Attach image button (simple: paste URL or type image URL, show preview)
+          - Model toggle buttons at top (Gemini 2.5 Flash | OpenRouter Free)
+        - Show active model badge next to the textarea
+
+      - RIGHT (280px): Info + Logs panel
+        - Tabs: "Agent Info" | "Live Logs"
+        - Agent Info: agent description, capabilities, system prompt (collapsible)
+        - Live Logs: embed a filtered version of the /agents log terminal
+          - Auto-scroll toggle, search box, copy all button
+          - Filter to current agent
+
+      - TOP: Unified controls bar
+        - Provider toggles (Gemini 2.5 Flash | OpenRouter Free | [future: Sandbox Nemotron])
+        - Active model badge showing current model
+        - CRT toggle button (use existing localStorage key from ThemeContext)
+        - "Clear" button to wipe conversation history
+
+      API wiring:
+      - Use /api/gemini/chat with SSE streaming (stream: true)
+      - Pass: { agentSlug, provider, stream: true, history: [...messages] }
+      - Parse SSE chunks and append to terminal scrollback
+      - Image generation: call /api/media/generate with the prompt and append image thumbnail to console
+      - For image attachment: accept an image URL in the message, append it as a visual element in the console
+
+      Reuse patterns from:
+      - ChatTool.tsx: SSE streaming logic, provider toggles
+      - AgentTool.tsx: agent list, info panel
+      - src/app/agents/page.tsx: log terminal styling
+
+      Wire into StudioSidebar: add a new tool entry for "Agents Terminal" with a Terminal icon
+      Add to ToolRouter so it's accessible via tool=terminal query param
+
+      Commit your changes with message: "feat: add AgentsTerminalTool — unified agent chat with terminal UI, model toggles, and image support"
+
+      Stop when committed. Report changed files and the commit hash.
+    assigned_to: general
+    depends_on: [scan-pages]
+    verified_by: verifier
+    max_retries: 2
+    verify_prompt: |
+      You are a code reviewer. Run in: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      Verify the AgentsTerminalTool:
+      1. Read src/app/studio/tools/AgentsTerminalTool.tsx — check it exists and is complete
+      2. Check it has: left agent list, center terminal console, right info/logs panel, provider toggles, SSE streaming
+      3. Run: Set-Location "C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios"; npm run build
+         - It must compile with 0 errors
+         - Count pages before and after — must not decrease
+      4. Check StudioSidebar has a new entry for "Agents Terminal" or similar
+      5. Check ToolRouter handles tool=terminal
+
+      Report: PASS or FAIL with specific issues found.
+
+  - id: apply-touchups
+    title: "Apply HIGH-priority page touch-ups"
+    prompt: |
+      You are in a codebase at: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      First, read docs/page-audit-report.md to know what needs fixing.
+      Focus only on HIGH and MEDIUM priority items.
+
+      For each item, make the fix and commit. Common patterns to fix:
+
+      1. Global CRT toggle: ensure all pages with CRT effects use the same localStorage key
+         (check ThemeContext for the key name, then grep for other variants)
+
+      2. Model/provider labels: stop hardcoding "Gemini 2.5" in UI labels where OpenRouter
+         models are also available. Use a dynamic label based on active provider.
+
+      3. Navbar consistency: ensure the Navbar clearly highlights the active section.
+         Check Studio vs Builder vs Generate vs Flow vs Social.
+
+      4. AgentTool / ChatTool duplication: if both exist and do similar things,
+         ensure they share the same API calls and agent list source (src/lib/agents.ts)
+
+      5. Any broken links or missing imports found in the scan.
+
+      6. Status badges: ensure every agent/chat surface shows consistent status indicators.
+
+      For each fix:
+      - Make the change
+      - Run: Set-Location "C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios"; npm run build
+        - Must compile with 0 errors
+      - Commit with a clear message like "fix: global CRT toggle consistency" or "fix: dynamic model labels in agent UI"
+
+      Stop when all HIGH priority items are done and at least the most impactful MEDIUM items.
+      Report: list of files changed and what was fixed.
+    assigned_to: general
+    depends_on: [scan-pages]
+    verified_by: verifier
+    max_retries: 2
+    verify_prompt: |
+      You are a verifier. Run in: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      Verify the touch-ups:
+      1. Read docs/page-audit-report.md — note the HIGH priority items
+      2. Run: Set-Location "C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios"; npm run build
+         - Must compile with 0 errors
+         - Count pages
+      3. Check the fixes mentioned in apply-touchups task output:
+         - CRT toggle: grep for the localStorage key pattern, ensure consistency
+         - Model labels: check at least 3 pages that display model names
+         - Navbar: visually inspect the structure (read the layout file)
+      4. Report PASS if build succeeds and key fixes are present, FAIL with specific issues.
+
+  - id: final-integration
+    title: "Final integration gate — compile + smoke test"
+    role: verify-as-task
+    prompt: |
+      You are the final integration gate. Run in: C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios
+
+      Run the full integration check:
+      1. Set-Location "C:\home\litbit\LiTTreeLabstudios\home\litbit\LiTTreeLabstudios"; npm run build
+         - Must compile with 0 errors AND 0 warnings
+         - Count total pages — must be >= 55 (original baseline)
+
+      2. Check that AgentsTerminalTool.tsx exists and is wired into StudioSidebar
+
+      3. Verify git status: git status -sb
+         - There should be uncommitted changes (new tool + touch-ups)
+
+      4. Run: git log --oneline -3 to see recent commits
+
+      Report: PASS if build is clean, files exist, and commits are present.
+      FAIL if build errors, pages dropped, or key files missing.
+    assigned_to: verifier
+    depends_on: [build-agents-terminal, apply-touchups]
+    max_retries: 1

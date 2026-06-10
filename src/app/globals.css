@@ -33,10 +33,10 @@
 @theme inline {
   --color-background: var(--bg-color);
   --color-foreground: var(--text-color);
-  --font-sans: "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono: "JetBrains Mono", "Fira Code", "Courier New", monospace;
-  --font-display: "JetBrains Mono", "Inter", sans-serif;
-  --font-retro: "JetBrains Mono", "Courier New", monospace;
+  --font-sans: var(--font-inter), "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  --font-display: var(--font-jetbrains), "JetBrains Mono", "Inter", sans-serif;
+  --font-retro: var(--font-jetbrains), "JetBrains Mono", "Courier New", monospace;
 
   /* IDE Native semantic tokens */
   --color-ide-bg: #0d0d0d;
@@ -410,7 +410,7 @@ a:hover {
 /* ============================================================
    ANIMATIONS
    ============================================================ */
-@keyframes float {
+@keyframes float-sm {
   0%, 100% { transform: translateY(0); }
   50%      { transform: translateY(-6px); }
 }
@@ -1120,8 +1120,8 @@ a:hover {
    AMBIENT GLOW ORBS
    ============================================================ */
 @keyframes float {
-  0%, 100% { transform: translateY(0) scale(1); }
-  50% { transform: translateY(-20px) scale(1.05); }
+  0%, 100% { transform: translateY(0) translateZ(0) scale(1); }
+  50% { transform: translateY(-20px) translateZ(0) scale(1.05); }
 }
 .glow-orb {
   position: absolute;
@@ -1130,6 +1130,8 @@ a:hover {
   opacity: 0.15;
   animation: float 8s ease-in-out infinite;
   pointer-events: none;
+  will-change: transform;
+  contain: layout style;
 }
 
 /* ============================================================
@@ -1401,4 +1403,117 @@ body, #__next, main {
   line-clamp: 3;
   -webkit-box-orient: vertical;
   overflow: hidden;
+}
+
+/* ============================================================
+   MOBILE-FIRST RESPONSIVE ENHANCEMENTS
+   ============================================================ */
+
+/* Mobile typography scaling */
+@media (max-width: 640px) {
+  body {
+    font-size: 13px;
+  }
+
+  h1, .font-display {
+    font-size: 1.5rem !important;
+    line-height: 1.2;
+  }
+
+  h2 {
+    font-size: 1.25rem !important;
+  }
+
+  h3 {
+    font-size: 1.1rem !important;
+  }
+}
+
+/* Safe area insets for notched phones */
+@supports (padding-top: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
+
+/* Touch-friendly tap targets (min 44px) */
+@media (pointer: coarse) {
+  .btn,
+  a,
+  button,
+  [role="button"] {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .card,
+  .glass-card {
+    padding: 16px;
+  }
+}
+
+/* Mobile layout adjustments */
+@media (max-width: 768px) {
+  /* Reduce horizontal padding on mobile */
+  .px-4,
+  .px-6 {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
+  /* Full-width cards on mobile with reduced border radius */
+  .glass-card {
+    border-radius: 8px;
+  }
+
+  /* Stack flex layouts vertically on mobile */
+  .flex-wrap {
+    gap: 8px;
+  }
+}
+
+/* Floating messenger chats - mobile positioning */
+@media (max-width: 640px) {
+  .fixed.bottom-4,
+  .fixed.bottom-6 {
+    bottom: env(safe-area-inset-bottom, 16px);
+  }
+}
+
+/* Audio player mobile optimization */
+@media (max-width: 480px) {
+  iframe[src*="spotify"] {
+    height: 80px !important;
+  }
+}
+
+/* Prevent zoom on iOS inputs */
+@media (max-width: 768px) {
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+}
+
+/* Reduce motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Status dot pulse animation */
+.status-dot {
+  animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
