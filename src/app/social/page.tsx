@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
-import { useAuth } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import { Heart, MessageCircle, Share2, Send, Image as ImageIcon, Flame, Clock, Users, Sparkles } from "lucide-react";
 
@@ -52,7 +52,7 @@ function pickAgent(text: string) {
 
 export default function SocialPage() {
   const { resolvedColors: T } = useTheme();
-  const { isSignedIn } = useAuth();
+  const { isSignedIn } = useClerkAuth();
   const { profile } = useProfile();
   const [posts, setPosts] = useState<FeedPost[]>(SEED_POSTS);
   const [sort, setSort] = useState<"latest" | "top" | "ai" | "human">("latest");

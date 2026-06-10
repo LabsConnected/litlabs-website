@@ -5,7 +5,7 @@ import { useState, useRef, useEffect } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import { useAuth } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { AGENT_AVATARS } from "@/lib/avatars";
 import { useScrollReveal } from "@/hooks/useScrollReveal";
 import { useMounted } from "@/hooks/useMounted";
@@ -375,7 +375,7 @@ export default function LandingPage() {
 
   const skinPresets = ["cyberpunk", "retro", "ocean", "sunset", "matrix", "pink", "synthwave", "volcanic", "gold", "arctic", "emerald", "midnight", "neon", "blood", "cosmic", "miami"] as const;
 
-  const { isLoaded, isSignedIn, userId } = useAuth();
+  const { isLoaded, isSignedIn, userId } = useClerkAuth();
   const mounted = useMounted();
   // Pre-generate random scales once to prevent background avatar jitter on re-render
   const randomScales = useRef(UI_AGENTS.map(() => 0.8 + Math.random() * 0.5));
