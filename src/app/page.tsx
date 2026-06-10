@@ -80,6 +80,10 @@ const UI_AGENTS: UIAgent[] = [
   { id: "pixel", name: "Pixel Forge", role: "Visual Artist", avatar: AGENT_AVATARS['pixel-forge'], desc: "Creates images and 3D worlds.", status: "online", systemPrompt: "You are Pixel Forge, a visionary artist. Reply with creative flair, max 2 sentences.", color: "#22d3ee" },
 ];
 
+const AGENT_EMOJI: Record<string, string> = {
+  director: "🎯", champion: "🏆", code: "💻", social: "📱", data: "📊", writer: "✍️", music: "🎵", pixel: "🎨",
+};
+
 interface FloatingChat {
   agentId: string;
   name: string;
@@ -418,7 +422,7 @@ export default function LandingPage() {
               left: `${8 + (i * 11)}%`, top: `${15 + (i % 4) * 20}%`,
               animationDelay: `${i * 0.7}s`, animationDuration: `${3 + i * 0.4}s`,
               fontSize: `${28 + (i % 3) * 10}px`, opacity: 0.07,
-            }}>{agent.avatar}</div>
+            }}>{AGENT_EMOJI[agent.id] ?? "🤖"}</div>
           ))}
         </div>
 
@@ -486,7 +490,7 @@ export default function LandingPage() {
                   <div className="p-4 space-y-2">
                     {UI_AGENTS.slice(0, 6).map((agent) => (
                       <div key={agent.id} className="flex items-center gap-3 p-2.5 rounded-lg transition-all" style={{ backgroundColor: resolvedColors.bgColor + '80', border: `1px solid ${resolvedColors.borderColor}20` }}>
-                        <span className="text-xl w-8 text-center">{agent.avatar}</span>
+                        <img src={agent.avatar} alt={agent.name} className="w-8 h-8 rounded-full" />
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-1.5">
                             <span className="font-bold text-xs">{agent.name}</span>

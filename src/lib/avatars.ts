@@ -2,7 +2,10 @@
 
 function svgAvatar(initial: string, color: string, bgFrom = "#0a1a2e", bgTo = "#000"): string {
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="128" height="128"><defs><radialGradient id="bg" cx="50%" cy="50%" r="50%"><stop offset="0%" stop-color="${bgFrom}"/><stop offset="100%" stop-color="${bgTo}"/></radialGradient><filter id="g"><feGaussianBlur stdDeviation="1.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs><circle cx="32" cy="32" r="30" fill="url(#bg)" stroke="${color}" stroke-width="2" filter="url(#g)"/><text x="32" y="39" text-anchor="middle" fill="${color}" font-size="26" font-family="monospace" font-weight="bold" filter="url(#g)">${initial}</text></svg>`;
-  return `data:image/svg+xml;base64,${btoa(svg)}`;
+  const encoded = typeof Buffer !== "undefined"
+    ? Buffer.from(svg).toString("base64")
+    : btoa(svg);
+  return `data:image/svg+xml;base64,${encoded}`;
 }
 
 export const AGENT_AVATARS: Record<string, string> = {
