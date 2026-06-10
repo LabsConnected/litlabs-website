@@ -198,7 +198,7 @@ function StudioInner() {
             <div className="flex items-center gap-2">
               {/* Coin balance */}
               <div className="flex items-center gap-1 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: T.accentColor + "10", color: T.accentColor }}>
-                <Coins size={10} /> {litcoins.toLocaleString()}
+                <Coins size={10} /> {litcoins.toLocaleString()} <span className="opacity-60">LiTBit Coins</span>
               </div>
 
               {/* CRT toggle */}

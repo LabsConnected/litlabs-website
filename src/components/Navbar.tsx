@@ -139,7 +139,7 @@ export default function Navbar() {
                 color: resolvedColors.accentColor,
                 border: `1px solid ${resolvedColors.accentColor}30`,
               }}
-              title="Your LitCoins balance"
+              title="Your LiTBit Coins balance"
             >
               <Coins size={10} /> ∞ FREE
             </span>
@@ -317,7 +317,7 @@ export default function Navbar() {
 
           <div className="px-4 py-4 border-t" style={{ borderColor: resolvedColors.borderColor + "20" }}>
             <div className="flex items-center justify-between mb-3">
-              <span className="text-xs font-bold" style={{ color: resolvedColors.textMuted }}>LitCoins</span>
+              <span className="text-xs font-bold" style={{ color: resolvedColors.textMuted }}>LiTBit Coins</span>
               <span className="text-xs font-bold" style={{ color: resolvedColors.accentColor }}>∞ FREE</span>
             </div>
             <NavAuth linkColor={resolvedColors.linkColor} />
