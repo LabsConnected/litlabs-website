@@ -20,6 +20,7 @@ const AgentTool  = lazyLoad(() => import("./tools/AgentTool"), { ssr: false });
 const AgentsTerminalTool = lazyLoad(() => import("./tools/AgentsTerminalTool"), { ssr: false });
 const GalleryTool = lazyLoad(() => import("./tools/GalleryTool"), { ssr: false });
 const SpaceTool  = lazyLoad(() => import("./tools/SpaceTool"), { ssr: false });
+const PipelineTool = lazyLoad(() => import("./tools/PipelineTool"), { ssr: false });
 
 /* ------------------------------------------------------------------ */
 /*  Model Badge — shows active provider per tool                        */
@@ -30,6 +31,7 @@ const STATIC_MODEL_MAP: Record<StudioTool, { provider: string; color: string }> 
   audio:   { provider: "TTS / Music", color: "#9b59b6" },
   agents:  { provider: "Gemini 2.5 Flash", color: "#ffff00" },
   terminal:{ provider: "Gemini 2.5 Flash", color: "#00ffff" },
+  pipeline: { provider: "Gemini Orchestrator", color: "#d946ef" },
   gallery: { provider: "Asset Bucket", color: "#d2a8ff" },
   space:   { provider: "MiniMax Space", color: "#ff6b35" },
 };
@@ -43,6 +45,7 @@ function ModelBadge({ tool, T }: { tool: StudioTool; T: ReturnType<typeof useThe
     : tool === "image"   ? MEDIA_PROVIDERS.find(p => p.id === "together")?.label.split(" ")[0] ?? "FLUX" + " Schnell"
     : tool === "video"   ? "Wan 2.1"
     : tool === "audio"   ? "TTS / Music"
+    : tool === "pipeline" ? "Gemini Orchestrator"
     : tool === "gallery" ? "Asset Bucket"
     : tool === "space"   ? "MiniMax Space"
     : info.provider;
@@ -90,6 +93,7 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
     case "audio":    return <AudioTool />;
     case "agents":   return <AgentTool />;
     case "terminal": return <AgentsTerminalTool />;
+    case "pipeline": return <PipelineTool />;
     case "gallery":  return <GalleryTool />;
     case "space":    return <SpaceTool />;
     default:         return <ImageTool />;
@@ -110,7 +114,7 @@ function StudioInner() {
 
   const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
-    toolParam && ["image", "video", "audio", "agents", "terminal", "gallery", "space"].includes(toolParam)
+    toolParam && ["image", "video", "audio", "agents", "terminal", "pipeline", "gallery", "space"].includes(toolParam)
       ? toolParam
       : "image";
 
@@ -124,8 +128,9 @@ function StudioInner() {
           "3": "audio",
           "4": "agents",
           "5": "terminal",
-          "6": "gallery",
-          "7": "space",
+          "6": "pipeline",
+          "7": "gallery",
+          "8": "space",
         };
         if (map[e.key]) {
           e.preventDefault();

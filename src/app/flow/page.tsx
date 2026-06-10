@@ -1,14 +1,16 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import Link from "next/link";
-import { useTheme } from "@/context/ThemeContext";
 import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
+import { useTheme } from "@/context/ThemeContext";
 import {
-  Play, Plus, Trash2, Save, Download, RefreshCw, Loader2,
-  Sparkles, Film, Image as ImageIcon, AlertTriangle, CheckCircle2,
-  Coins, History, Wand2, ArrowRight, Zap
+  Box, Terminal, Activity, Zap, Play, Cpu,
+  Loader2, Settings, Webhook, Database, MessageSquare,
+  Trash2, SlidersHorizontal, Save, Network, RefreshCw,
+  Film, Coins, Wand2, Plus, AlertTriangle, CheckCircle2,
+  Sparkles, Download, History, Image as ImageIcon
 } from "lucide-react";
 import { MEDIA_PROVIDERS, MediaFormat, MediaProviderId, getProvider } from "@/lib/media";
 
