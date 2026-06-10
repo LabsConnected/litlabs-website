@@ -4,6 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useProfile } from "@/context/ProfileContext";
 import dynamic from "next/dynamic";
 import {
   Home, ShoppingBag, Sparkles,
@@ -50,6 +51,7 @@ function useLocalStorageNumber(key: string, fallback: number) {
 
 export default function Navbar() {
   const { theme, resolvedColors, setMode } = useTheme();
+  const { profile } = useProfile();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [userOpen, setUserOpen] = useState(false);
@@ -80,33 +82,32 @@ export default function Navbar() {
 
   return (
     <nav
-      className="sticky top-0 z-50 border-b"
+      className="sticky top-0 z-50"
       style={{
-        borderColor: resolvedColors.borderColor + "30",
-        backgroundColor: resolvedColors.bgColor + "b0",
-        backdropFilter: "blur(20px) saturate(180%)",
-        WebkitBackdropFilter: "blur(20px) saturate(180%)",
+        borderBottom: `1px solid ${resolvedColors.borderColor}25`,
+        backgroundColor: resolvedColors.bgColor + "cc",
+        backdropFilter: "blur(24px) saturate(180%)",
+        WebkitBackdropFilter: "blur(24px) saturate(180%)",
+        boxShadow: `0 1px 0 ${resolvedColors.accentColor}10, 0 4px 20px rgba(0,0,0,0.3)`,
       }}
     >
       <div className="max-w-7xl mx-auto px-4">
-        <div className="flex items-center justify-between h-12">
+        <div className="flex items-center justify-between h-14">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2 group shrink-0">
-            <div className="relative">
-              <Zap
-                size={20}
-                className="transition-all duration-300 group-hover:scale-110 group-hover:rotate-12"
-                style={{ color: resolvedColors.accentColor }}
-              />
-              <div className="absolute inset-0 blur-md opacity-40" style={{ color: resolvedColors.accentColor }} />
+          <Link href="/" className="flex items-center gap-2.5 group shrink-0">
+            <div className="relative flex items-center justify-center w-8 h-8 rounded-lg transition-transform duration-300 group-hover:scale-105" style={{ background: `linear-gradient(135deg, ${resolvedColors.accentColor}30, ${resolvedColors.headerColor}20)`, border: `1px solid ${resolvedColors.accentColor}40` }}>
+              <Zap size={16} className="transition-all duration-300 group-hover:rotate-12" style={{ color: resolvedColors.accentColor }} />
             </div>
-            <span className="font-black text-sm hidden sm:inline tracking-tight" style={{ color: resolvedColors.headerColor }}>
-              LiTree Labs
-            </span>
+            <div className="hidden sm:flex flex-col leading-none">
+              <span className="font-black text-[13px] tracking-tight" style={{ background: `linear-gradient(90deg, ${resolvedColors.headerColor}, ${resolvedColors.accentColor})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                LiTree Labs
+              </span>
+              <span className="text-[9px] font-bold tracking-widest uppercase opacity-50" style={{ color: resolvedColors.textMuted }}>AI Platform</span>
+            </div>
           </Link>
 
-          {/* Desktop Nav — all pages surfaced */}
-          <div className="hidden lg:flex items-center gap-0.5">
+          {/* Desktop Nav */}
+          <div className="hidden lg:flex items-center gap-1 bg-opacity-40 px-1 py-1 rounded-xl" style={{ backgroundColor: resolvedColors.boxBg + "40", border: `1px solid ${resolvedColors.borderColor}20` }}>
             {navLinks.map((link) => {
               const active = isActive(link.href);
               const Icon = link.icon;
@@ -114,20 +115,15 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="relative flex items-center gap-1.5 px-2.5 py-2 text-[11px] font-bold rounded-md transition-all duration-200 hover:opacity-80"
-                  style={{ color: active ? resolvedColors.headerColor : resolvedColors.linkColor }}
+                  className="relative flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all duration-200"
+                  style={{
+                    color: active ? resolvedColors.bgColor : resolvedColors.textMuted,
+                    backgroundColor: active ? resolvedColors.accentColor : "transparent",
+                    boxShadow: active ? `0 0 12px ${resolvedColors.accentColor}50` : "none",
+                  }}
                 >
-                  <Icon size={13} strokeWidth={active ? 2.5 : 2} />
+                  <Icon size={12} strokeWidth={active ? 2.5 : 2} />
                   <span>{link.label}</span>
-                  {active && (
-                    <span
-                      className="absolute bottom-0 left-1.5 right-1.5 h-[2px] rounded-full"
-                      style={{
-                        background: `linear-gradient(90deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`,
-                        boxShadow: `0 0 8px ${resolvedColors.accentColor}60`,
-                      }}
-                    />
-                  )}
                 </Link>
               );
             })}
@@ -206,13 +202,20 @@ export default function Navbar() {
                 onClick={() => setUserOpen((v) => !v)}
                 aria-label="Navigation menu"
                 aria-expanded={userOpen}
-                className="flex items-center gap-1 p-1 rounded-md transition-all hover:opacity-70"
+                className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all hover:opacity-80"
                 style={{
-                  border: `1px solid ${resolvedColors.borderColor}40`,
+                  border: `1px solid ${resolvedColors.borderColor}30`,
                   backgroundColor: resolvedColors.boxBg + "60",
                 }}
                 title="Menu"
               >
+                {profile?.avatarUrl ? (
+                  <img src={profile.avatarUrl} alt="Profile" className="w-5 h-5 rounded-full object-cover" />
+                ) : (
+                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: resolvedColors.accentColor + "30", color: resolvedColors.accentColor }}>
+                    {profile?.displayName?.[0]?.toUpperCase() || "U"}
+                  </div>
+                )}
                 <ChevronDown size={10} style={{ color: resolvedColors.textMuted }} />
               </button>
               {userOpen && (

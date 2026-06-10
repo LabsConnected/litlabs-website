@@ -14,6 +14,7 @@ interface PageShellProps {
   children: ReactNode;
   title?: string;
   subtitle?: string;
+  icon?: ReactNode;
   breadcrumbs?: BreadcrumbItem[];
   className?: string;
   fullWidth?: boolean;
@@ -25,6 +26,7 @@ export default function PageShell({
   children,
   title,
   subtitle,
+  icon,
   breadcrumbs,
   className = "",
   fullWidth = false,
@@ -61,19 +63,29 @@ export default function PageShell({
 
         {(title || subtitle) && (
           <div className="mb-8">
-            {title && (
-              <div className="flex items-center justify-between gap-4">
-                <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ color: resolvedColors.headerColor }}>
-                  {title}
-                </h1>
-                {headerAction && <div className="shrink-0">{headerAction}</div>}
+            <div className="flex items-start justify-between gap-4">
+              <div className="flex items-center gap-3">
+                {icon && (
+                  <div className="flex-shrink-0 w-10 h-10 rounded-xl flex items-center justify-center text-xl" style={{ background: `linear-gradient(135deg, ${resolvedColors.accentColor}20, ${resolvedColors.headerColor}15)`, border: `1px solid ${resolvedColors.accentColor}30` }}>
+                    {icon}
+                  </div>
+                )}
+                <div>
+                  {title && (
+                    <h1 className="text-2xl sm:text-3xl font-black tracking-tight" style={{ background: `linear-gradient(90deg, ${resolvedColors.headerColor}, ${resolvedColors.accentColor})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+                      {title}
+                    </h1>
+                  )}
+                  {subtitle && (
+                    <p className="mt-1 text-sm" style={{ color: resolvedColors.textMuted }}>
+                      {subtitle}
+                    </p>
+                  )}
+                </div>
               </div>
-            )}
-            {subtitle && (
-              <p className="mt-2 text-sm opacity-70 max-w-2xl" style={{ color: resolvedColors.textMuted }}>
-                {subtitle}
-              </p>
-            )}
+              {headerAction && <div className="shrink-0 mt-1">{headerAction}</div>}
+            </div>
+            <div className="mt-4 h-px" style={{ background: `linear-gradient(90deg, ${resolvedColors.accentColor}40, transparent)` }} />
           </div>
         )}
 
