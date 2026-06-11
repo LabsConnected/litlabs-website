@@ -25,7 +25,7 @@ export async function GET(
 
     return NextResponse.json({ agent });
   } catch (error) {
-    console.error("Error fetching agent:", error);
+    // Error fetching agent:
     return NextResponse.json(
       { error: "Failed to fetch agent" },
       { status: 500 }

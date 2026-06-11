@@ -65,7 +65,7 @@ export async function POST(req: NextRequest) {
     const session = await stripeResponse.json();
 
     if (!stripeResponse.ok) {
-      console.error("Stripe error:", session);
+      // Stripe error:
       return NextResponse.json(
         { error: session.error?.message || "Stripe error" },
         { status: stripeResponse.status }
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ url: session.url, sessionId: session.id });
   } catch (err) {
-    console.error("Stripe checkout error:", err);
+    // Stripe checkout error:
     return NextResponse.json(
       { error: "Internal server error" },
       { status: 500 }

@@ -4,7 +4,7 @@ import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Wand2, Save, Download, RefreshCw, Coins, AlertTriangle,
-  CheckCircle2, Loader2, History, Sparkles
+  CheckCircle2, Loader2, History, Sparkles, Gift
 } from "lucide-react";
 import { MediaProviderId } from "@/lib/media";
 
@@ -51,6 +51,7 @@ export default function ImageTool() {
   const [history, setHistory] = useState<Generation[]>([]);
   const [coinBalance, setCoinBalance] = useState<number | null>(null);
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [claiming, setClaiming] = useState(false);
 
   /* Persist history */
   useEffect(() => {
@@ -146,25 +147,57 @@ export default function ImageTool() {
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Save failed");
       setStatus("succeeded");
+      setError("Saved to Gallery ✓");
+      setTimeout(() => setError(null), 3000);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Save failed");
       setStatus("succeeded");
     }
   }, []);
 
-  const handleDownload = useCallback((url: string, name: string) => {
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${name.replace(/[^a-z0-9]+/gi, "_")}.jpg`;
-    a.target = "_blank";
-    a.rel = "noopener noreferrer";
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+  const handleDownload = useCallback(async (url: string, name: string) => {
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const blobUrl = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = blobUrl;
+      a.download = `${name.replace(/[^a-z0-9]+/gi, "_")}.jpg`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(blobUrl);
+    } catch {
+      window.open(url, "_blank");
+    }
   }, []);
 
   const handleClearHistory = () => { setHistory([]); localStorage.removeItem(STORAGE_KEY); };
   const handleUsePrompt = (p: string) => { setPrompt(p); setError(null); };
+
+  const handleClaimBonus = useCallback(async () => {
+    setClaiming(true);
+    setError(null);
+    try {
+      const res = await fetch("/api/wallet", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ type: "daily" }),
+      });
+      const data = await res.json();
+      if (res.ok && typeof data.balance === "number") {
+        setCoinBalance(data.balance);
+        setError(`Daily bonus claimed! +50 LiTBit Coins`);
+        setTimeout(() => setError(null), 3000);
+      } else {
+        setError(data.error || "Failed to claim bonus");
+      }
+    } catch {
+      setError("Network error — try again");
+    } finally {
+      setClaiming(false);
+    }
+  }, []);
 
   const isWorking = status === "submitting" || status === "polling";
 
@@ -176,8 +209,19 @@ export default function ImageTool() {
           <Sparkles size={14} style={{ color: T.accentColor }} />
           <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>Image Generator</span>
         </div>
-        <div className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold border" style={{ borderColor: T.borderColor, color: T.accentColor, backgroundColor: T.boxBg }}>
-          <Coins size={11} /> {coinBalance ?? "—"} LiTBit
+        <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold border" style={{ borderColor: T.borderColor, color: T.accentColor, backgroundColor: T.boxBg }}>
+            <Coins size={11} /> {coinBalance ?? "—"} LiTBit
+          </div>
+          <button
+            onClick={handleClaimBonus}
+            disabled={claiming}
+            className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold border transition-all hover:scale-105 disabled:opacity-50"
+            style={{ borderColor: T.accentColor, color: T.bgColor, backgroundColor: T.accentColor }}
+            title="Claim 50 free LiTBit Coins daily"
+          >
+            <Gift size={11} /> {claiming ? "..." : "Claim"}
+          </button>
         </div>
       </div>
 

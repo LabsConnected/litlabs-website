@@ -52,7 +52,7 @@ async function getHandler(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching profile:", error);
+    // Error fetching profile:
     return NextResponse.json(
       { error: "Failed to fetch profile" },
       { status: 500 }
@@ -107,7 +107,7 @@ async function postHandler(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error updating profile:", error);
+    // Error updating profile:
     return NextResponse.json(
       { error: "Failed to update profile" },
       { status: 500 }

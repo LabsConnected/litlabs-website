@@ -42,7 +42,7 @@ export async function POST(req: NextRequest) {
       actionQueue = actionQueue.slice(0, 50);
     }
 
-    console.log("[Agent Action] Queued:", newAction);
+    // Agent action queued
 
     return NextResponse.json({
       success: true,

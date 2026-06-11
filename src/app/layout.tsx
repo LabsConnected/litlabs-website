@@ -65,7 +65,6 @@ export const metadata: Metadata = {
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ?? "";
-const clerkReady = clerkKey.startsWith("pk_") && clerkKey.length > 20;
 
 export default function RootLayout({
   children,
@@ -90,17 +89,19 @@ export default function RootLayout({
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
       <body className="antialiased min-h-screen" style={{ backgroundColor: "#0a0a0f" }}>
-        {clerkReady ? (
+        {clerkKey ? (
           <ClerkProvider
             publishableKey={clerkKey}
             signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
             signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
-            signInFallbackRedirectUrl={process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/builder"}
-            signUpFallbackRedirectUrl={process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/builder"}
+            signInFallbackRedirectUrl={process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"}
+            signUpFallbackRedirectUrl={process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"}
           >
             {inner}
           </ClerkProvider>
-        ) : inner}
+        ) : (
+          inner
+        )}
       </body>
     </html>
   );

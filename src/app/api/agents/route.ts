@@ -33,7 +33,7 @@ async function getHandler(req: NextRequest) {
     const { data: rows, error } = await query;
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json({ error: "Failed to fetch agents" }, { status: 500 });
     }
 
@@ -61,7 +61,7 @@ async function getHandler(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Error fetching agents:", error);
+    // Error fetching agents:
     return NextResponse.json({ error: "Failed to fetch agents" }, { status: 500 }
     );
   }
@@ -111,13 +111,13 @@ async function postHandler(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error("Supabase insert error:", error);
+      // Supabase insert error:
       return NextResponse.json({ error: "Failed to create agent" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, agent }, { status: 201 });
   } catch (error) {
-    console.error("Error creating agent:", error);
+    // Error creating agent:
     return NextResponse.json({ error: "Failed to create agent" }, { status: 500 });
   }
 }

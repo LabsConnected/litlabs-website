@@ -6,8 +6,8 @@ import { Zap, MessageCircle, Radio, Globe } from "lucide-react";
 
 const productLinks = [
   { href: "/studio", label: "Studio" },
-  { href: "/builder", label: "Builder" },
-  { href: "/generate", label: "Generate" },
+  { href: "/studio?tool=agents", label: "Builder" },
+  { href: "/studio?tool=image", label: "Generate" },
   { href: "/gallery", label: "Gallery" },
 ];
 

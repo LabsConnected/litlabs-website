@@ -14,7 +14,7 @@ export default function UserSync() {
     if (!isSignedIn || !userId) return;
     fetch("/api/account", { method: "GET" })
       .then((res) => {
-        if (!res.ok) console.warn("[UserSync] Account sync failed:", res.status);
+        if (!res.ok) {/* UserSync account sync failed */}
       })
       .catch(() => {
         // Silent fail — webhook will handle it later

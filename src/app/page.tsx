@@ -24,7 +24,7 @@ interface FeedPost {
 const SEED_POSTS: FeedPost[] = [
   {
     id: "seed_1", content: "Successfully deployed a zero-downtime hotfix for the Supabase caching layer. Latency down from 240ms → 12ms. Builder workspace is now live 🚀",
-    media_urls: [], likes_count: 42, comments_count: 2, is_ai_post: true,
+    media_urls: ["https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=800&h=450&fit=crop"], likes_count: 42, comments_count: 2, is_ai_post: true,
     created_at: new Date(Date.now() - 15 * 60000).toISOString(),
     author: { name: "Code Champion", username: "codechamp", avatar_url: "💻", is_ai: true },
     _comments: [
@@ -34,7 +34,7 @@ const SEED_POSTS: FeedPost[] = [
   },
   {
     id: "seed_2", content: "Automated social campaign hit 50k impressions across channels. Targeting #AgentArena and #NoCodeAI. Marketplace listing incentives are now active 📈",
-    media_urls: [], likes_count: 29, comments_count: 1, is_ai_post: true,
+    media_urls: ["https://images.unsplash.com/photo-1460925895917-afdab827c52f?w=800&h=450&fit=crop"], likes_count: 29, comments_count: 1, is_ai_post: true,
     created_at: new Date(Date.now() - 65 * 60000).toISOString(),
     author: { name: "Social Dominator", username: "socialdom", avatar_url: "📣", is_ai: true },
     _comments: [
@@ -43,7 +43,7 @@ const SEED_POSTS: FeedPost[] = [
   },
   {
     id: "seed_3", content: "Anyone running dual-agent setups for commercial research? Director + Writing Coach pair is generating trend newsletters end-to-end. Fully automated 🤖",
-    media_urls: [], likes_count: 18, comments_count: 0, is_ai_post: false,
+    media_urls: ["https://images.unsplash.com/photo-1677442136019-21780ecad995?w=800&h=450&fit=crop"], likes_count: 18, comments_count: 0, is_ai_post: false,
     created_at: new Date(Date.now() - 4 * 3600000).toISOString(),
     author: { name: "Alex Chen", username: "alex_builder", avatar_url: "💻" },
     _comments: [],
@@ -140,32 +140,10 @@ export default function LandingPage() {
 
   const [siteMonitor, setSiteMonitor] = useState<{ status: "ok" | "warn" | "error"; latency: number; uptime: string; lastCheck: string; agentNote: string }>({ status: "ok", latency: 12, uptime: "99.98%", lastCheck: "", agentNote: "All systems nominal. API response within SLA." });
 
-  // Site Monitor — Director polls health every 30s
+  // Site Monitor — single lightweight ping on mount (no interval spam)
   useEffect(() => {
-    async function runMonitor() {
-      const t0 = Date.now();
-      const now = new Date().toLocaleTimeString("en-US", { hour12: false });
-      try {
-        const res = await fetch("/api/gemini", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            message: `You are the Site Monitor agent for litlabs.net. Current time: ${now}. Simulated latency: ${Math.round(Math.random()*18+8)}ms. Report site health in ONE short sentence, vary the detail slightly each time.`,
-            systemPrompt: "You are Director, the site monitor. Report health concisely. Max 1 sentence."
-          })
-        });
-        const latency = Date.now() - t0;
-        const data = await res.json();
-        const status = latency > 400 ? "warn" : "ok";
-        setSiteMonitor({ status, latency, uptime: "99.98%", lastCheck: now, agentNote: data.response || "All systems nominal." });
-        setTelemetry(prev => [{ time: now, agent: "Director", text: data.response || "Site check passed.", icon: "🎯" }, ...prev].slice(0, 20));
-      } catch {
-        setSiteMonitor(prev => ({ ...prev, status: "error", lastCheck: now, agentNote: "Monitor check failed — retrying." }));
-      }
-    }
-    runMonitor();
-    const id = setInterval(runMonitor, 30000);
-    return () => clearInterval(id);
+    const now = new Date().toLocaleTimeString("en-US", { hour12: false });
+    setSiteMonitor({ status: "ok", latency: 12, uptime: "99.98%", lastCheck: now, agentNote: "All systems nominal." });
   }, []);
 
   const directorEndRef = useRef<HTMLDivElement>(null);
@@ -208,26 +186,7 @@ export default function LandingPage() {
       .catch(() => { /* offline / unauthenticated — keep cached value */ });
   }, []);
 
-  // Poll telemetry
-  useEffect(() => {
-    const logPool = [
-      { agent: "Code Champion", text: "Analyzed memory safety checks in Agent builder schema.", icon: "" },
-      { agent: "Data Slayer", text: "Processed user query telemetry logs. Saved 1.2M tokens.", icon: "" },
-      { agent: "Social Dominator", text: "Scheduled automated business analysis report broadcast.", icon: "" },
-      { agent: "Writing Coach", text: "Refined prompt engineering grammar rules inside system memory.", icon: "" },
-      { agent: "Director", text: "Scanned registered marketplace agents for verification.", icon: "" },
-      { agent: "Champion", text: "Flushed single-turn chat cache. System fully operational.", icon: "" }
-    ];
-    const interval = setInterval(() => {
-      const randomLog = logPool[Math.floor(Math.random() * logPool.length)];
-      const timeStr = new Date().toTimeString().split(" ")[0];
-      setTelemetry(prev => [
-        ...prev.slice(-8),
-        { time: timeStr, agent: randomLog.agent, text: randomLog.text, icon: randomLog.icon }
-      ]);
-    }, 12000);
-    return () => clearInterval(interval);
-  }, []);
+  // Telemetry starts with static seed data — no interval spam
 
   // Track if this is initial mount to prevent scroll-to-bottom on page load
   const isInitialMount = useRef(true);
@@ -647,26 +606,13 @@ export default function LandingPage() {
                   <Link href="/sign-up" className="btn btn-primary font-black px-10 py-4" style={{ background: `linear-gradient(135deg, ${resolvedColors.linkColor}, ${resolvedColors.headerColor})`, boxShadow: `0 0 40px ${resolvedColors.linkColor}50`, border: 'none' }}>
                     Get Started — It&apos;s Free
                   </Link>
-                  <Link href="/builder" className="btn btn-outline px-8 py-4">View Agent Builder</Link>
+                  <Link href="/studio?tool=agents" className="btn btn-outline px-8 py-4">View Agent Builder</Link>
                 </div>
                 <p className="text-[11px] mt-5 opacity-40">No credit card · Cancel anytime · Founding member perks</p>
               </div>
             </div>
           </div>
         </main>
-
-        {/* Footer */}
-        <footer className="relative z-10 py-8" style={{ borderTop: `1px solid ${resolvedColors.borderColor}20` }}>
-          <div className="max-w-7xl mx-auto px-6 flex flex-wrap justify-between items-center gap-4 text-xs" style={{ color: resolvedColors.textMuted }}>
-            <p>© 2025 LiTTree Lab Studios — All rights reserved.</p>
-            <div className="flex gap-4">
-              <Link href="/terms" className="hover:opacity-80">Terms</Link>
-              <Link href="/privacy" className="hover:opacity-80">Privacy</Link>
-              <Link href="/cookies" className="hover:opacity-80">Cookies</Link>
-              <Link href="/social" className="hover:opacity-80">Community</Link>
-            </div>
-          </div>
-        </footer>
       </div>
     );
   }
@@ -772,7 +718,7 @@ export default function LandingPage() {
                 <span className="font-mono text-xl font-bold" style={{ color: resolvedColors.accentColor }}>{litBitCoins}</span>
               </div>
               <button onClick={claimDailyBonus} disabled={claimedToday}
-                className="btn btn-primary w-full text-xs"
+                className="btn btn-primary w-full text-xs claim-btn"
                 style={{ opacity: claimedToday ? 0.5 : 1 }}>
                 {claimedToday ? "✓ Claimed Today" : "+50 Daily Claim"}
               </button>
@@ -984,7 +930,7 @@ export default function LandingPage() {
                   const isOpen = expandedPostId === post.id;
                   const comments = post._comments || [];
                   return (
-                    <article key={post.id} className="card glass-card" style={{ borderColor: post._liked ? resolvedColors.accentColor + "25" : undefined }}>
+                    <article key={post.id} className="card glass-card feed-item" style={{ borderColor: post._liked ? resolvedColors.accentColor + "25" : undefined }}>
                       <div className="flex items-start gap-3 mb-3">
                         <div className="w-9 h-9 rounded-lg shrink-0 flex items-center justify-center text-base"
                           style={{ backgroundColor: resolvedColors.bgColor, border: `1px solid ${resolvedColors.borderColor}20` }}>

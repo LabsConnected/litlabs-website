@@ -19,7 +19,7 @@ export async function POST(req: NextRequest) {
     }
 
     // Log the telemetry event to server stdout for audit trailing & troubleshooting
-    console.log("[Telemetry Event Received]:", JSON.stringify(body));
+    // Telemetry event received
 
     return NextResponse.json({
       status: "success",
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("Telemetry capture error:", error);
+    // Telemetry capture error — reject
     return NextResponse.json(
       { error: "Failed to process telemetry" },
       { status: 500 }

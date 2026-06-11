@@ -26,7 +26,7 @@ async function getHandler(req: NextRequest) {
       .eq("is_active", true);
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to fetch user agents" },
         { status: 500 }
@@ -38,7 +38,7 @@ async function getHandler(req: NextRequest) {
       total: userAgents?.length || 0,
     });
   } catch (error) {
-    console.error("Error fetching user agents:", error);
+    // Error fetching user agents:
     return NextResponse.json(
       { error: "Failed to fetch user agents" },
       { status: 500 }
@@ -110,7 +110,7 @@ async function postHandler(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to install agent" },
         { status: 500 }
@@ -122,7 +122,7 @@ async function postHandler(req: NextRequest) {
       userAgent: userAgent,
     });
   } catch (error) {
-    console.error("Error installing agent:", error);
+    // Error installing agent:
     return NextResponse.json(
       { error: "Failed to install agent" },
       { status: 500 }
@@ -159,7 +159,7 @@ async function deleteHandler(req: NextRequest) {
       .eq("agent_id", agentId);
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to remove agent" },
         { status: 500 }
@@ -170,7 +170,7 @@ async function deleteHandler(req: NextRequest) {
       message: "Agent removed from dock",
     });
   } catch (error) {
-    console.error("Error removing agent:", error);
+    // Error removing agent:
     return NextResponse.json(
       { error: "Failed to remove agent" },
       { status: 500 }

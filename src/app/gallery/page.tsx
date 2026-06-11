@@ -497,7 +497,7 @@ export default function Gallery() {
       />
 
       {/* ── Floating Create Button ── */}
-      <Link href="/generate" style={{ position: "fixed", bottom: "24px", right: "24px", width: "56px", height: "56px", borderRadius: "50%", backgroundColor: T.linkColor, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", textDecoration: "none", boxShadow: `0 4px 16px ${T.linkColor}40`, zIndex: 50, cursor: "pointer" }} title="AI Image Generator">
+      <Link href="/studio?tool=image" style={{ position: "fixed", bottom: "24px", right: "24px", width: "56px", height: "56px", borderRadius: "50%", backgroundColor: T.linkColor, color: "white", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "24px", textDecoration: "none", boxShadow: `0 4px 16px ${T.linkColor}40`, zIndex: 50, cursor: "pointer" }} title="AI Image Generator">
         🎨
       </Link>
 

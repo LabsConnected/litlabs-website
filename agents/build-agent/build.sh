@@ -15,7 +15,7 @@ cd "$PROJECT_DIR"
 # TypeScript check
 log "Running TypeScript check..."
 npx tsc --noEmit 2>&1 | tee -a "$LOG_FILE"
-local tsc_exit=$?
+tsc_exit=$?
 
 if [ $tsc_exit -ne 0 ]; then
   log "ERROR: TypeScript check failed"
@@ -26,7 +26,7 @@ log "TypeScript: OK"
 # Lint check
 log "Running ESLint..."
 npx eslint src/ 2>&1 | tee -a "$LOG_FILE"
-local lint_exit=$?
+lint_exit=$?
 
 if [ $lint_exit -ne 0 ]; then
   log "WARNING: ESLint found issues"
@@ -37,7 +37,7 @@ fi
 # Build test
 log "Running production build..."
 npm run build 2>&1 | tee -a "$LOG_FILE"
-local build_exit=$?
+build_exit=$?
 
 if [ $build_exit -ne 0 ]; then
   log "ERROR: Build failed"

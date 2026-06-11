@@ -50,10 +50,21 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
+    // Respect reduced motion
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+
     let animId: number;
     let w = 0, h = 0;
     let time = 0;
+    let lastFrame = 0;
+    const FRAME_INTERVAL = 1000 / 30; // throttle to 30fps
     const mouse = { x: -1000, y: -1000 };
+    let visible = true;
+
+    function onVisChange() {
+      visible = !document.hidden;
+    }
+    document.addEventListener("visibilitychange", onVisChange);
 
     /* ── Helpers ── */
     function hexToRgb(hex: string) {
@@ -162,7 +173,18 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
     }
 
     /* ── Draw ── */
-    function draw() {
+    function draw(now: number) {
+      if (!visible) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
+      const elapsed = now - lastFrame;
+      if (elapsed < FRAME_INTERVAL) {
+        animId = requestAnimationFrame(draw);
+        return;
+      }
+      lastFrame = now - (elapsed % FRAME_INTERVAL);
+
       const cols = colorsRef.current;
       const linkRgb = hexToRgb(cols.linkColor);
       const accentRgb = hexToRgb(cols.accentColor);
@@ -286,35 +308,49 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
       mouse.x = -1000;
       mouse.y = -1000;
     }
+    function onResize() {
+      resize();
+      initOrbs();
+      initAuroras();
+      initSparkles();
+    }
 
     resize();
     initOrbs();
     initAuroras();
     initSparkles();
-    draw();
+    draw(performance.now());
 
-    window.addEventListener("resize", () => { resize(); initOrbs(); initAuroras(); initSparkles(); });
+    window.addEventListener("resize", onResize);
     window.addEventListener("mousemove", onMouseMove);
     window.addEventListener("mouseleave", onMouseLeave);
 
     return () => {
       cancelAnimationFrame(animId);
-      window.removeEventListener("resize", resize);
+      document.removeEventListener("visibilitychange", onVisChange);
+      window.removeEventListener("resize", onResize);
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseleave", onMouseLeave);
     };
   }, []);
 
-  // Noise animation via CSS stepping
+  // Noise animation via rAF stepping (avoids setInterval)
   useEffect(() => {
     const el = noiseRef.current;
     if (!el) return;
     let step = 0;
-    const interval = setInterval(() => {
-      step = (step + 1) % 8;
-      el.style.transform = `translate(${step * 12}%, ${step * 8}%)`;
-    }, 500);
-    return () => clearInterval(interval);
+    let lastNoise = 0;
+    const NOISE_MS = 500;
+    function tickNoise(now: number) {
+      if (now - lastNoise >= NOISE_MS) {
+        lastNoise = now;
+        step = (step + 1) % 8;
+        el.style.transform = `translate(${step * 12}%, ${step * 8}%)`;
+      }
+      requestAnimationFrame(tickNoise);
+    }
+    const id = requestAnimationFrame(tickNoise);
+    return () => cancelAnimationFrame(id);
   }, []);
 
   return (

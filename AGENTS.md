@@ -216,3 +216,63 @@ This is a starting point. Add your own conventions, style, and rules as you figu
 ## Related
 
 - [Default AGENTS.md](/reference/AGENTS.default)
+
+---
+
+## 🛠️ LiTTree Lab Studios — Repo-Specific Context
+
+### Tech Stack & Build
+- **Next.js 16.2.7** with **webpack** build (`next build --webpack` in `vercel.json`)
+- **React 19**, **TypeScript**, **Tailwind CSS v4**
+- **Clerk** for auth (wraps entire app in `layout.tsx` via `ClerkProvider`)
+- **Supabase** for DB — project `rokbfvuoqildggnhappy`
+- Do NOT use `next build` without `--webpack` — `vercel.json` and `package.json` both expect it
+
+### Critical Auth Architecture
+- **Three-layer auth that WILL conflict if misconfigured:**
+  1. `ClerkProvider` wraps the app in `layout.tsx` — always rendered (was conditionally skipped before, causing `useUser`/`useAuth` to crash during SSG)
+  2. `middleware.ts` enforces custom JWT auth with hardcoded `ADMIN_EMAIL` check
+  3. `AuthContext` (`src/context/AuthContext.tsx`) manages client-side session state
+- `PUBLIC_PATHS` in `middleware.ts` must include every public route or users get 401 redirects
+- The `NavAuth` component (`src/components/ClerkAuth.tsx`) calls `useUser()` inside a try-catch — this is intentional because `useUser()` can throw if ClerkProvider isn't mounted (but now it always is)
+
+### Database Schema Traps
+- **`supabase_schema.sql` is DESTRUCTIVE** — drops ALL tables with `cascade`. Never run it on production without backup.
+- **Two schemas exist:** `supabase/migrations/` (idempotent, uses `users` table) vs `supabase_schema.sql` (destructive, uses `profiles` table)
+- **Webhook table mismatch:** `src/app/api/webhook/clerk/route.ts` was hitting `/rest/v1/users` but the app code consistently uses `.from("profiles")`. The webhook MUST match whatever table the app uses. Currently fixed to `profiles`.
+- **Missing `clerk_id` column:** The `profiles` schema doesn't have a `clerk_id` column, but the webhook sends it. Migration `supabase_migrations/20250610_add_clerk_id.sql` adds it.
+
+### Performance Landmines
+- **`AnimatedBackground.tsx`** — 60fps canvas animation runs on EVERY page. Previously had:
+  - `setInterval` for noise overlay (now replaced with rAF)
+  - Resize listener leak (`addEventListener` used anonymous arrow, `removeEventListener` tried to remove `resize` function directly)
+  - Now throttled to **30fps**, pauses on tab hidden, respects `prefers-reduced-motion`
+- **`src/app/page.tsx`** — previously had a 30s Gemini API polling interval AND a 12s fake telemetry ticker causing constant re-renders. Both removed.
+- **Do NOT add frequent `setInterval`/`setTimeout` in client components** without cleanup guards and visibility checks.
+
+### Deploy Pipeline
+- **Auto-deploy agent:** `agents/deploy-agent/deploy.sh`
+- **Critical fix:** Line 25 used bare `npx vercel` which fails because cron/service user has no `npx` in PATH. Must use absolute path: `/home/litbit/.nvm/versions/node/v22.22.3/bin/npx` or export PATH first.
+- **Down services** (external to this repo): `litlabs-api-tunnel`, `n8n-tunnel` — restart via systemctl or the agent's companion script, not via Next.js build.
+- **Vercel project ID:** `prj_EnE4JStJUENM89PWov574Y9q7mTy`
+
+### Missing Env Vars (Production Blockers)
+These are needed but currently missing/placeholder:
+- `CLERK_WEBHOOK_SECRET` — Clerk Dashboard → Webhooks
+- `STRIPE_SECRET_KEY` — currently `REGENERATE_REQUIRED`
+- `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`
+- `R2_ACCOUNT_ID`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`
+- AI provider keys: `HUGGING_FACE_API_KEY`, `TOGETHER_API_KEY`, `FAL_KEY`, `MINIMAX_API_KEY`, `SKYBOX_API_KEY`
+
+### Console Logging Policy
+- **Never leave `console.log`/`console.warn`/`console.error` in server-side code** (API routes, `src/lib/*.ts`)
+- Client-side (`src/components/`, `src/context/`) is less critical but should still be minimal
+- `src/components/UserSync.tsx` had a `console.warn` that was removed
+- `src/lib/agents.ts` had `console.error` that was replaced with a comment
+
+### File Permissions Quirk
+- `src/app/api/generate/video/route.ts` has permissions `600` (owner-only read/write). If Vercel build runs as a different user, this will cause a permission error. Check with `ls -l` and `chmod 644` if needed.
+
+### Shell Environment Issue (This Workspace)
+- The custom shell prompt (`GOD-CORE` banner) swallows command output and returns exit code 1 for ALL commands, even `node -e "console.log('hello')"`
+- **Workaround:** Commands actually execute but output is hidden. Use file redirection (`> output.log`) and then `cat output.log` to see results. Or run builds in a standard terminal outside this wrapper.

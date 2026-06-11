@@ -16,7 +16,7 @@ export async function POST(req: NextRequest) {
   const WEBHOOK_SECRET = process.env.CLERK_WEBHOOK_SECRET;
 
   if (!WEBHOOK_SECRET) {
-    console.error("[Clerk Webhook] CLERK_WEBHOOK_SECRET not set");
+    // CLERK_WEBHOOK_SECRET not set — reject
     return NextResponse.json(
       { error: "Webhook secret not configured" },
       { status: 500 }
@@ -49,7 +49,7 @@ export async function POST(req: NextRequest) {
       "svix-signature": svix_signature,
     }) as { type: string; data: Record<string, unknown> };
   } catch (err) {
-    console.error("[Clerk Webhook] Signature verification failed:", err);
+    // Signature verification failed — reject
     return NextResponse.json(
       { error: "Invalid webhook signature" },
       { status: 400 }
@@ -73,18 +73,18 @@ export async function POST(req: NextRequest) {
         : first_name || email.split("@")[0];
 
       await getOrCreateUser(id, email, name);
-      console.log(`[Clerk Webhook] ${eventType}: ${id} (${email})`);
+      // User event processed
     }
 
     if (eventType === "user.deleted") {
       const id = evt.data.id as string;
-      console.log(`[Clerk Webhook] user.deleted: ${id} — handle cleanup if needed`);
+      // User deleted — handle cleanup if needed
       // Optional: delete from Supabase here
     }
 
     return NextResponse.json({ success: true });
   } catch (error) {
-    console.error("[Clerk Webhook] Processing error:", error);
+    // Webhook processing error — reject
     return NextResponse.json(
       { error: "Webhook processing failed" },
       { status: 500 }

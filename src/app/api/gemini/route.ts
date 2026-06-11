@@ -36,7 +36,7 @@ async function handler(req: NextRequest) {
       failover: r.failover,
     });
   } catch (err) {
-    console.error("LLM route error:", err);
+    // LLM route error:
     const msg = err instanceof Error ? err.message : "Internal server error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

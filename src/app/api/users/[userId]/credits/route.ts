@@ -65,7 +65,7 @@ export async function POST(
     
     return response;
   } catch (error) {
-    console.error("Error updating credits:", error);
+    // Error updating credits:
     return NextResponse.json(
       { error: "Failed to update credits" },
       { status: 500 }
@@ -119,7 +119,7 @@ export async function GET(
     
     return response;
   } catch (error) {
-    console.error("Error fetching credits:", error);
+    // Error fetching credits:
     return NextResponse.json(
       { error: "Failed to fetch credits" },
       { status: 500 }

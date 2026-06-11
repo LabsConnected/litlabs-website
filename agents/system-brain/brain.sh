@@ -15,23 +15,23 @@ log "=== System Brain Starting ==="
 # Check all services
 check_services() {
   local frontend=$(systemctl is-active litlabs-frontend 2>/dev/null)
-  local api_tunnel=$(systemctl is-active litlabs-api-tunnel 2>/dev/null)
-  local n8n_tunnel=$(systemctl is-active n8n-tunnel 2>/dev/null)
-  
-  log "Services: frontend=$frontend api_tunnel=$api_tunnel n8n_tunnel=$n8n_tunnel"
-  
+  local cloudflared=$(systemctl is-active cloudflared-main 2>/dev/null)
+  local n8n_svc=$(systemctl is-active n8n 2>/dev/null)
+
+  log "Services: frontend=$frontend cloudflared=$cloudflared n8n=$n8n_svc"
+
   # Restart any down services
   if [ "$frontend" != "active" ]; then
     log "WARNING: frontend down, restarting..."
     systemctl restart litlabs-frontend
   fi
-  if [ "$api_tunnel" != "active" ]; then
-    log "WARNING: api-tunnel down, restarting..."
-    systemctl restart litlabs-api-tunnel
+  if [ "$cloudflared" != "active" ]; then
+    log "WARNING: cloudflared down, restarting..."
+    systemctl restart cloudflared-main
   fi
-  if [ "$n8n_tunnel" != "active" ]; then
-    log "WARNING: n8n-tunnel down, restarting..."
-    systemctl restart n8n-tunnel
+  if [ "$n8n_svc" != "active" ]; then
+    log "WARNING: n8n down, restarting..."
+    systemctl restart n8n
   fi
 }
 

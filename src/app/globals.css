@@ -131,8 +131,8 @@ a:hover {
    CARDS / GLASS
    ============================================================ */
 .card {
-  background: var(--bg-card);
-  border: 1px solid var(--border-color);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-card);
@@ -141,7 +141,7 @@ a:hover {
 }
 
 .card:hover {
-  border-color: #52525b;
+  border-color: rgba(255,255,255,0.1);
 }
 
 .card-header {
@@ -824,10 +824,22 @@ a:hover {
 /* ============================================================
    UTILITIES
    ============================================================ */
-.text-muted { color: var(--text-muted); }
+.text-muted { color: #6b7280 !important; }
 .text-link   { color: var(--link-color); }
 .text-header { color: var(--header-color); }
 .text-accent { color: var(--accent-color); }
+
+.claim-btn {
+  background: linear-gradient(135deg, #9d4edd, #c77dff) !important;
+  box-shadow: 0 4px 20px rgba(157, 78, 221, 0.4);
+  font-size: 14px;
+  border: none;
+}
+
+.feed-item {
+  padding: 20px !important;
+  gap: 12px !important;
+}
 .text-success { color: var(--success); }
 
 .divider {

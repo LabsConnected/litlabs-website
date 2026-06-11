@@ -26,7 +26,7 @@ async function getHandler(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error fetching preferences:", error);
+    // Error fetching preferences:
     return NextResponse.json(
       { error: "Failed to fetch preferences" },
       { status: 500 }
@@ -82,7 +82,7 @@ async function postHandler(req: NextRequest) {
       preferences: updated,
     });
   } catch (error) {
-    console.error("Error updating preferences:", error);
+    // Error updating preferences:
     return NextResponse.json(
       { error: "Failed to update preferences" },
       { status: 500 }

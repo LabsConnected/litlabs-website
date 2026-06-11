@@ -23,7 +23,7 @@ async function getHandler(req: NextRequest) {
       isNew: result.isNew,
     });
   } catch (error) {
-    console.error("[Account Sync] Error:", error);
+    // [Account Sync] Error:
     return NextResponse.json({ synced: false }, { status: 500 });
   }
 }
@@ -58,7 +58,7 @@ async function deleteHandler(req: NextRequest) {
       .eq("id", user.id);
 
     if (deleteError) {
-      console.error("Error deleting user:", deleteError);
+      // Error deleting user:
       return NextResponse.json(
         { error: "Failed to delete account" },
         { status: 500 }
@@ -74,7 +74,7 @@ async function deleteHandler(req: NextRequest) {
       note: "Your Clerk authentication account must be deleted separately via Clerk Dashboard",
     });
   } catch (error) {
-    console.error("Error deleting account:", error);
+    // Error deleting account:
     return NextResponse.json(
       { error: "Failed to delete account" },
       { status: 500 }

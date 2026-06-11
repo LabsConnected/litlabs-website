@@ -310,7 +310,7 @@ export default function AgentDetail() {
 
               {isInstalled ? (
                 <Link
-                  href="/builder"
+                  href="/studio?tool=agents"
                   className="block w-full py-3 text-center font-bold mb-3"
                   style={{ 
                     backgroundColor: theme.accentColor,

@@ -230,7 +230,12 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized — sign in to generate media" }, { status: 401 });
   }
 
-  const body = (await req.json().catch(() => ({}))) as MediaRequest;
+  let body: MediaRequest;
+  try {
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid request body — send JSON" }, { status: 400 });
+  }
   const prompt = body.prompt?.trim();
   if (!prompt || prompt.length < 3) {
     return NextResponse.json({ error: "Prompt must be at least 3 characters" }, { status: 400 });

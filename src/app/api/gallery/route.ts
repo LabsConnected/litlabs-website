@@ -40,6 +40,13 @@ async function getHandler(req: NextRequest) {
     const category = searchParams.get("category");
     const mine = searchParams.get("mine") === "true";
 
+    // Require auth for all gallery access (public list still needs auth
+    // until user_media has an is_public column)
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     let query = supabaseAdmin
       .from("user_media")
       .select("id, url, type, caption, created_at, users:user_id (name, username)")
@@ -47,14 +54,13 @@ async function getHandler(req: NextRequest) {
       .order("created_at", { ascending: false });
 
     if (mine) {
-      const { userId: clerkId } = await auth();
-      if (!clerkId) {
-        return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      }
       const { data: user } = await supabaseAdmin.from("users").select("id").eq("clerk_id", clerkId).single();
       if (!user) return NextResponse.json({ items: [] });
       query = query.eq("user_id", user.id);
     }
+    // NOTE: When mine=false, we return all media. This is fine for now
+    // but consider adding an is_public column to user_media for a true
+    // public gallery that doesn't expose private uploads.
 
     if (category) {
       query = query.ilike("caption", `%${category}%`);
@@ -63,7 +69,6 @@ async function getHandler(req: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      console.error("Gallery fetch error:", error);
       return NextResponse.json({ error: "Failed to fetch gallery" }, { status: 500 });
     }
 
@@ -87,7 +92,7 @@ async function getHandler(req: NextRequest) {
 
     return NextResponse.json({ items });
   } catch (err) {
-    console.error("Gallery error:", err);
+    // Gallery error:
     return NextResponse.json({ error: "Failed to fetch gallery" }, { status: 500 });
   }
 }
@@ -126,13 +131,13 @@ async function postHandler(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error("Gallery insert error:", error);
+      // Gallery insert error:
       return NextResponse.json({ error: "Failed to save image" }, { status: 500 });
     }
 
     return NextResponse.json({ success: true, item }, { status: 201 });
   } catch (err) {
-    console.error("Gallery save error:", err);
+    // Gallery save error:
     return NextResponse.json({ error: "Failed to save image" }, { status: 500 });
   }
 }

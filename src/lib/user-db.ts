@@ -72,7 +72,7 @@ export type Wallet = {
 export async function getOrCreateUser(clerkId: string, email: string, name?: string | null) {
   const db = getDb();
   if (!db) {
-    console.warn("[user-db] Supabase not configured — returning mock user");
+    // Supabase not configured — returning mock user
     return { user: null as unknown as UserProfile, isNew: true };
   }
 
@@ -86,7 +86,7 @@ export async function getOrCreateUser(clerkId: string, email: string, name?: str
     .single();
 
   if (createError || !user) {
-    console.error("[user-db] Failed to create user:", createError);
+    // Failed to create user:
     return { user: null as unknown as UserProfile, isNew: false };
   }
 
@@ -144,15 +144,22 @@ export async function updateUserPreferences(
   return data as UserPreferences;
 }
 
-/** Get user wallet */
+/** Get user wallet — auto-creates with 500 coins if missing */
 export async function getUserWallet(clerkId: string): Promise<Wallet | null> {
   const db = getDb();
   if (!db) return null;
   const user = await getUserByClerkId(clerkId);
   if (!user) return null;
   const { data, error } = await db.from("wallets").select("*").eq("user_id", user.id).single();
-  if (error || !data) return null;
-  return data as Wallet;
+  if (!error && data) return data as Wallet;
+  // Wallet missing — create with default 500 coins
+  const { data: created, error: createErr } = await db
+    .from("wallets")
+    .insert({ user_id: user.id, balance: 500 })
+    .select()
+    .single();
+  if (createErr || !created) return null;
+  return created as Wallet;
 }
 
 /** Update wallet balance */

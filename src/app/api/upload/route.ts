@@ -33,7 +33,7 @@ export async function POST(req: NextRequest) {
     const dataUrl = `data:${mime};base64,${base64}`;
     return NextResponse.json({ url: dataUrl, fallback: true });
   } catch (err) {
-    console.error("Upload error:", err);
+    // Upload error:
     return NextResponse.json({ error: "Upload failed" }, { status: 500 });
   }
 }

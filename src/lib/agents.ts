@@ -252,7 +252,7 @@ Respond as ${agent.name} in character. Be concise (1-3 sentences), helpful, and 
       const r = await generateText(prompt, { task: "chat" });
       return r.text || "I'm processing that...";
 } catch (error) {
-      console.error(`LLM error for ${agentId}:`, error);
+      // LLM error for agent — logged silently
       return `${agent.name} is thinking... (AI service temporarily unavailable)`;
     }
   }

@@ -29,7 +29,7 @@ check_all() {
   log "--- Monitor Check ---"
   
   # Local services
-  for svc in litlabs-frontend litlabs-api-tunnel n8n-tunnel; do
+  for svc in litlabs-frontend cloudflared-main n8n; do
     local status=$(systemctl is-active "$svc" 2>/dev/null)
     if [ "$status" != "active" ]; then
       alert "Service $svc is $status"

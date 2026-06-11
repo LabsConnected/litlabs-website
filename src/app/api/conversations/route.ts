@@ -35,7 +35,7 @@ async function getHandler(req: NextRequest) {
     const { data: conversations, error } = await query;
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to fetch conversations" },
         { status: 500 }
@@ -47,7 +47,7 @@ async function getHandler(req: NextRequest) {
       total: conversations?.length || 0,
     });
   } catch (error) {
-    console.error("Error fetching conversations:", error);
+    // Error fetching conversations:
     return NextResponse.json(
       { error: "Failed to fetch conversations" },
       { status: 500 }
@@ -105,7 +105,7 @@ async function postHandler(req: NextRequest) {
       .single();
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to create conversation" },
         { status: 500 }
@@ -117,7 +117,7 @@ async function postHandler(req: NextRequest) {
       message: "Conversation created",
     });
   } catch (error) {
-    console.error("Error creating conversation:", error);
+    // Error creating conversation:
     return NextResponse.json(
       { error: "Failed to create conversation" },
       { status: 500 }

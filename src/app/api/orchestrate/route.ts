@@ -114,7 +114,7 @@ async function handler(req: NextRequest) {
         { status: 400 }
       );
     } catch (error) {
-      console.error("Error in orchestration:", error);
+      // Error in orchestration:
       return NextResponse.json(
         { error: "Failed to orchestrate agents" },
         { status: 500 }

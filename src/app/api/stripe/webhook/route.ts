@@ -5,7 +5,7 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 
 async function creditCoinPack(clerkId: string, coinAmount: number, sessionId: string) {
   if (!isAdminSupabaseConfigured()) {
-    console.log("[Webhook] Supabase not configured — skipping wallet credit");
+    // Supabase not configured — skipping wallet credit
     return;
   }
   try {
@@ -13,7 +13,7 @@ async function creditCoinPack(clerkId: string, coinAmount: number, sessionId: st
     // Find user
     const { data: user } = await sb.from("users").select("id").eq("clerk_id", clerkId).single();
     if (!user) {
-      console.error("[Webhook] User not found for clerk_id:", clerkId);
+      // User not found for clerk_id — skip
       return;
     }
     // Get current wallet
@@ -31,9 +31,9 @@ async function creditCoinPack(clerkId: string, coinAmount: number, sessionId: st
       description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
       metadata: { stripe_session_id: sessionId },
     });
-    console.log(`[Webhook] Credited ${coinAmount} coins to ${clerkId}. New balance: ${newBalance}`);
+    // Credited coins — balance updated
   } catch (err) {
-    console.error("[Webhook] Failed to credit coin pack:", err);
+    // Failed to credit coin pack — log to error tracking service in production
   }
 }
 
@@ -44,12 +44,12 @@ export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
 
   if (!key) {
-    console.error("No STRIPE_SECRET_KEY configured");
+    // No STRIPE_SECRET_KEY configured — reject
     return NextResponse.json({ error: "No secret key" }, { status: 500 });
   }
 
   if (!signingSecret) {
-    console.error("No STRIPE_WEBHOOK_SECRET configured");
+    // No STRIPE_WEBHOOK_SECRET configured — reject
     return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
   }
 
@@ -61,7 +61,7 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(body, sig || "", signingSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("Webhook signature verification failed:", message);
+    // Webhook signature verification failed — reject
     return NextResponse.json({ error: `Webhook Error: ${message}` }, { status: 400 });
   }
 
@@ -69,7 +69,7 @@ export async function POST(req: NextRequest) {
   switch (event.type) {
     case "checkout.session.completed": {
       const session = event.data.object as Stripe.Checkout.Session;
-      console.log("Checkout completed:", session.id, "Email:", session.customer_email);
+      // Checkout completed — process coin pack
       const meta = session.metadata || {};
       const coinAmount = parseInt(meta.coin_amount || "0", 10);
       const clerkId = meta.clerk_id;
@@ -81,26 +81,26 @@ export async function POST(req: NextRequest) {
     case "customer.subscription.created":
     case "customer.subscription.updated": {
       const sub = event.data.object as Stripe.Subscription;
-      console.log("Subscription:", sub.id, "Status:", sub.status);
+      // Subscription event
       break;
     }
     case "customer.subscription.deleted": {
       const sub = event.data.object as Stripe.Subscription;
-      console.log("Subscription cancelled:", sub.id);
+      // Subscription cancelled
       break;
     }
     case "invoice.payment_succeeded": {
       const invoice = event.data.object as Stripe.Invoice;
-      console.log("Payment succeeded:", invoice.id);
+      // Payment succeeded
       break;
     }
     case "invoice.payment_failed": {
       const invoice = event.data.object as Stripe.Invoice;
-      console.log("Payment failed:", invoice.id);
+      // Payment failed
       break;
     }
     default:
-      console.log("Unhandled event:", event.type);
+      // Unhandled event type
   }
 
   return NextResponse.json({ received: true });

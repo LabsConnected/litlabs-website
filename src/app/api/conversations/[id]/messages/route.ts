@@ -43,7 +43,7 @@ export async function GET(
       .order("created_at", { ascending: true });
 
     if (error) {
-      console.error("Supabase error:", error);
+      // Supabase error:
       return NextResponse.json(
         { error: "Failed to fetch messages" },
         { status: 500 }
@@ -55,7 +55,7 @@ export async function GET(
       conversation,
     });
   } catch (error) {
-    console.error("Error fetching messages:", error);
+    // Error fetching messages:
     return NextResponse.json(
       { error: "Failed to fetch messages" },
       { status: 500 }
@@ -119,7 +119,7 @@ export async function POST(
       .single();
 
     if (msgError) {
-      console.error("Error saving message:", msgError);
+      // Error saving message:
     }
 
     // Get recent conversation history
@@ -154,7 +154,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
       const r = await generateText(prompt, { task: "chat", maxTokens: 1024 });
       aiResponse = r.text || "I'm thinking...";
     } catch (aiError) {
-      console.error("AI error:", aiError);
+      // AI error:
       aiResponse = `${agent.name} is temporarily unavailable. Please try again.`;
     }
 
@@ -170,7 +170,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
       .single();
 
     if (aiMsgError) {
-      console.error("Error saving AI message:", aiMsgError);
+      // Error saving AI message:
     }
 
     // Update conversation timestamp
@@ -184,7 +184,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
       assistantMessage: assistantMessage || { role: "assistant", content: aiResponse },
     });
   } catch (error) {
-    console.error("Error in chat:", error);
+    // Error in chat:
     return NextResponse.json(
       { error: "Failed to process message" },
       { status: 500 }

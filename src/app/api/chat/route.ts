@@ -58,7 +58,7 @@ async function handler(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Error in agent chat:", error);
+    // Error in agent chat:
     return NextResponse.json(
       { error: "Failed to process message" },
       { status: 500 }

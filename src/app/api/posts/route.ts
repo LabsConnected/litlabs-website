@@ -75,7 +75,7 @@ async function getHandler() {
     if (error) throw error;
     return NextResponse.json({ posts: posts || [] });
   } catch (err) {
-    console.error("GET posts error:", err);
+    // GET posts error:
     return NextResponse.json({ posts: MOCK_FEED, mock: true });
   }
 }
@@ -121,7 +121,7 @@ async function postHandler(req: NextRequest) {
     if (error) throw error;
     return NextResponse.json({ success: true, post });
   } catch (err) {
-    console.error("POST posts error:", err);
+    // POST posts error:
     return NextResponse.json({ error: "Failed to create post" }, { status: 500 });
   }
 }

@@ -30,7 +30,7 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     response.headers.set("X-RateLimit-Reset", String(resetTime));
     return response;
   } catch (err) {
-    console.error("GET comments error:", err);
+    // GET comments error:
     return NextResponse.json({ comments: [] });
   }
 }
@@ -75,7 +75,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     response.headers.set("X-RateLimit-Reset", String(resetTime));
     return response;
   } catch (err) {
-    console.error("POST comment error:", err);
+    // POST comment error:
     return NextResponse.json({ error: "Failed to create comment" }, { status: 500 });
   }
 }

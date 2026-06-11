@@ -43,7 +43,7 @@ async function logConversation(agent: Agent, userId: string | null, userMessage:
       },
     });
   } catch (err) {
-    console.error("Failed to log agent chat:", err);
+    // Failed to log agent chat:
   }
 }
 
@@ -118,7 +118,7 @@ async function handler(req: NextRequest) {
       },
     });
   } catch (err) {
-    console.error("LLM chat route error:", err);
+    // LLM chat route error:
     return NextResponse.json({ error: "Internal server error" }, { status: 500 });
   }
 }
