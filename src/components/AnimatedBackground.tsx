@@ -159,7 +159,7 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
     const sparkles: Sparkle[] = [];
     function initSparkles() {
       sparkles.length = 0;
-      for (let i = 0; i < 60; i++) {
+      for (let i = 0; i < 15; i++) {
         sparkles.push({
           x: Math.random() * w,
           y: Math.random() * h,
@@ -334,25 +334,6 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
     };
   }, []);
 
-  // Noise animation via rAF stepping (avoids setInterval)
-  useEffect(() => {
-    const el = noiseRef.current;
-    if (!el) return;
-    let step = 0;
-    let lastNoise = 0;
-    const NOISE_MS = 500;
-    function tickNoise(now: number) {
-      if (now - lastNoise >= NOISE_MS) {
-        lastNoise = now;
-        step = (step + 1) % 8;
-        el.style.transform = `translate(${step * 12}%, ${step * 8}%)`;
-      }
-      requestAnimationFrame(tickNoise);
-    }
-    const id = requestAnimationFrame(tickNoise);
-    return () => cancelAnimationFrame(id);
-  }, []);
-
   return (
     <>
       <canvas
@@ -368,30 +349,14 @@ export default function AnimatedBackground({ mode = "holo" }: { mode?: Backgroun
           willChange: "transform",
         }}
       />
-      {/* Scanlines */}
+      {/* Static scanlines — lightweight, no animation */}
       <div
         ref={scanlineRef}
         className="fixed inset-0 pointer-events-none z-[1]"
         style={{
           background: "repeating-linear-gradient(0deg, rgba(0,0,0,0.08) 0px, rgba(0,0,0,0.08) 1px, transparent 1px, transparent 3px)",
           backgroundSize: "100% 4px",
-          animation: "scanlineMove 8s linear infinite",
-          opacity: 0.4,
-          willChange: "transform",
-        }}
-      />
-      {/* Noise overlay */}
-      <div
-        ref={noiseRef}
-        className="fixed inset-0 pointer-events-none z-[1] opacity-[0.03]"
-        style={{
-          backgroundImage: `url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E")`,
-          backgroundRepeat: "repeat",
-          backgroundSize: "256px 256px",
-          width: "200%",
-          height: "200%",
-          top: "-50%",
-          left: "-50%",
+          opacity: 0.25,
         }}
       />
     </>
