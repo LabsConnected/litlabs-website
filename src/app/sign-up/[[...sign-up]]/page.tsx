@@ -1,99 +1,72 @@
 import { SignUp } from "@clerk/nextjs";
 
-const theme = {
-  bgColor: "#0a0a0f",
-  textColor: "#00ff41",
-  linkColor: "#ff0080",
-  headerColor: "#00ffff",
-  borderColor: "#ff00ff",
-  accentColor: "#ffff00",
-  boxBg: "#1a0a2e",
-};
-
 export default function SignUpPage() {
   return (
-    <div style={{ 
-      backgroundColor: theme.bgColor, 
-      minHeight: "100vh",
-      display: "flex",
-      alignItems: "center",
-      justifyContent: "center",
-      padding: "20px"
-    }}>
-      <div style={{ maxWidth: "400px", width: "100%" }}>
-        <div className="text-center mb-6">
-          <h1 style={{ 
-            color: theme.headerColor, 
-            fontSize: "24px", 
-            fontWeight: "bold",
-            marginBottom: "8px"
-          }}>
-            🤖 LiTreeLabStudios
+    <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: "#0f0f14" }}>
+      <div className="w-full max-w-sm">
+        <div className="text-center mb-8">
+          <div className="text-3xl mb-3">🚀</div>
+          <h1 className="text-xl font-black tracking-tight mb-1" style={{ color: "#e2e8f0" }}>
+            LiTree Labs
           </h1>
-          <p style={{ color: theme.textColor, fontSize: "12px" }}>
+          <p className="text-xs opacity-50" style={{ color: "#94a3b8" }}>
             Create your account to start building with AI agents
           </p>
         </div>
-        
-        <div style={{
-          border: `2px solid ${theme.borderColor}`,
-          backgroundColor: theme.boxBg,
-          padding: "20px"
-        }}>
+
+        <div className="rounded-xl p-1" style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}>
           <SignUp
             fallbackRedirectUrl="/"
             signInUrl="/sign-in"
             appearance={{
               elements: {
                 formButtonPrimary: {
-                  backgroundColor: theme.linkColor,
-                  color: "white",
+                  backgroundColor: "#6366f1",
+                  color: "#fff",
                   border: "none",
-                  fontSize: "12px",
+                  fontSize: "13px",
                   fontWeight: "bold",
+                  borderRadius: "8px",
                 },
                 formFieldInput: {
-                  backgroundColor: "rgba(0,0,0,0.5)",
-                  border: `1px solid ${theme.borderColor}`,
-                  color: "white",
+                  backgroundColor: "#0f0f14",
+                  border: "1px solid #2a2a3a",
+                  color: "#e2e8f0",
+                  borderRadius: "8px",
                 },
-                footerActionLink: {
-                  color: theme.linkColor,
-                },
-                headerTitle: {
-                  color: theme.headerColor,
-                },
-                headerSubtitle: {
-                  color: theme.textColor,
-                },
+                footerActionLink: { color: "#818cf8" },
+                headerTitle: { color: "#e2e8f0" },
+                headerSubtitle: { color: "#94a3b8" },
                 socialButtonsBlockButton: {
-                  border: `1px solid ${theme.borderColor}`,
+                  border: "1px solid #2a2a3a",
                   backgroundColor: "transparent",
+                  borderRadius: "8px",
+                },
+                card: { backgroundColor: "transparent", boxShadow: "none" },
+                formFieldLabel: { color: "#94a3b8", fontSize: "12px" },
+                identityPreviewText: { color: "#e2e8f0" },
+                alternativeMethodsBlockButton: {
+                  border: "1px solid #2a2a3a",
+                  color: "#94a3b8",
+                  borderRadius: "8px",
                 },
               },
               variables: {
-                colorPrimary: theme.linkColor,
-                colorBackground: theme.boxBg,
-                colorText: "white",
-                colorTextSecondary: theme.textColor,
-                colorInputBackground: "rgba(0,0,0,0.5)",
-                colorInputText: "white",
-                borderRadius: "0",
-                fontFamily: "Verdana, Arial, sans-serif",
+                colorPrimary: "#6366f1",
+                colorBackground: "#1a1a24",
+                colorText: "#e2e8f0",
+                colorTextSecondary: "#94a3b8",
+                colorInputBackground: "#0f0f14",
+                colorInputText: "#e2e8f0",
+                borderRadius: "8px",
+                fontFamily: "system-ui, -apple-system, sans-serif",
               },
             }}
           />
         </div>
-        
-        <div className="text-center mt-4">
-          <a 
-            href="/" 
-            style={{ 
-              color: theme.linkColor, 
-              fontSize: "11px",
-              textDecoration: "none"
-            }}
-          >
+
+        <div className="text-center mt-5">
+          <a href="/" className="text-[11px] opacity-50 hover:opacity-80 transition-opacity" style={{ color: "#94a3b8", textDecoration: "none" }}>
             ← Back to Home
           </a>
         </div>

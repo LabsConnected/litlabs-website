@@ -7,24 +7,19 @@ type NavAuthProps = {
   linkColor?: string;
 };
 
-export function NavAuth({ linkColor = "#ff0080" }: NavAuthProps) {
+export function NavAuth({ linkColor = "#6366f1" }: NavAuthProps) {
   const { isSignedIn, isLoaded } = useClerkAuth();
-  let user = null;
-  try {
-    // eslint-disable-next-line react-hooks/rules-of-hooks
-    ({ user } = useUser());
-  } catch { user = null; }
+  const { user } = useUser();
 
   if (!isLoaded) {
     return (
       <div
+        className="rounded-full animate-pulse"
         style={{
           width: 28,
           height: 28,
-          borderRadius: "50%",
           backgroundColor: linkColor + "20",
           border: `1px solid ${linkColor}40`,
-          animation: "pulse 1.5s infinite",
         }}
       />
     );
@@ -33,19 +28,9 @@ export function NavAuth({ linkColor = "#ff0080" }: NavAuthProps) {
   if (isSignedIn) {
     const firstName = user?.firstName || user?.username || "";
     return (
-      <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+      <div className="flex items-center gap-1.5">
         {firstName && (
-          <span
-            style={{
-              fontSize: "11px",
-              fontWeight: "bold",
-              color: linkColor,
-              maxWidth: "80px",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-              whiteSpace: "nowrap",
-            }}
-          >
+          <span className="text-[11px] font-bold truncate max-w-[80px]" style={{ color: linkColor }}>
             {firstName}
           </span>
         )}
@@ -57,17 +42,11 @@ export function NavAuth({ linkColor = "#ff0080" }: NavAuthProps) {
   return (
     <SignInButton mode="modal">
       <button
+        className="px-3.5 py-1.5 rounded-md text-[11px] font-bold cursor-pointer transition-all hover:opacity-90"
         style={{
-          padding: "5px 14px",
-          fontSize: "11px",
-          fontWeight: "bold",
           backgroundColor: linkColor,
-          color: "white",
-          border: "none",
-          borderRadius: "6px",
-          cursor: "pointer",
+          color: "#fff",
           letterSpacing: "0.05em",
-          boxShadow: `0 0 10px ${linkColor}50`,
         }}
       >
         Sign In
