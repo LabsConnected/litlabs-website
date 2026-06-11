@@ -4,7 +4,6 @@ export const dynamic = 'force-dynamic';
 import Link from 'next/link';
 import { useTheme } from '@/context/ThemeContext';
 import { useClerkAuth } from '@/hooks/useClerkAuth';
-import { useMounted } from '@/hooks/useMounted';
 import { Zap, ShoppingBag, Bot, Sparkles, Shield, BarChart3 } from 'lucide-react';
 
 const FEATURES = [
@@ -19,9 +18,18 @@ const FEATURES = [
 export default function LandingPage() {
   const { resolvedColors: C } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const mounted = useMounted();
 
-  if (!mounted || !isLoaded) return null;
+  /* Show loading state during auth init (matches SSR output to avoid hydration mismatch) */
+  if (!isLoaded) {
+    return (
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.bgColor }}>
+        <div className="text-center">
+          <div className="text-3xl mb-4 animate-pulse">⚡</div>
+          <div className="text-sm font-bold opacity-60" style={{ color: C.textColor }}>Loading...</div>
+        </div>
+      </div>
+    );
+  }
 
   if (isSignedIn) {
     return (

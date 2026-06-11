@@ -26,7 +26,7 @@ const PipelineTool = lazyLoad(() => import("./tools/PipelineTool"), { ssr: false
 /*  Model Badge — shows active provider per tool                        */
 /* ------------------------------------------------------------------ */
 const STATIC_MODEL_MAP: Record<StudioTool, { provider: string; color: string }> = {
-  image:   { provider: "FLUX Schnell", color: "#00ff41" },
+  image:   { provider: "Gemini Imagen 3", color: "#6366f1" },
   video:   { provider: "Wan 2.1", color: "#ff6b6b" },
   audio:   { provider: "TTS / Music", color: "#9b59b6" },
   agents:  { provider: "Gemini 2.5 Flash", color: "#ffff00" },
@@ -42,7 +42,7 @@ function ModelBadge({ tool, T }: { tool: StudioTool; T: ReturnType<typeof useThe
   // Dynamic label: use real model from llm.ts health check for agent tools
   const label = (tool === "agents" || tool === "terminal")
     ? health.gemini.model.replace("gemini-", "Gemini ").replace("openrouter/", "OR ")
-    : tool === "image"   ? MEDIA_PROVIDERS.find(p => p.id === "together")?.label.split(" ")[0] ?? "FLUX" + " Schnell"
+    : tool === "image"   ? MEDIA_PROVIDERS.find(p => p.id === "gemini")?.label.split(" ")[0] ?? "Gemini"
     : tool === "video"   ? "Wan 2.1"
     : tool === "audio"   ? "TTS / Music"
     : tool === "pipeline" ? "Gemini Orchestrator"

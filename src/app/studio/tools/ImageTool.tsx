@@ -42,7 +42,7 @@ export default function ImageTool() {
 
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
-  const [providerId, setProviderId] = useState<MediaProviderId>("fal");
+  const [providerId, setProviderId] = useState<MediaProviderId>("gemini");
   const [seed, setSeed] = useState<number>(0);
 
   const [status, setStatus] = useState<GenerationStatus>("idle");
@@ -75,7 +75,7 @@ export default function ImageTool() {
       .catch(() => { /* silent */ });
   }, []);
 
-  const providerCost = providerId === "pollinations" ? 0 : providerId === "together" ? 2 : providerId === "fal" ? 3 : 0;
+  const providerCost = providerId === "pollinations" ? 0 : providerId === "gemini" ? 1 : providerId === "together" ? 2 : providerId === "fal" ? 3 : 0;
   const canAfford = coinBalance === null || coinBalance >= providerCost;
   const promptValid = prompt.trim().length >= 3;
 
@@ -253,6 +253,7 @@ export default function ImageTool() {
             </div>
             <div className="grid grid-cols-1 gap-1.5">
               {([
+                { id: "gemini" as const, label: "Gemini (Imagen)", desc: "Google Imagen 3", cost: 1 },
                 { id: "pollinations" as const, label: "Pollinations (Free)", desc: "FLUX + SDXL", cost: 0 },
                 { id: "together" as const, label: "Together.ai (FLUX)", desc: "FLUX.1 Schnell", cost: 2 },
                 { id: "fal" as const, label: "FAL.ai (FLUX)", desc: "FLUX Pro", cost: 3 },

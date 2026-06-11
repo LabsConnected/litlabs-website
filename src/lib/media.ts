@@ -6,6 +6,7 @@ export type MediaFormat = "image" | "video";
 
 export type MediaProviderId =
   | "pollinations"
+  | "gemini"
   | "together"
   | "fal"
   | "huggingface"
@@ -29,6 +30,16 @@ export interface MediaProvider {
 }
 
 export const MEDIA_PROVIDERS: MediaProvider[] = [
+  {
+    id: "gemini",
+    label: "Gemini (Imagen)",
+    description: "Google Gemini Imagen 3 image generation via your existing GEMINI_API_KEY.",
+    supportedFormats: ["image"],
+    cost: () => 1,
+    requiresKey: true,
+    free: false,
+    tier: "cheap",
+  },
   {
     id: "pollinations",
     label: "Pollinations (Free)",
@@ -109,10 +120,13 @@ export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
   const candidates = MEDIA_PROVIDERS.filter(p =>
     p.supportedFormats.includes(format)
   );
-  // Prefer free first
+  // Default to Gemini for images (user's preferred provider)
+  if (format === "image") {
+    const gemini = candidates.find(p => p.id === "gemini");
+    if (gemini) return gemini.id;
+  }
+  // Fall back to free provider
   const free = candidates.find(p => p.free);
   if (free) return free.id;
-  // Then together for image, hf for video
-  if (format === "image") return "together";
   return "huggingface";
 };

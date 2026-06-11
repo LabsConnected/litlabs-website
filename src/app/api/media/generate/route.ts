@@ -9,6 +9,7 @@ const HF_VIDEO_URL = "https://api-inference.huggingface.co/models/damo-vilab/tex
 const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
 const FAL_API_KEY = process.env.FAL_KEY;
+const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -82,6 +83,47 @@ async function handleTogetherImage(
   return {
     downloadUrl: `data:image/png;base64,${b64}`,
     id: `together_${Date.now()}`,
+    status: "complete",
+    title: prompt.slice(0, 60),
+    format: "image",
+  };
+}
+
+async function handleGeminiImage(
+  prompt: string,
+  width: number,
+  height: number,
+): Promise<MediaResult> {
+  if (!GEMINI_API_KEY) throw new Error("Gemini key missing — set GEMINI_API_KEY");
+
+  // Use Imagen 3 via Google AI Studio predict endpoint
+  const res = await fetch(
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        instances: [{ prompt: prompt.trim() }],
+        parameters: {
+          sampleCount: 1,
+          aspectRatio: width === height ? "1:1" : width > height ? "16:9" : "9:16",
+        },
+      }),
+    }
+  );
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Gemini error: ${err.slice(0, 200) || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const b64 = data.predictions?.[0]?.bytesBase64Encoded;
+  if (!b64) throw new Error("Gemini returned no image data");
+
+  return {
+    downloadUrl: `data:image/png;base64,${b64}`,
+    id: `gemini_${Date.now()}`,
     status: "complete",
     title: prompt.slice(0, 60),
     format: "image",
@@ -275,7 +317,9 @@ async function handler(req: NextRequest) {
   // Dispatch
   let result: MediaResult;
   try {
-    if (providerId === "together") {
+    if (providerId === "gemini") {
+      result = await handleGeminiImage(prompt, body.width ?? 1024, body.height ?? 1024);
+    } else if (providerId === "together") {
       result = await handleTogetherImage(prompt, body.negativePrompt ?? "", body.width ?? 1024, body.height ?? 1024);
     } else if (providerId === "fal") {
       result = await handleFalImage(prompt, body.width ?? 1024, body.height ?? 1024);
