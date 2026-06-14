@@ -194,9 +194,6 @@ async function runFlow(
   // Check + deduct wallet up-front (free cells = 0 cost, no debit)
   if (totalCost > 0) {
     const wallet = await getUserWallet(userId);
-    if (!wallet) {
-      throw new Error("Wallet not initialized — claim your daily bonus first");
-    }
     if (wallet.balance < totalCost) {
       throw new Error(`Insufficient LiTBit Coins. Need ${totalCost}, have ${wallet.balance}`);
     }

@@ -8,10 +8,27 @@ import { useTheme } from "@/context/ThemeContext";
 
 // ─── Agents that can generate worlds ──────────────────────────────────────────
 const WORLD_AGENTS = [
-  { id: "pixel-forge", name: "Pixel Forge", icon: "🎨", color: "#e74c3c", desc: "AI image and 3D world generation specialist" },
+  { id: "pixel-forge", name: "Pixel Forge", icon: "🎨", color: "#e74c3c", desc: "AI image and 3D world generation specialist - understands context deeply" },
   { id: "director", name: "Director", icon: "🎯", color: "#00ffff", desc: "Orchestrates creative vision and world-building strategy" },
   { id: "champion", name: "Champion", icon: "🏆", color: "#ff0080", desc: "General creative partner for any visual concept" },
 ];
+
+// Pixel Forge's enhanced prompt system for context-aware generation
+const PIXEL_FORGE_SYSTEM_PROMPT = `You are Pixel Forge, an expert AI image generation specialist. Your job is to understand context deeply and craft enhanced prompts.
+
+When a user asks for image generation, analyze:
+1. CONTEXT: What is this FOR? (album art, social media, marketing, concept art)
+2. MOOD: What feeling should it evoke? (energetic, melancholic, futuristic, nostalgic)
+3. STYLE: What artistic approach? (minimalist, maximalist, photorealistic, abstract)
+4. AUDIENCE: Who will see this?
+
+PROMPT ENHANCEMENT RULES:
+- Album/EP art: Include genre aesthetics, mood lighting, artistic composition
+- Social media: Vibrant, attention-grabbing, optimized for scroll-stopping
+- Marketing: Professional, on-brand, conversion-focused
+- Portraits: Flattering angles, good lighting, personality-showing
+
+Always respond with an ENHANCED prompt that adds these details intelligently.`;
 
 type Message = {
   id: string;
@@ -31,6 +48,7 @@ type GeneratedWorld = {
   thumbUrl?: string;
   status: string;
   createdAt: string;
+  enhancedPrompt?: string;
 };
 
 export default function AgentChat() {
@@ -48,18 +66,48 @@ export default function AgentChat() {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [messages]);
 
+  // Enhance prompt using Pixel Forge's intelligence
+  const enhancePrompt = useCallback(async (userPrompt: string): Promise<string> => {
+    if (selectedAgent.id !== "pixel-forge") return userPrompt;
+    
+    try {
+      const res = await fetch("/api/gemini", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: `Enhance this image generation prompt for maximum quality and context-appropriateness: "${userPrompt}"\n\nReturn ONLY the enhanced prompt, nothing else.`,
+          systemPrompt: PIXEL_FORGE_SYSTEM_PROMPT,
+        }),
+      });
+      const data = await res.json();
+      return data.response?.trim() || userPrompt;
+    } catch {
+      return userPrompt;
+    }
+  }, [selectedAgent.id]);
+
   const generateWorld = useCallback(async (prompt: string) => {
+    // First enhance the prompt if using Pixel Forge
+    const enhancedPrompt = await enhancePrompt(prompt);
+    
     const res = await fetch("/api/media/generate", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt, negativePrompt: "blurry, low quality, distorted", providerId: "pollinations", format: "image", width: 1024, height: 1024 }),
+      body: JSON.stringify({ 
+        prompt: enhancedPrompt, 
+        negativePrompt: "blurry, low quality, distorted, text, watermark, signature", 
+        providerId: "pollinations", 
+        format: "image", 
+        width: 1024, 
+        height: 1024 
+      }),
     });
     const data = await res.json();
     if (data.success) {
-      return { id: data.id, status: "complete", fileUrl: data.downloadUrl, thumbUrl: data.thumbUrl };
+      return { id: data.id, status: "complete", fileUrl: data.downloadUrl, thumbUrl: data.thumbUrl, enhancedPrompt };
     }
     throw new Error(data.error || "Image generation failed");
-  }, []);
+  }, [enhancePrompt]);
 
   const sendMessage = useCallback(async () => {
     const content = input.trim();
@@ -95,9 +143,13 @@ export default function AgentChat() {
         const newWorld: GeneratedWorld = { id: world.id, prompt: content, status: "complete", createdAt: new Date().toISOString(), fileUrl: world.fileUrl, thumbUrl: world.thumbUrl };
         setWorlds(prev => [newWorld, ...prev]);
 
+        const enhancedMsg = world.enhancedPrompt && world.enhancedPrompt !== content 
+          ? `\n\n🧠 **Enhanced Prompt:** "${world.enhancedPrompt}"`
+          : '';
+
         setMessages(prev => prev.map(m => m.id === assistantMsg.id ? {
           ...m,
-          content: `✅ Image generated!`,
+          content: `✅ Image generated!${enhancedMsg}`,
           worldUrl: world.fileUrl,
           thumbUrl: world.thumbUrl,
           status: "done",
@@ -114,12 +166,15 @@ export default function AgentChat() {
     } else {
       // Regular chat response via Gemini
       try {
+        const isPixelForge = selectedAgent.id === "pixel-forge";
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             messages: [{ role: "user", content }],
-            systemPrompt: `You are ${selectedAgent.name}, ${selectedAgent.desc}. You help users create stunning AI-generated worlds, images, and visual concepts. Be creative, visual, and suggest specific prompts for 360 world generation.`,
+            systemPrompt: isPixelForge 
+              ? PIXEL_FORGE_SYSTEM_PROMPT 
+              : `You are ${selectedAgent.name}, ${selectedAgent.desc}. You help users create stunning AI-generated worlds, images, and visual concepts. Be creative, visual, and suggest specific prompts for 360 world generation.`,
             stream: false,
           }),
         });

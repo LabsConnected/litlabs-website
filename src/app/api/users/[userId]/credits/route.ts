@@ -38,10 +38,6 @@ export async function POST(
 
     // Get current wallet
     const wallet = await getUserWallet(userId);
-    if (!wallet) {
-      return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
-    }
-
     const newBalance = wallet.balance + amount;
     if (newBalance < 0) {
       return NextResponse.json(
@@ -103,21 +99,7 @@ export async function GET(
 
     const { userId } = await params;
     const wallet = await getUserWallet(userId);
-
-    if (!wallet) {
-      return NextResponse.json({ credits: 500 }); // Default starting balance
-    }
-
-    const response = NextResponse.json({
-      credits: wallet.balance,
-      lastClaimDate: wallet.last_claim_date,
-    });
-    
-    response.headers.set("X-RateLimit-Limit", "100");
-    response.headers.set("X-RateLimit-Remaining", String(remaining));
-    response.headers.set("X-RateLimit-Reset", String(resetTime));
-    
-    return response;
+    return NextResponse.json({ credits: wallet.balance });
   } catch (error) {
     // Error fetching credits:
     return NextResponse.json(

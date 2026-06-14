@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth, currentUser } from "@clerk/nextjs/server";
-import { getUserWallet, updateWalletBalance, claimDailyBonus, getOrCreateUser } from "@/lib/user-db";
+import { auth } from "@clerk/nextjs/server";
+import { getUserWallet, updateWalletBalance, claimDailyBonus } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 /**
@@ -14,34 +14,14 @@ async function getHandler(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    let wallet = await getUserWallet(clerkId);
-    if (!wallet) {
-      const clerkUser = await currentUser();
-      if (clerkUser) {
-        const email = clerkUser.emailAddresses?.[0]?.emailAddress || "";
-        const name = clerkUser.firstName || clerkUser.username || email.split("@")[0];
-        await getOrCreateUser(clerkId, email, name);
-      }
-      wallet = await getUserWallet(clerkId);
-    }
-    if (!wallet) {
-      return NextResponse.json(
-        { error: "Wallet unavailable — check Supabase connection" },
-        { status: 503 }
-      );
-    }
-
+    const wallet = await getUserWallet(clerkId);
     return NextResponse.json({
       balance: wallet.balance,
       last_claim_date: wallet.last_claim_date,
       updated_at: wallet.updated_at,
     });
-  } catch (error) {
-    // Error fetching wallet:
-    return NextResponse.json(
-      { error: "Failed to fetch wallet" },
-      { status: 500 }
-    );
+  } catch {
+    return NextResponse.json({ error: "Failed to fetch wallet" }, { status: 500 });
   }
 }
 
@@ -58,7 +38,6 @@ async function postHandler(req: NextRequest) {
     }
 
     const body = await req.json().catch(() => null);
-
     if (!body || !body.type) {
       return NextResponse.json(
         { error: "Invalid request. Use { type: 'daily' } or { type: 'spend', amount, reason }" },
@@ -66,16 +45,13 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    /* Spend coins — called by AudioTool, VideoTool, etc. after generation */
+    /* Spend coins */
     if (body.type === "spend") {
       const amount = typeof body.amount === "number" ? body.amount : 0;
       if (amount <= 0) {
         return NextResponse.json({ error: "amount must be a positive number" }, { status: 400 });
       }
       const currentWallet = await getUserWallet(clerkId);
-      if (!currentWallet) {
-        return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
-      }
       const newBalance = currentWallet.balance - amount;
       if (newBalance < 0) {
         return NextResponse.json(
@@ -99,43 +75,20 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    // Ensure user exists in Supabase (Clerk webhook may not have fired yet)
-    let wallet = await getUserWallet(clerkId);
-    if (!wallet) {
-      const clerkUser = await currentUser();
-      if (clerkUser) {
-        const email = clerkUser.emailAddresses?.[0]?.emailAddress || "";
-        const name = clerkUser.firstName || clerkUser.username || email.split("@")[0];
-        await getOrCreateUser(clerkId, email, name);
-      }
-      // Try again after creating user
-      wallet = await getUserWallet(clerkId);
-    }
-    if (!wallet) {
-      return NextResponse.json({ error: "Wallet not initialized — try again" }, { status: 503 });
-    }
-
     const claimed = await claimDailyBonus(clerkId, 50);
-
     return NextResponse.json({
       message: "Daily bonus claimed! +50 LiTBit Coins",
       balance: claimed.balance,
       last_claim_date: claimed.last_claim_date,
     });
   } catch (error: unknown) {
-    // Error claiming bonus:
-    
     if (error instanceof Error && error.message === "Daily bonus already claimed") {
       return NextResponse.json(
         { error: "Daily bonus already claimed today" },
         { status: 400 }
       );
     }
-    
-    return NextResponse.json(
-      { error: "Failed to claim bonus" },
-      { status: 500 }
-    );
+    return NextResponse.json({ error: "Failed to claim bonus" }, { status: 500 });
   }
 }
 
@@ -161,10 +114,6 @@ async function putHandler(req: NextRequest) {
     }
 
     const currentWallet = await getUserWallet(clerkId);
-    if (!currentWallet) {
-      return NextResponse.json({ error: "Wallet not found" }, { status: 404 });
-    }
-
     const newBalance = currentWallet.balance + body.amount;
     
     if (newBalance < 0) {

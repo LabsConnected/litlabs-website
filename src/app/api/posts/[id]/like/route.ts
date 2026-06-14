@@ -25,8 +25,24 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { data: user } = await sb.from("users").select("id").eq("clerk_id", userId).single();
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+    // Get post owner for notification
+    const { data: post } = await sb.from("posts").select("user_id").eq("id", postId).single();
+
     await sb.from("post_likes").insert({ post_id: postId, user_id: user.id }).select();
     await sb.rpc("increment_post_likes", { post_id: postId });
+
+    // Notify post owner (skip if liking own post)
+    if (post && post.user_id !== user.id) {
+      await sb.from("notifications").insert({
+        recipient_id: post.user_id,
+        actor_id: user.id,
+        type: "like",
+        entity_type: "post",
+        entity_id: postId,
+        content: "liked your post",
+      });
+    }
+
     const response = NextResponse.json({ success: true });
     response.headers.set("X-RateLimit-Limit", "50");
     response.headers.set("X-RateLimit-Remaining", String(remaining));

@@ -9,6 +9,9 @@ export type MediaProviderId =
   | "gemini"
   | "fal"
   | "huggingface"
+  | "together"
+  | "openai"
+  | "recraft"
   | "luma"
   | "veo"
   | "runway";
@@ -70,6 +73,36 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
     tier: "cheap",
   },
   {
+    id: "together",
+    label: "Together.ai (FLUX)",
+    description: "FLUX.1 Schnell Free model. Fast, high quality. Needs TOGETHER_API_KEY.",
+    supportedFormats: ["image"],
+    cost: () => 2,
+    requiresKey: true,
+    free: false,
+    tier: "cheap",
+  },
+  {
+    id: "openai",
+    label: "OpenAI (DALL-E 3)",
+    description: "DALL-E 3 for photorealistic images. Needs OPENAI_API_KEY.",
+    supportedFormats: ["image"],
+    cost: () => 5,
+    requiresKey: true,
+    free: false,
+    tier: "pro",
+  },
+  {
+    id: "recraft",
+    label: "Recraft (SVG/Vector)",
+    description: "Vector art and SVG generation. Needs RECRAFT_API_KEY.",
+    supportedFormats: ["image"],
+    cost: () => 3,
+    requiresKey: true,
+    free: false,
+    tier: "pro",
+  },
+  {
     id: "luma",
     label: "Luma Ray 3 (Coming Soon)",
     description: "Best quality/cost for cinematic short clips. ~$0.32/sec.",
@@ -109,10 +142,10 @@ export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
   const candidates = MEDIA_PROVIDERS.filter(p =>
     p.supportedFormats.includes(format)
   );
-  // Default to Gemini for images (user's preferred provider)
+  // Default to Pollinations for images (free, reliable, no API key)
   if (format === "image") {
-    const gemini = candidates.find(p => p.id === "gemini");
-    if (gemini) return gemini.id;
+    const free = candidates.find(p => p.id === "pollinations");
+    if (free) return free.id;
   }
   // Fall back to free provider
   const free = candidates.find(p => p.free);

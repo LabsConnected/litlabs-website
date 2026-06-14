@@ -156,7 +156,7 @@ export default function AgentTool() {
   const switchAgent = useCallback((agent: Agent) => { setSelectedAgent(agent); setStreaming(""); setShowCreate(false); }, []);
   const clearChat = useCallback(() => { setChatMap(prev => ({ ...prev, [selectedAgent.id]: [] })); setStreaming(""); }, [selectedAgent.id]);
 
-  const sendMessage = useCallback(async (text?: string) => {
+  const sendMessage = useCallback(async (text?: string, retryCount = 0) => {
     const content = (text || input).trim();
     if (!content || isLoading) return;
     setInput("");
@@ -166,37 +166,48 @@ export default function AgentTool() {
     const userMsg: Message = { id: crypto.randomUUID(), role: "user", content, ts: new Date().toLocaleTimeString() };
     setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), userMsg] }));
 
-    try {
-      const history = [...(chatMap[selectedAgent.id] || []), userMsg].map(m => ({ role: m.role, content: m.content }));
-      const res = await fetch("/api/gemini/chat", {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: history, systemPrompt: selectedAgent.systemPrompt, stream: true, provider }),
-      });
-      if (!res.ok) throw new Error("API error");
-      const reader = res.body?.getReader();
-      const decoder = new TextDecoder();
-      let full = "";
-      if (reader) {
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          for (const line of chunk.split("\n\n")) {
-            if (!line.startsWith("data: ")) continue;
-            const d = line.slice(6);
-            if (d === "[DONE]") continue;
-            try { const p = JSON.parse(d); if (p.text) { full += p.text; setStreaming(full); } } catch {}
+    async function attempt(): Promise<boolean> {
+      try {
+        const history = [...(chatMap[selectedAgent.id] || []), userMsg].map(m => ({ role: m.role, content: m.content }));
+        const res = await fetch("/api/gemini/chat", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ messages: history, systemPrompt: selectedAgent.systemPrompt, stream: true, provider }),
+        });
+        if (!res.ok) throw new Error(`API error ${res.status}`);
+        const reader = res.body?.getReader();
+        const decoder = new TextDecoder();
+        let full = "";
+        if (reader) {
+          while (true) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            const chunk = decoder.decode(value, { stream: true });
+            for (const line of chunk.split("\n\n")) {
+              if (!line.startsWith("data: ")) continue;
+              const d = line.slice(6);
+              if (d === "[DONE]") continue;
+              try { const p = JSON.parse(d); if (p.text) { full += p.text; setStreaming(full); } } catch {}
+            }
           }
         }
-      }
-      if (full) {
-        setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: full, ts: new Date().toLocaleTimeString() }] }));
+        if (full) {
+          setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: full, ts: new Date().toLocaleTimeString() }] }));
+          setStreaming("");
+        }
+        return true;
+      } catch (err) {
+        if (retryCount < 1) {
+          await new Promise(r => setTimeout(r, 1200));
+          return attempt();
+        }
+        const msg = err instanceof Error ? err.message : "Connection error";
+        setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: `⚠️ ${msg}. Try again or switch provider.`, ts: new Date().toLocaleTimeString() }] }));
         setStreaming("");
+        return false;
       }
-    } catch {
-      setChatMap(prev => ({ ...prev, [selectedAgent.id]: [...(prev[selectedAgent.id] || []), { id: crypto.randomUUID(), role: "assistant", content: "⚠️ Connection error. Check API configuration.", ts: new Date().toLocaleTimeString() }] }));
-      setStreaming("");
     }
+
+    await attempt();
     setIsLoading(false);
   }, [input, isLoading, selectedAgent, chatMap, provider]);
 
@@ -439,7 +450,11 @@ export default function AgentTool() {
             <div className="flex gap-2.5">
               <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px]" style={{ backgroundColor: selectedAgent.color + "20", border: `1px solid ${selectedAgent.color}40` }}>{selectedAgent.icon}</div>
               <div className="px-3 py-2 rounded-xl text-[11px] flex items-center gap-2" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20`, color: T.linkColor }}>
-                <Loader2 size={11} className="animate-spin" />
+                <span className="flex gap-0.5">
+                  <span className="w-1 h-1 rounded-full animate-bounce" style={{ backgroundColor: selectedAgent.color, animationDelay: '0ms' }} />
+                  <span className="w-1 h-1 rounded-full animate-bounce" style={{ backgroundColor: selectedAgent.color, animationDelay: '150ms' }} />
+                  <span className="w-1 h-1 rounded-full animate-bounce" style={{ backgroundColor: selectedAgent.color, animationDelay: '300ms' }} />
+                </span>
                 <span className="opacity-70">{selectedAgent.name} is thinking...</span>
               </div>
             </div>

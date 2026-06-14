@@ -9,6 +9,9 @@ const HF_VIDEO_URL = "https://api-inference.huggingface.co/models/damo-vilab/tex
 const POLLINATIONS_BASE = "https://image.pollinations.ai/prompt";
 const FAL_API_KEY = process.env.FAL_KEY;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const TOGETHER_API_KEY = process.env.TOGETHER_API_KEY;
+const OPENAI_API_KEY = process.env.OPENAI_API_KEY;
+const RECRAFT_API_KEY = process.env.RECRAFT_API_KEY;
 
 /* ------------------------------------------------------------------ */
 /*  Helpers                                                             */
@@ -57,77 +60,40 @@ function resolveGeminiAspect(width: number, height: number, explicitRatio?: stri
 
 async function handleGeminiImage(
   prompt: string,
-  width: number,
-  height: number,
+  _width: number,
+  _height: number,
   aspectRatio?: string,
-  imageSize: "1K" | "2K" | "4K" = "1K",
+  _imageSize: "1K" | "2K" | "4K" = "1K",
 ): Promise<MediaResult> {
   if (!GEMINI_API_KEY) throw new Error("Gemini key missing — set GEMINI_API_KEY");
 
-  const finalAspect = resolveGeminiAspect(width, height, aspectRatio);
-  const finalSize = (imageSize === "2K" || imageSize === "4K") ? imageSize : "1K";
+  const finalAspect = resolveGeminiAspect(_width, _height, aspectRatio);
 
-  // Use gemini-3.1-flash-image via generateContent (returns inlineData)
+  // Use stable Imagen 3 predict API - correct model name
   const res = await fetch(
-    `https://generativelanguage.googleapis.com/v1beta/models/gemini-3.1-flash-image:generateContent?key=${GEMINI_API_KEY}`,
+    `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-001:predict?key=${GEMINI_API_KEY}`,
     {
       method: "POST",
       headers: { "Content-Type": "application/json", "User-Agent": "litlabs-studio" },
       body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt.trim() }] }],
-        config: {
-          imageConfig: {
-            aspectRatio: finalAspect,
-            imageSize: finalSize,
-          },
-        },
+        instances: [{ prompt: prompt.trim() }],
+        parameters: { sampleCount: 1, aspectRatio: finalAspect },
       }),
     }
   );
 
-  // Fall back to Imagen 3 predict endpoint if flash-image model errors (quota / region)
   if (!res.ok) {
-    const errText = await res.text().catch(() => "");
-    // Try Imagen 3 predict as fallback
-    const fallbackRes = await fetch(
-      `https://generativelanguage.googleapis.com/v1beta/models/imagen-3.0-generate-002:predict?key=${GEMINI_API_KEY}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          instances: [{ prompt: prompt.trim() }],
-          parameters: { sampleCount: 1, aspectRatio: finalAspect },
-        }),
-      }
-    );
-    if (!fallbackRes.ok) {
-      const fbErr = await fallbackRes.text().catch(() => "");
-      throw new Error(`Gemini error: ${errText.slice(0, 150) || fbErr.slice(0, 150) || res.statusText}`);
+    const err = await res.text().catch(() => "");
+    // Try fallback to older model if 404
+    if (res.status === 404) {
+      throw new Error(`Gemini Imagen 3 model not found. Please check your API key or try Pollinations/Together.ai instead.`);
     }
-    const fbData = await fallbackRes.json();
-    const b64fb = fbData.predictions?.[0]?.bytesBase64Encoded;
-    if (!b64fb) throw new Error("Gemini Imagen 3 returned no image data");
-    return {
-      downloadUrl: `data:image/png;base64,${b64fb}`,
-      id: `gemini_${Date.now()}`,
-      status: "complete",
-      title: prompt.slice(0, 60),
-      format: "image",
-    };
+    throw new Error(`Gemini Imagen 3 error: ${err.slice(0, 300) || res.statusText}`);
   }
 
   const data = await res.json();
-
-  // Extract inline image from generateContent response
-  let b64: string | null = null;
-  for (const part of (data.candidates?.[0]?.content?.parts ?? [])) {
-    if (part.inlineData?.data) { b64 = part.inlineData.data; break; }
-  }
-
-  // Also try predictions array (Imagen 3 fallback shape)
-  if (!b64) b64 = data.predictions?.[0]?.bytesBase64Encoded ?? null;
-
-  if (!b64) throw new Error("Gemini returned no image data");
+  const b64 = data.predictions?.[0]?.bytesBase64Encoded;
+  if (!b64) throw new Error("Gemini Imagen 3 returned no image data");
 
   return {
     downloadUrl: `data:image/png;base64,${b64}`,
@@ -300,6 +266,124 @@ async function handlePollinationsImage(
   };
 }
 
+async function handleTogetherImage(prompt: string, width: number, height: number): Promise<MediaResult> {
+  if (!TOGETHER_API_KEY) throw new Error("Together.ai key missing — set TOGETHER_API_KEY");
+
+  const res = await fetch("https://api.together.xyz/v1/images/generations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TOGETHER_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "black-forest-labs/FLUX.1-schnell-Free",
+      prompt: prompt.trim(),
+      width: Math.min(width, 1024),
+      height: Math.min(height, 1024),
+      steps: 4,
+      n: 1,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Together.ai error: ${err.slice(0, 200) || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const b64 = data.data?.[0]?.b64_json;
+  const url = data.data?.[0]?.url;
+  if (b64) {
+    return {
+      downloadUrl: `data:image/png;base64,${b64}`,
+      id: `together_${Date.now()}`,
+      status: "complete",
+      title: prompt.slice(0, 60),
+      format: "image",
+    };
+  }
+  if (url) {
+    return {
+      downloadUrl: url,
+      id: `together_${Date.now()}`,
+      status: "complete",
+      title: prompt.slice(0, 60),
+      format: "image",
+    };
+  }
+  throw new Error("Together.ai returned no image data");
+}
+
+async function handleOpenAIImage(prompt: string, _width: number, _height: number): Promise<MediaResult> {
+  if (!OPENAI_API_KEY) throw new Error("OpenAI key missing — set OPENAI_API_KEY");
+
+  const res = await fetch("https://api.openai.com/v1/images/generations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${OPENAI_API_KEY}`,
+    },
+    body: JSON.stringify({
+      model: "dall-e-3",
+      prompt: prompt.trim(),
+      size: "1024x1024",
+      quality: "standard",
+      n: 1,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`OpenAI error: ${err.slice(0, 200) || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const url = data.data?.[0]?.url;
+  if (!url) throw new Error("OpenAI returned no image URL");
+
+  return {
+    downloadUrl: url,
+    id: `openai_${Date.now()}`,
+    status: "complete",
+    title: prompt.slice(0, 60),
+    format: "image",
+  };
+}
+
+async function handleRecraftImage(prompt: string, _width: number, _height: number): Promise<MediaResult> {
+  if (!RECRAFT_API_KEY) throw new Error("Recraft key missing — set RECRAFT_API_KEY");
+
+  const res = await fetch("https://external.api.recraft.ai/v1/images/generations", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${RECRAFT_API_KEY}`,
+    },
+    body: JSON.stringify({
+      prompt: prompt.trim(),
+      style: "digital_illustration",
+      n: 1,
+    }),
+  });
+
+  if (!res.ok) {
+    const err = await res.text().catch(() => "");
+    throw new Error(`Recraft error: ${err.slice(0, 200) || res.statusText}`);
+  }
+
+  const data = await res.json();
+  const url = data.data?.[0]?.url;
+  if (!url) throw new Error("Recraft returned no image URL");
+
+  return {
+    downloadUrl: url,
+    id: `recraft_${Date.now()}`,
+    status: "complete",
+    title: prompt.slice(0, 60),
+    format: "image",
+  };
+}
+
 /* ------------------------------------------------------------------ */
 /*  Main handler                                                        */
 /* ------------------------------------------------------------------ */
@@ -341,9 +425,6 @@ async function handler(req: NextRequest) {
   let wallet = null;
   if (!provider.free) {
     wallet = await getUserWallet(userId);
-    if (!wallet) {
-      return NextResponse.json({ error: "Wallet not initialized — claim your daily bonus first" }, { status: 500 });
-    }
     if (wallet.balance < cost) {
       return NextResponse.json(
         { error: `Insufficient LiTBit Coins. Need ${cost}, have ${wallet.balance}` },
@@ -371,6 +452,12 @@ async function handler(req: NextRequest) {
         body.width ?? 1024,
         body.height ?? 1024,
       );
+    } else if (providerId === "together") {
+      result = await handleTogetherImage(prompt, body.width ?? 1024, body.height ?? 1024);
+    } else if (providerId === "openai") {
+      result = await handleOpenAIImage(prompt, body.width ?? 1024, body.height ?? 1024);
+    } else if (providerId === "recraft") {
+      result = await handleRecraftImage(prompt, body.width ?? 1024, body.height ?? 1024);
     } else {
       return NextResponse.json(
         { error: `${provider.label} is not yet wired. Add the provider handler in /api/media/generate/route.ts` },

@@ -24,7 +24,7 @@ const MOCK_FEED = [
     id: "mock_2",
     user_id: "mock_user_2",
     content: "Pixel Forge just generated the perfect album art for my new EP. The AI understood my vision instantly 🎵",
-    media_urls: ["https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop"],
+    media_urls: ["https://images.unsplash.com/photo-1614613535308-eb5fbd3d2c17?w=1600&h=1600&fit=crop&q=80"],
     likes_count: 56,
     comments_count: 12,
     is_ai_post: false,
@@ -64,7 +64,10 @@ async function getHandler(req: NextRequest) {
       return NextResponse.json({ posts: MOCK_FEED, mock: true });
     }
     const sb = getAdminSupabase();
-    const { data: posts, error } = await sb
+    const { searchParams } = new URL(req.url);
+    const filter = searchParams.get("filter"); // "all" | "following"
+
+    let query = sb
       .from("posts")
       .select(`
         id, user_id, content, media_urls, likes_count, comments_count, is_ai_post, created_at,
@@ -72,6 +75,25 @@ async function getHandler(req: NextRequest) {
       `)
       .order("created_at", { ascending: false })
       .limit(50);
+
+    if (filter === "following") {
+      const { userId } = await auth();
+      if (userId) {
+        const { data: user } = await sb.from("users").select("id").eq("clerk_id", userId).single();
+        if (user) {
+          const { data: follows } = await sb.from("follows").select("followee_id").eq("follower_id", user.id);
+          const followeeIds = (follows || []).map(f => f.followee_id);
+          if (followeeIds.length > 0) {
+            query = query.in("user_id", followeeIds);
+          } else {
+            // No follows yet — return empty so UI can show "Discover people" prompt
+            return NextResponse.json({ posts: [], empty_following: true });
+          }
+        }
+      }
+    }
+
+    const { data: posts, error } = await query;
     if (error) throw error;
     return NextResponse.json({ posts: posts || [] });
   } catch {
@@ -86,8 +108,11 @@ async function postHandler(req: NextRequest) {
   }
 
   const body = await req.json().catch(() => null);
-  if (!body || !body.content?.trim()) {
-    return NextResponse.json({ error: "Content is required" }, { status: 400 });
+  const hasContent = body?.content?.trim();
+  const hasMedia = body?.media_urls?.length > 0;
+  
+  if (!body || (!hasContent && !hasMedia)) {
+    return NextResponse.json({ error: "Content or media is required" }, { status: 400 });
   }
 
   if (!isAdminSupabaseConfigured()) {
@@ -96,15 +121,40 @@ async function postHandler(req: NextRequest) {
 
   try {
     const sb = getAdminSupabase();
-    // Ensure user exists
-    const { data: user } = await sb
+    // Ensure user exists - create if not found
+    let { data: user } = await sb
       .from("users")
       .select("id")
       .eq("clerk_id", userId)
       .single();
 
     if (!user) {
-      return NextResponse.json({ error: "User not found. Please sign up first." }, { status: 404 });
+      // Auto-create user from Clerk data
+      const shortId = userId.slice(-8);
+      const { data: newUser, error: createError } = await sb
+        .from("users")
+        .insert({
+          clerk_id: userId,
+          username: `user_${shortId}`,
+          display_name: `LiTBit User ${shortId}`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        })
+        .select()
+        .single();
+      
+      if (createError) {
+        return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
+      }
+      
+      user = newUser;
+      
+      // Create initial wallet
+      await sb.from("wallets").insert({
+        user_id: user.id,
+        balance: 500,
+        lifetime_earned: 500,
+      });
     }
 
     const { data: post, error } = await sb

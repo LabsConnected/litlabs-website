@@ -1,16 +1,34 @@
 'use client';
 export const dynamic = "force-dynamic";
 
-import { useState, useCallback, useEffect } from 'react';
+import { useState, useCallback, useEffect, Suspense } from 'react';
 import Link from 'next/link';
 import { useTheme } from '@/context/ThemeContext';
 import { useAuth, RedirectToSignIn } from '@clerk/nextjs';
 import { useSearchParams } from 'next/navigation';
 import { AGENT_AVATARS, AGENT_AVATAR_META, type AgentAvatarMeta } from '@/lib/avatars';
+import { Check } from 'lucide-react';
 
 function formatPrice(cents: number): string {
   if (cents === 0) return 'FREE';
-  return cents + ' LBC'; // price in LiTBit Coins
+  return cents + ' LBC';
+}
+
+// Category color mapping for consistent theming
+function getCategoryColor(category: string): string {
+  const colors: Record<string, string> = {
+    developer: '#818cf8',    // Indigo
+    marketing: '#34d399',  // Emerald  
+    analytics: '#a78bfa',    // Purple
+    content: '#f472b6',      // Pink
+    general: '#fbbf24',      // Amber
+    orchestrator: '#fb923c', // Orange
+    music: '#22d3ee',        // Cyan
+    design: '#ec4899',       // Rose
+    research: '#60a5fa',     // Blue
+    legal: '#94a3b8',        // Slate
+  };
+  return colors[category] || '#fbbf24';
 }
 
 // CREDIT PACKS — Stripe price_id required for each (create in Stripe Dashboard)
@@ -73,7 +91,7 @@ const DEMO_AGENTS: Agent[] = [
   { id: '13', slug: 'ml-engineer', name: 'ML Engineer', description: 'Machine learning specialist. Builds models, optimizes training, and deploys AI systems.', category: 'analytics', avatar_url: AGENT_AVATARS['ml-engineer'], price_cents: 1500, features: ['Model training', 'Hyperparameter tuning', 'Model deployment'], is_featured: false, personality: 'Methodical, experimental, rigorous', rating: 4.8, installs: 89 },
 ];
 
-export default function Marketplace() {
+function MarketplaceInner() {
   const { isLoaded, isSignedIn, userId } = useAuth();
   const { resolvedColors: T } = useTheme();
   const searchParams = useSearchParams();
@@ -116,10 +134,6 @@ export default function Marketplace() {
   }, [isSignedIn]);
 
   const buyPack = async (pack: typeof CREDIT_PACKS[0]) => {
-    if (!pack.priceId || !pack.priceId.startsWith('price_')) {
-      showToast('Stripe setup needed: create a Price in Stripe Dashboard and add its price_xxx ID to CREDIT_PACKS.', 'info');
-      return;
-    }
     if (!isSignedIn || !userId) {
       showToast('Please sign in to purchase coins.', 'error');
       return;
@@ -129,8 +143,13 @@ export default function Marketplace() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          priceId: pack.priceId,
           mode: 'payment',
+          priceData: {
+            amount: pack.price * 100,
+            currency: 'usd',
+            name: `${pack.coins} LiTBit Coins`,
+            description: `${pack.label} pack — ${pack.savings}`,
+          },
           metadata: { clerk_id: userId, coin_amount: String(pack.coins) },
         }),
       });
@@ -578,36 +597,133 @@ function AgentAvatar({ slug, size = 40 }: { slug: string; size?: number }) {
 function AgentCard({ agent, isInstalled, onInstall, onPreview, theme }: { agent: Agent; isInstalled: boolean; onInstall: () => void; onPreview: () => void; theme: Record<string, string> }) {
   const T = theme;
   const [hovered, setHovered] = useState(false);
+  const categoryColor = getCategoryColor(agent.category);
+  
   return (
-    <div onMouseEnter={() => setHovered(true)} onMouseLeave={() => setHovered(false)} style={{ border: '1px solid ' + (hovered ? T.accentColor : T.borderColor), backgroundColor: 'rgba(0,0,0,0.3)', transition: 'all 0.2s', transform: hovered ? 'translateY(-4px)' : 'translateY(0)', boxShadow: hovered ? '0 8px 24px rgba(0,255,255,0.08)' : 'none', borderRadius: '8px', overflow: 'hidden' }}>
-      <div style={{ padding: '16px' }}>
-        <div style={{ display: 'flex', alignItems: 'flex-start', gap: '12px', marginBottom: '12px' }}>
-          <AgentAvatar slug={agent.slug} size={44} />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ color: T.headerColor, fontSize: '15px', fontWeight: 'bold', marginBottom: '2px', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{agent.name}</div>
-            <div style={{ color: T.textColor, fontSize: '10px', opacity: 0.6, textTransform: 'capitalize', display: 'flex', alignItems: 'center', gap: '6px' }}>
-              <span>{CATEGORY_LABELS[agent.category] || agent.category}</span>
+    <div 
+      onMouseEnter={() => setHovered(true)} 
+      onMouseLeave={() => setHovered(false)} 
+      className="group relative rounded-2xl overflow-hidden transition-all duration-300"
+      style={{ 
+        background: hovered ? `linear-gradient(135deg, ${T.boxBg}, ${categoryColor}08)` : T.boxBg,
+        border: `1px solid ${hovered ? categoryColor : T.borderColor + '40'}`,
+        transform: hovered ? 'translateY(-6px)' : 'translateY(0)',
+        boxShadow: hovered ? `0 20px 40px ${categoryColor}15` : '0 4px 20px rgba(0,0,0,0.2)',
+      }}
+    >
+      {/* Category accent line */}
+      <div className="h-1 w-full" style={{ background: categoryColor }} />
+      
+      <div className="p-5">
+        {/* Header */}
+        <div className="flex items-start gap-3 mb-4">
+          <AgentAvatar slug={agent.slug} size={48} />
+          <div className="flex-1 min-w-0">
+            <div className="flex items-center gap-2 mb-1">
+              <span className="text-sm font-bold truncate" style={{ color: T.textColor }}>{agent.name}</span>
+              {agent.is_featured && <span className="text-[10px] px-1.5 py-0.5 rounded-full font-bold" style={{ background: categoryColor + '20', color: categoryColor }}>★</span>}
+            </div>
+            <div className="flex items-center gap-2 text-[10px]" style={{ color: T.textMuted }}>
+              <span className="capitalize">{CATEGORY_LABELS[agent.category] || agent.category}</span>
               <span>·</span>
-              <span>⭐ {agent.rating}</span>
+              <span className="flex items-center gap-0.5">
+                <span className="text-yellow-400">★</span> {agent.rating}
+              </span>
               <span>·</span>
-              <span>📥 {agent.installs}</span>
+              <span>{(agent.installs || 0).toLocaleString()} installs</span>
             </div>
           </div>
-          <div style={{ padding: '4px 10px', fontSize: '10px', fontWeight: 'bold', backgroundColor: agent.price_cents === 0 ? T.accentColor : T.headerColor, color: 'black', borderRadius: '6px', letterSpacing: '0.5px', whiteSpace: 'nowrap' }}>{formatPrice(agent.price_cents)}</div>
+          <div 
+            className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0"
+            style={{ 
+              background: agent.price_cents === 0 ? categoryColor + '20' : categoryColor + '30',
+              color: agent.price_cents === 0 ? categoryColor : '#fff',
+              border: `1px solid ${categoryColor}50`
+            }}
+          >
+            {formatPrice(agent.price_cents)}
+          </div>
         </div>
-        <p style={{ color: T.textColor, fontSize: '12px', lineHeight: 1.5, marginBottom: '12px', height: '54px', overflow: 'hidden', opacity: 0.85 }}>{agent.description}</p>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '14px' }}>
-          {agent.features.slice(0, 2).map((f, i) => <span key={i} style={{ padding: '4px 10px', backgroundColor: 'rgba(255,0,128,0.1)', border: '1px solid ' + T.linkColor, color: T.linkColor, fontSize: '10px', borderRadius: '4px' }}>{f}</span>)}
+        
+        {/* Description */}
+        <p className="text-xs leading-relaxed mb-4 line-clamp-2" style={{ color: T.textMuted }}>
+          {agent.description}
+        </p>
+        
+        {/* Features */}
+        <div className="flex flex-wrap gap-1.5 mb-4">
+          {agent.features.slice(0, 3).map((f, i) => (
+            <span 
+              key={i} 
+              className="px-2 py-0.5 rounded-md text-[9px] font-medium"
+              style={{ 
+                background: categoryColor + '10',
+                color: categoryColor,
+                border: `1px solid ${categoryColor}20`
+              }}
+            >
+              {f}
+            </span>
+          ))}
         </div>
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <button onClick={onPreview} style={{ flex: 1, padding: '8px', border: '1px solid ' + T.linkColor, color: T.linkColor, backgroundColor: 'transparent', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', transition: 'all 0.15s' }}>👁 Preview</button>
+        
+        {/* Actions */}
+        <div className="flex gap-2">
+          <button 
+            onClick={onPreview}
+            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+            style={{ 
+              background: T.bgColor,
+              color: T.textColor,
+              border: `1px solid ${T.borderColor}40`
+            }}
+          >
+            Preview
+          </button>
           {isInstalled ? (
-            <button disabled style={{ flex: 1, padding: '8px', backgroundColor: 'rgba(80,80,80,0.3)', color: '#888', border: '1px solid #444', borderRadius: '6px', fontSize: '12px', fontWeight: 'bold', cursor: 'not-allowed' }}>✓ Installed</button>
+            <button 
+              disabled 
+              className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-not-allowed"
+              style={{ 
+                background: T.borderColor + '30',
+                color: T.textMuted,
+                border: `1px solid ${T.borderColor}30`
+              }}
+            >
+              <span className="flex items-center justify-center gap-1">
+                <Check size={12} /> Installed
+              </span>
+            </button>
           ) : (
-            <button onClick={onInstall} style={{ flex: 1, padding: '8px', backgroundColor: T.linkColor, color: 'white', border: 'none', cursor: 'pointer', fontSize: '12px', fontWeight: 'bold', borderRadius: '6px', transition: 'all 0.15s' }}>🚀 Install</button>
+            <button 
+              onClick={onInstall}
+              className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
+              style={{ 
+                background: categoryColor,
+                color: '#000',
+              }}
+            >
+              {agent.price_cents === 0 ? 'Install Free' : 'Buy Now'}
+            </button>
           )}
         </div>
       </div>
     </div>
+  );
+}
+
+/* Wrap in Suspense for useSearchParams */
+export default function Marketplace() {
+  return (
+    <Suspense fallback={
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: '#0a0a0f' }}>
+        <div className="text-center">
+          <div className="text-3xl mb-4 animate-pulse">⚡</div>
+          <div className="text-sm font-bold opacity-60">Loading Marketplace...</div>
+        </div>
+      </div>
+    }>
+      <MarketplaceInner />
+    </Suspense>
   );
 }

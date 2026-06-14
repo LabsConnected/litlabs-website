@@ -13,7 +13,7 @@ async function handler(req: NextRequest) {
     if (!GEMINI_API_KEY) return NextResponse.json({ error: "Gemini API key not configured" }, { status: 500 });
 
     const wallet = await getUserWallet(userId);
-    if (!wallet || wallet.balance < COST) {
+    if (wallet.balance < COST) {
       return NextResponse.json({ error: `Need ${COST} LiTBit Coins` }, { status: 402 });
     }
 

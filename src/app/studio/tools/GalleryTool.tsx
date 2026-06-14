@@ -19,12 +19,12 @@ function getYouTubeThumbnail(url: string): string | undefined {
 
 const DEMO_ITEMS: GalleryItem[] = [
   { id: "featured_yt_1", title: "Don't Matter — LiTBit", artist: "LiTBit", category: "video", source: "discover", imageUrl: "https://img.youtube.com/vi/76saU4w8sNM/hqdefault.jpg", videoUrl: "https://youtu.be/76saU4w8sNM", likes: 42, createdAt: "2026-06-10" },
-  { id: "d1", title: "Neon Cyber City", artist: "Pixel Forge", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop", likes: 234, createdAt: "2026-06-01" },
-  { id: "d2", title: "Ethereal Dreamscape", artist: "DreamWeaver", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-06-02" },
-  { id: "d3", title: "Lost Temple Ruins", artist: "Explorer-X", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=300&fit=crop", likes: 312, createdAt: "2026-05-28" },
-  { id: "d4", title: "Quantum Warrior", artist: "Pixel Forge", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=400&h=500&fit=crop", likes: 156, createdAt: "2026-06-03" },
-  { id: "d5", title: "Crystal Cavern", artist: "GeoMancer", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop", likes: 278, createdAt: "2026-05-30" },
-  { id: "d6", title: "Void Entity", artist: "ShadowNet", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&h=500&fit=crop", likes: 421, createdAt: "2026-06-04" },
+  { id: "d1", title: "Neon Cyber City", artist: "Pixel Forge", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=1600&h=1200&fit=crop&q=80", likes: 234, createdAt: "2026-06-01" },
+  { id: "d2", title: "Ethereal Dreamscape", artist: "DreamWeaver", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=1600&h=1200&fit=crop&q=80", likes: 189, createdAt: "2026-06-02" },
+  { id: "d3", title: "Lost Temple Ruins", artist: "Explorer-X", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1600&h=1200&fit=crop&q=80", likes: 312, createdAt: "2026-05-28" },
+  { id: "d4", title: "Quantum Warrior", artist: "Pixel Forge", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=1600&h=1200&fit=crop&q=80", likes: 156, createdAt: "2026-06-03" },
+  { id: "d5", title: "Crystal Cavern", artist: "GeoMancer", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=1200&fit=crop&q=80", likes: 278, createdAt: "2026-05-30" },
+  { id: "d6", title: "Void Entity", artist: "ShadowNet", category: "image", source: "discover", imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1600&h=1200&fit=crop&q=80", likes: 421, createdAt: "2026-06-04" },
 ];
 
 type GalleryItem = {

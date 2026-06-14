@@ -61,7 +61,7 @@ export default function ImageTool() {
 
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
-  const [providerId, setProviderId] = useState<MediaProviderId>("gemini");
+  const [providerId, setProviderId] = useState<MediaProviderId>("pollinations");
   const [seed, setSeed] = useState<number>(0);
   const [aspectRatio, setAspectRatio] = useState<"1:1" | "4:3" | "3:4" | "16:9" | "9:16">("1:1");
   const [imageSize, setImageSize] = useState<"1K" | "2K">("1K");
@@ -85,8 +85,9 @@ export default function ImageTool() {
   const [batchSize, setBatchSize] = useState<1 | 2 | 4>(1);
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
+  const [imgError, setImgError] = useState<string | null>(null);
   const [workspaces, setWorkspaces] = useState<Workspace[]>([
-    { id: "ws_default", name: "Default", prompt: "", negativePrompt: "", providerId: "gemini", aspectRatio: "1:1", imageSize: "1K", seed: 0 },
+    { id: "ws_default", name: "Default", prompt: "", negativePrompt: "", providerId: "pollinations", aspectRatio: "1:1", imageSize: "1K", seed: 0 },
   ]);
   const [activeWsId, setActiveWsId] = useState("ws_default");
   const [editingWsName, setEditingWsName] = useState<string | null>(null);
@@ -106,11 +107,27 @@ export default function ImageTool() {
     }
   }, [history]);
 
-  /* Fetch coin balance */
+  /* Fetch coin balance - sync from localStorage first for consistency */
   useEffect(() => {
+    // Read from localStorage first (consistent with Navbar)
+    try {
+      const raw = localStorage.getItem("litcoins");
+      if (raw) {
+        const val = Number(raw);
+        if (!isNaN(val)) setCoinBalance(val);
+      }
+    } catch { /* ignore */ }
+    
+    // Then sync from API
     fetch("/api/wallet")
       .then(r => r.json())
-      .then(d => { if (typeof d.balance === "number") setCoinBalance(d.balance); })
+      .then(d => { 
+        if (typeof d.balance === "number") {
+          setCoinBalance(d.balance);
+          // Update localStorage for consistency
+          try { localStorage.setItem("litcoins", String(d.balance)); } catch {}
+        }
+      })
       .catch(() => { /* silent */ });
   }, []);
 
@@ -174,9 +191,16 @@ export default function ImageTool() {
     setAspectRatio(ws.aspectRatio as any); setImageSize(ws.imageSize as any); setSeed(ws.seed);
   }
 
-  const providerCost = providerId === "pollinations" ? 0 : providerId === "gemini" ? 1 : providerId === "fal" ? 3 : 0;
+  const providerCost = 
+    providerId === "pollinations" ? 0 : 
+    providerId === "gemini" ? 1 : 
+    providerId === "together" ? 2 :
+    providerId === "fal" ? 3 :
+    providerId === "recraft" ? 3 :
+    providerId === "openai" ? 5 : 0;
   const canAfford = coinBalance === null || coinBalance >= providerCost * batchSize;
   const promptValid = prompt.trim().length >= 3;
+  const promptQuality = prompt.trim().length < 10 ? "weak" : prompt.trim().length < 30 ? "fair" : "good";
 
   const handleGenerate = useCallback(async () => {
     if (!promptValid) { setError("Prompt must be at least 3 characters."); return; }
@@ -184,6 +208,7 @@ export default function ImageTool() {
     if (!canAfford) { setError(`Not enough LiTBit Coins. Need ${totalCost}, have ${coinBalance}.`); return; }
 
     setError(null);
+    setImgError(null);
     setStatus("submitting");
     addLog("info", `Starting batch of ${batchSize} image(s) via ${providerId}...`);
 
@@ -242,7 +267,10 @@ export default function ImageTool() {
           ? { ...g, status: "failed", error: msg }
           : g
         ));
-        if (i === 0) setError(msg);
+        if (i === 0) {
+          setError(msg);
+          setCurrentResult(prev => prev?.id === localId ? { ...prev, status: "failed", error: msg } : prev);
+        }
       }
     }
     setStatus(results.every(r => r.status === "succeeded") ? "succeeded" : "failed");
@@ -403,7 +431,12 @@ export default function ImageTool() {
               className="w-full px-3 py-2 text-sm rounded outline-none resize-none disabled:opacity-50"
               style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }}
             />
-            <div className="text-right text-[10px] mt-1" style={{ color: T.textMuted }}>{prompt.length} chars {promptValid ? "✓" : "(min 3)"}</div>
+            <div className="flex items-center justify-between mt-1">
+              <div className="text-[10px]" style={{ color: promptQuality === "weak" ? "#f85149" : promptQuality === "fair" ? "#d29922" : "#3fb950" }}>
+                {promptQuality === "weak" ? "⚠️ Too short — describe the scene in detail" : promptQuality === "fair" ? "💡 Add more detail for better results" : "✓ Good prompt"}
+              </div>
+              <div className="text-[10px]" style={{ color: T.textMuted }}>{prompt.length} chars {promptValid ? "✓" : "(min 3)"}</div>
+            </div>
           </div>
 
           {/* Provider Selector */}
@@ -414,17 +447,26 @@ export default function ImageTool() {
                 <Coins size={10} /> {providerCost === 0 ? "FREE" : `${providerCost} 🪙`}
               </div>
             </div>
-            <div className="grid grid-cols-1 gap-1.5">
+            <div className="grid grid-cols-1 gap-1.5 max-h-56 overflow-y-auto">
               {([
-                { id: "gemini" as const, label: "Gemini (Imagen)", desc: "Google Imagen 3", cost: 1 },
-                { id: "pollinations" as const, label: "Pollinations (Free)", desc: "FLUX + SDXL", cost: 0 },
-                { id: "fal" as const, label: "FAL.ai (FLUX)", desc: "FLUX Pro", cost: 3 },
+                { id: "pollinations" as const, label: "Pollinations (Free)", desc: "FLUX + SDXL, works without API key", cost: 0, status: "ready" as const },
+                { id: "gemini" as const, label: "Gemini (Imagen 3)", desc: "Google Imagen 3, needs GEMINI_API_KEY", cost: 1, status: "needs-key" as const },
+                { id: "together" as const, label: "Together.ai (FLUX)", desc: "FLUX.1 Schnell, needs TOGETHER_API_KEY", cost: 2, status: "needs-key" as const },
+                { id: "fal" as const, label: "FAL.ai (FLUX Pro)", desc: "FLUX.1 Pro, needs FAL_KEY", cost: 3, status: "needs-key" as const },
+                { id: "openai" as const, label: "OpenAI (DALL-E 3)", desc: "DALL-E 3 photorealistic, needs OPENAI_API_KEY", cost: 5, status: "needs-key" as const },
+                { id: "recraft" as const, label: "Recraft (Vector)", desc: "SVG/vector art, needs RECRAFT_API_KEY", cost: 3, status: "needs-key" as const },
               ]).map(p => (
                 <button key={p.id} type="button" onClick={() => setProviderId(p.id)} disabled={isWorking}
-                  className="p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50"
+                  className="p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50 group relative"
                   style={{ backgroundColor: providerId === p.id ? T.accentColor + "20" : T.bgColor, borderColor: providerId === p.id ? T.accentColor : T.borderColor, color: providerId === p.id ? T.accentColor : T.textColor }}>
-                  <div className="font-bold">{p.label}</div>
-                  <div className="text-[9px] opacity-60 mt-0.5">{p.desc} · {p.cost === 0 ? "FREE" : `${p.cost} 🪙`}</div>
+                  <div className="flex items-center gap-1.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${p.status === "ready" ? "bg-green-500" : "bg-amber-500"}`} />
+                    <span className="font-bold">{p.label}</span>
+                  </div>
+                  <div className="text-[9px] opacity-60 mt-0.5 ml-3">{p.desc} · {p.cost === 0 ? "FREE" : `${p.cost} 🪙`}</div>
+                  {p.status === "ready" && providerId !== p.id && (
+                    <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[9px] px-1.5 py-0.5 rounded bg-green-500/20 text-green-400 opacity-0 group-hover:opacity-100 transition-opacity">Ready</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -526,8 +568,21 @@ export default function ImageTool() {
           </button>
 
           {error && (
-            <div className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border" style={{ borderColor: "#f85149", color: "#f85149", backgroundColor: "#f8514910" }}>
-              <AlertTriangle size={12} /><span>{error}</span>
+            <div className="text-[11px] flex flex-col gap-1.5 px-3 py-3 rounded-lg border" style={{ borderColor: "#f85149", color: "#f85149", backgroundColor: "#f8514915" }}>
+              <div className="flex items-center gap-1.5 font-bold">
+                <AlertTriangle size={12} /><span>Generation Failed</span>
+              </div>
+              <div className="opacity-90 leading-relaxed">{error}</div>
+              {providerId === "gemini" && error?.includes("404") && (
+                <div className="text-[10px] opacity-75 mt-1" style={{ color: T.textMuted }}>
+                  💡 Tip: Try Pollinations (Free) or Together.ai instead — no API key needed!
+                </div>
+              )}
+              {(providerId === "together" || providerId === "openai" || providerId === "fal" || providerId === "recraft") && error?.includes("key missing") && (
+                <div className="text-[10px] opacity-75 mt-1" style={{ color: T.textMuted }}>
+                  💡 Add your {providerId.toUpperCase()}_API_KEY in Vercel environment variables
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -550,7 +605,27 @@ export default function ImageTool() {
               }}
             >
               {currentResult?.fileUrl ? (
-                <img src={currentResult.fileUrl} alt={currentResult.prompt} className="w-full h-full object-contain" />
+                <>
+                  <img
+                    src={currentResult.fileUrl}
+                    alt={currentResult.prompt}
+                    className="w-full h-full object-contain"
+                    onError={() => setImgError("Image failed to load. Try regenerating.")}
+                    onLoad={() => setImgError(null)}
+                  />
+                  {imgError && (
+                    <div className="absolute inset-0 flex items-center justify-center" style={{ backgroundColor: T.bgColor + "dd" }}>
+                      <div className="text-center px-6">
+                        <div className="text-3xl mb-2">🖼️</div>
+                        <p className="text-sm" style={{ color: "#f85149" }}>{imgError}</p>
+                        <button onClick={() => { setImgError(null); handleGenerate(); }}
+                          className="mt-3 px-3 py-1.5 text-xs font-bold rounded" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+                          <RefreshCw size={10} className="inline mr-1" /> Retry
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </>
               ) : isWorking ? (
                 <div className="text-center">
                   <div className="relative w-20 h-20 mx-auto mb-3">
@@ -560,12 +635,20 @@ export default function ImageTool() {
                   <p className="text-sm opacity-70">Rendering...</p>
                 </div>
               ) : status === "failed" ? (
-                <div className="text-center px-6">
-                  <div className="text-3xl mb-2">⚠️</div>
-                  <p className="text-sm" style={{ color: "#f85149" }}>{error || "Failed"}</p>
-                  <button onClick={handleGenerate} className="mt-3 px-3 py-1.5 text-xs font-bold rounded" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
-                    <RefreshCw size={10} className="inline mr-1" /> Retry
-                  </button>
+                <div className="text-center px-6 py-8">
+                  <div className="w-16 h-16 mx-auto mb-3 rounded-full flex items-center justify-center" style={{ backgroundColor: "#f8514920" }}>
+                    <AlertTriangle size={28} style={{ color: "#f85149" }} />
+                  </div>
+                  <p className="text-sm font-bold mb-1" style={{ color: "#f85149" }}>Generation Failed</p>
+                  <p className="text-xs opacity-60 mb-4 max-w-xs mx-auto">{error || "Something went wrong. Check your API key or try a different provider."}</p>
+                  <div className="flex items-center justify-center gap-2">
+                    <button onClick={handleGenerate} className="px-4 py-2 text-xs font-bold rounded-lg flex items-center gap-1.5" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+                      <RefreshCw size={12} /> Retry
+                    </button>
+                    <button onClick={() => setProviderId("pollinations")} className="px-4 py-2 text-xs font-bold rounded-lg border flex items-center gap-1.5" style={{ borderColor: T.borderColor, color: T.textMuted }}>
+                      <Zap size={12} /> Try Free
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="text-center px-6">
@@ -611,7 +694,7 @@ export default function ImageTool() {
                   <button key={g.id} onClick={() => setCurrentResult(g)}
                     className="relative aspect-video border rounded overflow-hidden group hover:scale-[1.02] transition-transform"
                     style={{ borderColor: T.borderColor, backgroundColor: T.bgColor }}>
-                    {g.fileUrl ? <img src={g.fileUrl} alt={g.prompt} className="w-full h-full object-cover" />
+                    {g.fileUrl ? <img src={g.fileUrl} alt={g.prompt} className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none'; }} />
                       : g.status === "failed" ? <div className="w-full h-full flex items-center justify-center text-xl">⚠️</div>
                       : <div className="w-full h-full flex items-center justify-center"><Loader2 size={16} className="animate-spin opacity-50" /></div>}
                     <div className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 text-[8px] truncate" style={{ backgroundColor: "rgba(0,0,0,0.7)", color: "white" }}>{g.provider}</div>

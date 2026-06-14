@@ -2,6 +2,12 @@
 
 import { createContext, useContext, useState, useEffect, ReactNode } from "react";
 
+// Wallpaper types
+export type WallpaperId = 
+  | 'default' | 'gradient' | 'mesh' | 'dark' | 'custom'
+  | 'nebula' | 'cyberpunk' | 'aurora' | 'matrix' | 'sunset'
+  | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass';
+
 // User profile type
 export interface UserProfile {
   displayName: string;
@@ -30,6 +36,11 @@ export interface UserProfile {
     linkedin?: string;
   };
   badges: string[];
+  // Wallpaper & theme sync
+  wallpaper: WallpaperId;
+  customWallpaperUrl: string | null;
+  sidebarStyle: 'compact' | 'comfortable' | 'spacious';
+  accentColor: string;
 }
 
 // Default profile
@@ -47,6 +58,10 @@ const defaultProfile: UserProfile = {
   videoLinks: {},
   socialLinks: {},
   badges: ["🔥 Early Adopter", "🤖 Agent Builder", "💬 Community"],
+  wallpaper: 'mesh',
+  customWallpaperUrl: null,
+  sidebarStyle: 'comfortable',
+  accentColor: '#fbbf24',
 };
 
 // Context

@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
+import Image from "next/image";
 import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import dynamic from "next/dynamic";
 import {
   Home, ShoppingBag, Sparkles,
   Settings, Sun, Moon, Zap,
-  ChevronDown, X, Menu, Bell, Coins, User, MessageCircle
+  ChevronDown, X, Menu, Bell, Coins, User
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -23,9 +25,8 @@ const NavAuth = dynamic(
 const navLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/studio", label: "Studio", icon: Zap },
-  { href: "/marketplace", label: "Market", icon: ShoppingBag },
-  { href: "/social", label: "Social", icon: MessageCircle },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
+  { href: "/marketplace", label: "Market", icon: ShoppingBag },
 ];
 
 /* ------------------------------------------------------------------ */
@@ -36,6 +37,31 @@ const userLinks = [
   { href: "/settings", label: "Settings", icon: Settings },
   { href: "/showcase", label: "Showcase", icon: Sparkles },
 ];
+
+function WalletBadge({ accentColor }: { accentColor: string }) {
+  const [balance, setBalance] = useState<number | null>(null);
+  useEffect(() => {
+    fetch("/api/wallet")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (data?.balance !== undefined) setBalance(data.balance);
+      })
+      .catch(() => setBalance(null));
+  }, []);
+  return (
+    <span
+      className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold"
+      style={{
+        backgroundColor: accentColor + "15",
+        color: accentColor,
+        border: `1px solid ${accentColor}30`,
+      }}
+      title="Your LiTBit Coins balance"
+    >
+      <Coins size={10} /> {balance === null ? "—" : balance.toLocaleString()}
+    </span>
+  );
+}
 
 function useLocalStorageNumber(key: string, fallback: number) {
   const [val, setVal] = useState(fallback);
@@ -56,9 +82,42 @@ export default function Navbar() {
   const hamburgerRef = useRef<HTMLButtonElement>(null);
   const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
+  const [notifications, setNotifications] = useState<any[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const userRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const litcoins = useLocalStorageNumber("litcoins", 500);
+  const { isLoaded: authLoaded, isSignedIn } = useClerkAuth();
+
+  const fetchNotifications = async () => {
+    if (!isSignedIn) return;
+    try {
+      const [listRes, countRes] = await Promise.all([
+        fetch('/api/notifications?limit=20'),
+        fetch('/api/notifications/count'),
+      ]);
+      const listData = await listRes.json();
+      const countData = await countRes.json();
+      setNotifications(listData.notifications || []);
+      setUnreadCount(countData.count || 0);
+    } catch { /* ignore */ }
+  };
+
+  const markAllRead = async () => {
+    try {
+      await fetch('/api/notifications', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mark_all: true }) });
+      setUnreadCount(0);
+      setNotifications(prev => prev.map(n => ({ ...n, read_at: new Date().toISOString() })));
+    } catch { /* ignore */ }
+  };
+
+  useEffect(() => {
+    if (isSignedIn) {
+      fetchNotifications();
+      const interval = setInterval(fetchNotifications, 15000);
+      return () => clearInterval(interval);
+    }
+  }, [isSignedIn]);
 
   /* Close dropdowns on outside click + close mobile drawer on desktop resize */
   useEffect(() => {
@@ -103,14 +162,27 @@ export default function Navbar() {
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
           <Link href="/" className="flex items-center gap-2.5 group shrink-0">
-            <div className="relative flex items-center justify-center w-8 h-8 rounded-lg transition-transform duration-300 group-hover:scale-105" style={{ background: `linear-gradient(135deg, ${resolvedColors.accentColor}30, ${resolvedColors.headerColor}20)`, border: `1px solid ${resolvedColors.accentColor}40` }}>
-              <Zap size={16} className="transition-all duration-300 group-hover:rotate-12" style={{ color: resolvedColors.accentColor }} />
+            <div className="relative w-8 h-8 rounded-lg overflow-hidden transition-transform duration-300 group-hover:scale-105" style={{ border: `1px solid ${resolvedColors.accentColor}40` }}>
+              <Image src="/logo.png" alt="LiTree Lab Studios" fill className="object-contain p-0.5" unoptimized />
             </div>
-            <div className="hidden sm:flex flex-col leading-none">
-              <span className="font-black text-[13px] tracking-tight" style={{ background: `linear-gradient(90deg, ${resolvedColors.headerColor}, ${resolvedColors.accentColor})`, WebkitBackgroundClip: "text", WebkitTextFillColor: "transparent" }}>
+            <div className="hidden sm:flex flex-col leading-none px-2 py-1 rounded-lg"
+              style={{ 
+                backgroundColor: resolvedColors.bgColor + '60',
+                backdropFilter: 'blur(4px)',
+              }}>
+              <span className="font-black text-[13px] tracking-tight" 
+                style={{ 
+                  color: resolvedColors.textColor,
+                  textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
+                }}>
                 LiTree Labs
               </span>
-              <span className="text-[9px] font-bold tracking-widest uppercase opacity-50" style={{ color: resolvedColors.textMuted }}>AI Platform</span>
+              <span className="text-[9px] font-bold tracking-widest uppercase" 
+                style={{ 
+                  color: resolvedColors.textMuted,
+                  opacity: 0.9,
+                  textShadow: `0 0 8px ${resolvedColors.bgColor}`,
+                }}>AI Platform</span>
             </div>
           </Link>
 
@@ -139,23 +211,13 @@ export default function Navbar() {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LitCoins wallet */}
-            <span
-              className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold"
-              style={{
-                backgroundColor: resolvedColors.accentColor + "15",
-                color: resolvedColors.accentColor,
-                border: `1px solid ${resolvedColors.accentColor}30`,
-              }}
-              title="Your LiTBit Coins balance"
-            >
-              <Coins size={10} /> ∞ FREE
-            </span>
+            {/* LitCoins wallet — only when signed in */}
+            {authLoaded && isSignedIn && <WalletBadge accentColor={resolvedColors.accentColor} />}
 
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
               <button
-                onClick={() => setNotifOpen((v) => !v)}
+                onClick={() => { setNotifOpen((v) => !v); if (!notifOpen && unreadCount > 0) markAllRead(); }}
                 className="p-1.5 rounded-md transition-all duration-200 hover:scale-110 relative"
                 style={{
                   border: `1px solid ${resolvedColors.accentColor}30`,
@@ -165,26 +227,53 @@ export default function Navbar() {
                 title="Notifications"
               >
                 <Bell size={14} />
-                <span
-                  className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full"
-                  style={{ backgroundColor: resolvedColors.headerColor }}
-                />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full flex items-center justify-center text-[8px] font-black px-1"
+                    style={{ backgroundColor: resolvedColors.headerColor, color: '#fff' }}>
+                    {unreadCount > 9 ? '9+' : unreadCount}
+                  </span>
+                )}
               </button>
               {notifOpen && (
                 <div
-                  className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-[240px] z-50"
+                  className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-[280px] max-h-[400px] overflow-y-auto z-50"
                   style={{
                     backgroundColor: resolvedColors.boxBg + "f0",
                     borderColor: resolvedColors.borderColor + "40",
                     backdropFilter: "blur(12px)",
                   }}
                 >
-                  <div className="px-3 py-1.5 text-[10px] font-bold uppercase tracking-widest" style={{ color: resolvedColors.textMuted }}>
-                    Notifications
+                  <div className="flex items-center justify-between px-3 py-1.5 mb-1">
+                    <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: resolvedColors.textMuted }}>Notifications</span>
+                    {notifications.length > 0 && (
+                      <button onClick={markAllRead} className="text-[9px] font-bold hover:opacity-70 transition-opacity" style={{ color: resolvedColors.linkColor }}>
+                        Mark all read
+                      </button>
+                    )}
                   </div>
-                  <div className="px-3 py-4 text-[11px] text-center" style={{ color: resolvedColors.textMuted }}>
-                    No new notifications
-                  </div>
+                  {notifications.length === 0 ? (
+                    <div className="px-3 py-4 text-[11px] text-center" style={{ color: resolvedColors.textMuted }}>
+                      No notifications yet
+                    </div>
+                  ) : (
+                    <div className="space-y-0.5">
+                      {notifications.map((n) => (
+                        <div key={n.id} className="flex items-start gap-2 px-3 py-2 rounded-lg mx-1 transition-colors hover:bg-white/[0.03]"
+                          style={{ opacity: n.read_at ? 0.5 : 1 }}>
+                          <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0"
+                            style={{ backgroundColor: resolvedColors.accentColor + '12' }}>
+                            {n.type === 'follow' ? '👤' : n.type === 'like' ? '❤' : n.type === 'comment' ? '💬' : '🔔'}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <div className="text-[11px] leading-snug" style={{ color: resolvedColors.textColor }}>
+                              <span className="font-bold">{n.users?.name || 'Someone'}</span> {n.content}
+                            </div>
+                            <div className="text-[9px] opacity-40 mt-0.5">{new Date(n.created_at).toLocaleDateString()}</div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
             </div>
@@ -204,54 +293,56 @@ export default function Navbar() {
               {theme.mode === "dark" ? <Sun size={14} /> : <Moon size={14} />}
             </button>
 
-            {/* User dropdown (profile/settings links) — desktop */}
-            <div className="hidden md:block relative" ref={userRef}>
-              <button
-                onClick={() => setUserOpen((v) => !v)}
-                aria-label="Navigation menu"
-                aria-expanded={userOpen}
-                className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all hover:opacity-80"
-                style={{
-                  border: `1px solid ${resolvedColors.borderColor}30`,
-                  backgroundColor: resolvedColors.boxBg + "60",
-                }}
-                title="Menu"
-              >
-                {profile?.avatarUrl ? (
-                  <img src={profile.avatarUrl} alt="Profile" className="w-5 h-5 rounded-full object-cover" />
-                ) : (
-                  <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: resolvedColors.accentColor + "30", color: resolvedColors.accentColor }}>
-                    {profile?.displayName?.[0]?.toUpperCase() || "U"}
+            {/* User dropdown (profile/settings links) — desktop, signed-in only */}
+            {authLoaded && isSignedIn && (
+              <div className="hidden md:block relative" ref={userRef}>
+                <button
+                  onClick={() => setUserOpen((v) => !v)}
+                  aria-label="Navigation menu"
+                  aria-expanded={userOpen}
+                  className="flex items-center gap-1.5 px-2 py-1 rounded-lg transition-all hover:opacity-80"
+                  style={{
+                    border: `1px solid ${resolvedColors.borderColor}30`,
+                    backgroundColor: resolvedColors.boxBg + "60",
+                  }}
+                  title="Menu"
+                >
+                  {profile?.avatarUrl ? (
+                    <img src={profile.avatarUrl} alt="Profile" className="w-5 h-5 rounded-full object-cover" />
+                  ) : (
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[9px] font-black" style={{ backgroundColor: resolvedColors.accentColor + "30", color: resolvedColors.accentColor }}>
+                      {profile?.displayName?.[0]?.toUpperCase() || "U"}
+                    </div>
+                  )}
+                  <ChevronDown size={10} style={{ color: resolvedColors.textMuted }} />
+                </button>
+                {userOpen && (
+                  <div
+                    className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[160px] z-50"
+                    style={{
+                      backgroundColor: resolvedColors.boxBg + "f0",
+                      borderColor: resolvedColors.borderColor + "40",
+                      backdropFilter: "blur(12px)",
+                    }}
+                  >
+                    {userLinks.map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
+                          style={{ color: resolvedColors.textColor }}
+                        >
+                          <Icon size={13} />
+                          <span>{item.label}</span>
+                        </Link>
+                      );
+                    })}
                   </div>
                 )}
-                <ChevronDown size={10} style={{ color: resolvedColors.textMuted }} />
-              </button>
-              {userOpen && (
-                <div
-                  className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[160px] z-50"
-                  style={{
-                    backgroundColor: resolvedColors.boxBg + "f0",
-                    borderColor: resolvedColors.borderColor + "40",
-                    backdropFilter: "blur(12px)",
-                  }}
-                >
-                  {userLinks.map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <Link
-                        key={item.href}
-                        href={item.href}
-                        className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
-                        style={{ color: resolvedColors.textColor }}
-                      >
-                        <Icon size={13} />
-                        <span>{item.label}</span>
-                      </Link>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
             <NavAuth linkColor={resolvedColors.accentColor} />
@@ -314,32 +405,40 @@ export default function Navbar() {
               })}
             </div>
 
-            <div className="px-4 pb-2 space-y-1">
-              <div className="text-[10px] font-bold uppercase tracking-widest px-4 py-2 opacity-50" style={{ color: resolvedColors.textMuted }}>Account</div>
-              {userLinks.map((link) => {
-                const Icon = link.icon;
-                const active = isActive(link.href);
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-xl transition-all active:scale-95"
-                    style={{
-                      color: active ? resolvedColors.headerColor : resolvedColors.textColor,
-                      backgroundColor: active ? resolvedColors.accentColor + "15" : resolvedColors.boxBg + "80",
-                    }}
-                  >
-                    <Icon size={18} />
-                    {link.label}
-                  </Link>
-                );
-              })}
-            </div>
+            {authLoaded && isSignedIn && (
+              <div className="px-4 pb-2 space-y-1">
+                <div className="text-[10px] font-bold uppercase tracking-widest px-4 py-2 opacity-50" style={{ color: resolvedColors.textMuted }}>Account</div>
+                {userLinks.map((link) => {
+                  const Icon = link.icon;
+                  const active = isActive(link.href);
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className="flex items-center gap-3 px-4 py-3 text-sm font-bold rounded-xl transition-all active:scale-95"
+                      style={{
+                        color: active ? resolvedColors.headerColor : resolvedColors.textColor,
+                        backgroundColor: active ? resolvedColors.accentColor + "15" : resolvedColors.boxBg + "80",
+                      }}
+                    >
+                      <Icon size={18} />
+                      {link.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
 
             <div className="px-4 py-4 mt-2 border-t flex items-center justify-between" style={{ borderColor: resolvedColors.borderColor + "30" }}>
               <div className="flex items-center gap-2">
-                <Coins size={12} style={{ color: resolvedColors.accentColor }} />
-                <span className="text-xs font-bold" style={{ color: resolvedColors.accentColor }}>∞ FREE</span>
+                {authLoaded && isSignedIn ? (
+                  <WalletBadge accentColor={resolvedColors.accentColor} />
+                ) : (
+                  <>
+                    <Coins size={12} style={{ color: resolvedColors.accentColor }} />
+                    <span className="text-xs font-bold" style={{ color: resolvedColors.accentColor }}>Sign In</span>
+                  </>
+                )}
               </div>
               <button
                 onClick={() => setMode(theme.mode === "dark" ? "light" : "dark")}

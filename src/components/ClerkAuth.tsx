@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { Component, type ReactNode } from "react";
 import { useUser, UserButton, SignInButton } from "@clerk/nextjs";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -72,16 +73,18 @@ export function NavAuth({ linkColor = "#6366f1" }: NavAuthProps) {
   return (
     <ClerkBoundary
       fallback={
-        <button
-          className="px-3.5 py-1.5 rounded-md text-[11px] font-bold cursor-pointer transition-all hover:opacity-90"
-          style={{
-            backgroundColor: linkColor,
-            color: "#fff",
-            letterSpacing: "0.05em",
-          }}
-        >
-          Sign In
-        </button>
+        <Link href="/sign-in">
+          <button
+            className="px-3.5 py-1.5 rounded-md text-[11px] font-bold cursor-pointer transition-all hover:opacity-90"
+            style={{
+              backgroundColor: linkColor,
+              color: "#fff",
+              letterSpacing: "0.05em",
+            }}
+          >
+            Sign In
+          </button>
+        </Link>
       }
     >
       <AuthInner linkColor={linkColor} />

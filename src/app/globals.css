@@ -7,21 +7,21 @@
    ============================================================ */
 
 :root {
-  /* IDE Native core surfaces */
-  --bg-color: #0d0d0d;
-  --bg-elevated: #141416;
-  --bg-card: rgba(24, 24, 27, 0.95);
+  /* Volcanic Cyber theme - burnt orange and ember red */
+  --bg-color: #1a1210;
+  --bg-elevated: #251a15;
+  --bg-card: rgba(37, 26, 21, 0.95);
   --bg-glass: rgba(255, 255, 255, 0.03);
-  --text-color: #d4d4d8;
-  --text-muted: #71717a;
-  --link-color: #d2a8ff;
-  --header-color: #ff7b72;
-  --border-color: #3f3f46;
-  --accent-color: #79c0ff;
+  --text-color: #f0d8cc;
+  --text-muted: #a1a1aa;
+  --link-color: #f87171;
+  --header-color: #fca5a5;
+  --border-color: #4a2520;
+  --accent-color: #ef4444;
   --success: #56d364;
   --warning: #e3b341;
   --danger: #f85149;
-  --grid-line: rgba(63, 63, 70, 0.15);
+  --grid-line: rgba(74, 37, 32, 0.15);
   --shadow-glow: none;
   --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
   --radius-sm: 2px;

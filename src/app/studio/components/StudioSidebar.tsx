@@ -24,11 +24,11 @@ const AI_TOOLS: ToolItem[] = [
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "6" },
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "7" },
 ];
 
 const EXTERNAL_TOOLS: ToolItem[] = [
-  { id: "space", label: "Space", icon: Rocket, shortcut: "7" },
+  { id: "space", label: "Space", icon: Rocket, shortcut: "8" },
 ];
 
 function ToolGroup({

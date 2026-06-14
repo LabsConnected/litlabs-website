@@ -64,7 +64,21 @@ export default function FlowTool() {
 
   useEffect(() => {
     try { const raw = localStorage.getItem(STORAGE_KEY); if (raw) setHistory(JSON.parse(raw)); } catch { }
-    fetch("/api/wallet").then(r => r.json()).then(d => { if (typeof d.balance === "number") setCoinBalance(d.balance); }).catch(() => {});
+    // Read litcoins from localStorage first (consistent with Navbar)
+    try {
+      const coinsRaw = localStorage.getItem("litcoins");
+      if (coinsRaw) {
+        const val = Number(coinsRaw);
+        if (!isNaN(val)) setCoinBalance(val);
+      }
+    } catch { }
+    // Then sync from API
+    fetch("/api/wallet").then(r => r.json()).then(d => { 
+      if (typeof d.balance === "number") {
+        setCoinBalance(d.balance);
+        try { localStorage.setItem("litcoins", String(d.balance)); } catch {}
+      }
+    }).catch(() => {});
   }, []);
 
   const cellCosts = useMemo(() => cells.map(c => {

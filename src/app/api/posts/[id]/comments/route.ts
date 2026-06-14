@@ -61,6 +61,9 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
     const { data: user } = await sb.from("users").select("id").eq("clerk_id", userId).single();
     if (!user) return NextResponse.json({ error: "User not found" }, { status: 404 });
 
+    // Get post owner for notification
+    const { data: post } = await sb.from("posts").select("user_id").eq("id", postId).single();
+
     const { data: comment, error } = await sb
       .from("post_comments")
       .insert({ post_id: postId, user_id: user.id, content: body.content.trim() })
@@ -69,6 +72,19 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     if (error) throw error;
     await sb.rpc("increment_post_comments", { post_id: postId });
+
+    // Notify post owner (skip if commenting on own post)
+    if (post && post.user_id !== user.id) {
+      await sb.from("notifications").insert({
+        recipient_id: post.user_id,
+        actor_id: user.id,
+        type: "comment",
+        entity_type: "post",
+        entity_id: postId,
+        content: `commented: "${body.content.trim().slice(0, 40)}${body.content.trim().length > 40 ? '...' : ''}"`,
+      });
+    }
+
     const response = NextResponse.json({ success: true, comment });
     response.headers.set("X-RateLimit-Limit", "30");
     response.headers.set("X-RateLimit-Remaining", String(remaining));

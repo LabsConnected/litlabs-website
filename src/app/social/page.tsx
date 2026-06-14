@@ -1,7 +1,5 @@
-'use client';
-
-import SocialFeed from '@/components/SocialFeed';
+import { redirect } from 'next/navigation';
 
 export default function SocialPage() {
-  return <SocialFeed />;
+  redirect('/');
 }

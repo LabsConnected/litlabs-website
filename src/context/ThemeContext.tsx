@@ -364,8 +364,8 @@ const accentOverrides: Record<AccentColor, { linkColor: string; headerColor: str
 // Default theme
 const defaultTheme: Theme = {
   mode: "dark",
-  skin: "cyberpunk",
-  accent: "electric-blue",
+  skin: "volcanic",
+  accent: "sunset-orange",
   backgroundMode: "constellation",
 };
 

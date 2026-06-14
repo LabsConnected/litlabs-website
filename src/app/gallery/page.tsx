@@ -5,24 +5,41 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
-import { useAuth, RedirectToSignIn } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
 
 // ─── Demo gallery items ──────────────────────────────────────────────────────
+/* ─── Real AI-generated art via Pollinations ───────────────────────── */
+const P = (prompt: string, w: number, h: number, seed: number) =>
+  `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true&seed=${seed}&enhance=true`;
+
 const DEMO_ITEMS: GalleryItem[] = [
-  { id: "1", title: "Neon Cyber City", artist: "Pixel Forge", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=400&h=300&fit=crop", likes: 234, createdAt: "2026-06-01" },
-  { id: "2", title: "Ethereal Dreamscape", artist: "DreamWeaver", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-06-02" },
-  { id: "3", title: "Lost Temple Ruins", artist: "Explorer-X", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=400&h=300&fit=crop", likes: 312, createdAt: "2026-05-28" },
-  { id: "4", title: "Quantum Warrior", artist: "Pixel Forge", category: "character", imageUrl: "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=400&h=500&fit=crop", likes: 156, createdAt: "2026-06-03" },
-  { id: "5", title: "Crystal Cavern", artist: "GeoMancer", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=400&h=300&fit=crop", likes: 278, createdAt: "2026-05-30" },
-  { id: "6", title: "Void Entity", artist: "ShadowNet", category: "character", imageUrl: "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=400&h=500&fit=crop", likes: 421, createdAt: "2026-06-04" },
-  { id: "7", title: "Sunset Megacity", artist: "Pixel Forge", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=400&h=300&fit=crop", likes: 198, createdAt: "2026-05-25" },
-  { id: "8", title: "Fractal Mind", artist: "DreamWeaver", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=400&h=400&fit=crop", likes: 267, createdAt: "2026-05-29" },
-  { id: "9", title: "Underwater Utopia", artist: "AquaBot", category: "360-worlds", imageUrl: "https://images.unsplash.com/photo-1582967788606-a171f1080ca8?w=400&h=300&fit=crop", likes: 345, createdAt: "2026-06-01" },
-  { id: "10", title: "Cyber Samurai", artist: "Pixel Forge", category: "character", imageUrl: "https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=400&h=500&fit=crop", likes: 189, createdAt: "2026-05-27" },
-  { id: "11", title: "Starfield Station", artist: "StarWalker", category: "landscape", imageUrl: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=400&h=300&fit=crop", likes: 567, createdAt: "2026-06-04" },
-  { id: "12", title: "Neural Network", artist: "DataMancer", category: "abstract", imageUrl: "https://images.unsplash.com/photo-1635070041078-e363dbe00518?w=400&h=400&fit=crop", likes: 234, createdAt: "2026-05-26" },
+  { id: "1", title: "Neon Cyber City", artist: "Pixel Forge", category: "360-worlds",
+    imageUrl: P("futuristic neon cyberpunk city at night with flying cars holographic billboards rain soaked streets cinematic lighting 8k ultra detailed digital art", 1024, 768, 42), likes: 234, createdAt: "2026-06-01" },
+  { id: "2", title: "Ethereal Dreamscape", artist: "DreamWeaver", category: "abstract",
+    imageUrl: P("ethereal abstract dreamscape floating islands waterfalls of light aurora borealis colors swirling cosmic dust fantasy art highly detailed", 768, 1024, 77), likes: 189, createdAt: "2026-06-02" },
+  { id: "3", title: "Lost Temple Ruins", artist: "Explorer-X", category: "landscape",
+    imageUrl: P("massive ancient alien temple ruins overgrown with bioluminescent vines floating above clouds sunset god rays concept art epic scale", 1024, 768, 13), likes: 312, createdAt: "2026-05-28" },
+  { id: "4", title: "Quantum Warrior", artist: "Pixel Forge", category: "character",
+    imageUrl: P("female quantum warrior in glowing nanotech armor holding energy sword helmet off fierce expression sci fi character portrait detailed", 768, 1024, 88), likes: 156, createdAt: "2026-06-03" },
+  { id: "5", title: "Crystal Cavern", artist: "GeoMancer", category: "360-worlds",
+    imageUrl: P("vast underground crystal cavern with massive glowing amethyst geodes underground lake reflections fantasy environment art", 1024, 768, 55), likes: 278, createdAt: "2026-05-30" },
+  { id: "6", title: "Void Entity", artist: "ShadowNet", category: "character",
+    imageUrl: P("mysterious void entity humanoid shape made of swirling darkness and stars glowing purple eyes cosmic horror elegant digital painting", 768, 1024, 99), likes: 421, createdAt: "2026-06-04" },
+  { id: "7", title: "Sunset Megacity", artist: "Pixel Forge", category: "landscape",
+    imageUrl: P("futuristic megacity at sunset from above infinite skyscrapers connected by sky bridges flying vehicles orange pink sky sci fi matte painting", 1024, 768, 21), likes: 198, createdAt: "2026-05-25" },
+  { id: "8", title: "Fractal Mind", artist: "DreamWeaver", category: "abstract",
+    imageUrl: P("abstract human head profile made of glowing fractal patterns neural networks electric blue magenta synapses digital art high detail", 1024, 1024, 66), likes: 267, createdAt: "2026-05-29" },
+  { id: "9", title: "Underwater Utopia", artist: "AquaBot", category: "360-worlds",
+    imageUrl: P("underwater bioluminescent city with dome structures jellyfish swimming around coral towers fantasy sci fi environment art", 1024, 768, 33), likes: 345, createdAt: "2026-06-01" },
+  { id: "10", title: "Cyber Samurai", artist: "Pixel Forge", category: "character",
+    imageUrl: P("cyberpunk samurai with glowing katana red neon armor dark rainy Tokyo street detailed character art cinematic lighting", 768, 1024, 11), likes: 189, createdAt: "2026-05-27" },
+  { id: "11", title: "Starfield Station", artist: "StarWalker", category: "landscape",
+    imageUrl: P("massive ring shaped space station orbiting a gas planet with rings thousands of windows glowing milky way background sci fi art", 1024, 768, 72), likes: 567, createdAt: "2026-06-04" },
+  { id: "12", title: "Neural Network", artist: "DataMancer", category: "abstract",
+    imageUrl: P("abstract visualization of artificial neural network nodes and connections glowing fiber optic threads brain shape dark background digital art", 1024, 1024, 44), likes: 234, createdAt: "2026-05-26" },
 ];
 
 const CATEGORIES = [
@@ -39,6 +56,14 @@ const SORT_OPTIONS = [
   { id: "name", label: "🔤 Name" },
 ];
 
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function stringToColor(str: string): string {
+  let hash = 0;
+  for (let i = 0; i < str.length; i++) hash = str.charCodeAt(i) + ((hash << 5) - hash);
+  const h = Math.abs(hash % 360);
+  return `hsl(${h}, 65%, 45%)`;
+}
+
 // ─── Types ───────────────────────────────────────────────────────────────────
 type GalleryItem = {
   id: string;
@@ -54,7 +79,8 @@ type GalleryItem = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Gallery() {
-  const { isLoaded, isSignedIn } = useAuth();
+  const { isLoaded, isSignedIn } = useClerkAuth();
+  const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);
   const [selectedCategory, setSelectedCategory] = useState("all");
@@ -77,6 +103,7 @@ export default function Gallery() {
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
+  const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
 
   // Merge demo + real API + user items
   const items = [...apiItems, ...DEMO_ITEMS, ...userItems].map(item => ({
@@ -118,8 +145,21 @@ export default function Gallery() {
     );
   }
 
-  if (!isSignedIn) {
-    return <RedirectToSignIn redirectUrl="/gallery" />;
+  useEffect(() => {
+    if (isLoaded && !isSignedIn) {
+      router.push("/sign-in?redirect_url=/gallery");
+    }
+  }, [isLoaded, isSignedIn, router]);
+
+  if (!isLoaded || !isSignedIn) {
+    return (
+      <div style={{ backgroundColor: T?.bgColor || "#0f0f14", minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", color: T?.textColor || "#e2e8f0" }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "32px", marginBottom: "16px" }}>🔒</div>
+          <div>Sign in to view the gallery</div>
+        </div>
+      </div>
+    );
   }
 
   const filteredItems = items
@@ -258,22 +298,107 @@ export default function Gallery() {
         </div>
       </div>
 
-      {/* ── Hero Header ── */}
-      <div style={{ borderBottom: `2px solid ${T.borderColor}`, padding: "32px 24px", textAlign: "center", background: `linear-gradient(180deg, ${T.boxBg} 0%, ${T.bgColor} 100%)` }}>
-        <h1 style={{ color: T.headerColor, fontSize: "32px", fontWeight: "bold", letterSpacing: "3px", marginBottom: "8px" }}>🎨 AI ART GALLERY</h1>
-        <p style={{ color: T.textColor, fontSize: "13px", opacity: 0.7, maxWidth: "500px", margin: "0 auto 20px" }}>Explore worlds, characters, and dreams generated by AI agents</p>
-        <div style={{ display: "flex", gap: "16px", justifyContent: "center", flexWrap: "wrap" }}>
-          {[
-            { label: "Total Works", value: items.length },
-            { label: "Artists", value: new Set(items.map(i => i.artist)).size },
-            { label: "Categories", value: 4 },
-            { label: "Total Likes", value: items.reduce((s, i) => s + i.likes, 0) },
-          ].map(stat => (
-            <div key={stat.label} style={{ padding: "8px 16px", border: `1px solid ${T.borderColor}`, backgroundColor: "rgba(0,0,0,0.3)" }}>
-              <div style={{ color: T.accentColor, fontSize: "18px", fontWeight: "bold" }}>{stat.value}</div>
-              <div style={{ fontSize: "9px", color: T.textColor, opacity: 0.7 }}>{stat.label}</div>
+      {/* ── Dynamic Featured Hero ── */}
+      <div className="relative overflow-hidden" style={{ borderBottom: `2px solid ${T.borderColor}` }}>
+        {(() => {
+          const featured = [...items].sort((a, b) => b.likes - a.likes)[0] || DEMO_ITEMS[0];
+          return (
+            <div className="relative h-[380px] sm:h-[480px] group">
+              {brokenImages.has(featured.imageUrl) ? (
+                <div className="absolute inset-0 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${T.accentColor}20, ${T.linkColor}20)` }}>
+                  <span className="text-4xl opacity-30">🎨</span>
+                </div>
+              ) : (
+                <Image
+                  src={featured.imageUrl}
+                  alt={featured.title}
+                  fill
+                  className="object-cover transition-transform duration-[2s] ease-out group-hover:scale-105"
+                  priority
+                  unoptimized
+                  onError={() => setBrokenImages(prev => new Set(prev).add(featured.imageUrl))}
+                />
+              )}
+              {/* Vignette + gradient overlays */}
+              <div className="absolute inset-0" style={{ background: `linear-gradient(to top, ${T.bgColor} 0%, ${T.bgColor}e6 35%, transparent 70%)` }} />
+              <div className="absolute inset-0" style={{ background: `linear-gradient(135deg, ${T.linkColor}10 0%, transparent 50%)` }} />
+              <div className="absolute inset-0" style={{ boxShadow: `inset 0 -80px 80px -40px ${T.bgColor}` }} />
+
+              {/* Hero content */}
+              <div className="absolute bottom-0 left-0 right-0 p-6 sm:p-10">
+                <div className="max-w-6xl mx-auto">
+                  <div className="flex items-center gap-2 mb-3">
+                    <span className="text-[10px] font-bold uppercase tracking-[0.2em] px-2 py-0.5 rounded" style={{ backgroundColor: T.accentColor + '20', color: T.accentColor, border: `1px solid ${T.accentColor}40` }}>Featured</span>
+                    <span className="text-[10px] font-bold uppercase tracking-wider opacity-50" style={{ color: T.textColor }}>{featured.artist}</span>
+                    <span className="text-[10px] opacity-30">·</span>
+                    <span className="text-[10px] opacity-40" style={{ color: T.textColor }}>{featured.likes.toLocaleString()} sparks</span>
+                  </div>
+                  <h1 className="text-4xl sm:text-6xl font-black tracking-tight mb-2" style={{ color: T.headerColor, textShadow: `0 2px 30px ${T.bgColor}` }}>
+                    {featured.title}
+                  </h1>
+                  <p className="text-sm sm:text-base opacity-60 max-w-lg mb-6" style={{ color: T.textColor }}>
+                    Worlds, characters, and dreams generated by AI agents. Every pixel born from a prompt.
+                  </p>
+                  <div className="flex gap-3 flex-wrap items-center">
+                    {[
+                      { label: "Works", value: items.length },
+                      { label: "Artists", value: new Set(items.map(i => i.artist)).size },
+                      { label: "Sparks", value: items.reduce((s, i) => s + i.likes, 0) },
+                    ].map((stat, i) => (
+                      <div key={stat.label} className="px-4 py-2 rounded-lg backdrop-blur-sm" style={{ backgroundColor: T.boxBg + '80', border: `1px solid ${T.borderColor}30` }}>
+                        <div className="text-lg font-black" style={{ color: i === 0 ? T.accentColor : T.headerColor }}>{stat.value.toLocaleString()}</div>
+                        <div className="text-[10px] uppercase tracking-wider opacity-40" style={{ color: T.textColor }}>{stat.label}</div>
+                      </div>
+                    ))}
+                    <button
+                      onClick={() => setSelectedItem(featured)}
+                      className="px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all hover:scale-105"
+                      style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                    >
+                      View Featured
+                    </button>
+                  </div>
+                </div>
+              </div>
             </div>
-          ))}
+          );
+        })()}
+      </div>
+
+      {/* ── Trending Strip ── */}
+      <div style={{ borderBottom: `1px solid ${T.borderColor}30`, backgroundColor: T.boxBg + '30' }}>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4">
+          <div className="flex items-center gap-3 mb-3">
+            <span className="text-[10px] font-bold uppercase tracking-[0.2em] opacity-40" style={{ color: T.accentColor }}>Trending Now</span>
+            <div className="flex-1 h-px" style={{ backgroundColor: T.borderColor + '20' }} />
+          </div>
+          <div className="flex gap-3 overflow-x-auto pb-2 scrollbar-hide" style={{ scrollbarWidth: 'none' }}>
+            {[...items].sort((a, b) => b.likes - a.likes).slice(0, 6).map(item => (
+              <button
+                key={item.id}
+                onClick={() => setSelectedItem(item)}
+                className="shrink-0 w-[140px] sm:w-[180px] text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
+                style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20` }}
+              >
+                <div className="relative h-[90px] sm:h-[110px]">
+                  {brokenImages.has(item.imageUrl) ? (
+                    <div className="absolute inset-0 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${T.accentColor}15, ${T.linkColor}15)` }}>
+                      <span className="text-lg opacity-30">🎨</span>
+                    </div>
+                  ) : (
+                    <Image src={item.imageUrl} alt={item.title} fill className="object-cover" unoptimized sizes="180px" onError={() => setBrokenImages(prev => new Set(prev).add(item.imageUrl))} />
+                  )}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity" style={{ background: `linear-gradient(to top, ${T.bgColor}cc, transparent)` }} />
+                </div>
+                <div className="p-2">
+                  <div className="text-[10px] font-bold truncate" style={{ color: T.textColor }}>{item.title}</div>
+                  <div className="text-[9px] opacity-40 flex items-center gap-1" style={{ color: T.textColor }}>
+                    <span>♡</span> {item.likes.toLocaleString()}
+                  </div>
+                </div>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -285,43 +410,57 @@ export default function Gallery() {
       )}
 
       {/* ── Controls Bar ── */}
-      <div style={{ padding: "16px 24px", borderBottom: `1px solid ${T.borderColor}`, display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", backgroundColor: T.boxBg }}>
-        <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+      <div className="sticky top-0 z-30 backdrop-blur-md" style={{ padding: "14px 24px", borderBottom: `1px solid ${T.borderColor}40`, display: "flex", gap: "12px", flexWrap: "wrap", alignItems: "center", justifyContent: "space-between", backgroundColor: T.boxBg + 'dd' }}>
+        {/* Category pills */}
+        <div className="flex gap-2 flex-wrap">
           {CATEGORIES.map(cat => (
             <button
               key={cat.id}
               onClick={() => setSelectedCategory(cat.id)}
+              className="px-3 py-1.5 rounded-full text-[11px] font-medium transition-all duration-200"
               style={{
-                padding: "6px 12px", fontSize: "11px", border: `1px solid ${selectedCategory === cat.id ? T.accentColor : T.borderColor}`,
-                backgroundColor: selectedCategory === cat.id ? "rgba(255,255,0,0.15)" : "transparent",
-                color: selectedCategory === cat.id ? T.accentColor : T.textColor,
-                cursor: "pointer", fontFamily: "monospace",
+                border: `1px solid ${selectedCategory === cat.id ? T.accentColor + '60' : T.borderColor + '30'}`,
+                backgroundColor: selectedCategory === cat.id ? T.accentColor + '12' : T.bgColor + '60',
+                color: selectedCategory === cat.id ? T.accentColor : T.textColor + 'cc',
+                cursor: "pointer",
               }}
             >
-              {cat.label} ({cat.count})
+              {cat.label.replace(/[🌌🌍👤🏔️🎨]/g, '').trim()} <span style={{ opacity: 0.5 }}>{cat.count}</span>
             </button>
           ))}
         </div>
-        <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-          <input
-            type="text"
-            value={searchQuery}
-            onChange={e => setSearchQuery(e.target.value)}
-            placeholder="🔍 Search art or artist..."
-            style={{ padding: "8px 12px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: "#e0e0e0", fontSize: "12px", fontFamily: "monospace", width: "170px", outline: "none" }}
-          />
+        {/* Right controls */}
+        <div className="flex gap-2 items-center flex-wrap">
+          <div className="relative">
+            <input
+              type="text"
+              value={searchQuery}
+              onChange={e => setSearchQuery(e.target.value)}
+              placeholder="Search..."
+              className="pl-8 pr-3 py-1.5 rounded-lg text-xs outline-none transition-all focus:ring-1"
+              style={{
+                backgroundColor: T.bgColor + '80',
+                border: `1px solid ${T.borderColor}30`,
+                color: T.textColor,
+                width: '140px',
+              }}
+            />
+            <span className="absolute left-2.5 top-1/2 -translate-y-1/2 text-xs opacity-30">🔍</span>
+          </div>
           <select
             value={sortBy}
             onChange={e => setSortBy(e.target.value)}
-            style={{ padding: "8px", backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor, fontSize: "11px", fontFamily: "monospace", cursor: "pointer", outline: "none" }}
+            className="px-2 py-1.5 rounded-lg text-[11px] outline-none cursor-pointer"
+            style={{ backgroundColor: T.bgColor + '80', border: `1px solid ${T.borderColor}30`, color: T.textColor + 'cc' }}
           >
-            {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label}</option>)}
+            {SORT_OPTIONS.map(o => <option key={o.id} value={o.id}>{o.label.replace(/[🕐🔥🔤]/g, '').trim()}</option>)}
           </select>
-          <button onClick={() => setViewMode(v => v === "grid" ? "masonry" : "grid")} style={{ padding: "8px", backgroundColor: "transparent", border: `1px solid ${T.borderColor}`, color: T.textColor, cursor: "pointer", fontSize: "11px" }}>
-            {viewMode === "grid" ? "☰ Masonry" : "⊞ Grid"}
-          </button>
-          <button onClick={() => setShowUpload(!showUpload)} style={{ padding: "8px 14px", backgroundColor: T.linkColor, color: "#0a0a0f", border: "none", cursor: "pointer", fontSize: "11px", fontWeight: "bold" }}>
-            {showUpload ? "✕ Close" : "+ Share Creation"}
+          <button
+            onClick={() => setShowUpload(!showUpload)}
+            className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90"
+            style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+          >
+            {showUpload ? '✕' : '+ Upload'}
           </button>
         </div>
       </div>
@@ -400,69 +539,137 @@ export default function Gallery() {
         </div>
       )}
 
-      {/* ── Gallery Grid ── */}
-      <div className="px-4 py-6 md:px-6" style={{ display: "grid", gap: "16px", gridTemplateColumns: viewMode === "grid" ? "repeat(auto-fill, minmax(260px, 1fr))" : "repeat(auto-fill, minmax(220px, 1fr))" }}>
-        {filteredItems.map(item => (
-          <div
-            key={item.id}
-            onClick={() => {
-              if (item.mediaType === "video" && item.videoUrl) {
-                window.open(item.videoUrl, "_blank", "noopener,noreferrer");
-              } else {
-                setSelectedItem(item);
-              }
-            }}
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                if (item.mediaType === "video" && item.videoUrl) {
-                  window.open(item.videoUrl, "_blank", "noopener,noreferrer");
-                } else {
-                  setSelectedItem(item);
-                }
-              }
-            }}
-            role="button"
-            tabIndex={0}
-            className="lit-box group"
-            style={{
-              borderColor: T.borderColor, backgroundColor: T.boxBg, cursor: "pointer",
-              padding: "0px", margin: "0", overflow: "hidden"
-            }}
-          >
-            <div style={{ position: "relative", width: "100%", height: viewMode === "masonry" ? `${180 + (item.id.charCodeAt(0) % 3) * 60}px` : "200px", overflow: "hidden" }}>
-              <Image src={item.imageUrl} alt={item.title} fill style={{ objectFit: "cover" }} sizes="(max-width: 768px) 100vw, 300px" unoptimized />
-              <div style={{ position: "absolute", top: "8px", right: "8px", padding: "4px 8px", backgroundColor: "rgba(0,0,0,0.8)", border: `1px solid ${T.borderColor}`, color: T.accentColor, fontSize: "9px", textTransform: "uppercase" }}>
-                {item.category}
+      {/* ── Enhanced Masonry Gallery ── */}
+      <div className="px-4 py-6 sm:px-6 max-w-7xl mx-auto">
+        <div className="gallery-masonry">
+          {filteredItems.map((item, idx) => {
+            const aspect = [1, 1.25, 0.85, 1.1, 1.3, 0.9, 1.15, 1, 1.2, 0.8, 1.05, 1.35][idx % 12];
+            const isLiked = likedItems.has(item.id);
+            return (
+              <div
+                key={item.id}
+                className="gallery-item group relative rounded-xl overflow-hidden cursor-pointer"
+                style={{
+                  backgroundColor: T.boxBg,
+                  border: `1px solid ${T.borderColor}20`,
+                  marginBottom: '16px',
+                  breakInside: 'avoid',
+                  transition: 'border-color 0.3s, box-shadow 0.3s',
+                }}
+                onMouseEnter={e => { (e.currentTarget as HTMLElement).style.borderColor = T.accentColor + '40'; (e.currentTarget as HTMLElement).style.boxShadow = `0 0 20px ${T.accentColor}10`; }}
+                onMouseLeave={e => { (e.currentTarget as HTMLElement).style.borderColor = T.borderColor + '20'; (e.currentTarget as HTMLElement).style.boxShadow = 'none'; }}
+                onClick={() => {
+                  if (item.mediaType === "video" && item.videoUrl) {
+                    window.open(item.videoUrl, "_blank", "noopener,noreferrer");
+                  } else {
+                    setSelectedItem(item);
+                  }
+                }}
+                onKeyDown={(e) => { if (e.key === 'Enter') setSelectedItem(item); }}
+                role="button"
+                tabIndex={0}
+              >
+                {/* Image */}
+                <div className="relative overflow-hidden" style={{ aspectRatio: `${aspect}` }}>
+                  {brokenImages.has(item.imageUrl) ? (
+                    <div className="absolute inset-0 flex items-center justify-center" style={{ background: `linear-gradient(135deg, ${T.accentColor}15, ${T.linkColor}15)` }}>
+                      <span className="text-3xl opacity-30">🎨</span>
+                    </div>
+                  ) : (
+                    <Image
+                      src={item.imageUrl}
+                      alt={item.title}
+                      fill
+                      className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      unoptimized
+                      onError={() => setBrokenImages(prev => new Set(prev).add(item.imageUrl))}
+                    />
+                  )}
+                  {/* Dark gradient overlay for text readability */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-300"
+                    style={{ background: `linear-gradient(to top, ${T.bgColor}f0 0%, ${T.bgColor}80 30%, transparent 60%)` }}
+                  />
+                  {/* Neon glow on hover */}
+                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
+                    style={{ boxShadow: `inset 0 0 40px ${T.accentColor}15, 0 0 30px ${T.accentColor}08` }}
+                  />
+
+                  {/* Category badge */}
+                  <div className="absolute top-3 right-3 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
+                    style={{ backgroundColor: T.bgColor + 'cc', color: T.accentColor, border: `1px solid ${T.accentColor}40` }}>
+                    {item.category}
+                  </div>
+
+                  {/* Delete button for user items */}
+                  {item.id.startsWith("user_") && (
+                    <button
+                      onClick={e => { e.stopPropagation(); handleDeleteUserItem(item.id); }}
+                      className="absolute top-3 left-3 w-7 h-7 rounded-md flex items-center justify-center text-xs backdrop-blur-sm transition-colors hover:bg-red-500/80"
+                      style={{ backgroundColor: T.bgColor + 'cc', color: '#fff' }}
+                    >
+                      🗑
+                    </button>
+                  )}
+
+                  {/* Hover action bar */}
+                  <div className="absolute bottom-0 left-0 right-0 p-4 translate-y-2 group-hover:translate-y-0 opacity-0 group-hover:opacity-100 transition-all duration-300 flex items-end justify-between">
+                    <div>
+                      <div className="text-sm font-bold mb-0.5" style={{ color: '#fff', textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}>{item.title}</div>
+                      <div className="text-[10px] opacity-80" style={{ color: '#fff', textShadow: '0 1px 6px rgba(0,0,0,0.9)' }}>by {item.artist}</div>
+                    </div>
+                    <button
+                      onClick={e => {
+                        e.stopPropagation();
+                        navigator.clipboard.writeText(window.location.origin + '/gallery#' + item.id);
+                        showToast('Link copied!', 'success');
+                      }}
+                      className="w-8 h-8 rounded-lg flex items-center justify-center text-xs backdrop-blur-sm transition-all hover:scale-110"
+                      style={{ backgroundColor: T.bgColor + 'cc', color: T.textColor }}
+                      title="Copy link"
+                    >
+                      🔗
+                    </button>
+                  </div>
+                </div>
+
+                {/* Card footer */}
+                <div className="px-3 py-2.5 flex items-center justify-between">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <div className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black shrink-0"
+                      style={{ backgroundColor: stringToColor(item.artist), color: '#fff' }}>
+                      {item.artist.charAt(0)}
+                    </div>
+                    <span className="text-[11px] truncate opacity-60" style={{ color: T.textColor }}>{item.artist}</span>
+                  </div>
+                  <button
+                    onClick={e => { e.stopPropagation(); toggleLike(item.id); }}
+                    className="flex items-center gap-1 text-[11px] transition-all duration-200 hover:scale-110"
+                    style={{ color: isLiked ? '#ff3366' : T.textColor + '80', background: 'none', border: 'none', cursor: 'pointer' }}
+                  >
+                    <span className={`inline-block transition-transform duration-300 ${isLiked ? 'scale-125' : ''}`} style={{ filter: isLiked ? 'drop-shadow(0 0 4px #ff3366)' : 'none' }}>
+                      {isLiked ? '❤' : '♡'}
+                    </span>
+                    <span className="font-medium">{item.likes.toLocaleString()}</span>
+                  </button>
+                </div>
               </div>
-              {item.id.startsWith("user_") && (
-                <button
-                  onClick={e => { e.stopPropagation(); handleDeleteUserItem(item.id); }}
-                  style={{ position: "absolute", top: "8px", left: "8px", padding: "4px 8px", backgroundColor: "rgba(255,0,0,0.7)", color: "white", border: "none", cursor: "pointer", fontSize: "10px", fontWeight: "bold" }}
-                >
-                  🗑
-                </button>
-              )}
-            </div>
-            <div style={{ padding: "12px" }}>
-              <div style={{ color: T.headerColor, fontSize: "13px", fontWeight: "bold", marginBottom: "4px" }}>{item.title}</div>
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                <span style={{ fontSize: "10px", color: T.textColor, opacity: 0.7 }}>by {item.artist}</span>
-                <button
-                  onClick={e => { e.stopPropagation(); toggleLike(item.id); }}
-                  style={{ backgroundColor: "transparent", border: "none", color: likedItems.has(item.id) ? "#ff0080" : T.textColor, cursor: "pointer", fontSize: "12px" }}
-                >
-                  {likedItems.has(item.id) ? "❤️" : "🤍"} {item.likes}
-                </button>
-              </div>
-            </div>
-          </div>
-        ))}
+            );
+          })}
+        </div>
       </div>
 
       {filteredItems.length === 0 && (
-        <div style={{ textAlign: "center", padding: "60px 20px", color: T.textColor, opacity: 0.5 }}>
-          <div style={{ fontSize: "48px", marginBottom: "12px" }}>🔍</div>
-          <div>No works found matching your search.</div>
+        <div className="text-center py-20" style={{ color: T.textColor }}>
+          <div className="text-5xl mb-4 opacity-30">🌑</div>
+          <div className="text-sm opacity-50">No creations found in this sector.</div>
+          <button
+            onClick={() => { setSelectedCategory('all'); setSearchQuery(''); }}
+            className="mt-4 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all hover:opacity-80"
+            style={{ backgroundColor: T.accentColor + '15', color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+          >
+            View All Works
+          </button>
         </div>
       )}
 
@@ -490,7 +697,15 @@ export default function Gallery() {
       <style>{`
         ::-webkit-scrollbar { width: 6px; }
         ::-webkit-scrollbar-track { background: ${T.bgColor}; }
-        ::-webkit-scrollbar-thumb { background: ${T.borderColor}; }
+        ::-webkit-scrollbar-thumb { background: ${T.borderColor}; border-radius: 3px; }
+        .gallery-masonry {
+          columns: 1;
+          column-gap: 16px;
+        }
+        @media (min-width: 640px) { .gallery-masonry { columns: 2; } }
+        @media (min-width: 1024px) { .gallery-masonry { columns: 3; } }
+        @media (min-width: 1400px) { .gallery-masonry { columns: 4; } }
+        .gallery-item { break-inside: avoid; page-break-inside: avoid; }
       `}</style>
     </PageShell>
   );

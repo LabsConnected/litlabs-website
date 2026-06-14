@@ -2,67 +2,80 @@
 
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
-import { Zap, Radio, Globe } from "lucide-react";
 
-const legalLinks = [
+const PRODUCT_LINKS = [
+  { href: "/studio", label: "Studio" },
+  { href: "/marketplace", label: "Marketplace" },
+  { href: "/gallery", label: "Gallery" },
+  { href: "/agents", label: "Agents" },
+];
+
+const RESOURCE_LINKS = [
+  { href: "/builder", label: "Builder" },
+  { href: "/flow", label: "Flow" },
+  { href: "/social", label: "Social" },
+  { href: "/settings", label: "Settings" },
+];
+
+const COMPANY_LINKS = [
   { href: "/privacy", label: "Privacy" },
   { href: "/terms", label: "Terms" },
   { href: "/cookies", label: "Cookies" },
 ];
 
+const CONNECT_LINKS = [
+  { href: "https://github.com", label: "GitHub", external: true },
+  { href: "https://twitter.com", label: "Twitter / X", external: true },
+];
+
 export default function Footer() {
-  const { resolvedColors } = useTheme();
+  const { resolvedColors: C } = useTheme();
 
   return (
-    <footer
-      className="border-t mt-auto"
-      style={{
-        borderColor: resolvedColors.borderColor + "30",
-        backgroundColor: resolvedColors.bgColor + "90",
-        backdropFilter: "blur(12px)",
-        color: resolvedColors.textColor,
-      }}
-    >
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-4">
-          {/* Brand + Status */}
-          <div className="flex items-center gap-4">
-            <div className="flex items-center gap-2">
-              <Zap size={14} style={{ color: resolvedColors.accentColor }} />
-              <span className="text-[11px] font-bold" style={{ color: resolvedColors.headerColor }}>
-                LiTree Labs
-              </span>
-              <span className="text-[10px] opacity-50" style={{ color: resolvedColors.textMuted }}>
-                © 2026
-              </span>
-            </div>
-            <div className="flex items-center gap-2 text-[10px]" style={{ color: resolvedColors.textMuted }}>
-              <Radio size={10} className="status-dot online" />
-              <span>All Systems Operational</span>
+    <footer className="w-full" style={{ borderTop: `1px solid ${C.borderColor}18`, backgroundColor: C.bgColor }}>
+      <div className="max-w-5xl mx-auto px-4 sm:px-6 py-10">
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-8 mb-8">
+          <div>
+            <div className="text-xs font-bold mb-3 opacity-80" style={{ color: C.textColor }}>Product</div>
+            <div className="space-y-2">
+              {PRODUCT_LINKS.map(item => (
+                <Link key={item.label} href={item.href} className="block text-xs opacity-50 hover:opacity-100 transition-opacity" style={{ color: C.textColor }}>{item.label}</Link>
+              ))}
             </div>
           </div>
-
-          {/* Legal */}
-          <div className="flex items-center gap-4">
-            {legalLinks.map((link) => (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="text-[11px] font-medium transition-opacity hover:opacity-100"
-                style={{ color: resolvedColors.textMuted }}
-              >
-                {link.label}
-              </Link>
-            ))}
-            <a
-              href="https://github.com/Litree-Ceo/litlabs-website"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="hover:opacity-100 opacity-60 transition-opacity flex items-center gap-1 text-[11px]"
-              style={{ color: resolvedColors.linkColor }}
-            >
-              <Globe size={14} /> GitHub
-            </a>
+          <div>
+            <div className="text-xs font-bold mb-3 opacity-80" style={{ color: C.textColor }}>Resources</div>
+            <div className="space-y-2">
+              {RESOURCE_LINKS.map(item => (
+                <Link key={item.label} href={item.href} className="block text-xs opacity-50 hover:opacity-100 transition-opacity" style={{ color: C.textColor }}>{item.label}</Link>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-bold mb-3 opacity-80" style={{ color: C.textColor }}>Company</div>
+            <div className="space-y-2">
+              {COMPANY_LINKS.map(item => (
+                <Link key={item.label} href={item.href} className="block text-xs opacity-50 hover:opacity-100 transition-opacity" style={{ color: C.textColor }}>{item.label}</Link>
+              ))}
+            </div>
+          </div>
+          <div>
+            <div className="text-xs font-bold mb-3 opacity-80" style={{ color: C.textColor }}>Connect</div>
+            <div className="space-y-2">
+              {CONNECT_LINKS.map(item => (
+                <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer" className="block text-xs opacity-50 hover:opacity-100 transition-opacity" style={{ color: C.textColor }}>{item.label}</a>
+              ))}
+            </div>
+          </div>
+        </div>
+        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-6" style={{ borderTop: `1px solid ${C.borderColor}15` }}>
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-black" style={{ color: C.headerColor }}>LiTreeLabStudios</span>
+            <span className="text-[10px] opacity-40">© 2026</span>
+          </div>
+          <div className="flex items-center gap-1.5 text-[10px] opacity-40">
+            <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#34d399" }} />
+            All Systems Operational
           </div>
         </div>
       </div>

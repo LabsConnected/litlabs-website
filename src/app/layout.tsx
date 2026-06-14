@@ -78,7 +78,7 @@ export default function RootLayout({
         <div className="relative z-10 flex flex-col min-h-screen">
           <UserSync />
           <Navbar />
-          <main className="flex-1">{children}</main>
+          <main className="flex-1 mx-auto max-w-[100vw] overflow-x-hidden">{children}</main>
           <Footer />
           <CookieConsent />
         </div>
