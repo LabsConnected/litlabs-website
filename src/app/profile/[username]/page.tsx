@@ -11,7 +11,7 @@ import { getAgentProfile, AGENT_PROFILES } from "@/lib/agent-profiles";
 import {
   ArrowLeft, MessageCircle, UserPlus, Share2, MapPin, Link as LinkIcon,
   Calendar, Sparkles, Zap, Bot, Image as ImageIcon, Heart, MessageSquare,
-  MoreHorizontal, Verified, BadgeCheck, Cpu, Globe, Award
+  MoreHorizontal, Verified, BadgeCheck, Cpu, Globe, Award, Send
 } from "lucide-react";
 
 // Helper to format timestamps
@@ -87,6 +87,12 @@ export default function UserProfilePage({ params }: { params: { username: string
   const [isFollowing, setIsFollowing] = useState(false);
   const [activeTab, setActiveTab] = useState<"posts" | "generations" | "agents">("posts");
 
+  // Agent chat state
+  const [chatOpen, setChatOpen] = useState(false);
+  const [chatMessages, setChatMessages] = useState<{role: "user" | "assistant"; content: string}[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatLoading, setChatLoading] = useState(false);
+
   // Get current user's username from localStorage or default
   const [currentUsername, setCurrentUsername] = useState<string>("");
   
@@ -143,6 +149,37 @@ export default function UserProfilePage({ params }: { params: { username: string
 
   const handleFollow = () => {
     setIsFollowing(!isFollowing);
+  };
+
+  const sendChatMessage = async () => {
+    if (!chatInput.trim() || chatLoading || !userProfile?.isAgent) return;
+    const msg = chatInput.trim();
+    const history = [...chatMessages, { role: "user" as const, content: msg }];
+    setChatMessages(history);
+    setChatInput("");
+    setChatLoading(true);
+
+    try {
+      const res = await fetch("/api/gemini/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentSlug: params?.username?.toLowerCase(),
+          message: msg,
+          history: chatMessages.slice(-6),
+        }),
+      });
+      const data = await res.json();
+      if (data?.response) {
+        setChatMessages([...history, { role: "assistant", content: data.response }]);
+      } else {
+        setChatMessages([...history, { role: "assistant", content: "Sorry, I'm having trouble connecting right now. Try again in a moment!" }]);
+      }
+    } catch {
+      setChatMessages([...history, { role: "assistant", content: "Oops — something went wrong. Give me another shot?" }]);
+    } finally {
+      setChatLoading(false);
+    }
   };
 
   const isOwnProfile = currentUsername === (params?.username || "").toLowerCase();
@@ -308,10 +345,15 @@ export default function UserProfilePage({ params }: { params: { username: string
                     )}
                   </button>
                   <button
+                    onClick={() => userProfile?.isAgent && setChatOpen(v => !v)}
                     className="p-2 rounded-lg transition-all hover:scale-105"
-                    style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30` }}
+                    style={{
+                      backgroundColor: chatOpen && userProfile?.isAgent ? T.accentColor + '20' : T.bgColor,
+                      border: `1px solid ${chatOpen && userProfile?.isAgent ? T.accentColor : T.borderColor}30`,
+                    }}
+                    title={userProfile?.isAgent ? "Chat with this agent" : "Message"}
                   >
-                    <MessageCircle size={16} style={{ color: T.textMuted }} />
+                    <MessageCircle size={16} style={{ color: userProfile?.isAgent && chatOpen ? T.accentColor : T.textMuted }} />
                   </button>
                   <button
                     className="p-2 rounded-lg transition-all hover:scale-105"
@@ -479,6 +521,92 @@ export default function UserProfilePage({ params }: { params: { username: string
             </div>
           )}
         </div>
+
+        {/* Agent Chat Panel */}
+        {chatOpen && userProfile?.isAgent && (
+          <div className="mt-6 rounded-2xl overflow-hidden" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}30` }}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${T.borderColor}20` }}>
+              <div className="flex items-center gap-2">
+                <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#34d399' }} />
+                <span className="text-sm font-bold" style={{ color: T.textColor }}>Chat with {userProfile.displayName}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={{ backgroundColor: T.accentColor + '15', color: T.accentColor }}>AI Agent</span>
+              </div>
+              <button onClick={() => setChatOpen(false)} className="text-xs opacity-50 hover:opacity-80 transition-opacity" style={{ color: T.textMuted }}>Close</button>
+            </div>
+
+            <div className="p-4 space-y-3 min-h-[200px] max-h-[400px] overflow-y-auto">
+              {chatMessages.length === 0 && (
+                <div className="text-center py-8">
+                  <div className="text-3xl mb-2">👋</div>
+                  <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
+                    Ask {userProfile.displayName} anything about {userProfile.skills?.slice(0, 3).join(', ') || 'their expertise'}!
+                  </p>
+                </div>
+              )}
+              {chatMessages.map((m, i) => (
+                <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                  {m.role === 'assistant' && (
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: T.accentColor + '20', color: T.accentColor }}>
+                      {userProfile.avatar?.startsWith('http') ? (
+                        <img src={userProfile.avatar} alt="" className="w-full h-full rounded-full object-cover" />
+                      ) : (
+                        <Bot size={12} />
+                      )}
+                    </div>
+                  )}
+                  <div
+                    className="max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed"
+                    style={{
+                      backgroundColor: m.role === 'user' ? T.accentColor : T.bgColor,
+                      color: m.role === 'user' ? '#fff' : T.textColor,
+                      border: m.role === 'user' ? 'none' : `1px solid ${T.borderColor}20`,
+                    }}
+                  >
+                    {m.content}
+                  </div>
+                </div>
+              ))}
+              {chatLoading && (
+                <div className="flex gap-2">
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: T.accentColor + '20', color: T.accentColor }}>
+                    <Bot size={12} />
+                  </div>
+                  <div className="px-3 py-2 rounded-xl text-sm" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}20`, color: T.textMuted }}>
+                    <span className="inline-flex gap-1">
+                      <span className="animate-bounce">•</span>
+                      <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>•</span>
+                      <span className="animate-bounce" style={{ animationDelay: '0.4s' }}>•</span>
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-2 p-3" style={{ borderTop: `1px solid ${T.borderColor}20` }}>
+              <input
+                type="text"
+                value={chatInput}
+                onChange={(e) => setChatInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === 'Enter') sendChatMessage(); }}
+                placeholder={`Ask ${userProfile.displayName}...`}
+                className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
+                style={{
+                  backgroundColor: T.bgColor,
+                  color: T.textColor,
+                  border: `1px solid ${T.borderColor}30`,
+                }}
+              />
+              <button
+                onClick={sendChatMessage}
+                disabled={chatLoading || !chatInput.trim()}
+                className="p-2 rounded-lg transition-all hover:scale-105 disabled:opacity-40"
+                style={{ backgroundColor: T.accentColor }}
+              >
+                <Send size={14} style={{ color: '#fff' }} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </PageShell>
   );
