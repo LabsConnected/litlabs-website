@@ -4,7 +4,7 @@ export const dynamic = "force-dynamic";
 import { useState, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useRouter } from "next/navigation";
+import { useRouter, useParams } from "next/navigation";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
 import { getAgentProfile, AGENT_PROFILES } from "@/lib/agent-profiles";
@@ -79,10 +79,11 @@ function generateUserProfile(username: string) {
   };
 }
 
-export default function UserProfilePage({ params }: { params: { username: string } }) {
+export default function UserProfilePage() {
   const { isLoaded, isSignedIn, userId } = useClerkAuth();
   const { resolvedColors: T } = useTheme();
   const router = useRouter();
+  const params = useParams();
   const [userProfile, setUserProfile] = useState<any>(null);
   const [isFollowing, setIsFollowing] = useState(false);
   const [activeTab, setActiveTab] = useState<"posts" | "generations" | "agents">("posts");
@@ -95,9 +96,8 @@ export default function UserProfilePage({ params }: { params: { username: string
 
   // Get current user's username from localStorage or default
   const [currentUsername, setCurrentUsername] = useState<string>("");
-  
-  // Guard for missing username param
-  const usernameParam = params?.username;
+
+  const usernameParam = (params?.username as string) || "";
   
   useEffect(() => {
     const stored = typeof window !== 'undefined' ? localStorage.getItem('litlabs-profile') : null;
@@ -108,7 +108,7 @@ export default function UserProfilePage({ params }: { params: { username: string
   }, []);
 
   useEffect(() => {
-    const username = params?.username;
+    const username = usernameParam;
     if (!username) return;
     
     // First check if this is an agent profile
@@ -145,7 +145,7 @@ export default function UserProfilePage({ params }: { params: { username: string
       setUserProfile(profile);
       setIsFollowing(profile.isFollowing);
     }
-  }, [params?.username]);
+  }, [usernameParam]);
 
   const handleFollow = () => {
     setIsFollowing(!isFollowing);
@@ -164,7 +164,7 @@ export default function UserProfilePage({ params }: { params: { username: string
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: params?.username?.toLowerCase(),
+          agentSlug: usernameParam.toLowerCase(),
           message: msg,
           history: chatMessages.slice(-6),
         }),
@@ -182,7 +182,7 @@ export default function UserProfilePage({ params }: { params: { username: string
     }
   };
 
-  const isOwnProfile = currentUsername === (params?.username || "").toLowerCase();
+  const isOwnProfile = currentUsername === usernameParam.toLowerCase();
 
   // Show error if username param is missing
   if (!usernameParam) {
