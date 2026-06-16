@@ -10,7 +10,7 @@ import PageShell from "@/components/PageShell";
 
 export default function ProfilePage() {
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { resolvedColors } = useTheme();
+  const { resolvedColors: T } = useTheme();
   const { profile, updateProfile } = useProfile();
   
   const [editingSection, setEditingSection] = useState<string | null>(null);
@@ -78,8 +78,6 @@ export default function ProfilePage() {
   };
 
   const moods = ["😀 Happy", "😎 Cool", "💡 Creative", "🔥 Hot", "🎯 Focused", "🌟 Stellar", "💪 Strong", "🎵 Chill", "🚀 Launching", "😴 Tired", "🤔 Thinking", "💭 Dreaming"];
-
-  const T = resolvedColors;
 
   if (!isLoaded) {
     return (
