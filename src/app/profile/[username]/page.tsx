@@ -411,7 +411,7 @@ export default function UserProfilePage() {
 
             {/* Interests */}
             <div className="flex flex-wrap gap-2">
-              {userProfile.interests.map((interest: string) => (
+              {(userProfile.interests || []).map((interest: string) => (
                 <span
                   key={interest}
                   className="px-2.5 py-1 rounded-full text-[10px] font-medium"
@@ -451,7 +451,7 @@ export default function UserProfilePage() {
         <div className="space-y-4">
           {activeTab === "posts" && (
             <div className="space-y-4">
-              {userProfile.recentActivity.map((activity: any, i: number) => (
+              {(userProfile.recentActivity || []).map((activity: any, i: number) => (
                 <div
                   key={i}
                   className="p-4 rounded-xl transition-all hover:scale-[1.01]"

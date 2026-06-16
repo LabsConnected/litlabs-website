@@ -325,7 +325,7 @@ export default function ProfilePage() {
           <div className="lit-box p-4" style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}>
             <div className="lit-header -mx-4 -mt-4 mb-3" style={{ color: "white" }}>🏆 Studio Badges</div>
             <div className="flex flex-wrap gap-1.5">
-              {profile.badges.map((badge, i) => (
+              {(profile.badges || []).map((badge, i) => (
                 <span key={i} className="px-2 py-0.5 border text-[9px] font-bold uppercase tracking-wider" style={{ borderColor: T.accentColor, color: T.accentColor, backgroundColor: `${T.accentColor}11` }}>
                   {badge}
                 </span>
@@ -440,7 +440,7 @@ export default function ProfilePage() {
                   </button>
                 </div>
                 <div className="flex flex-wrap gap-1.5">
-                  {profile.interests.map((interest, i) => (
+                  {(profile.interests || []).map((interest, i) => (
                     <span key={i} className="px-2 py-1 text-[10px] border flex items-center gap-1.5" style={{ borderColor: T.borderColor, backgroundColor: "rgba(0,0,0,0.3)" }}>
                       {interest}
                       <button onClick={() => removeInterest(i)} className="text-red-500 font-bold hover:scale-110 active:scale-95">×</button>
@@ -457,12 +457,12 @@ export default function ProfilePage() {
               </div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
-                {profile.interests.map((interest, i) => (
+                {(profile.interests || []).map((interest, i) => (
                   <span key={i} className="px-3 py-1 text-[10px] border-2 uppercase font-bold tracking-wide" style={{ borderColor: T.borderColor, color: T.linkColor, backgroundColor: "black/40" }}>
                     {interest}
                   </span>
                 ))}
-                {profile.interests.length === 0 && (
+                {(profile.interests || []).length === 0 && (
                   <p className="text-[10px] text-gray-500 italic">No tags loaded in user index registers.</p>
                 )}
               </div>
