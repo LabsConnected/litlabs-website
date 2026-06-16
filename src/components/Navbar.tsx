@@ -7,6 +7,7 @@ import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useSessionAuth } from "@/hooks/useSessionAuth";
 import dynamic from "next/dynamic";
 import {
   Home, ShoppingBag, Sparkles,
@@ -87,7 +88,10 @@ export default function Navbar() {
   const userRef = useRef<HTMLDivElement>(null);
   const notifRef = useRef<HTMLDivElement>(null);
   const litcoins = useLocalStorageNumber("litcoins", 500);
-  const { isLoaded: authLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded: clerkLoaded, isSignedIn: clerkSignedIn } = useClerkAuth();
+  const { isLoaded: sessionLoaded, isSignedIn: sessionSignedIn } = useSessionAuth();
+  const authLoaded = clerkLoaded || sessionLoaded;
+  const isSignedIn = clerkSignedIn || sessionSignedIn;
 
   const fetchNotifications = async () => {
     if (!isSignedIn) return;
