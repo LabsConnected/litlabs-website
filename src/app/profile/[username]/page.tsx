@@ -100,7 +100,7 @@ function generateUserProfile(username: string) {
     role: roles[hash % roles.length],
     skills: skills[hash % skills.length],
     location: ['Cyber City', 'Neo Tokyo', 'Digital Nomad', 'Silicon Valley', 'Remote Zone'][hash % 5],
-    website: username + '.litlabs.net',
+    website: `${username}.litlabs.net`,
     joined: ['2024', '2023', '2025'][hash % 3],
     level: Math.floor((hash % 20)) + 1,
     xp: Math.floor((hash * 100) % 5000) + 100,

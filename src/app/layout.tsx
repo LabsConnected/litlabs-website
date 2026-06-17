@@ -10,6 +10,7 @@ import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import MusicPlayer from "@/components/MusicPlayer";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import { SITE_URL } from "@/lib/siteConfig";
 import "./globals.css";
 
 const inter = Inter({
@@ -32,21 +33,21 @@ export const viewport: Viewport = {
 };
 
 export const metadata: Metadata = {
-  metadataBase: new URL("https://litlabs.net"),
+  metadataBase: new URL(SITE_URL),
   title: {
     default: "LiTTree Lab Studios — AI Agent Platform",
     template: "%s | LiTTree Lab Studios",
   },
   description: "Deploy specialized AI agents, build no-code workflows, and automate your business with LiTTree Lab Studios — the AI-first creator platform.",
   keywords: ["AI agents", "automation", "workflow", "artificial intelligence", "NoCode", "LiTTree", "LiTPage", "Gemini", "AI platform"],
-  authors: [{ name: "LiTTree Lab Studios", url: "https://litlabs.net" }],
+  authors: [{ name: "LiTTree Lab Studios", url: SITE_URL }],
   creator: "LiTTree Lab Studios",
   publisher: "LiTTree Lab Studios",
   robots: { index: true, follow: true, googleBot: { index: true, follow: true } },
   openGraph: {
     type: "website",
     locale: "en_US",
-    url: "https://litlabs.net",
+    url: SITE_URL,
     siteName: "LiTTree Lab Studios",
     title: "LiTTree Lab Studios — AI Agent Platform",
     description: "Deploy specialized AI agents, build no-code workflows, and automate your business with LiTTree Lab Studios.",

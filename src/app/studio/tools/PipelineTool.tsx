@@ -60,7 +60,7 @@ function toYAML(nodes: PipelineNode[]): string {
   const lines: string[] = [
     "# LiTTree Labs Pipeline Protocol",
     `# Generated: ${new Date().toISOString()}`,
-    "# https://litlabs.net", "",
+    `# ${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}`, "",
     "version: \"1.0\"",
     `name: "untitled_pipeline"`,
     `nodes: ${nodes.length}`, "",

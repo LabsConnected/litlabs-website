@@ -8,7 +8,7 @@ export default function JobQueueMonitor() {
   useEffect(() => {
     const fetchQueue = async () => {
       try {
-        const res = await fetch("https://api.litlabs.net/api/queue");
+        const res = await fetch(process.env.NEXT_PUBLIC_API_BASE ? `${process.env.NEXT_PUBLIC_API_BASE}/api/queue` : "https://api.litlabs.net/api/queue");
         if (res.ok) {
           const data = await res.json();
           setJobs(data);

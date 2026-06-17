@@ -105,8 +105,9 @@ export default function Gallery() {
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" } | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
 
-  // Merge demo + real API + user items
-  const items = [...apiItems, ...DEMO_ITEMS, ...userItems].map(item => ({
+  // Real API items first; demo items only when API returns nothing (fallback)
+  const baseItems = apiItems.length > 0 ? [...apiItems, ...userItems] : [...DEMO_ITEMS, ...userItems];
+  const items = baseItems.map(item => ({
     ...item,
     likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
   }));

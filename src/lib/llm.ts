@@ -29,6 +29,7 @@
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
+import { SITE_URL } from "@/lib/siteConfig";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -229,7 +230,7 @@ async function generateViaOpenRouter(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENROUTER_KEY}`,
-      "HTTP-Referer": "https://litlabs.net",
+      "HTTP-Referer": SITE_URL,
       "X-Title": "LiTTree Lab Studios",
     },
     body: JSON.stringify(body),
@@ -440,7 +441,7 @@ async function streamViaOpenRouter(
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${OPENROUTER_KEY}`,
-      "HTTP-Referer": "https://litlabs.net",
+      "HTTP-Referer": SITE_URL,
       "X-Title": "LiTTree Lab Studios",
     },
     body: JSON.stringify(body),

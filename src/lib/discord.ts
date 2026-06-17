@@ -74,7 +74,7 @@ export async function sendDiscordMessage(
       body: JSON.stringify({
         ...message,
         username: message.username || 'Jarvis',
-        avatar_url: message.avatar_url || 'https://litlabs.net/jarvis-avatar.png',
+        avatar_url: message.avatar_url || `${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/jarvis-avatar.png`,
       }),
     });
 

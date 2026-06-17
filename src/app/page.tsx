@@ -11,8 +11,9 @@ import {
   Music, Volume2, SkipBack, SkipForward, Play, Pause,
   BarChart3, Server, Cpu, Database, Globe, Shield,
   ChevronDown, ChevronUp, Send, Bell, Plus, Edit, Trash2,
-  Copy, ExternalLink, Minimize, Maximize, Search, Filter,
+  Copy, ExternalLink, Minimize, Maximize, Search, Filter, Minus,
 } from 'lucide-react';
+import RetroBackground from '@/components/RetroBackground';
 
 // TypeScript interfaces
 interface ChatMessage {
@@ -39,20 +40,12 @@ interface AgentReply {
 
 interface FeedPost {
   id: string;
-  user_id: string;
+  author: string;
+  avatar: string;
   content: string;
-  media_urls: string[];
-  likes_count: number;
-  comments_count: number;
-  is_ai_post: boolean;
-  created_at: string;
-  author: { name: string; username: string; avatar_url: string | null } | null;
-  comments: Array<{
-    id: string;
-    content: string;
-    created_at: string;
-    author: { name: string; username: string; avatar_url: string | null } | null;
-  }>;
+  timestamp: number;
+  likes: number;
+  agentReplies?: AgentReply[];
 }
 
 interface AudioTrack {
@@ -75,121 +68,6 @@ interface DashboardStats {
   userId: string | null;
 }
 
-function RetroBackground() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-
-  // Generate random stars
-  const stars = Array.from({ length: 50 }, (_, i) => ({
-    id: i,
-    left: `${Math.random() * 100}%`,
-    top: `${Math.random() * 60}%`,
-    size: Math.random() * 2 + 1,
-    delay: Math.random() * 3,
-    duration: Math.random() * 2 + 2,
-  }));
-
-  // Floating orbs
-  const orbs = [
-    { color: '#ff00a0', size: 300, left: '10%', top: '20%', duration: 15 },
-    { color: '#00f0ff', size: 250, left: '70%', top: '60%', duration: 18 },
-    { color: '#00ff41', size: 200, left: '40%', top: '80%', duration: 20 },
-    { color: '#ff6b6b', size: 180, left: '85%', top: '10%', duration: 12 },
-  ];
-
-  if (!mounted) return null;
-
-  return (
-    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" style={{ background: 'linear-gradient(180deg, #0a0a12 0%, #151520 50%, #1a0a1a 100%)' }}>
-      {/* Animated stars */}
-      {stars.map((star) => (
-        <div
-          key={star.id}
-          className="absolute rounded-full"
-          style={{
-            left: star.left,
-            top: star.top,
-            width: star.size,
-            height: star.size,
-            background: '#fff',
-            boxShadow: `0 0 ${star.size * 4}px ${star.size}px rgba(255,255,255,0.5)`,
-            animation: `twinkle ${star.duration}s ease-in-out ${star.delay}s infinite`,
-            opacity: 0.3,
-          }}
-        />
-      ))}
-
-      {/* Animated gradient orbs */}
-      {orbs.map((orb, i) => (
-        <div
-          key={i}
-          className="absolute rounded-full"
-          style={{
-            width: orb.size,
-            height: orb.size,
-            left: orb.left,
-            top: orb.top,
-            background: `radial-gradient(circle, ${orb.color}40 0%, ${orb.color}10 40%, transparent 70%)`,
-            filter: 'blur(40px)',
-            animation: `float ${orb.duration}s ease-in-out infinite`,
-          }}
-        />
-      ))}
-
-      {/* Animated moving grid - the synthwave classic */}
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: `
-            linear-gradient(to bottom, transparent 0%, ${C.bgColor} 100%),
-            linear-gradient(rgba(0,240,255,0.4) 1px, transparent 1px),
-            linear-gradient(90deg, rgba(255,0,160,0.3) 1px, transparent 1px)
-          `,
-          backgroundSize: '100% 100%, 60px 60px, 60px 60px',
-          perspective: '500px',
-          transform: 'rotateX(60deg) translateY(-100px)',
-          transformOrigin: 'center top',
-          animation: 'gridMove 8s linear infinite',
-          opacity: 0.4,
-        }}
-      />
-
-      {/* Secondary subtle grid overlay */}
-      <div
-        className="absolute inset-0"
-        style={{
-          backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
-          backgroundSize: '100px 100px',
-        }}
-      />
-
-      {/* Vignette */}
-      <div
-        className="absolute inset-0"
-        style={{
-          background: 'radial-gradient(ellipse at center, transparent 0%, rgba(10,10,18,0.8) 100%)',
-        }}
-      />
-
-      <style jsx>{`
-        @keyframes twinkle {
-          0%, 100% { opacity: 0.2; transform: scale(1); }
-          50% { opacity: 0.8; transform: scale(1.5); }
-        }
-        @keyframes float {
-          0%, 100% { transform: translate(0, 0) scale(1); }
-          25% { transform: translate(30px, -30px) scale(1.1); }
-          50% { transform: translate(0, -60px) scale(1); }
-          75% { transform: translate(-30px, -30px) scale(0.9); }
-        }
-        @keyframes gridMove {
-          0% { background-position: 0 0, 0 0, 0 0; }
-          100% { background-position: 0 0, 0 60px, 0 60px; }
-        }
-      `}</style>
-    </div>
-  );
-}
 
 function CRTOverlay({ enabled }: { enabled: boolean }) {
   if (!enabled) return null;
@@ -197,6 +75,37 @@ function CRTOverlay({ enabled }: { enabled: boolean }) {
     <div className="fixed inset-0 pointer-events-none z-[9999] opacity-[0.08] mix-blend-overlay" style={{ background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, transparent 1px, transparent 2px, rgba(0,0,0,0.3) 3px)', backgroundSize: '100% 4px' }} />
   );
 }
+
+// Theme colors
+const C = {
+  bgColor: '#0a0a12',
+  boxBg: 'rgba(255,255,255,0.03)',
+  borderColor: 'rgba(255,255,255,0.1)',
+  textColor: '#e0e0e0',
+  textMuted: 'rgba(255,255,255,0.4)',
+  headerColor: '#00f0ff',
+  accentColor: '#ff00a0',
+  linkColor: '#ff9ff3',
+  success: '#00ff41',
+  warning: '#ffd93d',
+};
+
+const SYNTHWAVE_TRACKS = [
+  { id: '1', title: 'Neon Drive', artist: 'Synthwave Radio', duration: '4:32', url: '' },
+  { id: '2', title: 'Retrowave', artist: 'Outrun FM', duration: '3:58', url: '' },
+  { id: '3', title: 'Cyber City', artist: 'Darksynth', duration: '5:12', url: '' },
+];
+
+const MOODS = ['🔥 Grinding', '🧠 In Flow', '😎 Chill', '⚡ Hyped', '🎯 Focused', '😴 Tired'];
+
+const TOP_AGENTS = [
+  { id: 'code', name: 'Code Champ', icon: '💻', color: '#00f0ff', status: 'online' as const, role: 'Engineer' },
+  { id: 'social', name: 'Social Dom', icon: '📣', color: '#ff00a0', status: 'online' as const, role: 'Marketing' },
+  { id: 'data', name: 'Data Slayer', icon: '📊', color: '#ff9ff3', status: 'busy' as const, role: 'Analytics' },
+  { id: 'writer', name: 'Writer', icon: '✍️', color: '#ff6b6b', status: 'online' as const, role: 'Content' },
+  { id: 'director', name: 'Director', icon: '🎯', color: '#ffd93d', status: 'online' as const, role: 'Strategy' },
+  { id: 'ops', name: 'Ops King', icon: '⚙️', color: '#a8e6cf', status: 'offline' as const, role: 'Operations' },
+];
 
 export default function HomePage() {
   const { isLoaded, isSignedIn } = useClerkAuth();
@@ -237,6 +146,8 @@ export default function HomePage() {
   ]);
   const [newPost, setNewPost] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
+  const [feedLoading, setFeedLoading] = useState(false);
+  const [feedPosting, setFeedPosting] = useState(false);
   const [currentTrack, setCurrentTrack] = useState(0);
   const displayName = profile?.displayName || 'Builder';
 
@@ -279,37 +190,27 @@ export default function HomePage() {
     }
   };
 
-  const handlePost = () => {
-    if (!newPost.trim()) return;
-    const lower = newPost.toLowerCase();
-    let reply = null;
-    if (lower.includes('code') || lower.includes('react') || lower.includes('api')) 
-      reply = { 
-        agentId: 'code', 
-        agentName: 'Code Champ', 
-        text: 'Looking at your implementation approach - this shows solid engineering instincts. The separation of concerns is clean, and I particularly like how you\'ve handled the edge cases around async state management. If you\'re open to feedback, I\'d suggest adding a retry mechanism with exponential backoff for those external API calls. I can help you scaffold that out if you want to pair on it. Overall though, this is production-ready code with excellent type safety.' 
-      };
-    else if (lower.includes('market') || lower.includes('growth') || lower.includes('viral')) 
-      reply = { 
-        agentId: 'social', 
-        agentName: 'Social Dom', 
-        text: 'This strategy has serious viral potential. The timing aligns perfectly with current algorithm preferences, and your hook addresses a genuine pain point in the market. I\'d recommend launching this on Tuesday morning for maximum engagement - our data shows 340% higher reach during that window. Want me to draft three variations of the opening hook so you can A/B test? I can also pull competitive intelligence on what\'s working for similar campaigns right now.' 
-      };
-    else if (lower.includes('data') || lower.includes('analytics')) 
-      reply = { 
-        agentId: 'data', 
-        agentName: 'Data Slayer', 
-        text: 'The statistical significance here is strong (p < 0.01) and your confidence intervals are appropriately narrow. I\'ve run a similar analysis on our historical dataset of 2.3M user sessions and your pattern detection aligns with what we\'re seeing across the platform. One recommendation: consider segmenting by cohort rather than aggregate - there\'s likely a hidden pattern in the D7 retention curves that aggregate metrics are masking. Happy to build you a custom dashboard for real-time tracking.' 
-      };
-    else if (lower.includes('write') || lower.includes('content')) 
-      reply = { 
-        agentId: 'writer', 
-        agentName: 'Writer', 
-        text: 'Your narrative arc is compelling - the pacing builds tension effectively and the resolution delivers emotional payoff. The voice feels authentic and the word choice shows real craft. I\'d suggest tightening the second paragraph; there\'s a touch of redundancy in the descriptive passages that could slow reader engagement. The hook at the end is particularly strong - it creates that "just one more sentence" momentum that keeps readers scrolling. Want me to suggest some alternative phrasing for the middle section?' 
-      };
-    
-    setPosts([{ id: Date.now().toString(), author: displayName, avatar: profile?.avatarUrl || '👤', content: newPost, timestamp: Date.now(), likes: 0, agentReplies: reply ? [reply] : [] }, ...posts]);
+  const handlePost = async () => {
+    if (!newPost.trim() || feedPosting) return;
+    setFeedPosting(true);
+    // Optimistic add
+    const optimistic = { id: Date.now().toString(), author: displayName, avatar: profile?.avatarUrl || '👤', content: newPost, timestamp: Date.now(), likes: 0 };
+    setPosts(prev => [optimistic, ...prev]);
     setNewPost('');
+    try {
+      await fetch('/api/feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ content: optimistic.content, media_urls: [] }),
+      });
+      const r = await fetch('/api/feed');
+      const d = await r.json();
+      if (d.posts?.length > 0) setPosts(d.posts.map((p: any) => ({ id: p.id, author: p.author?.name || 'Anonymous', avatar: p.author?.avatar_url || '👤', content: p.content, timestamp: new Date(p.created_at).getTime(), likes: p.likes_count || 0 })));
+    } catch {
+      // keep optimistic post visible
+    } finally {
+      setFeedPosting(false);
+    }
   };
 
   const claimDaily = () => {

@@ -25,5 +25,7 @@ export function getUploadUrl(key: string, contentType: string): string {
 }
 
 export function getPublicUrl(key: string): string {
-  return `https://media.litlabs.net/${key}`;
+  return process.env.NEXT_PUBLIC_MEDIA_BASE
+    ? `${process.env.NEXT_PUBLIC_MEDIA_BASE}/${key}`
+    : `https://media.litlabs.net/${key}`;
 }

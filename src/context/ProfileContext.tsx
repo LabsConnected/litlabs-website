@@ -52,7 +52,7 @@ const defaultProfile: UserProfile = {
   avatarUrl: null,
   coverUrl: null,
   location: "Everywhere",
-  website: "https://litlabs.net",
+  website: process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net",
   interests: ["Web Development", "AI", "Music Production", "Entrepreneurship"],
   musicLinks: {},
   videoLinks: {},

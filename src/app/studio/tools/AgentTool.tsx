@@ -51,6 +51,34 @@ const PROVIDER_OPTIONS = [
   { id: "openrouter-free", label: "OpenRouter Free", hint: "Fallback pool" },
 ];
 
+/* ─── Context window management ──────────────────────────────────────── */
+const MAX_TOKENS_APPROX = 100_000; // Gemini 2.5 Flash context
+const TOKEN_THRESHOLD = 0.80;       // prune at 80% capacity
+
+/** Rough token estimate: ~4 chars per token */
+function estimateTokens(messages: { role: string; content: string }[]): number {
+  return messages.reduce((sum, m) => sum + Math.ceil(m.content.length / 4), 0);
+}
+
+/**
+ * Trims oldest non-system messages to stay under 80% of max context.
+ * Always keeps the first message (user framing) and the last 6 messages
+ * for continuity.
+ */
+function pruneHistory(messages: { role: string; content: string }[]): { role: string; content: string }[] {
+  const limit = Math.floor(MAX_TOKENS_APPROX * TOKEN_THRESHOLD);
+  if (estimateTokens(messages) <= limit) return messages;
+  // Keep first message + last 6 for continuity, prune from the middle
+  const head = messages.slice(0, 1);
+  const tail = messages.slice(-6);
+  const middle = messages.slice(1, -6);
+  let pruned = [...middle];
+  while (pruned.length > 0 && estimateTokens([...head, ...pruned, ...tail]) > limit) {
+    pruned = pruned.slice(2); // drop oldest pair (user + assistant)
+  }
+  return [...head, ...pruned, ...tail];
+}
+
 /* ─── Markdown renderer (minimal inline) ───────────────────────────── */
 function renderMarkdown(text: string): React.ReactNode[] {
   const lines = text.split("\n");
@@ -126,6 +154,8 @@ export default function AgentTool() {
   const [brTopic, setBrTopic] = useState("");
   const [brRunning, setBrRunning] = useState(false);
   const [brLog, setBrLog] = useState<BoardroomEntry[]>([]);
+  const [brRounds, setBrRounds] = useState<3 | 5 | 7>(3);
+  const [brCurrentRound, setBrCurrentRound] = useState(0);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -168,7 +198,8 @@ export default function AgentTool() {
 
     async function attempt(): Promise<boolean> {
       try {
-        const history = [...(chatMap[selectedAgent.id] || []), userMsg].map(m => ({ role: m.role, content: m.content }));
+        const rawHistory = [...(chatMap[selectedAgent.id] || []), userMsg].map(m => ({ role: m.role, content: m.content }));
+        const history = pruneHistory(rawHistory);
         const res = await fetch("/api/gemini/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ messages: history, systemPrompt: selectedAgent.systemPrompt, stream: true, provider }),
@@ -252,18 +283,24 @@ export default function AgentTool() {
     if (!brTopic.trim() || brRunning) return;
     setBrRunning(true);
     setBrLog([]);
+    setBrCurrentRound(0);
     const agA = allAgents.find(a => a.id === brAgentA) || AGENTS[0];
     const agB = allAgents.find(a => a.id === brAgentB) || AGENTS[2];
-    const rounds = 3;
-    let context: { role: string; content: string }[] = [{ role: "user", content: `Topic for discussion: ${brTopic}` }];
-    for (let r = 0; r < rounds * 2; r++) {
+    let context: { role: string; content: string }[] = [{ role: "user", content: `Topic for debate: "${brTopic}". Be direct and take a clear position.` }];
+    for (let r = 0; r < brRounds * 2; r++) {
       const isA = r % 2 === 0;
       const speaker = isA ? agA : agB;
       const otherName = isA ? agB.name : agA.name;
+      const roundNum = Math.floor(r / 2) + 1;
+      setBrCurrentRound(roundNum);
       try {
         const res = await fetch("/api/gemini/chat", {
           method: "POST", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ messages: context, systemPrompt: `${speaker.systemPrompt} You are speaking with ${otherName}. Keep responses concise (2-3 sentences). Respond to what was just said.`, stream: false, provider }),
+          body: JSON.stringify({
+            messages: pruneHistory(context),
+            systemPrompt: `${speaker.systemPrompt} You are debating ${otherName} on the topic. Keep it sharp: 2-3 sentences max. Round ${roundNum} of ${brRounds}. ${r === brRounds * 2 - 1 ? "This is your closing statement — summarize your position." : "Respond to what was just said."}`,
+            stream: false, provider,
+          }),
         });
         const data = await res.json();
         const reply: string = data.response || data.text || "...";
@@ -271,6 +308,7 @@ export default function AgentTool() {
         setBrLog(prev => [...prev, { agent: speaker.name, icon: speaker.icon, color: speaker.color, text: reply }]);
       } catch { break; }
     }
+    setBrCurrentRound(0);
     setBrRunning(false);
   };
 
@@ -644,45 +682,76 @@ export default function AgentTool() {
                 </div>
               )}
               {!brRunning && brLog.length === 0 && (
-                <div>
-                  <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Debate Topic</label>
-                  <input value={brTopic} onChange={e => setBrTopic(e.target.value)}
-                    placeholder="e.g. Should startups use AI from day one?"
-                    onKeyDown={e => { if (e.key === "Enter") runBoardroom(); }}
-                    className="w-full px-3 py-2 text-xs rounded-lg outline-none"
-                    style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Debate Topic</label>
+                    <input value={brTopic} onChange={e => setBrTopic(e.target.value)}
+                      placeholder="e.g. Should startups use AI from day one?"
+                      onKeyDown={e => { if (e.key === "Enter") runBoardroom(); }}
+                      className="w-full px-3 py-2 text-xs rounded-lg outline-none"
+                      style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
+                  </div>
+                  <div>
+                    <label className="block text-[9px] uppercase tracking-widest mb-1.5 font-bold" style={{ color: T.accentColor }}>Rounds</label>
+                    <div className="flex gap-1.5">
+                      {([3, 5, 7] as const).map(n => (
+                        <button key={n} onClick={() => setBrRounds(n)}
+                          className="flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all"
+                          style={{
+                            backgroundColor: brRounds === n ? T.linkColor + "20" : T.bgColor,
+                            borderColor: brRounds === n ? T.linkColor : T.borderColor + "30",
+                            color: brRounds === n ? T.linkColor : T.textMuted,
+                          }}>
+                          {n}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
                   <button onClick={runBoardroom} disabled={!brTopic.trim()}
-                    className="mt-3 w-full py-2 text-xs font-bold rounded-lg disabled:opacity-40 transition-all"
+                    className="w-full py-2 text-xs font-bold rounded-lg disabled:opacity-40 transition-all"
                     style={{ backgroundColor: T.linkColor, color: "#0a0a0f" }}>
-                    ⚔️ Start Debate (3 rounds)
+                    ⚔️ Start Debate · {brRounds} rounds
                   </button>
                 </div>
               )}
 
               {/* Log */}
               {(brRunning || brLog.length > 0) && (
-                <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
-                  {brLog.map((entry, i) => (
-                    <div key={i} className="flex gap-2.5">
-                      <span className="text-xl shrink-0">{entry.icon}</span>
-                      <div className="flex-1">
-                        <div className="text-[9px] font-bold mb-1" style={{ color: entry.color }}>{entry.agent}</div>
-                        <div className="text-[11px] leading-relaxed px-3 py-2 rounded-lg" style={{ backgroundColor: entry.color + "08", border: `1px solid ${entry.color}20`, color: T.textColor }}>
-                          {entry.text}
-                        </div>
+                <div className="space-y-3">
+                  {brRunning && brCurrentRound > 0 && (
+                    <div className="flex items-center justify-between text-[10px] px-1" style={{ color: T.linkColor }}>
+                      <div className="flex items-center gap-1.5">
+                        <Loader2 size={11} className="animate-spin" />
+                        Round {brCurrentRound} of {brRounds}
+                      </div>
+                      <div className="flex gap-1">
+                        {Array.from({ length: brRounds }, (_, i) => (
+                          <span key={i} className="w-2 h-2 rounded-full transition-all"
+                            style={{ backgroundColor: i < brCurrentRound ? T.linkColor : T.borderColor + "40" }} />
+                        ))}
                       </div>
                     </div>
-                  ))}
-                  {brRunning && (
-                    <div className="flex items-center gap-2 text-[11px]" style={{ color: T.linkColor }}>
-                      <Loader2 size={12} className="animate-spin" /> Agents deliberating...
-                    </div>
                   )}
+                  <div className="space-y-3 max-h-80 overflow-y-auto pr-1">
+                    {brLog.map((entry, i) => (
+                      <div key={i} className="flex gap-2.5">
+                        <span className="text-xl shrink-0">{entry.icon}</span>
+                        <div className="flex-1">
+                          <div className="text-[9px] font-bold mb-1" style={{ color: entry.color }}>{entry.agent}
+                            <span className="ml-2 opacity-40 font-normal">Round {Math.floor(i / 2) + 1}</span>
+                          </div>
+                          <div className="text-[11px] leading-relaxed px-3 py-2 rounded-lg" style={{ backgroundColor: entry.color + "08", border: `1px solid ${entry.color}20`, color: T.textColor }}>
+                            {entry.text}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
                 </div>
               )}
 
               {!brRunning && brLog.length > 0 && (
-                <button onClick={() => setBrLog([])} className="text-[10px] opacity-50 hover:opacity-100 transition-all" style={{ color: T.textMuted }}>
+                <button onClick={() => { setBrLog([]); setBrTopic(""); }} className="text-[10px] opacity-50 hover:opacity-100 transition-all" style={{ color: T.textMuted }}>
                   ↺ New debate
                 </button>
               )}
