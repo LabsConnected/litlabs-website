@@ -71,3 +71,20 @@ add-external-ssh.ps1
 
 # Local Netlify folder
 .netlify
+
+# Build artifacts and deploy/env dumps — never track these
+build-lint.log
+build.log
+build2.txt
+build3.txt
+buildlog.txt
+conflicts.txt
+debug_auth.js
+deploy-output.txt
+deploy.txt
+deploy3.txt
+deploy_now.txt
+vercel-deploy.txt
+env-keys.txt
+env_backup.txt
+env_dump.txt

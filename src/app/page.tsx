@@ -13,7 +13,6 @@ import {
   ChevronDown, ChevronUp, Send, Bell, Plus, Edit, Trash2,
   Copy, ExternalLink, Minimize, Maximize, Search, Filter, Minus,
 } from 'lucide-react';
-import RetroBackground from '@/components/RetroBackground';
 
 // TypeScript interfaces
 interface ChatMessage {
@@ -235,7 +234,6 @@ export default function HomePage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
-      <RetroBackground />
       <CRTOverlay enabled={crtEnabled} />
       
       {isSignedIn ? (

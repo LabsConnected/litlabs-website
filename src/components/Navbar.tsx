@@ -54,7 +54,7 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
   }, []);
   return (
     <span
-      className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold"
+      className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold"
       style={{
         backgroundColor: accentColor + "15",
         color: accentColor,

@@ -431,7 +431,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       bgColor: custom.bgColor || skinColors.bgColor,
       textColor: custom.textColor || skinColors.textColor,
-      textMuted: "#8a8aa3",
+      textMuted: "#a8a8c0",
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor: accent?.headerColor || custom.headerColor || skinColors.headerColor,
       borderColor: custom.borderColor || skinColors.borderColor,
