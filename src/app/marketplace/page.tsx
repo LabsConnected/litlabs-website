@@ -32,6 +32,7 @@ function getCategoryColor(category: string): string {
 }
 
 // CREDIT PACKS — Stripe price_id required for each (create in Stripe Dashboard)
+// Note: Found price_1TYs4AJ53kgx4fp5RgAChEmk (Pro Membership) in Stripe, but not specific coin packs.
 const CREDIT_PACKS: { id: string; coins: number; price: number; priceId: string; label: string; popular: boolean; savings: string }[] = [
   { id: 'starter', coins: 500, price: 1, priceId: '', label: 'Starter', popular: false, savings: 'Entry pack' },
   { id: 'popular', coins: 1200, price: 5, priceId: '', label: 'Popular', popular: true, savings: 'Save 20%' },
@@ -106,6 +107,7 @@ function MarketplaceInner() {
   const [sellModalAgent, setSellModalAgent] = useState<Agent | null>(null);
   const [sellPrice, setSellPrice] = useState('');
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
+  const [activeTab, setActiveTab] = useState<'agents' | 'coins'>('agents');
 
   // Fetch wallet from API (source of truth)
   const fetchWallet = async () => {
@@ -302,155 +304,171 @@ function MarketplaceInner() {
         </div>
       )}
 
-      <div style={{ borderBottom: '2px solid ' + T.borderColor, padding: '32px 24px', textAlign: 'center', background: 'linear-gradient(180deg, ' + T.boxBg + ' 0%, ' + T.bgColor + ' 100%)' }}>
+        <div style={{ borderBottom: '2px solid ' + T.borderColor, padding: '24px', textAlign: 'center', background: 'linear-gradient(180deg, ' + T.boxBg + ' 0%, ' + T.bgColor + ' 100%)' }}>
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '12px', marginBottom: '8px', flexWrap: 'wrap' }}>
-          <h1 style={{ color: T.headerColor, fontSize: '32px', fontWeight: 'bold', letterSpacing: '3px', margin: 0 }}>🤖 AGENT MARKETPLACE</h1>
+          <h1 style={{ color: T.headerColor, fontSize: '28px', fontWeight: 'bold', letterSpacing: '3px', margin: 0 }}>🤖 AGENT MARKETPLACE</h1>
           <span style={{ padding: '4px 10px', backgroundColor: 'rgba(255,107,107,0.2)', border: '1px solid #ff6b6b', color: '#ff6b6b', fontSize: '10px', fontWeight: 'bold', borderRadius: '6px', letterSpacing: '1px', textTransform: 'uppercase' }}>Beta</span>
         </div>
-        <p style={{ color: T.textColor, fontSize: '13px', opacity: 0.7, maxWidth: '500px', margin: '0 auto 12px' }}>Discover, install, and deploy AI agents to your workspace</p>
-        <div style={{ display: 'flex', gap: '8px', justifyContent: 'center', marginBottom: '16px' }}>
-          <button onClick={earnCoins} disabled={claimLoading} style={{ padding: '6px 14px', backgroundColor: `${T.accentColor}15`, border: `1px solid ${T.accentColor}`, color: T.accentColor, fontSize: '11px', cursor: claimLoading ? 'not-allowed' : 'pointer', fontWeight: 'bold', opacity: claimLoading ? 0.6 : 1 }}>{claimLoading ? '⏳ Claiming...' : '🪙 Daily Bonus'}</button>
-          <button onClick={() => showToast('Buy LiTBit Coins: connect wallet coming soon!', 'info')} style={{ padding: '6px 14px', backgroundColor: `${T.accentColor}10`, border: '1px solid ' + T.borderColor, color: T.textColor, fontSize: '11px', cursor: 'pointer' }}>💳 Buy LiTBit Coins</button>
-        </div>
-        <div style={{ display: 'flex', gap: '12px', justifyContent: 'center', flexWrap: 'wrap' }}>
-          {[
-            { label: 'Total Agents', value: stats.total, accent: T.accentColor },
-            { label: 'Free', value: stats.free, accent: T.accentColor },
-            { label: 'Installed', value: stats.installed, accent: T.accentColor },
-            { label: 'Your Wallet', value: stats.coins, accent: T.accentColor, bg: T.accentColor + '08', border: T.accentColor },
-          ].map(stat => (
-            <div key={stat.label} style={{ padding: '10px 20px', borderRadius: '8px', border: '1px solid ' + (stat.border || T.borderColor), backgroundColor: stat.bg || 'rgba(0,0,0,0.3)', minWidth: '100px' }}>
-              <div style={{ color: stat.accent, fontSize: '20px', fontWeight: 'bold', textAlign: 'center' }}>{stat.value}</div>
-              <div style={{ fontSize: '10px', color: T.textColor, opacity: 0.6, textAlign: 'center', marginTop: '2px', letterSpacing: '0.5px', textTransform: 'uppercase' }}>{stat.label}</div>
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div style={{ padding: '16px 24px', borderBottom: '1px solid ' + T.borderColor, display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', backgroundColor: T.boxBg }}>
-        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1, alignItems: 'center' }}>
-          <button onClick={() => setSelectedCategory('')} style={{ padding: '6px 14px', fontSize: '11px', borderRadius: '6px', border: '1px solid ' + (selectedCategory === '' ? T.accentColor : T.borderColor), backgroundColor: selectedCategory === '' ? 'rgba(255,255,0,0.15)' : 'transparent', color: selectedCategory === '' ? T.accentColor : T.textColor, cursor: 'pointer', fontFamily: 'monospace', fontWeight: selectedCategory === '' ? 'bold' : 'normal', transition: 'all 0.15s' }}>
-            All ({agents.length})
-          </button>
-          {categories.map(cat => (
-            <button key={cat} onClick={() => setSelectedCategory(cat === selectedCategory ? '' : cat)} style={{ padding: '6px 14px', fontSize: '11px', borderRadius: '6px', border: '1px solid ' + (selectedCategory === cat ? T.accentColor : T.borderColor), backgroundColor: selectedCategory === cat ? 'rgba(255,255,0,0.15)' : 'transparent', color: selectedCategory === cat ? T.accentColor : T.textColor, cursor: 'pointer', fontFamily: 'monospace', textTransform: 'capitalize', fontWeight: selectedCategory === cat ? 'bold' : 'normal', transition: 'all 0.15s' }}>
-              {CATEGORY_LABELS[cat] || cat} ({agents.filter(a => a.category === cat).length})
-            </button>
-          ))}
-        </div>
-        <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
-          <input type='text' value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder='Search agents...' style={{ padding: '8px 14px', backgroundColor: T.bgColor, border: '1px solid ' + T.borderColor, borderRadius: '6px', color: '#e0e0e0', fontSize: '12px', fontFamily: 'monospace', width: '200px', outline: 'none' }} />
-          <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: '8px 10px', backgroundColor: T.bgColor, border: '1px solid ' + T.borderColor, borderRadius: '6px', color: T.textColor, fontSize: '11px', fontFamily: 'monospace', cursor: 'pointer' }}>
-            <option value='featured'>Featured</option>
-            <option value='popular'>Popular</option>
-            <option value='rating'>Rating</option>
-            <option value='price'>Price</option>
-            <option value='name'>Name</option>
-          </select>
-          <Link href='/studio?tool=agents' style={{ padding: '8px 16px', backgroundColor: T.linkColor, color: 'white', textDecoration: 'none', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🚀 My Dock</Link>
-          <div style={{ padding: '8px 14px', borderRadius: '6px', border: '1px solid gold', color: 'gold', fontSize: '11px', fontWeight: 'bold', backgroundColor: 'rgba(255,215,0,0.08)', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🪙 {litBitCoins}</div>
-        </div>
-      </div>
-
-      <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
-        {featuredAgents.length > 0 && !searchQuery && (
-          <div style={{ marginBottom: '32px' }}>
-            <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '2px', marginBottom: '12px', fontWeight: 'bold' }}>⭐ FEATURED AGENTS</div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
-              {featuredAgents.map(agent => <AgentCard key={agent.id} agent={agent} isInstalled={installedAgents.has(agent.id)} onInstall={() => installAgent(agent.id)} onPreview={() => setPreviewAgent(agent)} theme={T} />)}
-            </div>
-          </div>
-        )}
-        <div>
-          <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '2px', marginBottom: '12px', fontWeight: 'bold' }}>
-            {selectedCategory ? selectedCategory.toUpperCase() + ' AGENTS' : 'ALL AGENTS'}
-            <span style={{ color: T.textColor, opacity: 0.5, marginLeft: '8px' }}>({filteredAgents.length})</span>
-          </div>
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
-            {(searchQuery ? filteredAgents : regularAgents).map(agent => <AgentCard key={agent.id} agent={agent} isInstalled={installedAgents.has(agent.id)} onInstall={() => installAgent(agent.id)} onPreview={() => setPreviewAgent(agent)} theme={T} />)}
-          </div>
-        </div>
-        {filteredAgents.length === 0 && (
-          <div style={{ textAlign: 'center', padding: '60px 20px', color: T.textColor, opacity: 0.5 }}>
-            <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '12px', color: T.headerColor }}>?</div>
-            <div>No agents found matching your search.</div>
-          </div>
-        )}
-
-        {/* CREDIT PACKS SECTION */}
-        <div style={{ marginTop: '48px', marginBottom: '32px', padding: '24px', border: '2px solid ' + T.borderColor, backgroundColor: T.boxBg }}>
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+        <p style={{ color: T.textColor, fontSize: '13px', opacity: 0.7, maxWidth: '500px', margin: '0 auto 16px' }}>Discover, install, and deploy AI agents to your workspace</p>
+        
+        {/* Smart Wallet Bar */}
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '16px', flexWrap: 'wrap', marginBottom: '20px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 20px', border: '2px solid gold', borderRadius: '8px', backgroundColor: 'rgba(255,215,0,0.08)' }}>
+            <span style={{ fontSize: '24px' }}>🪙</span>
             <div>
-              <div style={{ color: T.headerColor, fontSize: '18px', fontWeight: 'bold', marginBottom: '4px' }}>Buy LiTBit Coins</div>
-              <p style={{ color: T.textColor, fontSize: '12px', opacity: 0.7, maxWidth: '400px' }}>
-                Purchase coins to unlock premium agents, API access, and AI generations.
-                <strong style={{ color: T.accentColor }}>1 LBC = $0.01</strong> (1 cent per coin)
-              </p>
-            </div>
-            <div style={{ padding: '8px 16px', border: '1px solid gold', backgroundColor: 'rgba(255,215,0,0.1)' }}>
-              <span style={{ color: 'gold', fontSize: '14px', fontWeight: 'bold' }}>{litBitCoins} LBC current balance</span>
+              <div style={{ color: 'gold', fontSize: '20px', fontWeight: 'bold' }}>{litBitCoins.toLocaleString()}</div>
+              <div style={{ color: T.textColor, fontSize: '10px', opacity: 0.6 }}>LiTBit Coins Available</div>
             </div>
           </div>
-          
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px', marginBottom: '24px' }}>
-            {CREDIT_PACKS.map((pack) => (
-              <div 
-                key={pack.id}
-                style={{ 
-                  position: 'relative',
-                  padding: '20px', 
-                  border: `2px solid ${pack.popular ? 'gold' : T.borderColor}`, 
-                  backgroundColor: pack.popular ? 'rgba(255,215,0,0.08)' : 'rgba(0,0,0,0.3)',
-                  textAlign: 'center',
-                  cursor: 'pointer',
-                  transition: 'all 0.2s',
-                }}
-                onClick={() => showToast(`${pack.label} Pack: ${pack.coins.toLocaleString()} coins for $${pack.price} - Stripe integration coming soon!`, 'info')}
-              >
-                {pack.popular && (
-                  <div style={{ position: 'absolute', top: '-10px', left: '50%', transform: 'translateX(-50%)', backgroundColor: 'gold', color: 'black', padding: '2px 12px', fontSize: '10px', fontWeight: 'bold' }}>
-                    MOST POPULAR
-                  </div>
-                )}
-                <div style={{ color: pack.popular ? 'gold' : T.headerColor, fontSize: '28px', fontWeight: 'bold', marginBottom: '4px' }}>
-                  {pack.coins.toLocaleString()}
+          <button onClick={earnCoins} disabled={claimLoading} style={{ padding: '10px 18px', backgroundColor: `${T.accentColor}20`, border: `2px solid ${T.accentColor}`, color: T.accentColor, fontSize: '12px', cursor: claimLoading ? 'not-allowed' : 'pointer', fontWeight: 'bold', borderRadius: '6px', opacity: claimLoading ? 0.6 : 1 }}>{claimLoading ? '⏳ Claiming...' : '+50 Daily Bonus'}</button>
+        </div>
+
+        {/* Main Tabs */}
+        <div style={{ display: 'flex', justifyContent: 'center', gap: '8px' }}>
+          <button onClick={() => setActiveTab('agents')} style={{ padding: '12px 32px', fontSize: '14px', fontWeight: 'bold', border: '2px solid ' + (activeTab === 'agents' ? T.accentColor : T.borderColor), backgroundColor: activeTab === 'agents' ? T.accentColor + '20' : 'transparent', color: activeTab === 'agents' ? T.accentColor : T.textColor, borderRadius: '8px 8px 0 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🤖</span> Agents <span style={{ padding: '2px 8px', backgroundColor: activeTab === 'agents' ? T.accentColor : T.borderColor, color: '#000', fontSize: '11px', borderRadius: '4px' }}>{stats.total}</span>
+          </button>
+          <button onClick={() => setActiveTab('coins')} style={{ padding: '12px 32px', fontSize: '14px', fontWeight: 'bold', border: '2px solid ' + (activeTab === 'coins' ? 'gold' : T.borderColor), backgroundColor: activeTab === 'coins' ? 'rgba(255,215,0,0.15)' : 'transparent', color: activeTab === 'coins' ? 'gold' : T.textColor, borderRadius: '8px 8px 0 0', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span>🪙</span> LiTBit Coins
+          </button>
+        </div>
+      </div>
+
+      {activeTab === 'agents' && (
+        <>
+          <div style={{ padding: '16px 24px', borderBottom: '1px solid ' + T.borderColor, display: 'flex', gap: '12px', flexWrap: 'wrap', alignItems: 'center', justifyContent: 'space-between', backgroundColor: T.boxBg }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', flex: 1, alignItems: 'center' }}>
+              <button onClick={() => setSelectedCategory('')} style={{ padding: '6px 14px', fontSize: '11px', borderRadius: '6px', border: '1px solid ' + (selectedCategory === '' ? T.accentColor : T.borderColor), backgroundColor: selectedCategory === '' ? 'rgba(255,255,0,0.15)' : 'transparent', color: selectedCategory === '' ? T.accentColor : T.textColor, cursor: 'pointer', fontFamily: 'monospace', fontWeight: selectedCategory === '' ? 'bold' : 'normal', transition: 'all 0.15s' }}>
+                All ({agents.length})
+              </button>
+              {categories.map(cat => (
+                <button key={cat} onClick={() => setSelectedCategory(cat === selectedCategory ? '' : cat)} style={{ padding: '6px 14px', fontSize: '11px', borderRadius: '6px', border: '1px solid ' + (selectedCategory === cat ? T.accentColor : T.borderColor), backgroundColor: selectedCategory === cat ? 'rgba(255,255,0,0.15)' : 'transparent', color: selectedCategory === cat ? T.accentColor : T.textColor, cursor: 'pointer', fontFamily: 'monospace', textTransform: 'capitalize', fontWeight: selectedCategory === cat ? 'bold' : 'normal', transition: 'all 0.15s' }}>
+                  {CATEGORY_LABELS[cat] || cat} ({agents.filter(a => a.category === cat).length})
+                </button>
+              ))}
+            </div>
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input type='text' value={searchQuery} onChange={e => setSearchQuery(e.target.value)} placeholder='Search agents...' style={{ padding: '8px 14px', backgroundColor: T.bgColor, border: '1px solid ' + T.borderColor, borderRadius: '6px', color: '#e0e0e0', fontSize: '12px', fontFamily: 'monospace', width: '200px', outline: 'none' }} />
+              <select value={sortBy} onChange={e => setSortBy(e.target.value)} style={{ padding: '8px 10px', backgroundColor: T.bgColor, border: '1px solid ' + T.borderColor, borderRadius: '6px', color: T.textColor, fontSize: '11px', fontFamily: 'monospace', cursor: 'pointer' }}>
+                <option value='featured'>Featured</option>
+                <option value='popular'>Popular</option>
+                <option value='rating'>Rating</option>
+                <option value='price'>Price</option>
+                <option value='name'>Name</option>
+              </select>
+              <Link href='/studio?tool=agents' style={{ padding: '8px 16px', backgroundColor: T.linkColor, color: 'white', textDecoration: 'none', fontSize: '11px', fontWeight: 'bold', borderRadius: '6px', display: 'inline-flex', alignItems: 'center', gap: '4px' }}>🚀 My Dock</Link>
+            </div>
+          </div>
+
+          <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+            {featuredAgents.length > 0 && !searchQuery && (
+              <div style={{ marginBottom: '32px' }}>
+                <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '2px', marginBottom: '12px', fontWeight: 'bold' }}>⭐ FEATURED AGENTS</div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
+                  {featuredAgents.map(agent => <AgentCard key={agent.id} agent={agent} isInstalled={installedAgents.has(agent.id)} onInstall={() => installAgent(agent.id)} onPreview={() => setPreviewAgent(agent)} theme={T} />)}
                 </div>
-                <div style={{ color: T.textColor, fontSize: '11px', marginBottom: '8px' }}>LiTBit Coins</div>
-                <div style={{ color: pack.popular ? 'gold' : T.accentColor, fontSize: '20px', fontWeight: 'bold', marginBottom: '8px' }}>
-                  ${pack.price}
-                </div>
-                <div style={{ color: T.textColor, fontSize: '10px', opacity: 0.6, marginBottom: '12px' }}>
-                  {pack.savings} · {(pack.coins / pack.price).toFixed(0)} coins/$
-                </div>
-                <button onClick={() => buyPack(pack)} style={{ 
-                  width: '100%', 
-                  padding: '10px', 
-                  backgroundColor: pack.popular ? 'gold' : T.linkColor, 
-                  color: pack.popular ? 'black' : 'white', 
-                  border: 'none', 
-                  fontWeight: 'bold',
-                  fontSize: '12px',
-                  cursor: 'pointer'
-                }}>
-                  Buy {pack.label}
+              </div>
+            )}
+            <div>
+              <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '2px', marginBottom: '12px', fontWeight: 'bold' }}>
+                {selectedCategory ? selectedCategory.toUpperCase() + ' AGENTS' : 'ALL AGENTS'}
+                <span style={{ color: T.textColor, opacity: 0.5, marginLeft: '8px' }}>({filteredAgents.length})</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))', gap: '16px' }}>
+                {(searchQuery ? filteredAgents : regularAgents).map(agent => <AgentCard key={agent.id} agent={agent} isInstalled={installedAgents.has(agent.id)} onInstall={() => installAgent(agent.id)} onPreview={() => setPreviewAgent(agent)} theme={T} />)}
+              </div>
+            </div>
+            {filteredAgents.length === 0 && (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: T.textColor, opacity: 0.5 }}>
+                <div style={{ fontSize: '24px', fontWeight: 'bold', marginBottom: '12px', color: T.headerColor }}>?</div>
+                <div>No agents found matching your search.</div>
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {activeTab === 'coins' && (
+        <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+          {/* SMART COIN PACKS */}
+          <div style={{ marginBottom: '32px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px', flexWrap: 'wrap', gap: '16px' }}>
+              <div>
+                <div style={{ color: 'gold', fontSize: '14px', letterSpacing: '2px', marginBottom: '4px', fontWeight: 'bold' }}>🪙 BUY COINS</div>
+                <p style={{ color: T.textColor, fontSize: '12px', opacity: 0.7 }}>
+                  Purchase LiTBit Coins to unlock premium agents and features. 
+                  <strong style={{ color: T.accentColor }}>1 LBC = $0.01</strong>
+                </p>
+              </div>
+              <div style={{ display: 'flex', gap: '8px' }}>
+                <button onClick={earnCoins} disabled={claimLoading} style={{ padding: '10px 18px', backgroundColor: `${T.accentColor}20`, border: `2px solid ${T.accentColor}`, color: T.accentColor, fontSize: '12px', cursor: claimLoading ? 'not-allowed' : 'pointer', fontWeight: 'bold', borderRadius: '6px', opacity: claimLoading ? 0.6 : 1 }}>
+                  {claimLoading ? '⏳ Claiming...' : '⚡ Claim Daily +50'}
                 </button>
               </div>
-            ))}
+            </div>
+            
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '16px' }}>
+              {CREDIT_PACKS.map((pack) => (
+                <div 
+                  key={pack.id}
+                  style={{ 
+                    position: 'relative',
+                    padding: '24px 20px', 
+                    border: `2px solid ${pack.popular ? 'gold' : T.borderColor}`, 
+                    backgroundColor: pack.popular ? 'rgba(255,215,0,0.12)' : T.boxBg,
+                    textAlign: 'center',
+                    borderRadius: '12px',
+                    transition: 'all 0.2s',
+                    boxShadow: pack.popular ? '0 8px 32px rgba(255,215,0,0.15)' : 'none',
+                  }}
+                >
+                  {pack.popular && (
+                    <div style={{ position: 'absolute', top: '-12px', left: '50%', transform: 'translateX(-50%)', backgroundColor: 'gold', color: 'black', padding: '4px 16px', fontSize: '11px', fontWeight: 'bold', borderRadius: '4px' }}>
+                      ⭐ BEST VALUE
+                    </div>
+                  )}
+                  <div style={{ fontSize: '12px', color: T.textColor, opacity: 0.6, marginBottom: '8px', textTransform: 'uppercase', letterSpacing: '1px' }}>{pack.label}</div>
+                  <div style={{ color: pack.popular ? 'gold' : T.headerColor, fontSize: '36px', fontWeight: 'bold', marginBottom: '4px' }}>
+                    {pack.coins.toLocaleString()}
+                  </div>
+                  <div style={{ color: T.textColor, fontSize: '12px', marginBottom: '12px', opacity: 0.8 }}>LiTBit Coins</div>
+                  <div style={{ color: pack.popular ? 'gold' : T.accentColor, fontSize: '24px', fontWeight: 'bold', marginBottom: '8px' }}>
+                    ${pack.price}
+                  </div>
+                  <div style={{ color: T.textColor, fontSize: '11px', opacity: 0.6, marginBottom: '16px' }}>
+                    {pack.savings}
+                  </div>
+                  <button onClick={() => buyPack(pack)} style={{ 
+                    width: '100%', 
+                    padding: '12px', 
+                    backgroundColor: pack.popular ? 'gold' : T.linkColor, 
+                    color: pack.popular ? 'black' : 'white', 
+                    border: 'none', 
+                    fontWeight: 'bold',
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    borderRadius: '6px',
+                  }}>
+                    {pack.popular ? '⚡ Buy Best Value' : 'Buy Pack'}
+                  </button>
+                </div>
+              ))}
+            </div>
           </div>
 
-          {/* SPEND COINS — interactive */}
-          <div style={{ borderTop: '1px solid ' + T.borderColor, paddingTop: '20px' }}>
-            <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '1px', marginBottom: '16px', fontWeight: 'bold' }}>
-              SPEND YOUR LITBIT COINS
+          {/* SPEND COINS */}
+          <div style={{ borderTop: '2px solid ' + T.borderColor, paddingTop: '32px', marginBottom: '32px' }}>
+            <div style={{ color: T.accentColor, fontSize: '14px', letterSpacing: '2px', marginBottom: '20px', fontWeight: 'bold' }}>
+              💎 SPEND YOUR COINS
             </div>
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(180px, 1fr))', gap: '12px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '16px' }}>
               {SPEND_FEATURES.map((feat) => (
-                <div key={feat.id} style={{ padding: '14px', border: '1px solid ' + T.borderColor, backgroundColor: 'rgba(0,0,0,0.2)' }}>
-                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: T.accentColor, marginBottom: '6px', letterSpacing: '1px' }}>{feat.title.toUpperCase()}</div>
-                  <div style={{ color: T.headerColor, fontSize: '12px', fontWeight: 'bold', marginBottom: '2px' }}>{feat.title}</div>
-                  <div style={{ color: T.textColor, fontSize: '10px', opacity: 0.7, lineHeight: 1.4, marginBottom: '8px' }}>{feat.desc}</div>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ color: 'gold', fontSize: '12px', fontWeight: 'bold' }}>{feat.cost} LBC</span>
+                <div key={feat.id} style={{ padding: '20px', border: '1px solid ' + T.borderColor, backgroundColor: T.boxBg, borderRadius: '10px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 'bold', color: T.accentColor, marginBottom: '8px', letterSpacing: '1px' }}>{feat.title.toUpperCase()}</div>
+                  <div style={{ color: T.headerColor, fontSize: '14px', fontWeight: 'bold', marginBottom: '4px' }}>{feat.title}</div>
+                  <div style={{ color: T.textColor, fontSize: '11px', opacity: 0.7, lineHeight: 1.5, marginBottom: '12px', minHeight: '50px' }}>{feat.desc}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '12px', borderTop: '1px solid ' + T.borderColor }}>
+                    <span style={{ color: 'gold', fontSize: '16px', fontWeight: 'bold' }}>{feat.cost} LBC</span>
                     <button
                       onClick={async () => {
                         if (litBitCoins < feat.cost) {
@@ -464,7 +482,7 @@ function MarketplaceInner() {
                         }
                         showToast(`${feat.action} ${feat.title}. -${feat.cost} LBC. Balance: ${newBal}`, 'success');
                       }}
-                      style={{ padding: '4px 10px', backgroundColor: T.linkColor, color: 'white', border: 'none', fontSize: '10px', fontWeight: 'bold', cursor: 'pointer' }}
+                      style={{ padding: '8px 16px', backgroundColor: T.linkColor, color: 'white', border: 'none', fontSize: '12px', fontWeight: 'bold', cursor: 'pointer', borderRadius: '6px' }}
                     >
                       {feat.action}
                     </button>
@@ -475,27 +493,32 @@ function MarketplaceInner() {
           </div>
 
           {/* PRICING EXAMPLES */}
-          <div style={{ borderTop: '1px solid ' + T.borderColor, paddingTop: '20px', marginTop: '20px' }}>
-            <div style={{ color: T.accentColor, fontSize: '11px', letterSpacing: '1px', marginBottom: '12px', fontWeight: 'bold' }}>
-              PRICING EXAMPLES
+          <div style={{ borderTop: '2px solid ' + T.borderColor, paddingTop: '24px' }}>
+            <div style={{ color: T.textColor, fontSize: '12px', letterSpacing: '1px', marginBottom: '16px', fontWeight: 'bold', opacity: 0.8 }}>
+              📊 WHAT CAN YOU BUY?
             </div>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '16px', fontSize: '12px' }}>
-              <div style={{ padding: '8px 12px', border: '1px solid ' + T.borderColor }}>
-                <span style={{ color: T.accentColor }}>Support Agent</span>
-                <span style={{ color: T.textColor, opacity: 0.7 }}> — 50 LBC ($0.50)</span>
-              </div>
-              <div style={{ padding: '8px 12px', border: '1px solid ' + T.borderColor }}>
-                <span style={{ color: T.headerColor }}>Social Dominator</span>
-                <span style={{ color: T.textColor, opacity: 0.7 }}> — 250 LBC ($2.50)</span>
-              </div>
-              <div style={{ padding: '8px 12px', border: '1px solid ' + T.borderColor }}>
-                <span style={{ color: '#ff6b35' }}>Legal Shield</span>
-                <span style={{ color: T.textColor, opacity: 0.7 }}> — 1000 LBC ($10.00)</span>
-              </div>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px' }}>
+              {[
+                { name: 'Support Agent', cost: 50, color: T.accentColor },
+                { name: 'Writing Coach', cost: 75, color: T.headerColor },
+                { name: 'Research Guru', cost: 100, color: '#60a5fa' },
+                { name: 'Social Dominator', cost: 250, color: '#34d399' },
+                { name: 'Data Slayer', cost: 300, color: '#a78bfa' },
+                { name: 'Pixel Forge', cost: 200, color: '#ec4899' },
+                { name: 'Music Producer', cost: 400, color: '#22d3ee' },
+                { name: 'Legal Shield', cost: 1000, color: '#ff6b35' },
+                { name: 'Security Guru', cost: 1200, color: '#f87171' },
+                { name: 'ML Engineer', cost: 1500, color: '#fbbf24' },
+              ].map((item) => (
+                <div key={item.name} style={{ padding: '10px 16px', border: '1px solid ' + T.borderColor, borderRadius: '6px', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style={{ color: item.color, fontWeight: 'bold', fontSize: '13px' }}>{item.name}</span>
+                  <span style={{ color: 'gold', fontSize: '12px', fontWeight: 'bold' }}>{item.cost} LBC</span>
+                </div>
+              ))}
             </div>
           </div>
         </div>
-      </div>
+      )}
 
       {previewAgent && (
         <div onClick={() => setPreviewAgent(null)} style={{ position: 'fixed', inset: 0, backgroundColor: 'rgba(0,0,0,0.85)', zIndex: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '24px' }}>

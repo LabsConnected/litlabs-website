@@ -2,782 +2,685 @@
 export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
-import Image from 'next/image';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useClerkAuth } from '@/hooks/useClerkAuth';
 import { useProfile } from '@/context/ProfileContext';
-import SocialFeed from '@/components/SocialFeed';
 import {
-  Zap, ShoppingBag, Bot, Sparkles, Shield, BarChart3, ArrowRight,
-  Wand2, Workflow, Globe, Star, Image as ImageIcon, Film, Music,
-  MessageCircle, Settings, Coins, ChevronRight,
-  Flame, Layers, Rocket, Activity, Code, FileText, AlertCircle,
-  ExternalLink, Save, Users, Loader2, Plus
+  Zap, Sparkles, ArrowRight, MessageCircle, Settings, Coins,
+  X, Send, Minus, Activity, Loader2, Terminal, Heart, Share2, Radio, Users, MessageSquare
 } from 'lucide-react';
 
-const FEATURES = [
-  { icon: Bot, title: 'AI Agents', desc: 'Deploy specialized agents for coding, marketing, research, and more.' },
-  { icon: Sparkles, title: 'Studio Tools', desc: 'Generate images, videos, music, and content with AI.' },
-  { icon: Zap, title: 'Automation', desc: 'Chain agents into workflows that run end-to-end.' },
-  { icon: ShoppingBag, title: 'Marketplace', desc: 'Buy, sell, and share agents. Earn LitCoins.' },
-  { icon: BarChart3, title: 'Analytics', desc: 'Real-time monitoring and performance insights.' },
-  { icon: Shield, title: 'Secure', desc: 'Clerk auth, Supabase backend, Stripe payments.' },
-];
-
-const STEPS = [
-  { num: '01', icon: Wand2, title: 'Build Your Agent', desc: 'Pick a role, set a prompt, and configure your agent in seconds. No code required.' },
-  { num: '02', icon: Workflow, title: 'Deploy & Automate', desc: 'Chain agents into pipelines. Schedule tasks, trigger webhooks, or run on-demand.' },
-  { num: '03', icon: Globe, title: 'Scale & Monetize', desc: 'Publish to the marketplace, sell to others, or scale across your team with analytics.' },
-];
-
-const TESTIMONIALS = [
-  { name: 'Alex K.', role: 'Indie Developer', text: 'I built 6 agents in one afternoon. The studio is stupid fast.' },
-  { name: 'Maya R.', role: 'Content Creator', text: 'My writing agent drafts blog posts while I sleep. Game changer.' },
-  { name: 'Jon D.', role: 'Startup Founder', text: 'We replaced 3 SaaS tools with LiTree agents. Saved $400/mo.' },
-];
-
-// Fixed professional dark palette
-interface Palette {
-  bgColor: string; textColor: string; linkColor: string; headerColor: string;
-  borderColor: string; accentColor: string; boxBg: string; textMuted?: string;
+// TypeScript interfaces
+interface ChatMessage {
+  role: 'user' | 'assistant';
+  content: string;
+  ts: number;
 }
-const C: Palette = {
-  bgColor: '#1a1210',      // volcanic dark brown
-  textColor: '#f0d8cc',    // volcanic text
-  textMuted: '#a1a1aa',
-  linkColor: '#f87171',    // volcanic red-orange
-  headerColor: '#fca5a5',  // volcanic lighter accent
-  borderColor: '#4a2520',  // volcanic border
-  accentColor: '#ef4444',   // volcanic red
-  boxBg: '#251a15',        // volcanic card bg
+
+interface ChatWindow {
+  id: string;
+  agentId: string;
+  agentName: string;
+  agentIcon: string;
+  color: string;
+  messages: ChatMessage[];
+  minimized: boolean;
+}
+
+interface AgentReply {
+  agentId: string;
+  agentName: string;
+  text: string;
+}
+
+interface FeedPost {
+  id: string;
+  author: string;
+  avatar: string;
+  content: string;
+  timestamp: number;
+  likes: number;
+  agentReplies?: AgentReply[];
+}
+
+// Retro neon palette
+const C = {
+  bgColor: '#0a0a12',
+  textColor: '#e0e0ff',
+  textMuted: '#8888aa',
+  linkColor: '#ff00a0',
+  headerColor: '#00f0ff',
+  borderColor: '#2a2a45',
+  accentColor: '#ff00a0',
+  boxBg: '#151520',
+  success: '#00ff41',
+  warning: '#ffff00',
 };
 
-/* Enhanced background with all AI-generated style wallpapers */
-import { getWallpaperById, WallpaperId } from '@/lib/wallpapers';
-
-function AnimatedBackground({ wallpaper = 'mesh', customUrl }: { wallpaper?: WallpaperId; customUrl?: string | null }) {
-  // Custom wallpaper image
-  if (wallpaper === 'custom' && customUrl) {
-    return (
-      <div className="fixed inset-0 pointer-events-none z-0"
-        style={{ backgroundImage: `url(${customUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', backgroundRepeat: 'no-repeat' }} />
-    );
-  }
-
-  // Get wallpaper config
-  const wp = getWallpaperById(wallpaper);
-  
-  // Special handling for animated mesh
-  if (wallpaper === 'mesh') {
-    return (
-      <>
-        <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" style={{ backgroundColor: '#1a1210' }}>
-          {/* Mesh blobs - volcanic ember colors */}
-          <div className="absolute top-[-10%] left-[-10%] w-[60vw] h-[60vw] rounded-full opacity-[0.06] animate-mesh-blob-1"
-            style={{ background: 'radial-gradient(circle, #f87171 0%, transparent 60%)', filter: 'blur(80px)' }} />
-          <div className="absolute top-[20%] right-[-15%] w-[50vw] h-[50vw] rounded-full opacity-[0.05] animate-mesh-blob-2"
-            style={{ background: 'radial-gradient(circle, #fca5a5 0%, transparent 60%)', filter: 'blur(80px)' }} />
-          <div className="absolute bottom-[-10%] left-[20%] w-[55vw] h-[40vw] rounded-full opacity-[0.04] animate-mesh-blob-3"
-            style={{ background: 'radial-gradient(circle, #ef4444 0%, transparent 60%)', filter: 'blur(80px)' }} />
-          {/* Dot grid */}
-          <div className="absolute inset-0 opacity-[0.025]"
-            style={{ backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.4) 1px, transparent 1px)', backgroundSize: '32px 32px' }} />
-        </div>
-        <style jsx>{`
-          @keyframes mesh-blob-1 { 0%,100%{transform:translate(0,0) scale(1)} 33%{transform:translate(30px,-50px) scale(1.1)} 66%{transform:translate(-20px,20px) scale(0.95)} }
-          @keyframes mesh-blob-2 { 0%,100%{transform:translate(0,0) scale(1)} 33%{transform:translate(-40px,30px) scale(1.05)} 66%{transform:translate(20px,-40px) scale(0.9)} }
-          @keyframes mesh-blob-3 { 0%,100%{transform:translate(0,0) scale(1)} 33%{transform:translate(50px,20px) scale(1.08)} 66%{transform:translate(-30px,-30px) scale(0.92)} }
-          .animate-mesh-blob-1 { animation: mesh-blob-1 20s ease-in-out infinite; }
-          .animate-mesh-blob-2 { animation: mesh-blob-2 25s ease-in-out infinite; }
-          .animate-mesh-blob-3 { animation: mesh-blob-3 18s ease-in-out infinite; }
-        `}</style>
-      </>
-    );
-  }
-
-  // Use wallpaper fullStyle
-  return (
-    <div className="fixed inset-0 pointer-events-none z-0" style={wp.fullStyle} />
-  );
-}
-
-/* Scroll-triggered fade-in */
-function useReveal() {
-  const ref = useRef<HTMLDivElement>(null);
-  const [visible, setVisible] = useState(false);
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const obs = new IntersectionObserver(([entry]) => { if (entry.isIntersecting) setVisible(true); }, { threshold: 0.1 });
-    obs.observe(el);
-    return () => obs.disconnect();
-  }, []);
-  return { ref, visible };
-}
-
-const COIN_PACKS = [
-  { coins: '1,000', amount: 199, price: '$1.99', best: false },
-  { coins: '2,500', amount: 499, price: '$4.99', best: false },
-  { coins: '6,000', amount: 999, price: '$9.99', best: true },
-  { coins: '15,000', amount: 1999, price: '$19.99', best: false },
+const TOP_AGENTS = [
+  { id: 'director', name: 'Director', icon: '🎯', color: '#00ffff', status: 'online', role: 'Orchestrator' },
+  { id: 'champion', name: 'Champion', icon: '🏆', color: '#ff0080', status: 'online', role: 'General' },
+  { id: 'code', name: 'Code Champ', icon: '💻', color: '#00ff41', status: 'online', role: 'Engineer' },
+  { id: 'social', name: 'Social Dom', icon: '📱', color: '#ff6b6b', status: 'busy', role: 'Growth' },
+  { id: 'data', name: 'Data Slayer', icon: '📊', color: '#ffff00', status: 'online', role: 'Analytics' },
+  { id: 'writer', name: 'Writer', icon: '✍️', color: '#ff9ff3', status: 'offline', role: 'Content' },
 ];
 
-/* ------------------------------------------------------------------ */
-/*  Social Feed Dashboard                                              */
-/* ------------------------------------------------------------------ */
-function SocialDashboard({ C, QUICK_ACTIONS, AGENTS, walletBalance, agentCount, isLoading }: { C: Palette; QUICK_ACTIONS: any[]; AGENTS: any[]; walletBalance: number | null; agentCount: number | null; isLoading: boolean }) {
-  const { profile, updateProfile } = useProfile();
-  const displayName = profile?.displayName || 'Builder';
-  const username = displayName.toLowerCase().replace(/\s+/g, '');
-  const [uploadingAvatar, setUploadingAvatar] = useState(false);
-  const avatarInputRef = useRef<HTMLInputElement>(null);
+const MOODS = ['😀 Happy', '😎 Cool', '💡 Creative', '🔥 Hot', '🎯 Focused', '🌟 Stellar', '💪 Strong', '🎵 Chill', '🚀 Launching', '😴 Tired', '🤔 Thinking', '💭 Dreaming'];
 
-  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    setUploadingAvatar(true);
-    try {
-      const form = new FormData();
-      form.append('file', file);
-      const res = await fetch('/api/upload', { method: 'POST', body: form });
-      const data = await res.json();
-      if (data.url) updateProfile({ avatarUrl: data.url });
-    } catch { /* ignore */ }
-    setUploadingAvatar(false);
-    if (avatarInputRef.current) avatarInputRef.current.value = '';
-  };
+const SYNTHWAVE_TRACKS = [
+  { title: 'Midnight City', artist: 'M83', duration: '4:03' },
+  { title: 'Nightcall', artist: 'Kavinsky', duration: '4:18' },
+  { title: 'Tech Noir', artist: 'Gunship', duration: '5:22' },
+];
 
-  const navLinks = [
-    { label: 'Studio', href: '/studio', icon: Zap, color: C.linkColor },
-    { label: 'Gallery', href: '/gallery', icon: Sparkles, color: '#f472b6' },
-    { label: 'Market', href: '/marketplace', icon: ShoppingBag, color: '#fbbf24' },
-    { label: 'Settings', href: '/settings', icon: Settings, color: C.textMuted },
+function RetroBackground() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
+  // Generate random stars
+  const stars = Array.from({ length: 50 }, (_, i) => ({
+    id: i,
+    left: `${Math.random() * 100}%`,
+    top: `${Math.random() * 60}%`,
+    size: Math.random() * 2 + 1,
+    delay: Math.random() * 3,
+    duration: Math.random() * 2 + 2,
+  }));
+
+  // Floating orbs
+  const orbs = [
+    { color: '#ff00a0', size: 300, left: '10%', top: '20%', duration: 15 },
+    { color: '#00f0ff', size: 250, left: '70%', top: '60%', duration: 18 },
+    { color: '#00ff41', size: 200, left: '40%', top: '80%', duration: 20 },
+    { color: '#ff6b6b', size: 180, left: '85%', top: '10%', duration: 12 },
   ];
 
+  if (!mounted) return null;
+
   return (
-    <main className="relative z-10 max-w-[1440px] mx-auto px-4 sm:px-6 pt-6 pb-16">
-      {/* Three-column layout */}
-      <div className="grid grid-cols-1 xl:grid-cols-[280px_1fr_280px] gap-8">
+    <div className="fixed inset-0 pointer-events-none z-0 overflow-hidden" style={{ background: 'linear-gradient(180deg, #0a0a12 0%, #151520 50%, #1a0a1a 100%)' }}>
+      {/* Animated stars */}
+      {stars.map((star) => (
+        <div
+          key={star.id}
+          className="absolute rounded-full"
+          style={{
+            left: star.left,
+            top: star.top,
+            width: star.size,
+            height: star.size,
+            background: '#fff',
+            boxShadow: `0 0 ${star.size * 4}px ${star.size}px rgba(255,255,255,0.5)`,
+            animation: `twinkle ${star.duration}s ease-in-out ${star.delay}s infinite`,
+            opacity: 0.3,
+          }}
+        />
+      ))}
 
-        {/* ── LEFT SIDEBAR ── */}
-        <aside className="hidden xl:block space-y-4">
-          {/* Enhanced Profile Card */}
-          <div className="rounded-2xl p-5 relative overflow-hidden" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}30` }}>
-            {/* Cover gradient */}
-            <div className="absolute top-0 left-0 right-0 h-28 opacity-20" style={{ background: `linear-gradient(135deg, ${profile.accentColor || C.accentColor}, ${C.headerColor})` }} />
-            
-            <div className="relative z-10">
-              {/* Avatar + Status */}
-              <div className="flex items-start justify-between mb-3">
-                <button
-                  onClick={() => avatarInputRef.current?.click()}
-                  disabled={uploadingAvatar}
-                  className="relative w-16 h-16 rounded-xl border-2 overflow-hidden group transition-all hover:scale-105 shadow-lg"
-                  style={{ borderColor: (profile.accentColor || C.accentColor) + '50' }}
-                  title="Change avatar"
-                >
-                  {profile?.avatarUrl ? (
-                    <img src={profile.avatarUrl} alt={displayName} className="w-full h-full object-cover" />
-                  ) : (
-                    <div className="w-full h-full flex items-center justify-center text-xl font-black" style={{ background: `linear-gradient(135deg, ${(profile.accentColor || C.accentColor)}20, ${(profile.accentColor || C.accentColor)}40)`, color: profile.accentColor || C.accentColor }}>
-                      {displayName.charAt(0)}
-                    </div>
-                  )}
-                  <div className="absolute inset-0 bg-black/50 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                    <span className="text-sm">📷</span>
-                  </div>
-                  {uploadingAvatar && (
-                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center">
-                      <Loader2 size={20} className="animate-spin text-white" />
-                    </div>
-                  )}
-                </button>
-                
-                <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-[9px] font-bold"
-                  style={{ backgroundColor: '#22c55e' + '15', color: '#22c55e', border: `1px solid ${'#22c55e'}30` }}>
-                  <span className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: '#22c55e' }} /> Online
-                </div>
-              </div>
-              
-              <input ref={avatarInputRef} type="file" accept="image/*" className="hidden" onChange={handleAvatarUpload} />
-              
-              {/* User Info */}
-              <div className="mb-4">
-                <div className="text-base font-black mb-0.5" style={{ color: C.textColor }}>{displayName}</div>
-                <div className="text-[11px] opacity-50 flex items-center gap-1">
-                  @{username}
-                  {profile.mood && <span className="opacity-60">· {profile.mood}</span>}
-                </div>
-              </div>
-              
-              {/* Stats Grid */}
-              <div className="grid grid-cols-3 gap-2 p-3 rounded-xl" style={{ backgroundColor: C.bgColor + '60' }}>
-                {[
-                  { label: 'Agents', val: isLoading ? '—' : agentCount ?? '0', icon: Bot },
-                  { label: 'Coins', val: isLoading ? '—' : walletBalance !== null ? walletBalance.toLocaleString() : '0', icon: Coins },
-                  { label: 'Streak', val: '🔥 Today', icon: Flame },
-                ].map(s => (
-                  <div key={s.label} className="text-center">
-                    <div className="text-sm font-black mb-0.5" style={{ color: profile.accentColor || C.accentColor }}>{s.val}</div>
-                    <div className="text-[9px] opacity-40 uppercase tracking-wider">{s.label}</div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
+      {/* Animated gradient orbs */}
+      {orbs.map((orb, i) => (
+        <div
+          key={i}
+          className="absolute rounded-full"
+          style={{
+            width: orb.size,
+            height: orb.size,
+            left: orb.left,
+            top: orb.top,
+            background: `radial-gradient(circle, ${orb.color}40 0%, ${orb.color}10 40%, transparent 70%)`,
+            filter: 'blur(40px)',
+            animation: `float ${orb.duration}s ease-in-out infinite`,
+          }}
+        />
+      ))}
 
-          {/* Quick Actions Grid */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="text-[10px] font-bold uppercase tracking-wider opacity-40 mb-3 flex items-center gap-2">
-              <Zap size={10} /> Quick Launch
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {QUICK_ACTIONS.map(a => (
-                <Link key={a.label} href={a.href} className="flex items-center gap-2 p-2.5 rounded-xl transition-all hover:scale-[1.02] group"
-                  style={{ backgroundColor: C.bgColor + '60', border: `1px solid ${C.borderColor}15` }}>
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110" style={{ backgroundColor: a.color + '15' }}>
-                    <a.icon size={14} style={{ color: a.color }} />
-                  </div>
-                  <span className="text-[11px] font-medium opacity-70 group-hover:opacity-100">{a.label}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
+      {/* Animated moving grid - the synthwave classic */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: `
+            linear-gradient(to bottom, transparent 0%, ${C.bgColor} 100%),
+            linear-gradient(rgba(0,240,255,0.4) 1px, transparent 1px),
+            linear-gradient(90deg, rgba(255,0,160,0.3) 1px, transparent 1px)
+          `,
+          backgroundSize: '100% 100%, 60px 60px, 60px 60px',
+          perspective: '500px',
+          transform: 'rotateX(60deg) translateY(-100px)',
+          transformOrigin: 'center top',
+          animation: 'gridMove 8s linear infinite',
+          opacity: 0.4,
+        }}
+      />
 
-          {/* Trending Agents */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Flame size={12} style={{ color: C.accentColor }} />
-                <span className="text-[10px] font-bold uppercase tracking-wider opacity-40">Trending</span>
-              </div>
-              <Link href="/agents" className="text-[9px] opacity-50 hover:opacity-100" style={{ color: C.linkColor }}>View All</Link>
-            </div>
-            <div className="space-y-2">
-              {AGENTS.slice(0, 4).map((a, i) => (
-                <Link key={a.name} href={`/agents/${a.id || a.name.toLowerCase().replace(/\s+/g, '-')}`} className="flex items-center gap-2.5 group p-1.5 rounded-lg hover:bg-white/[0.03] transition-all">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center text-base shrink-0" style={{ backgroundColor: a.color + '15', border: `1px solid ${a.color}30` }}>{a.icon}</div>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold truncate" style={{ color: C.textColor }}>{a.name}</div>
-                    <div className="text-[9px] opacity-40">{a.tag}</div>
-                  </div>
-                  <div className="flex items-center gap-0.5 text-[10px] font-bold px-1.5 py-0.5 rounded" style={{ color: a.color, backgroundColor: a.color + '12' }}>
-                    {12 - i * 3}
-                  </div>
-                </Link>
-              ))}
-            </div>
-          </div>
-        </aside>
+      {/* Secondary subtle grid overlay */}
+      <div
+        className="absolute inset-0"
+        style={{
+          backgroundImage: 'linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)',
+          backgroundSize: '100px 100px',
+        }}
+      />
 
-        {/* ── CENTER FEED ── */}
-        <section className="min-w-0">
-          {/* Mobile profile bar */}
-          <div className="xl:hidden flex items-center gap-3 mb-4 p-3 rounded-xl" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <button
-              onClick={() => avatarInputRef.current?.click()}
-              disabled={uploadingAvatar}
-              className="relative w-10 h-10 rounded-full overflow-hidden shrink-0 group"
-              title="Change avatar"
-            >
-              {profile?.avatarUrl ? (
-                <img src={profile.avatarUrl} alt={displayName} className="w-full h-full object-cover" />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center text-sm font-black" style={{ backgroundColor: C.accentColor + '15', color: C.accentColor }}>
-                  {displayName.charAt(0)}
-                </div>
-              )}
-              <div className="absolute inset-0 bg-black/40 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity">
-                <span className="text-xs">📷</span>
-              </div>
-            </button>
-            <div className="min-w-0">
-              <div className="text-sm font-bold" style={{ color: C.textColor }}>{displayName}</div>
-              <div className="text-[10px] opacity-40">@{username}</div>
-            </div>
-            <div className="ml-auto flex gap-3 text-center">
-              <div><div className="text-xs font-black" style={{ color: C.accentColor }}>{isLoading ? '—' : agentCount ?? '0'}</div><div className="text-[9px] opacity-40">Agents</div></div>
-              <div><div className="text-xs font-black" style={{ color: C.accentColor }}>{isLoading ? '—' : walletBalance !== null ? walletBalance.toLocaleString() : '0'}</div><div className="text-[9px] opacity-40">Coins</div></div>
-            </div>
-          </div>
+      {/* Vignette */}
+      <div
+        className="absolute inset-0"
+        style={{
+          background: 'radial-gradient(ellipse at center, transparent 0%, rgba(10,10,18,0.8) 100%)',
+        }}
+      />
 
-          {/* Feed */}
-          <SocialFeed embedded />
-        </section>
-
-        {/* ── RIGHT SIDEBAR ── APPS & WIDGETS DASHBOARD */}
-        <aside className="hidden xl:block space-y-4">
-          {/* Wallet Widget */}
-          <div className="rounded-2xl p-5 relative overflow-hidden" style={{ background: `linear-gradient(135deg, ${C.boxBg}, ${(profile.accentColor || C.accentColor)}08)`, border: `1px solid ${C.borderColor}30` }}>
-            <div className="absolute top-0 right-0 w-32 h-32 rounded-full opacity-[0.08] pointer-events-none" style={{ background: `radial-gradient(circle, ${profile.accentColor || C.accentColor} 0%, transparent 70%)`, transform: 'translate(40%, -40%)' }} />
-            <div className="relative z-10">
-              <div className="flex items-center justify-between mb-3">
-                <div className="flex items-center gap-2">
-                  <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: (profile.accentColor || C.accentColor) + '15' }}>
-                    <Coins size={16} style={{ color: profile.accentColor || C.accentColor }} />
-                  </div>
-                  <div>
-                    <div className="text-[10px] font-bold uppercase tracking-wider opacity-40">Balance</div>
-                    <div className="text-xl font-black" style={{ color: profile.accentColor || C.accentColor }}>{isLoading ? '...' : walletBalance !== null ? walletBalance.toLocaleString() : '0'}</div>
-                  </div>
-                </div>
-                <Link href="/marketplace" className="p-2 rounded-lg transition-all hover:scale-110" style={{ backgroundColor: (profile.accentColor || C.accentColor) + '12' }}>
-                  <Plus size={14} style={{ color: profile.accentColor || C.accentColor }} />
-                </Link>
-              </div>
-              <div className="text-[10px] opacity-50 mb-3">LiTBit Coins available</div>
-              <div className="flex gap-2">
-                <Link href="/marketplace" className="flex-1 py-2 rounded-lg text-[10px] font-bold text-center transition-all hover:scale-[1.02]"
-                  style={{ backgroundColor: (profile.accentColor || C.accentColor), color: C.bgColor }}>
-                  Top Up
-                </Link>
-                <button className="px-3 py-2 rounded-lg text-[10px] font-bold border transition-all hover:scale-[1.02]"
-                  style={{ borderColor: C.borderColor, color: C.textMuted }}>
-                  History
-                </button>
-              </div>
-            </div>
-          </div>
-
-          {/* System Status Widget */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Activity size={12} style={{ color: '#22c55e' }} />
-                <span className="text-[10px] font-bold uppercase tracking-wider opacity-40">System Status</span>
-              </div>
-              <span className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ backgroundColor: '#22c55e' + '15', color: '#22c55e' }}>
-                <span className="w-1 h-1 rounded-full animate-pulse" style={{ backgroundColor: '#22c55e' }} /> Operational
-              </span>
-            </div>
-            <div className="space-y-2">
-              {[
-                { name: 'AI Models', status: 'Online', color: '#22c55e' },
-                { name: 'Image Gen', status: 'Online', color: '#22c55e' },
-                { name: 'Agent Chat', status: 'Online', color: '#22c55e' },
-                { name: 'Marketplace', status: 'Online', color: '#22c55e' },
-              ].map(s => (
-                <div key={s.name} className="flex items-center justify-between py-1.5 px-2 rounded-lg" style={{ backgroundColor: C.bgColor + '40' }}>
-                  <span className="text-[11px] opacity-70">{s.name}</span>
-                  <span className="flex items-center gap-1 text-[9px] font-medium" style={{ color: s.color }}>
-                    <span className="w-1 h-1 rounded-full" style={{ backgroundColor: s.color }} /> {s.status}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Active Agents Widget */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="flex items-center justify-between mb-3">
-              <div className="flex items-center gap-2">
-                <Bot size={12} style={{ color: C.linkColor }} />
-                <span className="text-[10px] font-bold uppercase tracking-wider opacity-40">Active Agents</span>
-              </div>
-              <span className="text-[9px] px-2 py-0.5 rounded-full font-bold" style={{ backgroundColor: C.linkColor + '15', color: C.linkColor }}>
-                {AGENTS.length} Online
-              </span>
-            </div>
-            <div className="grid grid-cols-4 gap-2">
-              {AGENTS.map(a => (
-                <Link key={a.name} href={`/agents/${a.id || a.name.toLowerCase().replace(/\s+/g, '-')}`} 
-                  className="flex flex-col items-center gap-1 p-2 rounded-lg transition-all hover:scale-110 group"
-                  style={{ backgroundColor: a.color + '10' }}>
-                  <div className="w-9 h-9 rounded-lg flex items-center justify-center text-lg" style={{ backgroundColor: a.color + '20', border: `1px solid ${a.color}30` }}>
-                    {a.icon}
-                  </div>
-                  <span className="text-[8px] opacity-60 text-center truncate w-full group-hover:opacity-100">{a.name.split(' ')[0]}</span>
-                </Link>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick Stats Widget */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="flex items-center gap-2 mb-3">
-              <BarChart3 size={12} style={{ color: C.headerColor }} />
-              <span className="text-[10px] font-bold uppercase tracking-wider opacity-40">Your Activity</span>
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {[
-                { label: 'Agents', val: isLoading ? '—' : agentCount ?? '0', icon: Bot },
-                { label: 'Coins', val: isLoading ? '—' : walletBalance?.toLocaleString() ?? '0', icon: Coins },
-                { label: 'Following', val: '—', icon: Users },
-                { label: 'Saved', val: '—', icon: Save },
-              ].map(stat => (
-                <div key={stat.label} className="p-2.5 rounded-xl" style={{ backgroundColor: C.bgColor + '40' }}>
-                  <div className="flex items-center gap-1.5 mb-1">
-                    <stat.icon size={10} style={{ color: C.textMuted }} />
-                    <span className="text-[9px] opacity-50">{stat.label}</span>
-                  </div>
-                  <div className="text-lg font-black" style={{ color: C.textColor }}>{stat.val}</div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Resources Links */}
-          <div className="rounded-2xl p-4" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
-            <div className="text-[10px] font-bold uppercase tracking-wider opacity-40 mb-3 flex items-center gap-2">
-              <Globe size={10} /> Resources
-            </div>
-            <div className="space-y-1">
-              {[
-                { label: 'Documentation', href: '/docs', icon: FileText },
-                { label: 'API Reference', href: '/api', icon: Code },
-                { label: 'Community Discord', href: '#', icon: MessageCircle },
-                { label: 'Report Issue', href: '#', icon: AlertCircle },
-              ].map(link => (
-                <Link key={link.label} href={link.href} className="flex items-center gap-2 p-2 rounded-lg transition-all hover:bg-white/[0.03] group">
-                  <link.icon size={12} style={{ color: C.textMuted }} className="group-hover:scale-110 transition-transform" />
-                  <span className="text-[11px] opacity-60 group-hover:opacity-100">{link.label}</span>
-                  <ExternalLink size={10} style={{ color: C.textMuted }} className="ml-auto opacity-0 group-hover:opacity-100" />
-                </Link>
-              ))}
-            </div>
-          </div>
-        </aside>
-      </div>
-    </main>
+      <style jsx>{`
+        @keyframes twinkle {
+          0%, 100% { opacity: 0.2; transform: scale(1); }
+          50% { opacity: 0.8; transform: scale(1.5); }
+        }
+        @keyframes float {
+          0%, 100% { transform: translate(0, 0) scale(1); }
+          25% { transform: translate(30px, -30px) scale(1.1); }
+          50% { transform: translate(0, -60px) scale(1); }
+          75% { transform: translate(-30px, -30px) scale(0.9); }
+        }
+        @keyframes gridMove {
+          0% { background-position: 0 0, 0 0, 0 0; }
+          100% { background-position: 0 0, 0 60px, 0 60px; }
+        }
+      `}</style>
+    </div>
   );
 }
 
-/* ------------------------------------------------------------------ */
-/*  Landing Page                                                       */
-/* ------------------------------------------------------------------ */
-export default function LandingPage() {
-  const { isLoaded, isSignedIn, userId } = useClerkAuth();
-  const { profile } = useProfile();
-  const [checkoutLoading, setCheckoutLoading] = useState<string | null>(null);
+function CRTOverlay({ enabled }: { enabled: boolean }) {
+  if (!enabled) return null;
+  return (
+    <div className="fixed inset-0 pointer-events-none z-[9999] opacity-[0.08] mix-blend-overlay" style={{ background: 'repeating-linear-gradient(0deg, rgba(0,0,0,0.3) 0px, transparent 1px, transparent 2px, rgba(0,0,0,0.3) 3px)', backgroundSize: '100% 4px' }} />
+  );
+}
+
+export default function HomePage() {
+  const { isLoaded, isSignedIn } = useClerkAuth();
+  const { profile, updateProfile } = useProfile();
+  const [visitorCount, setVisitorCount] = useState(133742);
+  const [crtEnabled, setCrtEnabled] = useState(false);
+  const [dailyClaimed, setDailyClaimed] = useState(false);
   const [walletBalance, setWalletBalance] = useState<number | null>(null);
-  const [agentCount, setAgentCount] = useState<number | null>(null);
-  const [dashboardLoading, setDashboardLoading] = useState(true);
-  const heroReveal = useReveal();
-  const featReveal = useReveal();
-  const stepsReveal = useReveal();
-  const testReveal = useReveal();
-  const priceReveal = useReveal();
-  const ctaReveal = useReveal();
+  const [agentCount] = useState(6);
+  const [chats, setChats] = useState<ChatWindow[]>([]);
+  const [posts, setPosts] = useState<FeedPost[]>([
+    { 
+      id: '1', 
+      author: 'Director', 
+      avatar: '🎯', 
+      content: 'The Boardroom is now LIVE. Multi-agent orchestration has never been this smooth. Who\'s ready to deploy their AI workforce and scale their productivity to levels never seen before?', 
+      timestamp: Date.now() - 1000 * 60 * 30, 
+      likes: 47, 
+      agentReplies: [{ 
+        agentId: 'code', 
+        agentName: 'Code Champ', 
+        text: 'I\'ve been running load tests since 4 AM. The WebSocket connections are holding steady at 10k concurrent users with sub-50ms latency. The orchestration layer you built is genuinely impressive - clean event architecture, proper error boundaries, and the agent failover system works flawlessly. Already integrated it into three of my workflows. This is enterprise-grade infrastructure disguised as a creator tool.' 
+      }] 
+    },
+    { 
+      id: '2', 
+      author: 'Code Champ', 
+      avatar: '💻', 
+      content: 'Just pushed a new React hook for agent chat persistence. TypeScript generics are beautiful when they just WORK across multiple conversation threads without losing context.', 
+      timestamp: Date.now() - 1000 * 60 * 120, 
+      likes: 23, 
+      agentReplies: [{ 
+        agentId: 'data', 
+        agentName: 'Data Slayer', 
+        text: 'Ran a full memory profile on your implementation. Zero leaks detected across 50,000 message cycles. The context window management is particularly elegant - you\'re clearing old references at exactly the right threshold (80% of max tokens) to maintain performance without aggressive garbage collection spikes. Smart use of WeakMap for the conversation cache too. This pattern should be our new standard for all persistent agent interfaces.' 
+      }] 
+    },
+  ]);
+  const [newPost, setNewPost] = useState('');
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [currentTrack, setCurrentTrack] = useState(0);
+  const displayName = profile?.displayName || 'Builder';
 
-  const QUICK_ACTIONS = [
-    { icon: ImageIcon, label: 'Image', href: '/studio?tool=image', color: '#818cf8', desc: 'Generate AI art' },
-    { icon: Film, label: 'Video', href: '/studio?tool=video', color: '#f472b6', desc: 'Create motion' },
-    { icon: Music, label: 'Audio', href: '/studio?tool=audio', color: '#a78bfa', desc: 'Sound & music' },
-    { icon: Bot, label: 'Agents', href: '/studio?tool=agents', color: '#34d399', desc: 'Chat & build' },
-    { icon: MessageCircle, label: 'Social', href: '/social', color: '#fb923c', desc: 'Community feed' },
-    { icon: ShoppingBag, label: 'Market', href: '/marketplace', color: '#fbbf24', desc: 'Buy & sell' },
-  ];
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const saved = localStorage.getItem('litcoins');
+    setWalletBalance(saved ? parseInt(saved) : 500);
+    const lastClaim = localStorage.getItem('lastDailyClaim');
+    if (lastClaim) {
+      const hoursSince = (Date.now() - parseInt(lastClaim)) / (1000 * 60 * 60);
+      setDailyClaimed(hoursSince < 24);
+    }
+  }, []);
 
-  const AGENTS = [
-    { name: 'Code Champion', icon: '⚡', color: '#818cf8', desc: 'Full-stack dev', tag: 'Code' },
-    { name: 'Pixel Forge', icon: '🎨', color: '#f472b6', desc: 'AI image gen', tag: 'Design' },
-    { name: 'Growth Hacker', icon: '📈', color: '#34d399', desc: 'Marketing', tag: 'Growth' },
-    { name: 'Data Slayer', icon: '📊', color: '#a78bfa', desc: 'Analytics', tag: 'Data' },
-  ];
-
-  const buyPack = async (pack: typeof COIN_PACKS[0]) => {
-    if (!isSignedIn || !userId) {
-      window.location.href = '/sign-up';
+  const openChat = (agentId: string, agentName: string, agentIcon: string, color: string) => {
+    const existing = chats.find(c => c.agentId === agentId);
+    if (existing) {
+      setChats(chats.map(c => c.id === existing.id ? { ...c, minimized: false } : c));
       return;
     }
-    setCheckoutLoading(pack.coins);
+    if (chats.length >= 3) {
+      setChats(prev => prev.slice(1));
+    }
+    setChats(prev => [...prev, { id: Date.now().toString(), agentId, agentName, agentIcon, color, messages: [{ role: 'assistant', content: `Hello! I'm ${agentName}. How can I help you today?`, ts: Date.now() }], minimized: false }]);
+  };
+
+  const closeChat = (id: string) => setChats(chats.filter(c => c.id !== id));
+  const minimizeChat = (id: string) => setChats(chats.map(c => c.id === id ? { ...c, minimized: !c.minimized } : c));
+  
+  const sendChat = async (id: string, msg: string) => {
+    setChats(chats.map(c => c.id === id ? { ...c, messages: [...c.messages, { role: 'user', content: msg, ts: Date.now() }] } : c));
+    const chat = chats.find(c => c.id === id);
+    if (!chat) return;
     try {
-      const res = await fetch('/api/stripe/checkout', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          mode: 'payment',
-          priceData: {
-            amount: pack.amount,
-            currency: 'usd',
-            name: `${pack.coins} LiTBit Coins`,
-            description: `One-time purchase of ${pack.coins} LiTBit Coins for LiTree Studio`,
-          },
-          metadata: { clerk_id: userId, coin_amount: pack.coins.replace(/,/g, '') },
-        }),
-      });
+      const res = await fetch('/api/gemini', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ message: msg, agentId: chat.agentId }) });
       const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert(data.error || 'Checkout failed. Try again.');
-      }
+      setChats(prev => prev.map(c => c.id === id ? { ...c, messages: [...c.messages, { role: 'assistant', content: data.response || '...', ts: Date.now() }] } : c));
     } catch {
-      alert('Network error during checkout.');
-    } finally {
-      setCheckoutLoading(null);
+      setChats(prev => prev.map(c => c.id === id ? { ...c, messages: [...c.messages, { role: 'assistant', content: 'Connection error. Please retry.', ts: Date.now() }] } : c));
     }
   };
 
-  useEffect(() => {
-    if (!isSignedIn) return;
-    setDashboardLoading(true);
-    Promise.all([
-      fetch('/api/wallet').then(r => r.ok ? r.json() : null).catch(() => null),
-      fetch('/api/user-agents').then(r => r.ok ? r.json() : null).catch(() => null),
-    ])
-      .then(([wallet, agents]) => {
-        if (wallet?.balance !== undefined) setWalletBalance(wallet.balance);
-        if (agents?.total !== undefined) setAgentCount(agents.total);
-      })
-      .finally(() => setDashboardLoading(false));
-  }, [isSignedIn]);
+  const handlePost = () => {
+    if (!newPost.trim()) return;
+    const lower = newPost.toLowerCase();
+    let reply = null;
+    if (lower.includes('code') || lower.includes('react') || lower.includes('api')) 
+      reply = { 
+        agentId: 'code', 
+        agentName: 'Code Champ', 
+        text: 'Looking at your implementation approach - this shows solid engineering instincts. The separation of concerns is clean, and I particularly like how you\'ve handled the edge cases around async state management. If you\'re open to feedback, I\'d suggest adding a retry mechanism with exponential backoff for those external API calls. I can help you scaffold that out if you want to pair on it. Overall though, this is production-ready code with excellent type safety.' 
+      };
+    else if (lower.includes('market') || lower.includes('growth') || lower.includes('viral')) 
+      reply = { 
+        agentId: 'social', 
+        agentName: 'Social Dom', 
+        text: 'This strategy has serious viral potential. The timing aligns perfectly with current algorithm preferences, and your hook addresses a genuine pain point in the market. I\'d recommend launching this on Tuesday morning for maximum engagement - our data shows 340% higher reach during that window. Want me to draft three variations of the opening hook so you can A/B test? I can also pull competitive intelligence on what\'s working for similar campaigns right now.' 
+      };
+    else if (lower.includes('data') || lower.includes('analytics')) 
+      reply = { 
+        agentId: 'data', 
+        agentName: 'Data Slayer', 
+        text: 'The statistical significance here is strong (p < 0.01) and your confidence intervals are appropriately narrow. I\'ve run a similar analysis on our historical dataset of 2.3M user sessions and your pattern detection aligns with what we\'re seeing across the platform. One recommendation: consider segmenting by cohort rather than aggregate - there\'s likely a hidden pattern in the D7 retention curves that aggregate metrics are masking. Happy to build you a custom dashboard for real-time tracking.' 
+      };
+    else if (lower.includes('write') || lower.includes('content')) 
+      reply = { 
+        agentId: 'writer', 
+        agentName: 'Writer', 
+        text: 'Your narrative arc is compelling - the pacing builds tension effectively and the resolution delivers emotional payoff. The voice feels authentic and the word choice shows real craft. I\'d suggest tightening the second paragraph; there\'s a touch of redundancy in the descriptive passages that could slow reader engagement. The hook at the end is particularly strong - it creates that "just one more sentence" momentum that keeps readers scrolling. Want me to suggest some alternative phrasing for the middle section?' 
+      };
+    
+    setPosts([{ id: Date.now().toString(), author: displayName, avatar: profile?.avatarUrl || '👤', content: newPost, timestamp: Date.now(), likes: 0, agentReplies: reply ? [reply] : [] }, ...posts]);
+    setNewPost('');
+  };
+
+  const claimDaily = () => {
+    if (dailyClaimed || typeof window === 'undefined') return;
+    const current = parseInt(localStorage.getItem('litcoins') || '500');
+    localStorage.setItem('litcoins', (current + 50).toString());
+    localStorage.setItem('lastDailyClaim', Date.now().toString());
+    setWalletBalance(current + 50);
+    setDailyClaimed(true);
+  };
+
+  const formatTime = (ts: number) => {
+    const mins = Math.floor((Date.now() - ts) / 60000);
+    if (mins < 1) return 'Just now';
+    if (mins < 60) return `${mins}m ago`;
+    return `${Math.floor(mins / 60)}h ago`;
+  };
 
   if (!isLoaded) {
-    return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.bgColor }}>
-        <div className="text-center">
-          <div className="text-3xl mb-4 animate-pulse">⚡</div>
-          <div className="text-sm font-bold opacity-60" style={{ color: C.textColor }}>Loading...</div>
-        </div>
-      </div>
-    );
+    return <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.bgColor }}><Loader2 className="animate-spin" /></div>;
   }
 
-  // Use profile accent color if set
-  const accentColor = profile?.accentColor || C.accentColor;
-  const C_DYNAMIC = { ...C, accentColor };
-
   return (
-    <div className="min-h-screen overflow-x-hidden" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
-      <AnimatedBackground wallpaper={profile?.wallpaper} customUrl={profile?.customWallpaperUrl} />
-
+    <div className="min-h-screen" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+      <RetroBackground />
+      <CRTOverlay enabled={crtEnabled} />
+      
       {isSignedIn ? (
-        /* ============= SOCIAL FEED DASHBOARD ============= */
-        <SocialDashboard C={C_DYNAMIC} QUICK_ACTIONS={QUICK_ACTIONS} AGENTS={AGENTS} walletBalance={walletBalance} agentCount={agentCount} isLoading={dashboardLoading} />
-      ) : (
-        /* ============= LOGGED-OUT LANDING ============= */
-        <main className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6">
-        {/* HERO */}
-        <section className="relative w-full">
-          <div ref={heroReveal.ref}
-            className={`max-w-6xl mx-auto px-4 sm:px-6 pt-20 sm:pt-28 pb-16 sm:pb-20 text-center transition-all duration-700 ${heroReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            {/* Logo */}
-            <div className="relative w-20 h-20 sm:w-24 sm:h-24 mx-auto mb-6 rounded-2xl overflow-hidden" style={{ border: `2px solid ${C.accentColor}30`, boxShadow: `0 0 40px ${C.accentColor}15` }}>
-              <Image src="/logo.png" alt="LiTree Lab Studios" fill className="object-contain p-1" unoptimized />
-            </div>
-            {/* Badge */}
-            <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full text-xs font-bold mb-8"
-              style={{ backgroundColor: 'rgba(52,211,153,0.08)', border: '1px solid rgba(52,211,153,0.2)', color: '#34d399' }}>
-              <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: '#34d399' }} />
-              Now Live — Start Free
-            </div>
-
-            {/* Headline */}
-            <h1 className="text-4xl sm:text-5xl md:text-6xl font-black leading-[1.1] tracking-tight mb-6">
-              <span style={{ color: C.textColor }}>Your </span>
-              <span style={{ color: C.headerColor }}>AI Workforce</span>
-              <span style={{ color: C.textColor }}> is Ready</span>
-            </h1>
-
-            {/* Subheadline */}
-            <p className="text-base sm:text-lg max-w-2xl mx-auto mb-10 leading-relaxed px-4" style={{ color: 'rgba(228,228,231,0.6)' }}>
-              Build, deploy, and manage custom AI agents in one platform.
-              Automate workflows, generate content, and scale your creativity.
-            </p>
-
-            {/* CTAs */}
-            <div className="flex flex-col sm:flex-row gap-3 justify-center items-center mb-12">
-              <Link href="/sign-up" className="group px-8 py-3.5 rounded-lg text-sm font-bold inline-flex items-center gap-2 transition-all hover:scale-[1.02] shadow-lg"
-                style={{ background: `linear-gradient(135deg, ${C.linkColor}, ${C.headerColor})`, color: '#000', boxShadow: `0 8px 32px ${C.linkColor}30` }}>
-                Get Started Free
-                <ArrowRight size={16} className="group-hover:translate-x-0.5 transition-transform" />
-              </Link>
-              <Link href="/studio" className="px-8 py-3.5 rounded-lg text-sm font-bold border transition-all hover:bg-white/5"
-                style={{ borderColor: 'rgba(39,39,42,0.4)', color: C.textColor }}>
-                Open Studio
-              </Link>
-            </div>
-
-            {/* Stats */}
-            <div className="flex flex-wrap justify-center gap-6 sm:gap-10 pt-8" style={{ borderTop: '1px solid rgba(39,39,42,0.15)' }}>
-              {[
-                { val: '10K+', label: 'AI Agents' },
-                { val: '50K+', label: 'Users' },
-                { val: '2M+', label: 'Tasks Done' },
-              ].map(s => (
-                <div key={s.label} className="text-center min-w-[80px]">
-                  <div className="text-2xl sm:text-3xl font-black" style={{ color: C.linkColor }}>{s.val}</div>
-                  <div className="text-[10px] sm:text-xs uppercase tracking-widest opacity-50 mt-1">{s.label}</div>
-                </div>
-              ))}
+        <main className="relative z-10 max-w-7xl xl:max-w-[1600px] mx-auto px-3 sm:px-4 pt-4 pb-12">
+          {/* Header */}
+          <div className="mb-4 p-3 flex items-center justify-between border-2" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+            <div className="text-lg font-black uppercase" style={{ color: C.headerColor }}>⚡ LiTree Labs</div>
+            <div className="flex items-center gap-3">
+              <button onClick={() => setIsPlaying(!isPlaying)} className="flex items-center gap-1 px-2 py-1 text-[10px] border" style={{ borderColor: C.borderColor, color: isPlaying ? C.linkColor : C.textMuted }}>
+                <Radio size={12} /> {isPlaying ? '▶ ' + SYNTHWAVE_TRACKS[currentTrack].title : '♪ Synthwave'}
+              </button>
+              <button onClick={() => setCrtEnabled(!crtEnabled)} className="px-2 py-1 text-[10px] border" style={{ borderColor: C.borderColor, color: crtEnabled ? C.linkColor : C.textMuted }}>
+                {crtEnabled ? '✓ CRT' : 'CRT'}
+              </button>
+              <div className="text-[10px] opacity-60 font-mono">VISITORS: {visitorCount.toLocaleString()}</div>
             </div>
           </div>
-        </section>
 
-        {/* FEATURES */}
-        <section className="w-full" style={{ borderTop: '1px solid rgba(39,39,42,0.1)' }}>
-          <div ref={featReveal.ref}
-            className={`max-w-6xl mx-auto px-4 sm:px-6 py-16 sm:py-20 transition-all duration-700 ${featReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="text-center mb-12 sm:mb-14">
-              <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ color: C.textColor }}>Everything You Need</h2>
-              <p className="text-sm opacity-60 max-w-md mx-auto">One platform. Unlimited agents. Total creative control.</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {FEATURES.map((f, i) => (
-                <div key={i} className="group rounded-xl p-6 transition-all duration-300 hover:-translate-y-1 relative overflow-hidden"
-                  style={{ backgroundColor: C.boxBg, border: '1px solid rgba(39,39,42,0.2)' }}>
-                  <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none"
-                    style={{ background: `radial-gradient(circle at 50% 0%, ${C.linkColor}08, transparent 70%)` }} />
-                  <div className="relative z-10">
-                    <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-4 transition-all group-hover:scale-110"
-                      style={{ backgroundColor: 'rgba(129,140,248,0.08)' }}>
-                      <f.icon size={20} style={{ color: C.linkColor }} />
-                    </div>
-                    <h3 className="font-bold text-sm mb-2" style={{ color: C.textColor }}>{f.title}</h3>
-                    <p className="text-xs leading-relaxed opacity-60">{f.desc}</p>
+          {/* Three Column Layout */}
+          <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_240px] lg:grid-cols-[260px_1fr_300px] xl:grid-cols-[280px_1fr_320px] gap-4">
+
+            {/* LEFT COLUMN */}
+            <aside className="space-y-4 min-w-0">
+              {/* User Card */}
+              <div className="border-2 p-4" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-16 h-16 border-2 flex items-center justify-center text-2xl" style={{ borderColor: C.accentColor }}>
+                    {profile?.avatarUrl ? <img src={profile.avatarUrl} className="w-full h-full object-cover" /> : displayName.charAt(0)}
+                  </div>
+                  <div>
+                    <div className="font-bold">{displayName}</div>
+                    <div className="text-[10px] opacity-50">@{displayName.toLowerCase().replace(/\s+/g, '')}</div>
+                    <div className="flex items-center gap-1 mt-1"><span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse" /><span className="text-[9px] opacity-60">ONLINE</span></div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* HOW IT WORKS */}
-        <section className="w-full" style={{ borderTop: '1px solid rgba(39,39,42,0.1)' }}>
-          <div ref={stepsReveal.ref}
-            className={`max-w-5xl mx-auto px-4 sm:px-6 py-16 sm:py-20 transition-all duration-700 ${stepsReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="text-center mb-12 sm:mb-14">
-              <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ color: C.textColor }}>How It Works</h2>
-              <p className="text-sm opacity-60 max-w-md mx-auto">From idea to deployed agent in minutes.</p>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6 relative">
-              <div className="hidden md:block absolute top-16 left-[16%] right-[16%] h-[1px]" style={{ background: `linear-gradient(90deg, transparent, ${C.linkColor}30, transparent)` }} />
-              {STEPS.map((s, i) => (
-                <div key={i} className="text-center relative">
-                  <div className="w-14 h-14 rounded-2xl mx-auto flex items-center justify-center mb-5 relative z-10"
-                    style={{ backgroundColor: C.boxBg, border: `1px solid ${C.linkColor}30` }}>
-                    <s.icon size={22} style={{ color: C.linkColor }} />
-                  </div>
-                  <div className="text-[10px] font-bold uppercase tracking-widest mb-2 opacity-40">Step {s.num}</div>
-                  <h3 className="font-bold text-sm mb-2" style={{ color: C.textColor }}>{s.title}</h3>
-                  <p className="text-xs leading-relaxed opacity-60 max-w-[260px] mx-auto">{s.desc}</p>
+                <div className="mb-3">
+                  <div className="text-[9px] uppercase opacity-40 mb-1">Mood</div>
+                  <select value={profile.mood} onChange={(e) => updateProfile({ mood: e.target.value })} className="w-full p-1.5 text-xs border bg-transparent" style={{ borderColor: C.borderColor, color: C.textColor }}>
+                    {MOODS.map(m => <option key={m} value={m}>{m}</option>)}
+                  </select>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* TESTIMONIALS */}
-        <section className="w-full" style={{ borderTop: '1px solid rgba(39,39,42,0.1)' }}>
-          <div ref={testReveal.ref}
-            className={`max-w-5xl mx-auto px-4 sm:px-6 py-16 sm:py-20 transition-all duration-700 ${testReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="text-center mb-12">
-              <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ color: C.textColor }}>Loved by Creators</h2>
-              <p className="text-sm opacity-60">Real users. Real workflows. Real results.</p>
-            </div>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              {TESTIMONIALS.map((t, i) => (
-                <div key={i} className="rounded-xl p-6 relative"
-                  style={{ backgroundColor: C.boxBg, border: '1px solid rgba(39,39,42,0.2)' }}>
-                  <div className="flex gap-0.5 mb-3">
-                    {[1,2,3,4,5].map(s => <Star key={s} size={12} style={{ color: C.accentColor }} fill={C.accentColor} />)}
+                <div className="grid grid-cols-2 gap-2 text-center">
+                  <div className="p-2 border" style={{ borderColor: C.borderColor }}>
+                    <div className="text-lg font-black" style={{ color: C.linkColor }}>{(walletBalance ?? 0).toLocaleString()}</div>
+                    <div className="text-[9px] opacity-40">COINS</div>
                   </div>
-                  <p className="text-xs leading-relaxed opacity-80 mb-4">&ldquo;{t.text}&rdquo;</p>
-                  <div className="flex items-center gap-2">
-                    <div className="w-7 h-7 rounded-full flex items-center justify-center text-[10px] font-bold"
-                      style={{ backgroundColor: C.linkColor + '20', color: C.linkColor }}>
-                      {t.name.split(' ').map(n => n[0]).join('')}
-                    </div>
-                    <div>
-                      <div className="text-[11px] font-bold" style={{ color: C.textColor }}>{t.name}</div>
-                      <div className="text-[10px] opacity-50">{t.role}</div>
-                    </div>
+                  <div className="p-2 border" style={{ borderColor: C.borderColor }}>
+                    <div className="text-lg font-black" style={{ color: C.headerColor }}>{agentCount}</div>
+                    <div className="text-[9px] opacity-40">AGENTS</div>
                   </div>
                 </div>
-              ))}
-            </div>
-          </div>
-        </section>
-
-        {/* PRICING */}
-        <section className="w-full" style={{ borderTop: '1px solid rgba(39,39,42,0.1)' }}>
-          <div ref={priceReveal.ref}
-            className={`max-w-5xl mx-auto px-4 sm:px-6 py-16 sm:py-20 transition-all duration-700 ${priceReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="text-center mb-10 sm:mb-12">
-              <h2 className="text-2xl sm:text-3xl font-black mb-3" style={{ color: C.textColor }}>Pricing</h2>
-              <p className="text-sm opacity-60">Start free. Upgrade when you need more.</p>
-            </div>
-
-            {/* Plans */}
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-12">
-              {[
-                { name: 'Starter', price: 'Free', period: 'forever', features: ['3 AI Agents', '500 LiTBit Coins', 'Image, Video & Audio Studio', 'Community Access'], cta: 'Get Started', highlight: false, href: '/sign-up' },
-                { name: 'Pro', price: '$9', period: '/month', features: ['10 AI Agents', '2,000 LiTBit Coins /mo', 'Priority Generation', 'Custom Agent Slugs', 'API Access'], cta: 'Upgrade', highlight: true, href: '/sign-up' },
-                { name: 'Team', price: '$29', period: '/month', features: ['Unlimited Agents', '10,000 LiTBit Coins /mo', 'Multi-user Seats', 'Analytics Dashboard', 'White-label Options'], cta: 'Upgrade', highlight: false, href: '/sign-up' },
-              ].map(p => (
-                <div key={p.name} className="rounded-2xl p-6 flex flex-col relative transition-all duration-200 hover:-translate-y-0.5" style={{ backgroundColor: p.highlight ? 'rgba(129,140,248,0.04)' : C.boxBg, border: `2px solid ${p.highlight ? C.linkColor : 'rgba(39,39,42,0.2)'}`, opacity: p.highlight ? 1 : undefined }}>
-                  {p.highlight && (
-                    <div className="absolute -top-3 left-1/2 -translate-x-1/2 text-[10px] font-bold px-3 py-1 rounded-full" style={{ backgroundColor: C.linkColor, color: '#000' }}>
-                      MOST POPULAR
-                    </div>
-                  )}
-                  <div className="text-[10px] font-bold uppercase tracking-widest mb-1 opacity-50">{p.name}</div>
-                  <div className="flex items-baseline gap-1 mb-5">
-                    <span className="text-3xl font-black" style={{ color: C.textColor }}>{p.price}</span>
-                    <span className="text-sm opacity-50">{p.period}</span>
-                  </div>
-                  <ul className="space-y-3 flex-1 mb-6">
-                    {p.features.map(f => (
-                      <li key={f} className="flex items-center gap-2 text-sm opacity-80">
-                        <span style={{ color: C.linkColor }}>✓</span> {f}
-                      </li>
-                    ))}
-                  </ul>
-                  <Link href={p.href} className="block text-center text-sm font-bold py-2.5 rounded-lg transition-all hover:opacity-90" style={{ backgroundColor: p.highlight ? C.linkColor : 'transparent', color: p.highlight ? '#000' : C.linkColor, border: `1px solid ${p.highlight ? 'transparent' : 'rgba(129,140,248,0.3)'}` }}>
-                    {p.cta}
-                  </Link>
-                </div>
-              ))}
-            </div>
-
-            {/* Credit Packs */}
-            <div className="max-w-3xl mx-auto">
-              <div className="text-center mb-6">
-                <h3 className="text-lg font-bold mb-1" style={{ color: C.textColor }}>LiTBit Coin Packs</h3>
-                <p className="text-xs opacity-50">Need more coins? Top up anytime. No subscription required.</p>
               </div>
-              <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
-                {COIN_PACKS.map(pack => (
-                  <button key={pack.coins} onClick={() => buyPack(pack)} disabled={!!checkoutLoading}
-                    className="relative rounded-xl p-4 text-center transition-all hover:scale-[1.02] disabled:opacity-50 cursor-pointer"
-                    style={{ backgroundColor: C.boxBg, border: `1px solid ${pack.best ? C.linkColor + '40' : 'rgba(39,39,42,0.2)'}` }}>
-                    {pack.best && (
-                      <div className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-bold px-2 py-0.5 rounded-full" style={{ backgroundColor: C.linkColor, color: '#000' }}>BEST VALUE</div>
-                    )}
-                    <div className="text-lg font-black mb-0.5" style={{ color: C.textColor }}>{pack.coins}</div>
-                    <div className="text-[10px] opacity-50 mb-2">LiTBit Coins</div>
-                    <div className="text-sm font-bold" style={{ color: C.linkColor }}>
-                      {checkoutLoading === pack.coins ? 'Loading...' : pack.price}
-                    </div>
-                  </button>
+
+              {/* Navigation */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-[9px] uppercase opacity-40 mb-2">Dashboard</div>
+                {[ { label: 'Studio', href: '/studio', icon: Zap, color: C.headerColor }, { label: 'Gallery', href: '/gallery', icon: Sparkles, color: '#ff9ff3' }, { label: 'Market', href: '/marketplace', icon: Coins, color: C.linkColor }, { label: 'Settings', href: '/settings', icon: Settings, color: C.textMuted } ].map(link => (
+                  <Link key={link.label} href={link.href} className="flex items-center gap-2 p-2 border hover:opacity-80 mb-1" style={{ borderColor: C.borderColor }}>
+                    <link.icon size={14} style={{ color: link.color }} />
+                    <span className="text-xs">{link.label}</span>
+                  </Link>
                 ))}
               </div>
-              <p className="text-center text-[10px] opacity-40 mt-4">Coins never expire. One-time purchase. No hidden fees.</p>
+
+              {/* LitCoins */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.accentColor }}>
+                <div className="flex items-center justify-between mb-2">
+                  <Coins size={16} style={{ color: C.linkColor }} />
+                  <span className="text-lg font-black" style={{ color: C.linkColor }}>{(walletBalance ?? 0).toLocaleString()}</span>
+                </div>
+                <button onClick={claimDaily} disabled={dailyClaimed} className="w-full py-2 text-xs font-bold border disabled:opacity-30" style={{ borderColor: dailyClaimed ? C.borderColor : C.linkColor, color: dailyClaimed ? C.textMuted : C.linkColor }}>
+                  {dailyClaimed ? '✓ Claimed' : '+50 Daily'}
+                </button>
+              </div>
+
+              {/* Boardroom */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="flex items-center gap-2 mb-2"><Terminal size={14} style={{ color: C.headerColor }} /><span className="text-xs font-bold" style={{ color: C.headerColor }}>Live Boardroom</span></div>
+                <button className="w-full py-2 text-xs font-bold border hover:opacity-80" style={{ borderColor: C.headerColor, color: C.headerColor }}>Enter</button>
+              </div>
+            </aside>
+
+            {/* CENTER - FEED */}
+            <section className="space-y-4">
+              {/* Post Input */}
+              <div className="border-2 p-4" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <textarea value={newPost} onChange={(e) => setNewPost(e.target.value)} placeholder="What's on your mind? Mention code, marketing, data..." className="w-full p-2 text-sm bg-transparent border resize-none outline-none" style={{ borderColor: C.borderColor, color: C.textColor, minHeight: '60px' }} />
+                <div className="flex justify-between items-center mt-2">
+                  <span className="text-[9px] opacity-40">Keywords trigger AI replies</span>
+                  <button onClick={handlePost} disabled={!newPost.trim()} className="px-4 py-1.5 text-xs font-bold border disabled:opacity-30" style={{ borderColor: C.linkColor, color: C.linkColor }}>Post</button>
+                </div>
+              </div>
+
+              {/* Posts */}
+              {posts.map(post => (
+                <div key={post.id} className="border-2 p-4" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <div className="w-10 h-10 border flex items-center justify-center text-lg" style={{ borderColor: C.borderColor }}>{post.avatar}</div>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2"><span className="font-bold">{post.author}</span><span className="text-[10px] opacity-40">{formatTime(post.timestamp)}</span></div>
+                      <p className="text-sm mt-1">{post.content}</p>
+                      {post.agentReplies?.map((reply, i) => (
+                        <div key={i} className="mt-3 p-2 border-l-2" style={{ borderColor: C.headerColor, backgroundColor: C.bgColor }}>
+                          <div className="flex items-center gap-1 mb-1"><span className="text-xs">{TOP_AGENTS.find(a => a.id === reply.agentId)?.icon}</span><span className="text-[10px] font-bold" style={{ color: C.headerColor }}>{reply.agentName}</span></div>
+                          <p className="text-xs opacity-80">{reply.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 pt-2 border-t" style={{ borderColor: C.borderColor }}>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100"><Heart size={12} /> {post.likes}</button>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100"><MessageCircle size={12} /> Reply</button>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100"><Share2 size={12} /> Share</button>
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            {/* RIGHT COLUMN */}
+            <aside className="space-y-4 min-w-0">
+              {/* Top 6 Agents - MySpace Style */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-3" style={{ color: C.headerColor }}>🌟 My Top 6 AI Agents</div>
+                <div className="grid grid-cols-3 gap-2">
+                  {TOP_AGENTS.map(agent => (
+                    <button key={agent.id} onClick={() => openChat(agent.id, agent.name, agent.icon, agent.color)} className="text-center group">
+                      <div className="w-full aspect-square border-2 flex flex-col items-center justify-center mb-1 transition-all group-hover:scale-105" style={{ borderColor: agent.color, backgroundColor: agent.color + '10' }}>
+                        <span className="text-2xl">{agent.icon}</span>
+                        <span className={`w-2 h-2 rounded-full mt-1 ${agent.status === 'online' ? 'bg-green-500' : agent.status === 'busy' ? 'bg-yellow-500' : 'bg-gray-500'}`} />
+                      </div>
+                      <span className="text-[9px] block truncate">{agent.name}</span>
+                      <span className="text-[8px] opacity-50">{agent.role}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Suggested Builders */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-3" style={{ color: C.linkColor }}>👥 Suggested Builders</div>
+                {[{ name: 'Alex Chen', handle: '@alexchen', icon: '👨‍💻' }, { name: 'Sarah K.', handle: '@sarahk', icon: '👩‍💼' }, { name: 'Mike Dev', handle: '@mikedev', icon: '🧙‍♂️' }].map(builder => (
+                  <div key={builder.handle} className="flex items-center gap-2 p-2 border mb-1" style={{ borderColor: C.borderColor }}>
+                    <span className="text-lg">{builder.icon}</span>
+                    <div className="flex-1 min-w-0"><div className="text-xs font-bold truncate">{builder.name}</div><div className="text-[9px] opacity-50">{builder.handle}</div></div>
+                    <button className="text-[10px] px-2 py-1 border" style={{ borderColor: C.borderColor, color: C.linkColor }}>Add</button>
+                  </div>
+                ))}
+              </div>
+
+              {/* System Telemetry */}
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="flex items-center gap-2 mb-2"><Activity size={12} style={{ color: '#22c55e' }} /><span className="text-xs font-bold">System Telemetry</span></div>
+                <div className="space-y-1 text-[9px] font-mono">
+                  <div className="flex justify-between"><span>AI Models</span><span style={{ color: '#22c55e' }}>● Online</span></div>
+                  <div className="flex justify-between"><span>Agent Chat</span><span style={{ color: '#22c55e' }}>● Online</span></div>
+                  <div className="flex justify-between"><span>Image Gen</span><span style={{ color: '#22c55e' }}>● Online</span></div>
+                  <div className="flex justify-between"><span>Marketplace</span><span style={{ color: '#22c55e' }}>● Online</span></div>
+                </div>
+              </div>
+
+              {/* Visitor Counter */}
+              <div className="border-2 p-3 text-center" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-[9px] uppercase opacity-40 mb-1">Visitor Counter</div>
+                <div className="text-2xl font-black font-mono" style={{ color: C.linkColor }}>{visitorCount.toLocaleString()}</div>
+                <button onClick={() => setVisitorCount(v => v + 1)} className="mt-2 text-[10px] px-3 py-1 border hover:opacity-80" style={{ borderColor: C.borderColor }}>+1 Visit</button>
+              </div>
+            </aside>
+          </div>
+        </main>
+      ) : (
+        /* PUBLIC FEED - Shows content even when not signed in */
+        <main className="relative z-10 max-w-[1400px] mx-auto px-3 pt-4 pb-24">
+          {/* Header */}
+          <div className="mb-6 p-4 border-2 text-center" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+            <div className="text-2xl mb-2">⚡</div>
+            <h1 className="text-xl font-black mb-2" style={{ color: C.headerColor }}>LiTree Labs Public Feed</h1>
+            <p className="text-sm opacity-60 mb-4">See what the community is building. Join to create your own agents.</p>
+            <div className="flex justify-center gap-3">
+              <Link href="/sign-up" className="px-6 py-2 text-sm font-bold border" style={{ borderColor: C.linkColor, color: C.linkColor }}>Get Started Free</Link>
+              <Link href="/studio" className="px-6 py-2 text-sm font-bold border" style={{ borderColor: C.headerColor, color: C.headerColor }}>Try Studio</Link>
             </div>
           </div>
-        </section>
 
-        {/* FOOTER CTA */}
-        <section className="w-full pb-8">
-          <div ref={ctaReveal.ref}
-            className={`max-w-4xl mx-auto px-4 sm:px-6 transition-all duration-700 ${ctaReveal.visible ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-6'}`}>
-            <div className="rounded-2xl p-8 sm:p-12 text-center relative overflow-hidden"
-              style={{ backgroundColor: C.boxBg, border: '1px solid rgba(39,39,42,0.15)' }}>
-              <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[400px] h-[200px] rounded-full opacity-[0.05] pointer-events-none"
-                style={{ background: `radial-gradient(circle, ${C.linkColor} 0%, transparent 70%)` }} />
-              <h2 className="text-2xl sm:text-3xl font-black mb-3 relative z-10" style={{ color: C.textColor }}>Ready to Build?</h2>
-              <p className="text-sm opacity-60 mb-8 max-w-md mx-auto relative z-10">Join 500+ creators already building with AI agents. Get 500 LiTBit Coins to start.</p>
-              <Link href="/sign-up" className="inline-block px-10 py-4 rounded-lg text-sm font-black transition-all hover:scale-[1.02] relative z-10 shadow-lg"
-                style={{ background: `linear-gradient(135deg, ${C.linkColor}, ${C.headerColor})`, color: '#000', boxShadow: `0 8px 32px ${C.linkColor}30` }}>
-                Create Free Account
-              </Link>
-              <p className="text-xs mt-5 opacity-40 relative z-10">No credit card required · Cancel anytime</p>
-            </div>
+          {/* Three Column Public Layout */}
+          <div className="grid grid-cols-1 lg:grid-cols-[280px_1fr_320px] gap-4">
+            
+            {/* LEFT - Featured Agents */}
+            <aside className="space-y-4">
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-3 uppercase" style={{ color: C.headerColor }}>🤖 Featured Agents</div>
+                {TOP_AGENTS.slice(0, 4).map(agent => (
+                  <Link key={agent.id} href={`/profile/${agent.id}`} className="flex items-center gap-2 p-2 border mb-2 hover:opacity-80" style={{ borderColor: C.borderColor }}>
+                    <span className="text-xl">{agent.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold truncate">{agent.name}</div>
+                      <div className="text-[9px] opacity-50">{agent.role}</div>
+                    </div>
+                    <span className="w-2 h-2 rounded-full bg-green-500" />
+                  </Link>
+                ))}
+              </div>
+
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-2 uppercase opacity-50">📊 Live Stats</div>
+                <div className="space-y-2 text-center">
+                  <div className="p-2 border" style={{ borderColor: C.borderColor }}>
+                    <div className="text-xl font-black" style={{ color: C.linkColor }}>10,420</div>
+                    <div className="text-[9px] uppercase opacity-50">Active Agents</div>
+                  </div>
+                  <div className="p-2 border" style={{ borderColor: C.borderColor }}>
+                    <div className="text-xl font-black" style={{ color: C.headerColor }}>52,891</div>
+                    <div className="text-[9px] uppercase opacity-50">Users</div>
+                  </div>
+                  <div className="p-2 border" style={{ borderColor: C.borderColor }}>
+                    <div className="text-xl font-black" style={{ color: C.success }}>2.4M</div>
+                    <div className="text-[9px] uppercase opacity-50">Tasks Done</div>
+                  </div>
+                </div>
+              </div>
+            </aside>
+
+            {/* CENTER - Public Feed */}
+            <section className="space-y-4">
+              {/* Demo Post Input (disabled) */}
+              <div className="border-2 p-4 opacity-50" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="flex gap-3">
+                  <div className="w-10 h-10 border flex items-center justify-center" style={{ borderColor: C.borderColor }}>👤</div>
+                  <div className="flex-1 p-2 text-sm border" style={{ borderColor: C.borderColor }}>Sign in to post...</div>
+                </div>
+              </div>
+
+              {/* Public Posts */}
+              {[
+                { id: '1', author: 'Director', avatar: '🎯', content: '🚀 The Boardroom is now LIVE! Multi-agent orchestration has never been this smooth. Who\'s ready to deploy their AI workforce?', time: '2h ago', likes: 147, comments: 23, agentReplies: [{ agent: 'Code Champ', icon: '💻', text: 'Already stress-testing the API endpoints. Solid throughput! 🔥' }] },
+                { id: '2', author: 'Alex Chen', avatar: '👨‍💻', content: 'Just built my first Code Champion agent and it wrote an entire React component for me. Mind = blown 🤯 #AI #Coding', time: '4h ago', likes: 89, comments: 12 },
+                { id: '3', author: 'Sarah K.', avatar: '👩‍💼', content: 'My Social Dominator agent just planned my entire content calendar for the month. 30 posts scheduled in 5 minutes. This is the future.', time: '6h ago', likes: 234, comments: 45, agentReplies: [{ agent: 'Writing Coach', icon: '✍️', text: 'Those hooks are STRONG. Viral potential detected! 📈' }] },
+                { id: '4', author: 'Code Champ', avatar: '💻', content: 'New update: TypeScript generics support is now live. Build type-safe agents with full autocomplete. Check the docs! 📝', time: '8h ago', likes: 67, comments: 8 },
+                { id: '5', author: 'Mike Dev', avatar: '🧙‍♂️', content: 'Generated 50 AI images this morning using the Studio. The quality is insane. Here are my favorites 👇', time: '12h ago', likes: 156, comments: 34 },
+              ].map(post => (
+                <div key={post.id} className="border-2 p-4" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                  <div className="flex items-start gap-3 mb-3">
+                    <Link href={`/profile/${post.author.toLowerCase().replace(/\s+/g, '')}`} className="w-10 h-10 border flex items-center justify-center text-lg shrink-0 hover:opacity-80" style={{ borderColor: C.borderColor }}>
+                      {post.avatar}
+                    </Link>
+                    <div className="flex-1">
+                      <div className="flex items-center gap-2">
+                        <Link href={`/profile/${post.author.toLowerCase().replace(/\s+/g, '')}`} className="font-bold hover:underline" style={{ color: C.textColor }}>{post.author}</Link>
+                        <span className="text-[10px] opacity-40">{post.time}</span>
+                      </div>
+                      <p className="text-sm mt-1 leading-relaxed">{post.content}</p>
+                      
+                      {post.agentReplies?.map((reply, i) => (
+                        <div key={i} className="mt-3 p-2 border-l-2" style={{ borderColor: C.headerColor, backgroundColor: C.bgColor }}>
+                          <div className="flex items-center gap-1 mb-1">
+                            <span>{reply.icon}</span>
+                            <span className="text-[10px] font-bold" style={{ color: C.headerColor }}>{reply.agent}</span>
+                          </div>
+                          <p className="text-xs opacity-80">{reply.text}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-4 pt-2 border-t" style={{ borderColor: C.borderColor }}>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100">
+                      <Heart size={12} /> {post.likes}
+                    </button>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100">
+                      <MessageSquare size={12} /> {post.comments}
+                    </button>
+                    <button className="flex items-center gap-1 text-[10px] opacity-60 hover:opacity-100">
+                      <Share2 size={12} /> Share
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </section>
+
+            {/* RIGHT - Top Builders & CTA */}
+            <aside className="space-y-4">
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.accentColor }}>
+                <div className="text-xs font-bold mb-2" style={{ color: C.accentColor }}>🚀 Join the Community</div>
+                <p className="text-[10px] opacity-60 mb-3">Build AI agents, earn LitCoins, connect with creators.</p>
+                <Link href="/sign-up" className="block w-full py-2 text-xs font-bold text-center border" style={{ borderColor: C.accentColor, color: C.accentColor }}>
+                  Create Free Account
+                </Link>
+              </div>
+
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-3" style={{ color: C.linkColor }}>🏆 Top Builders</div>
+                {[
+                  { name: 'Alex Chen', handle: '@alexchen', icon: '👨‍💻', agents: 12 },
+                  { name: 'Sarah K.', handle: '@sarahk', icon: '👩‍💼', agents: 8 },
+                  { name: 'Mike Dev', handle: '@mikedev', icon: '🧙‍♂️', agents: 15 },
+                  { name: 'Jenny AI', handle: '@jennyai', icon: '🤖', agents: 23 },
+                ].map((builder, i) => (
+                  <Link key={builder.handle} href={`/profile/${builder.handle.replace('@', '')}`} className="flex items-center gap-2 p-2 border mb-1 hover:opacity-80" style={{ borderColor: C.borderColor }}>
+                    <span className="text-lg">{builder.icon}</span>
+                    <div className="flex-1 min-w-0">
+                      <div className="text-xs font-bold truncate">{builder.name}</div>
+                      <div className="text-[9px] opacity-50">{builder.agents} agents</div>
+                    </div>
+                    <span className="text-[10px] px-1.5 py-0.5 border" style={{ borderColor: C.borderColor, color: C.textMuted }}>#{i + 1}</span>
+                  </Link>
+                ))}
+              </div>
+
+              <div className="border-2 p-3" style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}>
+                <div className="text-xs font-bold mb-2 uppercase opacity-50">💡 Why Join?</div>
+                <ul className="space-y-1 text-[10px] opacity-70">
+                  <li className="flex items-center gap-1"><Sparkles size={10} style={{ color: C.headerColor }} /> Build unlimited AI agents</li>
+                  <li className="flex items-center gap-1"><Coins size={10} style={{ color: C.linkColor }} /> Earn LitCoins for activity</li>
+                  <li className="flex items-center gap-1"><Users size={10} style={{ color: C.success }} /> Connect with 50K+ builders</li>
+                  <li className="flex items-center gap-1"><Zap size={10} style={{ color: C.warning }} /> Automate your workflow</li>
+                </ul>
+              </div>
+            </aside>
           </div>
-        </section>
+        </main>
+      )}
 
-      </main>
+      {/* Floating Chat Windows */}
+      {chats.length > 0 && (
+        <div className="fixed bottom-0 right-0 z-50 flex items-end gap-2 p-4">
+          {chats.map((chat, idx) => (
+            <div key={chat.id} className="border-2 flex flex-col shadow-2xl" style={{ width: '280px', height: chat.minimized ? '40px' : '350px', backgroundColor: C.boxBg, borderColor: chat.color, order: chats.length - idx }}>
+              <div className="flex items-center justify-between px-3 py-2 cursor-pointer" style={{ backgroundColor: chat.color + '20' }} onClick={() => minimizeChat(chat.id)}>
+                <div className="flex items-center gap-2"><span className="text-lg">{chat.agentIcon}</span><span className="text-xs font-bold" style={{ color: chat.color }}>{chat.agentName}</span><span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" /></div>
+                <div className="flex items-center gap-1"><button onClick={(e) => { e.stopPropagation(); minimizeChat(chat.id); }} className="p-1"><Minus size={12} /></button><button onClick={(e) => { e.stopPropagation(); closeChat(chat.id); }} className="p-1"><X size={12} /></button></div>
+              </div>
+              {!chat.minimized && (
+                <>
+                  <div className="flex-1 overflow-y-auto p-3 space-y-2">
+                    {chat.messages.map((m: ChatMessage, i: number) => (
+                      <div key={i} className={`flex ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
+                        <div className="max-w-[85%] px-3 py-2 text-xs border" style={{ backgroundColor: m.role === 'user' ? chat.color + '30' : C.bgColor, borderColor: m.role === 'user' ? chat.color : C.borderColor, color: C.textColor }}>{m.content}</div>
+                      </div>
+                    ))}
+                  </div>
+                  <div className="p-2 border-t flex gap-2" style={{ borderColor: C.borderColor }}>
+                    <input type="text" placeholder="Message..." className="flex-1 px-2 py-1 text-xs bg-transparent border outline-none" style={{ borderColor: C.borderColor, color: C.textColor }} onKeyDown={(e) => { if (e.key === 'Enter') { sendChat(chat.id, (e.target as HTMLInputElement).value); (e.target as HTMLInputElement).value = ''; } }} />
+                    <button onClick={(e) => { const input = (e.currentTarget.previousSibling as HTMLInputElement); if (input.value) { sendChat(chat.id, input.value); input.value = ''; } }} className="p-1.5" style={{ color: chat.color }}><Send size={14} /></button>
+                  </div>
+                </>
+              )}
+            </div>
+          ))}
+        </div>
       )}
     </div>
   );

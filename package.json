@@ -28,6 +28,7 @@
     "svix": "^1.95.1"
   },
   "devDependencies": {
+    "@netlify/plugin-nextjs": "^5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

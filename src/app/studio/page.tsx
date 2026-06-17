@@ -18,6 +18,7 @@ const VideoTool  = lazyLoad(() => import("./tools/VideoTool"), { ssr: false });
 const AudioTool  = lazyLoad(() => import("./tools/AudioTool"), { ssr: false });
 const AgentTool  = lazyLoad(() => import("./tools/AgentTool"), { ssr: false });
 const AgentsTerminalTool = lazyLoad(() => import("./tools/AgentsTerminalTool"), { ssr: false });
+const CLIBridgeTool = lazyLoad(() => import("./tools/CLIBridgeTool"), { ssr: false });
 const GalleryTool = lazyLoad(() => import("./tools/GalleryTool"), { ssr: false });
 const SpaceTool  = lazyLoad(() => import("./tools/SpaceTool"), { ssr: false });
 const PipelineTool = lazyLoad(() => import("./tools/PipelineTool"), { ssr: false });
@@ -28,6 +29,7 @@ const PipelineTool = lazyLoad(() => import("./tools/PipelineTool"), { ssr: false
 const STATIC_MODEL_MAP: Record<StudioTool, { provider: string; color: string }> = {
   image:   { provider: "Gemini Imagen 3", color: "#6366f1" },
   video:   { provider: "Wan 2.1", color: "#ff6b6b" },
+  clibridge: { provider: "Local CLI", color: "#00f0ff" },
   audio:   { provider: "TTS / Music", color: "#9b59b6" },
   agents:  { provider: "Gemini 2.5 Flash", color: "#ffff00" },
   terminal:{ provider: "Gemini 2.5 Flash", color: "#00ffff" },
@@ -123,6 +125,7 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
     case "audio":    return <AudioTool />;
     case "agents":   return <AgentTool />;
     case "terminal": return <AgentsTerminalTool />;
+    case "clibridge": return <CLIBridgeTool />;
     case "pipeline": return <PipelineTool />;
     case "gallery":  return <GalleryTool />;
     case "space":    return <SpaceTool />;

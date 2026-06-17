@@ -1,18 +1,58 @@
-"use client";
-export const dynamic = "force-dynamic";
+'use client';
+export const dynamic = 'force-dynamic';
 
-import { useState, useEffect } from "react";
-import { useTheme } from "@/context/ThemeContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useRouter, useParams } from "next/navigation";
-import Link from "next/link";
-import PageShell from "@/components/PageShell";
-import { getAgentProfile, AGENT_PROFILES } from "@/lib/agent-profiles";
+import { useState, useEffect } from 'react';
+import { useClerkAuth } from '@/hooks/useClerkAuth';
+import { useProfile } from '@/context/ProfileContext';
+import { useRouter, useParams } from 'next/navigation';
+import Link from 'next/link';
 import {
   ArrowLeft, MessageCircle, UserPlus, Share2, MapPin, Link as LinkIcon,
   Calendar, Sparkles, Zap, Bot, Image as ImageIcon, Heart, MessageSquare,
-  MoreHorizontal, Verified, BadgeCheck, Cpu, Globe, Award, Send
-} from "lucide-react";
+  MoreHorizontal, Verified, BadgeCheck, Crown, Target, Gift, TrendingUp,
+  Users, Flame, Send, X, Minus, Plus, Star, Award, Radio
+} from 'lucide-react';
+
+// Retro neon palette - matching homepage
+const C = {
+  bgColor: '#0a0a12',
+  textColor: '#e0e0ff',
+  textMuted: '#8888aa',
+  linkColor: '#ff00a0',
+  headerColor: '#00f0ff',
+  borderColor: '#2a2a45',
+  accentColor: '#ff00a0',
+  boxBg: '#151520',
+  success: '#00ff41',
+  warning: '#ffff00',
+};
+
+// Campaign types for agents - helps grow the platform
+const CAMPAIGN_TYPES = [
+  { id: 'invite', name: 'Invite Friends', icon: '👥', reward: 100, desc: 'Get 100 coins per friend who joins', progress: 60 },
+  { id: 'content', name: 'Content Creator', icon: '📝', reward: 50, desc: 'Post daily to earn 50 coins', progress: 30 },
+  { id: 'agent_builder', name: 'Agent Builder', icon: '🤖', reward: 200, desc: 'Build an agent, earn 200 coins', progress: 0 },
+  { id: 'viral', name: 'Viral Hunter', icon: '🔥', reward: 500, desc: 'Create content that gets 100+ likes', progress: 80 },
+  { id: 'community', name: 'Community Helper', icon: '💬', reward: 75, desc: 'Help 5 new users, earn 75 coins', progress: 45 },
+];
+
+// Agent brain capabilities - gives agents autonomy
+const AGENT_BRAIN_FEATURES = [
+  { id: 'autonomous_posting', name: 'Auto Poster', desc: 'Agent posts content when you\'re away', unlocked: true, cost: 0 },
+  { id: 'growth_optimizer', name: 'Growth AI', desc: 'Optimizes your profile for followers', unlocked: true, cost: 0 },
+  { id: 'dm_responder', name: 'DM Handler', desc: 'Responds to messages automatically', unlocked: false, cost: 500 },
+  { id: 'content_curator', name: 'Curator', desc: 'Finds and shares trending content', unlocked: false, cost: 500 },
+  { id: 'analytics_insights', name: 'Analytics AI', desc: 'Provides weekly performance reports', unlocked: true, cost: 0 },
+  { id: 'campaign_runner', name: 'Campaign Bot', desc: 'Auto-runs growth campaigns', unlocked: false, cost: 1000 },
+];
+
+// Top Friends for MySpace style
+const TOP_FRIENDS = [
+  { name: 'Director', icon: '🎯', role: 'Orchestrator', status: 'online' },
+  { name: 'Code Champ', icon: '💻', role: 'Engineer', status: 'online' },
+  { name: 'Data Slayer', icon: '📊', role: 'Analytics', status: 'busy' },
+  { name: 'Social Dom', icon: '📱', role: 'Growth', status: 'online' },
+];
 
 // Helper to format timestamps
 function formatTimeAgo(timestamp: string): string {
@@ -27,61 +67,67 @@ function formatTimeAgo(timestamp: string): string {
   return date.toLocaleDateString();
 }
 
-// Generate consistent mock data for any username
+// Generate retro profile with neon aesthetics
 function generateUserProfile(username: string) {
   const hash = username.split('').reduce((acc, char) => acc + char.charCodeAt(0), 0);
-  const avatars = ["🦁", "🐯", "🦊", "🐺", "🦅", "🦉", "🐉", "🦄", "🦋", "🐙", "🦑", "🦖"];
-  const covers = [
-    "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-    "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
-    "linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)",
-    "linear-gradient(135deg, #43e97b 0%, #38f9d7 100%)",
-    "linear-gradient(135deg, #fa709a 0%, #fee140 100%)",
-    "linear-gradient(135deg, #30cfd0 0%, #330867 100%)",
+  const avatars = ['🦁', '🐯', '🦊', '🐺', '🦅', '🦉', '🐉', '🦄', '🦋', '🐙', '🎯', '💻', '📱', '📊', '✍️', '🏆'];
+  const neonCovers = [
+    'linear-gradient(135deg, #ff00a0 0%, #00f0ff 100%)',
+    'linear-gradient(135deg, #00f0ff 0%, #ff00a0 100%)',
+    'linear-gradient(135deg, #ff6b6b 0%, #f9ca24 100%)',
+    'linear-gradient(135deg, #6c5ce7 0%, #a29bfe 100%)',
+    'linear-gradient(135deg, #00b894 0%, #00cec9 100%)',
+    'linear-gradient(135deg, #fd79a8 0%, #e84393 100%)',
   ];
-  const bios = [
-    "Building the future with AI agents 🚀 | Full-stack dev | Coffee addict ☕",
-    "AI researcher • Creative coder • Digital artist 🎨",
-    "Agent orchestrator 🤖 | Building autonomous systems | Open source enthusiast",
-    "Tech explorer • Prompt engineer • Future thinker 🔮",
-    "Code poet • AI whisperer • Automation wizard ⚡",
-  ];
-  const locations = ["San Francisco, CA", "New York, NY", "London, UK", "Tokyo, JP", "Remote 🌍", "Austin, TX"];
-  const websites = ["github.com", "twitter.com", "portfolio.me", "dev.to", "li Treelabstudios.com"];
   
-  const joinedDates = ["2024", "2023", "2022", "2025"];
+  const bios = [
+    '🚀 Building the future with AI agents | Neon dreamer | Code poet',
+    '🤖 Agent orchestrator | Full-stack wizard | Coffee addict ☕',
+    '🎨 Creative coder | AI researcher | Digital artist | Retro soul',
+    '⚡ Tech explorer | Prompt engineer | Future thinker | 80s vibes',
+    '💻 Code champion | Automation wizard | Synthwave enthusiast',
+  ];
+  
+  const roles = ['Agent Architect', 'Growth Hacker', 'Prompt Engineer', 'AI Developer', 'Creative Technologist', 'Digital Creator'];
+  const skills = [['React', 'AI', 'Design'], ['Growth', 'Marketing', 'Analytics'], ['Python', 'ML', 'Data'], ['Writing', 'Content', 'Strategy'], ['UX', 'UI', 'Product']];
   
   return {
     username,
-    displayName: username.charAt(0).toUpperCase() + username.slice(1),
+    displayName: username.charAt(0).toUpperCase() + username.slice(1).replace(/[_-]/g, ' '),
     avatar: avatars[hash % avatars.length],
-    cover: covers[hash % covers.length],
+    cover: neonCovers[hash % neonCovers.length],
     bio: bios[hash % bios.length],
-    location: locations[hash % locations.length],
-    website: websites[hash % websites.length],
-    joined: joinedDates[hash % joinedDates.length],
+    role: roles[hash % roles.length],
+    skills: skills[hash % skills.length],
+    location: ['Cyber City', 'Neo Tokyo', 'Digital Nomad', 'Silicon Valley', 'Remote Zone'][hash % 5],
+    website: username + '.litlabs.net',
+    joined: ['2024', '2023', '2025'][hash % 3],
+    level: Math.floor((hash % 20)) + 1,
+    xp: Math.floor((hash * 100) % 5000) + 100,
     followers: Math.floor((hash * 123) % 5000) + 100,
     following: Math.floor((hash * 456) % 1000) + 50,
     isVerified: hash % 3 === 0,
-    isFollowing: false,
+    isOnline: true,
     stats: {
       posts: Math.floor((hash * 789) % 200) + 10,
       generations: Math.floor((hash * 321) % 500) + 20,
-      agents: Math.floor((hash % 8)) + 1,
+      agents: Math.floor((hash % 6)) + 1,
       likes: Math.floor((hash * 999) % 10000) + 500,
+      coins: Math.floor((hash * 77) % 5000) + 500,
     },
-    interests: ["AI", "Coding", "Design", "Music", "Gaming"].slice(0, (hash % 5) + 1),
+    interests: ['AI', 'Coding', 'Design', 'Music', 'Gaming', 'Crypto'].slice(0, (hash % 4) + 2),
     recentActivity: [
-      { type: "post", text: "Just deployed my new AI agent! 🚀", time: "2h ago", likes: 24 },
-      { type: "generation", text: "Generated album art for my new EP", time: "5h ago", likes: 56 },
-      { type: "agent", text: "Created a Code Champion agent", time: "1d ago", likes: 12 },
+      { type: 'post', text: 'Just deployed my new AI agent! The future is here 🚀', time: '2h ago', likes: 24, comments: 5 },
+      { type: 'generation', text: 'Generated some neon vibes artwork 🎨✨', time: '5h ago', likes: 56, comments: 12 },
+      { type: 'agent', text: 'Created a new Code Champion agent. Ready to build! 💻', time: '1d ago', likes: 12, comments: 3 },
+      { type: 'achievement', text: 'Reached Level 5! Onwards and upwards 📈', time: '2d ago', likes: 89, comments: 15 },
     ],
   };
 }
 
 export default function UserProfilePage() {
   const { isLoaded, isSignedIn, userId } = useClerkAuth();
-  const { resolvedColors: T } = useTheme();
+  const { profile: myProfile } = useProfile();
   const router = useRouter();
   const params = useParams();
   const [userProfile, setUserProfile] = useState<any>(null);
@@ -111,40 +157,10 @@ export default function UserProfilePage() {
     const username = usernameParam;
     if (!username) return;
     
-    // First check if this is an agent profile
-    const agentProfile = getAgentProfile(username);
-    
-    if (agentProfile) {
-      // Convert agent profile to display format
-      setUserProfile({
-        ...agentProfile,
-        isAgent: true,
-        isVerified: true,
-        isFollowing: false,
-        joined: agentProfile.createdAt,
-        followers: agentProfile.stats.followers,
-        following: agentProfile.stats.following,
-        cover: agentProfile.coverImage,
-        stats: {
-          posts: agentProfile.stats.posts,
-          generations: Math.floor(agentProfile.stats.posts * 0.6),
-          agents: Math.floor(Math.random() * 3) + 1,
-          likes: agentProfile.stats.credits,
-        },
-        recentActivity: agentProfile.recentPosts.map(p => ({
-          type: "post",
-          text: p.content.slice(0, 80) + (p.content.length > 80 ? "..." : ""),
-          time: formatTimeAgo(p.timestamp),
-          likes: p.likes,
-        })),
-      });
-      setIsFollowing(false);
-    } else {
-      // Generate profile for this username
-      const profile = generateUserProfile(username.toLowerCase());
-      setUserProfile(profile);
-      setIsFollowing(profile.isFollowing);
-    }
+    // Generate profile for this username (includes agent-like profiles)
+    const profile = generateUserProfile(username.toLowerCase());
+    setUserProfile(profile);
+    setIsFollowing(false);
   }, [usernameParam]);
 
   const handleFollow = () => {
@@ -187,47 +203,43 @@ export default function UserProfilePage() {
   // Show error if username param is missing
   if (!usernameParam) {
     return (
-      <PageShell title="Profile Not Found">
-        <div className="min-h-[60vh] flex items-center justify-center">
-          <div className="text-center">
-            <div className="text-6xl mb-4">❓</div>
-            <h1 className="text-xl font-bold mb-2">No username provided</h1>
-            <p className="text-sm opacity-60 mb-4">Please provide a username in the URL</p>
-            <button
-              onClick={() => router.push('/')}
-              className="px-4 py-2 rounded-lg text-sm font-bold"
-              style={{ backgroundColor: T?.accentColor, color: '#fff' }}
-            >
-              ← Back to Home
-            </button>
-          </div>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+        <div className="text-center">
+          <div className="text-6xl mb-4">❓</div>
+          <h1 className="text-xl font-bold mb-2">No username provided</h1>
+          <p className="text-sm opacity-60 mb-4">Please provide a username in the URL</p>
+          <button
+            onClick={() => router.push('/')}
+            className="px-4 py-2 text-sm font-bold border"
+            style={{ borderColor: C.accentColor, color: C.accentColor }}
+          >
+            ← Back to Home
+          </button>
         </div>
-      </PageShell>
+      </div>
     );
   }
 
   if (!isLoaded || !userProfile) {
     return (
-      <PageShell title="Profile">
-        <div className="min-h-[60vh] flex items-center justify-center">
-          <div className="text-center">
-            <div className="w-12 h-12 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderColor: T?.accentColor, borderTopColor: 'transparent' }} />
-            <p className="text-sm opacity-60">Loading profile...</p>
-          </div>
+      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+        <div className="text-center">
+          <div className="w-12 h-12 border-2 border-t-transparent rounded-full animate-spin mx-auto mb-4" style={{ borderColor: C.accentColor, borderTopColor: 'transparent' }} />
+          <p className="text-sm opacity-60">Loading profile...</p>
         </div>
-      </PageShell>
+      </div>
     );
   }
 
   return (
-    <PageShell title={`${userProfile.displayName} (@${userProfile.username})`}>
-      <div className="max-w-4xl mx-auto">
+    <div className="min-h-screen" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+      <div className="max-w-4xl mx-auto px-4 py-6">
         {/* Back Button */}
         <div className="flex items-center gap-3 mb-4">
           <button
             onClick={() => router.back()}
             className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80"
-            style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}30`, color: T.textColor }}
+            style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}30`, color: C.textColor }}
           >
             <ArrowLeft size={14} /> Back
           </button>
@@ -235,7 +247,7 @@ export default function UserProfilePage() {
             <Link
               href="/profile"
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium transition-all hover:opacity-80 ml-auto"
-              style={{ backgroundColor: T.accentColor + '15', color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+              style={{ backgroundColor: C.accentColor + '15', color: C.accentColor, border: `1px solid ${C.accentColor}30` }}
             >
               <Sparkles size={14} /> Edit Profile
             </Link>
@@ -243,7 +255,7 @@ export default function UserProfilePage() {
         </div>
 
         {/* Profile Header Card */}
-        <div className="rounded-2xl overflow-hidden mb-6" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}30` }}>
+        <div className="rounded-2xl overflow-hidden mb-6" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}30` }}>
           {/* Cover */}
           <div className="h-40 sm:h-48 w-full relative">
             {userProfile.cover?.startsWith('http') ? (
@@ -264,7 +276,7 @@ export default function UserProfilePage() {
             <div className="relative -mt-12 mb-4">
               <div
                 className="w-24 h-24 sm:w-28 sm:h-28 rounded-2xl overflow-hidden border-4 shadow-lg"
-                style={{ backgroundColor: T.bgColor, borderColor: T.boxBg }}
+                style={{ backgroundColor: C.bgColor, borderColor: C.boxBg }}
               >
                 {userProfile.avatar?.startsWith('http') ? (
                   <img 
@@ -281,9 +293,9 @@ export default function UserProfilePage() {
               {userProfile.isVerified && (
                 <div
                   className="absolute -bottom-1 -right-1 w-7 h-7 rounded-full flex items-center justify-center"
-                  style={{ backgroundColor: T.accentColor }}
+                  style={{ backgroundColor: C.accentColor }}
                 >
-                  <Verified size={14} style={{ color: T.bgColor }} />
+                  <Verified size={14} style={{ color: C.bgColor }} />
                 </div>
               )}
               {userProfile.isAgent && (
@@ -300,15 +312,15 @@ export default function UserProfilePage() {
             <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4 mb-4">
               <div>
                 <div className="flex items-center gap-2 mb-1">
-                  <h1 className="text-xl sm:text-2xl font-black" style={{ color: T.textColor }}>
+                  <h1 className="text-xl sm:text-2xl font-black" style={{ color: C.textColor }}>
                     {userProfile.displayName}
                   </h1>
                   {userProfile.isVerified && (
-                    <BadgeCheck size={18} style={{ color: T.accentColor }} />
+                    <BadgeCheck size={18} style={{ color: C.accentColor }} />
                   )}
                 </div>
                 <p className="text-sm opacity-50 mb-2">@{userProfile.username}</p>
-                <p className="text-sm leading-relaxed max-w-lg" style={{ color: T.textMuted }}>
+                <p className="text-sm leading-relaxed max-w-lg" style={{ color: C.textMuted }}>
                   {userProfile.bio}
                 </p>
                 {userProfile.skills && userProfile.skills.length > 0 && (
@@ -317,7 +329,7 @@ export default function UserProfilePage() {
                       <span 
                         key={idx}
                         className="px-2 py-0.5 rounded-full text-[10px] font-medium"
-                        style={{ backgroundColor: T.accentColor + '20', color: T.accentColor }}
+                        style={{ backgroundColor: C.accentColor + '20', color: C.accentColor }}
                       >
                         {skill}
                       </span>
@@ -333,9 +345,9 @@ export default function UserProfilePage() {
                     onClick={handleFollow}
                     className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
                     style={{
-                      backgroundColor: isFollowing ? T.bgColor : T.accentColor,
-                      color: isFollowing ? T.textColor : T.bgColor,
-                      border: `1px solid ${isFollowing ? T.borderColor : T.accentColor}`,
+                      backgroundColor: isFollowing ? C.bgColor : C.accentColor,
+                      color: isFollowing ? C.textColor : C.bgColor,
+                      border: `1px solid ${isFollowing ? C.borderColor : C.accentColor}`,
                     }}
                   >
                     {isFollowing ? (
@@ -348,18 +360,18 @@ export default function UserProfilePage() {
                     onClick={() => userProfile?.isAgent && setChatOpen(v => !v)}
                     className="p-2 rounded-lg transition-all hover:scale-105"
                     style={{
-                      backgroundColor: chatOpen && userProfile?.isAgent ? T.accentColor + '20' : T.bgColor,
-                      border: `1px solid ${chatOpen && userProfile?.isAgent ? T.accentColor : T.borderColor}30`,
+                      backgroundColor: chatOpen && userProfile?.isAgent ? C.accentColor + '20' : C.bgColor,
+                      border: `1px solid ${chatOpen && userProfile?.isAgent ? C.accentColor : C.borderColor}30`,
                     }}
                     title={userProfile?.isAgent ? "Chat with this agent" : "Message"}
                   >
-                    <MessageCircle size={16} style={{ color: userProfile?.isAgent && chatOpen ? T.accentColor : T.textMuted }} />
+                    <MessageCircle size={16} style={{ color: userProfile?.isAgent && chatOpen ? C.accentColor : C.textMuted }} />
                   </button>
                   <button
                     className="p-2 rounded-lg transition-all hover:scale-105"
-                    style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30` }}
+                    style={{ backgroundColor: C.bgColor, border: `1px solid ${C.borderColor}30` }}
                   >
-                    <Share2 size={16} style={{ color: T.textMuted }} />
+                    <Share2 size={16} style={{ color: C.textMuted }} />
                   </button>
                 </div>
               )}
@@ -375,7 +387,7 @@ export default function UserProfilePage() {
               )}
               <div className="flex items-center gap-1">
                 <LinkIcon size={12} />
-                <a href={`https://${userProfile.website}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: T.accentColor }}>
+                <a href={`https://${userProfile.website}`} target="_blank" rel="noopener noreferrer" className="hover:underline" style={{ color: C.accentColor }}>
                   {userProfile.website}
                 </a>
               </div>
@@ -386,25 +398,25 @@ export default function UserProfilePage() {
             </div>
 
             {/* Stats */}
-            <div className="flex items-center gap-6 py-4 border-t" style={{ borderColor: T.borderColor + '20' }}>
+            <div className="flex items-center gap-6 py-4 border-t" style={{ borderColor: C.borderColor + '20' }}>
               <div className="text-center">
-                <div className="text-lg font-black" style={{ color: T.textColor }}>{userProfile.stats.posts}</div>
+                <div className="text-lg font-black" style={{ color: C.textColor }}>{userProfile.stats.posts}</div>
                 <div className="text-xs opacity-50">Posts</div>
               </div>
               <div className="text-center">
-                <div className="text-lg font-black" style={{ color: T.textColor }}>{userProfile.followers.toLocaleString()}</div>
+                <div className="text-lg font-black" style={{ color: C.textColor }}>{userProfile.followers.toLocaleString()}</div>
                 <div className="text-xs opacity-50">Followers</div>
               </div>
               <div className="text-center">
-                <div className="text-lg font-black" style={{ color: T.textColor }}>{userProfile.following.toLocaleString()}</div>
+                <div className="text-lg font-black" style={{ color: C.textColor }}>{userProfile.following.toLocaleString()}</div>
                 <div className="text-xs opacity-50">Following</div>
               </div>
               <div className="text-center">
-                <div className="text-lg font-black" style={{ color: T.accentColor }}>{userProfile.stats.generations}</div>
+                <div className="text-lg font-black" style={{ color: C.accentColor }}>{userProfile.stats.generations}</div>
                 <div className="text-xs opacity-50">Generations</div>
               </div>
               <div className="text-center">
-                <div className="text-lg font-black" style={{ color: T.accentColor }}>{userProfile.stats.agents}</div>
+                <div className="text-lg font-black" style={{ color: C.accentColor }}>{userProfile.stats.agents}</div>
                 <div className="text-xs opacity-50">Agents</div>
               </div>
             </div>
@@ -415,7 +427,7 @@ export default function UserProfilePage() {
                 <span
                   key={interest}
                   className="px-2.5 py-1 rounded-full text-[10px] font-medium"
-                  style={{ backgroundColor: T.accentColor + '12', color: T.accentColor, border: `1px solid ${T.accentColor}20` }}
+                  style={{ backgroundColor: C.accentColor + '12', color: C.accentColor, border: `1px solid ${C.accentColor}20` }}
                 >
                   {interest}
                 </span>
@@ -425,7 +437,7 @@ export default function UserProfilePage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex items-center gap-1 mb-6 p-1 rounded-xl" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20` }}>
+        <div className="flex items-center gap-1 mb-6 p-1 rounded-xl" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}>
           {[
             { id: "posts", label: "Posts", icon: MessageSquare },
             { id: "generations", label: "Generations", icon: ImageIcon },
@@ -436,9 +448,9 @@ export default function UserProfilePage() {
               onClick={() => setActiveTab(tab.id as any)}
               className="flex-1 flex items-center justify-center gap-1.5 py-2.5 rounded-lg text-xs font-bold transition-all"
               style={{
-                backgroundColor: activeTab === tab.id ? T.bgColor : 'transparent',
-                color: activeTab === tab.id ? T.accentColor : T.textMuted,
-                boxShadow: activeTab === tab.id ? `0 2px 8px ${T.accentColor}10` : 'none',
+                backgroundColor: activeTab === tab.id ? C.bgColor : 'transparent',
+                color: activeTab === tab.id ? C.accentColor : C.textMuted,
+                boxShadow: activeTab === tab.id ? `0 2px 8px ${C.accentColor}10` : 'none',
               }}
             >
               <tab.icon size={14} />
@@ -455,17 +467,17 @@ export default function UserProfilePage() {
                 <div
                   key={i}
                   className="p-4 rounded-xl transition-all hover:scale-[1.01]"
-                  style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20` }}
+                  style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}
                 >
                   <div className="flex items-start gap-3">
                     <div
                       className="w-10 h-10 rounded-lg flex items-center justify-center text-lg shrink-0"
-                      style={{ backgroundColor: T.accentColor + '12' }}
+                      style={{ backgroundColor: C.accentColor + '12' }}
                     >
                       {activity.type === "post" ? "💬" : activity.type === "generation" ? "🎨" : "🤖"}
                     </div>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm mb-1" style={{ color: T.textColor }}>{activity.text}</p>
+                      <p className="text-sm mb-1" style={{ color: C.textColor }}>{activity.text}</p>
                       <div className="flex items-center gap-3 text-xs opacity-50">
                         <span>{activity.time}</span>
                         <span className="flex items-center gap-1">
@@ -485,7 +497,7 @@ export default function UserProfilePage() {
                 <div
                   key={i}
                   className="aspect-square rounded-xl flex items-center justify-center text-3xl cursor-pointer transition-all hover:scale-[1.02]"
-                  style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}20` }}
+                  style={{ backgroundColor: C.bgColor, border: `1px solid ${C.borderColor}20` }}
                 >
                   {["🎨", "🖼️", "✨", "🌟", "💫", "🔮"][i - 1]}
                 </div>
@@ -499,7 +511,7 @@ export default function UserProfilePage() {
                 <div
                   key={i}
                   className="p-4 rounded-xl flex items-center gap-3 transition-all hover:scale-[1.01]"
-                  style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20` }}
+                  style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}20` }}
                 >
                   <div
                     className="w-12 h-12 rounded-lg flex items-center justify-center text-2xl"
@@ -508,13 +520,13 @@ export default function UserProfilePage() {
                     {["⚡", "🎨", "📈", "📊", "🔥", "🚀"][i % 6]}
                   </div>
                   <div className="flex-1 min-w-0">
-                    <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
+                    <div className="text-sm font-bold truncate" style={{ color: C.textColor }}>
                       {["Code Champion", "Pixel Forge", "Growth Hacker", "Data Slayer", "Speed Demon", "Launch Master"][i % 6]}
                     </div>
                     <div className="text-xs opacity-50">AI Agent • Active</div>
                   </div>
-                  <button className="p-1.5 rounded-lg" style={{ backgroundColor: T.bgColor }}>
-                    <MoreHorizontal size={14} style={{ color: T.textMuted }} />
+                  <button className="p-1.5 rounded-lg" style={{ backgroundColor: C.bgColor }}>
+                    <MoreHorizontal size={14} style={{ color: C.textMuted }} />
                   </button>
                 </div>
               ))}
@@ -524,21 +536,21 @@ export default function UserProfilePage() {
 
         {/* Agent Chat Panel */}
         {chatOpen && userProfile?.isAgent && (
-          <div className="mt-6 rounded-2xl overflow-hidden" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}30` }}>
-            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${T.borderColor}20` }}>
+          <div className="mt-6 rounded-2xl overflow-hidden" style={{ backgroundColor: C.boxBg, border: `1px solid ${C.borderColor}30` }}>
+            <div className="flex items-center justify-between px-4 py-3" style={{ borderBottom: `1px solid ${C.borderColor}20` }}>
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: '#34d399' }} />
-                <span className="text-sm font-bold" style={{ color: T.textColor }}>Chat with {userProfile.displayName}</span>
-                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={{ backgroundColor: T.accentColor + '15', color: T.accentColor }}>AI Agent</span>
+                <span className="text-sm font-bold" style={{ color: C.textColor }}>Chat with {userProfile.displayName}</span>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full" style={{ backgroundColor: C.accentColor + '15', color: C.accentColor }}>AI Agent</span>
               </div>
-              <button onClick={() => setChatOpen(false)} className="text-xs opacity-50 hover:opacity-80 transition-opacity" style={{ color: T.textMuted }}>Close</button>
+              <button onClick={() => setChatOpen(false)} className="text-xs opacity-50 hover:opacity-80 transition-opacity" style={{ color: C.textMuted }}>Close</button>
             </div>
 
             <div className="p-4 space-y-3 min-h-[200px] max-h-[400px] overflow-y-auto">
               {chatMessages.length === 0 && (
                 <div className="text-center py-8">
                   <div className="text-3xl mb-2">👋</div>
-                  <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
+                  <p className="text-sm opacity-60" style={{ color: C.textMuted }}>
                     Ask {userProfile.displayName} anything about {userProfile.skills?.slice(0, 3).join(', ') || 'their expertise'}!
                   </p>
                 </div>
@@ -546,7 +558,7 @@ export default function UserProfilePage() {
               {chatMessages.map((m, i) => (
                 <div key={i} className={`flex gap-2 ${m.role === 'user' ? 'justify-end' : 'justify-start'}`}>
                   {m.role === 'assistant' && (
-                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: T.accentColor + '20', color: T.accentColor }}>
+                    <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: C.accentColor + '20', color: C.accentColor }}>
                       {userProfile.avatar?.startsWith('http') ? (
                         <img src={userProfile.avatar} alt="" className="w-full h-full rounded-full object-cover" />
                       ) : (
@@ -557,9 +569,9 @@ export default function UserProfilePage() {
                   <div
                     className="max-w-[80%] px-3 py-2 rounded-xl text-sm leading-relaxed"
                     style={{
-                      backgroundColor: m.role === 'user' ? T.accentColor : T.bgColor,
-                      color: m.role === 'user' ? '#fff' : T.textColor,
-                      border: m.role === 'user' ? 'none' : `1px solid ${T.borderColor}20`,
+                      backgroundColor: m.role === 'user' ? C.accentColor : C.bgColor,
+                      color: m.role === 'user' ? '#fff' : C.textColor,
+                      border: m.role === 'user' ? 'none' : `1px solid ${C.borderColor}20`,
                     }}
                   >
                     {m.content}
@@ -568,10 +580,10 @@ export default function UserProfilePage() {
               ))}
               {chatLoading && (
                 <div className="flex gap-2">
-                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: T.accentColor + '20', color: T.accentColor }}>
+                  <div className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0" style={{ backgroundColor: C.accentColor + '20', color: C.accentColor }}>
                     <Bot size={12} />
                   </div>
-                  <div className="px-3 py-2 rounded-xl text-sm" style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}20`, color: T.textMuted }}>
+                  <div className="px-3 py-2 rounded-xl text-sm" style={{ backgroundColor: C.bgColor, border: `1px solid ${C.borderColor}20`, color: C.textMuted }}>
                     <span className="inline-flex gap-1">
                       <span className="animate-bounce">•</span>
                       <span className="animate-bounce" style={{ animationDelay: '0.2s' }}>•</span>
@@ -582,7 +594,7 @@ export default function UserProfilePage() {
               )}
             </div>
 
-            <div className="flex items-center gap-2 p-3" style={{ borderTop: `1px solid ${T.borderColor}20` }}>
+            <div className="flex items-center gap-2 p-3" style={{ borderTop: `1px solid ${C.borderColor}20` }}>
               <input
                 type="text"
                 value={chatInput}
@@ -591,16 +603,16 @@ export default function UserProfilePage() {
                 placeholder={`Ask ${userProfile.displayName}...`}
                 className="flex-1 px-3 py-2 rounded-lg text-sm outline-none"
                 style={{
-                  backgroundColor: T.bgColor,
-                  color: T.textColor,
-                  border: `1px solid ${T.borderColor}30`,
+                  backgroundColor: C.bgColor,
+                  color: C.textColor,
+                  border: `1px solid ${C.borderColor}30`,
                 }}
               />
               <button
                 onClick={sendChatMessage}
                 disabled={chatLoading || !chatInput.trim()}
                 className="p-2 rounded-lg transition-all hover:scale-105 disabled:opacity-40"
-                style={{ backgroundColor: T.accentColor }}
+                style={{ backgroundColor: C.accentColor }}
               >
                 <Send size={14} style={{ color: '#fff' }} />
               </button>
@@ -608,6 +620,6 @@ export default function UserProfilePage() {
           </div>
         )}
       </div>
-    </PageShell>
+    </div>
   );
 }

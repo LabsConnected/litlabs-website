@@ -111,6 +111,27 @@ export default function Gallery() {
     likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
   }));
 
+  // Memoized Lightbox navigation handlers to prevent infinite loops
+  const handleLightboxNext = useCallback(() => {
+    if (!selectedItem) return;
+    const idx = items.findIndex(i => i.id === selectedItem.id);
+    if (idx !== -1) {
+      setSelectedItem(items[(idx + 1) % items.length]);
+    }
+  }, [items, selectedItem]);
+
+  const handleLightboxPrev = useCallback(() => {
+    if (!selectedItem) return;
+    const idx = items.findIndex(i => i.id === selectedItem.id);
+    if (idx !== -1) {
+      setSelectedItem(items[(idx - 1 + items.length) % items.length]);
+    }
+  }, [items, selectedItem]);
+
+  const handleLightboxClose = useCallback(() => {
+    setSelectedItem(null);
+  }, []);
+
   const showToast = (msg: string, type: "success" | "error" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
@@ -351,7 +372,12 @@ export default function Gallery() {
                       </div>
                     ))}
                     <button
-                      onClick={() => setSelectedItem(featured)}
+                      onClick={() => {
+                        // Clear filters so featured item is in the Lightbox list
+                        setSelectedCategory('all');
+                        setSearchQuery('');
+                        setSelectedItem(featured);
+                      }}
                       className="px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all hover:scale-105"
                       style={{ backgroundColor: T.accentColor, color: T.bgColor }}
                     >
@@ -675,18 +701,12 @@ export default function Gallery() {
 
       {/* ── Lightbox ── */}
       <Lightbox
-        images={filteredItems.map(item => ({ src: item.imageUrl, alt: item.title, caption: `${item.title} — by ${item.artist} · ${item.category.toUpperCase()} · ${item.likes} sparks` }))}
-        currentIndex={selectedItem ? filteredItems.findIndex(i => i.id === selectedItem.id) : 0}
+        images={items.map(item => ({ src: item.imageUrl, alt: item.title, caption: `${item.title} — by ${item.artist} · ${item.category.toUpperCase()} · ${item.likes} sparks` }))}
+        currentIndex={selectedItem ? Math.max(0, items.findIndex(i => i.id === selectedItem.id)) : 0}
         isOpen={!!selectedItem}
-        onClose={() => setSelectedItem(null)}
-        onNext={() => {
-          const idx = filteredItems.findIndex(i => i.id === selectedItem!.id);
-          setSelectedItem(filteredItems[(idx + 1) % filteredItems.length]);
-        }}
-        onPrev={() => {
-          const idx = filteredItems.findIndex(i => i.id === selectedItem!.id);
-          setSelectedItem(filteredItems[(idx - 1 + filteredItems.length) % filteredItems.length]);
-        }}
+        onClose={handleLightboxClose}
+        onNext={handleLightboxNext}
+        onPrev={handleLightboxPrev}
       />
 
       {/* ── Floating Create Button ── */}

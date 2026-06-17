@@ -4,10 +4,10 @@ import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Image, Film, Music, LayoutGrid, Bot, Rocket,
-  ChevronLeft, ChevronRight, Zap, Sparkles, Terminal, Network
+  ChevronLeft, ChevronRight, Zap, Sparkles, Terminal, Network, Shell
 } from "lucide-react";
 
-export type StudioTool = "image" | "video" | "audio" | "agents" | "terminal" | "pipeline" | "gallery" | "space";
+export type StudioTool = "image" | "video" | "audio" | "agents" | "terminal" | "pipeline" | "gallery" | "space" | "clibridge";
 
 type ToolItem = { id: StudioTool; label: string; icon: typeof Image; shortcut: string };
 
@@ -21,6 +21,7 @@ const AI_TOOLS: ToolItem[] = [
   { id: "agents",   label: "Agents",   icon: Bot,     shortcut: "4" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "5" },
   { id: "pipeline", label: "Pipeline", icon: Network,  shortcut: "6" },
+  { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [

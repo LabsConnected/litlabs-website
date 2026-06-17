@@ -4,9 +4,9 @@ import { useEffect, useState, useRef } from 'react';
 import Link from 'next/link';
 import { useClerkAuth } from '@/hooks/useClerkAuth';
 import { useTheme } from '@/context/ThemeContext';
-import { Heart, MessageCircle, Send, ImageIcon, Film, Video, X, Loader2, Clapperboard } from 'lucide-react';
+import { Heart, MessageCircle, Send, ImageIcon, X, Loader2, Clapperboard } from 'lucide-react';
 
-type PostType = 'text' | 'image' | 'clip' | 'reel';
+type PostType = 'text' | 'image' | 'reel';
 
 type Post = {
   id: string;
@@ -284,7 +284,6 @@ export default function SocialFeed({ embedded = false }: { embedded?: boolean })
               {[
                 { type: 'text' as PostType, icon: Send, label: 'Text' },
                 { type: 'image' as PostType, icon: ImageIcon, label: 'Photo' },
-                { type: 'clip' as PostType, icon: Video, label: 'Clip' },
                 { type: 'reel' as PostType, icon: Clapperboard, label: 'Reel' },
               ].map(({ type, icon: Icon, label }) => (
                 <button
@@ -315,8 +314,8 @@ export default function SocialFeed({ embedded = false }: { embedded?: boolean })
             {mediaPreviews.length > 0 && (
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 mt-3">
                 {mediaPreviews.map((preview, i) => (
-                  <div key={i} className="relative group rounded-lg overflow-hidden" style={{ aspectRatio: postType === 'clip' || postType === 'reel' ? '16/9' : '1/1' }}>
-                    {postType === 'clip' || postType === 'reel' ? (
+                  <div key={i} className="relative group rounded-lg overflow-hidden" style={{ aspectRatio: postType === 'reel' ? '16/9' : '1/1' }}>
+                    {postType === 'reel' ? (
                       <video src={preview} className="w-full h-full object-cover" />
                     ) : (
                       <img src={preview} alt="Preview" className="w-full h-full object-cover" />
@@ -328,7 +327,6 @@ export default function SocialFeed({ embedded = false }: { embedded?: boolean })
                     >
                       <X size={12} />
                     </button>
-                    {postType === 'clip' && <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: T.bgColor, color: T.accentColor }}>CLIP</span>}
                     {postType === 'reel' && <span className="absolute bottom-1 left-1 px-1.5 py-0.5 rounded text-[9px] font-bold" style={{ backgroundColor: T.bgColor, color: T.accentColor }}>REEL</span>}
                   </div>
                 ))}
@@ -339,7 +337,7 @@ export default function SocialFeed({ embedded = false }: { embedded?: boolean })
               <input
                 ref={fileInputRef}
                 type="file"
-                accept={postType === 'clip' || postType === 'reel' ? 'video/*' : 'image/*'}
+                accept={postType === 'reel' ? 'video/*' : 'image/*'}
                 multiple
                 onChange={handleMediaSelect}
                 className="hidden"
