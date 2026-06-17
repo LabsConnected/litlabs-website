@@ -1,3 +1,10 @@
+# Environment variables — NEVER commit secrets
+.env.local
+.env*.local
+.env.vercel-production
+.env.vercel-secrets
+.sb_anon_key
+
 # Dependencies
 /node_modules
 /.pnp
