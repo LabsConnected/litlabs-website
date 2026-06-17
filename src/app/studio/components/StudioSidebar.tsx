@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Image, Film, Music, LayoutGrid, Bot, Rocket,
-  ChevronLeft, ChevronRight, Zap, Sparkles, Terminal, Network, Shell, Hammer
+  ChevronLeft, ChevronRight, Zap, Sparkles, Terminal, Network, Shell
 } from "lucide-react";
 
 export type StudioTool = "image" | "video" | "audio" | "agents" | "terminal" | "pipeline" | "gallery" | "space" | "clibridge";

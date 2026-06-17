@@ -2,12 +2,16 @@
 export const dynamic = 'force-dynamic';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { useClerkAuth } from '@/hooks/useClerkAuth';
 import { useProfile } from '@/context/ProfileContext';
 import {
-  Zap, Sparkles, ArrowRight, MessageCircle, Settings, Coins,
-  X, Send, Minus, Activity, Loader2, Terminal, Heart, Share2, Radio, Users, MessageSquare
+  Zap, Sparkles, MessageCircle, Settings, Coins,
+  X, Activity, Loader2, Terminal, Heart, Share2, Radio, Users, MessageSquare,
+  Music, Volume2, SkipBack, SkipForward, Play, Pause,
+  BarChart3, Server, Cpu, Database, Globe, Shield,
+  ChevronDown, ChevronUp, Send, Bell, Plus, Edit, Trash2,
+  Copy, ExternalLink, Minimize, Maximize, Search, Filter,
 } from 'lucide-react';
 
 // TypeScript interfaces
@@ -35,44 +39,41 @@ interface AgentReply {
 
 interface FeedPost {
   id: string;
-  author: string;
-  avatar: string;
+  user_id: string;
   content: string;
-  timestamp: number;
-  likes: number;
-  agentReplies?: AgentReply[];
+  media_urls: string[];
+  likes_count: number;
+  comments_count: number;
+  is_ai_post: boolean;
+  created_at: string;
+  author: { name: string; username: string; avatar_url: string | null } | null;
+  comments: Array<{
+    id: string;
+    content: string;
+    created_at: string;
+    author: { name: string; username: string; avatar_url: string | null } | null;
+  }>;
 }
 
-// Retro neon palette
-const C = {
-  bgColor: '#0a0a12',
-  textColor: '#e0e0ff',
-  textMuted: '#8888aa',
-  linkColor: '#ff00a0',
-  headerColor: '#00f0ff',
-  borderColor: '#2a2a45',
-  accentColor: '#ff00a0',
-  boxBg: '#151520',
-  success: '#00ff41',
-  warning: '#ffff00',
-};
+interface AudioTrack {
+  id: string;
+  title: string;
+  artist: string;
+  duration: string;
+  url: string;
+}
 
-const TOP_AGENTS = [
-  { id: 'director', name: 'Director', icon: '🎯', color: '#00ffff', status: 'online', role: 'Orchestrator' },
-  { id: 'champion', name: 'Champion', icon: '🏆', color: '#ff0080', status: 'online', role: 'General' },
-  { id: 'code', name: 'Code Champ', icon: '💻', color: '#00ff41', status: 'online', role: 'Engineer' },
-  { id: 'social', name: 'Social Dom', icon: '📱', color: '#ff6b6b', status: 'busy', role: 'Growth' },
-  { id: 'data', name: 'Data Slayer', icon: '📊', color: '#ffff00', status: 'online', role: 'Analytics' },
-  { id: 'writer', name: 'Writer', icon: '✍️', color: '#ff9ff3', status: 'offline', role: 'Content' },
-];
-
-const MOODS = ['😀 Happy', '😎 Cool', '💡 Creative', '🔥 Hot', '🎯 Focused', '🌟 Stellar', '💪 Strong', '🎵 Chill', '🚀 Launching', '😴 Tired', '🤔 Thinking', '💭 Dreaming'];
-
-const SYNTHWAVE_TRACKS = [
-  { title: 'Midnight City', artist: 'M83', duration: '4:03' },
-  { title: 'Nightcall', artist: 'Kavinsky', duration: '4:18' },
-  { title: 'Tech Noir', artist: 'Gunship', duration: '5:22' },
-];
+interface DashboardStats {
+  visitors: number;
+  uptime: string;
+  latency: string;
+  tokens: string;
+  totalUsers: number;
+  totalPosts: number;
+  totalAgents: number;
+  totalCoins: number;
+  userId: string | null;
+}
 
 function RetroBackground() {
   const [mounted, setMounted] = useState(false);
