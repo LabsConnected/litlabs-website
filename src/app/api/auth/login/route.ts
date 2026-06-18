@@ -31,28 +31,8 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  // Single-user admin login: accept any non-empty password for the admin email
   const user = await verifyPassword(email, password);
   if (!user) {
-    // Fallback: allow admin email with any non-empty password for personal access
-    const adminEmail = (process.env.ADMIN_EMAIL || "laidbacknostress4life@gmail.com").trim().toLowerCase();
-    const adminUsername = adminEmail.split("@")[0];
-    const identifier = email.trim().toLowerCase();
-    if ((identifier === adminEmail || identifier === adminUsername) && password.length > 0) {
-      const res = isJson
-        ? NextResponse.json({ user: { id: "admin", email: adminEmail, name: "Larry — CEO" } })
-        : NextResponse.redirect(new URL("/dashboard", req.url));
-      const token = await signToken({ id: "admin", email: adminEmail, name: "Larry — CEO" });
-      res.cookies.set("auth-token", token, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === "production",
-        sameSite: "lax",
-        maxAge: 60 * 60 * 24 * 7,
-        path: "/",
-      });
-      return res;
-    }
-
     if (isJson) {
       return NextResponse.json(
         { error: "Invalid credentials" },

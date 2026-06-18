@@ -28,7 +28,7 @@ export async function verifyPassword(
 }
 
 export async function findUserByEmail(email: string): Promise<User | null> {
-  if (!ADMIN_EMAIL) return null;
+  if (!ADMIN_EMAIL || !ADMIN_PASSWORD_HASH) return null;
   const identifier = email.trim().toLowerCase();
   const adminEmail = ADMIN_EMAIL.trim().toLowerCase();
   const adminUsername = ADMIN_EMAIL.split("@")[0].trim().toLowerCase();
