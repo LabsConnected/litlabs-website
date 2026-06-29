@@ -1,4 +1,3 @@
-// Supabase client setup
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
@@ -6,9 +5,15 @@ const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
 
 let _supabase: SupabaseClient | null = null;
 
-export function getSupabase(): SupabaseClient {
-  if (!supabaseUrl || supabaseUrl.includes("your-project") || !supabaseKey || supabaseKey.includes("your-anon")) {
-    throw new Error("Supabase is not configured. Set NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY.");
+export function getSupabase(): SupabaseClient | null {
+  if (
+    !supabaseUrl ||
+    !supabaseKey ||
+    supabaseKey.includes("your-anon") ||
+    supabaseKey.length < 10
+  ) {
+    // Return null instead of crashing during static prerendering
+    return null;
   }
   if (!_supabase) {
     _supabase = createClient(supabaseUrl, supabaseKey);
@@ -16,18 +21,28 @@ export function getSupabase(): SupabaseClient {
   return _supabase;
 }
 
+// 🔱 Build-Safe Proxy Engine
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
-    return (getSupabase() as unknown as Record<string | symbol, unknown>)[prop];
+    const client = getSupabase();
+    if (!client) {
+      // During static prerendering (no env keys), return safe stubs instead of crashing
+      return typeof prop === "string" &&
+        ["from", "auth", "channel"].includes(prop)
+        ? () => ({ select: () => ({}), insert: () => ({}) })
+        : undefined;
+    }
+    return (client as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 
-// Server-only admin client using service role key (bypasses RLS — server routes only)
+// Server-only admin client using service role key (bypasses RLS - server routes only)
 let _supabaseAdmin: SupabaseClient | null = null;
-export function getSupabaseAdmin(): SupabaseClient {
+
+export function getSupabaseAdmin(): SupabaseClient | null {
   const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-  if (!supabaseUrl || !serviceKey) {
-    throw new Error("Supabase admin client requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY.");
+  if (!supabaseUrl || !serviceKey || serviceKey.length < 10) {
+    return null;
   }
   if (!_supabaseAdmin) {
     _supabaseAdmin = createClient(supabaseUrl, serviceKey, {
@@ -39,7 +54,13 @@ export function getSupabaseAdmin(): SupabaseClient {
 
 export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
-    return (getSupabaseAdmin() as unknown as Record<string | symbol, unknown>)[prop];
+    const client = getSupabaseAdmin();
+    if (!client) {
+      return typeof prop === "string" && ["from"].includes(prop)
+        ? () => ({ select: () => ({}), insert: () => ({}), update: () => ({}) })
+        : undefined;
+    }
+    return (client as unknown as Record<string | symbol, unknown>)[prop];
   },
 });
 

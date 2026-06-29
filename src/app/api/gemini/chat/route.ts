@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
 export const runtime = "nodejs";
@@ -43,19 +43,19 @@ async function logConversation(
   responseText: string,
 ) {
   try {
-    await getSupabaseAdmin()
-      .from("agent_logs")
-      .insert({
-        agent_id: agent.id,
-        level: "info",
-        message: "Agent chat",
-        metadata: {
-          userId,
-          userMessage,
-          responseText,
-          timestamp: new Date().toISOString(),
-        },
-      });
+    const admin = getSupabaseAdmin();
+    if (!admin) return; // Build-safe: null when env keys unavailable
+    await admin.from("agent_logs").insert({
+      agent_id: agent.id,
+      level: "info",
+      message: "Agent chat",
+      metadata: {
+        userId,
+        userMessage,
+        responseText,
+        timestamp: new Date().toISOString(),
+      },
+    });
   } catch {
     // Failed to log agent chat:
   }
@@ -147,10 +147,11 @@ async function handler(req: NextRequest) {
         Connection: "keep-alive",
       },
     });
-  } catch {
+  } catch (err) {
     // LLM chat route error:
+    console.error("[api/gemini/chat] error:", err);
     return NextResponse.json(
-      { error: "Internal server error" },
+      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 },
     );
   }

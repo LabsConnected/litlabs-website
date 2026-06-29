@@ -1,5 +1,3 @@
-import { getSupabaseAdmin } from "@/lib/supabase";
-
 export type LogLevel = "info" | "warn" | "error" | "success";
 
 /**
@@ -10,10 +8,15 @@ export async function logAgentEvent(
   agentSlug: string,
   level: LogLevel,
   message: string,
-  metadata?: Record<string, unknown>
+  metadata?: Record<string, unknown>,
 ): Promise<void> {
   try {
+    // Lazy import to avoid build-time errors
+    const { getSupabaseAdmin } = await import("./supabase");
     const admin = getSupabaseAdmin();
+    
+    // Check if admin client is valid
+    if (!admin || typeof admin.from !== "function") return;
 
     const { data: agent } = await admin
       .from("agents")

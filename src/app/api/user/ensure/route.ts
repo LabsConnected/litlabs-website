@@ -9,6 +9,12 @@ export async function POST() {
   }
 
   const sb = getSupabase();
+  if (!sb) {
+    return NextResponse.json(
+      { error: "Database unavailable" },
+      { status: 503 },
+    );
+  }
 
   try {
     // Check if user exists
@@ -81,6 +87,12 @@ export async function GET() {
   }
 
   const sb = getSupabase();
+  if (!sb) {
+    return NextResponse.json(
+      { exists: false, error: "Database unavailable" },
+      { status: 503 },
+    );
+  }
 
   const { data: user } = await sb
     .from("users")
