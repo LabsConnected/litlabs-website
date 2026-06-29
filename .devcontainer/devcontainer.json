@@ -1,6 +1,7 @@
 {
   "name": "LiTTLabStudio OS",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:20",
+  "workspaceFolder": "/workspaces/litlabs-website/litlabs",
   "postCreateCommand": "npm install --ignore-scripts",
   "forwardPorts": [3000],
   "portsAttributes": {
