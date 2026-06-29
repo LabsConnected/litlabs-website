@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=3072 next dev --turbo=false",
-    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev",
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=3072 next dev",
+    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbo",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
