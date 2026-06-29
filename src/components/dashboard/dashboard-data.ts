@@ -1,0 +1,251 @@
+import {
+  Zap,
+  Sparkles,
+  ShoppingBag,
+  Gamepad2,
+  Music,
+  Radio,
+  Clapperboard,
+  Wrench,
+  Image as ImageIcon,
+  Mic,
+  FileText,
+  Terminal,
+  MessageSquare,
+} from "lucide-react";
+
+export type IconComponent = React.ComponentType<{
+  size?: number;
+  className?: string;
+  style?: React.CSSProperties;
+  color?: string;
+}>;
+
+export const APPS = [
+  {
+    id: "jarvis",
+    label: "Jarvis",
+    icon: Terminal,
+    color: "#ff00a0",
+    href: "#",
+  },
+  {
+    id: "studio",
+    label: "Studio",
+    icon: Zap,
+    color: "#00f0ff",
+    href: "/studio",
+  },
+  {
+    id: "gallery",
+    label: "Gallery",
+    icon: Sparkles,
+    color: "#ff00a0",
+    href: "/gallery",
+  },
+  {
+    id: "social",
+    label: "Social",
+    icon: MessageSquare,
+    color: "#ff00a0",
+    href: "/social",
+  },
+  {
+    id: "marketplace",
+    label: "Marketplace",
+    icon: ShoppingBag,
+    color: "#ff9ff3",
+    href: "/marketplace",
+  },
+  { id: "music", label: "Music", icon: Music, color: "#ff2d78", href: "#" },
+  {
+    id: "games",
+    label: "Games",
+    icon: Gamepad2,
+    color: "#8b5cf6",
+    href: "/games",
+  },
+  {
+    id: "watch",
+    label: "Watch",
+    icon: Clapperboard,
+    color: "#3b82f6",
+    href: "#",
+  },
+  { id: "radio", label: "Radio", icon: Radio, color: "#10b981", href: "#" },
+  { id: "tools", label: "Tools", icon: Wrench, color: "#f59e0b", href: "#" },
+];
+
+export const AGENTS = [
+  {
+    name: "Director",
+    status: "online" as const,
+    task: "Orchestration",
+    color: "#00ffff",
+  },
+  {
+    name: "Champion",
+    status: "online" as const,
+    task: "General tasks",
+    color: "#ff0080",
+  },
+  {
+    name: "Code Champion",
+    status: "working" as const,
+    task: "Load tests",
+    color: "#00ff41",
+  },
+  {
+    name: "Social Dominator",
+    status: "idle" as const,
+    task: "Analytics review",
+    color: "#ff6b6b",
+  },
+  {
+    name: "Data Slayer",
+    status: "working" as const,
+    task: "Profiling",
+    color: "#ffff00",
+  },
+  {
+    name: "Writing Coach",
+    status: "online" as const,
+    task: "Content review",
+    color: "#ff9ff3",
+  },
+  {
+    name: "Alex Chen",
+    status: "online" as const,
+    task: "Architecture",
+    color: "#3b82f6",
+  },
+  {
+    name: "Sarah K.",
+    status: "working" as const,
+    task: "Growth strategy",
+    color: "#ec4899",
+  },
+  {
+    name: "Mike Dev",
+    status: "online" as const,
+    task: "API design",
+    color: "#06b6d4",
+  },
+  {
+    name: "J. Taylor",
+    status: "idle" as const,
+    task: "Script editing",
+    color: "#f59e0b",
+  },
+  {
+    name: "Home Controller",
+    status: "online" as const,
+    task: "Device sync",
+    color: "#22d3ee",
+  },
+];
+
+export const CREATORS = [
+  {
+    name: "Alex Chen",
+    handle: "@alexchen",
+    color: "#3b82f6",
+    followers: "12.4K",
+  },
+  { name: "Sarah K.", handle: "@sarahk", color: "#ec4899", followers: "8.2K" },
+  {
+    name: "Mike Dev",
+    handle: "@mikedev",
+    color: "#06b6d4",
+    followers: "15.1K",
+  },
+  {
+    name: "J. Taylor",
+    handle: "@jtaylor",
+    color: "#f59e0b",
+    followers: "6.8K",
+  },
+  {
+    name: "Pixel Forge",
+    handle: "@pixelforge",
+    color: "#8b5cf6",
+    followers: "22.3K",
+  },
+];
+
+export const GAMES = [
+  { title: "Neon Racer", genre: "Arcade", color: "#ff00a0", players: "2.4k" },
+  {
+    title: "Agent Arena",
+    genre: "Strategy",
+    color: "#00f0ff",
+    players: "1.8k",
+  },
+  { title: "Synth Maze", genre: "Puzzle", color: "#8b5cf6", players: "980" },
+  { title: "Cyber Drift", genre: "Racing", color: "#ff9ff3", players: "3.1k" },
+];
+
+export const WATCH = [
+  {
+    title: "Agent Setup Guide",
+    channel: "LiTree Labs",
+    views: "12k",
+    color: "#ff00a0",
+  },
+  {
+    title: "Studio Deep Dive",
+    channel: "LiTree Labs",
+    views: "8.5k",
+    color: "#00f0ff",
+  },
+  {
+    title: "Creator Spotlight #04",
+    channel: "Community",
+    views: "4.2k",
+    color: "#8b5cf6",
+  },
+];
+
+export const RADIO = [
+  {
+    title: "Synthwave FM",
+    genre: "Synthwave",
+    listeners: 342,
+    color: "#ff00a0",
+  },
+  { title: "Lo-Fi Lounge", genre: "Lo-Fi", listeners: 891, color: "#00f0ff" },
+  {
+    title: "Cyber Beats",
+    genre: "Darksynth",
+    listeners: 156,
+    color: "#8b5cf6",
+  },
+  { title: "Focus Flow", genre: "Ambient", listeners: 620, color: "#10b981" },
+];
+
+export const TOOLS = [
+  {
+    title: "Prompt Vault",
+    desc: "Saved prompts & styles",
+    icon: FileText,
+    color: "#f59e0b",
+  },
+  {
+    title: "Asset Locker",
+    desc: "Images, audio & projects",
+    icon: ImageIcon,
+    color: "#00f0ff",
+  },
+  {
+    title: "Quick Notes",
+    desc: "Scratchpad & ideas",
+    icon: Mic,
+    color: "#ff00a0",
+  },
+  {
+    title: "Batch Gen",
+    desc: "Multi-run generations",
+    icon: Zap,
+    color: "#8b5cf6",
+  },
+];

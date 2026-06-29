@@ -1,0 +1,5 @@
+{
+  "priority": 3,
+  "title": "Agent Chat UI",
+  "description": "Build the agent chat interface with model selector, message history, and streaming responses."
+}

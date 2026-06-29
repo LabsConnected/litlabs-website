@@ -1,0 +1,49 @@
+{
+  "name": "frontend",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=3072 next dev --turbo=false",
+    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "pages:build": "npx @cloudflare/next-on-pages@1",
+    "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
+    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat"
+  },
+  "dependencies": {
+    "@aws-sdk/client-s3": "^3.0.0",
+    "@aws-sdk/s3-request-presigner": "^3.0.0",
+    "@clerk/nextjs": "^6.39.5",
+    "@google/genai": "^2.8.0",
+    "@google/generative-ai": "^0.24.1",
+    "@next/third-parties": "^16.2.9",
+    "@stripe/stripe-js": "^5.10.0",
+    "@supabase/supabase-js": "^2.106.2",
+    "@usejarvis/brain": "^0.8.0",
+    "bcryptjs": "^3.0.3",
+    "jose": "^6.2.3",
+    "jsnes": "^2.1.0",
+    "keytar": "^7.9.0",
+    "lucide-react": "^1.17.0",
+    "next": "^16.2.9",
+    "react": "^19.2.7",
+    "react-dom": "^19.2.7",
+    "sharp": "^0.33.0",
+    "stripe": "^18.0.0",
+    "svix": "^1.95.1"
+  },
+  "devDependencies": {
+    "@netlify/plugin-nextjs": "^5",
+    "@tailwindcss/postcss": "^4",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "cross-env": "^10.1.0",
+    "eslint": "^9",
+    "eslint-config-next": "16.2.6",
+    "tailwindcss": "^4",
+    "typescript": "^5"
+  }
+}

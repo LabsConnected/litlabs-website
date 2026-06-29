@@ -1,0 +1,24 @@
+{
+  "buildCommand": "next build",
+  "outputDirectory": ".next",
+  "framework": "nextjs",
+  "installCommand": "npm install",
+  "crons": [
+    {
+      "path": "/api/deployments/digest",
+      "schedule": "0 9 * * 1-5"
+    }
+  ],
+  "functions": {
+    "src/app/api/media/generate/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/generate-video/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/generate-audio/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/generate-music/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/analyze-video/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/transcribe/route.ts": { "maxDuration": 60 },
+    "src/app/api/media/video-status/route.ts": { "maxDuration": 30 },
+    "src/app/api/media/video-download/route.ts": { "maxDuration": 60 },
+    "src/app/api/music/generate/route.ts": { "maxDuration": 60 },
+    "src/app/api/flow/route.ts": { "maxDuration": 60 }
+  }
+}

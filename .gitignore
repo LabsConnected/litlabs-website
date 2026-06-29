@@ -1,0 +1,21 @@
+# Vercel
+.vercel
+
+# Env files
+.env*
+!.env.example
+
+# Dependencies
+node_modules/
+
+# Build output
+.next/
+out/
+
+# Large internal libs
+lib/oracle-cli/
+
+# Misc
+tsconfig.tsbuildinfo
+*.backup
+bun.lock

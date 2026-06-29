@@ -1,0 +1,17 @@
+# ROM files - do not commit to git
+# You must supply your own legally obtained ROM files
+
+*.nes
+*.smc
+*.sfc
+*.bin
+*.md
+*.gb
+*.gba
+*.zip
+*.7z
+*.rar
+
+# Keep the README
+!README.md
+!.gitignore
