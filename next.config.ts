@@ -5,6 +5,9 @@ const nextConfig: NextConfig = {
   // PERFORMANCE OPTIMIZATIONS
   // ============================================
 
+  // Allow local browser previews and proxy origins in dev
+  allowedDevOrigins: ["127.0.0.1", "localhost", "192.168.0.77"],
+
   // Avoid Windows EPERM errors during .next cleanup
   cleanDistDir: false,
 

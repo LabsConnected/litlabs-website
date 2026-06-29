@@ -34,12 +34,9 @@
   --color-background: var(--bg-color);
   --color-foreground: var(--text-color);
   --font-sans: var(--font-inter), "Inter", "Segoe UI", system-ui, sans-serif;
-  --font-mono:
-    var(--font-jetbrains), "JetBrains Mono", "Fira Code", "Courier New",
-    monospace;
+  --font-mono: var(--font-jetbrains), "JetBrains Mono", "Fira Code", "Courier New", monospace;
   --font-display: var(--font-jetbrains), "JetBrains Mono", "Inter", sans-serif;
-  --font-retro:
-    var(--font-jetbrains), "JetBrains Mono", "Courier New", monospace;
+  --font-retro: var(--font-jetbrains), "JetBrains Mono", "Courier New", monospace;
 
   /* IDE Native semantic tokens */
   --color-ide-bg: #0d0d0d;
@@ -55,20 +52,11 @@
 /* ============================================================
    BASE
    ============================================================ */
-*,
-*::before,
-*::after {
+* {
   box-sizing: border-box;
 }
 
-html {
-  scroll-behavior: smooth;
-}
-
-html,
-body {
-  overflow-x: hidden;
-}
+/* html scroll-behavior removed - was causing scroll-to-bottom on page refresh */
 
 body {
   background-color: var(--bg-color);
@@ -100,12 +88,7 @@ body::before {
 /* ============================================================
    TYPOGRAPHY
    ============================================================ */
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
+h1, h2, h3, h4, h5, h6 {
   font-family: var(--font-sans);
   font-weight: 700;
   letter-spacing: -0.02em;
@@ -148,8 +131,8 @@ a:hover {
    CARDS / GLASS
    ============================================================ */
 .card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background: rgba(255,255,255,0.02);
+  border: 1px solid rgba(255,255,255,0.05);
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-card);
@@ -158,7 +141,7 @@ a:hover {
 }
 
 .card:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(255,255,255,0.1);
 }
 
 .card-header {
@@ -369,15 +352,8 @@ a:hover {
 }
 
 @keyframes ping {
-  0% {
-    transform: scale(1) translateZ(0);
-    opacity: 0.5;
-  }
-  80%,
-  100% {
-    transform: scale(2.2) translateZ(0);
-    opacity: 0;
-  }
+  0%   { transform: scale(1) translateZ(0);   opacity: 0.5; }
+  80%, 100% { transform: scale(2.2) translateZ(0); opacity: 0; }
 }
 
 /* ============================================================
@@ -403,11 +379,7 @@ a:hover {
   content: "";
   position: absolute;
   inset: 0;
-  background: radial-gradient(
-    ellipse at center,
-    transparent 55%,
-    rgba(0, 0, 0, 0.4) 100%
-  );
+  background: radial-gradient(ellipse at center, transparent 55%, rgba(0, 0, 0, 0.4) 100%);
 }
 
 /* ============================================================
@@ -439,63 +411,29 @@ a:hover {
    ANIMATIONS
    ============================================================ */
 @keyframes float-sm {
-  0%,
-  100% {
-    transform: translateY(0);
-  }
-  50% {
-    transform: translateY(-6px);
-  }
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
 }
 
 @keyframes glow {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.7;
-  }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.7; }
 }
 
 @keyframes pulse-opacity {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.5; }
 }
 
 @keyframes marquee {
-  0% {
-    transform: translateX(0);
-  }
-  100% {
-    transform: translateX(-50%);
-  }
+  0%   { transform: translateX(0); }
+  100% { transform: translateX(-50%); }
 }
 
-.animate-float {
-  animation: float 4s ease-in-out infinite;
-  will-change: transform;
-  transform: translateZ(0);
-}
-.animate-glow {
-  animation: glow 2.5s ease-in-out infinite;
-  will-change: opacity;
-  transform: translateZ(0);
-}
-.animate-marquee {
-  animation: marquee 30s linear infinite;
-  will-change: transform;
-  transform: translateZ(0);
-}
-.animate-pulse-opacity {
-  animation: pulse-opacity 2s ease-in-out infinite;
-  will-change: opacity;
-}
+.animate-float { animation: float 4s ease-in-out infinite; will-change: transform; transform: translateZ(0); }
+.animate-glow  { animation: glow 2.5s ease-in-out infinite; will-change: opacity; transform: translateZ(0); }
+.animate-marquee { animation: marquee 30s linear infinite; will-change: transform; transform: translateZ(0); }
+.animate-pulse-opacity { animation: pulse-opacity 2s ease-in-out infinite; will-change: opacity; }
 
 /* ============================================================
    AGENT TILES
@@ -886,18 +824,10 @@ a:hover {
 /* ============================================================
    UTILITIES
    ============================================================ */
-.text-muted {
-  color: #6b7280 !important;
-}
-.text-link {
-  color: var(--link-color);
-}
-.text-header {
-  color: var(--header-color);
-}
-.text-accent {
-  color: var(--accent-color);
-}
+.text-muted { color: #6b7280 !important; }
+.text-link   { color: var(--link-color); }
+.text-header { color: var(--header-color); }
+.text-accent { color: var(--accent-color); }
 
 .claim-btn {
   background: linear-gradient(135deg, #9d4edd, #c77dff) !important;
@@ -910,18 +840,11 @@ a:hover {
   padding: 20px !important;
   gap: 12px !important;
 }
-.text-success {
-  color: var(--success);
-}
+.text-success { color: var(--success); }
 
 .divider {
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    rgba(255, 255, 255, 0.08),
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.08), transparent);
   margin: 16px 0;
   border: none;
 }
@@ -979,9 +902,7 @@ a:hover {
   border: 1px solid var(--border-color);
   background: var(--bg-card);
   border-radius: var(--radius-md);
-  transition:
-    border-color var(--transition),
-    box-shadow var(--transition);
+  transition: border-color var(--transition), box-shadow var(--transition);
 }
 
 .lit-box:hover {
@@ -1014,9 +935,7 @@ a:hover {
   font-size: 12px;
   font-weight: bold;
   max-width: 320px;
-  animation:
-    slideInRight 0.3s ease-out,
-    fadeOut 0.3s ease-in 2.7s forwards;
+  animation: slideInRight 0.3s ease-out, fadeOut 0.3s ease-in 2.7s forwards;
   backdrop-filter: blur(8px);
 }
 
@@ -1039,96 +958,48 @@ a:hover {
 }
 
 @keyframes slideInRight {
-  from {
-    transform: translateX(120%);
-    opacity: 0;
-  }
-  to {
-    transform: translateX(0);
-    opacity: 1;
-  }
+  from { transform: translateX(120%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
 }
 
 @keyframes fadeOut {
-  from {
-    opacity: 1;
-  }
-  to {
-    opacity: 0;
-  }
+  from { opacity: 1; }
+  to { opacity: 0; }
 }
 
 /* ============================================================
    MOBILE UTILITIES
    ============================================================ */
 @media (max-width: 768px) {
-  .hide-mobile {
-    display: none !important;
-  }
-  .full-width-mobile {
-    width: 100% !important;
-  }
-  .stack-mobile {
-    flex-direction: column !important;
-  }
+  .hide-mobile { display: none !important; }
+  .full-width-mobile { width: 100% !important; }
+  .stack-mobile { flex-direction: column !important; }
 }
 
 /* ============================================================
    SMOOTHER ANIMATIONS
    ============================================================ */
 @keyframes fadeInUp {
-  from {
-    opacity: 0;
-    transform: translateY(12px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
 @keyframes slideInBottom {
-  from {
-    opacity: 0;
-    transform: translateY(20px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
 }
 
-.animate-fadeInUp {
-  animation: fadeInUp 0.4s ease-out both;
-  will-change: transform, opacity;
-}
-.animate-slideInBottom {
-  animation: slideInBottom 0.5s ease-out both;
-  will-change: transform, opacity;
-}
+.animate-fadeInUp { animation: fadeInUp 0.4s ease-out both; will-change: transform, opacity; }
+.animate-slideInBottom { animation: slideInBottom 0.5s ease-out both; will-change: transform, opacity; }
 
 /* Stagger children */
-.stagger-children > * {
-  animation: fadeInUp 0.35s ease-out both;
-}
-.stagger-children > *:nth-child(1) {
-  animation-delay: 0.05s;
-}
-.stagger-children > *:nth-child(2) {
-  animation-delay: 0.1s;
-}
-.stagger-children > *:nth-child(3) {
-  animation-delay: 0.15s;
-}
-.stagger-children > *:nth-child(4) {
-  animation-delay: 0.2s;
-}
-.stagger-children > *:nth-child(5) {
-  animation-delay: 0.25s;
-}
-.stagger-children > *:nth-child(6) {
-  animation-delay: 0.3s;
-}
+.stagger-children > * { animation: fadeInUp 0.35s ease-out both; }
+.stagger-children > *:nth-child(1) { animation-delay: 0.05s; }
+.stagger-children > *:nth-child(2) { animation-delay: 0.1s; }
+.stagger-children > *:nth-child(3) { animation-delay: 0.15s; }
+.stagger-children > *:nth-child(4) { animation-delay: 0.2s; }
+.stagger-children > *:nth-child(5) { animation-delay: 0.25s; }
+.stagger-children > *:nth-child(6) { animation-delay: 0.3s; }
 
 /* ============================================================
    SCROLL REVEAL
@@ -1136,67 +1007,42 @@ a:hover {
 .reveal {
   opacity: 0;
   transform: translateY(24px);
-  transition:
-    opacity 0.6s ease-out,
-    transform 0.6s ease-out;
+  transition: opacity 0.6s ease-out, transform 0.6s ease-out;
 }
 .reveal.revealed {
   opacity: 1;
   transform: translateY(0);
 }
-.reveal-delay-1 {
-  transition-delay: 0.1s;
-}
-.reveal-delay-2 {
-  transition-delay: 0.2s;
-}
-.reveal-delay-3 {
-  transition-delay: 0.3s;
-}
-.reveal-delay-4 {
-  transition-delay: 0.4s;
-}
-.reveal-delay-5 {
-  transition-delay: 0.5s;
-}
+.reveal-delay-1 { transition-delay: 0.1s; }
+.reveal-delay-2 { transition-delay: 0.2s; }
+.reveal-delay-3 { transition-delay: 0.3s; }
+.reveal-delay-4 { transition-delay: 0.4s; }
+.reveal-delay-5 { transition-delay: 0.5s; }
 
 /* ============================================================
    GLOW EFFECTS
    ============================================================ */
 .glow-box {
-  box-shadow:
-    0 0 20px rgba(0, 229, 255, 0.08),
-    0 0 60px rgba(0, 229, 255, 0.04);
+  box-shadow: 0 0 20px rgba(0, 229, 255, 0.08), 0 0 60px rgba(0, 229, 255, 0.04);
   transition: box-shadow 0.3s ease;
 }
 .glow-box:hover {
-  box-shadow:
-    0 0 30px rgba(0, 229, 255, 0.15),
-    0 0 80px rgba(0, 229, 255, 0.06);
+  box-shadow: 0 0 30px rgba(0, 229, 255, 0.15), 0 0 80px rgba(0, 229, 255, 0.06);
 }
 
 .glow-border {
   position: relative;
 }
 .glow-border::before {
-  content: "";
+  content: '';
   position: absolute;
   inset: -1px;
   border-radius: inherit;
   padding: 1px;
-  background: linear-gradient(
-    135deg,
-    var(--link-color),
-    var(--header-color),
-    var(--accent-color)
-  );
-  -webkit-mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+  background: linear-gradient(135deg, var(--link-color), var(--header-color), var(--accent-color));
+  -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   -webkit-mask-composite: xor;
-  mask:
-    linear-gradient(#fff 0 0) content-box,
-    linear-gradient(#fff 0 0);
+  mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
   mask-composite: exclude;
   opacity: 0;
   transition: opacity 0.3s ease;
@@ -1219,9 +1065,7 @@ a:hover {
 .glass-card:hover {
   background: rgba(255, 255, 255, 0.04);
   border-color: rgba(255, 255, 255, 0.1);
-  box-shadow:
-    0 12px 48px rgba(0, 0, 0, 0.4),
-    0 0 20px rgba(0, 229, 255, 0.05);
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.4), 0 0 20px rgba(0, 229, 255, 0.05);
   transform: translateY(-2px);
 }
 
@@ -1230,15 +1074,15 @@ a:hover {
    ============================================================ */
 .grid-bg {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.03) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
   background-size: 60px 60px;
 }
 
 .grid-bg-dense {
   background-image:
-    linear-gradient(rgba(255, 255, 255, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(255, 255, 255, 0.04) 1px, transparent 1px);
+    linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px);
   background-size: 24px 24px;
 }
 
@@ -1246,20 +1090,11 @@ a:hover {
    SHIMMER / LOADING
    ============================================================ */
 @keyframes shimmer {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 .shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(255, 255, 255, 0.06) 50%,
-    transparent 100%
-  );
+  background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.06) 50%, transparent 100%);
   background-size: 200% 100%;
   animation: shimmer 2s infinite;
 }
@@ -1279,7 +1114,7 @@ a:hover {
    SCANLINE EFFECT (subtle)
    ============================================================ */
 .scanlines::after {
-  content: "";
+  content: '';
   position: absolute;
   inset: 0;
   background: repeating-linear-gradient(
@@ -1297,13 +1132,8 @@ a:hover {
    AMBIENT GLOW ORBS
    ============================================================ */
 @keyframes float {
-  0%,
-  100% {
-    transform: translateY(0) translateZ(0) scale(1);
-  }
-  50% {
-    transform: translateY(-20px) translateZ(0) scale(1.05);
-  }
+  0%, 100% { transform: translateY(0) translateZ(0) scale(1); }
+  50% { transform: translateY(-20px) translateZ(0) scale(1.05); }
 }
 .glow-orb {
   position: absolute;
@@ -1320,16 +1150,11 @@ a:hover {
    TYPEWRITER CURSOR
    ============================================================ */
 @keyframes blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
 }
 .typewriter-cursor::after {
-  content: "|";
+  content: '|';
   animation: blink 1s step-end infinite;
   will-change: opacity;
   color: var(--accent-color);
@@ -1340,9 +1165,7 @@ a:hover {
    CARD HOVER LIFT
    ============================================================ */
 .hover-lift {
-  transition:
-    transform 0.25s ease,
-    box-shadow 0.25s ease;
+  transition: transform 0.25s ease, box-shadow 0.25s ease;
 }
 .hover-lift:hover {
   transform: translateY(-4px);
@@ -1353,11 +1176,7 @@ a:hover {
    RADIAL GLOW BACKGROUND
    ============================================================ */
 .radial-glow {
-  background: radial-gradient(
-    ellipse at 50% 0%,
-    var(--link-color) 08 0%,
-    transparent 60%
-  );
+  background: radial-gradient(ellipse at 50% 0%, var(--link-color)08 0%, transparent 60%);
 }
 
 /* ============================================================
@@ -1367,12 +1186,10 @@ a:hover {
   border-radius: 10px;
   border: 1px solid var(--border-color);
   background: var(--bg-card);
-  transition:
-    box-shadow 0.2s ease,
-    transform 0.15s ease;
+  transition: box-shadow 0.2s ease, transform 0.15s ease;
 }
 .studio-card:hover {
-  box-shadow: 0 0 20px var(--link-color) 10;
+  box-shadow: 0 0 20px var(--link-color)10;
 }
 
 .studio-panel {
@@ -1398,7 +1215,7 @@ a:hover {
 .studio-button:hover {
   background: var(--bg-glass);
   border-color: var(--link-color);
-  box-shadow: 0 0 12px var(--link-color) 15;
+  box-shadow: 0 0 12px var(--link-color)15;
 }
 .studio-button:active {
   transform: scale(0.98);
@@ -1413,19 +1230,15 @@ a:hover {
   font-size: 12px;
   font-family: var(--font-mono);
   outline: none;
-  transition:
-    border-color 0.15s ease,
-    box-shadow 0.15s ease;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
 }
 .studio-input:focus {
   border-color: var(--accent-color);
-  box-shadow: 0 0 0 2px var(--accent-color) 20;
+  box-shadow: 0 0 0 2px var(--accent-color)20;
 }
 
 .glow-text {
-  text-shadow:
-    0 0 20px var(--accent-color) 40,
-    0 0 40px var(--link-color) 20;
+  text-shadow: 0 0 20px var(--accent-color)40, 0 0 40px var(--link-color)20;
 }
 
 /* Smooth scrollbar for studio */
@@ -1448,12 +1261,8 @@ a:hover {
    SCANLINE ANIMATION
    ============================================================ */
 @keyframes scanlineMove {
-  0% {
-    transform: translateY(0);
-  }
-  100% {
-    transform: translateY(4px);
-  }
+  0%   { transform: translateY(0); }
+  100% { transform: translateY(4px); }
 }
 
 /* ============================================================
@@ -1537,9 +1346,7 @@ html {
 }
 
 /* No horizontal overflow anywhere */
-body,
-#__next,
-main {
+body, #__next, main {
   overflow-x: hidden;
   max-width: 100vw;
 }
@@ -1594,41 +1401,6 @@ main {
   gap: 12px;
 }
 
-/* ============================================================
-   JARVIS TERMINAL EFFECTS
-   ============================================================ */
-.terminal-grid-bg {
-  background-image:
-    linear-gradient(rgba(0, 255, 157, 0.03) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 255, 157, 0.03) 1px, transparent 1px);
-  background-size: 20px 20px;
-}
-
-/* CRT flicker on terminal output */
-@keyframes crt-flicker {
-  0% {
-    opacity: 0.98;
-  }
-  5% {
-    opacity: 1;
-  }
-  10% {
-    opacity: 0.97;
-  }
-  15% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.99;
-  }
-  100% {
-    opacity: 1;
-  }
-}
-.crt-flicker {
-  animation: crt-flicker 0.15s infinite;
-}
-
 /* Line clamping utilities */
 .line-clamp-2 {
   display: -webkit-box;
@@ -1656,8 +1428,7 @@ main {
     font-size: 13px;
   }
 
-  h1,
-  .font-display {
+  h1, .font-display {
     font-size: 1.5rem !important;
     line-height: 1.2;
   }
@@ -1758,59 +1529,29 @@ main {
 }
 
 @keyframes pulse {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0.5;
-  }
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
 }
 
 /* ============================================================
    SKELETON LOADERS
    ============================================================ */
 @keyframes skeleton-wave {
-  0% {
-    background-position: -200% 0;
-  }
-  100% {
-    background-position: 200% 0;
-  }
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
 }
 .skeleton {
-  background: linear-gradient(
-    90deg,
-    rgba(255, 255, 255, 0.04) 25%,
-    rgba(255, 255, 255, 0.08) 50%,
-    rgba(255, 255, 255, 0.04) 75%
-  );
+  background: linear-gradient(90deg, rgba(255,255,255,0.04) 25%, rgba(255,255,255,0.08) 50%, rgba(255,255,255,0.04) 75%);
   background-size: 200% 100%;
   animation: skeleton-wave 1.5s ease-in-out infinite;
   border-radius: 4px;
 }
-.skeleton-text {
-  height: 12px;
-  margin-bottom: 8px;
-}
-.skeleton-text.w-3-4 {
-  width: 75%;
-}
-.skeleton-text.w-1-2 {
-  width: 50%;
-}
-.skeleton-text.w-full {
-  width: 100%;
-}
-.skeleton-avatar {
-  width: 40px;
-  height: 40px;
-  border-radius: 50%;
-}
-.skeleton-card {
-  height: 120px;
-  border-radius: 8px;
-}
+.skeleton-text { height: 12px; margin-bottom: 8px; }
+.skeleton-text.w-3-4 { width: 75%; }
+.skeleton-text.w-1-2 { width: 50%; }
+.skeleton-text.w-full { width: 100%; }
+.skeleton-avatar { width: 40px; height: 40px; border-radius: 50%; }
+.skeleton-card { height: 120px; border-radius: 8px; }
 
 /* ============================================================
    CHAT BUBBLES
@@ -1830,14 +1571,14 @@ main {
   background: linear-gradient(135deg, var(--accent-color), var(--link-color));
   color: #0a0a0f;
   font-weight: 500;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.3);
+  box-shadow: 0 2px 12px rgba(0,0,0,0.3);
 }
 .chat-bubble-ai {
   border-radius: 16px 16px 16px 4px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.08);
+  background: rgba(255,255,255,0.05);
+  border: 1px solid rgba(255,255,255,0.08);
   color: var(--text-color);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.2);
+  box-shadow: 0 2px 8px rgba(0,0,0,0.2);
 }
 .chat-bubble-ai .agent-label {
   font-size: 10px;
@@ -1889,26 +1630,16 @@ main {
   background: rgba(20, 20, 23, 0.9);
   border: 1px solid rgba(255, 255, 255, 0.07);
   border-radius: 12px;
-  box-shadow:
-    0 4px 24px rgba(0, 0, 0, 0.4),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
-  transition:
-    transform 0.2s ease,
-    box-shadow 0.2s ease,
-    border-color 0.2s ease;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.05);
+  transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
 }
 .card-elevated:hover {
   transform: translateY(-2px);
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    0 0 0 1px rgba(255, 255, 255, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.07);
-  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 0 1px rgba(255,255,255,0.1), inset 0 1px 0 rgba(255,255,255,0.07);
+  border-color: rgba(255,255,255,0.12);
 }
 .card-glow:hover {
-  box-shadow:
-    0 8px 32px rgba(0, 0, 0, 0.5),
-    0 0 20px var(--accent-color, rgba(121, 192, 255, 0.15));
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5), 0 0 20px var(--accent-color, rgba(121,192,255,0.15));
 }
 
 /* ============================================================
@@ -1918,7 +1649,7 @@ main {
   position: relative;
 }
 .agent-online-ring::after {
-  content: "";
+  content: '';
   position: absolute;
   bottom: 1px;
   right: 1px;
@@ -1933,20 +1664,13 @@ main {
 /* ============================================================
    CUSTOM SCROLLBAR
    ============================================================ */
-::-webkit-scrollbar {
-  width: 6px;
-  height: 6px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
-  background: rgba(255, 255, 255, 0.12);
+  background: rgba(255,255,255,0.12);
   border-radius: 3px;
 }
-::-webkit-scrollbar-thumb:hover {
-  background: rgba(255, 255, 255, 0.2);
-}
+::-webkit-scrollbar-thumb:hover { background: rgba(255,255,255,0.2); }
 
 /* ============================================================
    FOCUS RING (accessibility + aesthetics)
@@ -1962,64 +1686,164 @@ main {
    ============================================================ */
 .divider-accent {
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    var(--accent-color, #79c0ff) 40,
-    transparent
-  );
+  background: linear-gradient(90deg, var(--accent-color, #79c0ff)40, transparent);
   border: none;
   margin: 0;
 }
 .divider-center {
   height: 1px;
-  background: linear-gradient(
-    90deg,
-    transparent,
-    var(--accent-color, #79c0ff) 40,
-    transparent
-  );
+  background: linear-gradient(90deg, transparent, var(--accent-color, #79c0ff)40, transparent);
   border: none;
   margin: 0;
 }
 
 /* ============================================================
-   SCROLLBAR HIDE UTILITY
+   RESPONSIVE POLISH (added 2026-06-23)
    ============================================================ */
-.scrollbar-hide {
-  -ms-overflow-style: none;
-  scrollbar-width: none;
-}
-.scrollbar-hide::-webkit-scrollbar {
-  display: none;
+
+/* Prevent any page from overflowing horizontally */
+html, body, #__next {
+  overflow-x: hidden;
+  max-width: 100vw;
 }
 
-/* ============================================================
-   STUDIO SIDEBAR MOBILE
-   ============================================================ */
+/* Respect reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* Mobile typography tweaks */
+@media (max-width: 640px) {
+  body {
+    font-size: 14px;
+  }
+  h1 { font-size: 1.75rem !important; line-height: 1.15 !important; }
+  h2 { font-size: 1.5rem !important; line-height: 1.2 !important; }
+  h3 { font-size: 1.25rem !important; }
+}
+
+/* Studio workspace should always fill the viewport */
+.studio-scroll {
+  width: 100%;
+  min-width: 0;
+}
+
+/* Gallery masonry gap */
+.gallery-masonry {
+  column-gap: 12px;
+}
+.gallery-masonry > * {
+  break-inside: avoid;
+  margin-bottom: 12px;
+}
+
+/* Better mobile nav */
 @media (max-width: 768px) {
-  .studio-sidebar {
-    position: fixed;
-    left: 0;
-    top: 0;
-    height: 100vh;
-    z-index: 50;
-    transform: translateX(-100%);
-    transition: transform 0.3s ease;
+  nav [role="navigation"] > * {
+    flex-shrink: 0;
   }
-  .studio-sidebar.open {
-    transform: translateX(0);
+}
+
+/* Main content area should never overflow */
+main {
+  min-width: 0;
+}
+
+/* Studio tool content should fill the workspace and not be smushed */
+.studio-scroll > * {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+}
+
+/* Force all tool canvases to stay inside the viewport */
+.studio-scroll img,
+.studio-scroll video,
+.studio-scroll canvas {
+  max-width: 100%;
+  height: auto;
+}
+
+/* Reduce padding on mobile for dense tools */
+@media (max-width: 640px) {
+  .studio-scroll {
+    padding: 12px;
   }
-  .studio-sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.5);
-    z-index: 40;
-    opacity: 0;
-    pointer-events: none;
-    transition: opacity 0.3s ease;
+}
+
+
+/* ============================================================
+   STUDIO RESPONSIVE FIXES (added 2026-06-23)
+   ============================================================ */
+
+/* Studio tool root should fill the available workspace */
+.studio-tool-root,
+.studio-scroll > div {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
+  box-sizing: border-box;
+}
+
+/* All studio inputs and textareas should not overflow */
+.studio-scroll input,
+.studio-scroll textarea,
+.studio-scroll select {
+  max-width: 100%;
+}
+
+/* Studio cards should not overflow */
+.studio-scroll .rounded-lg,
+.studio-scroll .border,
+.studio-scroll .border-2 {
+  max-width: 100%;
+}
+
+/* Tool preview areas should be responsive */
+.studio-scroll .aspect-video,
+.studio-scroll .aspect-square,
+.studio-scroll [class*="aspect-"] {
+  max-width: 100%;
+}
+
+/* Gallery asset bucket cards */
+.studio-scroll .asset-card {
+  min-width: 0;
+  word-break: break-word;
+}
+
+/* Pipeline canvas should be responsive */
+.studio-scroll .pipeline-canvas,
+.studio-scroll canvas {
+  max-width: 100%;
+}
+
+/* Mobile: reduce padding in studio tools */
+@media (max-width: 640px) {
+  .studio-scroll {
+    padding: 12px;
   }
-  .studio-sidebar-overlay.open {
-    opacity: 1;
-    pointer-events: auto;
+  .studio-scroll h1,
+  .studio-scroll h2,
+  .studio-scroll h3 {
+    font-size: 1rem;
   }
+}
+
+/* Prevent any tool from creating horizontal overflow */
+.studio-scroll {
+  overflow-x: hidden;
+}
+
+/* Make sure the terminal/pipeline text wraps */
+.studio-scroll pre,
+.studio-scroll code,
+.studio-scroll .terminal-output {
+  white-space: pre-wrap;
+  word-break: break-word;
+  max-width: 100%;
 }
