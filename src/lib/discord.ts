@@ -43,15 +43,15 @@ export const DISCORD_COLORS = {
   neutral: 0x8888aa, // Gray
 };
 
-// Channel-specific webhook URLs (loaded from env)
+// Channel-specific webhook URLs (server-only — never expose to client)
 const WEBHOOK_URLS: Record<NotificationChannel, string | undefined> = {
-  general: process.env.NEXT_PUBLIC_DISCORD_GENERAL_WEBHOOK,
-  admin: process.env.NEXT_PUBLIC_DISCORD_ADMIN_WEBHOOK,
-  security: process.env.NEXT_PUBLIC_DISCORD_SECURITY_WEBHOOK,
-  sales: process.env.NEXT_PUBLIC_DISCORD_SALES_WEBHOOK,
-  errors: process.env.NEXT_PUBLIC_DISCORD_ERRORS_WEBHOOK,
-  agents: process.env.NEXT_PUBLIC_DISCORD_AGENTS_WEBHOOK,
-  system: process.env.NEXT_PUBLIC_DISCORD_SYSTEM_WEBHOOK,
+  general: process.env.DISCORD_GENERAL_WEBHOOK,
+  admin: process.env.DISCORD_ADMIN_WEBHOOK,
+  security: process.env.DISCORD_SECURITY_WEBHOOK,
+  sales: process.env.DISCORD_SALES_WEBHOOK,
+  errors: process.env.DISCORD_ERRORS_WEBHOOK,
+  agents: process.env.DISCORD_AGENTS_WEBHOOK,
+  system: process.env.DISCORD_SYSTEM_WEBHOOK,
 };
 
 /**

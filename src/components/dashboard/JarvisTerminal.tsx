@@ -251,6 +251,16 @@ function buildBootLogs(): LogEntry[] {
   return bootLogs;
 }
 
+type HistoryEntry = { role: "user" | "assistant"; content: string };
+
+interface SiteContext {
+  platform?: string;
+  totalUsers?: number;
+  currentTime?: string;
+  recentEvents?: { type: string; title: string; when: string }[];
+  capabilities?: string[];
+}
+
 export default function JarvisTerminal() {
   const { resolvedColors: T } = useTheme();
   const [logs, setLogs] = useState<LogEntry[]>(buildBootLogs);
@@ -279,6 +289,11 @@ export default function JarvisTerminal() {
   >("unknown");
   const voicePickerRef = useRef<HTMLDivElement>(null);
 
+  // Conversation memory
+  const [conversationHistory, setConversationHistory] = useState<HistoryEntry[]>([]);
+  const [siteContext, setSiteContext] = useState<SiteContext | null>(null);
+  const historyRef = useRef<HistoryEntry[]>([]);
+
   const terminalRef = useRef<HTMLDivElement>(null);
   const videoRef = useRef<HTMLVideoElement>(null);
   const recognitionRef = useRef<SpeechRecognition | null>(null);
@@ -292,6 +307,88 @@ export default function JarvisTerminal() {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [logs, brainText, isBrainStreaming]);
+
+  // Keep ref in sync for use in callbacks
+  useEffect(() => {
+    historyRef.current = conversationHistory;
+  }, [conversationHistory]);
+
+  // Load conversation history from localStorage on mount
+  useEffect(() => {
+    try {
+      const stored = localStorage.getItem(`jarvis_history_${selectedAgent}`);
+      if (stored) {
+        const parsed = JSON.parse(stored) as HistoryEntry[];
+        setConversationHistory(parsed.slice(-20));
+      } else {
+        setConversationHistory([]);
+      }
+    } catch {
+      setConversationHistory([]);
+    }
+  }, [selectedAgent]);
+
+  // Load history from server (async, merges with localStorage)
+  useEffect(() => {
+    fetch(`/api/jarvis/history?agent=${selectedAgent}&limit=20`)
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.messages?.length) {
+          const serverHistory: HistoryEntry[] = data.messages.map(
+            (m: { role: string; content: string }) => ({
+              role: m.role as "user" | "assistant",
+              content: m.content,
+            }),
+          );
+          setConversationHistory((prev) => {
+            // Merge: prefer server if longer, else keep local
+            if (serverHistory.length > prev.length) return serverHistory;
+            return prev;
+          });
+        }
+      })
+      .catch(() => {});
+  }, [selectedAgent]);
+
+  // Fetch site context for smarter responses
+  useEffect(() => {
+    fetch("/api/jarvis/context")
+      .then((r) => r.ok ? r.json() : null)
+      .then((data) => {
+        if (data?.context) setSiteContext(data.context);
+      })
+      .catch(() => {});
+  }, []);
+
+  // Persist history to localStorage on change
+  useEffect(() => {
+    if (conversationHistory.length > 0) {
+      try {
+        localStorage.setItem(
+          `jarvis_history_${selectedAgent}`,
+          JSON.stringify(conversationHistory.slice(-20)),
+        );
+      } catch { /* quota exceeded */ }
+    }
+  }, [conversationHistory, selectedAgent]);
+
+  // Helper to add to history and persist to server
+  const addToHistory = useCallback(
+    (entry: HistoryEntry) => {
+      setConversationHistory((prev) => [...prev, entry].slice(-20));
+      // Fire-and-forget server persist
+      fetch("/api/jarvis/history", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agent: selectedAgent,
+          role: entry.role,
+          content: entry.content,
+        }),
+      }).catch(() => {});
+    },
+    [selectedAgent],
+  );
 
   /* Position voice picker in a portal so it escapes the terminal's stacking context */
   useLayoutEffect(() => {
@@ -470,6 +567,10 @@ export default function JarvisTerminal() {
       setIsBrainStreaming(true);
       setBrainText("");
       setIsProcessing(true);
+
+      // Add user message to conversation history
+      addToHistory({ role: "user", content: msg });
+
       try {
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
@@ -477,6 +578,8 @@ export default function JarvisTerminal() {
           body: JSON.stringify({
             agentSlug: selectedAgent,
             message: msg,
+            history: historyRef.current.slice(-8),
+            context: siteContext || undefined,
             provider: "gemini",
             stream: true,
           }),
@@ -485,6 +588,7 @@ export default function JarvisTerminal() {
         const reader = res.body.getReader();
         const decoder = new TextDecoder();
         let fullText = "";
+        let toolResults: { tool: string; result: string }[] = [];
         while (true) {
           const { done, value } = await reader.read();
           if (done) break;
@@ -494,21 +598,40 @@ export default function JarvisTerminal() {
             if (!line.startsWith("data: ")) continue;
             try {
               const data = JSON.parse(line.slice(6));
-              const text = data.text || "";
-              if (text) {
-                fullText += text;
+              if (data.text) {
+                fullText += data.text;
                 setBrainText(fullText);
+              }
+              if (data.toolResults) {
+                toolResults = data.toolResults;
               }
             } catch {
               /* ignore malformed SSE */
             }
           }
         }
+
+        // Add assistant response to conversation history
+        if (fullText) {
+          addToHistory({ role: "assistant", content: fullText });
+        }
+
         addLog({
           type: "brain",
           text: fullText || "No response received.",
           agentName: "JARVIS",
         });
+
+        // Display tool results if any
+        if (toolResults.length > 0) {
+          for (const tr of toolResults) {
+            addLog({
+              type: "success",
+              text: `[TOOL:${tr.tool}] ${tr.result}`,
+            });
+          }
+        }
+
         speak(fullText);
       } catch (err) {
         addLog({
@@ -521,7 +644,7 @@ export default function JarvisTerminal() {
         setIsProcessing(false);
       }
     },
-    [selectedAgent, addLog, speak],
+    [selectedAgent, addLog, speak, addToHistory, siteContext],
   );
 
   const triggerAlexa = useCallback(

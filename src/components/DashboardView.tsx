@@ -8,6 +8,7 @@ import { useWallet } from "@/context/WalletContext";
 import { APPS } from "@/components/dashboard/dashboard-data";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
+import NotificationInbox from "@/components/dashboard/NotificationInbox";
 
 export default function DashboardView() {
   const { user } = useUser();
@@ -91,6 +92,11 @@ export default function DashboardView() {
             : "overflow-y-auto"
         }`}
       >
+        {/* Notification bell */}
+        <div className="flex justify-end mb-2">
+          <NotificationInbox />
+        </div>
+
         {/* Mobile app bar */}
         <div className="md:hidden flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide">
           {APPS.map((app) => {
