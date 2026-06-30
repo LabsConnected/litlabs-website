@@ -12,7 +12,8 @@ export const maxDuration = 60;
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "director";
-const HISTORY_LIMIT = 8;
+// Keep last 12 turns (6 exchanges) to give the model solid context without bloating the prompt
+const HISTORY_LIMIT = 12;
 
 interface SiteContext {
   platform?: string;
@@ -28,11 +29,14 @@ function buildPrompt(
   history: HistoryEntry[],
   context?: SiteContext,
 ): string {
-  const condensed = history
-    .slice(-HISTORY_LIMIT)
-    .map(
-      (entry) =>
-        `${entry.role === "user" ? "User" : agent.name}: ${entry.content}`,
+  const recentHistory = history.slice(-HISTORY_LIMIT);
+
+  // Build a turn-by-turn conversation transcript so the model can track the full thread
+  const transcript = recentHistory
+    .map((entry) =>
+      entry.role === "user"
+        ? `User: ${entry.content}`
+        : `${agent.name}: ${entry.content}`,
     )
     .join("\n");
 
@@ -42,14 +46,20 @@ function buildPrompt(
 
   const toolPrompt = buildToolPrompt();
 
-  return `${agent.systemPrompt}
-
-Personality: ${agent.personality}
-Role: ${agent.role}
-${contextBlock}${toolPrompt}
-${condensed ? `\nConversation history:\n${condensed}\n\n` : ""}User: ${message}
-
-Respond as ${agent.name} in character, staying concise and actionable. If you need to use a tool, include it in format [TOOL:name {"param":"value"}].`;
+  return [
+    agent.systemPrompt,
+    contextBlock,
+    toolPrompt,
+    "",
+    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+    `User: ${message}`,
+    "",
+    `Respond as ${agent.name} in character, staying concise and actionable. If you need to use a tool, include it in format [TOOL:name {"param":"value"}].`,
+    "",
+    `${agent.name}:`,
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
 }
 
 async function logConversation(

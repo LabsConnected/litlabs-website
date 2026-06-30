@@ -346,78 +346,75 @@ function StudioInner() {
           className="flex-1 overflow-hidden flex flex-col w-full"
           style={{ backgroundColor: T.bgColor, willChange: "transform" }}
         >
-          {/* Zed-style top bar — scrollable on mobile */}
+          {/* Studio top bar */}
           <div
-            className="flex items-center justify-between px-3 h-11 md:h-9 shrink-0 overflow-x-auto scrollbar-hide"
+            className="flex items-center justify-between px-3 h-11 md:h-9 shrink-0"
             style={{
               borderBottom: `1px solid ${T.borderColor}12`,
               backgroundColor: T.boxBg + "40",
             }}
           >
-            {/* Left: breadcrumb */}
-            <div className="flex items-center gap-2 shrink-0">
+            {/* Left: breadcrumb — "Workspace /" hidden on xs */}
+            <div className="flex items-center gap-1.5 shrink-0 min-w-0">
               <span
-                className="text-xs md:text-[10px] font-bold uppercase tracking-[0.12em] opacity-40"
+                className="hidden sm:inline text-[10px] font-bold uppercase tracking-[0.12em] opacity-40 whitespace-nowrap"
                 style={{ color: T.textMuted }}
               >
                 Workspace
               </span>
               <span
-                className="text-xs md:text-[10px] opacity-20"
+                className="hidden sm:inline text-[10px] opacity-20"
                 style={{ color: T.textMuted }}
               >
                 /
               </span>
               <span
-                className="text-xs md:text-[10px] font-bold uppercase tracking-[0.12em]"
+                className="text-[11px] md:text-[10px] font-black uppercase tracking-[0.12em] truncate"
                 style={{ color: T.accentColor }}
               >
                 {activeTool}
               </span>
-            </div>
-
-            {/* Center: model badge — hidden on very small screens */}
-            <div className="hidden sm:block">
-              <ModelBadge tool={activeTool} />
+              {/* Model badge inline on mobile */}
+              <div className="ml-2">
+                <ModelBadge tool={activeTool} />
+              </div>
             </div>
 
             {/* Right: actions */}
-            <div className="flex items-center gap-2 shrink-0">
+            <div className="flex items-center gap-1.5 shrink-0">
               {/* Coin balance */}
               <div
-                className="flex items-center gap-1 px-2 py-1 md:px-1.5 md:py-0.5 rounded text-xs md:text-[9px] font-bold whitespace-nowrap"
+                className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] md:text-[9px] font-bold whitespace-nowrap"
                 style={{
                   backgroundColor: T.accentColor + "10",
                   color: T.accentColor,
                 }}
               >
-                <Coins size={12} className="md:w-2.5 md:h-2.5" />{" "}
-                {litcoins.toLocaleString()}{" "}
-                <span className="opacity-60 hidden sm:inline">
-                  LiTBit Coins
-                </span>
+                <Coins size={11} />
+                <span>{litcoins.toLocaleString()}</span>
+                <span className="opacity-60 hidden sm:inline">LiTBit</span>
               </div>
 
-              {/* CRT toggle */}
+              {/* CRT toggle — icon-only on xs, label on sm+ */}
               <button
                 onClick={() => toggleCrt()}
-                className="flex items-center gap-1 text-xs md:text-[9px] font-bold uppercase tracking-wider px-2 py-1 md:px-1.5 md:py-0.5 rounded transition-all hover:opacity-80 shrink-0"
+                className="flex items-center gap-1 text-[10px] md:text-[9px] font-bold uppercase px-2 py-0.5 rounded transition-all hover:opacity-80"
                 style={{
-                  backgroundColor: crtEnabled
-                    ? T.accentColor + "12"
-                    : "transparent",
+                  backgroundColor: crtEnabled ? T.accentColor + "12" : "transparent",
                   color: crtEnabled ? T.accentColor : T.textMuted + "60",
                   border: `1px solid ${crtEnabled ? T.accentColor + "30" : T.borderColor + "15"}`,
                 }}
               >
-                <Monitor size={12} className="md:w-2.5 md:h-2.5" /> CRT
+                <Monitor size={11} />
+                <span className="hidden sm:inline">CRT</span>
               </button>
             </div>
           </div>
 
           {/* Tool content — canvas, GPU composited for smooth scroll */}
+          {/* pb-14 md:pb-0 reserves space for mobile bottom tab bar */}
           <div
-            className="flex-1 overflow-auto studio-scroll"
+            className="flex-1 overflow-auto studio-scroll pb-14 md:pb-0"
             style={{ transform: "translateZ(0)", willChange: "transform" }}
           >
             <Suspense

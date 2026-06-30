@@ -13,26 +13,35 @@ import {
   Image as ImageIcon,
   Terminal,
   X,
+  FolderOpen,
+  ChevronRight,
 } from "lucide-react";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, buildSystemPrompt } from "@/lib/agents";
+import {
+  loadProjectContext,
+  saveProjectContext,
+  hasProjectContext,
+  projectContextSummary,
+  EMPTY_CONTEXT,
+} from "@/lib/project-context";
+import type { ProjectContext } from "@/lib/agents";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
-type AgentProfile = (typeof AGENTS)[keyof typeof AGENTS] & {
-  color: string;
-  desc: string;
-  systemPrompt: string;
-};
-
-const AGENT_LIST: AgentProfile[] = Object.values(AGENTS).map((agent) => ({
-  ...agent,
-  color: (agent as AgentProfile).color ?? "#00ffff",
-  desc: (agent as AgentProfile).role ?? "Agent",
-  systemPrompt: (agent as AgentProfile).systemPrompt ?? "",
-}));
+const AGENT_LIST = Object.values(AGENTS);
 
 const AGENT_COLORS: Record<string, string> = Object.fromEntries(
-  AGENT_LIST.map((a) => [a.id, a.color]),
+  AGENT_LIST.map((a) => [a.id, a.color ?? "#00ffff"]),
 );
+
+/* ─── Slash command help ──────────────────────────────────────────────── */
+const SLASH_HELP = `Available commands:
+  /clear        — Clear terminal output
+  /help         — Show this help
+  /project      — Show / edit your project context
+  /project set  — Guided project context setup
+  /agents       — List all agents and their domains
+  /image <desc> — Generate an image (routes to Visionary)
+  /model        — Toggle AI model provider`;
 
 type TerminalLine = {
   id: string;
@@ -108,6 +117,9 @@ export default function AgentsTerminalTool() {
   const [attachedImageUrl, setAttachedImageUrl] = useState("");
   const [showImageInput, setShowImageInput] = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState("");
+  const [projectCtx, setProjectCtx] = useState<ProjectContext>(() => loadProjectContext());
+  const [showProjectEditor, setShowProjectEditor] = useState(false);
+  const [projectDraft, setProjectDraft] = useState<ProjectContext>(() => loadProjectContext());
 
   /* Right panel */
   const [rightTab, setRightTab] = useState<"info" | "logs">("info");
@@ -192,11 +204,77 @@ export default function AgentsTerminalTool() {
     [appendLine],
   );
 
+  /* ── Slash command handler ───────────────────────────────────────── */
+  const handleSlashCommand = useCallback((cmd: string): boolean => {
+    const lower = cmd.trim().toLowerCase();
+
+    if (lower === "/clear") {
+      setLines([]);
+      return true;
+    }
+    if (lower === "/help") {
+      addSystemLine(SLASH_HELP);
+      return true;
+    }
+    if (lower === "/project" || lower === "/project show") {
+      const ctx = loadProjectContext();
+      if (!hasProjectContext(ctx)) {
+        addSystemLine("No project context set. Type /project set to configure.");
+      } else {
+        addSystemLine(
+          `Project context:\n` +
+          Object.entries(ctx)
+            .filter(([, v]) => v)
+            .map(([k, v]) => `  ${k}: ${v}`)
+            .join("\n")
+        );
+      }
+      return true;
+    }
+    if (lower === "/project set" || lower === "/project edit") {
+      setProjectDraft({ ...loadProjectContext() });
+      setShowProjectEditor(true);
+      return true;
+    }
+    if (lower === "/agents") {
+      const agentInfo = AGENT_LIST.map(
+        (a) => `  ${a.tag ?? a.name.toUpperCase()} — ${a.role}\n    Domains: ${(a.domains ?? []).join(", ")}`
+      ).join("\n");
+      addSystemLine(`Active agents (${AGENT_LIST.length}):\n${agentInfo}`);
+      return true;
+    }
+    if (lower === "/model") {
+      setProvider((p) => p === "gemini" ? "openrouter-free" : "gemini");
+      addSystemLine(`Switched model provider.`);
+      return true;
+    }
+    if (lower.startsWith("/image ")) {
+      const desc = cmd.slice(7).trim();
+      // Route to Visionary agent
+      setSelectedAgentId("pixel-forge");
+      addSystemLine(`[Visionary] Routing image request...`);
+      // Return false so sendMessage continues with the description text
+      setInput(desc);
+      return false;
+    }
+    return false;
+  }, [addSystemLine]);
+
   const sendMessage = useCallback(
     async (text?: string) => {
       const content = (text || input).trim();
       if (!content && !attachedImageUrl) return;
       if (isLoading) return;
+
+      // Handle slash commands before sending
+      if (content.startsWith("/")) {
+        const handled = handleSlashCommand(content);
+        if (handled) {
+          setInput("");
+          return;
+        }
+        // /image routes here — input was reset, fall through
+      }
 
       const finalText =
         content + (attachedImageUrl ? `\n[Image: ${attachedImageUrl}]` : "");
@@ -242,6 +320,8 @@ export default function AgentsTerminalTool() {
             content: l.content,
           }));
 
+        const ctxPrompt = buildSystemPrompt(selectedAgent.systemPrompt, projectCtx);
+
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -250,7 +330,7 @@ export default function AgentsTerminalTool() {
             provider,
             stream: true,
             history,
-            systemPrompt: selectedAgent.systemPrompt,
+            systemPrompt: ctxPrompt,
           }),
         });
 
@@ -319,8 +399,10 @@ export default function AgentsTerminalTool() {
       lines,
       selectedAgent,
       provider,
+      projectCtx,
       appendLine,
       addSystemLine,
+      handleSlashCommand,
     ],
   );
 
@@ -448,53 +530,67 @@ export default function AgentsTerminalTool() {
           </span>
         </div>
 
+        {/* Project context badge */}
+        <button
+          onClick={() => { setProjectDraft({ ...projectCtx }); setShowProjectEditor(true); }}
+          className="mx-2 mb-1 mt-1 flex items-center gap-1.5 px-2 py-1 rounded text-left transition-all hover:opacity-90"
+          style={{
+            backgroundColor: hasProjectContext(projectCtx) ? T.accentColor + "18" : "transparent",
+            border: `1px solid ${hasProjectContext(projectCtx) ? T.accentColor + "40" : T.borderColor + "20"}`,
+          }}
+        >
+          <FolderOpen size={9} style={{ color: hasProjectContext(projectCtx) ? T.accentColor : T.textMuted, flexShrink: 0 }} />
+          <span className="text-[9px] truncate" style={{ color: hasProjectContext(projectCtx) ? T.textColor : T.textMuted }}>
+            {hasProjectContext(projectCtx) ? projectContextSummary(projectCtx) : "Set project context…"}
+          </span>
+        </button>
+
         {/* Agent list */}
         <div className="flex-1 overflow-y-auto py-1">
-          {AGENT_LIST.map((agent, idx) => {
+          {AGENT_LIST.map((agent) => {
             const isActive = selectedAgentId === agent.id;
+            const agentColor = agent.color ?? "#00ffff";
             return (
               <button
                 key={agent.id}
                 onClick={() => setSelectedAgentId(agent.id)}
-                className="w-full text-left px-3 py-2 transition-all group border-l-2"
+                className="w-full text-left px-3 py-2 transition-all border-l-2"
                 style={{
-                  backgroundColor: isActive
-                    ? agent.color + "08"
-                    : "transparent",
-                  borderLeftColor: isActive ? agent.color : "transparent",
+                  backgroundColor: isActive ? agentColor + "12" : "transparent",
+                  borderLeftColor: isActive ? agentColor : "transparent",
                 }}
               >
                 <div className="flex items-center gap-2">
-                  <span
-                    className="text-[9px] font-mono w-4 shrink-0"
-                    style={{ color: T.textMuted + "60" }}
-                  >
-                    {String(idx + 1).padStart(2, "0")}
-                  </span>
                   <div
                     className="w-2 h-2 rounded-full shrink-0"
                     style={{
-                      backgroundColor: agent.color,
-                      boxShadow: isActive ? `0 0 6px ${agent.color}` : "none",
+                      backgroundColor: agentColor,
+                      boxShadow: isActive ? `0 0 8px ${agentColor}` : "none",
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <div
-                      className="text-[11px] font-bold truncate"
-                      style={{ color: isActive ? agent.color : T.textColor }}
-                    >
-                      {agent.name}
+                    <div className="flex items-center gap-1.5">
+                      <span
+                        className="text-[11px] font-bold"
+                        style={{ color: isActive ? agentColor : T.textColor }}
+                      >
+                        {agent.name}
+                      </span>
+                      <span
+                        className="text-[8px] font-mono px-1 rounded"
+                        style={{ backgroundColor: agentColor + "18", color: agentColor }}
+                      >
+                        {agent.tag ?? agent.id.toUpperCase()}
+                      </span>
                     </div>
                     <div
-                      className="text-[9px] truncate"
-                      style={{
-                        color: isActive ? T.textMuted : T.textMuted + "60",
-                      }}
+                      className="text-[9px] truncate mt-0.5"
+                      style={{ color: T.textMuted + "80" }}
                     >
                       {agent.role}
                     </div>
                   </div>
-                  {isActive && <span style={{ color: agent.color }}>▶</span>}
+                  {isActive && <ChevronRight size={10} style={{ color: agentColor }} />}
                 </div>
               </button>
             );
@@ -506,19 +602,14 @@ export default function AgentsTerminalTool() {
           className="border-t px-3 py-2 space-y-1"
           style={{ borderColor: T.borderColor + "20" }}
         >
-          <div
-            className="text-[9px] font-mono"
-            style={{ color: T.textMuted + "60" }}
-          >
-            Quick commands:
-          </div>
-          <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
-            <span style={{ color: T.accentColor }}>/help</span>
-            <span style={{ color: T.textMuted + "60" }}>show help</span>
-            <span style={{ color: T.accentColor }}>/clear</span>
-            <span style={{ color: T.textMuted + "60" }}>clear chat</span>
-            <span style={{ color: T.accentColor }}>/image</span>
-            <span style={{ color: T.textMuted + "60" }}>gen image</span>
+          <div className="text-[9px] font-mono" style={{ color: T.textMuted + "60" }}>Commands:</div>
+          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px] font-mono">
+            {[["/help", "help"], ["/clear", "clear"], ["/project", "context"], ["/image", "gen img"], ["/agents", "list"], ["/model", "switch"]].map(([cmd, label]) => (
+              <div key={cmd} className="contents">
+                <button onClick={() => { setInput(cmd); }} className="text-left hover:opacity-80" style={{ color: T.accentColor }}>{cmd}</button>
+                <span style={{ color: T.textMuted + "50" }}>{label}</span>
+              </div>
+            ))}
           </div>
         </div>
 
@@ -728,8 +819,10 @@ export default function AgentsTerminalTool() {
                   <span style={{ color: "#ff6b6b" }}>{line.content}</span>
                 </div>
               ) : line.role === "system" ? (
-                <div className="flex items-start gap-1 pl-4 opacity-50">
-                  <span style={{ color: T.textMuted }}># {line.content}</span>
+                <div className="pl-4 opacity-60">
+                  {line.content.split("\n").map((l, i) => (
+                    <div key={i} style={{ color: T.textMuted }}>  {l}</div>
+                  ))}
                 </div>
               ) : (
                 /* AI Response */
@@ -1013,20 +1106,39 @@ export default function AgentsTerminalTool() {
               </div>
             </div>
 
-            {/* Description */}
+            {/* Role + domains */}
             <div>
-              <div
-                className="text-[8px] font-bold uppercase tracking-widest mb-1"
-                style={{ color: T.accentColor }}
-              >
-                Description
+              <div className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Role</div>
+              <p className="text-[10px] leading-relaxed opacity-70" style={{ color: T.textColor }}>{selectedAgent.role}</p>
+              {(selectedAgent.domains ?? []).length > 0 && (
+                <div className="flex flex-wrap gap-1 mt-2">
+                  {(selectedAgent.domains ?? []).map((d) => (
+                    <span key={d} className="text-[8px] px-1.5 py-0.5 rounded font-mono"
+                      style={{ backgroundColor: (selectedAgent.color ?? T.accentColor) + "18", color: selectedAgent.color ?? T.accentColor, border: `1px solid ${selectedAgent.color ?? T.accentColor}30` }}
+                    >{d}</span>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* Project context */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <div className="text-[8px] font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>Project Context</div>
+                <button onClick={() => { setProjectDraft({ ...projectCtx }); setShowProjectEditor(true); }}
+                  className="text-[8px] px-1.5 py-0.5 rounded hover:opacity-80"
+                  style={{ color: T.accentColor, border: `1px solid ${T.accentColor}40` }}
+                >Edit</button>
               </div>
-              <p
-                className="text-[10px] leading-relaxed opacity-70"
-                style={{ color: T.textColor }}
-              >
-                {selectedAgent.desc}
-              </p>
+              {hasProjectContext(projectCtx) ? (
+                <div className="text-[9px] font-mono space-y-0.5" style={{ color: T.textMuted }}>
+                  {Object.entries(projectCtx).filter(([, v]) => v).map(([k, v]) => (
+                    <div key={k}><span style={{ color: T.accentColor }}>{k}:</span> {String(v).slice(0, 50)}{String(v).length > 50 ? "…" : ""}</div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-[9px] opacity-50" style={{ color: T.textMuted }}>Not set — agents can't see your project yet.</div>
+              )}
             </div>
 
             {/* System Prompt */}
@@ -1206,6 +1318,109 @@ export default function AgentsTerminalTool() {
           </div>
         )}
       </div>
+
+      {/* ── Project Context Editor Modal ─────────────────────────────── */}
+      {showProjectEditor && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
+          onClick={(e) => { if (e.target === e.currentTarget) setShowProjectEditor(false); }}
+        >
+          <div
+            className="w-full max-w-lg rounded-xl border overflow-hidden"
+            style={{ backgroundColor: "#0f0f12", borderColor: T.accentColor + "40" }}
+          >
+            {/* Modal header */}
+            <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: T.borderColor + "30" }}>
+              <div className="flex items-center gap-2">
+                <FolderOpen size={15} style={{ color: T.accentColor }} />
+                <span className="font-bold text-sm" style={{ color: T.textColor }}>Project Context</span>
+                <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}>
+                  agents read this every message
+                </span>
+              </div>
+              <button onClick={() => setShowProjectEditor(false)} style={{ color: T.textMuted }}>
+                <X size={15} />
+              </button>
+            </div>
+
+            {/* Fields */}
+            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
+              {([
+                ["name", "Project Name", "e.g. LiTTree Lab Studios", false],
+                ["description", "Description", "What does it do? Who is it for?", true],
+                ["stack", "Tech Stack", "e.g. Next.js 16, Supabase, Tailwind, Clerk", false],
+                ["goals", "Current Goals", "e.g. Launch v1, improve onboarding, hit 1k users", true],
+                ["repoUrl", "Repo / URL", "https://github.com/...", false],
+                ["customInstructions", "Custom Instructions", "e.g. Always use TypeScript strict mode. Prefer functional components.", true],
+              ] as [keyof ProjectContext, string, string, boolean][]).map(([key, label, placeholder, multi]) => (
+                <div key={key}>
+                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: T.accentColor }}>
+                    {label}
+                  </label>
+                  {multi ? (
+                    <textarea
+                      value={projectDraft[key] ?? ""}
+                      onChange={(e) => setProjectDraft((p) => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      rows={3}
+                      className="w-full rounded px-3 py-2 text-[11px] font-mono outline-none resize-none"
+                      style={{ backgroundColor: "#1a1a1f", border: `1px solid ${T.borderColor}40`, color: T.textColor }}
+                    />
+                  ) : (
+                    <input
+                      value={projectDraft[key] ?? ""}
+                      onChange={(e) => setProjectDraft((p) => ({ ...p, [key]: e.target.value }))}
+                      placeholder={placeholder}
+                      className="w-full rounded px-3 py-2 text-[11px] font-mono outline-none"
+                      style={{ backgroundColor: "#1a1a1f", border: `1px solid ${T.borderColor}40`, color: T.textColor }}
+                    />
+                  )}
+                </div>
+              ))}
+            </div>
+
+            {/* Footer */}
+            <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: T.borderColor + "30" }}>
+              <button
+                onClick={() => {
+                  const empty = { ...EMPTY_CONTEXT };
+                  setProjectDraft(empty);
+                  setProjectCtx(empty);
+                  saveProjectContext(empty);
+                  addSystemLine("Project context cleared.");
+                  setShowProjectEditor(false);
+                }}
+                className="text-[11px] px-3 py-1.5 rounded hover:opacity-80"
+                style={{ color: "#ff5f56", border: "1px solid #ff5f5640" }}
+              >
+                Clear
+              </button>
+              <div className="flex gap-2">
+                <button
+                  onClick={() => setShowProjectEditor(false)}
+                  className="text-[11px] px-3 py-1.5 rounded hover:opacity-80"
+                  style={{ color: T.textMuted, border: `1px solid ${T.borderColor}40` }}
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={() => {
+                    saveProjectContext(projectDraft);
+                    setProjectCtx({ ...projectDraft });
+                    addSystemLine(`Project context saved. All agents now know about: ${projectDraft.name || "your project"}.`);
+                    setShowProjectEditor(false);
+                  }}
+                  className="text-[11px] px-4 py-1.5 rounded font-bold hover:opacity-90"
+                  style={{ backgroundColor: T.accentColor, color: "#000" }}
+                >
+                  Save
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

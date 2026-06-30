@@ -322,7 +322,7 @@ export default function DashboardWidgets({
               {claimed ? "Reward Claimed!" : "Daily Reward"}
             </div>
             <div className="text-[10px]" style={{ color: T.textMuted }}>
-              {claimed ? "Come back tomorrow for more" : "+100 LiTBit Coins"}
+              {claimed ? "Come back tomorrow for more" : "+50 LiTBit Coins"}
             </div>
             <div className="mt-1.5">
               <button

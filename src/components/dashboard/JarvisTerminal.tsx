@@ -277,7 +277,7 @@ export default function JarvisTerminal() {
   const [continuousMode, setContinuousMode] = useState(false);
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
-  const [alexaOutEnabled, setAlexaOutEnabled] = useState(false);
+  const [alexaOutEnabled, setAlexaOutEnabled] = useState<boolean>(false);
   const [availableVoices, setAvailableVoices] = useState<
     SpeechSynthesisVoice[]
   >([]);
@@ -571,6 +571,7 @@ export default function JarvisTerminal() {
       // Add user message to conversation history
       addToHistory({ role: "user", content: msg });
 
+
       try {
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
@@ -578,7 +579,7 @@ export default function JarvisTerminal() {
           body: JSON.stringify({
             agentSlug: selectedAgent,
             message: msg,
-            history: historyRef.current.slice(-8),
+            history: historyRef.current.slice(-12),
             context: siteContext || undefined,
             provider: "gemini",
             stream: true,
@@ -615,6 +616,7 @@ export default function JarvisTerminal() {
         if (fullText) {
           addToHistory({ role: "assistant", content: fullText });
         }
+
 
         addLog({
           type: "brain",
@@ -698,6 +700,7 @@ export default function JarvisTerminal() {
           return;
         case "clear":
           setLogs([]);
+          setConversationHistory([]);
           setIsProcessing(false);
           return;
         case "tts":
@@ -715,9 +718,10 @@ export default function JarvisTerminal() {
           if (arg && REAL_AGENTS[arg as keyof typeof REAL_AGENTS]) {
             const a = REAL_AGENTS[arg as keyof typeof REAL_AGENTS];
             setSelectedAgent(arg);
+            setConversationHistory([]);
             addLog({
               type: "success",
-              text: `Switched to ${a.name} (${a.role})`,
+              text: `Switched to ${a.name} (${a.role}). Conversation history cleared.`,
             });
           } else {
             const list = Object.entries(REAL_AGENTS)
@@ -1523,9 +1527,10 @@ export default function JarvisTerminal() {
                 key={agent.id}
                 onClick={() => {
                   setSelectedAgent(slug);
+                  setConversationHistory([]);
                   addLog({
                     type: "system",
-                    text: `Selected agent: ${agent.name}`,
+                    text: `Selected agent: ${agent.name}. Memory cleared.`,
                   });
                 }}
                 className={`w-full text-left rounded-md border px-2.5 py-2 transition-all group hover:scale-[1.02] ${selectedAgent === slug ? "border-[#00ff9d]/40 bg-[#00ff9d]/5" : "border-white/5 hover:border-white/15"}`}

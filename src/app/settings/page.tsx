@@ -23,7 +23,17 @@ import {
   ScanLine,
   AlertTriangle,
   ExternalLink,
+  FolderOpen,
+  RefreshCw,
 } from "lucide-react";
+import {
+  loadProjectContext,
+  saveProjectContext,
+  clearProjectContext,
+  hasProjectContext,
+  EMPTY_CONTEXT,
+} from "@/lib/project-context";
+import type { ProjectContext } from "@/lib/agents";
 import Link from "next/link";
 
 const BACKGROUND_MODES: { id: BackgroundMode; label: string }[] = [
@@ -43,6 +53,7 @@ const BYOK_KEYS = [
 const TABS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
+  { id: "project", label: "Project", icon: FolderOpen },
   { id: "keys", label: "BYOK", icon: Key },
   { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
@@ -50,12 +61,17 @@ const TABS = [
 type TabId = (typeof TABS)[number]["id"];
 
 export default function SettingsPage() {
-  const { theme, resolvedColors: T, setMode, setSkin, setAccent, setBackgroundMode } = useTheme();
+  const { theme, resolvedColors: T, setMode, setSkin, setAccent, setBackgroundMode, setCustomColors, resetTheme } = useTheme();
   const { profile, updateProfile } = useProfile();
   const { balance } = useWallet();
   const { crtEnabled, toggleCrt } = useCrtToggle();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [customColorDraft, setCustomColorDraft] = useState<NonNullable<typeof theme.customColors>>(
+    () => theme.customColors ?? {}
+  );
+  const [projectCtx, setProjectCtxState] = useState<ProjectContext>(() => loadProjectContext());
+  const [projectSaved, setProjectSaved] = useState(false);
 
   /* Profile state */
   const [name, setName] = useState(profile.displayName || "");
@@ -68,7 +84,7 @@ export default function SettingsPage() {
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
 
-  /* BYOK state — seeded from localStorage */
+  /* BYOK state ΓÇö seeded from localStorage */
   const [keys, setKeys] = useState<Record<string, string>>(() => {
     if (typeof window === "undefined") return {};
     const loaded: Record<string, string> = {};
@@ -79,7 +95,7 @@ export default function SettingsPage() {
   });
   const [keysSaved, setKeysSaved] = useState(false);
 
-  /* Notifications state — seeded from localStorage */
+  /* Notifications state ΓÇö seeded from localStorage */
   const [discordWebhook, setDiscordWebhook] = useState(() =>
     typeof window === "undefined"
       ? ""
@@ -182,7 +198,7 @@ export default function SettingsPage() {
 
   if (!isLoaded) {
     return (
-      <PageShell title="Settings" subtitle="Loading your preferences..." icon="⚙️">
+      <PageShell title="Settings" subtitle="Loading your preferences..." icon="ΓÜÖ∩╕Å">
         <div className="p-8 flex items-center justify-center">
           <Loader2 className="animate-spin" style={{ color: T.accentColor }} />
         </div>
@@ -192,7 +208,7 @@ export default function SettingsPage() {
 
   if (!isSignedIn) {
     return (
-      <PageShell title="Settings" subtitle="Sign in to manage your account" icon="⚙️">
+      <PageShell title="Settings" subtitle="Sign in to manage your account" icon="ΓÜÖ∩╕Å">
         <div className="p-8 max-w-md mx-auto text-center">
           <p className="mb-4 opacity-70" style={{ color: T.textMuted }}>
             You need to be signed in to view settings.
@@ -212,8 +228,8 @@ export default function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      subtitle="Profile, appearance, keys, and notifications — all in one place."
-      icon="⚙️"
+      subtitle="Profile, appearance, keys, and notifications ΓÇö all in one place."
+      icon="ΓÜÖ∩╕Å"
     >
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Wallet strip */}
@@ -442,6 +458,69 @@ export default function SettingsPage() {
               </div>
             </div>
 
+            {/* Custom Theme Builder */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-black" style={{ color: T.headerColor }}>Custom Theme Builder</h2>
+                  <p className="text-xs opacity-60 mt-0.5" style={{ color: T.textMuted }}>Override any colour ΓÇö hex values. Leave blank to use skin default.</p>
+                </div>
+                <button
+                  onClick={() => { setCustomColorDraft({}); resetTheme(); }}
+                  className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg hover:opacity-80"
+                  style={{ border: `1px solid ${T.borderColor}40`, color: T.textMuted }}
+                >
+                  <RefreshCw size={11} /> Reset
+                </button>
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-4">
+                {([
+                  ["bgColor", "Background"],
+                  ["boxBg", "Card / Box"],
+                  ["textColor", "Text"],
+                  ["accentColor", "Accent"],
+                  ["linkColor", "Link"],
+                  ["headerColor", "Header"],
+                  ["borderColor", "Border"],
+                ] as [keyof NonNullable<typeof theme.customColors>, string][]).map(([key, label]) => {
+                  const currentVal = (customColorDraft[key] ?? "") as string;
+                  const previewColor = currentVal || (T as Record<string, string>)[key] || "#888";
+                  return (
+                    <div key={key}>
+                      <label className="block text-[10px] font-bold uppercase tracking-wider mb-1.5" style={{ color: T.textMuted }}>{label}</label>
+                      <div className="flex items-center gap-2">
+                        <input
+                          type="color"
+                          value={previewColor}
+                          onChange={(e) => {
+                            const next = { ...customColorDraft, [key]: e.target.value };
+                            setCustomColorDraft(next);
+                            setCustomColors(next);
+                          }}
+                          className="w-8 h-8 rounded cursor-pointer border-0 p-0 bg-transparent"
+                        />
+                        <input
+                          type="text"
+                          value={currentVal}
+                          onChange={(e) => {
+                            const val = e.target.value;
+                            const next = { ...customColorDraft, [key]: val || undefined };
+                            setCustomColorDraft(next);
+                            if (/^#[0-9a-fA-F]{6}$/.test(val) || !val) setCustomColors(next);
+                          }}
+                          placeholder={previewColor}
+                          maxLength={7}
+                          className="flex-1 text-xs px-2 py-1 rounded font-mono outline-none"
+                          style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}40`, color: T.textColor }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <p className="text-[10px] mt-3 opacity-50" style={{ color: T.textMuted }}>Changes apply live. Reset returns to current skin defaults.</p>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
                 <h2 className="text-lg font-black mb-4" style={{ color: T.headerColor }}>
@@ -519,6 +598,81 @@ export default function SettingsPage() {
                     CRT Scanlines {crtEnabled ? "On" : "Off"}
                   </button>
                 </div>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Project Tab */}
+        {activeTab === "project" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-start gap-3 mb-5">
+                <FolderOpen size={18} style={{ color: T.accentColor }} />
+                <div>
+                  <h2 className="text-lg font-black" style={{ color: T.headerColor }}>Your Project Context</h2>
+                  <p className="text-xs opacity-70 max-w-2xl mt-1" style={{ color: T.textMuted }}>
+                    Every agent reads this before every message ΓÇö so they understand your project, stack, and goals without you repeating yourself. Works for any project, not just LiTTree.
+                  </p>
+                </div>
+              </div>
+              <div className="space-y-4">
+                {([
+                  ["name", "Project Name", "e.g. LiTTree Lab Studios", false],
+                  ["description", "Description", "What does it do? Who is it for?", true],
+                  ["stack", "Tech Stack", "e.g. Next.js 16, Supabase, Tailwind 4, Clerk, Stripe", false],
+                  ["goals", "Current Goals", "e.g. Launch v1, improve onboarding, hit 1k users, fix auth bug", true],
+                  ["repoUrl", "Repo / Live URL", "https://github.com/... or https://yoursite.com", false],
+                  ["customInstructions", "Custom Instructions", "Anything agents should always follow. e.g. Always prefer TypeScript strict. Prefer pnpm over npm. No class components.", true],
+                ] as [keyof ProjectContext, string, string, boolean][]).map(([key, label, placeholder, multi]) => (
+                  <div key={key}>
+                    <label className="block text-xs font-bold uppercase tracking-wider mb-1" style={{ color: T.accentColor }}>{label}</label>
+                    {multi ? (
+                      <textarea
+                        value={projectCtx[key] ?? ""}
+                        onChange={(e) => setProjectCtxState((p) => ({ ...p, [key]: e.target.value }))}
+                        placeholder={placeholder}
+                        rows={3}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none resize-none focus:ring-2 transition-all"
+                        style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "40", color: T.textColor }}
+                      />
+                    ) : (
+                      <input
+                        value={projectCtx[key] ?? ""}
+                        onChange={(e) => setProjectCtxState((p) => ({ ...p, [key]: e.target.value }))}
+                        placeholder={placeholder}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                        style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "40", color: T.textColor }}
+                      />
+                    )}
+                  </div>
+                ))}
+              </div>
+              <div className="flex items-center gap-3 mt-6">
+                <button
+                  onClick={() => {
+                    saveProjectContext(projectCtx);
+                    setProjectSaved(true);
+                    setTimeout(() => setProjectSaved(false), 2500);
+                  }}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90"
+                  style={{ backgroundColor: T.accentColor, color: "#000" }}
+                >
+                  {projectSaved ? <Check size={14} /> : <Save size={14} />}
+                  {projectSaved ? "Saved!" : "Save Context"}
+                </button>
+                {hasProjectContext(projectCtx) && (
+                  <button
+                    onClick={() => {
+                      clearProjectContext();
+                      setProjectCtxState({ ...EMPTY_CONTEXT });
+                    }}
+                    className="px-4 py-2 rounded-lg text-sm font-bold hover:opacity-80"
+                    style={{ border: `1px solid #ef444440`, color: "#ef4444" }}
+                  >
+                    Clear All
+                  </button>
+                )}
               </div>
             </div>
           </div>

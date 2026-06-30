@@ -107,7 +107,7 @@ export default function GamesPage() {
   return (
     <PageShell
       title="Game Cloud"
-      subtitle="Play classic retro games and modern HTML5 titles"
+      subtitle="Play HTML5 arcade and puzzle classics right in your browser"
       icon="🎮"
     >
       {/* Retro Ticker */}
@@ -116,8 +116,8 @@ export default function GamesPage() {
         style={{ borderColor: T.borderColor, color: T.accentColor }}
       >
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>🎮 GAME CLOUD ONLINE // 8 EMULATORS READY</span>
-          <span>⚡ NES SNES GENESIS GB GBA ARCADE SUPPORT</span>
+          <span>🎮 GAME CLOUD ONLINE // HTML5 ARCADE READY</span>
+          <span>⚡ PUZZLE • ARCADE • CLASSICS • NO INSTALLS</span>
           <span>🏆 LEADERBOARDS ACTIVE // MULTIPLAYER ENABLED</span>
           <span>💾 CLOUD SAVES SYNCED ACROSS DEVICES</span>
         </div>
@@ -145,7 +145,7 @@ export default function GamesPage() {
                 LiTTree Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
-                {GAME_LIBRARY.length} games available • NES • SNES • Genesis •
+                {GAME_LIBRARY.length} games available • Puzzle • Arcade •
                 HTML5
               </p>
             </div>
