@@ -9,7 +9,6 @@ import PageShell from "@/components/PageShell";
 import GameEmulator from "@/components/GameEmulator";
 import {
   Search,
-  Users,
   Gamepad2,
   Heart,
   Play,
@@ -37,7 +36,6 @@ const CATEGORIES: {
   { id: "retro", label: "Retro", icon: Gamepad2 },
   { id: "arcade", label: "Arcade", icon: Zap },
   { id: "puzzle", label: "Puzzle", icon: Grid3X3 },
-  { id: "multiplayer", label: "Multiplayer", icon: Users },
 ];
 
 export default function GamesPage() {

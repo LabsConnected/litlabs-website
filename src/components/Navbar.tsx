@@ -15,6 +15,7 @@ import { usePathname } from "next/navigation";
 import { useState, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
+import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSessionAuth } from "@/hooks/useSessionAuth";
 import dynamic from "next/dynamic";
@@ -62,18 +63,7 @@ const userLinks = [
 ];
 
 function WalletBadge({ accentColor }: { accentColor: string }) {
-  const [balance, setBalance] = useState<number | null>(null);
-  useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      fetch("/api/wallet")
-        .then((r) => (r.ok ? r.json() : null))
-        .then((data) => {
-          if (data?.balance !== undefined) setBalance(data.balance);
-        })
-        .catch(() => setBalance(null));
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
+  const { balance, isLoading } = useWallet();
   return (
     <span
       className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold"
@@ -84,7 +74,7 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
       }}
       title="Your LiTBit Coins balance"
     >
-      <Coins size={10} /> {balance === null ? "—" : balance.toLocaleString()}
+      <Coins size={10} /> {isLoading ? "—" : balance.toLocaleString()}
     </span>
   );
 }

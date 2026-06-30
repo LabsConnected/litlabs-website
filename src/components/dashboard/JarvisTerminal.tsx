@@ -1,6 +1,7 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
 import {
@@ -272,6 +273,7 @@ export default function JarvisTerminal() {
   >([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
   const [showVoicePicker, setShowVoicePicker] = useState(false);
+  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number>>({});
   const [micPermission, setMicPermission] = useState<
     "prompt" | "granted" | "denied" | "unknown"
   >("unknown");
@@ -290,6 +292,34 @@ export default function JarvisTerminal() {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
     }
   }, [logs, brainText, isBrainStreaming]);
+
+  /* Position voice picker in a portal so it escapes the terminal's stacking context */
+  useLayoutEffect(() => {
+    if (!showVoicePicker || !voicePickerRef.current) return;
+    const position = () => {
+      if (!voicePickerRef.current) return;
+      const rect = voicePickerRef.current.getBoundingClientRect();
+      const spaceBelow = window.innerHeight - rect.bottom;
+      const placeAbove = spaceBelow < 260;
+      setVoicePickerStyle({
+        position: "fixed",
+        right: Math.max(8, window.innerWidth - rect.right),
+        top: placeAbove ? undefined : rect.bottom + 6,
+        bottom: placeAbove ? window.innerHeight - rect.top + 6 : undefined,
+        width: Math.min(320, window.innerWidth - 16),
+        maxHeight: 240,
+        overflowY: "auto",
+        zIndex: 9999,
+      });
+    };
+    position();
+    window.addEventListener("resize", position);
+    window.addEventListener("scroll", position, true);
+    return () => {
+      window.removeEventListener("resize", position);
+      window.removeEventListener("scroll", position, true);
+    };
+  }, [showVoicePicker]);
 
   /* Load available TTS voices */
   useEffect(() => {
@@ -991,45 +1021,50 @@ export default function JarvisTerminal() {
               <Speaker size={12} className="text-[#00b8ff]" />
               <ChevronDown size={10} className="text-white/40" />
             </button>
-            {showVoicePicker && availableVoices.length > 0 && (
-              <div
-                className="absolute right-0 top-full mt-1.5 rounded-lg border border-white/10 overflow-hidden shadow-xl z-50 min-w-[220px] max-h-[240px] overflow-y-auto"
-                style={{
-                  backgroundColor: "rgba(10,15,20,0.95)",
-                  backdropFilter: "blur(12px)",
-                }}
-              >
-                <div className="px-2 py-1.5 text-[10px] font-mono uppercase text-white/30 border-b border-white/5">
-                  Voices
-                </div>
-                {availableVoices
-                  .filter((v) => v.lang.startsWith("en"))
-                  .map((voice) => (
-                    <button
-                      key={voice.voiceURI}
-                      onClick={() => {
-                        setSelectedVoiceURI(voice.voiceURI);
-                        setShowVoicePicker(false);
-                        addLog({
-                          type: "success",
-                          text: `Voice set to: ${voice.name}`,
-                        });
-                        /* Preview voice */
-                        const u = new SpeechSynthesisUtterance(
-                          "Voice activated.",
-                        );
-                        u.voice = voice;
-                        u.rate = 1.15;
-                        u.pitch = 0.85;
-                        window.speechSynthesis.speak(u);
-                      }}
-                      className={`w-full text-left px-2.5 py-1.5 text-[10px] font-mono transition-colors hover:bg-white/5 ${voice.voiceURI === selectedVoiceURI ? "text-[#00ff9d] bg-[#00ff9d]/5" : "text-white/70"}`}
-                    >
-                      {voice.name}
-                    </button>
-                  ))}
-              </div>
-            )}
+            {showVoicePicker &&
+              availableVoices.length > 0 &&
+              typeof document !== "undefined" &&
+              createPortal(
+                <div
+                  className="fixed rounded-lg border border-white/10 overflow-hidden shadow-xl z-50 min-w-[220px] max-h-[240px] overflow-y-auto"
+                  style={{
+                    backgroundColor: "rgba(10,15,20,0.95)",
+                    backdropFilter: "blur(12px)",
+                    ...voicePickerStyle,
+                  }}
+                >
+                  <div className="px-2 py-1.5 text-[10px] font-mono uppercase text-white/30 border-b border-white/5">
+                    Voices
+                  </div>
+                  {availableVoices
+                    .filter((v) => v.lang.startsWith("en"))
+                    .map((voice) => (
+                      <button
+                        key={voice.voiceURI}
+                        onClick={() => {
+                          setSelectedVoiceURI(voice.voiceURI);
+                          setShowVoicePicker(false);
+                          addLog({
+                            type: "success",
+                            text: `Voice set to: ${voice.name}`,
+                          });
+                          /* Preview voice */
+                          const u = new SpeechSynthesisUtterance(
+                            "Voice activated.",
+                          );
+                          u.voice = voice;
+                          u.rate = 1.15;
+                          u.pitch = 0.85;
+                          window.speechSynthesis.speak(u);
+                        }}
+                        className={`w-full text-left px-2.5 py-1.5 text-[10px] font-mono transition-colors hover:bg-white/5 ${voice.voiceURI === selectedVoiceURI ? "text-[#00ff9d] bg-[#00ff9d]/5" : "text-white/70"}`}
+                      >
+                        {voice.name}
+                      </button>
+                    ))}
+                </div>,
+                document.body,
+              )}
           </div>
           {/* Alexa output toggle */}
           <button

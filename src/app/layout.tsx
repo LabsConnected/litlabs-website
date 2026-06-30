@@ -3,6 +3,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
+import { WalletProvider } from "@/context/WalletContext";
 import Navbar from "@/components/Navbar";
 import Footer from "@/components/Footer";
 import CookieConsent from "@/components/CookieConsent";
@@ -114,17 +115,19 @@ export default function RootLayout({
   const inner = (
     <ThemeProvider>
       <ProfileProvider>
-        <AnimatedBackgroundWrapper />
-        <div className="relative z-10 flex flex-col min-h-screen">
-          <UserSync />
-          <Navbar />
-          <main className="flex-1 w-full max-w-full overflow-x-hidden">
-            {children}
-          </main>
-          <Footer />
-          <CookieConsent />
-          <ServiceWorkerRegistration />
-        </div>
+        <WalletProvider>
+          <AnimatedBackgroundWrapper />
+          <div className="relative z-10 flex flex-col min-h-screen">
+            <UserSync />
+            <Navbar />
+            <main className="flex-1 w-full max-w-full overflow-x-hidden">
+              {children}
+            </main>
+            <Footer />
+            <CookieConsent />
+            <ServiceWorkerRegistration />
+          </div>
+        </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
   );

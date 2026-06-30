@@ -219,7 +219,7 @@ const darkSkins: Record<
   },
 };
 
-// Light mode variants
+// Light mode variants — deep navy text for crisp daytime contrast
 const lightSkins: Record<
   SkinPreset,
   {
@@ -234,7 +234,7 @@ const lightSkins: Record<
 > = {
   cyberpunk: {
     bgColor: "#f5f5fa",
-    textColor: "#1e1e2e",
+    textColor: "#1a1a2e",
     linkColor: "#0ea5e9",
     headerColor: "#0284c7",
     borderColor: "#d1d5db",
@@ -243,7 +243,7 @@ const lightSkins: Record<
   },
   retro: {
     bgColor: "#faf9f6",
-    textColor: "#2a2a2a",
+    textColor: "#1a1a2e",
     linkColor: "#d97706",
     headerColor: "#b45309",
     borderColor: "#e5e0d8",
@@ -252,7 +252,7 @@ const lightSkins: Record<
   },
   ocean: {
     bgColor: "#f0f9ff",
-    textColor: "#0c2d4a",
+    textColor: "#1a1a2e",
     linkColor: "#0284c7",
     headerColor: "#0369a1",
     borderColor: "#bae6fd",
@@ -261,7 +261,7 @@ const lightSkins: Record<
   },
   sunset: {
     bgColor: "#fffaf5",
-    textColor: "#3d2618",
+    textColor: "#1a1a2e",
     linkColor: "#ea580c",
     headerColor: "#c2410c",
     borderColor: "#fed7aa",
@@ -270,7 +270,7 @@ const lightSkins: Record<
   },
   matrix: {
     bgColor: "#f8f8fc",
-    textColor: "#1e1b4b",
+    textColor: "#1a1a2e",
     linkColor: "#6366f1",
     headerColor: "#4f46e5",
     borderColor: "#c7d2fe",
@@ -279,7 +279,7 @@ const lightSkins: Record<
   },
   pink: {
     bgColor: "#fdf2f8",
-    textColor: "#4a1d3a",
+    textColor: "#1a1a2e",
     linkColor: "#db2777",
     headerColor: "#be185d",
     borderColor: "#fbcfe8",
@@ -288,7 +288,7 @@ const lightSkins: Record<
   },
   synthwave: {
     bgColor: "#faf5ff",
-    textColor: "#3b1d5c",
+    textColor: "#1a1a2e",
     linkColor: "#a855f7",
     headerColor: "#7e22ce",
     borderColor: "#e9d5ff",
@@ -297,7 +297,7 @@ const lightSkins: Record<
   },
   volcanic: {
     bgColor: "#fff5f5",
-    textColor: "#3d1a1a",
+    textColor: "#1a1a2e",
     linkColor: "#dc2626",
     headerColor: "#b91c1c",
     borderColor: "#fecaca",
@@ -306,7 +306,7 @@ const lightSkins: Record<
   },
   gold: {
     bgColor: "#fdfbf7",
-    textColor: "#3d3418",
+    textColor: "#1a1a2e",
     linkColor: "#ca8a04",
     headerColor: "#a16207",
     borderColor: "#fde68a",
@@ -315,7 +315,7 @@ const lightSkins: Record<
   },
   arctic: {
     bgColor: "#f0f9ff",
-    textColor: "#0c2d4a",
+    textColor: "#1a1a2e",
     linkColor: "#0284c7",
     headerColor: "#0369a1",
     borderColor: "#bae6fd",
@@ -324,7 +324,7 @@ const lightSkins: Record<
   },
   emerald: {
     bgColor: "#f0fdf4",
-    textColor: "#064e3b",
+    textColor: "#1a1a2e",
     linkColor: "#059669",
     headerColor: "#047857",
     borderColor: "#a7f3d0",
@@ -333,7 +333,7 @@ const lightSkins: Record<
   },
   midnight: {
     bgColor: "#f5f6ff",
-    textColor: "#1e1b4b",
+    textColor: "#1a1a2e",
     linkColor: "#4f46e5",
     headerColor: "#4338ca",
     borderColor: "#c7d2fe",
@@ -342,7 +342,7 @@ const lightSkins: Record<
   },
   neon: {
     bgColor: "#fafafa",
-    textColor: "#171717",
+    textColor: "#1a1a2e",
     linkColor: "#0891b2",
     headerColor: "#0e7490",
     borderColor: "#e5e5e5",
@@ -351,7 +351,7 @@ const lightSkins: Record<
   },
   blood: {
     bgColor: "#fef2f2",
-    textColor: "#3d1a1a",
+    textColor: "#1a1a2e",
     linkColor: "#dc2626",
     headerColor: "#b91c1c",
     borderColor: "#fecaca",
@@ -360,7 +360,7 @@ const lightSkins: Record<
   },
   cosmic: {
     bgColor: "#f5f3ff",
-    textColor: "#2e1a5c",
+    textColor: "#1a1a2e",
     linkColor: "#7c3aed",
     headerColor: "#6d28d9",
     borderColor: "#ddd6fe",
@@ -369,7 +369,7 @@ const lightSkins: Record<
   },
   miami: {
     bgColor: "#f0fdfa",
-    textColor: "#134e4a",
+    textColor: "#1a1a2e",
     linkColor: "#0d9488",
     headerColor: "#0f766e",
     borderColor: "#ccfbf1",

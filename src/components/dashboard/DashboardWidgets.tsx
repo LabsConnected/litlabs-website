@@ -11,7 +11,35 @@ import {
   Check,
 } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
-import { AGENTS, CREATORS } from "./dashboard-data";
+import { AGENTS as REAL_AGENTS } from "@/lib/agents";
+import { CREATORS } from "./dashboard-data";
+
+const AGENT_COLORS = [
+  "#00ffff",
+  "#ff0080",
+  "#00ff41",
+  "#ff6b6b",
+  "#ffff00",
+  "#ff9ff3",
+  "#3b82f6",
+  "#ec4899",
+  "#06b6d4",
+  "#f59e0b",
+  "#22d3ee",
+  "#8b5cf6",
+];
+
+const AGENTS = Object.values(REAL_AGENTS).map((a, i) => ({
+  name: a.name,
+  status:
+    a.status === "busy"
+      ? ("working" as const)
+      : a.status === "offline"
+        ? ("idle" as const)
+        : ("online" as const),
+  task: a.role,
+  color: AGENT_COLORS[i % AGENT_COLORS.length],
+}));
 
 export function TelemetryDot({
   label,
@@ -65,7 +93,7 @@ export default function DashboardWidgets({
 
   return (
     <aside
-      className="hidden xl:flex flex-col gap-4 w-80 shrink-0 p-4 border-l overflow-y-auto"
+      className="hidden xl:flex flex-col gap-4 w-80 shrink-0 p-4 border-r overflow-y-auto"
       style={{
         borderColor: `${T.borderColor}30`,
         backgroundColor: `${T.bgColor}60`,

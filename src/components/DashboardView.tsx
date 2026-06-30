@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useUser } from "@clerk/nextjs";
 import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import { APPS } from "@/components/dashboard/dashboard-data";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
@@ -12,29 +13,12 @@ export default function DashboardView() {
   const { user } = useUser();
   const { profile } = useProfile();
   const { resolvedColors: T } = useTheme();
+  const { balance, claimed, claim } = useWallet();
   const [activeApp, setActiveApp] = useState("home");
-  const [balance, setBalance] = useState(() => {
-    if (typeof window === "undefined") return 9999;
-    return parseInt(localStorage.getItem("litcoins") || "500");
-  });
-  const [claimed, setClaimed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    const last = localStorage.getItem("lastDailyClaim");
-    return !!(last && Date.now() - parseInt(last) < 86400000);
-  });
   const visitors = 133742;
 
   const displayName =
     profile?.displayName || user?.firstName || user?.username || "Creator";
-
-  const claimDaily = () => {
-    if (claimed) return;
-    const next = balance + 100;
-    setBalance(next);
-    localStorage.setItem("litcoins", String(next));
-    localStorage.setItem("lastDailyClaim", String(Date.now()));
-    setClaimed(true);
-  };
 
   return (
     <div
@@ -90,6 +74,15 @@ export default function DashboardView() {
         })}
       </aside>
 
+      {/* Left Widgets Sidebar */}
+      <DashboardWidgets
+        displayName={displayName}
+        balance={balance}
+        claimed={claimed}
+        visitors={visitors}
+        onClaimAction={claim}
+      />
+
       {/* Center */}
       <main
         className={`flex-1 min-w-0 p-4 lg:p-6 ${
@@ -125,15 +118,6 @@ export default function DashboardView() {
 
         <CenterStage activeApp={activeApp} displayName={displayName} />
       </main>
-
-      {/* Right Widgets */}
-      <DashboardWidgets
-        displayName={displayName}
-        balance={balance}
-        claimed={claimed}
-        visitors={visitors}
-        onClaimAction={claimDaily}
-      />
     </div>
   );
 }
