@@ -10,6 +10,8 @@ export interface MusicTrack {
   url: string;
   duration?: number;
   cover?: string;
+  isLive?: boolean;
+  genre?: string;
 }
 
 export interface UserMusicPreferences {
@@ -18,6 +20,7 @@ export interface UserMusicPreferences {
   autoPlay: boolean;
   muteOnLeave: boolean;
   currentTrackId?: string;
+  lastTrackId?: string;
   profileMusicId?: string;
   allowOthersToHear: boolean;
 }
@@ -66,7 +69,7 @@ export const DEFAULT_PLAYLIST: MusicTrack[] = [
 export function getDefaultPreferences(): UserMusicPreferences {
   return {
     enabled: false,
-    volume: 50,
+    volume: 70,
     autoPlay: false,
     muteOnLeave: true,
     allowOthersToHear: true,

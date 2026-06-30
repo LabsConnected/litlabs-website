@@ -27,7 +27,7 @@ export const APPS = [
     label: "Jarvis",
     icon: Terminal,
     color: "#ff00a0",
-    href: "#",
+    href: "/dashboard?app=jarvis",
   },
   {
     id: "studio",
@@ -57,7 +57,7 @@ export const APPS = [
     color: "#ff9ff3",
     href: "/marketplace",
   },
-  { id: "music", label: "Music", icon: Music, color: "#ff2d78", href: "#" },
+  { id: "music", label: "Music", icon: Music, color: "#ff2d78", href: "/dashboard?app=music" },
   {
     id: "games",
     label: "Games",
@@ -70,10 +70,10 @@ export const APPS = [
     label: "Watch",
     icon: Clapperboard,
     color: "#3b82f6",
-    href: "#",
+    href: "/dashboard?app=watch",
   },
-  { id: "radio", label: "Radio", icon: Radio, color: "#10b981", href: "#" },
-  { id: "tools", label: "Tools", icon: Wrench, color: "#f59e0b", href: "#" },
+  { id: "radio", label: "Radio", icon: Radio, color: "#10b981", href: "/dashboard?app=radio" },
+  { id: "tools", label: "Tools", icon: Wrench, color: "#f59e0b", href: "/dashboard?app=tools" },
 ];
 
 export const AGENTS = [
@@ -208,19 +208,61 @@ export const WATCH = [
 
 export const RADIO = [
   {
+    id: "synthwave-fm",
     title: "Synthwave FM",
     genre: "Synthwave",
     listeners: 342,
     color: "#ff00a0",
+    nowPlaying: "Neon Horizon — Lazerhawk",
+    streamUrl: null as string | null,
+    description: "Retro-futuristic synth vibes for late-night sessions.",
+    playlist: [
+      { id: "midnight-city", title: "Midnight City", artist: "M83", url: "https://www.youtube.com/embed/dX3k_QDnzHE?autoplay=1&loop=1&playlist=dX3k_QDnzHE", duration: 243 },
+      { id: "nightcall", title: "Nightcall", artist: "Kavinsky", url: "https://www.youtube.com/embed/MV_3Dpw-BRY?autoplay=1&loop=1&playlist=MV_3Dpw-BRY", duration: 258 },
+    ],
   },
-  { title: "Lo-Fi Lounge", genre: "Lo-Fi", listeners: 891, color: "#00f0ff" },
   {
+    id: "lofi-lounge",
+    title: "Lo-Fi Lounge",
+    genre: "Lo-Fi",
+    listeners: 891,
+    color: "#00f0ff",
+    nowPlaying: "Midnight Study — ChillHop",
+    streamUrl: null as string | null,
+    description: "Chill beats for deep focus and study flow.",
+    playlist: [
+      { id: "resonance", title: "Resonance", artist: "Home", url: "https://www.youtube.com/embed/8GW6sLrK40k?autoplay=1&loop=1&playlist=8GW6sLrK40k", duration: 212 },
+      { id: "solaris", title: "Solaris", artist: "Cyberpunk Ambient", url: "https://www.youtube.com/embed/SvO5EfwfMoQ?autoplay=1&loop=1&playlist=SvO5EfwfMoQ", duration: 180 },
+    ],
+  },
+  {
+    id: "cyber-beats",
     title: "Cyber Beats",
     genre: "Darksynth",
     listeners: 156,
     color: "#8b5cf6",
+    nowPlaying: "Ghost Protocol — Power Glove",
+    streamUrl: null as string | null,
+    description: "Hard-hitting dark synth for intense work sessions.",
+    playlist: [
+      { id: "tech-noir", title: "Tech Noir", artist: "Gunship", url: "https://www.youtube.com/embed/JRkNZH_3K3s?autoplay=1&loop=1&playlist=JRkNZH_3K3s", duration: 322 },
+      { id: "nightcall", title: "Nightcall", artist: "Kavinsky", url: "https://www.youtube.com/embed/MV_3Dpw-BRY?autoplay=1&loop=1&playlist=MV_3Dpw-BRY", duration: 258 },
+    ],
   },
-  { title: "Focus Flow", genre: "Ambient", listeners: 620, color: "#10b981" },
+  {
+    id: "focus-flow",
+    title: "Focus Flow",
+    genre: "Ambient",
+    listeners: 620,
+    color: "#10b981",
+    nowPlaying: "Weightless — Marconi Union",
+    streamUrl: null as string | null,
+    description: "Ambient soundscapes engineered for peak concentration.",
+    playlist: [
+      { id: "resonance", title: "Resonance", artist: "Home", url: "https://www.youtube.com/embed/8GW6sLrK40k?autoplay=1&loop=1&playlist=8GW6sLrK40k", duration: 212 },
+      { id: "solaris", title: "Solaris", artist: "Cyberpunk Ambient", url: "https://www.youtube.com/embed/SvO5EfwfMoQ?autoplay=1&loop=1&playlist=SvO5EfwfMoQ", duration: 180 },
+    ],
+  },
 ];
 
 export const TOOLS = [
