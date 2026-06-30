@@ -20,6 +20,7 @@
     "@google/generative-ai": "^0.24.1",
     "@next/third-parties": "^16.2.9",
     "@stripe/stripe-js": "^5.10.0",
+    "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.106.2",
     "@usejarvis/brain": "^0.8.0",
     "bcryptjs": "^3.0.3",
