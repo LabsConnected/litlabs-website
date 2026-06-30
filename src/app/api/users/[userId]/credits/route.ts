@@ -26,13 +26,22 @@ export async function POST(
   }
 
   try {
-    // Verify admin/system authentication
+    // Verify authentication
     const { userId: clerkId } = await auth();
     if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { userId } = await params;
+
+    // Only the user themselves or an admin can modify credits
+    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").filter(Boolean);
+    const isSelf = clerkId === userId;
+    const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
+    if (!isSelf && !isAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await req.json();
     const amount = Number(body.amount) || 0;
 

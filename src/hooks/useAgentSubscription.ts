@@ -3,10 +3,13 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@supabase/supabase-js";
 
-const supabase = createClient(
-  "https://rokbfvuoqildggnhappy.supabase.co",
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "",
-);
+const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL || "";
+const SUPABASE_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || "";
+
+const supabase =
+  SUPABASE_URL && SUPABASE_KEY
+    ? createClient(SUPABASE_URL, SUPABASE_KEY)
+    : null;
 
 interface TaskItem {
   id: string;
@@ -23,7 +26,7 @@ export function useAgentSubscription(sessionId: string) {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
 
   useEffect(() => {
-    if (!sessionId) return;
+    if (!sessionId || !supabase) return;
 
     // 1. Fetch initial pipeline snapshot
     supabase
