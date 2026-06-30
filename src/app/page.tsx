@@ -1,14 +1,11 @@
 "use client";
 
 import Link from 'next/link';
-import nextDynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useEffect } from 'react';
 import { useSupabaseAuthHook } from '@/hooks/useSupabaseAuth';
+import { useClerkAuth } from '@/hooks/useClerkAuth';
 import { Code2, Bot, BarChart3, ChevronRight, Shield, ArrowRight, Check, Globe, Coins } from 'lucide-react';
-
-const DashboardView = nextDynamic(
-  () => import('@/components/DashboardView'),
-  { ssr: false }
-);
 
 const FEATURES = [
   { icon: Bot, title: 'Specialized AI Agents', desc: 'Deploy purpose-built agents for coding, writing, data analysis, social growth, and more. Each agent is finely tuned for its domain.' },
@@ -208,6 +205,15 @@ function LandingPage() {
 }
 
 export default function HomePage() {
-  const { isSignedIn } = useSupabaseAuthHook();
-  return isSignedIn ? <DashboardView /> : <LandingPage />;
+  const { isSignedIn: supabaseSignedIn } = useSupabaseAuthHook();
+  const { isSignedIn: clerkSignedIn } = useClerkAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (supabaseSignedIn || clerkSignedIn) {
+      router.replace('/dashboard');
+    }
+  }, [supabaseSignedIn, clerkSignedIn, router]);
+
+  return <LandingPage />;
 }
