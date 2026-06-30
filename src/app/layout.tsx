@@ -103,9 +103,7 @@ export const metadata: Metadata = {
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-if (!clerkKey) {
-  throw new Error("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required");
-}
+const hasValidClerkKey = clerkKey && clerkKey.length > 30;
 
 export default function RootLayout({
   children,
@@ -118,8 +116,8 @@ export default function RootLayout({
         <WalletProvider>
           <AnimatedBackgroundWrapper />
           <div className="relative z-10 flex flex-col min-h-screen">
-            <UserSync />
-            <NavbarWrapper />
+            {hasValidClerkKey && <UserSync />}
+            {hasValidClerkKey && <NavbarWrapper />}
             <main className="flex-1 w-full max-w-full overflow-x-hidden">
               {children}
             </main>
@@ -131,6 +129,19 @@ export default function RootLayout({
       </ProfileProvider>
     </ThemeProvider>
   );
+
+  if (!hasValidClerkKey) {
+    return (
+      <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+        <body
+          className="antialiased min-h-screen"
+          style={{ backgroundColor: "#0a0a0f" }}
+        >
+          {inner}
+        </body>
+      </html>
+    );
+  }
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
