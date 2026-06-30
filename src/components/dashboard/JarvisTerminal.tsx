@@ -268,6 +268,7 @@ export default function JarvisTerminal() {
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
   const [alexaOutEnabled, setAlexaOutEnabled] = useState(false);
+  const conversationHistory = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
   const [availableVoices, setAvailableVoices] = useState<
     SpeechSynthesisVoice[]
   >([]);
@@ -470,6 +471,15 @@ export default function JarvisTerminal() {
       setIsBrainStreaming(true);
       setBrainText("");
       setIsProcessing(true);
+
+      // Snapshot history before adding the new user message
+      const historySnapshot = [...conversationHistory.current];
+      // Optimistically add user turn
+      conversationHistory.current = [
+        ...historySnapshot,
+        { role: "user" as const, content: msg },
+      ];
+
       try {
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
@@ -477,6 +487,7 @@ export default function JarvisTerminal() {
           body: JSON.stringify({
             agentSlug: selectedAgent,
             message: msg,
+            history: historySnapshot,
             provider: "gemini",
             stream: true,
           }),
@@ -504,6 +515,12 @@ export default function JarvisTerminal() {
             }
           }
         }
+        // Commit assistant turn to history (keep last 20 turns to avoid token bloat)
+        conversationHistory.current = [
+          ...conversationHistory.current,
+          { role: "assistant" as const, content: fullText },
+        ].slice(-20);
+
         addLog({
           type: "brain",
           text: fullText || "No response received.",
@@ -511,6 +528,8 @@ export default function JarvisTerminal() {
         });
         speak(fullText);
       } catch (err) {
+        // Roll back the optimistic user turn on error
+        conversationHistory.current = historySnapshot;
         addLog({
           type: "error",
           text: err instanceof Error ? err.message : "Neural link severed.",
@@ -575,6 +594,7 @@ export default function JarvisTerminal() {
           return;
         case "clear":
           setLogs([]);
+          conversationHistory.current = [];
           setIsProcessing(false);
           return;
         case "tts":
@@ -592,9 +612,10 @@ export default function JarvisTerminal() {
           if (arg && REAL_AGENTS[arg as keyof typeof REAL_AGENTS]) {
             const a = REAL_AGENTS[arg as keyof typeof REAL_AGENTS];
             setSelectedAgent(arg);
+            conversationHistory.current = [];
             addLog({
               type: "success",
-              text: `Switched to ${a.name} (${a.role})`,
+              text: `Switched to ${a.name} (${a.role}). Conversation history cleared.`,
             });
           } else {
             const list = Object.entries(REAL_AGENTS)
@@ -1400,9 +1421,10 @@ export default function JarvisTerminal() {
                 key={agent.id}
                 onClick={() => {
                   setSelectedAgent(slug);
+                  conversationHistory.current = [];
                   addLog({
                     type: "system",
-                    text: `Selected agent: ${agent.name}`,
+                    text: `Selected agent: ${agent.name}. Memory cleared.`,
                   });
                 }}
                 className={`w-full text-left rounded-md border px-2.5 py-2 transition-all group hover:scale-[1.02] ${selectedAgent === slug ? "border-[#00ff9d]/40 bg-[#00ff9d]/5" : "border-white/5 hover:border-white/15"}`}

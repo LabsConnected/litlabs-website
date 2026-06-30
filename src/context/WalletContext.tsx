@@ -39,20 +39,25 @@ export function WalletProvider({ children }: { children: ReactNode }) {
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/wallet");
-      if (!res.ok) throw new Error("Failed to fetch wallet");
+      if (!res.ok) {
+        if (res.status === 401) {
+          setBalance(0);
+          setClaimed(false);
+        }
+        return;
+      }
       const data = await res.json();
       setBalance(typeof data.balance === "number" ? data.balance : 0);
       setClaimed(isSameDay(data.last_claim_date, new Date()));
     } catch {
-      setBalance(0);
-      setClaimed(false);
+      // Keep existing optimistic state on network error
     } finally {
       setIsLoading(false);
     }
   }, []);
 
   const claim = useCallback(async () => {
-    if (claimed || isClaiming) return false;
+    if (isClaiming || claimed) return false;
     setIsClaiming(true);
     try {
       const res = await fetch("/api/wallet", {
@@ -60,8 +65,11 @@ export function WalletProvider({ children }: { children: ReactNode }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ type: "daily" }),
       });
-      const data = await res.json();
-      if (!res.ok) return false;
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        if (data.error?.includes("already claimed")) setClaimed(true);
+        return false;
+      }
       setBalance(typeof data.balance === "number" ? data.balance : balance);
       setClaimed(true);
       return true;

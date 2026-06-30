@@ -11,29 +11,35 @@ export const maxDuration = 60;
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "director";
-const HISTORY_LIMIT = 8;
+// Keep last 12 turns (6 exchanges) to give the model solid context without bloating the prompt
+const HISTORY_LIMIT = 12;
 
 function buildPrompt(
   agent: Agent,
   message: string,
   history: HistoryEntry[],
 ): string {
-  const condensed = history
-    .slice(-HISTORY_LIMIT)
-    .map(
-      (entry) =>
-        `${entry.role === "user" ? "User" : agent.name}: ${entry.content}`,
+  const recentHistory = history.slice(-HISTORY_LIMIT);
+
+  // Build a turn-by-turn conversation transcript so the model can track the full thread
+  const transcript = recentHistory
+    .map((entry) =>
+      entry.role === "user"
+        ? `User: ${entry.content}`
+        : `${agent.name}: ${entry.content}`,
     )
     .join("\n");
 
-  return `${agent.systemPrompt}
-
-Personality: ${agent.personality}
-Role: ${agent.role}
-
-${condensed ? `Conversation history:\n${condensed}\n\n` : ""}User: ${message}
-
-Respond as ${agent.name} in character, staying concise and actionable.`;
+  return [
+    agent.systemPrompt,
+    "",
+    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+    `User: ${message}`,
+    "",
+    `${agent.name}:`,
+  ]
+    .filter((line) => line !== undefined)
+    .join("\n");
 }
 
 async function logConversation(

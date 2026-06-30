@@ -42,29 +42,12 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-.vercel
-
 # Admin scripts
 fix-ssh-admin.ps1
-
-
-# Admin scripts
 fix-portproxy.ps1
-
-
-# Admin scripts
 fix-ssh-complete.ps1
-
-
-# Admin scripts
 reinstall-openssh.ps1
-
-
-# Admin scripts
 use-wsl-ssh.ps1
-
-
-# Admin scripts
 add-external-ssh.ps1
 
 .env*
@@ -90,3 +73,11 @@ hermes-*.sh
 nuke-clean.ps1
 RECOVERY_MANIFEST.md
 Modelfile
+
+# Large internal libs / virtualenvs
+lib/oracle-cli/
+litlabs/
+
+# Misc
+*.backup
+bun.lock

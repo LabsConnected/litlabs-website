@@ -231,9 +231,9 @@ export default function Navbar() {
             </div>
           </Link>
 
-          {/* Desktop Nav */}
+          {/* Desktop Nav — visible from md up */}
           <div
-            className="hidden lg:flex items-center gap-1 bg-opacity-40 px-1 py-1 rounded-xl"
+            className="hidden md:flex items-center gap-0.5 px-1 py-1 rounded-xl"
             style={{
               backgroundColor: resolvedColors.boxBg + "40",
               border: `1px solid ${resolvedColors.borderColor}20`,
@@ -246,7 +246,7 @@ export default function Navbar() {
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="relative flex items-center gap-1.5 px-2 xl:px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all duration-200"
+                  className="relative flex items-center gap-1.5 px-2.5 py-1.5 text-[11px] font-bold rounded-lg transition-all duration-200"
                   style={{
                     color: active
                       ? resolvedColors.bgColor
@@ -260,8 +260,8 @@ export default function Navbar() {
                   }}
                   title={link.label}
                 >
-                  <Icon size={12} strokeWidth={active ? 2.5 : 2} />
-                  <span className="hidden xl:inline">{link.label}</span>
+                  <Icon size={13} strokeWidth={active ? 2.5 : 2} />
+                  <span className="hidden lg:inline">{link.label}</span>
                 </Link>
               );
             })}
@@ -269,10 +269,11 @@ export default function Navbar() {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LitCoins wallet — only when signed in */}
+            {/* LitCoins wallet — only when signed in, hide on small */}
             {authLoaded && isSignedIn && (
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
+
 
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
@@ -380,7 +381,7 @@ export default function Navbar() {
               )}
             </div>
 
-            {/* Theme toggle */}
+            {/* Theme toggle — hidden on very small, shown sm+ */}
             <button
               onClick={() => setMode(theme.mode === "dark" ? "light" : "dark")}
               aria-label={
@@ -388,7 +389,7 @@ export default function Navbar() {
                   ? "Switch to light mode"
                   : "Switch to dark mode"
               }
-              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
+              className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
               style={{
                 border: `1px solid ${resolvedColors.accentColor}30`,
                 color: resolvedColors.accentColor,
@@ -469,7 +470,7 @@ export default function Navbar() {
             {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
             <NavAuth linkColor={resolvedColors.accentColor} />
 
-            {/* Mobile hamburger */}
+            {/* Mobile hamburger — only below md */}
             <button
               ref={hamburgerRef}
               onClick={(e) => {
@@ -478,7 +479,7 @@ export default function Navbar() {
               }}
               aria-label={mobileOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileOpen}
-              className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg"
+              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg"
               style={{ color: resolvedColors.linkColor }}
             >
               {mobileOpen ? <X size={20} /> : <Menu size={20} />}
