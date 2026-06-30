@@ -362,14 +362,16 @@ export default function JarvisTerminal() {
 
   // Persist history to localStorage on change
   useEffect(() => {
-    if (conversationHistory.length > 0) {
-      try {
+    try {
+      if (conversationHistory.length > 0) {
         localStorage.setItem(
           `jarvis_history_${selectedAgent}`,
           JSON.stringify(conversationHistory.slice(-20)),
         );
-      } catch { /* quota exceeded */ }
-    }
+      } else {
+        localStorage.removeItem(`jarvis_history_${selectedAgent}`);
+      }
+    } catch { /* quota exceeded */ }
   }, [conversationHistory, selectedAgent]);
 
   // Helper to add to history and persist to server
