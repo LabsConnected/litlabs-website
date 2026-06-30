@@ -201,8 +201,31 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             </div>
           </Link>
 
-          {/* Spacer — sidebar owns all nav, top bar is global only */}
-          <div className="flex-1" />
+          {/* Center nav links — hidden on /dashboard where sidebar handles nav */}
+          <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
+            {[
+              { href: "/dashboard", label: "Dashboard" },
+              { href: "/studio", label: "Studio" },
+              { href: "/marketplace", label: "Marketplace" },
+              { href: "/social", label: "Social" },
+            ].map((link) => {
+              const active = pathname === link.href || pathname?.startsWith(link.href + "/") || pathname?.startsWith(link.href + "?");
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="px-3 py-1.5 rounded-lg text-sm font-bold transition-all hover:opacity-100"
+                  style={{
+                    color: active ? resolvedColors.accentColor : resolvedColors.textMuted,
+                    backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent",
+                    opacity: active ? 1 : 0.7,
+                  }}
+                >
+                  {link.label}
+                </Link>
+              );
+            })}
+          </div>
 
           {/* Right side */}
           <div className="flex items-center gap-2">
