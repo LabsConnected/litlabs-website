@@ -1,5 +1,12 @@
-import { redirect } from "next/navigation";
+"use client";
+
+import nextDynamic from "next/dynamic";
+
+const DashboardView = nextDynamic(
+  () => import("@/components/DashboardView"),
+  { ssr: false },
+);
 
 export default function DashboardPage() {
-  redirect("/");
+  return <DashboardView />;
 }
