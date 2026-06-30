@@ -6,7 +6,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useSearchParams } from "next/navigation";
-import { Activity, X } from "lucide-react";
+import { Activity, X, PanelLeft, PanelRight } from "lucide-react";
 import { APPS } from "@/components/dashboard/dashboard-data";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
@@ -28,6 +28,17 @@ export default function DashboardView() {
   const [manualApp, setManualApp] = useState("home");
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
+  const [widgetSide, setWidgetSide] = useState<"left" | "right">(() => {
+    if (typeof window === "undefined") return "right";
+    const saved = localStorage.getItem("dashboard_widget_side");
+    return saved === "left" ? "left" : "right";
+  });
+
+  const toggleWidgetSide = () => {
+    const next = widgetSide === "right" ? "left" : "right";
+    setWidgetSide(next);
+    localStorage.setItem("dashboard_widget_side", next);
+  };
 
   const activeApp = appFromUrl ?? manualApp;
   const setActiveApp = (app: string) => setManualApp(app);
@@ -49,6 +60,29 @@ export default function DashboardView() {
         <Navbar onMenuClick={() => setSidebarOpen(true)} />
 
         <div className="flex flex-1 min-h-0">
+          {/* Left rail — shown when widgetSide === "left" */}
+          {widgetSide === "left" && (
+            <div className="relative">
+              <button
+                onClick={toggleWidgetSide}
+                className="absolute top-3 right-2 z-10 p-1.5 rounded-lg transition-all hover:bg-white/10"
+                style={{ color: T.textMuted }}
+                title="Move panel to right"
+              >
+                <PanelRight size={13} />
+              </button>
+              <DashboardWidgets
+                displayName={displayName}
+                balance={balance}
+                claimed={claimed}
+                visitors={visitors}
+                onClaimAction={claim}
+                onOpenMusic={() => setActiveApp("music")}
+                onOpenRadio={() => setActiveApp("radio")}
+              />
+            </div>
+          )}
+
           {/* Center content */}
           <main
             className={`flex-1 min-w-0 p-4 lg:p-6 ${
@@ -89,16 +123,28 @@ export default function DashboardView() {
             />
           </main>
 
-          {/* Right rail — live widgets (xl+ only) */}
-          <DashboardWidgets
-            displayName={displayName}
-            balance={balance}
-            claimed={claimed}
-            visitors={visitors}
-            onClaimAction={claim}
-            onOpenMusic={() => setActiveApp("music")}
-            onOpenRadio={() => setActiveApp("radio")}
-          />
+          {/* Right rail — shown when widgetSide === "right" */}
+          {widgetSide === "right" && (
+            <div className="relative">
+              <button
+                onClick={toggleWidgetSide}
+                className="absolute top-3 left-2 z-10 p-1.5 rounded-lg transition-all hover:bg-white/10"
+                style={{ color: T.textMuted }}
+                title="Move panel to left"
+              >
+                <PanelLeft size={13} />
+              </button>
+              <DashboardWidgets
+                displayName={displayName}
+                balance={balance}
+                claimed={claimed}
+                visitors={visitors}
+                onClaimAction={claim}
+                onOpenMusic={() => setActiveApp("music")}
+                onOpenRadio={() => setActiveApp("radio")}
+              />
+            </div>
+          )}
         </div>
       </div>
 
