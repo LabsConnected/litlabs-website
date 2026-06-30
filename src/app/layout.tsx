@@ -4,8 +4,8 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
+import NavbarWrapper from "@/components/NavbarWrapper";
+import FooterWrapper from "@/components/FooterWrapper";
 import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
@@ -119,11 +119,11 @@ export default function RootLayout({
           <AnimatedBackgroundWrapper />
           <div className="relative z-10 flex flex-col min-h-screen">
             <UserSync />
-            <Navbar />
+            <NavbarWrapper />
             <main className="flex-1 w-full max-w-full overflow-x-hidden">
               {children}
             </main>
-            <Footer />
+            <FooterWrapper />
             <CookieConsent />
             <ServiceWorkerRegistration />
           </div>
@@ -144,10 +144,10 @@ export default function RootLayout({
           signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
           signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
           signInFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"
+            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/dashboard"
           }
           signUpFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"
+            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/dashboard?new=1"
           }
           appearance={{
             variables: {

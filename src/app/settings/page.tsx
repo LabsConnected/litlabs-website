@@ -25,6 +25,8 @@ import {
   ExternalLink,
   FolderOpen,
   RefreshCw,
+  Copy,
+  Share2,
 } from "lucide-react";
 import {
   loadProjectContext,
@@ -369,6 +371,45 @@ export default function SettingsPage() {
                 )}
               </div>
             </div>
+
+            {/* Public Profile Share */}
+            {username && (
+              <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+                <div className="flex items-center gap-2 mb-1">
+                  <Share2 size={14} style={{ color: T.accentColor }} />
+                  <h2 className="text-lg font-black" style={{ color: T.headerColor }}>Your Public Profile</h2>
+                </div>
+                <p className="text-xs mb-4 opacity-70" style={{ color: T.textMuted }}>
+                  Share this link so others can find and follow you.
+                </p>
+                <div className="flex items-center gap-2">
+                  <div
+                    className="flex-1 px-3 py-2 rounded-lg border text-sm font-mono truncate"
+                    style={{ backgroundColor: `${T.boxBg}80`, borderColor: `${T.borderColor}30`, color: T.textMuted }}
+                  >
+                    {typeof window !== "undefined" ? `${window.location.origin}/profile/${username}` : `/profile/${username}`}
+                  </div>
+                  <button
+                    onClick={() => {
+                      const url = `${window.location.origin}/profile/${username}`;
+                      navigator.clipboard.writeText(url).catch(() => {});
+                    }}
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-80"
+                    style={{ backgroundColor: `${T.accentColor}15`, color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+                  >
+                    <Copy size={12} /> Copy
+                  </button>
+                  <Link
+                    href={`/profile/${username}`}
+                    target="_blank"
+                    className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-80"
+                    style={{ backgroundColor: `${T.boxBg}80`, color: T.textMuted, border: `1px solid ${T.borderColor}30` }}
+                  >
+                    <ExternalLink size={12} /> View
+                  </Link>
+                </div>
+              </div>
+            )}
           </div>
         )}
 

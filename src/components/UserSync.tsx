@@ -13,8 +13,11 @@ export default function UserSync() {
   useEffect(() => {
     if (!isSignedIn || !userId) return;
     fetch("/api/account", { method: "GET" })
-      .then((res) => {
-        if (!res.ok) {/* UserSync account sync failed */}
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.isNew) {
+          try { localStorage.setItem("litlabs-new-user", "1"); } catch { /* ignore */ }
+        }
       })
       .catch(() => {
         // Silent fail — webhook will handle it later
