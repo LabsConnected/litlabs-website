@@ -51,47 +51,26 @@
     }
   ],
   "categories": ["productivity", "developer", "ai", "utilities"],
-  "screenshots": [
-    {
-      "src": "/screenshots/home-wide.png",
-      "sizes": "1280x720",
-      "type": "image/png",
-      "form_factor": "wide"
-    },
-    {
-      "src": "/screenshots/home-narrow.png",
-      "sizes": "750x1334",
-      "type": "image/png",
-      "form_factor": "narrow"
-    }
-  ],
   "shortcuts": [
     {
       "name": "Studio",
       "short_name": "Studio",
       "description": "Open the AI Studio",
-      "url": "/studio",
-      "icons": [{ "src": "/icons/shortcut-studio.png", "sizes": "96x96" }]
+      "url": "/studio"
     },
     {
       "name": "Marketplace",
       "short_name": "Market",
       "description": "Browse AI agents",
-      "url": "/marketplace",
-      "icons": [{ "src": "/icons/shortcut-market.png", "sizes": "96x96" }]
+      "url": "/marketplace"
     },
     {
       "name": "Settings",
       "short_name": "Settings",
       "description": "Manage preferences",
-      "url": "/settings",
-      "icons": [{ "src": "/icons/shortcut-settings.png", "sizes": "96x96" }]
+      "url": "/settings"
     }
   ],
   "related_applications": [],
-  "prefer_related_applications": false,
-  "features": ["cross-origin-isolated"],
-  "edge_side_panel": {
-    "preferred_width": 400
-  }
+  "prefer_related_applications": false
 }

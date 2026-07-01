@@ -2,106 +2,31 @@ import type { MetadataRoute } from "next";
 import { SITE_URL } from "@/lib/siteConfig";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = SITE_URL;
   const now = new Date();
 
-  return [
-    { url: base, lastModified: now, changeFrequency: "daily", priority: 1 },
+  const staticRoutes = [
+    { path: "/", priority: 1.0, changeFrequency: "weekly" as const },
+    { path: "/studio", priority: 0.9, changeFrequency: "weekly" as const },
     {
-      url: `${base}/studio`,
-      lastModified: now,
-      changeFrequency: "weekly",
+      path: "/marketplace",
       priority: 0.9,
+      changeFrequency: "daily" as const,
     },
-    {
-      url: `${base}/marketplace`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.9,
-    },
-    {
-      url: `${base}/gallery`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/agents`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/social`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/flow`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
-    {
-      url: `${base}/games`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
-    {
-      url: `${base}/dashboard`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.7,
-    },
-    {
-      url: `${base}/code`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/ai-builder`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/showcase`,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/profile`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.5,
-    },
-    {
-      url: `${base}/settings`,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.5,
-    },
-    {
-      url: `${base}/terms`,
-      lastModified: now,
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
-    {
-      url: `${base}/privacy`,
-      lastModified: now,
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
-    {
-      url: `${base}/cookies`,
-      lastModified: now,
-      changeFrequency: "yearly",
-      priority: 0.3,
-    },
+    { path: "/agents", priority: 0.8, changeFrequency: "weekly" as const },
+    { path: "/gallery", priority: 0.7, changeFrequency: "daily" as const },
+    { path: "/social", priority: 0.7, changeFrequency: "daily" as const },
+    { path: "/games", priority: 0.5, changeFrequency: "monthly" as const },
+    { path: "/showcase", priority: 0.6, changeFrequency: "weekly" as const },
+    { path: "/privacy", priority: 0.3, changeFrequency: "yearly" as const },
+    { path: "/cookies", priority: 0.3, changeFrequency: "yearly" as const },
+    { path: "/sign-in", priority: 0.4, changeFrequency: "yearly" as const },
+    { path: "/sign-up", priority: 0.5, changeFrequency: "yearly" as const },
   ];
+
+  return staticRoutes.map((route) => ({
+    url: `${SITE_URL}${route.path}`,
+    lastModified: now,
+    changeFrequency: route.changeFrequency,
+    priority: route.priority,
+  }));
 }
