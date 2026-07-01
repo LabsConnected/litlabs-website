@@ -11,13 +11,14 @@ import {
   type IconComponent,
 } from "./dashboard-data";
 import dynamic from "next/dynamic";
+import { useState } from "react";
 import SocialFeed from "@/components/SocialFeed";
 import MusicPlayer from "./MusicPlayer";
 import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
 
-const MusicPlayerFull = () => <MusicPlayer mode="full" />;
-const RadioPanelFull = () => <RadioPanel mode="full" />;
+const SpotifyPlayer = dynamic(() => import("./SpotifyPlayer"), { ssr: false });
+
 
 /* Lazy-load heavy dashboard panes so the initial dashboard bundle stays small */
 const DashboardContent = dynamic(() => import("./DashboardContent"), {
@@ -278,16 +279,8 @@ export function CenterStage({
         </div>
       );
     case "music":
-      return (
-        <div className="space-y-6">
-          <HeroCard
-            title="Music"
-            subtitle="Playlists, radios & your library."
-            color="#ff2d78"
-          />
-          <MusicPlayerFull />
-        </div>
-      );
+      return <MusicHub />;
+
     case "games":
       return (
         <div className="space-y-6">
@@ -363,7 +356,7 @@ export function CenterStage({
             subtitle="Live stations curated for focus & flow."
             color="#10b981"
           />
-          <RadioPanelFull />
+          <RadioPanel mode="full" />
         </div>
       );
     case "audio-tools":
@@ -461,4 +454,51 @@ export function CenterStage({
         </div>
       );
   }
+}
+
+/* ------------------------------------------------------------------ */
+/*  MusicHub — tabbed music section                                    */
+/* ------------------------------------------------------------------ */
+const MUSIC_TABS = [
+  { id: "spotify", label: "Spotify", color: "#1DB954" },
+  { id: "player",  label: "LiTree Player", color: "#ff00a0" },
+  { id: "radio",   label: "Radio", color: "#00f0ff" },
+  { id: "tools",   label: "Audio Tools", color: "#8b5cf6" },
+] as const;
+
+type MusicTab = (typeof MUSIC_TABS)[number]["id"];
+
+function MusicHub() {
+  const { resolvedColors: T } = useTheme();
+  const [tab, setTab] = useState<MusicTab>("spotify");
+
+  return (
+    <div className="space-y-4">
+      <HeroCard title="Music" subtitle="Stream, create & broadcast." color="#1DB954" />
+
+      {/* Tab bar */}
+      <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: `${T.boxBg}60`, border: `1px solid ${T.borderColor}20` }}>
+        {MUSIC_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setTab(t.id)}
+            className="flex-1 py-2 rounded-lg text-xs font-bold transition-all"
+            style={{
+              backgroundColor: tab === t.id ? `${t.color}20` : "transparent",
+              color: tab === t.id ? t.color : T.textMuted,
+              border: tab === t.id ? `1px solid ${t.color}30` : "1px solid transparent",
+            }}
+          >
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {/* Tab content */}
+      {tab === "spotify"  && <SpotifyPlayer />}
+      {tab === "player"   && <MusicPlayer mode="full" />}
+      {tab === "radio"    && <RadioPanel mode="full" />}
+      {tab === "tools"    && <AudioTool />}
+    </div>
+  );
 }
