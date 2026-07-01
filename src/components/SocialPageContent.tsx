@@ -230,20 +230,20 @@ export default function SocialPageContent() {
           className="mb-4 p-3 flex items-center justify-between border-2"
           style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 sm:gap-3">
             <Link
               href="/"
-              className="text-lg font-black uppercase"
+              className="text-sm sm:text-lg font-black uppercase"
               style={{ color: C.headerColor }}
             >
-              ⚡ LiTTree LabStudios
+              ⚡ LiTTree
             </Link>
             <div className="hidden sm:flex items-center gap-1 text-[10px] opacity-50">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
               SOCIAL FEED
             </div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1 sm:gap-2">
             <button
               onClick={() => loadPosts(activeTab)}
               className="p-1.5 border hover:opacity-80"
@@ -251,17 +251,10 @@ export default function SocialPageContent() {
             >
               <RefreshCw size={12} style={{ color: C.textMuted }} />
             </button>
-            <Link
-              href="/"
-              className="px-3 py-1.5 text-xs border hover:opacity-80"
-              style={{ borderColor: C.borderColor, color: C.textMuted }}
-            >
-              Home
-            </Link>
             {!isSignedIn && (
               <Link
                 href="/sign-up"
-                className="px-3 py-1.5 text-xs font-bold border"
+                className="px-2 sm:px-3 py-1.5 text-[10px] sm:text-xs font-bold border"
                 style={{ borderColor: C.accentColor, color: C.accentColor }}
               >
                 Join
@@ -272,8 +265,8 @@ export default function SocialPageContent() {
 
         {/* Three Column Layout */}
         <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_240px] lg:grid-cols-[260px_1fr_300px] xl:grid-cols-[280px_1fr_320px] gap-4">
-          {/* LEFT COLUMN */}
-          <aside className="space-y-4 min-w-0">
+          {/* LEFT COLUMN - Hidden on mobile */}
+          <aside className="hidden md:block space-y-4 min-w-0">
             {isSignedIn && profile && (
               <div
                 className="border-2 p-4"
@@ -407,12 +400,12 @@ export default function SocialPageContent() {
             {/* Compose */}
             {isSignedIn && (
               <div
-                className="border-2 p-4"
+                className="border-2 p-3 sm:p-4"
                 style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
               >
-                <div className="flex gap-3">
+                <div className="flex gap-2 sm:gap-3">
                   <div
-                    className="w-10 h-10 border-2 flex items-center justify-center text-lg shrink-0"
+                    className="w-8 h-8 sm:w-10 sm:h-10 border-2 flex items-center justify-center text-sm sm:text-lg shrink-0"
                     style={{ borderColor: C.accentColor }}
                   >
                     {profile?.avatarUrl ? (
@@ -437,30 +430,30 @@ export default function SocialPageContent() {
                           handlePost();
                       }}
                       placeholder="What's on your mind? Share with the community..."
-                      className="w-full p-2 text-sm bg-transparent border resize-none outline-none"
+                      className="w-full p-2 text-xs sm:text-sm bg-transparent border resize-none outline-none"
                       style={{
                         borderColor: C.borderColor,
                         color: C.textColor,
-                        minHeight: "60px",
+                        minHeight: "50px sm:60px",
                       }}
                     />
                     <div className="flex justify-between items-center mt-2">
-                      <span className="text-[9px] opacity-40">
+                      <span className="text-[8px] sm:text-[9px] opacity-40 hidden sm:block">
                         Ctrl+Enter to post
                       </span>
                       <button
                         onClick={handlePost}
                         disabled={!newPost.trim() || posting}
-                        className="px-4 py-1.5 text-xs font-bold border disabled:opacity-30 flex items-center gap-1"
+                        className="px-3 sm:px-4 py-1.5 text-[10px] sm:text-xs font-bold border disabled:opacity-30 flex items-center gap-1"
                         style={{
                           borderColor: C.accentColor,
                           color: C.accentColor,
                         }}
                       >
                         {posting ? (
-                          <Loader2 size={12} className="animate-spin" />
+                          <Loader2 size={10} className="animate-spin" />
                         ) : (
-                          <Plus size={12} />
+                          <Plus size={10} />
                         )}
                         Post
                       </button>
@@ -599,14 +592,14 @@ export default function SocialPageContent() {
                   </div>
 
                   {/* Content */}
-                  <p className="text-sm mb-3 leading-relaxed whitespace-pre-wrap">
+                  <p className="text-xs sm:text-sm mb-2 sm:mb-3 leading-relaxed whitespace-pre-wrap">
                     {post.content}
                   </p>
 
                   {/* Media */}
                   {post.media_urls?.length > 0 && (
                     <div
-                      className="mb-3 grid gap-2"
+                      className="mb-2 sm:mb-3 grid gap-2"
                       style={{
                         gridTemplateColumns:
                           post.media_urls.length > 1 ? "1fr 1fr" : "1fr",
@@ -622,7 +615,7 @@ export default function SocialPageContent() {
                             className="w-full object-cover border"
                             style={{
                               borderColor: C.borderColor,
-                              maxHeight: "300px",
+                              maxHeight: "200px sm:300px",
                             }}
                           />
                         </>
@@ -711,8 +704,8 @@ export default function SocialPageContent() {
             )}
           </section>
 
-          {/* RIGHT COLUMN */}
-          <aside className="space-y-4">
+          {/* RIGHT COLUMN - Hidden on mobile */}
+          <aside className="hidden lg:block space-y-4">
             {/* Trending */}
             <div
               className="border-2 p-3"

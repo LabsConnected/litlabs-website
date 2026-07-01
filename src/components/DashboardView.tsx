@@ -7,7 +7,6 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useSearchParams } from "next/navigation";
 import { Activity, X, PanelLeft, PanelRight } from "lucide-react";
-import { APPS } from "@/components/dashboard/dashboard-data";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
 import Sidebar from "@/components/Sidebar";
@@ -91,31 +90,6 @@ export default function DashboardView() {
                 : "overflow-y-auto"
             }`}
           >
-            {/* Mobile app bar — compact horizontal scroll below md */}
-            <div className="md:hidden flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide">
-              {APPS.map((app) => {
-                const Icon = app.icon;
-                const active = activeApp === app.id;
-                return (
-                  <button
-                    key={app.id}
-                    onClick={() => setActiveApp(app.id)}
-                    className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all"
-                    style={{
-                      backgroundColor: active ? `${app.color}15` : `${T.boxBg}60`,
-                      border: active
-                        ? `1px solid ${app.color}40`
-                        : `1px solid ${T.borderColor}30`,
-                      color: active ? app.color : T.textMuted,
-                    }}
-                  >
-                    <Icon size={14} />
-                    {app.label}
-                  </button>
-                );
-              })}
-            </div>
-
             <CenterStage
               activeApp={activeApp}
               displayName={displayName}

@@ -27,6 +27,17 @@ import {
   RefreshCw,
   Copy,
   Share2,
+  Shield,
+  Smartphone,
+  Clock,
+  Lock,
+  Globe,
+  Zap,
+  Crown,
+  CreditCard,
+  Receipt,
+  Sparkles,
+  Plus,
 } from "lucide-react";
 import {
   loadProjectContext,
@@ -58,6 +69,10 @@ const TABS = [
   { id: "project", label: "Project", icon: FolderOpen },
   { id: "keys", label: "BYOK", icon: Key },
   { id: "litkeys", label: "Keys", icon: Key },
+  { id: "security", label: "Security", icon: Shield },
+  { id: "connected", label: "Connected", icon: Globe },
+  { id: "privacy", label: "Privacy", icon: Lock },
+  { id: "billing", label: "Billing", icon: Coins },
   { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
 
@@ -127,6 +142,33 @@ export default function SettingsPage() {
   const [inviteMaxUses, setInviteMaxUses] = useState("1");
   const [newInviteCode, setNewInviteCode] = useState<string | null>(null);
   const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  /* Security state */
+  const [twoFactorEnabled, setTwoFactorEnabled] = useState(false);
+  const [sessions, setSessions] = useState([
+    { id: "1", device: "Chrome on Windows", location: "San Francisco, CA", lastActive: "2 minutes ago", current: true },
+    { id: "2", device: "Safari on iPhone", location: "San Francisco, CA", lastActive: "1 hour ago", current: false },
+    { id: "3", device: "Firefox on Mac", location: "New York, NY", lastActive: "3 days ago", current: false },
+  ]);
+  const [securitySaved, setSecuritySaved] = useState(false);
+
+  /* Connected Services state */
+  const [connectedServices, setConnectedServices] = useState([
+    { id: "github", name: "GitHub", connected: true, icon: "🐙" },
+    { id: "discord", name: "Discord", connected: false, icon: "💬" },
+    { id: "google", name: "Google", connected: true, icon: "🔍" },
+    { id: "slack", name: "Slack", connected: false, icon: "💼" },
+  ]);
+  const [connectedSaved, setConnectedSaved] = useState(false);
+
+  /* Privacy state */
+  const [profileVisibility, setProfileVisibility] = useState("public");
+  const [dataExportRequested, setDataExportRequested] = useState(false);
+  const [privacySaved, setPrivacySaved] = useState(false);
+
+  /* Billing state */
+  const [currentPlan, setCurrentPlan] = useState("free");
+  const [billingSaved, setBillingSaved] = useState(false);
 
   const copyText = (text: string, id: string) => {
     navigator.clipboard.writeText(text).catch(() => {});
@@ -357,7 +399,7 @@ export default function SettingsPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-1 overflow-x-auto pb-2 mb-6 scrollbar-hide">
+        <div className="flex gap-1 overflow-x-auto pb-2 mb-4 sm:mb-6 scrollbar-hide">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;
@@ -365,7 +407,7 @@ export default function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-all"
+                className="flex items-center gap-1.5 sm:gap-2 px-3 sm:px-4 py-1.5 sm:py-2 rounded-lg text-[10px] sm:text-xs sm:text-sm font-bold whitespace-nowrap transition-all"
                 style={{
                   backgroundColor: active
                     ? `${T.accentColor}20`
@@ -376,7 +418,8 @@ export default function SettingsPage() {
                   color: active ? T.accentColor : T.textMuted,
                 }}
               >
-                <Icon size={14} />
+                <Icon size={12} className="sm:hidden" />
+                <Icon size={14} className="hidden sm:block" />
                 {tab.label}
               </button>
             );
@@ -385,21 +428,21 @@ export default function SettingsPage() {
 
         {/* Profile Tab */}
         {activeTab === "profile" && (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             <div
-              className="rounded-2xl border p-4 sm:p-6"
+              className="rounded-2xl border p-3 sm:p-4 md:p-6"
               style={cardStyle}
             >
               <h2
-                className="text-lg font-black mb-1"
+                className="text-base sm:text-lg font-black mb-1"
                 style={{ color: T.headerColor }}
               >
                 Public Profile
               </h2>
-              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+              <p className="text-[10px] sm:text-xs mb-3 sm:mb-5 opacity-70" style={{ color: T.textMuted }}>
                 This is what other creators see across the platform.
               </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 sm:gap-4">
                 {[
                   { label: "Display Name", value: name, set: setName, placeholder: "Your name" },
                   { label: "Username", value: username, set: setUsername, placeholder: "username" },
@@ -1117,6 +1160,575 @@ export default function SettingsPage() {
                   ))}
                 </div>
               )}
+            </div>
+          </div>
+        )}
+
+        {/* Security Tab */}
+        {activeTab === "security" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Two-Factor Authentication
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Add an extra layer of security to your account.
+              </p>
+              <div className="flex items-center justify-between p-3 rounded-lg border" style={inputStyle}>
+                <div>
+                  <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                    2FA Authentication
+                  </div>
+                  <div className="text-[10px] opacity-70" style={{ color: T.textMuted }}>
+                    Require verification code when signing in.
+                  </div>
+                </div>
+                <button
+                  onClick={() => { setTwoFactorEnabled(!twoFactorEnabled); setSecuritySaved(true); }}
+                  className="w-12 h-6 rounded-full transition-colors relative"
+                  style={{
+                    backgroundColor: twoFactorEnabled ? T.accentColor : `${T.borderColor}50`,
+                  }}
+                >
+                  <span
+                    className="absolute top-0.5 left-0.5 w-5 h-5 rounded-full bg-white transition-transform"
+                    style={{ transform: twoFactorEnabled ? "translateX(24px)" : "translateX(0)" }}
+                  />
+                </button>
+              </div>
+              {securitySaved && (
+                <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "#22c55e" }}>
+                  <Check size={12} />
+                  Security settings saved
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Active Sessions
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Manage where you're logged in.
+              </p>
+              <div className="space-y-3">
+                {sessions.map((session) => (
+                  <div
+                    key={session.id}
+                    className="flex items-center justify-between p-3 rounded-lg border"
+                    style={{ backgroundColor: T.bgColor + "30", borderColor: T.borderColor + "30" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <Smartphone size={16} style={{ color: T.textMuted }} />
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                          {session.device}
+                        </div>
+                        <div className="text-[10px]" style={{ color: T.textMuted }}>
+                          {session.location} • {session.lastActive}
+                        </div>
+                      </div>
+                    </div>
+                    {session.current ? (
+                      <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ backgroundColor: "#22c55e20", color: "#22c55e" }}>
+                        Current
+                      </span>
+                    ) : (
+                      <button className="text-[10px] px-2 py-1 rounded-lg font-bold transition-all hover:scale-105" style={{ backgroundColor: "#ef444420", color: "#ef4444" }}>
+                        Revoke
+                      </button>
+                    )}
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Password
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Change your password to keep your account secure.
+              </p>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                    Current Password
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                    style={inputStyle}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                    New Password
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                    style={inputStyle}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                    Confirm New Password
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="••••••••"
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                    style={inputStyle}
+                  />
+                </div>
+                <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+                  <Lock size={14} />
+                  Change Password
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Connected Services Tab */}
+        {activeTab === "connected" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Connected Services
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Connect third-party services to enhance your experience.
+              </p>
+              <div className="space-y-3">
+                {connectedServices.map((service) => (
+                  <div
+                    key={service.id}
+                    className="flex items-center justify-between p-3 rounded-lg border"
+                    style={{ backgroundColor: T.bgColor + "30", borderColor: T.borderColor + "30" }}
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-2xl">{service.icon}</span>
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                          {service.name}
+                        </div>
+                        <div className="text-[10px]" style={{ color: T.textMuted }}>
+                          {service.connected ? "Connected" : "Not connected"}
+                        </div>
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => {
+                        setConnectedServices(services => 
+                          services.map(s => 
+                            s.id === service.id ? { ...s, connected: !s.connected } : s
+                          )
+                        );
+                        setConnectedSaved(true);
+                      }}
+                      className="text-[10px] px-3 py-1.5 rounded-lg font-bold transition-all hover:scale-105"
+                      style={{
+                        backgroundColor: service.connected ? "#ef444420" : T.accentColor + "20",
+                        color: service.connected ? "#ef4444" : T.accentColor,
+                        border: service.connected ? "1px solid #ef444430" : "1px solid " + T.accentColor + "30",
+                      }}
+                    >
+                      {service.connected ? "Disconnect" : "Connect"}
+                    </button>
+                  </div>
+                ))}
+              </div>
+              {connectedSaved && (
+                <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "#22c55e" }}>
+                  <Check size={12} />
+                  Connected services updated
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Webhooks
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Set up webhooks to receive real-time notifications.
+              </p>
+              <div className="space-y-3">
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                    Webhook URL
+                  </label>
+                  <input
+                    type="url"
+                    placeholder="https://your-server.com/webhook"
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                    style={inputStyle}
+                  />
+                </div>
+                <div className="space-y-1">
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                    Secret Key
+                  </label>
+                  <input
+                    type="password"
+                    placeholder="Your webhook secret"
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                    style={inputStyle}
+                  />
+                </div>
+                <button className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+                  <ExternalLink size={14} />
+                  Add Webhook
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Privacy Tab */}
+        {activeTab === "privacy" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Profile Visibility
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Control who can see your profile and activity.
+              </p>
+              <div className="space-y-3">
+                {[
+                  { id: "public", label: "Public", desc: "Anyone can view your profile" },
+                  { id: "private", label: "Private", desc: "Only you can view your profile" },
+                  { id: "friends", label: "Friends Only", desc: "Only connections can view your profile" },
+                ].map((option) => (
+                  <button
+                    key={option.id}
+                    onClick={() => setProfileVisibility(option.id)}
+                    className="w-full flex items-center justify-between p-3 rounded-lg border text-left transition-all hover:scale-[1.01]"
+                    style={{
+                      backgroundColor: profileVisibility === option.id ? T.accentColor + "15" : T.bgColor + "30",
+                      borderColor: profileVisibility === option.id ? T.accentColor + "30" : T.borderColor + "30",
+                    }}
+                  >
+                    <div>
+                      <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                        {option.label}
+                      </div>
+                      <div className="text-[10px]" style={{ color: T.textMuted }}>
+                        {option.desc}
+                      </div>
+                    </div>
+                    {profileVisibility === option.id && (
+                      <Check size={16} style={{ color: T.accentColor }} />
+                    )}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Data Export
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Download all your data in a portable format.
+              </p>
+              <button
+                onClick={() => { setDataExportRequested(true); setPrivacySaved(true); }}
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90"
+                style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+              >
+                <RefreshCw size={14} />
+                {dataExportRequested ? "Export Requested" : "Request Data Export"}
+              </button>
+              {dataExportRequested && (
+                <div className="mt-3 text-xs" style={{ color: T.textMuted }}>
+                  You'll receive an email with your data export link within 24 hours.
+                </div>
+              )}
+            </div>
+
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                Account Deletion
+              </h2>
+              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
+                Permanently delete your account and all associated data.
+              </p>
+              <button
+                className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90"
+                style={{ backgroundColor: "#ef444420", color: "#ef4444", border: "1px solid #ef444430" }}
+              >
+                <AlertTriangle size={14} />
+                Delete Account
+              </button>
+              <div className="mt-3 text-[10px]" style={{ color: T.textMuted }}>
+                This action cannot be undone. All your data will be permanently deleted.
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Billing Tab */}
+        {activeTab === "billing" && (
+          <div className="space-y-6">
+            {/* Subscription Status Card */}
+            <div className="rounded-2xl border p-5 sm:p-6" style={{ ...cardStyle, background: `linear-gradient(135deg, ${T.boxBg} 0%, ${T.accentColor}08 100%)` }}>
+              <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4">
+                <div className="flex items-start gap-4">
+                  <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center"
+                    style={{ backgroundColor: T.accentColor + "15", border: `1px solid ${T.accentColor}30` }}
+                  >
+                    <Crown size={22} style={{ color: T.accentColor }} />
+                  </div>
+                  <div>
+                    <div className="text-xs font-bold uppercase tracking-wider opacity-60 mb-1" style={{ color: T.textMuted }}>
+                      Current Plan
+                    </div>
+                    <h2 className="text-xl font-black mb-1" style={{ color: T.headerColor }}>
+                      {currentPlan === "free" ? "Free" : currentPlan === "pro" ? "Pro" : "Enterprise"}
+                    </h2>
+                    <p className="text-xs opacity-70" style={{ color: T.textMuted }}>
+                      {currentPlan === "free"
+                        ? "You're on the free plan. Upgrade to unlock more agents and features."
+                        : currentPlan === "pro"
+                          ? "Your Pro subscription is active. Renews automatically on Feb 15, 2026."
+                          : "Enterprise plan with dedicated support and custom SLA."}
+                    </p>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  {currentPlan !== "free" && (
+                    <button
+                      onClick={() => { setCurrentPlan("free"); setBillingSaved(true); }}
+                      className="px-4 py-2 rounded-lg text-xs font-bold border transition-all hover:opacity-80"
+                      style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
+                    >
+                      Cancel Plan
+                    </button>
+                  )}
+                  <button
+                    onClick={() => { setCurrentPlan("pro"); setBillingSaved(true); }}
+                    className="px-4 py-2 rounded-lg text-xs font-bold transition-all hover:opacity-90"
+                    style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                  >
+                    {currentPlan === "pro" ? "Manage Subscription" : "Upgrade to Pro"}
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Plan Tiers */}
+            <div className="grid md:grid-cols-3 gap-4">
+              {[
+                {
+                  id: "free",
+                  name: "Free",
+                  price: "$0",
+                  period: "forever",
+                  icon: Zap,
+                  color: T.textMuted,
+                  features: ["3 core agents", "5 projects", "Community support", "500 daily coins", "Basic analytics"],
+                  cta: "Current Plan",
+                },
+                {
+                  id: "pro",
+                  name: "Pro",
+                  price: "$19",
+                  period: "/month",
+                  icon: Sparkles,
+                  color: T.accentColor,
+                  features: ["All 18+ agents", "Unlimited projects", "Priority support", "2,000 daily coins", "Advanced analytics", "API access", "Custom themes"],
+                  cta: "Upgrade to Pro",
+                  popular: true,
+                },
+                {
+                  id: "enterprise",
+                  name: "Enterprise",
+                  price: "Custom",
+                  period: "pricing",
+                  icon: Crown,
+                  color: "#fbbf24",
+                  features: ["Everything in Pro", "Custom agent training", "Dedicated support", "SLA guarantee", "SSO & audit logs", "White-label options"],
+                  cta: "Contact Sales",
+                },
+              ].map((plan) => {
+                const Icon = plan.icon;
+                const isCurrent = currentPlan === plan.id;
+                return (
+                  <div
+                    key={plan.id}
+                    className="rounded-2xl border p-5 transition-all hover:scale-[1.02]"
+                    style={{
+                      ...cardStyle,
+                      borderColor: plan.popular ? plan.color : T.borderColor + "30",
+                      background: plan.popular ? `linear-gradient(180deg, ${plan.color}08 0%, ${T.boxBg} 100%)` : T.boxBg,
+                    }}
+                  >
+                    {plan.popular && (
+                      <div
+                        className="text-[9px] font-bold uppercase tracking-wider px-2 py-1 rounded-full mb-3 inline-block"
+                        style={{ backgroundColor: plan.color + "20", color: plan.color }}
+                      >
+                        Most Popular
+                      </div>
+                    )}
+                    <div className="flex items-center gap-2 mb-3">
+                      <div
+                        className="w-8 h-8 rounded-lg flex items-center justify-center"
+                        style={{ backgroundColor: plan.color + "15" }}
+                      >
+                        <Icon size={16} style={{ color: plan.color }} />
+                      </div>
+                      <span className="font-black" style={{ color: T.textColor }}>{plan.name}</span>
+                    </div>
+                    <div className="flex items-baseline gap-1 mb-4">
+                      <span className="text-2xl font-black" style={{ color: plan.color }}>{plan.price}</span>
+                      <span className="text-xs opacity-60" style={{ color: T.textMuted }}>{plan.period}</span>
+                    </div>
+                    <div className="space-y-2 mb-5">
+                      {plan.features.map((feature) => (
+                        <div key={feature} className="flex items-center gap-2 text-[11px]" style={{ color: T.textMuted }}>
+                          <Check size={12} style={{ color: plan.color }} />
+                          {feature}
+                        </div>
+                      ))}
+                    </div>
+                    <button
+                      onClick={() => { setCurrentPlan(plan.id); setBillingSaved(true); }}
+                      className="w-full py-2.5 rounded-lg text-xs font-bold transition-all hover:opacity-90"
+                      style={{
+                        backgroundColor: isCurrent ? T.borderColor + "30" : plan.popular ? plan.color : T.accentColor + "15",
+                        color: isCurrent ? T.textMuted : plan.popular ? "#000" : T.accentColor,
+                        border: isCurrent ? `1px solid ${T.borderColor}30` : "none",
+                        cursor: isCurrent ? "default" : "pointer",
+                      }}
+                    >
+                      {isCurrent ? "Current Plan" : plan.cta}
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* Usage Summary */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <h2 className="text-lg font-black mb-4" style={{ color: T.headerColor }}>
+                Usage This Month
+              </h2>
+              <div className="grid sm:grid-cols-3 gap-4">
+                {[
+                  { label: "Agents Used", value: "3 / 3", detail: "Free limit reached" },
+                  { label: "Projects", value: "2 / 5", detail: "3 remaining" },
+                  { label: "Coins Earned", value: "1,240", detail: "+50 daily bonus" },
+                ].map((stat) => (
+                  <div key={stat.label} className="p-3 rounded-lg border" style={{ backgroundColor: T.bgColor + "30", borderColor: T.borderColor + "30" }}>
+                    <div className="text-[10px] font-bold uppercase tracking-wider opacity-60 mb-1" style={{ color: T.textMuted }}>
+                      {stat.label}
+                    </div>
+                    <div className="text-lg font-black mb-0.5" style={{ color: T.textColor }}>
+                      {stat.value}
+                    </div>
+                    <div className="text-[10px] opacity-60" style={{ color: T.textMuted }}>
+                      {stat.detail}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* Payment Methods */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                    Payment Methods
+                  </h2>
+                  <p className="text-xs opacity-70" style={{ color: T.textMuted }}>
+                    Manage cards and billing details.
+                  </p>
+                </div>
+                <button
+                  className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:opacity-90"
+                  style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+                >
+                  <Plus size={12} />
+                  Add Card
+                </button>
+              </div>
+              <div className="space-y-3">
+                <div className="flex items-center justify-between p-3 rounded-lg border" style={{ backgroundColor: T.bgColor + "30", borderColor: T.borderColor + "30" }}>
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-7 rounded flex items-center justify-center" style={{ backgroundColor: "#6366f120" }}>
+                      <CreditCard size={16} style={{ color: "#6366f1" }} />
+                    </div>
+                    <div>
+                      <div className="text-sm font-bold" style={{ color: T.textColor }}>Visa ending in 4242</div>
+                      <div className="text-[10px]" style={{ color: T.textMuted }}>Expires 12/25</div>
+                    </div>
+                  </div>
+                  <span className="text-[10px] px-2 py-1 rounded-full font-bold" style={{ backgroundColor: "#22c55e20", color: "#22c55e" }}>
+                    Default
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Invoice History */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-center justify-between mb-4">
+                <div>
+                  <h2 className="text-lg font-black mb-1" style={{ color: T.headerColor }}>
+                    Invoice History
+                  </h2>
+                  <p className="text-xs opacity-70" style={{ color: T.textMuted }}>
+                    Download past invoices and receipts.
+                  </p>
+                </div>
+                <Receipt size={18} style={{ color: T.accentColor }} />
+              </div>
+              <div className="space-y-2">
+                {[
+                  { id: "INV-001", date: "Jan 15, 2026", amount: "$19.00", status: "Paid", plan: "Pro" },
+                  { id: "INV-002", date: "Dec 15, 2025", amount: "$19.00", status: "Paid", plan: "Pro" },
+                  { id: "INV-003", date: "Nov 15, 2025", amount: "$0.00", status: "Free", plan: "Free" },
+                ].map((invoice) => (
+                  <div key={invoice.id} className="flex items-center justify-between p-3 rounded-lg border" style={{ backgroundColor: T.bgColor + "30", borderColor: T.borderColor + "30" }}>
+                    <div className="flex items-center gap-3">
+                      <div className="w-8 h-8 rounded-lg flex items-center justify-center" style={{ backgroundColor: T.accentColor + "10" }}>
+                        <Receipt size={14} style={{ color: T.accentColor }} />
+                      </div>
+                      <div>
+                        <div className="text-sm font-bold" style={{ color: T.textColor }}>{invoice.id}</div>
+                        <div className="text-[10px]" style={{ color: T.textMuted }}>{invoice.date} · {invoice.plan}</div>
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className="text-sm font-bold" style={{ color: T.textColor }}>{invoice.amount}</span>
+                      <span
+                        className="text-[10px] px-2 py-1 rounded-full font-bold"
+                        style={{
+                          backgroundColor: invoice.status === "Paid" ? "#22c55e20" : T.borderColor + "20",
+                          color: invoice.status === "Paid" ? "#22c55e" : T.textMuted,
+                        }}
+                      >
+                        {invoice.status}
+                      </span>
+                      <button
+                        className="text-[10px] px-2 py-1 rounded-lg font-bold transition-all hover:scale-105"
+                        style={{ backgroundColor: T.accentColor + "15", color: T.accentColor }}
+                      >
+                        Download
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           </div>
         )}

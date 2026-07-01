@@ -288,6 +288,34 @@ export default function JarvisTerminal() {
   const isSpeaking = useRef(false);
   const pushTimerRef = useRef<number | null>(null);
 
+  const AGENT_COMMANDS = [
+    "/scan",
+    "/status",
+    "/image",
+    "/code",
+    "/agent",
+    "/voice",
+    "/alexa",
+    "/clear",
+    "/help",
+    "/tts",
+  ];
+
+  const ghostText = (() => {
+    if (!input.startsWith("/")) return "";
+    const match = AGENT_COMMANDS.find((cmd) => cmd.startsWith(input));
+    return match ? match.slice(input.length) : "";
+  })();
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Enter") {
+      sendMessage();
+    } else if (e.key === "Tab" && ghostText) {
+      e.preventDefault();
+      setInput(input + ghostText);
+    }
+  };
+
   useEffect(() => {
     if (terminalRef.current) {
       terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
@@ -1307,15 +1335,24 @@ export default function JarvisTerminal() {
             <span className="text-[#00ff9d] font-mono text-sm shrink-0 pl-1 select-none">
               &gt;&gt;
             </span>
-            <input
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") sendMessage();
-              }}
-              placeholder="Command JARVIS... (try /scan, /help)"
-              className="flex-1 bg-transparent border-none outline-none text-white text-sm font-mono placeholder:text-white/20 min-w-0"
-            />
+            <div className="flex-1 relative min-w-0">
+              <input
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="Command JARVIS... (try /scan, /help)"
+                className="w-full bg-transparent border-none outline-none text-white text-sm font-mono placeholder:text-white/20 min-w-0"
+                style={{ caretColor: "#00ff9d" }}
+              />
+              {ghostText && (
+                <span
+                  className="absolute left-0 top-0 pointer-events-none text-sm font-mono text-white/20 select-none"
+                  style={{ whiteSpace: "pre" }}
+                >
+                  {ghostText}
+                </span>
+              )}
+            </div>
             <button
               onClick={toggleMic}
               onMouseDown={handleMicPointerDown}

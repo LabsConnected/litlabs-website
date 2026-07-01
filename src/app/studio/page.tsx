@@ -6,9 +6,18 @@ import { useTheme, useCrtToggle } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import Link from "next/link";
 import lazyLoad from "next/dynamic";
-import { Monitor, Coins } from "lucide-react";
+import { Monitor, Coins, Sparkles, Image, Film, Music, Bot, LayoutGrid } from "lucide-react";
 import StudioSidebar, { StudioTool } from "./components/StudioSidebar";
 import { MEDIA_PROVIDERS } from "@/lib/media";
+import ModelPicker from "@/components/ModelPicker";
+import KeyManager from "@/components/KeyManager";
+import PromptComposer from "@/components/PromptComposer";
+import AssetLibrary from "@/components/AssetLibrary";
+import VersionHistory from "@/components/VersionHistory";
+import TemplateLibrary from "@/components/TemplateLibrary";
+import StylePresets from "@/components/StylePresets";
+import DragDropCanvas from "@/components/DragDropCanvas";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 /* Lazy-load tools to keep bundle reasonable */
 const ImageTool = lazyLoad(() => import("./tools/ImageTool"), { ssr: false });
@@ -234,6 +243,13 @@ function StudioInner() {
       return 500;
     }
   });
+  const [selectedModel, setSelectedModel] = useState("adaptive");
+  const [recentModels, setRecentModels] = useState<string[]>(["gemini-2.5-flash", "gpt-4o"]);
+  const [showKeyManager, setShowKeyManager] = useState(false);
+  const [showProTools, setShowProTools] = useState(false);
+  const [studioTab, setStudioTab] = useState<"canvas" | "prompt" | "assets" | "templates" | "styles" | "history">("canvas");
+  const [promptValue, setPromptValue] = useState("");
+  const [canvasItems, setCanvasItems] = useState<any[]>([]);
 
   const toolParam = searchParams.get("tool") as StudioTool | null;
   const activeTool: StudioTool =
@@ -333,12 +349,232 @@ function StudioInner() {
 
       {/* Main workspace */}
       <div className="flex flex-1 overflow-hidden relative">
-        <StudioSidebar
-          activeTool={activeTool}
-          onToolChange={(t) =>
-            router.push(`/studio?tool=${t}`, { scroll: false })
-          }
-        />
+        {/* Desktop: StudioSidebar */}
+        <div className="hidden md:block">
+          <StudioSidebar
+            activeTool={activeTool}
+            onToolChange={(t) =>
+              router.push(`/studio?tool=${t}`, { scroll: false })
+            }
+          />
+        </div>
+
+        {/* Mobile: Tool selector bar */}
+        <div className="md:hidden fixed top-0 left-0 right-0 z-30 border-b"
+          style={{ backgroundColor: T.bgColor + "f0", borderColor: T.borderColor + "30" }}>
+          <div className="flex items-center overflow-x-auto px-2 py-2 gap-2 scrollbar-hide">
+            {[
+              { id: "image", label: "Image", icon: Image },
+              { id: "video", label: "Video", icon: Film },
+              { id: "audio", label: "Audio", icon: Music },
+              { id: "agents", label: "Agents", icon: Bot },
+              { id: "gallery", label: "Gallery", icon: LayoutGrid },
+            ].map((tool) => {
+              const Icon = tool.icon;
+              const isActive = activeTool === tool.id;
+              return (
+                <button
+                  key={tool.id}
+                  onClick={() => router.push(`/studio?tool=${tool.id}`, { scroll: false })}
+                  className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold whitespace-nowrap transition-all"
+                  style={{
+                    backgroundColor: isActive ? T.accentColor + "15" : T.boxBg + "40",
+                    border: isActive ? `1px solid ${T.accentColor}30` : `1px solid ${T.borderColor}20`,
+                    color: isActive ? T.accentColor : T.textMuted,
+                  }}
+                >
+                  <Icon size={14} />
+                  {tool.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        {/* Key Manager Panel - Right Sidebar */}
+        {showKeyManager && (
+          <div className="w-80 border-l overflow-y-auto shrink-0"
+            style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+            <div className="p-4">
+              <div className="flex items-center justify-between mb-4">
+                <div className="text-sm font-black" style={{ color: T.textColor }}>
+                  API Keys
+                </div>
+                <button
+                  onClick={() => setShowKeyManager(false)}
+                  className="p-1 rounded-lg transition-all hover:scale-110"
+                  style={{ color: T.textMuted }}
+                >
+                  ×
+                </button>
+              </div>
+              <KeyManager />
+            </div>
+          </div>
+        )}
+
+        {/* Pro Tools Panel - Right Sidebar (Desktop) / Bottom Sheet (Mobile) */}
+        {showProTools && (
+          <>
+            {/* Mobile Bottom Sheet */}
+            <div className="sm:hidden fixed inset-0 z-50 flex flex-col"
+              style={{ backgroundColor: T.bgColor + "95" }}>
+              <div className="flex items-center justify-between p-4 border-b"
+                style={{ borderColor: T.borderColor + "20" }}>
+                <div className="text-sm font-black" style={{ color: T.textColor }}>
+                  Pro Tools
+                </div>
+                <button
+                  onClick={() => setShowProTools(false)}
+                  className="p-2 rounded-lg"
+                  style={{ color: T.textMuted }}
+                >
+                  ×
+                </button>
+              </div>
+              <div className="flex-1 overflow-y-auto p-4 space-y-4">
+                {/* Mobile Model Picker */}
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                    Model
+                  </div>
+                  <ModelPicker 
+                    selectedModel={selectedModel} 
+                    onModelChange={(id) => { setSelectedModel(id); setRecentModels([id, ...recentModels.slice(0, 4)]); }}
+                    recentModels={recentModels}
+                  />
+                </div>
+                
+                {/* Quick Actions */}
+                <div>
+                  <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                    Quick Actions
+                  </div>
+                  <div className="grid grid-cols-2 gap-2">
+                    <button
+                      onClick={() => setStudioTab("canvas")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "canvas" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "canvas" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">🎨</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "canvas" ? T.accentColor : T.textMuted }}>Canvas</span>
+                    </button>
+                    <button
+                      onClick={() => setStudioTab("prompt")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "prompt" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "prompt" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">✨</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "prompt" ? T.accentColor : T.textMuted }}>Prompt</span>
+                    </button>
+                    <button
+                      onClick={() => setStudioTab("assets")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "assets" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "assets" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">📁</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "assets" ? T.accentColor : T.textMuted }}>Assets</span>
+                    </button>
+                    <button
+                      onClick={() => setStudioTab("templates")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "templates" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "templates" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">📋</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "templates" ? T.accentColor : T.textMuted }}>Templates</span>
+                    </button>
+                    <button
+                      onClick={() => setStudioTab("styles")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "styles" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "styles" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">🎭</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "styles" ? T.accentColor : T.textMuted }}>Styles</span>
+                    </button>
+                    <button
+                      onClick={() => setStudioTab("history")}
+                      className="flex flex-col items-center gap-2 p-3 rounded-xl text-center"
+                      style={{ backgroundColor: studioTab === "history" ? T.accentColor + "15" : T.boxBg + "40", border: studioTab === "history" ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30" }}
+                    >
+                      <span className="text-2xl">📜</span>
+                      <span className="text-[10px] font-bold" style={{ color: studioTab === "history" ? T.accentColor : T.textMuted }}>History</span>
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            {/* Desktop Sidebar */}
+            <div className="hidden sm:block w-80 border-l overflow-y-auto shrink-0"
+              style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+              <div className="p-4">
+                <div className="flex items-center justify-between mb-4">
+                  <div className="text-sm font-black" style={{ color: T.textColor }}>
+                    Pro Tools
+                  </div>
+                  <button
+                    onClick={() => setShowProTools(false)}
+                    className="p-1 rounded-lg transition-all hover:scale-110"
+                    style={{ color: T.textMuted }}
+                  >
+                    ×
+                  </button>
+                </div>
+                <div className="space-y-4">
+                  <div>
+                    <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                      Quick Actions
+                    </div>
+                    <div className="space-y-2">
+                      <button
+                        onClick={() => setStudioTab("canvas")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "canvas" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "canvas" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>🎨</span> Canvas
+                      </button>
+                      <button
+                        onClick={() => setStudioTab("prompt")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "prompt" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "prompt" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>✨</span> Prompt Composer
+                      </button>
+                      <button
+                        onClick={() => setStudioTab("assets")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "assets" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "assets" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>📁</span> Asset Library
+                      </button>
+                      <button
+                        onClick={() => setStudioTab("templates")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "templates" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "templates" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>📋</span> Templates
+                      </button>
+                      <button
+                        onClick={() => setStudioTab("styles")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "styles" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "styles" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>🎭</span> Style Presets
+                      </button>
+                      <button
+                        onClick={() => setStudioTab("history")}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                        style={{ backgroundColor: studioTab === "history" ? T.accentColor + "15" : T.boxBg + "40", color: studioTab === "history" ? T.accentColor : T.textMuted }}
+                      >
+                        <span>📜</span> Version History
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
 
         {/* Content area — full width on mobile, beside sidebar on desktop */}
         <main
@@ -381,6 +617,52 @@ function StudioInner() {
 
             {/* Right: actions */}
             <div className="flex items-center gap-1.5 shrink-0">
+              {/* Model Picker - Full width on mobile */}
+              <div className="hidden sm:block">
+                <ModelPicker 
+                  selectedModel={selectedModel} 
+                  onModelChange={(id) => { setSelectedModel(id); setRecentModels([id, ...recentModels.slice(0, 4)]); }}
+                  recentModels={recentModels}
+                />
+              </div>
+              
+              {/* Mobile Model Picker Button */}
+              <button
+                onClick={() => setShowProTools(!showProTools)}
+                className="sm:hidden p-2 rounded-lg"
+                style={{ backgroundColor: T.boxBg + "40", color: T.textMuted }}
+              >
+                <Sparkles size={16} />
+              </button>
+              
+              {/* Pro Tools Toggle */}
+              <button
+                onClick={() => setShowProTools(!showProTools)}
+                className="hidden sm:flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                style={{
+                  backgroundColor: showProTools ? T.accentColor + "15" : T.boxBg + "40",
+                  color: showProTools ? T.accentColor : T.textMuted,
+                  border: showProTools ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30",
+                }}
+              >
+                <Sparkles size={12} />
+                Pro Tools
+              </button>
+              
+              {/* Key Manager Toggle */}
+              <button
+                onClick={() => setShowKeyManager(!showKeyManager)}
+                className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                style={{
+                  backgroundColor: showKeyManager ? T.accentColor + "15" : T.boxBg + "40",
+                  color: showKeyManager ? T.accentColor : T.textMuted,
+                  border: showKeyManager ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30",
+                }}
+              >
+                <Monitor size={12} />
+                Keys
+              </button>
+              
               {/* Coin balance */}
               <div
                 className="flex items-center gap-1 px-2 py-0.5 rounded text-[10px] md:text-[9px] font-bold whitespace-nowrap"
@@ -410,77 +692,11 @@ function StudioInner() {
             </div>
           </div>
 
-          {/* Tool content — canvas, GPU composited for smooth scroll */}
-          {/* pb-14 md:pb-0 reserves space for mobile bottom tab bar */}
-          <div
-            className="flex-1 overflow-auto studio-scroll pb-14 md:pb-0"
+          {/* Tool content */}
+          <div className="flex-1 overflow-auto studio-scroll pt-12 md:pt-0 pb-20 md:pb-0"
             style={{ transform: "translateZ(0)", willChange: "transform" }}
           >
-            <Suspense
-              fallback={
-                <div className="min-h-[600px] p-6 space-y-4 animate-pulse">
-                  {/* Skeleton header */}
-                  <div className="flex items-center gap-3 mb-6">
-                    <div
-                      className="w-8 h-8 rounded-md"
-                      style={{ backgroundColor: T.accentColor + "15" }}
-                    />
-                    <div className="space-y-2">
-                      <div
-                        className="w-32 h-4 rounded"
-                        style={{ backgroundColor: T.accentColor + "12" }}
-                      />
-                      <div
-                        className="w-48 h-3 rounded"
-                        style={{ backgroundColor: T.accentColor + "08" }}
-                      />
-                    </div>
-                  </div>
-                  {/* Skeleton cards */}
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                    <div
-                      className="h-40 rounded-xl"
-                      style={{
-                        backgroundColor: T.boxBg + "30",
-                        border: `1px solid ${T.borderColor}10`,
-                      }}
-                    />
-                    <div
-                      className="h-40 rounded-xl"
-                      style={{
-                        backgroundColor: T.boxBg + "30",
-                        border: `1px solid ${T.borderColor}10`,
-                      }}
-                    />
-                    <div
-                      className="h-40 rounded-xl"
-                      style={{
-                        backgroundColor: T.boxBg + "30",
-                        border: `1px solid ${T.borderColor}10`,
-                      }}
-                    />
-                    <div
-                      className="h-40 rounded-xl"
-                      style={{
-                        backgroundColor: T.boxBg + "30",
-                        border: `1px solid ${T.borderColor}10`,
-                      }}
-                    />
-                  </div>
-                  {/* Skeleton footer */}
-                  <div className="flex gap-3 pt-4">
-                    <div
-                      className="w-24 h-8 rounded-lg"
-                      style={{ backgroundColor: T.accentColor + "10" }}
-                    />
-                    <div
-                      className="w-24 h-8 rounded-lg"
-                      style={{ backgroundColor: T.accentColor + "10" }}
-                    />
-                  </div>
-                </div>
-              }
-            >
+            <Suspense fallback={<div className="p-6">Loading...</div>}>
               <ToolRouter tool={activeTool} />
             </Suspense>
           </div>
@@ -496,17 +712,19 @@ function StudioInner() {
 /* Wrap in Suspense for useSearchParams */
 export default function StudioPage() {
   return (
-    <Suspense
-      fallback={
-        <div className="min-h-screen flex items-center justify-center font-mono bg-black text-cyan-400">
-          <div className="text-center">
-            <div className="text-3xl mb-4 animate-pulse">⚡</div>
-            <div>Initializing Studio...</div>
+    <ErrorBoundary>
+      <Suspense
+        fallback={
+          <div className="min-h-screen flex items-center justify-center font-mono bg-black text-cyan-400">
+            <div className="text-center">
+              <div className="text-3xl mb-4 animate-pulse">⚡</div>
+              <div>Initializing Studio...</div>
+            </div>
           </div>
-        </div>
-      }
-    >
-      <StudioInner />
-    </Suspense>
+        }
+      >
+        <StudioInner />
+      </Suspense>
+    </ErrorBoundary>
   );
 }

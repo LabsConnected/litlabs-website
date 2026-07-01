@@ -24,7 +24,12 @@ import {
   Check,
   Plus,
   Trash2,
+  Filter,
 } from "lucide-react";
+import GalaxyMap, { GalaxyNode } from "@/components/GalaxyMap";
+import TelemetryPanel from "@/components/TelemetryPanel";
+import EventStream, { Event } from "@/components/EventStream";
+import ErrorBoundary from "@/components/ErrorBoundary";
 
 // Admin-only guard
 const ADMIN_USER_ID = "user_litbit";
@@ -95,6 +100,11 @@ export default function AdminDashboard() {
 
   const [stats, setStats] = useState<LiveStats>(generateMockStats());
   const [events, setEvents] = useState<RecentEvent[]>(generateMockEvents());
+  const [galaxyNodes, setGalaxyNodes] = useState<GalaxyNode[]>([]);
+  const [selectedNode, setSelectedNode] = useState<GalaxyNode | null>(null);
+  const [filterType, setFilterType] = useState<string>("all");
+  const [showFilters, setShowFilters] = useState(false);
+  const [showTelemetry, setShowTelemetry] = useState(false);
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
@@ -183,6 +193,8 @@ export default function AdminDashboard() {
             setLastUpdate(new Date());
           } else if (data.type === "event") {
             setEvents((prev) => [data.payload, ...prev].slice(0, 50));
+          } else if (data.type === "nodes") {
+            setGalaxyNodes(data.payload);
           }
         } catch {
           // Ignore parse errors
@@ -258,10 +270,11 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div
-      className="min-h-screen p-6"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
-    >
+    <ErrorBoundary>
+      <div
+        className="min-h-screen p-6"
+        style={{ backgroundColor: T.bgColor, color: T.textColor }}
+      >
       {/* Header */}
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
@@ -272,7 +285,7 @@ export default function AdminDashboard() {
             <Terminal size={24} style={{ color: T.accentColor }} />
           </div>
           <div>
-            <h1 className="text-2xl font-bold" style={{ color: T.textColor }}>
+            <h1 className="text-xl md:text-2xl font-bold" style={{ color: T.textColor }}>
               Admin Command Center
             </h1>
             <div
@@ -294,9 +307,27 @@ export default function AdminDashboard() {
           </div>
         </div>
 
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-2">
+          {/* Mobile Filter Toggle */}
+          <button
+            onClick={() => setShowFilters(!showFilters)}
+            className="md:hidden p-2 rounded-lg"
+            style={{ backgroundColor: T.boxBg + "40", color: T.textMuted }}
+          >
+            <Filter size={16} />
+          </button>
+          
+          {/* Mobile Telemetry Toggle */}
+          <button
+            onClick={() => setShowTelemetry(!showTelemetry)}
+            className="md:hidden p-2 rounded-lg"
+            style={{ backgroundColor: T.boxBg + "40", color: T.textMuted }}
+          >
+            <Activity size={16} />
+          </button>
+          
           <div
-            className="px-4 py-2 rounded-lg text-sm"
+            className="hidden md:flex items-center gap-4 px-4 py-2 rounded-lg text-sm"
             style={{
               backgroundColor: T.boxBg,
               border: `1px solid ${T.borderColor}`,
@@ -315,155 +346,288 @@ export default function AdminDashboard() {
         </div>
       </div>
 
-      {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-        <StatCard
-          T={T}
-          icon={Users}
-          label="Online Users"
-          value={stats.onlineUsers}
-          trend={+12}
-          color={T.accentColor}
-        />
-        <StatCard
-          T={T}
-          icon={ShoppingCart}
-          label="Today's Sales"
-          value={stats.todaySales}
-          trend={+5}
-          color={T.success}
-        />
-        <StatCard
-          T={T}
-          icon={Coins}
-          label="Revenue (LBC)"
-          value={stats.todayRevenueLBC.toLocaleString()}
-          trend={+8}
-          color={T.headerColor}
-        />
-        <StatCard
-          T={T}
-          icon={Zap}
-          label="Active Agents"
-          value={stats.activeAgents}
-          trend={0}
-          color={T.warning}
-        />
-      </div>
-
-      {/* Main Content */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Live Event Feed */}
-        <div
-          className="lg:col-span-2 rounded-xl p-4"
-          style={{
-            backgroundColor: T.boxBg,
-            border: `1px solid ${T.borderColor}`,
-          }}
-        >
-          <div className="flex items-center justify-between mb-4">
-            <h2 className="text-lg font-bold" style={{ color: T.textColor }}>
-              Live Activity Feed
-            </h2>
-            <button
-              onClick={() => setEvents([])}
-              className="text-xs px-3 py-1 rounded-md transition-all"
-              style={{ backgroundColor: T.borderColor, color: T.textMuted }}
-            >
-              Clear
-            </button>
-          </div>
-
-          <div className="space-y-2 max-h-[400px] overflow-auto">
-            {events.length === 0 ? (
-              <div className="text-center py-8" style={{ color: T.textMuted }}>
-                No recent activity
+      {/* Main Content - Galaxy Map + Telemetry */}
+      <div className="flex-1 flex flex-col md:flex-row overflow-hidden" style={{ minHeight: "600px" }}>
+        {/* Left Filter Rail - Collapsible on Mobile */}
+        <div className={`${showFilters ? "block" : "hidden"} md:block w-full md:w-56 border-b md:border-r overflow-y-auto absolute md:relative z-20 h-full`}
+          style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+          <div className="p-4 space-y-4">
+            {/* Mobile Close Button */}
+            <div className="md:hidden flex items-center justify-between mb-4">
+              <div className="text-sm font-black" style={{ color: T.textColor }}>Filters</div>
+              <button
+                onClick={() => setShowFilters(false)}
+                className="p-2 rounded-lg"
+                style={{ color: T.textMuted }}
+              >
+                ×
+              </button>
+            </div>
+            
+            {/* Search */}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                Search
               </div>
-            ) : (
-              events.map((event) => (
-                <div
-                  key={event.id}
-                  className="flex items-center gap-3 p-3 rounded-lg"
-                  style={{ backgroundColor: T.bgColor }}
-                >
-                  <div
-                    className="w-10 h-10 rounded-lg flex items-center justify-center"
+              <input
+                type="text"
+                placeholder="Search nodes..."
+                className="w-full px-3 py-2 rounded-lg text-sm outline-none"
+                style={{ backgroundColor: T.bgColor + "40", border: "1px solid " + T.borderColor + "30", color: T.textColor }}
+              />
+            </div>
+
+            {/* Zone Filters */}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                Zones
+              </div>
+              <div className="space-y-1">
+                {["All", "Studio", "Marketplace", "Social", "Agents"].map((zone) => (
+                  <button
+                    key={zone}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
                     style={{
-                      backgroundColor:
-                        event.type === "sale"
-                          ? T.success + "20"
-                          : event.type === "signup"
-                            ? T.accentColor + "20"
-                            : event.type === "alert"
-                              ? T.warning + "20"
-                              : T.headerColor + "20",
+                      backgroundColor: "transparent",
+                      color: T.textMuted,
                     }}
                   >
-                    {event.type === "sale" ? (
-                      <ShoppingCart size={18} style={{ color: T.success }} />
-                    ) : event.type === "signup" ? (
-                      <Users size={18} style={{ color: T.accentColor }} />
-                    ) : event.type === "alert" ? (
-                      <AlertCircle size={18} style={{ color: T.warning }} />
-                    ) : (
-                      <Zap size={18} style={{ color: T.headerColor }} />
-                    )}
-                  </div>
-                  <div className="flex-1">
-                    <p className="text-sm" style={{ color: T.textColor }}>
-                      {event.message}
-                    </p>
-                    <p className="text-xs" style={{ color: T.textMuted }}>
-                      {formatTime(event.timestamp)}
-                    </p>
-                  </div>
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: T.accentColor }} />
+                    {zone}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Node Type Filters */}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                Node Types
+              </div>
+              <div className="space-y-1">
+                {[
+                  { id: "all", label: "All Nodes", color: T.accentColor },
+                  { id: "agent", label: "Agents", color: "#22c55e" },
+                  { id: "user", label: "Users", color: "#8b5cf6" },
+                  { id: "server", label: "Servers", color: "#f97316" },
+                  { id: "database", label: "Databases", color: "#10b981" },
+                ].map((type) => (
+                  <button
+                    key={type.id}
+                    onClick={() => setFilterType(type.id)}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                    style={{
+                      backgroundColor: filterType === type.id ? T.accentColor + "15" : "transparent",
+                      color: filterType === type.id ? T.accentColor : T.textMuted,
+                      border: filterType === type.id ? "1px solid " + T.accentColor + "30" : "transparent",
+                    }}
+                  >
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: type.color }} />
+                    {type.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Status Filters */}
+            <div>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                Status
+              </div>
+              <div className="space-y-1">
+                {[
+                  { id: "all", label: "All Status" },
+                  { id: "active", label: "Active", color: "#22c55e" },
+                  { id: "idle", label: "Idle", color: "#f59e0b" },
+                  { id: "offline", label: "Offline", color: "#6b7280" },
+                ].map((status) => (
+                  <button
+                    key={status.id}
+                    className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105 text-left"
+                    style={{
+                      backgroundColor: "transparent",
+                      color: T.textMuted,
+                    }}
+                  >
+                    <div className="w-2 h-2 rounded-full" style={{ backgroundColor: status.color || T.accentColor }} />
+                    {status.label}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Quick Stats */}
+            <div className="pt-4 border-t" style={{ borderColor: T.borderColor + "20" }}>
+              <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                Quick Stats
+              </div>
+              <div className="space-y-2 text-xs" style={{ color: T.textMuted }}>
+                <div className="flex justify-between">
+                  <span>Total Nodes</span>
+                  <span style={{ color: T.textColor }}>{galaxyNodes.length}</span>
                 </div>
-              ))
-            )}
+                <div className="flex justify-between">
+                  <span>Active</span>
+                  <span style={{ color: "#22c55e" }}>{galaxyNodes.filter(n => n.status === "active").length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Agents</span>
+                  <span style={{ color: T.textColor }}>{galaxyNodes.filter(n => n.type === "agent").length}</span>
+                </div>
+                <div className="flex justify-between">
+                  <span>Users</span>
+                  <span style={{ color: T.textColor }}>{galaxyNodes.filter(n => n.type === "user").length}</span>
+                </div>
+              </div>
+            </div>
           </div>
         </div>
 
-        {/* System Status */}
-        <div
-          className="rounded-xl p-4"
-          style={{
-            backgroundColor: T.boxBg,
-            border: `1px solid ${T.borderColor}`,
-          }}
-        >
-          <h2 className="text-lg font-bold mb-4" style={{ color: T.textColor }}>
-            System Health
-          </h2>
-
-          <div className="space-y-3">
-            <StatusRow T={T} icon={Server} label="API Server" status="online" />
-            <StatusRow T={T} icon={Database} label="Database" status="online" />
-            <StatusRow T={T} icon={Zap} label="AI Models" status="online" />
-            <StatusRow
-              T={T}
-              icon={Activity}
-              label="WebSocket"
-              status={isConnected ? "online" : "degraded"}
-            />
+        {/* Galaxy Map - Centerpiece */}
+        <div className="flex-1 relative" style={{ backgroundColor: T.bgColor }}>
+          <div className="absolute top-4 left-4 z-10 flex items-center gap-2">
+            <div className="px-3 py-1.5 rounded-lg text-xs font-bold" style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}>
+              Live Galaxy Map
+            </div>
+            <div className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs" style={{ backgroundColor: T.boxBg + "60", color: T.textMuted }}>
+              <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <span>Real-time</span>
+            </div>
           </div>
+          
+          <GalaxyMap 
+            nodes={galaxyNodes} 
+            interactive={true} 
+            filterType={filterType}
+            onNodeClick={setSelectedNode}
+          />
+          
+          {/* Node Details Panel - Drill-Down Inspector */}
+          {selectedNode && (
+            <div className="absolute top-20 right-4 w-80 p-4 rounded-2xl border z-10"
+              style={{ backgroundColor: T.boxBg + "90", borderColor: T.borderColor + "30" }}>
+              <div className="flex items-center justify-between mb-3">
+                <div className="text-sm font-black" style={{ color: T.textColor }}>{selectedNode.label}</div>
+                <button
+                  onClick={() => setSelectedNode(null)}
+                  className="p-1 rounded-lg transition-all hover:scale-110"
+                  style={{ color: T.textMuted }}
+                >
+                  ×
+                </button>
+              </div>
+              
+              {/* Node Info */}
+              <div className="space-y-2 mb-4 pb-4 border-b" style={{ borderColor: T.borderColor + "20" }}>
+                <div className="flex items-center gap-2">
+                  <div className="w-2 h-2 rounded-full" style={{ backgroundColor: selectedNode.color }} />
+                  <span className="text-xs" style={{ color: T.textMuted }}>
+                    {selectedNode.type.charAt(0).toUpperCase() + selectedNode.type.slice(1)}
+                  </span>
+                  <span className="text-xs" style={{ color: T.textMuted }}>•</span>
+                  <span className="text-xs font-bold" style={{ 
+                    color: selectedNode.status === "active" ? "#22c55e" : 
+                          selectedNode.status === "idle" ? "#f59e0b" : "#6b7280" 
+                  }}>
+                    {selectedNode.status.toUpperCase()}
+                  </span>
+                </div>
+                <div className="text-xs" style={{ color: T.textMuted }}>
+                  Connections: {selectedNode.connections.length}
+                </div>
+                {selectedNode.data && (
+                  <div className="mt-2 pt-2 border-t" style={{ borderColor: T.borderColor + "20" }}>
+                    <div className="text-[10px] font-bold mb-1" style={{ color: T.textColor }}>Metadata:</div>
+                    {Object.entries(selectedNode.data).map(([key, value]) => (
+                  <div key={key} className="text-[10px]" style={{ color: T.textMuted }}>
+                    {key}: {String(value)}
+                  </div>
+                ))}
+                  </div>
+                )}
+              </div>
 
-          <div
-            className="mt-6 pt-4 border-t"
-            style={{ borderColor: T.borderColor }}
-          >
-            <h3
-              className="text-sm font-bold mb-3"
-              style={{ color: T.textMuted }}
-            >
-              Quick Actions
-            </h3>
-            <div className="space-y-2">
-              <ActionButton T={T} label="Restart API" onClick={() => {}} />
-              <ActionButton T={T} label="Clear Cache" onClick={() => {}} />
-              <ActionButton
-                T={T}
-                label="Send Test Notification"
-                onClick={() => {}}
+              {/* Recent Activity */}
+              <div className="mb-4 pb-4 border-b" style={{ borderColor: T.borderColor + "20" }}>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                  Recent Activity
+                </div>
+                <div className="space-y-2">
+                  {[
+                    { time: "2m ago", action: "Task completed", status: "success" },
+                    { time: "15m ago", action: "Connection established", status: "success" },
+                    { time: "1h ago", action: "Status check", status: "info" },
+                  ].map((activity, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[10px]">
+                      <div className="w-1.5 h-1.5 rounded-full" style={{ 
+                        backgroundColor: activity.status === "success" ? "#22c55e" : "#8b5cf6" 
+                      }} />
+                      <span style={{ color: T.textMuted }}>{activity.time}</span>
+                      <span style={{ color: T.textColor }}>{activity.action}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Quick Actions */}
+              <div>
+                <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+                  Actions
+                </div>
+                <div className="space-y-2">
+                  <button className="w-full py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                    style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: "1px solid " + T.accentColor + "30" }}>
+                    View Logs
+                  </button>
+                  <button className="w-full py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                    style={{ backgroundColor: T.boxBg + "40", color: T.textColor, border: "1px solid " + T.borderColor + "30" }}>
+                    Manage
+                  </button>
+                  <button className="w-full py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
+                    style={{ backgroundColor: T.boxBg + "40", color: T.textMuted, border: "1px solid " + T.borderColor + "30" }}>
+                    Inspect Data
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* Right Rail - Telemetry & Events - Collapsible on Mobile */}
+        <div className={`${showTelemetry ? "block" : "hidden"} md:block w-full md:w-80 border-t md:border-l overflow-y-auto absolute md:relative z-20 h-full`}
+          style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+          <div className="p-4 space-y-6">
+            {/* Mobile Close Button */}
+            <div className="md:hidden flex items-center justify-between mb-4">
+              <div className="text-sm font-black" style={{ color: T.textColor }}>Telemetry</div>
+              <button
+                onClick={() => setShowTelemetry(false)}
+                className="p-2 rounded-lg"
+                style={{ color: T.textMuted }}
+              >
+                ×
+              </button>
+            </div>
+            
+            <TelemetryPanel data={{
+              activeUsers: stats.onlineUsers,
+              totalUsers: stats.totalUsers,
+              agentRequests: stats.activeAgents,
+              systemLoad: 34,
+              responseTime: 245,
+              errorRate: 0.02,
+              uptime: 99.9,
+              totalConversations: stats.totalConversations,
+            }} />
+            <div className="border-t pt-4" style={{ borderColor: T.borderColor + "20" }}>
+              <EventStream 
+                events={events.map(e => ({
+                  id: e.id,
+                  type: e.type as any,
+                  message: e.message,
+                  timestamp: e.timestamp,
+                }))}
+                maxEvents={10}
               />
             </div>
           </div>
@@ -581,6 +745,7 @@ export default function AdminDashboard() {
         LiTTree Admin Dashboard v2.0 • Real-time Data • Admin Access Only
       </div>
     </div>
+    </ErrorBoundary>
   );
 }
 

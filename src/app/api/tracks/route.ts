@@ -1,6 +1,32 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 
+// Fallback tracks when Supabase is not configured
+const FALLBACK_TRACKS = [
+  {
+    id: "1",
+    title: "Neon Dreams",
+    artist: "Synthwave Labs",
+    album: "Cyberpunk Collection",
+    duration: 180,
+    url: null,
+    cover: null,
+    genre: "synthwave",
+    plays: 0,
+  },
+  {
+    id: "2",
+    title: "Digital Horizon",
+    artist: "Pixel Forge",
+    album: "Future Sounds",
+    duration: 210,
+    url: null,
+    cover: null,
+    genre: "electronic",
+    plays: 0,
+  },
+];
+
 function getClient() {
   try {
     return getSupabaseAdmin();
@@ -13,7 +39,13 @@ function getClient() {
 export async function GET(req: NextRequest) {
   const supabase = getClient();
   if (!supabase) {
-    return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
+    // Return fallback tracks when Supabase is not configured
+    const { searchParams } = new URL(req.url);
+    const genre = searchParams.get("genre");
+    const filtered = genre
+      ? FALLBACK_TRACKS.filter((t) => t.genre === genre)
+      : FALLBACK_TRACKS;
+    return NextResponse.json({ tracks: filtered });
   }
   try {
     const { searchParams } = new URL(req.url);

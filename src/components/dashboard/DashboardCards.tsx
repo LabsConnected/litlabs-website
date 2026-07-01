@@ -200,6 +200,7 @@ import {
   Image as ImageIcon,
   Video,
   Mic,
+  Plus,
 } from "lucide-react";
 
 export function CenterStage({
@@ -218,40 +219,141 @@ export function CenterStage({
   switch (activeApp) {
     case "studio":
       return (
-        <div className="space-y-6">
-          <HeroCard
-            title="Studio"
-            subtitle="Create images, audio, video & code."
-            color="#00f0ff"
-          />
-          <QuickActionGrid
-            actions={[
-              {
-                label: "Image Gen",
-                icon: ImageIcon,
-                color: "#ff00a0",
-                href: "/studio?tool=image",
-              },
-              {
-                label: "Video Gen",
-                icon: Video,
-                color: "#00f0ff",
-                href: "/studio?tool=video",
-              },
-              {
-                label: "Audio Gen",
-                icon: Mic,
-                color: "#8b5cf6",
-                href: "/studio?tool=audio",
-              },
-              {
-                label: "Code Agent",
-                icon: Zap,
-                color: "#ff9ff3",
-                href: "/studio?tool=agents",
-              },
-            ]}
-          />
+        <div className="space-y-4 md:space-y-6">
+          {/* Mobile: Compact welcome card */}
+          <div className="md:hidden">
+            <div className="mb-3">
+              <p className="text-sm font-bold" style={{ color: T.textColor }}>
+                👋 Welcome back, {displayName}
+              </p>
+              <p className="text-xs" style={{ color: T.textMuted }}>
+                Ship something today.
+              </p>
+            </div>
+            <Link
+              href="/studio?tool=image"
+              className="flex items-center justify-center gap-2 w-full py-3 rounded-lg text-sm font-bold transition-all"
+              style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+            >
+              <Plus size={16} /> Create
+            </Link>
+          </div>
+
+          {/* Desktop: Full HeroCard */}
+          <div className="hidden md:block">
+            <HeroCard
+              title="Studio"
+              subtitle="Create images, audio, video & code."
+              color="#00f0ff"
+            />
+          </div>
+
+          {/* Mobile: Compact quick actions */}
+          <div className="md:hidden grid grid-cols-4 gap-2">
+            {[
+              { label: "AI", icon: Zap, href: "/agents", color: "#ff9ff3" },
+              { label: "Post", icon: Send, href: "/social", color: "#00f0ff" },
+              { label: "Img", icon: ImageIcon, href: "/studio?tool=image", color: "#ff00a0" },
+              { label: "Music", icon: Mic, href: "/dashboard?app=music", color: "#8b5cf6" },
+            ].map((action) => {
+              const Icon = action.icon;
+              return (
+                <Link
+                  key={action.label}
+                  href={action.href}
+                  className="flex flex-col items-center gap-1.5 p-2 rounded-lg transition-all"
+                  style={{ backgroundColor: `${T.boxBg}60`, border: `1px solid ${action.color}20` }}
+                >
+                  <Icon size={16} style={{ color: action.color }} />
+                  <span className="text-[9px] font-bold" style={{ color: T.textColor }}>
+                    {action.label}
+                  </span>
+                </Link>
+              );
+            })}
+          </div>
+
+          {/* Desktop: Full QuickActionGrid */}
+          <div className="hidden md:block">
+            <QuickActionGrid
+              actions={[
+                {
+                  label: "Image Gen",
+                  icon: ImageIcon,
+                  color: "#ff00a0",
+                  href: "/studio?tool=image",
+                },
+                {
+                  label: "Video Gen",
+                  icon: Video,
+                  color: "#00f0ff",
+                  href: "/studio?tool=video",
+                },
+                {
+                  label: "Audio Gen",
+                  icon: Mic,
+                  color: "#8b5cf6",
+                  href: "/studio?tool=audio",
+                },
+                {
+                  label: "Code Agent",
+                  icon: Zap,
+                  color: "#ff9ff3",
+                  href: "/studio?tool=agents",
+                },
+              ]}
+            />
+          </div>
+
+          {/* Mobile: Continue Working */}
+          <div className="md:hidden">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold" style={{ color: "#ff6b35" }}>
+                🔥 Continue Working
+              </span>
+            </div>
+            <div className="space-y-2">
+              {[
+                { label: "Image #42", href: "/gallery" },
+                { label: "Agent Forge", href: "/studio?tool=agents" },
+                { label: "Music Project", href: "/dashboard?app=music" },
+              ].map((item) => (
+                <Link
+                  key={item.label}
+                  href={item.href}
+                  className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all"
+                  style={{ backgroundColor: `${T.boxBg}60`, color: T.textColor }}
+                >
+                  <div className="w-1 h-1 rounded-full" style={{ backgroundColor: T.accentColor }} />
+                  {item.label}
+                </Link>
+              ))}
+            </div>
+          </div>
+
+          {/* Mobile: Stats */}
+          <div className="md:hidden">
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-xs font-bold" style={{ color: T.textMuted }}>
+                📊 Stats
+              </span>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {[
+                { label: "3 Nodes", value: "8 Agents" },
+                { label: "42 Users", value: "99.9%" },
+              ].map((stat) => (
+                <div
+                  key={stat.label}
+                  className="px-3 py-2 rounded-lg text-xs"
+                  style={{ backgroundColor: `${T.boxBg}60`, color: T.textColor }}
+                >
+                  <div className="font-bold">{stat.label}</div>
+                  <div className="opacity-60" style={{ color: T.textMuted }}>{stat.value}</div>
+                </div>
+              ))}
+            </div>
+          </div>
         </div>
       );
     case "social":

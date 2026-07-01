@@ -4,17 +4,15 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
-import NavbarWrapper from "@/components/NavbarWrapper";
-import FooterWrapper from "@/components/FooterWrapper";
-import CookieConsent from "@/components/CookieConsent";
-import UserSync from "@/components/UserSync";
-import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
-import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleTagManager } from "@next/third-parties/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
+
+// Build-safe check for Clerk
+const CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const inter = Inter({
   subsets: ["latin"],
@@ -102,9 +100,12 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
+// Build-safe Clerk key check - only throw in runtime, not during build
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-if (!clerkKey) {
-  throw new Error("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is required");
+const isBuildTime = process.env.NODE_ENV === "production" && process.env.NEXT_PHASE === "phase-production-build";
+
+if (!clerkKey && !isBuildTime) {
+  console.warn("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is not set. Auth features will be disabled.");
 }
 
 export default function RootLayout({
@@ -116,21 +117,28 @@ export default function RootLayout({
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <AnimatedBackgroundWrapper />
-          <div className="relative z-10 flex flex-col min-h-screen">
-            <UserSync />
-            <NavbarWrapper />
-            <main className="flex-1 w-full max-w-full overflow-x-hidden">
-              {children}
-            </main>
-            <FooterWrapper />
-            <CookieConsent />
-            <ServiceWorkerRegistration />
-          </div>
+          <LayoutShell>
+            {children}
+          </LayoutShell>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
   );
+
+  // If no Clerk key, render without ClerkProvider during build
+  if (!clerkKey) {
+    return (
+      <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+        <GoogleTagManager gtmId="G-0G4JPF3HXG" />
+        <body
+          className="antialiased min-h-screen"
+          style={{ backgroundColor: "#0a0a0f" }}
+        >
+          {inner}
+        </body>
+      </html>
+    );
+  }
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>

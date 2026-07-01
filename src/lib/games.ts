@@ -20,6 +20,15 @@ export interface Game {
   players: number;
   rating: number;
   tags: string[];
+  // Platform features
+  plays: string;
+  progress?: number;
+  difficulty?: "easy" | "medium" | "hard" | "expert";
+  controls?: string[];
+  achievements?: Achievement[];
+  bestScore?: number;
+  totalPlays?: number;
+  playersToday?: number;
 }
 
 export interface SaveState {
@@ -38,6 +47,14 @@ export interface LeaderboardEntry {
   timestamp: number;
 }
 
+export interface Achievement {
+  id: string;
+  title: string;
+  description: string;
+  icon: string;
+  unlocked: boolean;
+}
+
 // Demo game library - in production, this would come from a database
 export const GAME_LIBRARY: Game[] = [
   // HTML5 Games - Verified iframe-friendly embeds
@@ -54,6 +71,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 2,
     rating: 4.5,
     tags: ["retro", "classic", "arcade"],
+    plays: "12.8K",
   },
   {
     id: "2048",
@@ -69,6 +87,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.5,
     tags: ["puzzle", "numbers", "minimalist"],
+    plays: "28.6K",
   },
   {
     id: "hextris",
@@ -83,6 +102,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.3,
     tags: ["puzzle", "fast", "reaction"],
+    plays: "31.4K",
   },
   {
     id: "tetris-react",
@@ -98,6 +118,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.8,
     tags: ["puzzle", "classic", "blocks"],
+    plays: "45.2K",
   },
   {
     id: "pacman",
@@ -113,6 +134,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.9,
     tags: ["arcade", "classic", "maze"],
+    plays: "52.1K",
   },
   {
     id: "snake",
@@ -127,6 +149,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.4,
     tags: ["arcade", "classic", "reflexes"],
+    plays: "19.2K",
   },
   {
     id: "sudoku",
@@ -141,6 +164,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.4,
     tags: ["puzzle", "numbers", "logic"],
+    plays: "15.8K",
   },
   {
     id: "flappy",
@@ -155,6 +179,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.2,
     tags: ["arcade", "skill", "endless"],
+    plays: "38.7K",
   },
   {
     id: "minesweeper",
@@ -169,6 +194,7 @@ export const GAME_LIBRARY: Game[] = [
     players: 1,
     rating: 4.5,
     tags: ["puzzle", "logic", "classic"],
+    plays: "22.3K",
   },
 ];
 

@@ -131,6 +131,22 @@ export default function AgentsTerminalTool() {
   const selectedAgent =
     AGENT_LIST.find((a) => a.id === selectedAgentId) ?? AGENT_LIST[0];
 
+  const TERMINAL_COMMANDS = [
+    "/clear",
+    "/help",
+    "/project",
+    "/project set",
+    "/agents",
+    "/image",
+    "/model",
+  ];
+
+  const ghostText = (() => {
+    if (!input.startsWith("/")) return "";
+    const match = TERMINAL_COMMANDS.find((cmd) => cmd.startsWith(input));
+    return match ? match.slice(input.length) : "";
+  })();
+
   /* Persist lines */
   useEffect(() => {
     try {
@@ -410,6 +426,13 @@ export default function AgentsTerminalTool() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
+      return;
+    }
+
+    // Tab to accept ghost suggestion
+    if (e.key === "Tab" && ghostText) {
+      e.preventDefault();
+      setInput(input + ghostText);
       return;
     }
 
@@ -964,7 +987,7 @@ export default function AgentsTerminalTool() {
             </div>
 
             {/* Input area */}
-            <div className="flex-1 flex gap-2 items-start">
+            <div className="flex-1 flex gap-2 items-start relative">
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -978,8 +1001,21 @@ export default function AgentsTerminalTool() {
                   color: T.textColor,
                   minHeight: "22px",
                   maxHeight: "140px",
+                  caretColor: T.accentColor,
                 }}
               />
+              {ghostText && (
+                <div
+                  className="absolute left-0 top-1 pointer-events-none text-[11px] font-mono select-none overflow-hidden"
+                  style={{
+                    color: T.textMuted + "40",
+                    whiteSpace: "pre",
+                    paddingLeft: "0.25rem",
+                  }}
+                >
+                  {ghostText}
+                </div>
+              )}
 
               {/* Quick actions */}
               <div className="flex gap-1 shrink-0">
