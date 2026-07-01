@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateUser } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -15,15 +15,27 @@ async function getHandler() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    // This creates the user + wallet + preferences if they don't exist
-    const result = await getOrCreateUser(clerkId, "", "");
+    // Fetch real user info from Clerk so we don't insert blank email/name
+    let email = `${clerkId}@placeholder.local`;
+    let name = "";
+    try {
+      const clerk = await clerkClient();
+      const clerkUser = await clerk.users.getUser(clerkId);
+      email = clerkUser.emailAddresses[0]?.emailAddress ?? email;
+      name =
+        [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
+        email.split("@")[0];
+    } catch {
+      // Clerk API unavailable — proceed with placeholder so sync still runs
+    }
+
+    const result = await getOrCreateUser(clerkId, email, name);
 
     return NextResponse.json({
       synced: true,
       isNew: result.isNew,
     });
   } catch {
-    // [Account Sync] Error:
     return NextResponse.json({ synced: false }, { status: 500 });
   }
 }

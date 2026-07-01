@@ -5,22 +5,28 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 
 /**
  * Syncs user identity to the database on mount.
- * Only active when Clerk auth is configured; silent no-op otherwise.
+ * Primary: GET /api/account. Backup: POST /api/user/ensure if primary fails.
  */
 export default function UserSync() {
   const { isSignedIn, userId } = useClerkAuth();
 
   useEffect(() => {
     if (!isSignedIn || !userId) return;
+
     fetch("/api/account", { method: "GET" })
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
+      .then(async (res) => {
+        const data = res.ok ? await res.json().catch(() => null) : null;
         if (data?.isNew) {
           try { localStorage.setItem("litlabs-new-user", "1"); } catch { /* ignore */ }
         }
+        // If account sync failed or returned not-synced, fire ensure as backup
+        if (!res.ok || !data?.synced) {
+          fetch("/api/user/ensure", { method: "POST" }).catch(() => {});
+        }
       })
       .catch(() => {
-        // Silent fail — webhook will handle it later
+        // Primary failed — try ensure as fallback
+        fetch("/api/user/ensure", { method: "POST" }).catch(() => {});
       });
   }, [isSignedIn, userId]);
 

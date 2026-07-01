@@ -109,8 +109,9 @@ export async function getOrCreateUser(
     return { user: null as unknown as UserProfile, isNew: false };
   }
 
-  await db.from("user_preferences").insert({ user_id: user.id });
-  await db.from("wallets").insert({ user_id: user.id, balance: 500 });
+  // Use upsert with onConflict so duplicate calls are idempotent
+  await db.from("user_preferences").upsert({ user_id: user.id }, { onConflict: "user_id", ignoreDuplicates: true });
+  await db.from("wallets").upsert({ user_id: user.id, balance: 500 }, { onConflict: "user_id", ignoreDuplicates: true });
 
   return { user: user as UserProfile, isNew: true };
 }
@@ -192,12 +193,23 @@ export async function updateUserPreferences(
   return data as UserPreferences;
 }
 
-/** Get user wallet — auto-creates with 500 coins if missing. Returns synthetic wallet on ANY failure. */
+/** Get user wallet — auto-creates user+wallet if missing. Returns balance:0 fallback only if DB is truly unreachable. */
 export async function getUserWallet(clerkId: string): Promise<Wallet> {
   const db = getDb();
   if (db) {
     try {
-      const user = await getUserByClerkId(clerkId);
+      let user = await getUserByClerkId(clerkId);
+
+      // Auto-ensure: if user row missing, create it before bailing
+      if (!user) {
+        const { user: ensured } = await getOrCreateUser(
+          clerkId,
+          `${clerkId}@placeholder.local`,
+          "",
+        );
+        user = ensured ?? null;
+      }
+
       if (user) {
         const { data } = await db
           .from("wallets")
@@ -205,7 +217,7 @@ export async function getUserWallet(clerkId: string): Promise<Wallet> {
           .eq("user_id", user.id)
           .single();
         if (data) return data as Wallet;
-        // Wallet missing — create with default 500 coins
+        // Wallet row missing — create with default 500 coins
         const { data: created } = await db
           .from("wallets")
           .insert({ user_id: user.id, balance: 500 })
@@ -214,41 +226,15 @@ export async function getUserWallet(clerkId: string): Promise<Wallet> {
         if (created) return created as Wallet;
       }
     } catch {
-      // DB query failed — fall through to synthetic wallet
+      // DB query failed — fall through to zero-balance fallback
     }
   }
 
-  // Fallback: Use localStorage for wallet persistence when Supabase isn't configured
-  const storageKey = `litlabs-wallet-${clerkId}`;
-  let stored: string | null = null;
-  try {
-    stored =
-      typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-  } catch {
-    // localStorage not available
-  }
-
-  if (stored) {
-    try {
-      const parsed = JSON.parse(stored);
-      return {
-        id: "local",
-        user_id: clerkId,
-        balance: parsed.balance ?? 9999,
-        last_claim_date: parsed.last_claim_date ?? null,
-        created_at: parsed.created_at ?? new Date().toISOString(),
-        updated_at: parsed.updated_at ?? new Date().toISOString(),
-      };
-    } catch {
-      // Invalid stored data
-    }
-  }
-
-  // Default fallback wallet
+  // True fallback: DB unreachable — return 0 balance so UI reflects reality
   return {
     id: "fallback",
     user_id: clerkId,
-    balance: 9999,
+    balance: 0,
     last_claim_date: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -264,88 +250,21 @@ export async function updateWalletBalance(
   const { absolute = false, lastClaimDate } = options || {};
   const db = getDb();
 
-  // Fallback mode — Supabase not configured, use localStorage
   if (!db) {
-    const storageKey = `litlabs-wallet-${clerkId}`;
-    let currentBalance = 9999;
-
-    // Try to get existing balance from localStorage
-    try {
-      const stored =
-        typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        currentBalance = parsed.balance ?? 9999;
-      }
-    } catch {
-      // localStorage not available
-    }
-
-    // Calculate new balance
-    const newBalance = absolute ? amount : currentBalance + amount;
-
-    // Save to localStorage
-    const walletData = {
-      balance: Math.max(0, newBalance),
-      last_claim_date: lastClaimDate || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(storageKey, JSON.stringify(walletData));
-      }
-    } catch {
-      // localStorage not available
-    }
-
-    return {
-      id: "local",
-      user_id: clerkId,
-      ...walletData,
-    } as Wallet;
+    throw new Error("Database not configured — cannot persist wallet update");
   }
 
-  const user = await getUserByClerkId(clerkId);
+  let user = await getUserByClerkId(clerkId);
   if (!user) {
-    // Graceful fallback — user exists in Clerk but not yet in Supabase, use localStorage
-    const storageKey = `litlabs-wallet-${clerkId}`;
-    let currentBalance = 9999;
-
-    try {
-      const stored =
-        typeof window !== "undefined" ? localStorage.getItem(storageKey) : null;
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        currentBalance = parsed.balance ?? 9999;
-      }
-    } catch {
-      /* ignore */
-    }
-
-    const newBalance = absolute ? amount : currentBalance + amount;
-    const walletData = {
-      balance: Math.max(0, newBalance),
-      last_claim_date: lastClaimDate || null,
-      created_at: new Date().toISOString(),
-      updated_at: new Date().toISOString(),
-    };
-
-    try {
-      if (typeof window !== "undefined") {
-        localStorage.setItem(storageKey, JSON.stringify(walletData));
-      }
-    } catch {
-      /* ignore */
-    }
-
-    return {
-      id: "local",
-      user_id: clerkId,
-      ...walletData,
-    } as Wallet;
+    // Auto-ensure user row before failing
+    const { user: ensured } = await getOrCreateUser(
+      clerkId,
+      `${clerkId}@placeholder.local`,
+      "",
+    );
+    user = ensured ?? null;
   }
+  if (!user) throw new Error(`User not found for clerkId: ${clerkId}`);
 
   let targetBalance = amount;
   if (!absolute) {
