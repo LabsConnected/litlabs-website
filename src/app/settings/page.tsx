@@ -57,6 +57,7 @@ const TABS = [
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "project", label: "Project", icon: FolderOpen },
   { id: "keys", label: "BYOK", icon: Key },
+  { id: "litkeys", label: "Keys", icon: Key },
   { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
 
@@ -114,6 +115,111 @@ export default function SettingsPage() {
       localStorage.getItem("litlabs-notify-email") === "true",
   );
   const [notifSaved, setNotifSaved] = useState(false);
+
+  /* Keys tab state */
+  const [apiKeys, setApiKeys] = useState<{ id: string; name: string; prefix: string; scopes: string[]; last_used_at: string | null; revoked_at: string | null; created_at: string }[]>([]);
+  const [inviteCodes, setInviteCodes] = useState<{ id: string; label: string | null; max_uses: number; uses_count: number; expires_at: string | null; revoked_at: string | null; created_at: string }[]>([]);
+  const [keysLoading, setKeysLoading] = useState(false);
+  const [newKeyName, setNewKeyName] = useState("");
+  const [newKeySecret, setNewKeySecret] = useState<string | null>(null);
+  const [keysLoaded, setKeysLoaded] = useState(false);
+  const [inviteLabel, setInviteLabel] = useState("");
+  const [inviteMaxUses, setInviteMaxUses] = useState("1");
+  const [newInviteCode, setNewInviteCode] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+
+  const copyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const loadKeys = useCallback(async () => {
+    if (!isSignedIn) return;
+    setKeysLoading(true);
+    try {
+      const [keysRes, invitesRes] = await Promise.all([
+        fetch("/api/keys/list"),
+        fetch("/api/invites/list"),
+      ]);
+      if (keysRes.ok) {
+        const d = await keysRes.json();
+        setApiKeys(d.keys || []);
+      }
+      if (invitesRes.ok) {
+        const d = await invitesRes.json();
+        setInviteCodes(d.codes || []);
+      }
+    } catch { /* silent */ } finally {
+      setKeysLoading(false);
+      setKeysLoaded(true);
+    }
+  }, [isSignedIn]);
+
+  const generateApiKey = async () => {
+    if (!newKeyName.trim()) return;
+    setKeysLoading(true);
+    try {
+      const res = await fetch("/api/keys/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: newKeyName.trim() }),
+      });
+      const data = await res.json();
+      if (res.ok && data.key) {
+        setNewKeySecret(data.key);
+        setNewKeyName("");
+        await loadKeys();
+      }
+    } catch { /* silent */ } finally {
+      setKeysLoading(false);
+    }
+  };
+
+  const revokeApiKey = async (id: string) => {
+    try {
+      await fetch(`/api/keys/revoke/${id}`, { method: "DELETE" });
+      setApiKeys((prev) => prev.filter((k) => k.id !== id));
+    } catch { /* silent */ }
+  };
+
+  const generateInviteCode = async () => {
+    setKeysLoading(true);
+    try {
+      const res = await fetch("/api/invites/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: inviteLabel.trim(), max_uses: Number(inviteMaxUses) || 1 }),
+      });
+      const data = await res.json();
+      if (res.ok && data.code) {
+        setNewInviteCode(data.code);
+        setInviteLabel("");
+        setInviteMaxUses("1");
+        await loadKeys();
+      }
+    } catch { /* silent */ } finally {
+      setKeysLoading(false);
+    }
+  };
+
+  const revokeInviteCode = async (id: string) => {
+    try {
+      await fetch("/api/invites/list", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setInviteCodes((prev) => prev.filter((c) => c.id !== id));
+    } catch { /* silent */ }
+  };
+
+  /* Load keys when tab is opened */
+  useEffect(() => {
+    if (activeTab === "litkeys" && !keysLoaded && isSignedIn) {
+      loadKeys();
+    }
+  }, [activeTab, keysLoaded, isSignedIn, loadKeys]);
 
   /* Load remote profile once */
   useEffect(() => {
@@ -767,6 +873,250 @@ export default function SettingsPage() {
                   {keysSaved ? "Saved" : "Save Keys"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Keys Tab — Invite Codes + API Keys */}
+        {activeTab === "litkeys" && (
+          <div className="space-y-6">
+
+            {/* New API Key Secret Modal */}
+            {newKeySecret && (
+              <div
+                className="rounded-2xl border p-4 sm:p-6"
+                style={{ borderColor: T.accentColor + "60", backgroundColor: `${T.accentColor}08` }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Key size={16} style={{ color: T.accentColor }} />
+                  <h3 className="font-black text-sm" style={{ color: T.accentColor }}>
+                    Copy your key — you will NOT see it again
+                  </h3>
+                </div>
+                <div
+                  className="font-mono text-xs break-all px-3 py-2 rounded-lg mb-3 select-all"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, border: `1px solid ${T.borderColor}40` }}
+                >
+                  {newKeySecret}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => copyText(newKeySecret, "new-key")}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                    style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                  >
+                    {copiedId === "new-key" ? <Check size={12} /> : <Copy size={12} />}
+                    {copiedId === "new-key" ? "Copied!" : "Copy Key"}
+                  </button>
+                  <button
+                    onClick={() => setNewKeySecret(null)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-80"
+                    style={{ border: `1px solid ${T.borderColor}40`, color: T.textMuted }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* New Invite Code Display */}
+            {newInviteCode && (
+              <div
+                className="rounded-2xl border p-4 sm:p-6"
+                style={{ borderColor: T.success + "60", backgroundColor: `${T.success}08` }}
+              >
+                <div className="flex items-center gap-2 mb-2">
+                  <Share2 size={16} style={{ color: T.success }} />
+                  <h3 className="font-black text-sm" style={{ color: T.success }}>
+                    New Invite Code Created
+                  </h3>
+                </div>
+                <div
+                  className="font-mono text-base font-bold tracking-widest px-3 py-2 rounded-lg mb-3"
+                  style={{ backgroundColor: T.bgColor, color: T.textColor, border: `1px solid ${T.borderColor}40` }}
+                >
+                  {newInviteCode}
+                </div>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => copyText(newInviteCode, "new-invite")}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold transition-all"
+                    style={{ backgroundColor: T.success, color: "#000" }}
+                  >
+                    {copiedId === "new-invite" ? <Check size={12} /> : <Copy size={12} />}
+                    {copiedId === "new-invite" ? "Copied!" : "Copy Code"}
+                  </button>
+                  <button
+                    onClick={() => setNewInviteCode(null)}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold hover:opacity-80"
+                    style={{ border: `1px solid ${T.borderColor}40`, color: T.textMuted }}
+                  >
+                    Dismiss
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Invite Codes */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-start gap-3 mb-5">
+                <Share2 size={18} style={{ color: T.accentColor }} />
+                <div>
+                  <h2 className="text-lg font-black" style={{ color: T.headerColor }}>Invite Codes</h2>
+                  <p className="text-xs opacity-70 max-w-xl mt-1" style={{ color: T.textMuted }}>
+                    Control who can join. Each code can be limited to a number of uses and an expiry date.
+                  </p>
+                </div>
+              </div>
+
+              {/* Generate form */}
+              <div className="flex flex-wrap gap-2 mb-5">
+                <input
+                  value={inviteLabel}
+                  onChange={(e) => setInviteLabel(e.target.value)}
+                  placeholder="Label (e.g. Beta Wave 1)"
+                  className="flex-1 min-w-[160px] px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                  style={inputStyle}
+                />
+                <select
+                  value={inviteMaxUses}
+                  onChange={(e) => setInviteMaxUses(e.target.value)}
+                  className="px-3 py-2 rounded-lg border text-sm outline-none"
+                  style={inputStyle}
+                >
+                  {[1, 5, 10, 25, 100].map((n) => (
+                    <option key={n} value={n}>{n} use{n > 1 ? "s" : ""}</option>
+                  ))}
+                </select>
+                <button
+                  onClick={generateInviteCode}
+                  disabled={keysLoading}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                >
+                  {keysLoading ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />}
+                  Generate
+                </button>
+              </div>
+
+              {/* Code list */}
+              {keysLoading && !keysLoaded ? (
+                <div className="text-center py-4">
+                  <Loader2 className="animate-spin mx-auto" size={20} style={{ color: T.accentColor }} />
+                </div>
+              ) : inviteCodes.length === 0 ? (
+                <p className="text-sm opacity-50" style={{ color: T.textMuted }}>No invite codes yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {inviteCodes.map((code) => (
+                    <div
+                      key={code.id}
+                      className="flex flex-wrap items-center gap-2 p-3 rounded-xl"
+                      style={{ backgroundColor: `${T.bgColor}80`, border: `1px solid ${T.borderColor}30` }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold" style={{ color: T.textColor }}>
+                          {code.label || "Unlabeled"}
+                        </div>
+                        <div className="text-[10px] font-mono" style={{ color: T.textMuted }}>
+                          {code.uses_count}/{code.max_uses} uses
+                          {code.expires_at ? ` · expires ${new Date(code.expires_at).toLocaleDateString()}` : ""}
+                          {code.revoked_at ? " · REVOKED" : ""}
+                        </div>
+                      </div>
+                      {!code.revoked_at && (
+                        <button
+                          onClick={() => revokeInviteCode(code.id)}
+                          className="text-[10px] px-2 py-1 rounded-lg font-bold hover:opacity-80"
+                          style={{ border: `1px solid #ef444440`, color: "#ef4444" }}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            {/* API Keys */}
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-start gap-3 mb-5">
+                <Key size={18} style={{ color: T.accentColor }} />
+                <div>
+                  <h2 className="text-lg font-black" style={{ color: T.headerColor }}>API Keys</h2>
+                  <p className="text-xs opacity-70 max-w-xl mt-1" style={{ color: T.textMuted }}>
+                    Let agents, automations, or external apps call your LiTLabs API. The key is only shown once.
+                  </p>
+                </div>
+              </div>
+
+              {/* Generate form */}
+              <div className="flex gap-2 mb-5">
+                <input
+                  value={newKeyName}
+                  onChange={(e) => setNewKeyName(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && generateApiKey()}
+                  placeholder="Key name (e.g. My Agent Bot)"
+                  className="flex-1 px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                  style={inputStyle}
+                />
+                <button
+                  onClick={generateApiKey}
+                  disabled={keysLoading || !newKeyName.trim()}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90 disabled:opacity-50"
+                  style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                >
+                  {keysLoading ? <Loader2 size={14} className="animate-spin" /> : <Key size={14} />}
+                  Create
+                </button>
+              </div>
+
+              {/* Key list */}
+              {keysLoading && !keysLoaded ? (
+                <div className="text-center py-4">
+                  <Loader2 className="animate-spin mx-auto" size={20} style={{ color: T.accentColor }} />
+                </div>
+              ) : apiKeys.length === 0 ? (
+                <p className="text-sm opacity-50" style={{ color: T.textMuted }}>No API keys yet.</p>
+              ) : (
+                <div className="space-y-2">
+                  {apiKeys.map((key) => (
+                    <div
+                      key={key.id}
+                      className="flex flex-wrap items-center gap-2 p-3 rounded-xl"
+                      style={{ backgroundColor: `${T.bgColor}80`, border: `1px solid ${T.borderColor}30` }}
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="text-xs font-bold" style={{ color: T.textColor }}>{key.name}</div>
+                        <div className="text-[10px] font-mono" style={{ color: T.textMuted }}>
+                          {key.prefix}···
+                          {key.last_used_at
+                            ? ` · last used ${new Date(key.last_used_at).toLocaleDateString()}`
+                            : " · never used"}
+                          {key.revoked_at ? " · REVOKED" : ""}
+                        </div>
+                      </div>
+                      <button
+                        onClick={() => copyText(key.prefix + "···", key.id + "-copy")}
+                        className="text-[10px] px-2 py-1 rounded-lg font-bold hover:opacity-80"
+                        style={{ border: `1px solid ${T.borderColor}40`, color: T.textMuted }}
+                      >
+                        {copiedId === key.id + "-copy" ? <Check size={10} /> : <Copy size={10} />}
+                      </button>
+                      {!key.revoked_at && (
+                        <button
+                          onClick={() => revokeApiKey(key.id)}
+                          className="text-[10px] px-2 py-1 rounded-lg font-bold hover:opacity-80"
+                          style={{ border: `1px solid #ef444440`, color: "#ef4444" }}
+                        >
+                          Revoke
+                        </button>
+                      )}
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
           </div>
         )}

@@ -18,6 +18,12 @@ import {
   Terminal,
   Server,
   Database,
+  Key,
+  Share2,
+  Copy,
+  Check,
+  Plus,
+  Trash2,
 } from "lucide-react";
 
 // Admin-only guard
@@ -92,6 +98,60 @@ export default function AdminDashboard() {
   const [isConnected, setIsConnected] = useState(false);
   const [lastUpdate, setLastUpdate] = useState<Date>(new Date());
 
+  // Invite codes state
+  const [inviteCodes, setInviteCodes] = useState<{ id: string; label: string | null; max_uses: number; uses_count: number; expires_at: string | null; revoked_at: string | null; created_at: string }[]>([]);
+  const [inviteLabel, setInviteLabel] = useState("");
+  const [inviteMaxUses, setInviteMaxUses] = useState("5");
+  const [newCode, setNewCode] = useState<string | null>(null);
+  const [copiedId, setCopiedId] = useState<string | null>(null);
+  const [inviteLoading, setInviteLoading] = useState(false);
+
+  const copyText = (text: string, id: string) => {
+    navigator.clipboard.writeText(text).catch(() => {});
+    setCopiedId(id);
+    setTimeout(() => setCopiedId(null), 2000);
+  };
+
+  const loadInvites = async () => {
+    try {
+      const res = await fetch("/api/invites/list");
+      if (res.ok) {
+        const data = await res.json();
+        setInviteCodes(data.codes || []);
+      }
+    } catch { /* silent */ }
+  };
+
+  const createInvite = async () => {
+    setInviteLoading(true);
+    try {
+      const res = await fetch("/api/invites/create", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ label: inviteLabel.trim(), max_uses: Number(inviteMaxUses) || 1 }),
+      });
+      const data = await res.json();
+      if (res.ok && data.code) {
+        setNewCode(data.code);
+        setInviteLabel("");
+        await loadInvites();
+      }
+    } catch { /* silent */ } finally {
+      setInviteLoading(false);
+    }
+  };
+
+  const revokeInvite = async (id: string) => {
+    try {
+      await fetch("/api/invites/list", {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ id }),
+      });
+      setInviteCodes((prev) => prev.filter((c) => c.id !== id));
+    } catch { /* silent */ }
+  };
+
   const eventSourceRef = useRef<EventSource | null>(null);
 
   // Auth guard
@@ -99,6 +159,10 @@ export default function AdminDashboard() {
     if (isLoaded && (!isSignedIn || userId !== ADMIN_USER_ID)) {
       router.push("/");
     }
+    if (isLoaded && isSignedIn && userId === ADMIN_USER_ID) {
+      loadInvites();
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isLoaded, isSignedIn, userId, router]);
 
   // Live data connection (SSE)
@@ -404,6 +468,112 @@ export default function AdminDashboard() {
             </div>
           </div>
         </div>
+      </div>
+
+      {/* Invite Codes Panel */}
+      <div
+        className="mt-6 rounded-xl p-4"
+        style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}` }}
+      >
+        <div className="flex items-center gap-2 mb-4">
+          <Share2 size={18} style={{ color: T.accentColor }} />
+          <h2 className="text-lg font-bold" style={{ color: T.textColor }}>Invite Codes</h2>
+        </div>
+
+        {/* New code alert */}
+        {newCode && (
+          <div
+            className="flex items-center gap-3 p-3 rounded-lg mb-4"
+            style={{ backgroundColor: T.success + "15", border: `1px solid ${T.success}40` }}
+          >
+            <Key size={16} style={{ color: T.success }} />
+            <span className="font-mono font-bold text-sm flex-1" style={{ color: T.success }}>
+              {newCode}
+            </span>
+            <button
+              onClick={() => copyText(newCode, "admin-new-code")}
+              className="flex items-center gap-1 text-xs px-2 py-1 rounded"
+              style={{ backgroundColor: T.success + "30", color: T.success }}
+            >
+              {copiedId === "admin-new-code" ? <Check size={12} /> : <Copy size={12} />}
+              {copiedId === "admin-new-code" ? "Copied" : "Copy"}
+            </button>
+            <button
+              onClick={() => setNewCode(null)}
+              className="text-xs opacity-50 hover:opacity-80"
+              style={{ color: T.textMuted }}
+            >
+              ×
+            </button>
+          </div>
+        )}
+
+        {/* Generate form */}
+        <div className="flex flex-wrap gap-2 mb-4">
+          <input
+            value={inviteLabel}
+            onChange={(e) => setInviteLabel(e.target.value)}
+            placeholder="Label (e.g. Beta Wave 1)"
+            className="flex-1 min-w-[160px] px-3 py-2 rounded-lg text-sm outline-none"
+            style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }}
+          />
+          <select
+            value={inviteMaxUses}
+            onChange={(e) => setInviteMaxUses(e.target.value)}
+            className="px-3 py-2 rounded-lg text-sm outline-none"
+            style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textColor }}
+          >
+            {[1, 5, 10, 25, 100].map((n) => (
+              <option key={n} value={n}>{n} use{n > 1 ? "s" : ""}</option>
+            ))}
+          </select>
+          <button
+            onClick={createInvite}
+            disabled={inviteLoading}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90 disabled:opacity-50"
+            style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+          >
+            <Plus size={14} />
+            {inviteLoading ? "Generating…" : "Generate"}
+          </button>
+        </div>
+
+        {/* Codes table */}
+        {inviteCodes.length === 0 ? (
+          <p className="text-sm" style={{ color: T.textMuted }}>No invite codes yet.</p>
+        ) : (
+          <div className="space-y-2">
+            {inviteCodes.map((code) => (
+              <div
+                key={code.id}
+                className="flex flex-wrap items-center gap-3 p-3 rounded-lg"
+                style={{ backgroundColor: T.bgColor, opacity: code.revoked_at ? 0.5 : 1 }}
+              >
+                <div className="flex-1 min-w-0">
+                  <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                    {code.label || "Unlabeled"}
+                  </div>
+                  <div className="text-xs font-mono" style={{ color: T.textMuted }}>
+                    {code.uses_count}/{code.max_uses} uses
+                    {code.expires_at ? ` · expires ${new Date(code.expires_at).toLocaleDateString()}` : ""}
+                    {code.revoked_at ? " · REVOKED" : ""}
+                  </div>
+                </div>
+                <div className="flex items-center gap-2">
+                  {!code.revoked_at && (
+                    <button
+                      onClick={() => revokeInvite(code.id)}
+                      className="flex items-center gap-1 text-xs px-2 py-1 rounded-lg hover:opacity-80"
+                      style={{ border: "1px solid #ef444440", color: "#ef4444" }}
+                    >
+                      <Trash2 size={11} /> Revoke
+                    </button>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
       </div>
 
       {/* Footer */}
