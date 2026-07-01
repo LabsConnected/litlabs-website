@@ -281,7 +281,7 @@ export async function executeHATool(
       case "ha_notify":
         result = await notify(
           args.message as string,
-          (args.title as string) || "LiTree Labs",
+          (args.title as string) || "LiTree LabStudios",
         );
         break;
       case "ha_tts":

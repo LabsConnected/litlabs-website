@@ -113,7 +113,7 @@ export async function directorPlan(
   completed: string,
   projectContext: string,
 ): Promise<string> {
-  const prompt = `You are the LiTreeLabStudios Hive Mind Director. Analyze the project state and plan the next task.
+  const prompt = `You are the LiTTree LabStudios Hive Mind Director. Analyze the project state and plan the next task.
 
 PROJECT CONTEXT:
 ${projectContext}
@@ -154,7 +154,7 @@ export async function executorCode(
   existingCode?: string,
   errorLogs?: string,
 ): Promise<string> {
-  let prompt = `You are the LiTreeLabStudios Hive Mind Executor. Implement the code for: ${targetFile}
+  let prompt = `You are the LiTTree LabStudios Hive Mind Executor. Implement the code for: ${targetFile}
 
 DIRECTOR INSTRUCTIONS:
 ${instructions}

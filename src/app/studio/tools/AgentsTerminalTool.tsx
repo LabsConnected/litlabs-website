@@ -767,10 +767,10 @@ export default function AgentsTerminalTool() {
                   className="text-[12px] font-bold"
                   style={{ color: T.accentColor }}
                 >
-                  LiTree Labs Terminal
+                  LiTTree LabStudios Terminal
                 </div>
                 <div className="text-[10px] opacity-60">
-                  Copyright (c) LiTree Lab Studios. All rights reserved.
+                  Copyright (c) LiTTree LabStudios. All rights reserved.
                 </div>
                 <div className="mt-4 text-[10px] opacity-40">
                   Connected to{" "}
@@ -1347,7 +1347,7 @@ export default function AgentsTerminalTool() {
             {/* Fields */}
             <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
               {([
-                ["name", "Project Name", "e.g. LiTTree Lab Studios", false],
+                ["name", "Project Name", "e.g. LiTTree LabStudios", false],
                 ["description", "Description", "What does it do? Who is it for?", true],
                 ["stack", "Tech Stack", "e.g. Next.js 16, Supabase, Tailwind, Clerk", false],
                 ["goals", "Current Goals", "e.g. Launch v1, improve onboarding, hit 1k users", true],

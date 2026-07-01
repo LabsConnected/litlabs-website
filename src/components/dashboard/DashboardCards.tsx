@@ -461,7 +461,7 @@ export function CenterStage({
 /* ------------------------------------------------------------------ */
 const MUSIC_TABS = [
   { id: "spotify", label: "Spotify", color: "#1DB954" },
-  { id: "player",  label: "LiTree Player", color: "#ff00a0" },
+  { id: "player",  label: "LiTTree LabStudios Player", color: "#ff00a0" },
   { id: "radio",   label: "Radio", color: "#00f0ff" },
   { id: "tools",   label: "Audio Tools", color: "#8b5cf6" },
 ] as const;

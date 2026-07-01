@@ -166,7 +166,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             >
               <Image
                 src="/logo.png"
-                alt="LiTree Lab Studios"
+                alt="LiTTree LabStudios"
                 fill
                 className="object-contain p-0.5"
                 unoptimized
@@ -186,7 +186,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
                   textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
                 }}
               >
-                LiTree Labs
+                LiTTree LabStudios
               </span>
               <span
                 className="text-[9px] font-bold tracking-widest uppercase"
@@ -201,26 +201,32 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             </div>
           </Link>
 
-          {/* Center nav links — hidden on /dashboard where sidebar handles nav */}
-          <div className="hidden md:flex items-center gap-1 flex-1 justify-center">
+          {/* Center nav links — full control panel */}
+          <div className="hidden md:flex items-center gap-1 flex-1 justify-center overflow-x-auto scrollbar-hide">
             {[
-              { href: "/dashboard", label: "Dashboard" },
-              { href: "/studio", label: "Studio" },
-              { href: "/marketplace", label: "Marketplace" },
-              { href: "/social", label: "Social" },
+              { href: "/dashboard", label: "Dashboard", icon: "📊" },
+              { href: "/studio", label: "Studio", icon: "🎨" },
+              { href: "/agents", label: "Agents", icon: "🤖" },
+              { href: "/gallery", label: "Gallery", icon: "🖼️" },
+              { href: "/social", label: "Social", icon: "💬" },
+              { href: "/marketplace", label: "Marketplace", icon: "🛒" },
+              { href: "/dashboard?app=music", label: "Music", icon: "🎵" },
+              { href: "/games", label: "Games", icon: "🎮" },
             ].map((link) => {
               const active = pathname === link.href || pathname?.startsWith(link.href + "/") || pathname?.startsWith(link.href + "?");
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="px-3 py-1.5 rounded-lg text-sm font-bold transition-all hover:opacity-100"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all hover:scale-105 whitespace-nowrap"
                   style={{
                     color: active ? resolvedColors.accentColor : resolvedColors.textMuted,
                     backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent",
+                    border: active ? `1px solid ${resolvedColors.accentColor}30` : `1px solid ${resolvedColors.borderColor}20`,
                     opacity: active ? 1 : 0.7,
                   }}
                 >
+                  <span className="text-xs">{link.icon}</span>
                   {link.label}
                 </Link>
               );

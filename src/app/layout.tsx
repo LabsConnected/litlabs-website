@@ -35,7 +35,7 @@ export const viewport: Viewport = {
   themeColor: "#0d0d0d",
 };
 
-const META_TITLE = "LiTTree Lab Studios — The Creator Network With AI Agents";
+const META_TITLE = "LiTTree LabStudios — The Creator Network With AI Agents";
 const META_DESC =
   "Build, share, and grow with agents at your side. LiTTree is a creator network where AI helps you create, connect, and distribute your work.";
 
@@ -43,7 +43,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTTree Lab Studios",
+    template: "%s | LiTTree LabStudios",
   },
   description: META_DESC,
   keywords: [
@@ -59,9 +59,9 @@ export const metadata: Metadata = {
     "LiTPage",
     "AI platform",
   ],
-  authors: [{ name: "LiTTree Lab Studios", url: SITE_URL }],
-  creator: "LiTTree Lab Studios",
-  publisher: "LiTTree Lab Studios",
+  authors: [{ name: "LiTTree LabStudios", url: SITE_URL }],
+  creator: "LiTTree LabStudios",
+  publisher: "LiTTree LabStudios",
   robots: {
     index: true,
     follow: true,
@@ -71,7 +71,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree Lab Studios",
+    siteName: "LiTTree LabStudios",
     title: META_TITLE,
     description: META_DESC,
     images: [

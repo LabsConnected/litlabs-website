@@ -168,7 +168,7 @@ function StatusBar({
         className="text-xs md:text-[9px] font-bold uppercase tracking-wider opacity-40"
         style={{ color: T.accentColor }}
       >
-        LiTree Studio
+        LiTTree LabStudios Studio
       </span>
       <span className="text-xs md:text-[9px] opacity-20">·</span>
       <span
