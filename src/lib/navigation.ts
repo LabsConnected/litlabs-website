@@ -54,6 +54,7 @@ import {
   Rocket,
   Menu,
   Terminal,
+  Gift,
 } from "lucide-react";
 
 export type NavItem = {
