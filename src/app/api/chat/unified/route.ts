@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { streamText, generateText } from "@/lib/llm";
+import { streamText, generateText, type LLMProvider } from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -109,7 +109,11 @@ async function handleAgentChat(body: UnifiedChatRequest) {
     );
   }
 
-  const agentMessage = orchestrator.sendMessage(from, to, message, type, metadata);
+  const validTypes = ["chat", "command", "insight", "task"] as const;
+  type MessageType = (typeof validTypes)[number];
+  const messageType: MessageType = validTypes.includes(type as MessageType) ? (type as MessageType) : "chat";
+
+  const agentMessage = orchestrator.sendMessage(from, to, message, messageType, metadata);
 
   if (simulateResponse) {
     const response = await orchestrator.simulateAgentResponse(to, message);
@@ -142,6 +146,19 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     return NextResponse.json({ error: "Missing message" }, { status: 400 });
   }
 
+  const validProviders: LLMProvider[] = [
+    "gemini",
+    "openrouter-free",
+    "openrouter-qwen",
+    "openrouter-deepseek",
+    "openrouter-mistral",
+    "openrouter-llama",
+    "openrouter-trinity",
+  ];
+  const llmProvider: LLMProvider = validProviders.includes(provider as LLMProvider)
+    ? (provider as LLMProvider)
+    : "gemini";
+
   const agent =
     AGENTS[agentSlug as keyof typeof AGENTS] ??
     AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
@@ -150,7 +167,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   if (!stream) {
     const r = await generateText(
       prompt,
-      { task: "chat", provider, maxTokens: 2048 },
+      { task: "chat", provider: llmProvider, maxTokens: 2048 },
       undefined,
     );
     await logConversation(agent, userId, message, r.text);
@@ -175,7 +192,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
               encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
             );
           },
-          { task: "chat", provider, maxTokens: 2048 },
+          { task: "chat", provider: llmProvider, maxTokens: 2048 },
         );
         controller.enqueue(
           encoder.encode(

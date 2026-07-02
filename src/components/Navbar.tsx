@@ -85,7 +85,7 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
   );
 }
 
-export default function Navbar() {
+export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
   const { theme, resolvedColors, setMode } = useTheme();
   const { profile } = useProfile();
   const pathname = usePathname();
@@ -478,7 +478,7 @@ export default function Navbar() {
               ref={hamburgerRef}
               onClick={(e) => {
                 e.stopPropagation();
-                setMobileOpen((v) => !v);
+                onMenuClick?.();
               }}
               aria-label={mobileOpen ? "Close menu" : "Open menu"}
               aria-expanded={mobileOpen}
