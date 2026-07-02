@@ -7,6 +7,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import Link from "next/link";
+import Image from "next/image";
 import PageShell from "@/components/PageShell";
 
 export default function ProfilePage() {
@@ -22,34 +23,14 @@ export default function ProfilePage() {
   }, [isLoaded, isSignedIn, router]);
 
   const [editingSection, setEditingSection] = useState<string | null>(null);
-  const [visitorCount, setVisitorCount] = useState(133742);
   const [newInterest, setNewInterest] = useState("");
   const [saving, setSaving] = useState(false);
+  const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
+  const [coverPreview, setCoverPreview] = useState<string | null>(null);
+  const [avatarFile, setAvatarFile] = useState<File | null>(null);
+  const [coverFile, setCoverFile] = useState<File | null>(null);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
-
-  // Custom User Profile Comments List (local mock database)
-  const [comments, setComments] = useState([
-    {
-      author: "TechBro99",
-      avatar: "💻",
-      time: "2 hours ago",
-      text: "Yo this profile is fire! 🔥 Let's sync on that next-gen orchestrator build.",
-    },
-    {
-      author: "CodeQueen",
-      avatar: "👑",
-      time: "5 hours ago",
-      text: "The custom volcano skin variables compile beautifully. Outstanding theme!",
-    },
-    {
-      author: "DesignDave",
-      avatar: "🎨",
-      time: "1 day ago",
-      text: "Love the LiTPage aesthetic fused with Gemini agents. Absolutely genius design!",
-    },
-  ]);
-  const [newCommentText, setNewCommentText] = useState("");
 
   const saveProfile = useCallback(
     async (updates: Record<string, unknown>) => {
@@ -96,24 +77,48 @@ export default function ProfilePage() {
     [saveProfile, updateProfile],
   );
 
-  const handleAvatarUpload = async (
-    e: React.ChangeEvent<HTMLInputElement>,
-  ) => {
+  const handleAvatarSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      await uploadAndSave(file, "avatar_url").catch(() => {
-        updateProfile({ avatarUrl: URL.createObjectURL(file) });
-      });
+      setAvatarFile(file);
+      setAvatarPreview(URL.createObjectURL(file));
     }
   };
 
-  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      await uploadAndSave(file, "cover_url").catch(() => {
-        updateProfile({ coverUrl: URL.createObjectURL(file) });
-      });
+      setCoverFile(file);
+      setCoverPreview(URL.createObjectURL(file));
     }
+  };
+
+  const confirmAvatarUpload = async () => {
+    if (!avatarFile) return;
+    await uploadAndSave(avatarFile, "avatar_url").catch(() => {
+      updateProfile({ avatarUrl: URL.createObjectURL(avatarFile) });
+    });
+    setAvatarFile(null);
+    setAvatarPreview(null);
+  };
+
+  const confirmCoverUpload = async () => {
+    if (!coverFile) return;
+    await uploadAndSave(coverFile, "cover_url").catch(() => {
+      updateProfile({ coverUrl: URL.createObjectURL(coverFile) });
+    });
+    setCoverFile(null);
+    setCoverPreview(null);
+  };
+
+  const cancelAvatarUpload = () => {
+    setAvatarFile(null);
+    setAvatarPreview(null);
+  };
+
+  const cancelCoverUpload = () => {
+    setCoverFile(null);
+    setCoverPreview(null);
   };
 
   const addInterest = () => {
@@ -127,20 +132,6 @@ export default function ProfilePage() {
     const newInterests = [...profile.interests];
     newInterests.splice(index, 1);
     updateProfile({ interests: newInterests });
-  };
-
-  const handleAddComment = () => {
-    if (!newCommentText.trim()) return;
-    setComments([
-      ...comments,
-      {
-        author: profile.displayName || "You",
-        avatar: "🔥",
-        time: "Just now",
-        text: newCommentText.trim(),
-      },
-    ]);
-    setNewCommentText("");
   };
 
   const moods = [
@@ -196,63 +187,62 @@ export default function ProfilePage() {
 
   return (
     <PageShell title="Profile" className="text-xs relative">
-      {/* Marquee Ticker */}
-      <div
-        className="w-full bg-black py-1.5 border-b-2 overflow-hidden flex"
-        style={{ borderColor: T.borderColor, color: T.accentColor }}
-      >
-        <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>👤 USER PROFILE MODULE ACTIVE // SECURE SECTOR CHANNELS</span>
-          <span>
-            ⚡ DOUBLE CLICK HEADERS OR EDIT BUTTONS TO OVERRIDE BIOS VARIABLES
-          </span>
-          <span>
-            💾 ALL CUSTOM AVATARS AND BACKDROP COVERS ENCODED DIRECTLY TO LOCAL
-            CLUSTERS
-          </span>
-        </div>
-      </div>
-
       {/* Cover Image Backdrop */}
       <div
-        className="relative h-48 md:h-64 overflow-hidden cursor-pointer group border-b-2"
+        className="relative h-48 md:h-72 overflow-hidden group border-b-2"
         style={{ borderColor: T.borderColor }}
-        onClick={() => coverInputRef.current?.click()}
       >
-        {profile.coverUrl ? (
-          <>
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src={profile.coverUrl}
-              alt="Cover"
-              className="w-full h-full object-cover"
-            />
-          </>
-        ) : (
-          <div className="w-full h-full flex flex-col items-center justify-center bg-linear-to-r from-purple-950 via-black to-blue-950">
+        <Image
+          src={coverPreview || profile.coverUrl || "https://placehold.co/1200x400/1a1a2e/ffffff?text=+"}
+          alt="Cover"
+          fill
+          className="object-cover"
+          unoptimized
+          sizes="100vw"
+        />
+        {!profile.coverUrl && !coverPreview && (
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-r from-purple-950/80 via-black/80 to-blue-950/80">
             <span className="text-2xl font-bold tracking-widest text-white/50 animate-pulse">
-              📷 CHANGE HERO BACKDROP PACKET
-            </span>
-            <span className="text-[10px] text-white/30 uppercase mt-1">
-              Accepts PNG / JPG structures
+              📷 Add Cover Image
             </span>
           </div>
         )}
         <input
           type="file"
           ref={coverInputRef}
-          onChange={handleCoverUpload}
+          onChange={handleCoverSelect}
           accept="image/*"
           className="hidden"
         />
-        <div
-          className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-          style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
-        >
-          <span className="text-white text-xs font-bold uppercase tracking-widest border border-white p-2">
-            Click to Upload Cover Image
-          </span>
-        </div>
+        {!coverPreview ? (
+          <button
+            onClick={() => coverInputRef.current?.click()}
+            className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+            style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
+          >
+            <span className="text-white text-xs font-bold uppercase tracking-widest border border-white p-2">
+              Change Cover
+            </span>
+          </button>
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center gap-3" style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+            <button
+              onClick={confirmCoverUpload}
+              disabled={saving}
+              className="px-4 py-2 text-xs font-bold uppercase tracking-widest border disabled:opacity-50"
+              style={{ backgroundColor: T.accentColor, color: "black", borderColor: T.borderColor }}
+            >
+              {saving ? "Uploading..." : "Upload Cover"}
+            </button>
+            <button
+              onClick={cancelCoverUpload}
+              className="px-4 py-2 text-xs font-bold uppercase tracking-widest border"
+              style={{ backgroundColor: T.bgColor, color: T.textMuted, borderColor: T.borderColor }}
+            >
+              Cancel
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Main Grid Content */}
@@ -267,44 +257,63 @@ export default function ProfilePage() {
             <input
               type="file"
               ref={avatarInputRef}
-              onChange={handleAvatarUpload}
+              onChange={handleAvatarSelect}
               accept="image/*"
               className="hidden"
             />
 
             <div
-              className="w-32 h-32 mx-auto mb-4 cursor-pointer relative group overflow-hidden border-2"
+              className="w-32 h-32 mx-auto mb-4 relative group overflow-hidden border-2 rounded-full"
               style={{
                 backgroundColor: T.bgColor,
                 borderColor: T.borderColor,
               }}
-              onClick={() => avatarInputRef.current?.click()}
             >
-              {profile.avatarUrl ? (
-                <>
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={profile.avatarUrl}
-                    alt="Avatar"
-                    className="w-full h-full object-cover"
-                  />
-                </>
-              ) : (
-                <div className="w-full h-full flex flex-col items-center justify-center">
+              <Image
+                src={avatarPreview || profile.avatarUrl || "https://placehold.co/128/1a1a2e/ffffff?text=+"}
+                alt="Avatar"
+                fill
+                className="object-cover"
+                unoptimized
+                sizes="128px"
+              />
+              {!profile.avatarUrl && !avatarPreview && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center">
                   <span className="text-4xl">👤</span>
                   <span className="text-[8px] opacity-40 uppercase tracking-widest mt-1">
                     No Frame
                   </span>
                 </div>
               )}
-              <div
-                className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
-              >
-                <span className="text-white text-[10px] font-bold uppercase tracking-widest">
-                  UPLOAD PIC
-                </span>
-              </div>
+              {!avatarPreview ? (
+                <button
+                  onClick={() => avatarInputRef.current?.click()}
+                  className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                  style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                >
+                  <span className="text-white text-[10px] font-bold uppercase tracking-widest">
+                    Change Photo
+                  </span>
+                </button>
+              ) : (
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2" style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+                  <button
+                    onClick={confirmAvatarUpload}
+                    disabled={saving}
+                    className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest border disabled:opacity-50"
+                    style={{ backgroundColor: T.accentColor, color: "black", borderColor: T.borderColor }}
+                  >
+                    {saving ? "Uploading..." : "Upload"}
+                  </button>
+                  <button
+                    onClick={cancelAvatarUpload}
+                    className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest border"
+                    style={{ backgroundColor: T.bgColor, color: T.textMuted, borderColor: T.borderColor }}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Display Name - Editable */}
@@ -323,17 +332,34 @@ export default function ProfilePage() {
                     borderColor: T.borderColor,
                   }}
                 />
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="px-4 py-1 text-[10px] font-bold border-2"
-                  style={{
-                    backgroundColor: T.linkColor,
-                    color: "black",
-                    borderColor: T.borderColor,
-                  }}
-                >
-                  Save Override
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      saveProfile({ displayName: profile.displayName });
+                      setEditingSection(null);
+                    }}
+                    disabled={saving}
+                    className="px-4 py-1.5 text-[10px] font-bold border-2 disabled:opacity-50"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      color: "black",
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Save Name"}
+                  </button>
+                  <button
+                    onClick={() => setEditingSection(null)}
+                    className="px-4 py-1.5 text-[10px] font-bold border-2"
+                    style={{
+                      backgroundColor: T.bgColor,
+                      color: T.textMuted,
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <h2
@@ -345,16 +371,7 @@ export default function ProfilePage() {
               </h2>
             )}
 
-            <div className="flex justify-center items-center gap-1.5 mt-2">
-              <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <p
-                className="text-[10px] uppercase font-bold tracking-widest"
-                style={{ color: T.accentColor }}
-              >
-                Node Active
-              </p>
-            </div>
-            <p className="text-[10px] opacity-60 font-mono mt-0.5">
+            <p className="text-[10px] opacity-60 mt-0.5">
               @{profile.username}
             </p>
 
@@ -392,17 +409,34 @@ export default function ProfilePage() {
                       </button>
                     ))}
                   </div>
-                  <button
-                    onClick={() => setEditingSection(null)}
-                    className="px-3 py-1 text-[10px] font-bold border-2"
-                    style={{
-                      backgroundColor: T.linkColor,
-                      color: "black",
-                      borderColor: T.borderColor,
-                    }}
-                  >
-                    Lock Mood
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => {
+                        saveProfile({ mood: profile.mood });
+                        setEditingSection(null);
+                      }}
+                      disabled={saving}
+                      className="px-3 py-1 text-[10px] font-bold border-2 disabled:opacity-50"
+                      style={{
+                        backgroundColor: T.accentColor,
+                        color: "black",
+                        borderColor: T.borderColor,
+                      }}
+                    >
+                      {saving ? "Saving..." : "Save Mood"}
+                    </button>
+                    <button
+                      onClick={() => setEditingSection(null)}
+                      className="px-3 py-1 text-[10px] font-bold border-2"
+                      style={{
+                        backgroundColor: T.bgColor,
+                        color: T.textMuted,
+                        borderColor: T.borderColor,
+                      }}
+                    >
+                      Cancel
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div
@@ -426,7 +460,7 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3"
               style={{ color: "white" }}
             >
-              Node Interactions
+              Quick Actions
             </div>
             <div className="grid grid-cols-2 gap-2 text-[10px] font-bold">
               <button
@@ -477,7 +511,7 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3"
               style={{ color: "white" }}
             >
-              🎵 Audio Deck
+              🎵 Music Links
             </div>
             {editingSection === "music" ? (
               <div className="space-y-1.5">
@@ -519,17 +553,34 @@ export default function ProfilePage() {
                     borderColor: T.borderColor,
                   }}
                 />
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="w-full px-4 py-1.5 text-xs font-bold border-2"
-                  style={{
-                    backgroundColor: T.linkColor,
-                    color: "black",
-                    borderColor: T.borderColor,
-                  }}
-                >
-                  Save Stream Registries
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      saveProfile({ musicLinks: profile.musicLinks });
+                      setEditingSection(null);
+                    }}
+                    disabled={saving}
+                    className="flex-1 px-4 py-1.5 text-xs font-bold border-2 disabled:opacity-50"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      color: "black",
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Save Music Links"}
+                  </button>
+                  <button
+                    onClick={() => setEditingSection(null)}
+                    className="px-4 py-1.5 text-xs font-bold border-2"
+                    style={{
+                      backgroundColor: T.bgColor,
+                      color: T.textMuted,
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="space-y-2 text-[10px] font-bold">
@@ -590,7 +641,7 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3"
               style={{ color: "white" }}
             >
-              🏆 Studio Badges
+              🏆 Badges
             </div>
             <div className="flex flex-wrap gap-1.5">
               {(profile.badges || []).map((badge, i) => (
@@ -614,25 +665,16 @@ export default function ProfilePage() {
         <div className="md:col-span-8 space-y-4">
           {/* Status Indicator */}
           <div
-            className="border-2 p-3 bg-black/60 shadow-md"
-            style={{ borderColor: T.borderColor }}
+            className="border p-3 rounded-lg"
+            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <div className="flex items-center gap-2">
-              <span className="text-xl animate-pulse">💡</span>
-              <p className="italic text-[11px] leading-relaxed">
-                <strong className="uppercase" style={{ color: T.accentColor }}>
-                  Status Stream:
+              <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+              <p className="text-[11px] leading-relaxed" style={{ color: T.textMuted }}>
+                <strong style={{ color: T.accentColor }}>
+                  {profile.displayName}
                 </strong>{" "}
-                {profile.displayName} is actively tweaking client variables
-                inside Sector 7. |
-                <strong
-                  className="uppercase ml-1"
-                  style={{ color: T.accentColor }}
-                >
-                  {" "}
-                  Mood:
-                </strong>{" "}
-                {profile.mood}
+                is {profile.mood.toLowerCase()}.
               </p>
             </div>
           </div>
@@ -646,7 +688,7 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3 flex justify-between items-center"
               style={{ color: "white" }}
             >
-              <span>Bio & Objectives</span>
+              <span>About</span>
               <button
                 onClick={() =>
                   setEditingSection(editingSection === "bio" ? null : "bio")
@@ -680,7 +722,7 @@ export default function ProfilePage() {
                       className="text-[10px] font-bold uppercase tracking-wider"
                       style={{ color: T.accentColor }}
                     >
-                      Grid Sector Location:
+                      Location:
                     </label>
                     <input
                       type="text"
@@ -701,7 +743,7 @@ export default function ProfilePage() {
                       className="text-[10px] font-bold uppercase tracking-wider"
                       style={{ color: T.accentColor }}
                     >
-                      Custom Endpoint Website:
+                      Website:
                     </label>
                     <input
                       type="url"
@@ -718,17 +760,34 @@ export default function ProfilePage() {
                     />
                   </div>
                 </div>
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="px-4 py-2 text-xs font-bold border-2"
-                  style={{
-                    backgroundColor: T.linkColor,
-                    color: "black",
-                    borderColor: T.borderColor,
-                  }}
-                >
-                  Save Coordinates
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      saveProfile({ bio: profile.bio, location: profile.location, website: profile.website });
+                      setEditingSection(null);
+                    }}
+                    disabled={saving}
+                    className="px-4 py-2 text-xs font-bold border-2 disabled:opacity-50"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      color: "black",
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Save Bio & Links"}
+                  </button>
+                  <button
+                    onClick={() => setEditingSection(null)}
+                    className="px-4 py-2 text-xs font-bold border-2"
+                    style={{
+                      backgroundColor: T.bgColor,
+                      color: T.textMuted,
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="text-[11px] leading-relaxed">
@@ -738,11 +797,10 @@ export default function ProfilePage() {
                   style={{ borderColor: T.borderColor, color: T.accentColor }}
                 >
                   <span className="font-bold">
-                    📍 LOCATION:{" "}
-                    <span className="text-white">{profile.location}</span>
+                    📍 {profile.location}
                   </span>
                   <span className="font-bold">
-                    🌐 WEB TARGET:{" "}
+                    🌐{" "}
                     <a
                       href={profile.website}
                       target="_blank"
@@ -750,7 +808,7 @@ export default function ProfilePage() {
                       style={{ color: T.linkColor }}
                       className="hover:underline"
                     >
-                      {profile.website || "N/A"}
+                      {profile.website || "No website"}
                     </a>
                   </span>
                 </div>
@@ -767,7 +825,7 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3 flex justify-between items-center"
               style={{ color: "white" }}
             >
-              <span>Specialty Tags</span>
+              <span>Interests</span>
               <button
                 onClick={() =>
                   setEditingSection(
@@ -833,17 +891,34 @@ export default function ProfilePage() {
                     </span>
                   ))}
                 </div>
-                <button
-                  onClick={() => setEditingSection(null)}
-                  className="px-4 py-1.5 text-xs font-bold border-2"
-                  style={{
-                    backgroundColor: T.linkColor,
-                    color: "black",
-                    borderColor: T.borderColor,
-                  }}
-                >
-                  Commit Interests
-                </button>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => {
+                      saveProfile({ interests: profile.interests });
+                      setEditingSection(null);
+                    }}
+                    disabled={saving}
+                    className="px-4 py-1.5 text-xs font-bold border-2 disabled:opacity-50"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      color: "black",
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    {saving ? "Saving..." : "Save Tags"}
+                  </button>
+                  <button
+                    onClick={() => setEditingSection(null)}
+                    className="px-4 py-1.5 text-xs font-bold border-2"
+                    style={{
+                      backgroundColor: T.bgColor,
+                      color: T.textMuted,
+                      borderColor: T.borderColor,
+                    }}
+                  >
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex flex-wrap gap-1.5">
@@ -862,7 +937,7 @@ export default function ProfilePage() {
                 ))}
                 {(profile.interests || []).length === 0 && (
                   <p className="text-[10px] text-gray-500 italic">
-                    No tags loaded in user index registers.
+                    No interests added yet.
                   </p>
                 )}
               </div>
@@ -878,9 +953,9 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3 flex justify-between items-center"
               style={{ color: "white" }}
             >
-              <span>Linked Co-Builder Array</span>
-              <span className="text-[10px] font-mono tracking-widest text-white/50">
-                TOP 8 ACTIVE NODES
+              <span>Top Collaborators</span>
+              <span className="text-[10px] tracking-widest text-white/50">
+                MOCK DATA
               </span>
             </div>
 
@@ -928,8 +1003,8 @@ export default function ProfilePage() {
               className="lit-header -mx-4 -mt-4 mb-3 flex justify-between items-center"
               style={{ color: "white" }}
             >
-              <span>Captured Visual Buffers</span>
-              <span className="text-[9px] opacity-50">GALLERY DISK ARRAY</span>
+              <span>Gallery</span>
+              <span className="text-[9px] opacity-50">MOCK DATA</span>
             </div>
 
             <div className="grid grid-cols-4 md:grid-cols-8 gap-2">
@@ -950,110 +1025,14 @@ export default function ProfilePage() {
             </div>
           </div>
 
-          {/* Public Node Comment Registry */}
-          <div
-            className="lit-box p-4"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="lit-header -mx-4 -mt-4 mb-3"
-              style={{ color: "white" }}
-            >
-              Public Node Comment Registry
-            </div>
-
-            <div className="space-y-3.5 max-h-[300px] overflow-y-auto pr-1 mb-4">
-              {comments.map((comment, i) => (
-                <div
-                  key={i}
-                  className="border-b border-dashed pb-3 last:border-b-0 last:pb-0"
-                  style={{ borderColor: T.borderColor }}
-                >
-                  <div className="flex items-center gap-2 mb-1.5">
-                    <span
-                      className="w-6 h-6 rounded-full bg-gray-900 border flex items-center justify-center text-sm"
-                      style={{ borderColor: T.borderColor }}
-                    >
-                      {comment.avatar}
-                    </span>
-                    <span
-                      className="font-bold text-xs"
-                      style={{ color: T.linkColor }}
-                    >
-                      {comment.author}
-                    </span>
-                    <span className="text-[9px] opacity-50 ml-auto">
-                      - {comment.time}
-                    </span>
-                  </div>
-                  <p
-                    className="text-[11px] ml-8 leading-relaxed"
-                    style={{ color: T.textColor }}
-                  >
-                    {comment.text}
-                  </p>
-                </div>
-              ))}
-            </div>
-
-            <div
-              className="pt-3 border-t border-dashed"
-              style={{ borderColor: T.borderColor }}
-            >
-              <textarea
-                value={newCommentText}
-                onChange={(e) => setNewCommentText(e.target.value)}
-                placeholder="Compose public comment packet..."
-                className="w-full p-2 text-xs border-2 min-h-[60px] outline-none font-mono resize-none"
-                style={{
-                  backgroundColor: T.bgColor,
-                  color: T.textColor,
-                  borderColor: T.borderColor,
-                }}
-              />
-              <button
-                onClick={handleAddComment}
-                className="mt-2 px-4 py-2 text-xs font-bold border-2 hover:scale-105 active:scale-95 transition-all uppercase tracking-wider"
-                style={{
-                  backgroundColor: T.linkColor,
-                  color: "black",
-                  borderColor: T.borderColor,
-                }}
-              >
-                Inject Packet ⚡
-              </button>
-            </div>
-          </div>
         </div>
       </div>
 
-      {/* Footer statistics and metadata */}
       <div
-        className="border-t-2 mt-8 p-6 text-center text-[10px] font-mono"
-        style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+        className="border-t mt-8 p-6 text-center text-[10px]"
+        style={{ borderColor: T.borderColor, color: T.textMuted }}
       >
-        <div className="mb-3">
-          <span
-            className="font-bold text-base px-2 py-0.5 bg-black border text-green-400"
-            style={{ borderColor: T.borderColor }}
-          >
-            {visitorCount.toLocaleString()}
-          </span>
-          <span className="ml-2 uppercase tracking-widest opacity-60 font-bold">
-            Captured Telemetry Nodes
-          </span>
-          <button
-            onClick={() => setVisitorCount((v) => v + 1)}
-            className="ml-3 px-2 py-0.5 text-[10px] font-bold border-2 active:scale-90 transition-transform"
-            style={{ borderColor: T.borderColor, backgroundColor: "black" }}
-          >
-            PING +1
-          </button>
-        </div>
-        <div style={{ color: T.textColor }} className="opacity-50">
-          © {new Date().getFullYear()} LiTreeLabStudios NETWORK HUB | SYSTEM
-          CORE v5.24 | POWERED BY ⚡GOD-CORE SPECIALISTS
-        </div>
+        © {new Date().getFullYear()} LiTTree LabStudios
       </div>
     </PageShell>
   );
