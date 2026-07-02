@@ -56,6 +56,7 @@ async function getHandler() {
         name: user.name,
         username: user.username,
         avatar_url: user.avatar_url,
+        cover_url: (user as { cover_url?: string | null }).cover_url ?? null,
         bio: user.bio,
         website: user.website,
         location: user.location,
@@ -99,6 +100,9 @@ async function postHandler(req: NextRequest) {
       ...(typeof body.avatar_url === "string" && {
         avatar_url: body.avatar_url,
       }),
+      ...(typeof body.cover_url === "string" && {
+        cover_url: body.cover_url,
+      }),
     };
 
     if (Object.keys(allowedUpdates).length === 0) {
@@ -119,6 +123,7 @@ async function postHandler(req: NextRequest) {
         name: updatedUser.name,
         username: updatedUser.username,
         avatar_url: updatedUser.avatar_url,
+        cover_url: (updatedUser as { cover_url?: string | null }).cover_url ?? null,
         bio: updatedUser.bio,
         website: updatedUser.website,
         location: updatedUser.location,
