@@ -97,8 +97,18 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { label: "Feed", href: "/social?feed=main", icon: Flame },
-      { label: "Notifications", href: "/social?tab=notifications", icon: Bell, badge: 3 },
-      { label: "Messages", href: "/social?tab=messages", icon: MessagesSquare, badge: 1 },
+      {
+        label: "Notifications",
+        href: "/social?tab=notifications",
+        icon: Bell,
+        badge: 3,
+      },
+      {
+        label: "Messages",
+        href: "/social?tab=messages",
+        icon: MessagesSquare,
+        badge: 1,
+      },
       { label: "Wallet", href: "/wallet", icon: Wallet },
     ],
   },
@@ -116,9 +126,17 @@ export const NAV_GROUPS: NavGroup[] = [
           { label: "Following", href: "/social?feed=following", icon: Users },
           { label: "Friends", href: "/social?feed=friends", icon: Heart },
           { label: "Local", href: "/social?feed=local", icon: Map },
-          { label: "Trending", href: "/social?feed=trending", icon: TrendingUp },
+          {
+            label: "Trending",
+            href: "/social?feed=trending",
+            icon: TrendingUp,
+          },
           { label: "Creator Feed", href: "/social?feed=creator", icon: Star },
-          { label: "Marketplace Feed", href: "/social?feed=marketplace", icon: ShoppingBag },
+          {
+            label: "Marketplace Feed",
+            href: "/social?feed=marketplace",
+            icon: ShoppingBag,
+          },
           { label: "Music Feed", href: "/social?feed=music", icon: Music },
           { label: "Image Feed", href: "/social?feed=image", icon: Image },
           { label: "Video Feed", href: "/social?feed=video", icon: Video },
@@ -129,13 +147,33 @@ export const NAV_GROUPS: NavGroup[] = [
           { label: "History", href: "/social?feed=history", icon: Clock },
         ],
       },
-      { label: "Friends", href: "/social?tab=friends", icon: Users, online: true },
-      { label: "Messages", href: "/social?tab=messages", icon: MessagesSquare, badge: 1 },
-      { label: "Notifications", href: "/social?tab=notifications", icon: Bell, badge: 3 },
+      {
+        label: "Friends",
+        href: "/social?tab=friends",
+        icon: Users,
+        online: true,
+      },
+      {
+        label: "Messages",
+        href: "/social?tab=messages",
+        icon: MessagesSquare,
+        badge: 1,
+      },
+      {
+        label: "Notifications",
+        href: "/social?tab=notifications",
+        icon: Bell,
+        badge: 3,
+      },
       { label: "Communities", href: "/social?tab=communities", icon: Users },
       { label: "Groups", href: "/social?tab=groups", icon: Folder },
       { label: "Events", href: "/social?tab=events", icon: Calendar },
-      { label: "Live", href: "/social?tab=live", icon: MonitorPlay, online: true },
+      {
+        label: "Live",
+        href: "/social?tab=live",
+        icon: MonitorPlay,
+        online: true,
+      },
     ],
   },
   {
@@ -155,6 +193,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Prompt Library", href: "/studio?tool=prompts", icon: Library },
       { label: "Models", href: "/studio?tool=models", icon: Aperture },
       { label: "History", href: "/studio?tool=history", icon: Clock },
+      {
+        label: "Color by Number",
+        href: "/studio?tool=color",
+        icon: Paintbrush,
+      },
       { label: "Exports", href: "/studio?tool=exports", icon: Download },
       { label: "Templates", href: "/studio?tool=templates", icon: FileText },
       { label: "Workflows", href: "/studio?tool=workflows", icon: Layers },
@@ -169,11 +212,23 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Home", href: "/marketplace", icon: Home },
       { label: "Discover", href: "/marketplace?tab=discover", icon: Search },
       { label: "Sell", href: "/marketplace?tab=sell", icon: Store },
-      { label: "Subscriptions", href: "/marketplace?tab=subscriptions", icon: CreditCard },
-      { label: "Downloads", href: "/marketplace?tab=downloads", icon: Download },
+      {
+        label: "Subscriptions",
+        href: "/marketplace?tab=subscriptions",
+        icon: CreditCard,
+      },
+      {
+        label: "Downloads",
+        href: "/marketplace?tab=downloads",
+        icon: Download,
+      },
       { label: "Purchases", href: "/marketplace?tab=purchases", icon: Receipt },
       { label: "Favorites", href: "/marketplace?tab=favorites", icon: Heart },
-      { label: "Collections", href: "/marketplace?tab=collections", icon: Folder },
+      {
+        label: "Collections",
+        href: "/marketplace?tab=collections",
+        icon: Folder,
+      },
       { label: "Coupons", href: "/marketplace?tab=coupons", icon: Tag },
       { label: "Orders", href: "/marketplace?tab=orders", icon: Package },
       { label: "Reviews", href: "/marketplace?tab=reviews", icon: Star },
@@ -194,7 +249,12 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Racing", href: "/games?category=racing", icon: Zap },
       { label: "FPS", href: "/games?category=fps", icon: Target },
       { label: "Simulation", href: "/games?category=simulation", icon: Layers },
-      { label: "Multiplayer", href: "/games?tab=multiplayer", icon: Users, online: true },
+      {
+        label: "Multiplayer",
+        href: "/games?tab=multiplayer",
+        icon: Users,
+        online: true,
+      },
       { label: "Achievements", href: "/games?tab=achievements", icon: Award },
       { label: "Friends", href: "/games?tab=friends", icon: Heart },
       { label: "Leaderboard", href: "/games?tab=leaderboard", icon: BarChart3 },
@@ -232,7 +292,11 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "AI Images", href: "/gallery?tab=ai", icon: Sparkles },
       { label: "Albums", href: "/gallery?tab=albums", icon: Library },
       { label: "Shared", href: "/gallery?tab=shared", icon: Share2 },
-      { label: "Marketplace", href: "/marketplace?tab=library", icon: ShoppingBag },
+      {
+        label: "Marketplace",
+        href: "/marketplace?tab=library",
+        icon: ShoppingBag,
+      },
       { label: "Music", href: "/dashboard?app=music", icon: Music },
       { label: "Files", href: "/library/files", icon: FileText },
       { label: "Saved", href: "/library/saved", icon: Bookmark },
@@ -270,7 +334,11 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Settings", href: "/settings", icon: Settings },
       { label: "Profile", href: "/profile", icon: User },
-      { label: "Notifications", href: "/settings?tab=notifications", icon: Bell },
+      {
+        label: "Notifications",
+        href: "/settings?tab=notifications",
+        icon: Bell,
+      },
       { label: "Theme", href: "/settings?tab=appearance", icon: Aperture },
       { label: "Admin", href: "/admin", icon: Shield },
       { label: "Logout", href: "/sign-in", icon: Fingerprint },
@@ -333,7 +401,7 @@ export function isActive(
   pathname: string | null,
   searchParams: URLSearchParams,
   href?: string,
-  appId?: string
+  appId?: string,
 ) {
   if (!href) return false;
   const [path, query] = href.split("?");
@@ -346,20 +414,30 @@ export function isActive(
   if (query) {
     const hrefParams = new URLSearchParams(query);
     const searchMatch = Array.from(hrefParams.entries()).every(
-      ([key, value]) => searchParams.get(key) === value
+      ([key, value]) => searchParams.get(key) === value,
     );
     return pathname === path && searchMatch;
   }
   return pathname?.startsWith(path) ?? false;
 }
 
-export function flattenNav(): { label: string; href: string; icon: LucideIcon }[] {
+export function flattenNav(): {
+  label: string;
+  href: string;
+  icon: LucideIcon;
+}[] {
   const result: { label: string; href: string; icon: LucideIcon }[] = [];
   NAV_GROUPS.forEach((group) => {
     group.items.forEach((item) => {
-      if (item.href) result.push({ label: item.label, href: item.href, icon: item.icon });
+      if (item.href)
+        result.push({ label: item.label, href: item.href, icon: item.icon });
       item.children?.forEach((child) => {
-        if (child.href) result.push({ label: child.label, href: child.href, icon: child.icon });
+        if (child.href)
+          result.push({
+            label: child.label,
+            href: child.href,
+            icon: child.icon,
+          });
       });
     });
   });
