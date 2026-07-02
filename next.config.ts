@@ -1,7 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Skip type checking for build (temporary fix for gitignored directory issue)
+  output: "standalone",
+
+  // Skip type checking for build
   typescript: {
     ignoreBuildErrors: true,
   },

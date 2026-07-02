@@ -9,7 +9,6 @@ import { useSearchParams } from "next/navigation";
 import { Activity, X, PanelLeft, PanelRight } from "lucide-react";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
-import Navbar from "@/components/Navbar";
 
 export default function DashboardView() {
   const { user } = useUser();
@@ -47,9 +46,6 @@ export default function DashboardView() {
     >
       {/* Main column: top bar + content + right rail */}
       <div className="flex flex-col flex-1 min-w-0">
-        {/* Slim top bar — global actions only */}
-        <Navbar />
-
         <div className="flex flex-1 min-h-0">
           {/* Left rail — shown when widgetSide === "left" */}
           {widgetSide === "left" && (

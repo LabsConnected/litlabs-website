@@ -7,6 +7,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useUser } from "@clerk/nextjs";
 import {
   X,
   ChevronLeft,
@@ -277,6 +278,7 @@ function SidebarContent({
   const { balance } = useWallet();
   const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
+  const { user } = useUser();
 
   const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(() =>
     loadJson(GROUP_EXPANDED_KEY, {} as Record<string, boolean>)
@@ -410,6 +412,46 @@ function SidebarContent({
           </button>
         )}
       </div>
+
+      {/* User profile card */}
+      {!collapsed && isSignedIn && user && (
+        <div
+          className="px-3 py-3 border-b"
+          style={{ borderColor: `${T.borderColor}30` }}
+        >
+          <Link
+            href="/profile"
+            className="flex items-center gap-3 p-2 rounded-lg transition-colors hover:bg-white/5"
+          >
+            <div className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2" style={{ borderColor: T.accentColor }}>
+              {user.imageUrl ? (
+                <NextImage
+                  src={user.imageUrl}
+                  alt="Profile"
+                  fill
+                  className="object-cover"
+                  sizes="40px"
+                />
+              ) : (
+                <div
+                  className="w-full h-full flex items-center justify-center text-sm font-bold"
+                  style={{ backgroundColor: T.boxBg, color: T.accentColor }}
+                >
+                  {(user.firstName?.[0] || user.username?.[0] || "?").toUpperCase()}
+                </div>
+              )}
+            </div>
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
+                {profile?.displayName || user.firstName || user.username || "Creator"}
+              </div>
+              <div className="text-xs truncate" style={{ color: T.textMuted }}>
+                @{user.username || "litree"}
+              </div>
+            </div>
+          </Link>
+        </div>
+      )}
 
       {/* Jarvis / AI assistant */}
       {!collapsed && (
