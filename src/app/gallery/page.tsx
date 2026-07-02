@@ -313,6 +313,7 @@ export default function Gallery() {
     type: "success" | "error";
   } | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
+  const [isMock, setIsMock] = useState(false);
 
   // Real API items first; demo items only when API returns nothing (fallback)
   const baseItems =
@@ -360,7 +361,8 @@ export default function Gallery() {
 
     fetch(`/api/gallery?${params.toString()}`)
       .then((r) => r.json())
-      .then((data: { items?: GalleryItem[] }) => {
+      .then((data: { items?: GalleryItem[]; mock?: boolean }) => {
+        setIsMock(data.mock === true);
         if (data.items && data.items.length > 0) {
           // Mark items as owned by current user
           const currentUserName = user?.fullName || user?.username;
@@ -657,6 +659,15 @@ export default function Gallery() {
           </span>
         </div>
       </div>
+
+      {isMock && (
+        <div
+          className="w-full px-4 py-2 text-[10px] text-center"
+          style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
+        >
+          🛠 Demo gallery — connect Supabase to see real community uploads.
+        </div>
+      )}
 
       {/* ── Dynamic Featured Hero ── */}
       <div

@@ -92,6 +92,7 @@ export default function SocialPageContent() {
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [toast, setToast] = useState<string | null>(null);
   const [emptyFollowing, setEmptyFollowing] = useState(false);
+  const [isMock, setIsMock] = useState(false);
   const toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const showToast = (msg: string) => {
@@ -107,6 +108,7 @@ export default function SocialPageContent() {
       const filter = tab === "following" ? "?filter=following" : "";
       const res = await fetch(`/api/posts${filter}`);
       const data = await res.json();
+      setIsMock(data.mock === true);
       if (data.empty_following) {
         setEmptyFollowing(true);
         setPosts([]);
@@ -263,6 +265,15 @@ export default function SocialPageContent() {
             )}
           </div>
         </div>
+
+        {isMock && (
+          <div
+            className="w-full px-4 py-2 text-[10px] text-center"
+            style={{ backgroundColor: C.accentColor + "20", color: C.accentColor, borderBottom: `1px solid ${C.accentColor}40` }}
+          >
+            🛠 Demo feed — connect Supabase to see real community posts.
+          </div>
+        )}
 
         {/* Three Column Layout */}
         <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_240px] lg:grid-cols-[260px_1fr_300px] xl:grid-cols-[280px_1fr_320px] gap-4">
