@@ -280,9 +280,11 @@ function SidebarContent({
   const { isSignedIn } = useClerkAuth();
   const { user } = useUser();
 
-  const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(() =>
-    loadJson(GROUP_EXPANDED_KEY, {} as Record<string, boolean>)
-  );
+  const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(() => {
+    const saved = loadJson<Record<string, boolean>>(GROUP_EXPANDED_KEY, {});
+    const defaults = Object.fromEntries(NAV_GROUPS.map((g) => [g.label, true]));
+    return { ...defaults, ...saved };
+  });
   const [pinned, setPinned] = useState<string[]>(() => loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]));
   const [hidden, setHidden] = useState<string[]>(() => loadJson(HIDDEN_KEY, []));
   const [mode, setMode] = useState<string>(() => {
