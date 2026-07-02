@@ -1,255 +1,234 @@
 "use client";
 
-import { useRef, useEffect, useState, useCallback } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Maximize2, Minus, Move, Plus, RotateCw, Search, ZoomIn, ZoomOut } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { ZoomIn, ZoomOut, RotateCw, Maximize2, Filter } from "lucide-react";
 
-export interface GalaxyNode {
+export type GalaxyNode = {
   id: string;
+  label: string;
+  type: "user" | "agent" | "system" | "database" | "zone" | "alert";
+  status: "active" | "idle" | "busy" | "offline";
   x: number;
   y: number;
   size: number;
   color: string;
-  label: string;
-  type: "agent" | "user" | "server" | "database" | "post";
-  status: "active" | "idle" | "offline";
   connections: string[];
-  data?: Record<string, unknown>;
-}
+  metric?: number;
+  subtitle?: string;
+};
 
-interface GalaxyMapProps {
+const DEFAULT_NODES: GalaxyNode[] = [
+  { id: "core", label: "LiTTree Core", type: "system", status: "active", x: 0, y: 0, size: 34, color: "#22d3ee", connections: ["studio", "marketplace", "social", "agents"], subtitle: "central orbit", metric: 98 },
+  { id: "studio", label: "Studio", type: "zone", status: "active", x: -190, y: -60, size: 26, color: "#f97316", connections: ["core", "agents"], subtitle: "builder activity", metric: 32 },
+  { id: "marketplace", label: "Marketplace", type: "zone", status: "busy", x: 180, y: -70, size: 26, color: "#a78bfa", connections: ["core", "social"], subtitle: "sales / installs", metric: 18 },
+  { id: "social", label: "Social", type: "zone", status: "active", x: -160, y: 140, size: 24, color: "#ec4899", connections: ["core", "users"], subtitle: "community flow", metric: 44 },
+  { id: "agents", label: "Agents", type: "zone", status: "busy", x: 170, y: 140, size: 26, color: "#34d399", connections: ["core", "db"], subtitle: "tasks + logs", metric: 76 },
+  { id: "users", label: "Users", type: "user", status: "active", x: -320, y: 30, size: 18, color: "#60a5fa", connections: ["social", "core"], subtitle: "active visitors", metric: 42 },
+  { id: "db", label: "Database", type: "database", status: "active", x: 320, y: 40, size: 20, color: "#10b981", connections: ["agents", "core"], subtitle: "realtime rows", metric: 91 },
+  { id: "alerts", label: "Alerts", type: "alert", status: "idle", x: 0, y: 270, size: 18, color: "#f59e0b", connections: ["core"], subtitle: "watchlist", metric: 2 },
+];
+
+export default function GalaxyMap({
+  nodes = DEFAULT_NODES,
+  onNodeClick,
+}: {
   nodes?: GalaxyNode[];
   onNodeClick?: (node: GalaxyNode) => void;
-  interactive?: boolean;
-  filterType?: string;
-}
-
-export default function GalaxyMap({ 
-  nodes = [], 
-  onNodeClick, 
-  interactive = true,
-  filterType = "all"
-}: GalaxyMapProps) {
+}) {
   const { resolvedColors: T } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const wrapperRef = useRef<HTMLDivElement>(null);
   const [zoom, setZoom] = useState(1);
   const [rotation, setRotation] = useState(0);
   const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  const animationRef = useRef<number>();
+  const [dragging, setDragging] = useState(false);
+  const dragStart = useRef({ x: 0, y: 0 });
 
-  // Filter nodes by type
-  const filteredNodes = filterType === "all" 
-    ? nodes 
-    : nodes.filter(node => node.type === filterType);
+  const displayNodes = useMemo(() => nodes.length ? nodes : DEFAULT_NODES, [nodes]);
 
-  // Generate default nodes if none provided
-  const defaultNodes: GalaxyNode[] = [
-    { id: "center", x: 0, y: 0, size: 40, color: "#f97316", label: "Core", type: "server", status: "active", connections: [] },
-    { id: "jarvis", x: -100, y: -50, size: 25, color: "#00ffff", label: "JARVIS", type: "agent", status: "active", connections: ["center"] },
-    { id: "forge", x: 100, y: -50, size: 25, color: "#22d3ee", label: "Forge", type: "agent", status: "active", connections: ["center"] },
-    { id: "pulse", x: -50, y: 100, size: 25, color: "#f472b6", label: "Pulse", type: "agent", status: "idle", connections: ["center"] },
-    { id: "visionary", x: 50, y: 100, size: 25, color: "#e879f9", label: "Visionary", type: "agent", status: "active", connections: ["center"] },
-    { id: "nexus", x: 0, y: 150, size: 25, color: "#34d399", label: "Nexus", type: "agent", status: "active", connections: ["center"] },
-    { id: "db", x: -150, y: 0, size: 20, color: "#10b981", label: "Database", type: "database", status: "active", connections: ["center"] },
-    { id: "users", x: 150, y: 0, size: 20, color: "#8b5cf6", label: "Users", type: "user", status: "active", connections: ["center"] },
-  ];
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+    const resize = () => {
+      canvas.width = wrapper.clientWidth * window.devicePixelRatio;
+      canvas.height = wrapper.clientHeight * window.devicePixelRatio;
+      canvas.style.width = `${wrapper.clientWidth}px`;
+      canvas.style.height = `${wrapper.clientHeight}px`;
+      draw();
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(wrapper);
+    resize();
+    return () => ro.disconnect();
+  }, []);
 
-  const displayNodes = filteredNodes.length > 0 ? filteredNodes : defaultNodes;
-
-  const draw = useCallback(() => {
+  const draw = () => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
-
     const width = canvas.width;
     const height = canvas.height;
-    const centerX = width / 2;
-    const centerY = height / 2;
+    const dpr = window.devicePixelRatio || 1;
 
-    // Clear canvas
-    ctx.fillStyle = T.bgColor + "00";
-    ctx.fillRect(0, 0, width, height);
+    ctx.clearRect(0, 0, width, height);
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    const w = width / dpr;
+    const h = height / dpr;
 
-    // Draw background stars
-    for (let i = 0; i < 200; i++) {
-      const x = Math.random() * width;
-      const y = Math.random() * height;
-      const size = Math.random() * 2;
-      const opacity = Math.random() * 0.5;
-      ctx.fillStyle = `rgba(255, 255, 255, ${opacity})`;
+    const bg = ctx.createLinearGradient(0, 0, w, h);
+    bg.addColorStop(0, T.bgColor);
+    bg.addColorStop(1, T.boxBg);
+    ctx.fillStyle = bg;
+    ctx.fillRect(0, 0, w, h);
+
+    for (let i = 0; i < 140; i++) {
+      const x = (i * 97) % w;
+      const y = (i * 61) % h;
+      const r = (i % 3) + 0.5;
+      ctx.fillStyle = `rgba(255,255,255,${i % 7 === 0 ? 0.45 : 0.15})`;
       ctx.beginPath();
-      ctx.arc(x, y, size, 0, Math.PI * 2);
+      ctx.arc(x, y, r, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    ctx.save();
-    ctx.translate(centerX + offset.x, centerY + offset.y);
+    const cx = w / 2 + offset.x;
+    const cy = h / 2 + offset.y;
+    ctx.translate(cx, cy);
     ctx.scale(zoom, zoom);
     ctx.rotate((rotation * Math.PI) / 180);
 
-    // Draw connections
     displayNodes.forEach((node) => {
-      node.connections.forEach((targetId) => {
-        const target = displayNodes.find(n => n.id === targetId);
-        if (target) {
-          ctx.beginPath();
-          ctx.moveTo(node.x, node.y);
-          ctx.lineTo(target.x, target.y);
-          ctx.strokeStyle = node.color + "40";
-          ctx.lineWidth = 2;
-          ctx.stroke();
-        }
+      node.connections.forEach((id) => {
+        const target = displayNodes.find((n) => n.id === id);
+        if (!target) return;
+        const gradient = ctx.createLinearGradient(node.x, node.y, target.x, target.y);
+        gradient.addColorStop(0, node.color + "90");
+        gradient.addColorStop(1, target.color + "40");
+        ctx.strokeStyle = gradient;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(node.x, node.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.stroke();
       });
     });
 
-    // Draw nodes
-    displayNodes.forEach((node) => {
-      // Glow effect
-      const gradient = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.size * 2);
-      gradient.addColorStop(0, node.color + "40");
-      gradient.addColorStop(1, "transparent");
-      ctx.fillStyle = gradient;
+    displayNodes.forEach((node, i) => {
+      const pulse = 1 + Math.sin(Date.now() / 900 + i) * 0.05;
+      const glow = ctx.createRadialGradient(node.x, node.y, 0, node.x, node.y, node.size * 2.6);
+      glow.addColorStop(0, node.color + "aa");
+      glow.addColorStop(0.35, node.color + "55");
+      glow.addColorStop(1, "transparent");
+      ctx.fillStyle = glow;
       ctx.beginPath();
-      ctx.arc(node.x, node.y, node.size * 2, 0, Math.PI * 2);
+      ctx.arc(node.x, node.y, node.size * 2.6 * pulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // Main node
-      ctx.beginPath();
-      ctx.arc(node.x, node.y, node.size, 0, Math.PI * 2);
       ctx.fillStyle = node.color;
-      ctx.fill();
-
-      // Status indicator
-      const statusColor = node.status === "active" ? "#22c55e" : node.status === "idle" ? "#f59e0b" : "#6b7280";
       ctx.beginPath();
-      ctx.arc(node.x + node.size * 0.7, node.y - node.size * 0.7, 4, 0, Math.PI * 2);
-      ctx.fillStyle = statusColor;
+      ctx.arc(node.x, node.y, node.size * pulse, 0, Math.PI * 2);
       ctx.fill();
 
-      // Label
+      ctx.strokeStyle = "#ffffff22";
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, node.size * pulse, 0, Math.PI * 2);
+      ctx.stroke();
+
+      const statusColor =
+        node.status === "active" ? "#22c55e" : node.status === "busy" ? "#f59e0b" : node.status === "idle" ? "#60a5fa" : "#6b7280";
+      ctx.fillStyle = statusColor;
+      ctx.beginPath();
+      ctx.arc(node.x + node.size * 0.75, node.y - node.size * 0.75, 3.2, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = T.textColor;
-      ctx.font = "10px Inter";
+      ctx.font = "600 12px ui-sans-serif, system-ui";
       ctx.textAlign = "center";
-      ctx.fillText(node.label, node.x, node.y + node.size + 15);
+      ctx.fillText(node.label, node.x, node.y + node.size + 18);
+      ctx.font = "10px ui-monospace, SFMono-Regular, Menlo, monospace";
+      ctx.fillStyle = T.textMuted;
+      if (node.subtitle) ctx.fillText(node.subtitle, node.x, node.y + node.size + 31);
     });
 
     ctx.restore();
-  }, [displayNodes, T, offset, zoom, rotation]);
+  };
 
   useEffect(() => {
-    draw();
-    animationRef.current = requestAnimationFrame(animate);
-  }, [draw]);
+    let raf = 0;
+    const tick = () => {
+      draw();
+      raf = requestAnimationFrame(tick);
+    };
+    tick();
+    return () => cancelAnimationFrame(raf);
+  });
 
-  const animate = () => {
-    // Subtle animation for active nodes
-    displayNodes.forEach((node, i) => {
-      if (node.status === "active") {
-        node.size = 25 + Math.sin(Date.now() / 1000 + i) * 2;
-      }
-    });
-    draw();
-    animationRef.current = requestAnimationFrame(animate);
-  };
-
-  const handleMouseDown = (e: React.MouseEvent) => {
-    if (!interactive) return;
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (isDragging) {
-      setOffset({
-        x: e.clientX - dragStart.x,
-        y: e.clientY - dragStart.y,
-      });
-    }
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleWheel = (e: React.WheelEvent) => {
-    e.preventDefault();
-    const delta = e.deltaY > 0 ? -0.1 : 0.1;
-    setZoom((prev) => Math.max(0.5, Math.min(3, prev + delta)));
-  };
-
-  const handleNodeClick = (e: React.MouseEvent, node: GalaxyNode) => {
-    if (interactive && onNodeClick) {
-      onNodeClick(node);
-    }
+  const toNode = (clientX: number, clientY: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect) return null;
+    const x = clientX - rect.left - rect.width / 2 - offset.x;
+    const y = clientY - rect.top - rect.height / 2 - offset.y;
+    const wx = x / zoom;
+    const wy = y / zoom;
+    return displayNodes.find((node) => {
+      const dx = node.x - wx;
+      const dy = node.y - wy;
+      return Math.sqrt(dx * dx + dy * dy) <= node.size + 8;
+    }) || null;
   };
 
   return (
-    <div className="relative w-full h-full" onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onWheel={handleWheel}>
+    <div
+      ref={wrapperRef}
+      className="relative h-full w-full overflow-hidden rounded-3xl border"
+      style={{
+        background: `radial-gradient(circle at 50% 50%, ${T.accentColor}12, transparent 30%), linear-gradient(180deg, ${T.bgColor}, ${T.boxBg})`,
+        borderColor: T.borderColor + "30",
+        boxShadow: `inset 0 0 0 1px ${T.borderColor}20, 0 30px 80px ${T.bgColor}80`,
+      }}
+      onPointerDown={(e) => {
+        setDragging(true);
+        dragStart.current = { x: e.clientX - offset.x, y: e.clientY - offset.y };
+      }}
+      onPointerMove={(e) => {
+        if (!dragging) return;
+        setOffset({ x: e.clientX - dragStart.current.x, y: e.clientY - dragStart.current.y });
+      }}
+      onPointerUp={() => setDragging(false)}
+      onPointerLeave={() => setDragging(false)}
+      onWheel={(e) => {
+        e.preventDefault();
+        setZoom((z) => Math.max(0.5, Math.min(2.6, z + (e.deltaY > 0 ? -0.08 : 0.08))));
+      }}
+    >
       <canvas
         ref={canvasRef}
         onClick={(e) => {
-          const rect = canvasRef.current?.getBoundingClientRect();
-          if (!rect) return;
-          const x = e.clientX - rect.left - rect.width / 2 - offset.x;
-          const y = e.clientY - rect.top - rect.height / 2 - offset.y;
-          const clickedNode = displayNodes.find(node => {
-            const dx = node.x - x / zoom;
-            const dy = node.y - y / zoom;
-            return Math.sqrt(dx * dx + dy * dy) < node.size;
-          });
-          if (clickedNode) handleNodeClick(e, clickedNode);
+          const node = toNode(e.clientX, e.clientY);
+          if (node && onNodeClick) onNodeClick(node);
         }}
-        style={{ width: "100%", height: "100%" }}
+        className="absolute inset-0 cursor-grab active:cursor-grabbing"
       />
-      
-      {/* Controls */}
-      <div className="absolute bottom-4 left-4 flex items-center gap-2">
-        <button
-          onClick={() => setZoom((prev) => Math.max(0.5, prev - 0.2))}
-          className="p-2 rounded-lg transition-all hover:scale-110"
-          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
-        >
-          <ZoomOut size={16} />
-        </button>
-        <div className="px-3 py-1 rounded-lg text-xs font-bold" style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}>
-          {Math.round(zoom * 100)}%
-        </div>
-        <button
-          onClick={() => setZoom((prev) => Math.min(3, prev + 0.2))}
-          className="p-2 rounded-lg transition-all hover:scale-110"
-          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
-        >
-          <ZoomIn size={16} />
-        </button>
-        <button
-          onClick={() => setRotation((prev) => prev + 15)}
-          className="p-2 rounded-lg transition-all hover:scale-110"
-          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
-        >
-          <RotateCw size={16} />
-        </button>
-        <button
-          onClick={() => { setZoom(1); setRotation(0); setOffset({ x: 0, y: 0 }); }}
-          className="p-2 rounded-lg transition-all hover:scale-110"
-          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
-        >
-          <Maximize2 size={16} />
-        </button>
+
+      <div className="absolute left-4 top-4 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em]" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.accentColor }}>
+        Live Galaxy Map
       </div>
-      
-      {/* Filter indicator */}
-      {filterType !== "all" && (
-        <div className="absolute top-4 left-4 flex items-center gap-2 px-3 py-1.5 rounded-lg"
-          style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}
-        >
-          <Filter size={14} />
-          <span className="text-xs font-bold capitalize">{filterType}</span>
-        </div>
-      )}
+      <div className="absolute bottom-4 left-4 flex items-center gap-2 rounded-2xl border px-3 py-2 text-xs" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textMuted }}>
+        <Move size={14} />
+        Drag, scroll, and click nodes
+      </div>
+      <div className="absolute bottom-4 right-4 flex items-center gap-2">
+        <button onClick={() => setZoom((z) => Math.max(0.5, z - 0.1))} className="rounded-xl border p-2 transition-transform hover:scale-105" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textColor }}><ZoomOut size={14} /></button>
+        <button onClick={() => setZoom(1)} className="rounded-xl border p-2 transition-transform hover:scale-105" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textColor }}><Search size={14} /></button>
+        <button onClick={() => setZoom((z) => Math.min(2.6, z + 0.1))} className="rounded-xl border p-2 transition-transform hover:scale-105" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textColor }}><ZoomIn size={14} /></button>
+        <button onClick={() => setRotation((r) => r + 12)} className="rounded-xl border p-2 transition-transform hover:scale-105" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textColor }}><RotateCw size={14} /></button>
+        <button onClick={() => { setRotation(0); setZoom(1); setOffset({ x: 0, y: 0 }); }} className="rounded-xl border p-2 transition-transform hover:scale-105" style={{ backgroundColor: T.boxBg + "88", borderColor: T.borderColor + "30", color: T.textColor }}><Maximize2 size={14} /></button>
+      </div>
     </div>
   );
 }

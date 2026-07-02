@@ -6,7 +6,6 @@ interface Notification {
   created_at?: string;
   users?: { name?: string } | null;
   content?: string;
-  type?: string;
   [key: string]: unknown;
 }
 
@@ -21,14 +20,24 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSessionAuth } from "@/hooks/useSessionAuth";
 import dynamic from "next/dynamic";
 import {
+  Home,
+  ShoppingBag,
+  Sparkles,
   Settings,
+  Music,
+  Gamepad2,
   Sun,
   Moon,
   ChevronDown,
+  X,
   Menu,
   Bell,
+  MessageSquare,
   Coins,
   User,
+  Code2,
+  Wand2,
+  Bot,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -37,11 +46,26 @@ const NavAuth = dynamic(
 );
 
 /* ------------------------------------------------------------------ */
-/*  User dropdown items                                                 */
+/*  Primary nav links — ALL surfaced, no hidden dropdown               */
+/* ------------------------------------------------------------------ */
+const navLinks = [
+  { href: "/", label: "Home", icon: Home },
+  { href: "/dashboard", label: "Dashboard", icon: Bot },
+  { href: "/studio", label: "Studio", icon: Wand2 },
+  { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/gallery", label: "Gallery", icon: Sparkles },
+  { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+  { href: "/settings", label: "Settings", icon: Settings },
+];
+
+/* ------------------------------------------------------------------ */
+/*  Utility items for mobile / user dropdown                           */
 /* ------------------------------------------------------------------ */
 const userLinks = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
+  { href: "/code", label: "Code Scanner", icon: Code2 },
+  { href: "/showcase", label: "Showcase", icon: Sparkles },
 ];
 
 function WalletBadge({ accentColor }: { accentColor: string }) {
@@ -61,14 +85,11 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
   );
 }
 
-interface NavbarProps {
-  onMenuClick?: () => void;
-}
-
-export default function Navbar({ onMenuClick }: NavbarProps) {
+export default function Navbar() {
   const { theme, resolvedColors, setMode } = useTheme();
   const { profile } = useProfile();
   const pathname = usePathname();
+  const [mobileOpen, setMobileOpen] = useState(false);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
   const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
@@ -124,26 +145,39 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
     };
   }, [isSignedIn]);
 
-  /* Close dropdowns on outside click */
+  /* Close dropdowns on outside click + close mobile drawer on desktop resize */
   useEffect(() => {
     const handleClick = (e: MouseEvent) => {
       if (userRef.current && !userRef.current.contains(e.target as Node))
         setUserOpen(false);
       if (notifRef.current && !notifRef.current.contains(e.target as Node))
         setNotifOpen(false);
+      if (mobileOpen && !hamburgerRef.current?.contains(e.target as Node))
+        setMobileOpen(false);
+    };
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) setMobileOpen(false);
     };
     document.addEventListener("mousedown", handleClick);
-    return () => document.removeEventListener("mousedown", handleClick);
-  }, []);
+    window.addEventListener("resize", handleResize);
+    return () => {
+      document.removeEventListener("mousedown", handleClick);
+      window.removeEventListener("resize", handleResize);
+    };
+  }, [mobileOpen]);
 
-  /* Close dropdowns on route change */
+  /* Close mobile menu on route change */
   useEffect(() => {
     const id = requestAnimationFrame(() => {
+      setMobileOpen(false);
       setUserOpen(false);
       setNotifOpen(false);
     });
     return () => cancelAnimationFrame(id);
   }, [pathname]);
+
+  const isActive = (href: string) =>
+    href === "/" ? pathname === "/" : pathname.startsWith(href);
 
   return (
     <nav
@@ -166,7 +200,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             >
               <Image
                 src="/logo.png"
-                alt="LiTTree LabStudios"
+                alt="LiTree Lab Studios"
                 fill
                 className="object-contain p-0.5"
                 unoptimized
@@ -186,7 +220,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
                   textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
                 }}
               >
-                LiTTree LabStudios
+                LiTree Labs
               </span>
               <span
                 className="text-[9px] font-bold tracking-widest uppercase"
@@ -201,33 +235,37 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             </div>
           </Link>
 
-          {/* Center nav links — full control panel */}
-          <div className="hidden md:flex items-center gap-1 flex-1 justify-center overflow-x-auto scrollbar-hide">
-            {[
-              { href: "/dashboard", label: "Dashboard", icon: "📊" },
-              { href: "/studio", label: "Studio", icon: "🎨" },
-              { href: "/agents", label: "Agents", icon: "🤖" },
-              { href: "/gallery", label: "Gallery", icon: "🖼️" },
-              { href: "/social", label: "Social", icon: "💬" },
-              { href: "/marketplace", label: "Marketplace", icon: "🛒" },
-              { href: "/dashboard?app=music", label: "Music", icon: "🎵" },
-              { href: "/games", label: "Games", icon: "🎮" },
-            ].map((link) => {
-              const active = pathname === link.href || pathname?.startsWith(link.href + "/") || pathname?.startsWith(link.href + "?");
+          {/* Desktop Nav */}
+          <div
+            className="hidden lg:flex items-center gap-1 bg-opacity-40 px-1 py-1 rounded-xl"
+            style={{
+              backgroundColor: resolvedColors.boxBg + "40",
+              border: `1px solid ${resolvedColors.borderColor}20`,
+            }}
+          >
+            {navLinks.map((link) => {
+              const active = isActive(link.href);
+              const Icon = link.icon;
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-bold transition-all hover:scale-105 whitespace-nowrap"
+                  className="relative flex items-center gap-1.5 px-2 xl:px-3 py-1.5 text-[11px] font-bold rounded-lg transition-all duration-200"
                   style={{
-                    color: active ? resolvedColors.accentColor : resolvedColors.textMuted,
-                    backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent",
-                    border: active ? `1px solid ${resolvedColors.accentColor}30` : `1px solid ${resolvedColors.borderColor}20`,
-                    opacity: active ? 1 : 0.7,
+                    color: active
+                      ? resolvedColors.bgColor
+                      : resolvedColors.textMuted,
+                    backgroundColor: active
+                      ? resolvedColors.accentColor
+                      : "transparent",
+                    boxShadow: active
+                      ? `0 0 12px ${resolvedColors.accentColor}50`
+                      : "none",
                   }}
+                  title={link.label}
                 >
-                  <span className="text-xs">{link.icon}</span>
-                  {link.label}
+                  <Icon size={12} strokeWidth={active ? 2.5 : 2} />
+                  <span className="hidden xl:inline">{link.label}</span>
                 </Link>
               );
             })}
@@ -235,11 +273,10 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LitCoins wallet — only when signed in, hide on small */}
+            {/* LitCoins wallet — only when signed in */}
             {authLoaded && isSignedIn && (
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
-
 
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
@@ -347,7 +384,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
               )}
             </div>
 
-            {/* Theme toggle — hidden on very small, shown sm+ */}
+            {/* Theme toggle */}
             <button
               onClick={() => setMode(theme.mode === "dark" ? "light" : "dark")}
               aria-label={
@@ -355,7 +392,7 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
                   ? "Switch to light mode"
                   : "Switch to dark mode"
               }
-              className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
+              className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
               style={{
                 border: `1px solid ${resolvedColors.accentColor}30`,
                 color: resolvedColors.accentColor,
@@ -436,20 +473,151 @@ export default function Navbar({ onMenuClick }: NavbarProps) {
             {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
             <NavAuth linkColor={resolvedColors.accentColor} />
 
-            {/* Mobile hamburger — triggers Sidebar drawer, only below md */}
+            {/* Mobile hamburger */}
             <button
               ref={hamburgerRef}
-              onClick={onMenuClick}
-              aria-label="Open navigation"
-              className="md:hidden w-9 h-9 flex items-center justify-center rounded-lg transition-colors hover:bg-white/10"
-              style={{ color: resolvedColors.textMuted }}
+              onClick={(e) => {
+                e.stopPropagation();
+                setMobileOpen((v) => !v);
+              }}
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
+              aria-expanded={mobileOpen}
+              className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg"
+              style={{ color: resolvedColors.linkColor }}
             >
-              <Menu size={20} />
+              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
             </button>
           </div>
         </div>
       </div>
 
+      {/* Mobile drawer — slide down from nav bottom */}
+      {mobileOpen && (
+        <>
+          {/* Tap-outside scrim */}
+          <div
+            className="lg:hidden fixed inset-0 z-48"
+            style={{ top: "56px", backgroundColor: "rgba(0,0,0,0.6)" }}
+            onClick={() => setMobileOpen(false)}
+            onTouchStart={() => setMobileOpen(false)}
+          />
+          {/* Drawer panel */}
+          <div
+            className="lg:hidden fixed left-0 right-0 z-49 flex flex-col overflow-y-auto"
+            style={{
+              top: "56px",
+              maxHeight: "calc(100dvh - 56px)",
+              backgroundColor: resolvedColors.bgColor,
+              borderBottom: `2px solid ${resolvedColors.accentColor}30`,
+              boxShadow: `0 8px 32px rgba(0,0,0,0.5)`,
+            }}
+          >
+            <div className="px-4 pt-5 pb-2 space-y-1">
+              {navLinks.map((link) => {
+                const Icon = link.icon;
+                const active = isActive(link.href);
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="flex items-center gap-3 px-4 py-4 text-sm font-bold rounded-xl transition-all active:scale-95"
+                    style={{
+                      color: active
+                        ? resolvedColors.bgColor
+                        : resolvedColors.textColor,
+                      backgroundColor: active
+                        ? resolvedColors.accentColor
+                        : resolvedColors.boxBg + "80",
+                      boxShadow: active
+                        ? `0 0 12px ${resolvedColors.accentColor}40`
+                        : "none",
+                    }}
+                  >
+                    <Icon size={20} />
+                    {link.label}
+                  </Link>
+                );
+              })}
+            </div>
+
+            {authLoaded && isSignedIn && (
+              <div className="px-4 pb-2 space-y-1">
+                <div
+                  className="text-[10px] font-bold uppercase tracking-widest px-4 py-2 opacity-50"
+                  style={{ color: resolvedColors.textMuted }}
+                >
+                  Account
+                </div>
+                {userLinks.map((link) => {
+                  const Icon = link.icon;
+                  const active = isActive(link.href);
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      className="flex items-center gap-3 px-4 py-4 text-sm font-bold rounded-xl transition-all active:scale-95"
+                      style={{
+                        color: active
+                          ? resolvedColors.headerColor
+                          : resolvedColors.textColor,
+                        backgroundColor: active
+                          ? resolvedColors.accentColor + "15"
+                          : resolvedColors.boxBg + "80",
+                      }}
+                    >
+                      <Icon size={20} />
+                      {link.label}
+                    </Link>
+                  );
+                })}
+              </div>
+            )}
+
+            <div
+              className="px-4 py-4 mt-2 border-t flex items-center justify-between"
+              style={{ borderColor: resolvedColors.borderColor + "30" }}
+            >
+              <div className="flex items-center gap-2">
+                {authLoaded && isSignedIn ? (
+                  <WalletBadge accentColor={resolvedColors.accentColor} />
+                ) : (
+                  <>
+                    <Coins
+                      size={12}
+                      style={{ color: resolvedColors.accentColor }}
+                    />
+                    <span
+                      className="text-xs font-bold"
+                      style={{ color: resolvedColors.accentColor }}
+                    >
+                      Sign In
+                    </span>
+                  </>
+                )}
+              </div>
+              <button
+                onClick={() =>
+                  setMode(theme.mode === "dark" ? "light" : "dark")
+                }
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border"
+                style={{
+                  borderColor: resolvedColors.borderColor + "40",
+                  color: resolvedColors.textMuted,
+                }}
+              >
+                {theme.mode === "dark" ? <Sun size={13} /> : <Moon size={13} />}
+                {theme.mode === "dark" ? "Light Mode" : "Dark Mode"}
+              </button>
+            </div>
+          </div>
+        </>
+      )}
     </nav>
   );
 }
+
+
+
+
+
+

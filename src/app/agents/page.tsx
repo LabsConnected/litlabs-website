@@ -1,256 +1,125 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
-import { Zap, Terminal, TrendingUp, Palette, Home, ArrowRight, Circle, Plus, Settings, ChevronDown } from "lucide-react";
+import { Activity, ArrowRight, Bot, Clock3, Filter, MessageSquare, Search, Sparkles, Terminal } from "lucide-react";
 
-const AGENTS = [
-  {
-    slug: "director",
-    name: "JARVIS",
-    role: "Director & Orchestrator",
-    tag: "DIRECTOR",
-    color: "#00ffff",
-    icon: Terminal,
-    desc: "Strategy, planning, orchestration. The command center of LiTTree Labs. Sharp, decisive, and loyal.",
-    domains: ["Strategy", "Orchestration", "General", "Planning", "QA"],
-    personality: "Sharp · Strategic · Sardonic wit",
-  },
-  {
-    slug: "forge",
-    name: "Forge",
-    role: "Engineer & Architect",
-    tag: "FORGE",
-    color: "#22d3ee",
-    icon: Zap,
-    desc: "Code, architecture, debugging, DevOps. Writes production-ready TypeScript and ships fast — no preamble.",
-    domains: ["TypeScript", "React", "Next.js", "Supabase", "APIs", "DevOps"],
-    personality: "Precise · Opinionated · Ships fast",
-  },
-  {
-    slug: "pulse",
-    name: "Pulse",
-    role: "Growth, Content & Analytics",
-    tag: "PULSE",
-    color: "#f472b6",
-    icon: TrendingUp,
-    desc: "Growth strategy, content creation, SEO, and data analytics. Thinks in hooks, funnels, and retention loops.",
-    domains: ["Marketing", "Content", "SEO", "Analytics", "Copywriting", "Social"],
-    personality: "Data-driven · High-energy · Actionable",
-  },
-  {
-    slug: "pixel-forge",
-    name: "Visionary",
-    role: "Creative Director & Visual AI",
-    tag: "VISIONARY",
-    color: "#e879f9",
-    icon: Palette,
-    desc: "Image generation, brand identity, UI/UX, and creative direction. Turns ideas into prompts that actually work.",
-    domains: ["Image Gen", "Brand", "Design", "UI/UX", "Storytelling", "Visual"],
-    personality: "Visually fluent · Warm · Brand-aware",
-  },
-  {
-    slug: "home",
-    name: "Nexus",
-    role: "Automation & Integrations",
-    tag: "NEXUS",
-    color: "#34d399",
-    icon: Home,
-    desc: "Home automation, IoT, webhooks, and smart integrations. Connects your digital and physical world.",
-    domains: ["Home Assistant", "IoT", "Automation", "Webhooks", "Integrations"],
-    personality: "Calm · Methodical · Reliable",
-  },
-];
+type AgentStatus = { name: string; role: string; status: "running" | "idle"; lastAction: string; uptime: string };
+const statusMeta = { running: { label: "Working", color: "#22d3ee" }, idle: { label: "Ready", color: "#34d399" } } as const;
 
 export default function AgentsPage() {
   const { resolvedColors: T } = useTheme();
-  const [selectedAgent, setSelectedAgent] = useState(AGENTS[0]);
-  const [prompt, setPrompt] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
+  const [agents, setAgents] = useState<AgentStatus[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [search, setSearch] = useState("");
+  const [filter, setFilter] = useState<"All" | "running" | "idle">("All");
+
+  useEffect(() => {
+    let alive = true;
+    const load = async () => {
+      try {
+        const res = await fetch("/api/agents/status");
+        const data = await res.json();
+        if (alive) setAgents(Array.isArray(data) ? data : []);
+      } finally {
+        if (alive) setLoading(false);
+      }
+    };
+    load();
+    const id = setInterval(load, 15000);
+    return () => { alive = false; clearInterval(id); };
+  }, []);
+
+  const filteredAgents = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    return agents.filter((agent) => {
+      const matchesSearch = !q || agent.name.toLowerCase().includes(q) || agent.role.toLowerCase().includes(q) || agent.lastAction.toLowerCase().includes(q);
+      const matchesFilter = filter === "All" || agent.status === filter;
+      return matchesSearch && matchesFilter;
+    });
+  }, [agents, search, filter]);
+
+  const onlineCount = agents.filter((a) => a.status === "running").length;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
-      {/* Mobile: Discord/Midjourney style */}
-      <div className="md:hidden">
-        {/* Header */}
-        <div className="px-4 py-3 border-b" style={{ borderColor: T.borderColor + "20" }}>
-          <div className="flex items-center justify-between">
-            <h1 className="text-sm font-black" style={{ color: T.textColor }}>Agent Forge</h1>
-            <button
-              onClick={() => setShowSettings(!showSettings)}
-              className="p-2 rounded-lg"
-              style={{ backgroundColor: T.boxBg + "40", color: T.textMuted }}
-            >
-              <Settings size={16} />
-            </button>
+    <main className="min-h-screen pb-12" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+      <section className="relative overflow-hidden border-b" style={{ borderColor: T.borderColor + "20" }}>
+        <div className="absolute inset-0 pointer-events-none" style={{ background: "radial-gradient(circle at top left, rgba(34,211,238,0.12), transparent 35%), radial-gradient(circle at top right, rgba(249,115,22,0.12), transparent 30%)" }} />
+        <div className="relative max-w-7xl mx-auto px-4 py-10 md:py-14">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-6">
+            <div>
+              <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-[0.24em]" style={{ backgroundColor: T.accentColor + "12", border: `1px solid ${T.accentColor}30`, color: T.accentColor }}>
+                <Sparkles size={12} /> {onlineCount}/{agents.length || 0} online
+              </div>
+              <h1 className="mt-4 text-4xl md:text-6xl font-black tracking-tight" style={{ color: T.headerColor }}>Agent Command Center</h1>
+              <p className="mt-4 max-w-2xl text-base md:text-lg opacity-75">A real roster for your AI team. Search, filter, and jump into the right specialist without digging through hidden pages.</p>
+            </div>
+            <div className="grid grid-cols-3 gap-3">
+              <StatCard label="Online" value={onlineCount} accent={T.accentColor} />
+              <StatCard label="Tracked" value={agents.length} accent={T.linkColor} />
+              <StatCard label="Mode" value="Live" accent={T.headerColor} />
+            </div>
           </div>
         </div>
+      </section>
 
-        {/* Agent Selector */}
-        <div className="px-4 py-3 border-b" style={{ borderColor: T.borderColor + "20" }}>
-          <button
-            onClick={() => setShowSettings(!showSettings)}
-            className="w-full flex items-center justify-between px-3 py-2 rounded-lg text-xs font-bold"
-            style={{ backgroundColor: T.boxBg + "40", color: T.textColor }}
-          >
-            <div className="flex items-center gap-2">
-              <div
-                className="w-6 h-6 rounded flex items-center justify-center"
-                style={{ backgroundColor: selectedAgent.color + "20" }}
-              >
-                <selectedAgent.icon size={12} style={{ color: selectedAgent.color }} />
-              </div>
-              {selectedAgent.name}
-            </div>
-            <ChevronDown size={14} style={{ color: T.textMuted }} />
-          </button>
-        </div>
-
-        {/* Prompt Input */}
-        <div className="px-4 py-3">
-          <textarea
-            value={prompt}
-            onChange={(e) => setPrompt(e.target.value)}
-            placeholder="Describe what you need..."
-            className="w-full px-3 py-2 rounded-lg text-xs resize-none outline-none"
-            style={{
-              backgroundColor: T.boxBg + "40",
-              border: `1px solid ${T.borderColor}30`,
-              color: T.textColor,
-              minHeight: "80px",
-            }}
-            rows={3}
-          />
-        </div>
-
-        {/* Attachments */}
-        <div className="px-4 py-2">
-          <button className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-bold"
-            style={{ backgroundColor: T.boxBg + "40", color: T.textMuted }}>
-            <Plus size={14} /> Attachments
-          </button>
-        </div>
-
-        {/* Generate Button */}
-        <div className="px-4 py-3">
-          <button className="w-full py-3 rounded-lg text-sm font-bold"
-            style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
-            Generate
-          </button>
-        </div>
-
-        {/* Results Grid */}
-        <div className="px-4 py-4">
-          <div className="text-xs font-bold mb-3" style={{ color: T.textMuted }}>Results</div>
-          <div className="grid grid-cols-2 gap-2">
-            {[1, 2, 3, 4, 5, 6].map((i) => (
-              <div
-                key={i}
-                className="aspect-square rounded-lg"
-                style={{ backgroundColor: T.boxBg + "40", border: `1px solid ${T.borderColor}20` }}
-              />
+      <section className="max-w-7xl mx-auto px-4 pt-5">
+        <div className="flex flex-col lg:flex-row gap-3 lg:items-center lg:justify-between">
+          <div className="relative flex-1 max-w-xl">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2" style={{ color: T.textMuted }} />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Search agents, roles, or recent actions..." className="w-full pl-9 pr-4 py-3 rounded-xl text-sm outline-none" style={{ backgroundColor: T.boxBg + "50", border: `1px solid ${T.borderColor}30`, color: T.textColor }} />
+          </div>
+          <div className="flex items-center gap-2 flex-wrap">
+            <Filter size={14} style={{ color: T.textMuted }} />
+            {(["All", "running", "idle"] as const).map((item) => (
+              <button key={item} onClick={() => setFilter(item)} className="px-3 py-2 rounded-xl text-xs font-bold capitalize" style={{ backgroundColor: filter === item ? T.accentColor + "15" : T.boxBg + "35", color: filter === item ? T.accentColor : T.textMuted, border: `1px solid ${filter === item ? T.accentColor + "35" : T.borderColor + "25"}` }}>{item}</button>
             ))}
           </div>
         </div>
-      </div>
+      </section>
 
-      {/* Desktop: Original grid layout */}
-      <div className="hidden md:block">
-        {/* Hero */}
-        <div className="relative overflow-hidden border-b" style={{ borderColor: T.borderColor + "20" }}>
-          <div className="absolute inset-0 pointer-events-none"
-            style={{ background: `radial-gradient(ellipse at 50% 0%, ${T.accentColor}08 0%, transparent 70%)` }} />
-          <div className="max-w-5xl mx-auto px-6 py-16 text-center relative z-10">
-            <div className="inline-flex items-center gap-2 px-3 py-1.5 rounded-full text-xs font-bold mb-6"
-              style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}>
-              <Circle size={6} className="fill-current" /> 5 AGENTS ONLINE
-            </div>
-            <h1 className="text-4xl lg:text-5xl font-black tracking-tight mb-4" style={{ color: T.textColor }}>
-              Your AI Agent Team
-            </h1>
-            <p className="text-lg max-w-xl mx-auto" style={{ color: T.textMuted }}>
-              Five specialized agents, each with deep expertise. Pick one and start a conversation.
-            </p>
-          </div>
-        </div>
-
-        {/* Agent grid */}
-        <div className="max-w-5xl mx-auto px-6 py-12">
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-            {AGENTS.map((agent) => {
-              const Icon = agent.icon;
+      <section className="max-w-7xl mx-auto px-4 mt-6">
+        {loading ? (
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">{Array.from({ length: 6 }).map((_, i) => <div key={i} className="h-56 rounded-3xl border animate-pulse" style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }} />)}</div>
+        ) : (
+          <div className="grid md:grid-cols-2 xl:grid-cols-3 gap-4">
+            {filteredAgents.map((agent) => {
+              const meta = statusMeta[agent.status];
               return (
-                <Link key={agent.slug} href={`/agents/${agent.slug}`}
-                  className="group relative rounded-2xl p-6 flex flex-col gap-4 transition-all duration-200 hover:scale-[1.02] hover:-translate-y-0.5"
-                  style={{
-                    backgroundColor: T.boxBg + "cc",
-                    border: `1px solid ${agent.color}20`,
-                    boxShadow: `0 0 0 0 ${agent.color}00`,
-                  }}>
-                  {/* Glow on hover */}
-                  <div className="absolute inset-0 rounded-2xl opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
-                    style={{ background: `radial-gradient(circle at 30% 20%, ${agent.color}08 0%, transparent 60%)` }} />
-
-                  {/* Header */}
+                <article key={agent.name} className="group rounded-3xl border p-5 transition-transform duration-200 hover:-translate-y-1" style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "25" }}>
                   <div className="flex items-start justify-between">
-                    <div className="w-12 h-12 rounded-xl flex items-center justify-center"
-                      style={{ backgroundColor: agent.color + "15", border: `1px solid ${agent.color}30` }}>
-                      <Icon size={22} style={{ color: agent.color }} />
-                    </div>
-                    <div className="flex items-center gap-1.5">
-                      <div className="w-1.5 h-1.5 rounded-full animate-pulse" style={{ backgroundColor: agent.color }} />
-                      <span className="text-[9px] font-bold tracking-widest" style={{ color: agent.color }}>ONLINE</span>
-                    </div>
+                    <div className="w-12 h-12 rounded-2xl flex items-center justify-center" style={{ backgroundColor: meta.color + "15", border: `1px solid ${meta.color}30` }}><Bot size={20} style={{ color: meta.color }} /></div>
+                    <div className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: meta.color }} /><span className="text-[10px] font-black uppercase tracking-[0.24em]" style={{ color: meta.color }}>{meta.label}</span></div>
                   </div>
-
-                  {/* Name + role */}
-                  <div>
-                    <div className="text-lg font-black mb-0.5" style={{ color: T.textColor }}>{agent.name}</div>
-                    <div className="text-[11px] font-bold uppercase tracking-wider mb-2" style={{ color: agent.color }}>{agent.role}</div>
-                    <p className="text-xs leading-relaxed" style={{ color: T.textMuted }}>{agent.desc}</p>
+                  <h2 className="mt-4 text-2xl font-black" style={{ color: T.headerColor }}>{agent.name}</h2>
+                  <p className="mt-1 text-[11px] font-bold uppercase tracking-[0.24em]" style={{ color: T.textMuted }}>{agent.role}</p>
+                  <p className="mt-4 text-sm leading-relaxed" style={{ color: T.textColor }}>{agent.lastAction}</p>
+                  <div className="mt-4 grid grid-cols-2 gap-2 text-xs">
+                    <div className="rounded-xl p-3" style={{ backgroundColor: T.bgColor + "60" }}><div className="flex items-center gap-1.5 opacity-60"><Clock3 size={11} /> Uptime</div><div className="mt-1 font-black">{agent.uptime}</div></div>
+                    <div className="rounded-xl p-3" style={{ backgroundColor: T.bgColor + "60" }}><div className="flex items-center gap-1.5 opacity-60"><Activity size={11} /> Status</div><div className="mt-1 font-black capitalize">{agent.status}</div></div>
                   </div>
-
-                  {/* Domains */}
-                  <div className="flex flex-wrap gap-1">
-                    {agent.domains.slice(0, 4).map((d) => (
-                      <span key={d} className="text-[9px] px-2 py-0.5 rounded-full font-bold"
-                        style={{ backgroundColor: agent.color + "15", color: agent.color }}>
-                        {d}
-                      </span>
-                    ))}
-                    {agent.domains.length > 4 && (
-                      <span className="text-[9px] px-2 py-0.5 rounded-full font-bold"
-                        style={{ backgroundColor: T.borderColor + "20", color: T.textMuted }}>
-                        +{agent.domains.length - 4}
-                      </span>
-                    )}
+                  <div className="mt-4 flex items-center gap-2">
+                    <Link href={`/agents/${agent.name.toLowerCase().replace(/\s+/g, "-")}`} className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold" style={{ backgroundColor: meta.color + "15", color: meta.color, border: `1px solid ${meta.color}30` }}><MessageSquare size={14} /> Chat</Link>
+                    <Link href="/studio?tool=agents" className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold" style={{ backgroundColor: T.bgColor + "60", color: T.textMuted, border: `1px solid ${T.borderColor}30` }}><Terminal size={14} /> Open</Link>
                   </div>
-
-                  {/* Personality + CTA */}
-                  <div className="flex items-center justify-between mt-auto pt-2 border-t" style={{ borderColor: T.borderColor + "15" }}>
-                    <span className="text-[10px] italic" style={{ color: T.textMuted }}>{agent.personality}</span>
-                    <div className="flex items-center gap-1 text-[11px] font-bold group-hover:gap-2 transition-all" style={{ color: agent.color }}>
-                      Chat <ArrowRight size={12} />
-                    </div>
-                  </div>
-                </Link>
+                </article>
               );
             })}
           </div>
+        )}
+      </section>
 
-          {/* Bottom note */}
-          <div className="mt-12 text-center">
-            <p className="text-xs" style={{ color: T.textMuted }}>
-              All agents share context from your{" "}
-              <Link href="/dashboard?tab=settings&section=project" className="underline hover:opacity-70" style={{ color: T.accentColor }}>
-                project settings
-              </Link>
-              {" "}— set it once, every agent knows your stack.
-            </p>
-          </div>
+      <section className="max-w-7xl mx-auto px-4 mt-8">
+        <div className="rounded-3xl border p-5 md:p-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4" style={{ background: "linear-gradient(135deg, rgba(34,211,238,0.08), rgba(249,115,22,0.06))", borderColor: T.borderColor + "25" }}>
+          <div><div className="text-xs font-black uppercase tracking-[0.24em]" style={{ color: T.accentColor }}>Next step</div><p className="mt-2 text-sm opacity-80">Use the agent cards to chat, or launch the Studio agents tool for a more hands-on workspace.</p></div>
+          <div className="flex items-center gap-2"><Link href="/studio?tool=agents" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-black" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>Launch Studio <ArrowRight size={14} /></Link><Link href="/gallery" className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold" style={{ backgroundColor: T.boxBg + "50", color: T.textColor, border: `1px solid ${T.borderColor}30` }}>Browse Gallery</Link></div>
         </div>
-      </div>
-    </div>
+      </section>
+    </main>
   );
+}
+
+function StatCard({ label, value, accent }: { label: string; value: string | number; accent: string }) {
+  return <div className="min-w-[92px] rounded-2xl border p-3" style={{ backgroundColor: "rgba(255,255,255,0.02)", borderColor: `${accent}25` }}><div className="text-2xl font-black" style={{ color: accent }}>{value}</div><div className="mt-1 text-[10px] font-bold uppercase tracking-[0.22em] opacity-60">{label}</div></div>;
 }

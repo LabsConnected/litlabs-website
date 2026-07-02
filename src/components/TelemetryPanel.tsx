@@ -1,198 +1,172 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { Activity, Zap, Server, Database, TrendingUp, AlertCircle, Clock, Users, MessageSquare } from "lucide-react";
-import LoadingSkeleton from "./LoadingSkeleton";
+import { Activity, AlertCircle, Clock, Database, Server, TrendingUp, Users, Zap } from "lucide-react";
 
-interface TelemetryData {
-  activeUsers: number;
+export type TelemetryData = {
+  onlineUsers: number;
   totalUsers: number;
-  agentRequests: number;
-  systemLoad: number;
+  todaySignups: number;
+  todaySales: number;
+  todayRevenueLBC: number;
+  activeAgents: number;
+  totalConversations: number;
+  systemHealth: "healthy" | "degraded" | "down";
+  requestRate: number;
   responseTime: number;
   errorRate: number;
-  uptime: number;
-  totalConversations?: number;
-  totalPosts?: number;
-}
+};
 
-interface TelemetryPanelProps {
+const DEFAULT_DATA: TelemetryData = {
+  onlineUsers: 42,
+  totalUsers: 1337,
+  todaySignups: 9,
+  todaySales: 11,
+  todayRevenueLBC: 2450,
+  activeAgents: 6,
+  totalConversations: 4521,
+  systemHealth: "healthy",
+  requestRate: 88,
+  responseTime: 245,
+  errorRate: 0.02,
+};
+
+export default function TelemetryPanel({
+  data = DEFAULT_DATA,
+  lastUpdate,
+  connected = false,
+}: {
   data?: TelemetryData;
-}
-
-export default function TelemetryPanel({ data: externalData }: TelemetryPanelProps) {
+  lastUpdate?: Date | null;
+  connected?: boolean;
+}) {
   const { resolvedColors: T } = useTheme();
-  const [loading, setLoading] = useState(true);
-  const [telemetry, setTelemetry] = useState<TelemetryData>(externalData || {
-    activeUsers: 1247,
-    totalUsers: 5423,
-    agentRequests: 89,
-    systemLoad: 34,
-    responseTime: 245,
-    errorRate: 0.02,
-    uptime: 99.9,
-    totalConversations: 4521,
-    totalPosts: 1234,
-  });
+  const [pulse, setPulse] = useState(0);
 
   useEffect(() => {
-    if (externalData) {
-      setTelemetry(externalData);
-      setLoading(false);
-      return;
-    }
+    const id = window.setInterval(() => setPulse((v) => (v + 1) % 1000), 1600);
+    return () => window.clearInterval(id);
+  }, []);
 
-    // Simulate loading
-    setTimeout(() => setLoading(false), 500);
+  const metrics = useMemo(
+    () => [
+      { label: "Online Users", value: data.onlineUsers, icon: Users, color: T.accentColor },
+      { label: "Requests/min", value: data.requestRate, icon: Zap, color: "#f59e0b" },
+      { label: "Revenue (LBC)", value: data.todayRevenueLBC.toLocaleString(), icon: TrendingUp, color: "#34d399" },
+      { label: "Active Agents", value: data.activeAgents, icon: Activity, color: "#a78bfa" },
+    ],
+    [data, T.accentColor],
+  );
 
-    // Simulate live updates if no external data
-    const interval = setInterval(() => {
-      setTelemetry(prev => ({
-        ...prev,
-        activeUsers: Math.max(0, prev.activeUsers + Math.floor(Math.random() * 10) - 5),
-        agentRequests: prev.agentRequests + Math.floor(Math.random() * 3),
-        systemLoad: 30 + Math.floor(Math.random() * 15),
-        responseTime: 200 + Math.floor(Math.random() * 100),
-      }));
-    }, 2000);
-    return () => clearInterval(interval);
-  }, [externalData]);
-
-  if (loading) {
-    return (
-      <div className="space-y-4">
-        <LoadingSkeleton type="card" height="40px" />
-        <div className="grid grid-cols-2 gap-3">
-          <LoadingSkeleton type="card" height="80px" />
-          <LoadingSkeleton type="card" height="80px" />
-        </div>
-        <LoadingSkeleton type="card" height="120px" />
-      </div>
-    );
-  }
+  const statusColor =
+    data.systemHealth === "healthy" ? "#22c55e" : data.systemHealth === "degraded" ? "#f59e0b" : "#ef4444";
 
   return (
     <div className="space-y-4">
-      {/* System Status */}
-      <div className="flex items-center gap-2 p-3 rounded-xl border"
-        style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-        <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-        <span className="text-xs font-bold" style={{ color: T.textColor }}>All Systems Operational</span>
+      <div className="rounded-2xl border p-4" style={{ backgroundColor: T.boxBg + "78", borderColor: T.borderColor + "28" }}>
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>System Status</div>
+            <div className="mt-1 text-lg font-black" style={{ color: T.textColor }}>Command center live</div>
+          </div>
+          <div className="flex items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-black uppercase" style={{ borderColor: statusColor + "40", color: statusColor, backgroundColor: statusColor + "12" }}>
+            <span className="w-2 h-2 rounded-full" style={{ backgroundColor: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
+            {connected ? "connected" : "polling"}
+          </div>
+        </div>
+        <div className="mt-3 text-xs" style={{ color: T.textMuted }}>
+          {lastUpdate ? `Last update ${lastUpdate.toLocaleTimeString()}` : "Waiting for live data"}
+        </div>
       </div>
 
-      {/* Key Metrics */}
       <div className="grid grid-cols-2 gap-3">
-        <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-          <div className="flex items-center gap-2 mb-1">
-            <Activity size={14} style={{ color: T.accentColor }} />
-            <span className="text-[10px]" style={{ color: T.textMuted }}>Active Users</span>
-          </div>
-          <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.activeUsers.toLocaleString()}</div>
-        </div>
-        <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-          <div className="flex items-center gap-2 mb-1">
-            <Users size={14} style={{ color: "#8b5cf6" }} />
-            <span className="text-[10px]" style={{ color: T.textMuted }}>Total Users</span>
-          </div>
-          <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.totalUsers.toLocaleString()}</div>
-        </div>
-        <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-          <div className="flex items-center gap-2 mb-1">
-            <Zap size={14} style={{ color: "#f59e0b" }} />
-            <span className="text-[10px]" style={{ color: T.textMuted }}>Requests/min</span>
-          </div>
-          <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.agentRequests}</div>
-        </div>
-        <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-          <div className="flex items-center gap-2 mb-1">
-            <Server size={14} style={{ color: "#22c55e" }} />
-            <span className="text-[10px]" style={{ color: T.textMuted }}>System Load</span>
-          </div>
-          <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.systemLoad}%</div>
-        </div>
+        {metrics.map((metric) => {
+          const Icon = metric.icon;
+          return (
+            <div key={metric.label} className="rounded-2xl border p-3" style={{ backgroundColor: T.boxBg + "70", borderColor: T.borderColor + "28" }}>
+              <div className="flex items-center justify-between">
+                <Icon size={14} style={{ color: metric.color }} />
+                <span className="text-[10px] uppercase tracking-[0.18em]" style={{ color: T.textMuted }}>{metric.label}</span>
+              </div>
+              <div className="mt-2 text-2xl font-black" style={{ color: T.textColor }}>{metric.value}</div>
+            </div>
+          );
+        })}
       </div>
 
-      {/* Additional Metrics */}
-      {telemetry.totalConversations !== undefined && (
-        <div className="grid grid-cols-2 gap-3">
-          <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-            <div className="flex items-center gap-2 mb-1">
-              <MessageSquare size={14} style={{ color: "#06b6d4" }} />
-              <span className="text-[10px]" style={{ color: T.textMuted }}>Conversations</span>
-            </div>
-            <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.totalConversations.toLocaleString()}</div>
-          </div>
-          <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-            <div className="flex items-center gap-2 mb-1">
-              <TrendingUp size={14} style={{ color: "#ec4899" }} />
-              <span className="text-[10px]" style={{ color: T.textMuted }}>Posts</span>
-            </div>
-            <div className="text-xl font-black" style={{ color: T.textColor }}>{telemetry.totalPosts?.toLocaleString() || 0}</div>
-          </div>
+      <div className="space-y-3 rounded-2xl border p-4" style={{ backgroundColor: T.boxBg + "70", borderColor: T.borderColor + "28" }}>
+        <div className="flex items-center justify-between">
+          <span className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Performance</span>
+          <span className="text-[10px] font-mono" style={{ color: T.accentColor }}>{data.responseTime}ms avg</span>
         </div>
-      )}
-
-      {/* Performance Charts */}
-      <div className="space-y-3">
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold" style={{ color: T.textMuted }}>Response Time</span>
-            <span className="text-xs font-mono" style={{ color: T.accentColor }}>{telemetry.responseTime}ms</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "30" }}>
-            <div 
-              className="h-full rounded-full transition-all duration-500"
-              style={{ 
-                width: `${Math.min(100, (500 / telemetry.responseTime) * 100)}%`,
-                backgroundColor: telemetry.responseTime < 300 ? "#22c55e" : telemetry.responseTime < 500 ? "#f59e0b" : "#ef4444"
-              }}
-            />
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold" style={{ color: T.textMuted }}>Error Rate</span>
-            <span className="text-xs font-mono" style={{ color: telemetry.errorRate < 0.05 ? "#22c55e" : "#ef4444" }}>{(telemetry.errorRate * 100).toFixed(2)}%</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "30" }}>
-            <div 
-              className="h-full rounded-full transition-all duration-500"
-              style={{ 
-                width: `${telemetry.errorRate * 100}%`,
-                backgroundColor: telemetry.errorRate < 0.05 ? "#22c55e" : "#ef4444"
-              }}
-            />
-          </div>
-        </div>
-        <div>
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-xs font-bold" style={{ color: T.textMuted }}>Uptime</span>
-            <span className="text-xs font-mono" style={{ color: "#8b5cf6" }}>{telemetry.uptime}%</span>
-          </div>
-          <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "30" }}>
-            <div 
-              className="h-full rounded-full transition-all duration-500"
-              style={{ 
-                width: `${telemetry.uptime}%`,
-                backgroundColor: telemetry.uptime > 99 ? "#22c55e" : telemetry.uptime > 95 ? "#f59e0b" : "#ef4444"
-              }}
-            />
-          </div>
-        </div>
+        <Bar label="Response Time" value={Math.min(100, (500 / data.responseTime) * 100)} color={data.responseTime < 300 ? "#22c55e" : data.responseTime < 500 ? "#f59e0b" : "#ef4444"} />
+        <Bar label="Error Rate" value={Math.min(100, data.errorRate * 100)} color={data.errorRate < 0.05 ? "#22c55e" : "#ef4444"} />
       </div>
 
-      {/* Database Status */}
-      <div className="p-3 rounded-xl border" style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-        <div className="flex items-center gap-2 mb-2">
-          <Database size={14} style={{ color: T.accentColor }} />
-          <span className="text-xs font-bold" style={{ color: T.textMuted }}>Database</span>
-        </div>
+      <div className="rounded-2xl border p-4" style={{ backgroundColor: T.boxBg + "70", borderColor: T.borderColor + "28" }}>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-500" />
-          <span className="text-xs" style={{ color: T.textColor }}>Connected</span>
+          <Server size={14} style={{ color: T.accentColor }} />
+          <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Live Database</div>
+        </div>
+        <div className="mt-3 flex items-center gap-2">
+          <Database size={14} style={{ color: "#22c55e" }} />
+          <span className="text-sm" style={{ color: T.textColor }}>Connected and receiving rows</span>
+        </div>
+        <div className="mt-3 text-xs" style={{ color: T.textMuted }}>
+          {data.totalUsers.toLocaleString()} users · {data.totalConversations.toLocaleString()} conversations
         </div>
       </div>
+
+      <div className="rounded-2xl border p-4" style={{ backgroundColor: T.boxBg + "70", borderColor: T.borderColor + "28" }}>
+        <div className="flex items-center justify-between">
+          <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Uptime</div>
+          <Clock size={14} style={{ color: T.accentColor }} />
+        </div>
+        <div className="mt-3 text-3xl font-black" style={{ color: T.textColor }}>99.9%</div>
+        <div className="mt-2 text-xs" style={{ color: T.textMuted }}>Stable over the last 24 hours</div>
+        <div className="mt-3 h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "24" }}>
+          <div className="h-full rounded-full" style={{ width: `${90 + (pulse % 8)}%`, background: `linear-gradient(90deg, ${T.accentColor}, ${statusColor})` }} />
+        </div>
+      </div>
+
+      <div className="rounded-2xl border p-4" style={{ backgroundColor: T.boxBg + "70", borderColor: T.borderColor + "28" }}>
+        <div className="flex items-center gap-2">
+          <AlertCircle size={14} style={{ color: T.warning }} />
+          <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Alerts</div>
+        </div>
+        <div className="mt-3 grid grid-cols-2 gap-2 text-sm">
+          <StatChip label="Today sales" value={data.todaySales} color={T.accentColor} />
+          <StatChip label="Signups" value={data.todaySignups} color="#34d399" />
+          <StatChip label="Agents" value={data.activeAgents} color="#a78bfa" />
+          <StatChip label="Errors" value={Math.max(0, Math.round(data.errorRate * 100))} color={T.warning} />
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Bar({ label, value, color }: { label: string; value: number; color: string }) {
+  const { resolvedColors: T } = useTheme();
+  return (
+    <div>
+      <div className="mb-2 flex items-center justify-between">
+        <span className="text-xs font-bold" style={{ color: T.textMuted }}>{label}</span>
+        <span className="text-[10px] font-mono" style={{ color }}>{value.toFixed(1)}%</span>
+      </div>
+      <div className="h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "24" }}>
+        <div className="h-full rounded-full" style={{ width: `${value}%`, backgroundColor: color }} />
+      </div>
+    </div>
+  );
+}
+
+function StatChip({ label, value, color }: { label: string; value: number | string; color: string }) {
+  const { resolvedColors: T } = useTheme();
+  return (
+    <div className="rounded-xl border px-3 py-2" style={{ backgroundColor: T.bgColor + "50", borderColor: color + "30" }}>
+      <div className="text-[10px] uppercase tracking-[0.18em]" style={{ color: T.textMuted }}>{label}</div>
+      <div className="mt-1 text-lg font-black" style={{ color }}>{value}</div>
     </div>
   );
 }

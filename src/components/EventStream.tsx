@@ -1,142 +1,122 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { Clock, AlertCircle, CheckCircle, ShoppingCart, UserPlus, MessageSquare, Zap, Database } from "lucide-react";
+import { AlertCircle, CheckCircle2, Clock, ShoppingCart, UserPlus, Users } from "lucide-react";
 
-export interface Event {
+export type AdminEvent = {
   id: string;
-  type: "user" | "agent" | "system" | "sale" | "alert" | "database" | "request";
+  type: "user" | "agent" | "system" | "sale" | "alert" | "signup" | "chat";
   message: string;
-  timestamp: Date;
-  icon?: React.ReactNode;
+  timestamp: string | Date;
   data?: Record<string, unknown>;
-}
+};
 
-interface EventStreamProps {
-  events?: Event[];
-  maxEvents?: number;
-}
+const DEFAULT_EVENTS: AdminEvent[] = [
+  { id: "1", type: "signup", message: "New user joined the platform", timestamp: new Date(Date.now() - 1000 * 60 * 2) },
+  { id: "2", type: "agent", message: "JARVIS completed a command cycle", timestamp: new Date(Date.now() - 1000 * 60 * 4) },
+  { id: "3", type: "sale", message: "Code Champion purchased", timestamp: new Date(Date.now() - 1000 * 60 * 7) },
+  { id: "4", type: "system", message: "Provider health check passed", timestamp: new Date(Date.now() - 1000 * 60 * 10) },
+];
 
-export default function EventStream({ events: externalEvents, maxEvents = 10 }: EventStreamProps) {
+export default function EventStream({
+  events = DEFAULT_EVENTS,
+  onClear,
+}: {
+  events?: AdminEvent[];
+  onClear?: () => void;
+}) {
   const { resolvedColors: T } = useTheme();
-  const [events, setEvents] = useState<Event[]>([]);
-
-  useEffect(() => {
-    if (externalEvents) {
-      setEvents(externalEvents);
-      return;
-    }
-
-    // Mock events - replace with real WebSocket connection
-    const mockEvents: Event[] = [
-      { id: "1", type: "user", message: "User @alex joined the platform", timestamp: new Date(Date.now() - 1000 * 60 * 2), icon: <UserPlus size={12} /> },
-      { id: "2", type: "agent", message: "JARVIS completed orchestration task", timestamp: new Date(Date.now() - 1000 * 60 * 5), icon: <CheckCircle size={12} /> },
-      { id: "3", type: "system", message: "System health check passed", timestamp: new Date(Date.now() - 1000 * 60 * 10), icon: <Clock size={12} /> },
-      { id: "4", type: "sale", message: "Agent sale: Code Champion purchased", timestamp: new Date(Date.now() - 1000 * 60 * 15), icon: <ShoppingCart size={12} /> },
-      { id: "5", type: "agent", message: "Forge deployed production build", timestamp: new Date(Date.now() - 1000 * 60 * 20), icon: <CheckCircle size={12} /> },
-      { id: "6", type: "user", message: "User @sarah created new project", timestamp: new Date(Date.now() - 1000 * 60 * 25), icon: <UserPlus size={12} /> },
-      { id: "7", type: "alert", message: "High memory usage detected on Forge", timestamp: new Date(Date.now() - 1000 * 60 * 30), icon: <AlertCircle size={12} /> },
-    ];
-
-    setEvents(mockEvents);
-
-    // Add new event every 30 seconds
-    const interval = setInterval(() => {
-      const eventTypes: Event["type"][] = ["user", "agent", "system", "sale", "alert", "database", "request"];
-      const messages = [
-        "User joined",
-        "Agent task completed",
-        "System check",
-        "Sale made",
-        "Alert triggered",
-        "Database query",
-        "API request",
-      ];
-      const newEvent: Event = {
-        id: Date.now().toString(),
-        type: eventTypes[Math.floor(Math.random() * eventTypes.length)],
-        message: messages[Math.floor(Math.random() * messages.length)],
-        timestamp: new Date(),
-      };
-      setEvents(prev => [newEvent, ...prev].slice(0, maxEvents));
-    }, 30000);
-
-    return () => clearInterval(interval);
-  }, [externalEvents, maxEvents]);
-
-  const getEventColor = (type: Event["type"]) => {
-    switch (type) {
-      case "user": return "#3b82f6";
-      case "agent": return "#22c55e";
-      case "system": return "#8b5cf6";
-      case "sale": return "#f59e0b";
-      case "alert": return "#ef4444";
-      case "database": return "#10b981";
-      case "request": return "#06b6d4";
-      default: return "#6b7280";
-    }
-  };
-
-  const getEventIcon = (type: Event["type"]) => {
-    switch (type) {
-      case "user": return <UserPlus size={12} />;
-      case "agent": return <CheckCircle size={12} />;
-      case "system": return <Clock size={12} />;
-      case "sale": return <ShoppingCart size={12} />;
-      case "alert": return <AlertCircle size={12} />;
-      case "database": return <Database size={12} />;
-      case "request": return <Zap size={12} />;
-      default: return <MessageSquare size={12} />;
-    }
-  };
-
-  const formatTime = (date: Date) => {
-    const now = new Date();
-    const diff = Math.floor((now.getTime() - date.getTime()) / 1000 / 60);
-    if (diff < 1) return "Just now";
-    if (diff < 60) return `${diff}m ago`;
-    return `${Math.floor(diff / 60)}h ago`;
-  };
+  const rows = useMemo(() => events.slice(0, 12), [events]);
 
   return (
-    <div className="space-y-2">
-      <div className="flex items-center gap-2">
-        <Clock size={14} style={{ color: T.accentColor }} />
-        <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-          Live Events
-        </span>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Clock size={14} style={{ color: T.accentColor }} />
+          <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Live Events</div>
+        </div>
+        {onClear && (
+          <button onClick={onClear} className="rounded-full border px-3 py-1 text-[10px] font-black uppercase" style={{ borderColor: T.borderColor + "30", color: T.textMuted, backgroundColor: T.boxBg + "60" }}>
+            Clear
+          </button>
+        )}
       </div>
-      <div className="space-y-2 max-h-64 overflow-y-auto">
-        {events.length === 0 ? (
-          <div className="text-center py-8">
-            <Clock size={24} className="mx-auto mb-2" style={{ color: T.textMuted }} />
-            <p className="text-xs" style={{ color: T.textMuted }}>No events yet</p>
+      <div className="space-y-2 max-h-[28rem] overflow-auto pr-1">
+        {rows.length === 0 ? (
+          <div className="rounded-2xl border px-4 py-6 text-center text-sm" style={{ backgroundColor: T.boxBg + "60", borderColor: T.borderColor + "28", color: T.textMuted }}>
+            No recent activity
           </div>
         ) : (
-          events.map((event) => (
-            <div
-              key={event.id}
-              className="flex items-start gap-3 p-3 rounded-xl border transition-all hover:scale-[1.01]"
-              style={{
-                backgroundColor: T.boxBg + "30",
-                borderColor: T.borderColor + "20",
-              }}
-            >
-              <div
-                className="p-1.5 rounded-lg"
-                style={{ backgroundColor: getEventColor(event.type) + "20", color: getEventColor(event.type) }}
-              >
-                {event.icon || getEventIcon(event.type)}
-              </div>
-              <div className="flex-1 min-w-0">
-                <p className="text-xs" style={{ color: T.textColor }}>{event.message}</p>
-                <div className="text-[10px] mt-1" style={{ color: T.textMuted }}>{formatTime(event.timestamp)}</div>
-              </div>
-            </div>
+          rows.map((event) => (
+            <EventRow key={event.id} event={event} />
           ))
         )}
       </div>
     </div>
   );
+}
+
+function EventRow({ event }: { event: AdminEvent }) {
+  const { resolvedColors: T } = useTheme();
+  const color = getEventColor(event.type, T.accentColor);
+  const Icon = getEventIcon(event.type);
+
+  return (
+    <div className="flex items-start gap-3 rounded-2xl border p-3 transition-transform hover:scale-[1.01]" style={{ backgroundColor: T.boxBg + "60", borderColor: color + "26" }}>
+      <div className="rounded-xl p-2" style={{ backgroundColor: color + "18", color }}>
+        <Icon size={14} />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="text-sm" style={{ color: T.textColor }}>{event.message}</div>
+        <div className="mt-1 text-[10px]" style={{ color: T.textMuted }}>
+          {formatTime(event.timestamp)}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function formatTime(value: string | Date) {
+  const date = value instanceof Date ? value : new Date(value);
+  const diff = Math.floor((Date.now() - date.getTime()) / 60000);
+  if (diff < 1) return "Just now";
+  if (diff < 60) return `${diff}m ago`;
+  return `${Math.floor(diff / 60)}h ago`;
+}
+
+function getEventColor(type: AdminEvent["type"], fallback: string) {
+  switch (type) {
+    case "signup":
+    case "user":
+      return "#60a5fa";
+    case "agent":
+    case "chat":
+      return "#34d399";
+    case "sale":
+      return "#f59e0b";
+    case "alert":
+      return "#ef4444";
+    case "system":
+      return fallback;
+    default:
+      return fallback;
+  }
+}
+
+function getEventIcon(type: AdminEvent["type"]) {
+  switch (type) {
+    case "signup":
+    case "user":
+      return UserPlus;
+    case "sale":
+      return ShoppingCart;
+    case "agent":
+    case "chat":
+      return CheckCircle2;
+    case "alert":
+      return AlertCircle;
+    default:
+      return Users;
+  }
 }

@@ -4,15 +4,17 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
-import LayoutShell from "@/components/LayoutShell";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import CookieConsent from "@/components/CookieConsent";
+import UserSync from "@/components/UserSync";
+import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
+import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleTagManager } from "@next/third-parties/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
-
-// Build-safe check for Clerk
-const CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 
 const inter = Inter({
   subsets: ["latin"],
@@ -33,7 +35,7 @@ export const viewport: Viewport = {
   themeColor: "#0d0d0d",
 };
 
-const META_TITLE = "LiTTree LabStudios — The Creator Network With AI Agents";
+const META_TITLE = "LiTTree Lab Studios — The Creator Network With AI Agents";
 const META_DESC =
   "Build, share, and grow with agents at your side. LiTTree is a creator network where AI helps you create, connect, and distribute your work.";
 
@@ -41,7 +43,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTTree LabStudios",
+    template: "%s | LiTTree Lab Studios",
   },
   description: META_DESC,
   keywords: [
@@ -57,9 +59,9 @@ export const metadata: Metadata = {
     "LiTPage",
     "AI platform",
   ],
-  authors: [{ name: "LiTTree LabStudios", url: SITE_URL }],
-  creator: "LiTTree LabStudios",
-  publisher: "LiTTree LabStudios",
+  authors: [{ name: "LiTTree Lab Studios", url: SITE_URL }],
+  creator: "LiTTree Lab Studios",
+  publisher: "LiTTree Lab Studios",
   robots: {
     index: true,
     follow: true,
@@ -69,7 +71,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree LabStudios",
+    siteName: "LiTTree Lab Studios",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -100,13 +102,7 @@ export const metadata: Metadata = {
   manifest: "/manifest.json",
 };
 
-// Build-safe Clerk key check - only throw in runtime, not during build
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const isBuildTime = process.env.NODE_ENV === "production" && process.env.NEXT_PHASE === "phase-production-build";
-
-if (!clerkKey && !isBuildTime) {
-  console.warn("NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY is not set. Auth features will be disabled.");
-}
 
 export default function RootLayout({
   children,
@@ -117,28 +113,41 @@ export default function RootLayout({
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <LayoutShell>
-            {children}
-          </LayoutShell>
+          <AnimatedBackgroundWrapper />
+          <div className="relative z-10 flex flex-col min-h-screen">
+            <UserSync />
+            <Navbar />
+            <main className="flex-1 w-full max-w-full overflow-x-hidden">
+              {children}
+            </main>
+            <Footer />
+            <CookieConsent />
+            <ServiceWorkerRegistration />
+          </div>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
   );
 
-  // If no Clerk key, render without ClerkProvider during build
-  if (!clerkKey) {
-    return (
-      <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-        <GoogleTagManager gtmId="G-0G4JPF3HXG" />
-        <body
-          className="antialiased min-h-screen"
-          style={{ backgroundColor: "#0a0a0f" }}
-        >
-          {inner}
-        </body>
-      </html>
-    );
-  }
+  const shell = (
+    <ThemeProvider>
+      <ProfileProvider>
+        <WalletProvider>
+          <AnimatedBackgroundWrapper />
+          <div className="relative z-10 flex flex-col min-h-screen">
+            <UserSync />
+            <Navbar />
+            <main className="flex-1 w-full max-w-full overflow-x-hidden">
+              {children}
+            </main>
+            <Footer />
+            <CookieConsent />
+            <ServiceWorkerRegistration />
+          </div>
+        </WalletProvider>
+      </ProfileProvider>
+    </ThemeProvider>
+  );
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
@@ -147,49 +156,53 @@ export default function RootLayout({
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#0a0a0f" }}
       >
-        <ClerkProvider
-          publishableKey={clerkKey}
-          signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
-          signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
-          signInFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/dashboard"
-          }
-          signUpFallbackRedirectUrl={
-            process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/dashboard?new=1"
-          }
-          appearance={{
-            variables: {
-              colorPrimary: "#00f0ff",
-              colorBackground: "#0a0a12",
-              colorText: "#e0e0ff",
-              colorTextSecondary: "#8888aa",
-              colorDanger: "#ff00a0",
-              colorSuccess: "#00ff41",
-              borderRadius: "8px",
-            },
-            elements: {
-              card: {
-                backgroundColor: "#151520",
-                border: "1px solid #2a2a45",
-                boxShadow: "0 4px 20px rgba(0,240,255,0.1)",
+        {clerkKey ? (
+          <ClerkProvider
+            publishableKey={clerkKey}
+            signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
+            signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
+            signInFallbackRedirectUrl={
+              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"
+            }
+            signUpFallbackRedirectUrl={
+              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"
+            }
+            appearance={{
+              variables: {
+                colorPrimary: "#00f0ff",
+                colorBackground: "#0a0a12",
+                colorText: "#e0e0ff",
+                colorTextSecondary: "#8888aa",
+                colorDanger: "#ff00a0",
+                colorSuccess: "#00ff41",
+                borderRadius: "8px",
               },
-              userButtonPopoverCard: {
-                backgroundColor: "#151520",
-                border: "1px solid #2a2a45",
-              },
-              userButtonPopoverActionButton: {
-                "&:hover": {
-                  backgroundColor: "rgba(0,240,255,0.1)",
+              elements: {
+                card: {
+                  backgroundColor: "#151520",
+                  border: "1px solid #2a2a45",
+                  boxShadow: "0 4px 20px rgba(0,240,255,0.1)",
+                },
+                userButtonPopoverCard: {
+                  backgroundColor: "#151520",
+                  border: "1px solid #2a2a45",
+                },
+                userButtonPopoverActionButton: {
+                  "&:hover": {
+                    backgroundColor: "rgba(0,240,255,0.1)",
+                  },
+                },
+                badge: {
+                  backgroundColor: "#ff00a0",
                 },
               },
-              badge: {
-                backgroundColor: "#ff00a0",
-              },
-            },
-          }}
-        >
-          {inner}
-        </ClerkProvider>
+            }}
+          >
+            {shell}
+          </ClerkProvider>
+        ) : (
+          shell
+        )}
       </body>
     </html>
   );

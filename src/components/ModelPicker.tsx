@@ -1,216 +1,209 @@
 "use client";
 
-import { useState, useMemo } from "react";
+import { useMemo, useState } from "react";
+import { ChevronDown, Clock, DollarSign, Search, Sparkles, Star, Zap } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { Search, ChevronDown, Sparkles, Clock, Star, Zap, DollarSign } from "lucide-react";
+import { CHAT_ROOMS } from "@/lib/chatRooms";
 
-interface Model {
+type Model = {
   id: string;
   name: string;
   provider: string;
   cost: "free" | "paid" | "hybrid";
   speed: "fast" | "medium" | "slow";
-  quality: "low" | "medium" | "high";
-  context: number;
   recommended?: boolean;
-  icon?: string;
-}
+  icon: string;
+};
 
 const MODELS: Model[] = [
-  { id: "adaptive", name: "Adaptive", provider: "Auto", cost: "hybrid", speed: "fast", quality: "high", context: 128000, recommended: true, icon: "🧠" },
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", cost: "free", speed: "fast", quality: "high", context: 1000000, icon: "⚡" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro", provider: "Google", cost: "paid", speed: "medium", quality: "high", context: 2000000, icon: "✨" },
-  { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", cost: "paid", speed: "fast", quality: "high", context: 128000, icon: "🔮" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", cost: "free", speed: "fast", quality: "medium", context: 128000, icon: "⚡" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", cost: "paid", speed: "medium", quality: "high", context: 200000, icon: "🎯" },
-  { id: "claude-3-haiku", name: "Claude 3 Haiku", provider: "Anthropic", cost: "free", speed: "fast", quality: "medium", context: 200000, icon: "🚀" },
+  { id: "adaptive", name: "Adaptive", provider: "Auto", cost: "hybrid", speed: "fast", recommended: true, icon: "🧠" },
+  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", cost: "free", speed: "fast", icon: "⚡" },
+  { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", cost: "paid", speed: "fast", icon: "🔮" },
+  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", cost: "paid", speed: "medium", icon: "🎯" },
+  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", cost: "free", speed: "fast", icon: "⚡" },
+  { id: "ollama-local", name: "Local Ollama", provider: "Local", cost: "free", speed: "medium", icon: "🖥️" },
 ];
 
-interface ModelPickerProps {
+export default function ModelPicker({
+  selectedModel,
+  onModelChange,
+  recentModels = [],
+}: {
   selectedModel: string;
   onModelChange: (modelId: string) => void;
   recentModels?: string[];
-}
-
-export default function ModelPicker({ selectedModel, onModelChange, recentModels = [] }: ModelPickerProps) {
+}) {
   const { resolvedColors: T } = useTheme();
-  const [isOpen, setIsOpen] = useState(false);
-  const [searchQuery, setSearchQuery] = useState("");
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
 
-  const selectedModelData = MODELS.find(m => m.id === selectedModel) || MODELS[0];
+  const selected = MODELS.find((m) => m.id === selectedModel) ?? MODELS[0];
+  const filtered = useMemo(() => {
+    if (!query) return MODELS;
+    const q = query.toLowerCase();
+    return MODELS.filter((m) => `${m.name} ${m.provider}`.toLowerCase().includes(q));
+  }, [query]);
 
-  const filteredModels = useMemo(() => {
-    if (!searchQuery) return MODELS;
-    return MODELS.filter(m => 
-      m.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      m.provider.toLowerCase().includes(searchQuery.toLowerCase())
-    );
-  }, [searchQuery]);
+  const recent = useMemo(
+    () => recentModels.map((id) => MODELS.find((m) => m.id === id)).filter(Boolean) as Model[],
+    [recentModels],
+  );
 
-  const recentModelsData = useMemo(() => {
-    return recentModels
-      .map(id => MODELS.find(m => m.id === id))
-      .filter(Boolean) as Model[];
-  }, [recentModels]);
-
-  const recommendedModels = MODELS.filter(m => m.recommended);
+  const relatedRoom = CHAT_ROOMS.find((room) => room.modelId === selected.id);
+  const badgeColor =
+    selected.cost === "free" ? "#34d399" : selected.cost === "paid" ? "#f59e0b" : T.accentColor;
 
   return (
     <div className="relative">
       <button
-        onClick={() => setIsOpen(!isOpen)}
-        className="flex items-center gap-2 px-4 py-2.5 rounded-xl transition-all hover:scale-105"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center gap-2 rounded-2xl border px-4 py-3 text-left"
         style={{
-          backgroundColor: T.boxBg + "60",
-          border: "1px solid " + T.borderColor + "30",
+          backgroundColor: T.boxBg + "70",
+          borderColor: T.borderColor + "24",
           color: T.textColor,
         }}
       >
-        <span className="text-lg">{selectedModelData.icon}</span>
-        <span className="text-sm font-bold">{selectedModelData.name}</span>
-        <span className="text-[10px] px-2 py-0.5 rounded-full" style={{
-          backgroundColor: selectedModelData.cost === "free" ? "#22c55e20" : "#f59e0b20",
-          color: selectedModelData.cost === "free" ? "#22c55e" : "#f59e0b",
-        }}>
-          {selectedModelData.cost === "free" ? "FREE" : "PAID"}
+        <span className="text-lg">{selected.icon}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-sm font-bold">{selected.name}</span>
+          <span className="block text-[10px] uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>
+            {relatedRoom?.label ?? selected.provider}
+          </span>
+        </span>
+        <span
+          className="rounded-full px-2 py-1 text-[10px] font-black uppercase"
+          style={{ backgroundColor: badgeColor + "18", color: badgeColor }}
+        >
+          {selected.cost}
         </span>
         <ChevronDown size={14} style={{ color: T.textMuted }} />
       </button>
 
-      {isOpen && (
+      {open && (
         <div
-          className="absolute top-full left-0 mt-2 w-80 rounded-2xl border shadow-2xl z-50 max-h-[500px] overflow-y-auto"
+          className="absolute left-0 top-full z-50 mt-2 w-[min(22rem,90vw)] overflow-hidden rounded-3xl border shadow-2xl"
           style={{
             backgroundColor: T.boxBg,
-            borderColor: T.borderColor + "30",
+            borderColor: T.borderColor + "28",
           }}
-          onClick={(e) => e.stopPropagation()}
         >
-          {/* Search */}
-          <div className="p-3 border-b" style={{ borderColor: T.borderColor + "20" }}>
-            <div className="flex items-center gap-2 px-3 py-2 rounded-lg" style={{ backgroundColor: T.bgColor + "40" }}>
+          <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+            <div
+              className="flex items-center gap-2 rounded-2xl border px-3 py-2"
+              style={{
+                backgroundColor: T.bgColor + "50",
+                borderColor: T.borderColor + "18",
+              }}
+            >
               <Search size={14} style={{ color: T.textMuted }} />
               <input
-                type="text"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search models..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="flex-1 bg-transparent outline-none text-sm"
+                className="w-full bg-transparent text-sm outline-none"
                 style={{ color: T.textColor }}
               />
             </div>
           </div>
 
-          {/* Adaptive default */}
-          {!searchQuery && (
-            <div className="p-2">
-              <div className="text-[10px] font-bold uppercase tracking-widest mb-2 px-2" style={{ color: T.textMuted }}>
-                Default
+          {!query && recent.length > 0 && (
+            <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+              <div
+                className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{ color: T.textMuted }}
+              >
+                <Clock size={10} /> Recent
               </div>
-              {MODELS.filter(m => m.id === "adaptive").map((model) => (
+              <div className="space-y-2">
+                {recent.slice(0, 3).map((model) => (
+                  <button
+                    key={model.id}
+                    onClick={() => {
+                      onModelChange(model.id);
+                      setOpen(false);
+                    }}
+                    className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-all hover:bg-white/5"
+                  >
+                    <span className="text-lg">{model.icon}</span>
+                    <span className="min-w-0 flex-1">
+                      <span className="block text-sm font-bold">{model.name}</span>
+                      <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                        {model.provider}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {!query && (
+            <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+              <div
+                className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{ color: T.textMuted }}
+              >
+                <Star size={10} /> Recommended
+              </div>
+              {MODELS.filter((m) => m.recommended).map((model) => (
                 <button
                   key={model.id}
-                  onClick={() => { onModelChange(model.id); setIsOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
-                  style={{
-                    backgroundColor: selectedModel === model.id ? T.accentColor + "15" : "transparent",
-                    border: selectedModel === model.id ? "1px solid " + T.accentColor + "30" : "transparent",
+                  onClick={() => {
+                    onModelChange(model.id);
+                    setOpen(false);
                   }}
+                  className="flex w-full items-center gap-3 rounded-2xl px-3 py-2 text-left transition-all hover:bg-white/5"
                 >
-                  <span className="text-xl">{model.icon}</span>
-                  <div className="flex-1 text-left">
-                    <div className="text-sm font-bold" style={{ color: T.textColor }}>{model.name}</div>
-                    <div className="text-[10px]" style={{ color: T.textMuted }}>{model.provider}</div>
-                  </div>
+                  <span className="text-lg">{model.icon}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold">{model.name}</span>
+                    <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                      {model.provider}
+                    </span>
+                  </span>
                   <Sparkles size={12} style={{ color: T.accentColor }} />
                 </button>
               ))}
             </div>
           )}
 
-          {/* Recent */}
-          {!searchQuery && recentModelsData.length > 0 && (
-            <div className="p-2 border-t" style={{ borderColor: T.borderColor + "20" }}>
-              <div className="text-[10px] font-bold uppercase tracking-widest mb-2 px-2" style={{ color: T.textMuted }}>
-                <Clock size={10} className="inline mr-1" /> Recent
-              </div>
-              {recentModelsData.slice(0, 3).map((model) => (
+          <div className="max-h-72 overflow-auto p-3">
+            <div
+              className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.18em]"
+              style={{ color: T.textMuted }}
+            >
+              <DollarSign size={10} /> All models
+            </div>
+            <div className="space-y-2">
+              {filtered.map((model) => (
                 <button
                   key={model.id}
-                  onClick={() => { onModelChange(model.id); setIsOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
+                  onClick={() => {
+                    onModelChange(model.id);
+                    setOpen(false);
+                  }}
+                  className="flex w-full items-center gap-3 rounded-2xl border px-3 py-2 text-left transition-all hover:scale-[1.01]"
                   style={{
-                    backgroundColor: selectedModel === model.id ? T.accentColor + "15" : "transparent",
+                    backgroundColor: selectedModel === model.id ? T.accentColor + "16" : "transparent",
+                    borderColor: selectedModel === model.id ? T.accentColor + "30" : "transparent",
                   }}
                 >
                   <span className="text-lg">{model.icon}</span>
-                  <div className="flex-1 text-left">
-                    <div className="text-sm font-bold" style={{ color: T.textColor }}>{model.name}</div>
-                    <div className="text-[10px]" style={{ color: T.textMuted }}>{model.provider}</div>
-                  </div>
-                  {model.cost === "free" && (
-                    <span className="text-[9px] px-1.5 py-0.5 rounded" style={{ backgroundColor: "#22c55e20", color: "#22c55e" }}>FREE</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block text-sm font-bold">{model.name}</span>
+                    <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                      {model.provider}
+                    </span>
+                  </span>
+                  {model.cost === "free" ? (
+                    <Zap size={12} style={{ color: "#34d399" }} />
+                  ) : (
+                    <DollarSign size={12} style={{ color: "#f59e0b" }} />
                   )}
                 </button>
               ))}
             </div>
-          )}
-
-          {/* Recommended */}
-          {!searchQuery && (
-            <div className="p-2 border-t" style={{ borderColor: T.borderColor + "20" }}>
-              <div className="text-[10px] font-bold uppercase tracking-widest mb-2 px-2" style={{ color: T.textMuted }}>
-                <Star size={10} className="inline mr-1" /> Recommended
-              </div>
-              {recommendedModels.map((model) => (
-                <button
-                  key={model.id}
-                  onClick={() => { onModelChange(model.id); setIsOpen(false); }}
-                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
-                  style={{
-                    backgroundColor: selectedModel === model.id ? T.accentColor + "15" : "transparent",
-                  }}
-                >
-                  <span className="text-lg">{model.icon}</span>
-                  <div className="flex-1 text-left">
-                    <div className="text-sm font-bold" style={{ color: T.textColor }}>{model.name}</div>
-                    <div className="text-[10px]" style={{ color: T.textMuted }}>{model.provider}</div>
-                  </div>
-                  <div className="flex items-center gap-1">
-                    {model.speed === "fast" && <Zap size={10} style={{ color: "#22c55e" }} />}
-                    {model.cost === "free" && <DollarSign size={10} style={{ color: "#22c55e" }} />}
-                  </div>
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* All Models */}
-          <div className="p-2 border-t" style={{ borderColor: T.borderColor + "20" }}>
-            <div className="text-[10px] font-bold uppercase tracking-widest mb-2 px-2" style={{ color: T.textMuted }}>
-              All Models
-            </div>
-            {filteredModels.map((model) => (
-              <button
-                key={model.id}
-                onClick={() => { onModelChange(model.id); setIsOpen(false); }}
-                className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl transition-all hover:scale-[1.02]"
-                style={{
-                  backgroundColor: selectedModel === model.id ? T.accentColor + "15" : "transparent",
-                }}
-              >
-                <span className="text-lg">{model.icon}</span>
-                <div className="flex-1 text-left">
-                  <div className="text-sm font-bold" style={{ color: T.textColor }}>{model.name}</div>
-                  <div className="text-[10px]" style={{ color: T.textMuted }}>{model.provider}</div>
-                </div>
-                <div className="flex items-center gap-2">
-                  {model.speed === "fast" && <Zap size={10} style={{ color: "#22c55e" }} />}
-                  {model.cost === "free" && <DollarSign size={10} style={{ color: "#22c55e" }} />}
-                  {model.cost === "paid" && <DollarSign size={10} style={{ color: "#f59e0b" }} />}
-                </div>
-              </button>
-            ))}
           </div>
         </div>
       )}

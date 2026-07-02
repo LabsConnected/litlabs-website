@@ -2,6 +2,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { AGENTS } from "@/lib/agents";
+import { generateText } from "@/lib/llm";
 
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
@@ -11,6 +13,32 @@ async function handler(req: NextRequest) {
   try {
     const body = await req.json();
     const { from, to, message, type = "chat", metadata } = body;
+
+    // Backward-compatible gallery/chat payload: { message, agent }
+    const agentSlug = body.agent || body.agentSlug;
+    if ((!from || !to) && message && agentSlug) {
+      const agent = AGENTS[agentSlug as keyof typeof AGENTS];
+      if (!agent) {
+        return NextResponse.json(
+          { error: "Invalid agent ID" },
+          { status: 400 },
+        );
+      }
+
+      const response = await generateText(
+        `${agent.systemPrompt}\n\nPersonality: ${agent.personality}\nRole: ${agent.role}\n\nUser: ${message}\n\nRespond as ${agent.name} in character. Be helpful, concise, and natural.`,
+        { task: "chat", maxTokens: 1024 },
+      );
+
+      return NextResponse.json({
+        reply: response.text,
+        message: response.text,
+        agent: {
+          id: agent.id,
+          name: agent.name,
+        },
+      });
+    }
 
     if (!from || !to || !message) {
       return NextResponse.json(

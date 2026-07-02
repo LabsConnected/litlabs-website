@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Zap,
 } from "lucide-react";
+import { AGENT_AVATAR_META } from "@/lib/avatars";
 
 const ACTIVEPIECES_WEBHOOK =
   "https://cloud.activepieces.com/api/v1/webhooks/VoccE3SEr4bciLvkThTlO";
@@ -114,6 +115,17 @@ const AGENTS: Agent[] = [
     color: "#9b59b6",
   },
 ];
+
+function getAgentAvatar(agent: Agent) {
+  const key = agent.id.toLowerCase();
+  const meta = AGENT_AVATAR_META[key];
+  return {
+    emoji: meta?.emoji || agent.icon,
+    initials: meta?.initials || agent.name.slice(0, 2).toUpperCase(),
+    color: meta?.color || agent.color,
+    bg: meta?.bg || `${agent.color}18`,
+  };
+}
 
 const QUICK: Record<string, string[]> = {
   director: [
@@ -424,6 +436,7 @@ export default function AgentTool() {
     () => chatMap[selectedAgent.id] || [],
     [chatMap, selectedAgent.id],
   );
+  const selectedAvatar = getAgentAvatar(selectedAgent);
 
   useEffect(() => {
     try {
@@ -924,7 +937,7 @@ export default function AgentTool() {
           }}
         >
           <div className="flex items-center gap-2.5">
-            <span className="text-xl">{selectedAgent.icon}</span>
+            <span className="text-xl">{selectedAvatar.emoji}</span>
             <div>
               <div
                 className="text-xs font-bold leading-tight"
@@ -1005,7 +1018,7 @@ export default function AgentTool() {
           {messages.length === 0 && !streaming && (
             <div className="flex flex-col items-center justify-center h-full pb-8 text-center">
               <div className="text-5xl mb-3 opacity-90">
-                {selectedAgent.icon}
+                {selectedAvatar.emoji}
               </div>
               <div
                 className="text-sm font-bold mb-1"
@@ -1060,7 +1073,7 @@ export default function AgentTool() {
                   border: `1px solid ${msg.role === "user" ? T.accentColor + "40" : selectedAgent.color + "40"}`,
                 }}
               >
-                {msg.role === "user" ? "U" : selectedAgent.icon}
+                {msg.role === "user" ? "U" : selectedAvatar.initials}
               </div>
               {/* Bubble */}
               <div className="max-w-[80%] space-y-0.5">
@@ -1103,7 +1116,7 @@ export default function AgentTool() {
                   border: `1px solid ${selectedAgent.color}40`,
                 }}
               >
-                {selectedAgent.icon}
+                {selectedAvatar.emoji}
               </div>
               <div className="max-w-[80%]">
                 <div
@@ -1137,7 +1150,7 @@ export default function AgentTool() {
                   border: `1px solid ${selectedAgent.color}40`,
                 }}
               >
-                {selectedAgent.icon}
+                {selectedAvatar.emoji}
               </div>
               <div
                 className="px-3 py-2 rounded-xl text-[11px] flex items-center gap-2"
@@ -1256,7 +1269,7 @@ export default function AgentTool() {
             background: selectedAgent.color + "08",
           }}
         >
-          <div className="text-4xl mb-2">{selectedAgent.icon}</div>
+          <div className="text-4xl mb-2">{selectedAvatar.emoji}</div>
           <div
             className="text-xs font-bold"
             style={{ color: selectedAgent.color }}

@@ -263,7 +263,7 @@ export async function playMedia(entityId: string, url: string): Promise<HAServic
   return callService("media_player", "play_media", { entity_id: entityId, media_content_id: url, media_content_type: "audio/mp3" });
 }
 
-export async function notify(message: string, title = "LiTree LabStudios", target?: string): Promise<HAServiceResponse> {
+export async function notify(message: string, title = "LiTTree LabStudios", target?: string): Promise<HAServiceResponse> {
   return callService("notify", target || "persistent_notification", { message, title });
 }
 

@@ -1,7 +1,9 @@
 "use client";
+export const dynamic = "force-dynamic";
 
 import { useState, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSearchParams, useRouter } from "next/navigation";
@@ -10,16 +12,18 @@ import {
   AGENT_AVATAR_META,
   type AgentAvatarMeta,
 } from "@/lib/avatars";
-import { Check } from "lucide-react";
+import {
+  Check,
+  ArrowRight,
+  Sparkles,
+  ShieldCheck,
+  Coins,
+  WandSparkles,
+} from "lucide-react";
 
 function formatPrice(cents: number): string {
   if (cents === 0) return "FREE";
-  return `${cents} LBC`;
-}
-
-function formatUsdPrice(cents: number): string {
-  if (cents === 0) return "Free";
-  return `$${(cents / 100).toFixed(2)}`;
+  return cents + " LBC";
 }
 
 // Category color mapping for consistent theming
@@ -39,7 +43,8 @@ function getCategoryColor(category: string): string {
   return colors[category] || "#fbbf24";
 }
 
-// CREDIT PACKS — 1 LBC = $0.01 USD
+// CREDIT PACKS — Stripe price_id required for each (create in Stripe Dashboard)
+// Note: Found price_1TYs4AJ53kgx4fp5RgAChEmk (Pro Membership) in Stripe, but not specific coin packs.
 const CREDIT_PACKS: {
   id: string;
   coins: number;
@@ -51,48 +56,48 @@ const CREDIT_PACKS: {
 }[] = [
   {
     id: "starter",
-    coins: 100,
+    coins: 500,
     price: 1,
     priceId: "",
     label: "Starter",
     popular: false,
-    savings: "100 LBC",
+    savings: "Entry pack",
   },
   {
-    id: "value",
-    coins: 550,
+    id: "popular",
+    coins: 1200,
     price: 5,
     priceId: "",
-    label: "Value",
+    label: "Popular",
     popular: true,
-    savings: "Save 10%",
+    savings: "Save 20%",
   },
   {
     id: "pro",
-    coins: 1200,
+    coins: 3000,
     price: 10,
     priceId: "",
     label: "Pro",
     popular: false,
-    savings: "Save 20%",
+    savings: "Save 33%",
   },
   {
     id: "whale",
-    coins: 3500,
+    coins: 7000,
     price: 25,
     priceId: "",
     label: "Whale",
     popular: false,
-    savings: "Save 40%",
+    savings: "Save 43%",
   },
   {
     id: "max",
-    coins: 8000,
+    coins: 15000,
     price: 50,
     priceId: "",
     label: "Max",
     popular: false,
-    savings: "Save 60%",
+    savings: "Save 50%",
   },
 ];
 
@@ -234,7 +239,7 @@ const DEMO_AGENTS: Agent[] = [
     installs: 1567,
   },
 
-  // BUDGET TIER (25-75 coins ~ $0.25-$0.75)
+  // BUDGET TIER (50-150 coins ~ $0.50-$1.50)
   {
     id: "4",
     slug: "writing-coach",
@@ -243,7 +248,7 @@ const DEMO_AGENTS: Agent[] = [
       "Master copywriter. Elevates writing quality — editing, tone adjustment, copywriting, and storytelling.",
     category: "content",
     avatar_url: AGENT_AVATARS["writing-coach"],
-    price_cents: 50,
+    price_cents: 75,
     features: ["Editing", "Tone adjustment", "Copywriting"],
     is_featured: false,
     personality: "Constructive, articulate, refined",
@@ -258,7 +263,7 @@ const DEMO_AGENTS: Agent[] = [
       "Deep research agent. Synthesizes information from multiple sources, fact-checks, and produces reports.",
     category: "research",
     avatar_url: AGENT_AVATARS["research-guru"],
-    price_cents: 75,
+    price_cents: 100,
     features: ["Deep research", "Fact-checking", "Reporting"],
     is_featured: false,
     personality: "Thorough, skeptical, rigorous",
@@ -273,7 +278,7 @@ const DEMO_AGENTS: Agent[] = [
       "Customer support specialist. Handles inquiries, troubleshooting, and creates FAQ documentation.",
     category: "general",
     avatar_url: AGENT_AVATARS["support-agent"],
-    price_cents: 25,
+    price_cents: 50,
     features: ["Support tickets", "Documentation", "Troubleshooting"],
     is_featured: false,
     personality: "Patient, helpful, clear",
@@ -281,7 +286,7 @@ const DEMO_AGENTS: Agent[] = [
     installs: 543,
   },
 
-  // PRO TIER (100-200 coins ~ $1-$2)
+  // PRO TIER (200-500 coins ~ $2-$5)
   {
     id: "7",
     slug: "social-dominator",
@@ -290,7 +295,7 @@ const DEMO_AGENTS: Agent[] = [
       "Growth hacker and content creator. Writes viral posts, crafts strategies, and helps you dominate social media.",
     category: "marketing",
     avatar_url: AGENT_AVATARS["social-dominator"],
-    price_cents: 100,
+    price_cents: 250,
     features: ["Viral content", "Growth strategy", "Analytics"],
     is_featured: true,
     personality: "Bold, creative, results-driven",
@@ -305,7 +310,7 @@ const DEMO_AGENTS: Agent[] = [
       "Data scientist. Analyzes data, builds models, creates visualizations, and surfaces actionable insights.",
     category: "analytics",
     avatar_url: AGENT_AVATARS["data-slayer"],
-    price_cents: 150,
+    price_cents: 300,
     features: ["Data analysis", "Modeling", "Visualization"],
     is_featured: true,
     personality: "Precise, analytical, data-driven",
@@ -320,7 +325,7 @@ const DEMO_AGENTS: Agent[] = [
       "AI image and 3D world generation specialist. Creates stunning visuals, textures, and immersive environments.",
     category: "design",
     avatar_url: AGENT_AVATARS["pixel-forge"],
-    price_cents: 100,
+    price_cents: 200,
     features: ["Image generation", "360 worlds", "Texture design"],
     is_featured: true,
     personality: "Visionary, artistic, detailed",
@@ -335,7 +340,7 @@ const DEMO_AGENTS: Agent[] = [
       "Creates original music from text prompts and lyrics. Generates songs, instrumentals, and covers with AI.",
     category: "music",
     avatar_url: AGENT_AVATARS["music-producer"],
-    price_cents: 200,
+    price_cents: 400,
     features: ["Music generation", "Lyrics writing", "Style guidance"],
     is_featured: true,
     personality: "Creative, musical, expressive",
@@ -343,7 +348,7 @@ const DEMO_AGENTS: Agent[] = [
     installs: 743,
   },
 
-  // ELITE TIER (300-500 coins ~ $3-$5)
+  // ELITE TIER (1000+ coins ~ $10+)
   {
     id: "11",
     slug: "legal-shield",
@@ -352,7 +357,7 @@ const DEMO_AGENTS: Agent[] = [
       "Legal assistant for contracts, compliance, and regulatory guidance. Not a lawyer, but a powerful research aide.",
     category: "legal",
     avatar_url: AGENT_AVATARS["legal-shield"],
-    price_cents: 300,
+    price_cents: 1000,
     features: ["Contract review", "Compliance", "Legal research"],
     is_featured: false,
     personality: "Cautious, precise, thorough",
@@ -367,7 +372,7 @@ const DEMO_AGENTS: Agent[] = [
       "Cybersecurity expert. Audits code, finds vulnerabilities, and recommends security best practices.",
     category: "developer",
     avatar_url: AGENT_AVATARS["security-guru"],
-    price_cents: 400,
+    price_cents: 1200,
     features: ["Security audits", "Vulnerability scanning", "Best practices"],
     is_featured: false,
     personality: "Paranoid, thorough, vigilant",
@@ -382,7 +387,7 @@ const DEMO_AGENTS: Agent[] = [
       "Machine learning specialist. Builds models, optimizes training, and deploys AI systems.",
     category: "analytics",
     avatar_url: AGENT_AVATARS["ml-engineer"],
-    price_cents: 500,
+    price_cents: 1500,
     features: ["Model training", "Hyperparameter tuning", "Model deployment"],
     is_featured: false,
     personality: "Methodical, experimental, rigorous",
@@ -399,7 +404,7 @@ const DEMO_AGENTS: Agent[] = [
       "AI Agent Architect & Full-Stack Builder. Trained 47 specialized models. Builds multi-agent systems that actually work.",
     category: "developer",
     avatar_url: AGENT_AVATARS.alexchen,
-    price_cents: 300,
+    price_cents: 500,
     features: [
       "Multi-agent architecture",
       "React/Node/Gemini integration",
@@ -419,7 +424,7 @@ const DEMO_AGENTS: Agent[] = [
       "Growth Hacker & Marketing Strategist. Turns zero-budget campaigns into viral sensations. Lives for social growth and SEO.",
     category: "marketing",
     avatar_url: AGENT_AVATARS.sarahk,
-    price_cents: 200,
+    price_cents: 400,
     features: [
       "Viral marketing",
       "SEO strategy",
@@ -439,7 +444,7 @@ const DEMO_AGENTS: Agent[] = [
       "Full-Stack Engineer & API Wizard. Builds systems that scale. React, Node, Go, Rust — ships fast, open sources everything.",
     category: "developer",
     avatar_url: AGENT_AVATARS.mikedev,
-    price_cents: 250,
+    price_cents: 450,
     features: [
       "Full-stack architecture",
       "API design",
@@ -460,7 +465,7 @@ const DEMO_AGENTS: Agent[] = [
       "Storyteller, Content Strategist, and AI Writing Coach. Helps founders find their voice and brands find their story.",
     category: "content",
     avatar_url: AGENT_AVATARS.jtaylor,
-    price_cents: 175,
+    price_cents: 350,
     features: [
       "Copywriting that converts",
       "Brand voice development",
@@ -480,7 +485,7 @@ const DEMO_AGENTS: Agent[] = [
       "Smart Home Manager. Controls Home Assistant devices — lights, climate, media, notifications. Your home's AI butler.",
     category: "general",
     avatar_url: AGENT_AVATARS.home,
-    price_cents: 100,
+    price_cents: 250,
     features: [
       "Device control",
       "Climate management",
@@ -496,6 +501,37 @@ const DEMO_AGENTS: Agent[] = [
 
 // Build slug→demo lookup for metadata enrichment
 const DEMO_BY_SLUG = Object.fromEntries(DEMO_AGENTS.map((a) => [a.slug, a]));
+
+const MARKETPLACE_SHOWCASE = [
+  {
+    src: "/showcase/cover-architecture.png",
+    title: "Architecture",
+    subtitle: "Multi-agent systems and orchestration",
+  },
+  {
+    src: "/showcase/control-center.png",
+    title: "Control Center",
+    subtitle: "Live agent management and installs",
+  },
+  {
+    src: "/showcase/engine-routing.png",
+    title: "Engine Routing",
+    subtitle: "Dispatch work to the right specialist",
+  },
+];
+
+const CATEGORY_ART: Record<string, string> = {
+  developer: "/showcase/engine-routing.png",
+  orchestrator: "/showcase/cover-architecture.png",
+  analytics: "/showcase/control-center.png",
+  marketing: "/showcase/control-center.png",
+  content: "/showcase/cover-architecture.png",
+  design: "/showcase/engine-routing.png",
+  research: "/showcase/control-center.png",
+  music: "/showcase/cover-architecture.png",
+  legal: "/showcase/control-center.png",
+  general: "/showcase/engine-routing.png",
+};
 
 function MarketplaceInner() {
   const { isLoaded, isSignedIn, userId } = useClerkAuth();
@@ -753,56 +789,11 @@ function MarketplaceInner() {
       if (!agent) return;
 
       if (agent.price_cents > 0) {
-        // Paid agents: use coins if balance is enough, otherwise Stripe checkout
+        // Paid agents: redirect to Stripe checkout
         if (!isSignedIn || !userId) {
           showToast("Please sign in to purchase this agent.", "error");
           return;
         }
-
-        if (litBitCoins >= agent.price_cents) {
-          // Buy with coins
-          const newBal = await syncWallet(-agent.price_cents);
-          if (newBal === null) {
-            showToast("Transaction failed. Could not deduct coins.", "error");
-            return;
-          }
-          try {
-            const res = await fetch("/api/user-agents", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ agentId: agent.id }),
-            });
-            const data = await res.json();
-            if (res.ok || res.status === 200) {
-              setInstalledAgents((prev) => {
-                const n = new Set(prev);
-                n.add(agent.id);
-                n.add(agent.slug);
-                return n;
-              });
-              showToast(
-                `✅ ${agent.name} purchased! -${agent.price_cents} LBC. Balance: ${newBal}`,
-                "success",
-              );
-            } else {
-              showToast(data.error || "Install failed.", "error");
-            }
-          } catch {
-            setInstalledAgents((prev) => {
-              const n = new Set(prev);
-              n.add(agent.id);
-              n.add(agent.slug);
-              return n;
-            });
-            showToast(
-              `✅ ${agent.name} purchased with coins!`,
-              "success",
-            );
-          }
-          return;
-        }
-
-        // Not enough coins — redirect to Stripe checkout
         try {
           const res = await fetch("/api/stripe/checkout", {
             method: "POST",
@@ -810,7 +801,7 @@ function MarketplaceInner() {
             body: JSON.stringify({
               mode: "payment",
               priceData: {
-                amount: agent.price_cents, // 1 LBC = $0.01 → price_cents is already USD cents
+                amount: agent.price_cents * 100, // 1 LBC = $0.01 → price_cents * 100 = USD cents
                 currency: "usd",
                 name: `${agent.name} — Agent License`,
                 description: `One-time purchase: ${agent.name} (${agent.price_cents} LBC)`,
@@ -865,7 +856,7 @@ function MarketplaceInner() {
         showToast(`✅ ${agent.name} installed for free!`, "success");
       }
     },
-    [agents, isSignedIn, userId, litBitCoins],
+    [agents, isSignedIn, userId],
   );
 
   const uninstallAgent = useCallback(
@@ -1006,9 +997,8 @@ function MarketplaceInner() {
 
       <div
         style={{
-          borderBottom: "2px solid " + T.borderColor,
-          padding: "24px",
-          textAlign: "center",
+          borderBottom: "1px solid " + T.borderColor,
+          padding: "28px 24px 20px",
           background:
             "linear-gradient(180deg, " +
             T.boxBg +
@@ -1017,208 +1007,337 @@ function MarketplaceInner() {
             " 100%)",
         }}
       >
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "12px",
-            marginBottom: "8px",
-            flexWrap: "wrap",
-          }}
-        >
-          <h1
+        <div className="mx-auto max-w-6xl">
+          <div
             style={{
-              color: T.headerColor,
-              fontSize: "28px",
-              fontWeight: "bold",
-              letterSpacing: "3px",
-              margin: 0,
+              display: "grid",
+              gridTemplateColumns: "1.15fr 0.85fr",
+              gap: "20px",
+              alignItems: "stretch",
             }}
           >
-            🤖 AGENT MARKETPLACE
-          </h1>
-          <span
-            style={{
-              padding: "4px 10px",
-              backgroundColor: "rgba(255,107,107,0.2)",
-              border: "1px solid #ff6b6b",
-              color: "#ff6b6b",
-              fontSize: "10px",
-              fontWeight: "bold",
-              borderRadius: "6px",
-              letterSpacing: "1px",
-              textTransform: "uppercase",
-            }}
-          >
-            Beta
-          </span>
-        </div>
-        <p
-          style={{
-            color: T.textColor,
-            fontSize: "13px",
-            opacity: 0.7,
-            maxWidth: "500px",
-            margin: "0 auto 16px",
-          }}
-        >
-          Discover, install, and deploy AI agents to your workspace
-        </p>
-
-        {/* Smart Wallet Bar */}
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            gap: "12px",
-            flexWrap: "wrap",
-            marginBottom: "20px",
-          }}
-        >
+            <div
+              style={{
+                textAlign: "left",
+                padding: "26px",
+                border: "1px solid " + T.borderColor,
+                borderRadius: "18px",
+                background:
+                  "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
+                boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
+              }}
+            >
+              <div
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "flex-start",
+                  gap: "12px",
+                  marginBottom: "10px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <h1
+                  style={{
+                    color: T.headerColor,
+                    fontSize: "28px",
+                    fontWeight: "bold",
+                    letterSpacing: "2px",
+                    margin: 0,
+                  }}
+                >
+                  AGENT MARKETPLACE
+                </h1>
+                <span
+                  style={{
+                    padding: "4px 10px",
+                    backgroundColor: "rgba(255,107,107,0.12)",
+                    border: "1px solid #ff6b6b66",
+                    color: "#ff8d8d",
+                    fontSize: "10px",
+                    fontWeight: "bold",
+                    borderRadius: "6px",
+                    letterSpacing: "1px",
+                    textTransform: "uppercase",
+                  }}
+                >
+                  Beta
+                </span>
+              </div>
+              <p
+                style={{
+                  color: T.textColor,
+                  fontSize: "14px",
+                  opacity: 0.72,
+                  maxWidth: "620px",
+                  margin: "0 0 18px",
+                  lineHeight: 1.6,
+                }}
+              >
+                Discover, install, and deploy AI agents to your workspace.
+                Free agents install instantly, pro agents unlock with your
+                tier, and premium listings are priced in LiTBit Coins.
+              </p>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "10px",
+                  flexWrap: "wrap",
+                  marginBottom: "18px",
+                }}
+              >
+                <span className="badge badge-pink">Marketplace</span>
+                <span className="badge">Stable rules</span>
+                <span className="badge badge-success">Server-side installs</span>
+              </div>
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                  gap: "12px",
+                  marginBottom: "18px",
+                }}
+              >
+                {[
+                  { label: "Agents", value: stats.total, icon: Sparkles },
+                  { label: "Free", value: stats.free, icon: ShieldCheck },
+                  { label: "Installed", value: stats.installed, icon: WandSparkles },
+                  { label: "Balance", value: stats.coins, icon: Coins },
+                ].map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <div
+                      key={item.label}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        gap: "12px",
+                        padding: "14px 16px",
+                        borderRadius: "14px",
+                        border: "1px solid " + T.borderColor,
+                        backgroundColor: "rgba(255,255,255,0.025)",
+                      }}
+                    >
+                      <div
+                        style={{
+                          width: "38px",
+                          height: "38px",
+                          borderRadius: "12px",
+                          display: "flex",
+                          alignItems: "center",
+                          justifyContent: "center",
+                          backgroundColor: T.accentColor + "18",
+                          color: T.accentColor,
+                        }}
+                      >
+                        <Icon size={18} />
+                      </div>
+                      <div>
+                        <div
+                          style={{
+                            color: T.textColor,
+                            fontSize: "18px",
+                            fontWeight: "bold",
+                            lineHeight: 1.1,
+                          }}
+                        >
+                          {item.value}
+                        </div>
+                        <div
+                          style={{
+                            color: T.textColor,
+                            fontSize: "10px",
+                            opacity: 0.6,
+                            textTransform: "uppercase",
+                            letterSpacing: "1px",
+                          }}
+                        >
+                          {item.label}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+              <div
+                style={{
+                  display: "flex",
+                  gap: "12px",
+                  flexWrap: "wrap",
+                }}
+              >
+                <Link
+                  href="/studio"
+                  style={{
+                    padding: "12px 18px",
+                    backgroundColor: T.linkColor,
+                    color: "white",
+                    textDecoration: "none",
+                    fontSize: "12px",
+                    fontWeight: "bold",
+                    borderRadius: "10px",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  Open in Studio <ArrowRight size={15} />
+                </Link>
+                <button
+                  onClick={() => setActiveTab("coins")}
+                  style={{
+                    padding: "12px 18px",
+                    backgroundColor: "rgba(255,215,0,0.08)",
+                    border: "1px solid rgba(255,215,0,0.35)",
+                    color: "gold",
+                    fontSize: "12px",
+                    cursor: "pointer",
+                    fontWeight: "bold",
+                    borderRadius: "10px",
+                  }}
+                >
+                  View Coin Packs
+                </button>
+              </div>
+            </div>
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+              }}
+            >
+              {MARKETPLACE_SHOWCASE.map((item, idx) => (
+                <div
+                  key={item.title}
+                  style={{
+                    position: "relative",
+                    minHeight: idx === 0 ? "220px" : "155px",
+                    borderRadius: "18px",
+                    overflow: "hidden",
+                    border: "1px solid " + T.borderColor,
+                    backgroundColor: T.bgColor,
+                    gridColumn: idx === 0 ? "1 / -1" : "auto",
+                  }}
+                >
+                  <Image
+                    src={item.src}
+                    alt={item.title}
+                    fill
+                    sizes="(max-width: 768px) 100vw, 50vw"
+                    style={{ objectFit: "cover" }}
+                    priority={idx === 0}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      background:
+                        "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.68) 100%)",
+                    }}
+                  />
+                  <div
+                    style={{
+                      position: "absolute",
+                      inset: 0,
+                      display: "flex",
+                      flexDirection: "column",
+                      justifyContent: "flex-end",
+                      padding: "14px",
+                    }}
+                  >
+                    <div
+                      style={{
+                        color: "#fff",
+                        fontSize: idx === 0 ? "18px" : "14px",
+                        fontWeight: "bold",
+                        marginBottom: "4px",
+                      }}
+                    >
+                      {item.title}
+                    </div>
+                    <div
+                      style={{
+                        color: "rgba(255,255,255,0.75)",
+                        fontSize: "11px",
+                        lineHeight: 1.45,
+                      }}
+                    >
+                      {item.subtitle}
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
           <div
             style={{
               display: "flex",
-              alignItems: "center",
-              gap: "10px",
-              padding: "12px 20px",
-              border: "2px solid #fbbf24",
-              borderRadius: "12px",
-              backgroundColor: "rgba(251,191,36,0.08)",
-              boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
-            }}
-          >
-            <span style={{ fontSize: "28px" }}>🪙</span>
-            <div>
-              <div
-                style={{ color: "#fbbf24", fontSize: "22px", fontWeight: "bold" }}
-              >
-                {litBitCoins.toLocaleString()}
-              </div>
-              <div
-                style={{ color: T.textColor, fontSize: "10px", opacity: 0.6 }}
-              >
-                LiTBit Coins Available
-              </div>
-            </div>
-          </div>
-          <button
-            onClick={() => setActiveTab("coins")}
-            style={{
-              padding: "12px 20px",
-              backgroundColor: "#fbbf24",
-              border: "2px solid #fbbf24",
-              color: "#000",
-              fontSize: "12px",
-              cursor: "pointer",
-              fontWeight: "bold",
-              borderRadius: "8px",
-              display: "flex",
-              alignItems: "center",
-              gap: "6px",
-            }}
-          >
-            <span>💳</span> Buy Coins
-          </button>
-          <button
-            onClick={earnCoins}
-            disabled={claimLoading}
-            style={{
-              padding: "12px 20px",
-              backgroundColor: `${T.accentColor}20`,
-              border: `2px solid ${T.accentColor}`,
-              color: T.accentColor,
-              fontSize: "12px",
-              cursor: claimLoading ? "not-allowed" : "pointer",
-              fontWeight: "bold",
-              borderRadius: "8px",
-              opacity: claimLoading ? 0.6 : 1,
-            }}
-          >
-            {claimLoading ? "⏳ Claiming..." : "⚡ +50 Daily"}
-          </button>
-        </div>
-
-        {/* Main Tabs */}
-        <div style={{ display: "flex", justifyContent: "center", gap: "8px" }}>
-          <button
-            onClick={() => setActiveTab("agents")}
-            style={{
-              padding: "12px 32px",
-              fontSize: "14px",
-              fontWeight: "bold",
-              border:
-                "2px solid " +
-                (activeTab === "agents" ? T.accentColor : T.borderColor),
-              backgroundColor:
-                activeTab === "agents" ? T.accentColor + "20" : "transparent",
-              color: activeTab === "agents" ? T.accentColor : T.textColor,
-              borderRadius: "8px 8px 0 0",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
+              justifyContent: "center",
               gap: "8px",
+              marginTop: "20px",
             }}
           >
-            <span>🤖</span> Agents{" "}
-            <span
+            <button
+              onClick={() => setActiveTab("agents")}
               style={{
-                padding: "2px 8px",
+                padding: "12px 32px",
+                fontSize: "14px",
+                fontWeight: "bold",
+                border:
+                  "2px solid " +
+                  (activeTab === "agents" ? T.accentColor : T.borderColor),
                 backgroundColor:
-                  activeTab === "agents" ? T.accentColor : T.borderColor,
-                color: "#000",
-                fontSize: "11px",
-                borderRadius: "4px",
+                  activeTab === "agents" ? T.accentColor + "20" : "transparent",
+                color: activeTab === "agents" ? T.accentColor : T.textColor,
+                borderRadius: "8px 8px 0 0",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
               }}
             >
-              {stats.total}
-            </span>
-          </button>
-          <button
-            onClick={() => setActiveTab("coins")}
-            style={{
-              padding: "12px 32px",
-              fontSize: "14px",
-              fontWeight: "bold",
-              border:
-                "2px solid " + (activeTab === "coins" ? "gold" : T.borderColor),
-              backgroundColor:
-                activeTab === "coins" ? "rgba(255,215,0,0.15)" : "transparent",
-              color: activeTab === "coins" ? "gold" : T.textColor,
-              borderRadius: "8px 8px 0 0",
-              cursor: "pointer",
-              display: "flex",
-              alignItems: "center",
-              gap: "8px",
-            }}
-          >
-            <span>🪙</span> LiTBit Coins
-          </button>
+              <span>🤖</span> Agents{" "}
+              <span
+                style={{
+                  padding: "2px 8px",
+                  backgroundColor:
+                    activeTab === "agents" ? T.accentColor : T.borderColor,
+                  color: "#000",
+                  fontSize: "11px",
+                  borderRadius: "4px",
+                }}
+              >
+                {stats.total}
+              </span>
+            </button>
+            <button
+              onClick={() => setActiveTab("coins")}
+              style={{
+                padding: "12px 32px",
+                fontSize: "14px",
+                fontWeight: "bold",
+                border:
+                  "2px solid " + (activeTab === "coins" ? "gold" : T.borderColor),
+                backgroundColor:
+                  activeTab === "coins" ? "rgba(255,215,0,0.15)" : "transparent",
+                color: activeTab === "coins" ? "gold" : T.textColor,
+                borderRadius: "8px 8px 0 0",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: "8px",
+              }}
+            >
+              <span>🪙</span> LiTBit Coins
+            </button>
+          </div>
         </div>
       </div>
 
       {activeTab === "agents" && (
         <div className="flex-1 flex flex-col">
-          {/* Mobile: Compact header */}
-          <div className="md:hidden px-4 py-3 border-b" style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg }}>
-            <input
-              type="text"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search agents..."
-              className="w-full px-3 py-2 rounded-lg text-xs outline-none"
-              style={{
-                backgroundColor: T.bgColor,
-                border: `1px solid ${T.borderColor}30`,
-                color: T.textColor,
-              }}
-            />
-          </div>
-
-          {/* Desktop: Full header */}
           <div
-            className="hidden md:block"
             style={{
               padding: "16px 24px",
               borderBottom: "1px solid " + T.borderColor,
@@ -1250,7 +1369,7 @@ function MarketplaceInner() {
                     (selectedCategory === "" ? T.accentColor : T.borderColor),
                   backgroundColor:
                     selectedCategory === ""
-                      ? T.accentColor + "15"
+                      ? "rgba(255,255,0,0.15)"
                       : "transparent",
                   color: selectedCategory === "" ? T.accentColor : T.textColor,
                   cursor: "pointer",
@@ -1278,7 +1397,7 @@ function MarketplaceInner() {
                         : T.borderColor),
                     backgroundColor:
                       selectedCategory === cat
-                        ? T.accentColor + "15"
+                        ? "rgba(255,255,0,0.15)"
                         : "transparent",
                     color:
                       selectedCategory === cat ? T.accentColor : T.textColor,
@@ -1333,7 +1452,7 @@ function MarketplaceInner() {
                 <option value="name">Name</option>
               </select>
               <Link
-                href="/studio?tool=agents"
+                href="/studio"
                 style={{
                   padding: "8px 16px",
                   backgroundColor: T.linkColor,
@@ -1347,55 +1466,26 @@ function MarketplaceInner() {
                   gap: "4px",
                 }}
               >
-                🚀 My Dock
+                Open in Studio
               </Link>
             </div>
-          </div>
-
-          {/* Mobile: Category pills */}
-          <div className="md:hidden px-4 py-2 flex gap-2 overflow-x-auto scrollbar-hide">
-            <button
-              onClick={() => setSelectedCategory("")}
-              className="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap"
-              style={{
-                backgroundColor: selectedCategory === "" ? T.accentColor + "15" : T.boxBg + "40",
-                border: selectedCategory === "" ? `1px solid ${T.accentColor}30` : `1px solid ${T.borderColor}20`,
-                color: selectedCategory === "" ? T.accentColor : T.textColor,
-              }}
-            >
-              All
-            </button>
-            {categories.slice(0, 5).map((cat) => (
-              <button
-                key={cat}
-                onClick={() => setSelectedCategory(cat === selectedCategory ? "" : cat)}
-                className="px-3 py-1.5 rounded-full text-xs font-bold whitespace-nowrap"
-                style={{
-                  backgroundColor: selectedCategory === cat ? T.accentColor + "15" : T.boxBg + "40",
-                  border: selectedCategory === cat ? `1px solid ${T.accentColor}30` : `1px solid ${T.borderColor}20`,
-                  color: selectedCategory === cat ? T.accentColor : T.textColor,
-                }}
-              >
-                {CATEGORY_LABELS[cat] || cat}
-              </button>
-            ))}
           </div>
 
           <div
             className="flex-1"
             style={{
-              padding: "16px md:24px",
+              padding: "24px",
               maxWidth: "1200px",
               margin: "0 auto",
               width: "100%",
             }}
           >
             {featuredAgents.length > 0 && !searchQuery && (
-              <div style={{ marginBottom: "24px md:32px" }}>
+              <div style={{ marginBottom: "32px" }}>
                 <div
                   style={{
                     color: T.accentColor,
-                    fontSize: "10px md:11px",
+                    fontSize: "11px",
                     letterSpacing: "2px",
                     marginBottom: "12px",
                     fontWeight: "bold",
@@ -1406,8 +1496,9 @@ function MarketplaceInner() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                    gap: "12px md:16px",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(260px, 1fr))",
+                    gap: "16px",
                   }}
                 >
                   {featuredAgents.map((agent) => (
@@ -1426,11 +1517,11 @@ function MarketplaceInner() {
 
             {/* NEW ARRIVALS */}
             {newArrivals.length > 0 && !searchQuery && !selectedCategory && (
-              <div style={{ marginBottom: "24px md:32px" }}>
+              <div style={{ marginBottom: "32px" }}>
                 <div
                   style={{
                     color: "#22d3ee",
-                    fontSize: "10px md:11px",
+                    fontSize: "11px",
                     letterSpacing: "2px",
                     marginBottom: "12px",
                     fontWeight: "bold",
@@ -1455,8 +1546,9 @@ function MarketplaceInner() {
                 <div
                   style={{
                     display: "grid",
-                    gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                    gap: "12px md:16px",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(260px, 1fr))",
+                    gap: "16px",
                   }}
                 >
                   {newArrivals.map((agent) => (
@@ -1478,7 +1570,7 @@ function MarketplaceInner() {
               <div
                 style={{
                   color: T.accentColor,
-                  fontSize: "10px md:11px",
+                  fontSize: "11px",
                   letterSpacing: "2px",
                   marginBottom: "12px",
                   fontWeight: "bold",
@@ -1502,8 +1594,8 @@ function MarketplaceInner() {
               <div
                 style={{
                   display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(160px, 1fr))",
-                  gap: "12px md:16px",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: "16px",
                 }}
               >
                 {(searchQuery ? filteredAgents : regularAgents).map((agent) => (
@@ -1873,16 +1965,16 @@ function MarketplaceInner() {
             </div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
               {[
-                { name: "Support Agent", cost: 25, color: T.accentColor },
-                { name: "Writing Coach", cost: 50, color: T.headerColor },
-                { name: "Research Guru", cost: 75, color: "#60a5fa" },
-                { name: "Social Dominator", cost: 100, color: "#34d399" },
-                { name: "Pixel Forge", cost: 100, color: "#ec4899" },
-                { name: "Data Slayer", cost: 150, color: "#a78bfa" },
-                { name: "Music Producer", cost: 200, color: "#22d3ee" },
-                { name: "Legal Shield", cost: 300, color: "#ff6b35" },
-                { name: "Security Guru", cost: 400, color: "#f87171" },
-                { name: "ML Engineer", cost: 500, color: "#fbbf24" },
+                { name: "Support Agent", cost: 50, color: T.accentColor },
+                { name: "Writing Coach", cost: 75, color: T.headerColor },
+                { name: "Research Guru", cost: 100, color: "#60a5fa" },
+                { name: "Social Dominator", cost: 250, color: "#34d399" },
+                { name: "Data Slayer", cost: 300, color: "#a78bfa" },
+                { name: "Pixel Forge", cost: 200, color: "#ec4899" },
+                { name: "Music Producer", cost: 400, color: "#22d3ee" },
+                { name: "Legal Shield", cost: 1000, color: "#ff6b35" },
+                { name: "Security Guru", cost: 1200, color: "#f87171" },
+                { name: "ML Engineer", cost: 1500, color: "#fbbf24" },
               ].map((item) => (
                 <div
                   key={item.name}
@@ -1912,15 +2004,6 @@ function MarketplaceInner() {
                     }}
                   >
                     {item.cost} LBC
-                  </span>
-                  <span
-                    style={{
-                      color: T.textColor,
-                      fontSize: "10px",
-                      opacity: 0.6,
-                    }}
-                  >
-                    {formatUsdPrice(item.cost)}
                   </span>
                 </div>
               ))}
@@ -2065,11 +2148,6 @@ function MarketplaceInner() {
                   }}
                 >
                   {formatPrice(previewAgent.price_cents)}
-                  {previewAgent.price_cents > 0 && (
-                    <span style={{ fontSize: "11px", opacity: 0.7, marginLeft: "4px" }}>
-                      ({formatUsdPrice(previewAgent.price_cents)})
-                    </span>
-                  )}
                 </span>
               </div>
               <div style={{ display: "flex", gap: "8px" }}>
@@ -2147,13 +2225,11 @@ function MarketplaceInner() {
                   >
                     {previewAgent.price_cents === 0
                       ? "🚀 Install Free"
-                      : litBitCoins >= previewAgent.price_cents
-                        ? `🪙 Buy with Coins — ${formatPrice(previewAgent.price_cents)}`
-                        : `💳 Buy — ${formatUsdPrice(previewAgent.price_cents)}`}
+                      : "🪙 Buy — " + formatPrice(previewAgent.price_cents)}
                   </button>
                 )}
                 <Link
-                  href="/studio?tool=agents"
+                  href="/studio"
                   onClick={() => setPreviewAgent(null)}
                   style={{
                     padding: "12px 20px",
@@ -2166,7 +2242,7 @@ function MarketplaceInner() {
                     alignItems: "center",
                   }}
                 >
-                  Open Builder
+                  Open in Studio
                 </Link>
               </div>
             </div>
@@ -2366,6 +2442,7 @@ function AgentCard({
   const T = theme;
   const [hovered, setHovered] = useState(false);
   const categoryColor = getCategoryColor(agent.category);
+  const artSrc = CATEGORY_ART[agent.category] || "/showcase/control-center.png";
 
   return (
     <div
@@ -2385,6 +2462,75 @@ function AgentCard({
     >
       {/* Category accent line */}
       <div className="h-1 w-full" style={{ background: categoryColor }} />
+
+      <div style={{ position: "relative", height: "132px", overflow: "hidden" }}>
+        <Image
+          src={artSrc}
+          alt={agent.name}
+          fill
+          sizes="(max-width: 768px) 100vw, 25vw"
+          style={{ objectFit: "cover" }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            background:
+              "linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.72) 100%)",
+          }}
+        />
+        <div
+          style={{
+            position: "absolute",
+            left: "14px",
+            right: "14px",
+            bottom: "12px",
+            display: "flex",
+            justifyContent: "space-between",
+            gap: "10px",
+            alignItems: "end",
+          }}
+        >
+          <div>
+            <div
+              style={{
+                color: "#fff",
+                fontSize: "14px",
+                fontWeight: "bold",
+                marginBottom: "4px",
+              }}
+            >
+              {agent.name}
+            </div>
+            <div
+              style={{
+                color: "rgba(255,255,255,0.7)",
+                fontSize: "10px",
+                textTransform: "uppercase",
+                letterSpacing: "1px",
+              }}
+            >
+              {CATEGORY_LABELS[agent.category] || agent.category}
+            </div>
+          </div>
+          <div
+            style={{
+              padding: "4px 8px",
+              borderRadius: "999px",
+              backgroundColor:
+                agent.price_cents === 0
+                  ? "rgba(255,255,255,0.15)"
+                  : "rgba(0,0,0,0.5)",
+              color: "#fff",
+              fontSize: "10px",
+              fontWeight: "bold",
+              border: "1px solid rgba(255,255,255,0.14)",
+            }}
+          >
+            {formatPrice(agent.price_cents)}
+          </div>
+        </div>
+      </div>
 
       <div className="p-5">
         {/* Header */}
@@ -2426,7 +2572,7 @@ function AgentCard({
             </div>
           </div>
           <div
-            className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0 text-right"
+            className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0"
             style={{
               background:
                 agent.price_cents === 0
@@ -2436,12 +2582,7 @@ function AgentCard({
               border: `1px solid ${categoryColor}50`,
             }}
           >
-            <div>{formatPrice(agent.price_cents)}</div>
-            {agent.price_cents > 0 && (
-              <div style={{ fontSize: "9px", opacity: 0.8, fontWeight: "normal" }}>
-                {formatUsdPrice(agent.price_cents)}
-              </div>
-            )}
+            {formatPrice(agent.price_cents)}
           </div>
         </div>
 
@@ -2506,9 +2647,7 @@ function AgentCard({
                 color: "#000",
               }}
             >
-              {agent.price_cents === 0
-                ? "Install Free"
-                : "Buy Now"}
+              {agent.price_cents === 0 ? "Install Free" : "Buy Now"}
             </button>
           )}
         </div>

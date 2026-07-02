@@ -13,35 +13,26 @@ import {
   Image as ImageIcon,
   Terminal,
   X,
-  FolderOpen,
-  ChevronRight,
 } from "lucide-react";
-import { AGENTS, buildSystemPrompt } from "@/lib/agents";
-import {
-  loadProjectContext,
-  saveProjectContext,
-  hasProjectContext,
-  projectContextSummary,
-  EMPTY_CONTEXT,
-} from "@/lib/project-context";
-import type { ProjectContext } from "@/lib/agents";
+import { AGENTS } from "@/lib/agents";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
-const AGENT_LIST = Object.values(AGENTS);
+type AgentProfile = (typeof AGENTS)[keyof typeof AGENTS] & {
+  color: string;
+  desc: string;
+  systemPrompt: string;
+};
+
+const AGENT_LIST: AgentProfile[] = Object.values(AGENTS).map((agent) => ({
+  ...agent,
+  color: (agent as AgentProfile).color ?? "#00ffff",
+  desc: (agent as AgentProfile).role ?? "Agent",
+  systemPrompt: (agent as AgentProfile).systemPrompt ?? "",
+}));
 
 const AGENT_COLORS: Record<string, string> = Object.fromEntries(
-  AGENT_LIST.map((a) => [a.id, a.color ?? "#00ffff"]),
+  AGENT_LIST.map((a) => [a.id, a.color]),
 );
-
-/* ─── Slash command help ──────────────────────────────────────────────── */
-const SLASH_HELP = `Available commands:
-  /clear        — Clear terminal output
-  /help         — Show this help
-  /project      — Show / edit your project context
-  /project set  — Guided project context setup
-  /agents       — List all agents and their domains
-  /image <desc> — Generate an image (routes to Visionary)
-  /model        — Toggle AI model provider`;
 
 type TerminalLine = {
   id: string;
@@ -76,6 +67,7 @@ function formatTime() {
 /* ─── Main Component ─────────────────────────────────────────────────── */
 export default function AgentsTerminalTool() {
   const { resolvedColors: T } = useTheme();
+  const [isMobile, setIsMobile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -117,9 +109,6 @@ export default function AgentsTerminalTool() {
   const [attachedImageUrl, setAttachedImageUrl] = useState("");
   const [showImageInput, setShowImageInput] = useState(false);
   const [imageUrlInput, setImageUrlInput] = useState("");
-  const [projectCtx, setProjectCtx] = useState<ProjectContext>(() => loadProjectContext());
-  const [showProjectEditor, setShowProjectEditor] = useState(false);
-  const [projectDraft, setProjectDraft] = useState<ProjectContext>(() => loadProjectContext());
 
   /* Right panel */
   const [rightTab, setRightTab] = useState<"info" | "logs">("info");
@@ -131,21 +120,12 @@ export default function AgentsTerminalTool() {
   const selectedAgent =
     AGENT_LIST.find((a) => a.id === selectedAgentId) ?? AGENT_LIST[0];
 
-  const TERMINAL_COMMANDS = [
-    "/clear",
-    "/help",
-    "/project",
-    "/project set",
-    "/agents",
-    "/image",
-    "/model",
-  ];
-
-  const ghostText = (() => {
-    if (!input.startsWith("/")) return "";
-    const match = TERMINAL_COMMANDS.find((cmd) => cmd.startsWith(input));
-    return match ? match.slice(input.length) : "";
-  })();
+  useEffect(() => {
+    const update = () => setIsMobile(window.innerWidth < 1024);
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   /* Persist lines */
   useEffect(() => {
@@ -220,77 +200,11 @@ export default function AgentsTerminalTool() {
     [appendLine],
   );
 
-  /* ── Slash command handler ───────────────────────────────────────── */
-  const handleSlashCommand = useCallback((cmd: string): boolean => {
-    const lower = cmd.trim().toLowerCase();
-
-    if (lower === "/clear") {
-      setLines([]);
-      return true;
-    }
-    if (lower === "/help") {
-      addSystemLine(SLASH_HELP);
-      return true;
-    }
-    if (lower === "/project" || lower === "/project show") {
-      const ctx = loadProjectContext();
-      if (!hasProjectContext(ctx)) {
-        addSystemLine("No project context set. Type /project set to configure.");
-      } else {
-        addSystemLine(
-          `Project context:\n` +
-          Object.entries(ctx)
-            .filter(([, v]) => v)
-            .map(([k, v]) => `  ${k}: ${v}`)
-            .join("\n")
-        );
-      }
-      return true;
-    }
-    if (lower === "/project set" || lower === "/project edit") {
-      setProjectDraft({ ...loadProjectContext() });
-      setShowProjectEditor(true);
-      return true;
-    }
-    if (lower === "/agents") {
-      const agentInfo = AGENT_LIST.map(
-        (a) => `  ${a.tag ?? a.name.toUpperCase()} — ${a.role}\n    Domains: ${(a.domains ?? []).join(", ")}`
-      ).join("\n");
-      addSystemLine(`Active agents (${AGENT_LIST.length}):\n${agentInfo}`);
-      return true;
-    }
-    if (lower === "/model") {
-      setProvider((p) => p === "gemini" ? "openrouter-free" : "gemini");
-      addSystemLine(`Switched model provider.`);
-      return true;
-    }
-    if (lower.startsWith("/image ")) {
-      const desc = cmd.slice(7).trim();
-      // Route to Visionary agent
-      setSelectedAgentId("pixel-forge");
-      addSystemLine(`[Visionary] Routing image request...`);
-      // Return false so sendMessage continues with the description text
-      setInput(desc);
-      return false;
-    }
-    return false;
-  }, [addSystemLine]);
-
   const sendMessage = useCallback(
     async (text?: string) => {
       const content = (text || input).trim();
       if (!content && !attachedImageUrl) return;
       if (isLoading) return;
-
-      // Handle slash commands before sending
-      if (content.startsWith("/")) {
-        const handled = handleSlashCommand(content);
-        if (handled) {
-          setInput("");
-          return;
-        }
-        // /image routes here — input was reset, fall through
-      }
 
       const finalText =
         content + (attachedImageUrl ? `\n[Image: ${attachedImageUrl}]` : "");
@@ -336,8 +250,6 @@ export default function AgentsTerminalTool() {
             content: l.content,
           }));
 
-        const ctxPrompt = buildSystemPrompt(selectedAgent.systemPrompt, projectCtx);
-
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -346,7 +258,7 @@ export default function AgentsTerminalTool() {
             provider,
             stream: true,
             history,
-            systemPrompt: ctxPrompt,
+            systemPrompt: selectedAgent.systemPrompt,
           }),
         });
 
@@ -415,10 +327,8 @@ export default function AgentsTerminalTool() {
       lines,
       selectedAgent,
       provider,
-      projectCtx,
       appendLine,
       addSystemLine,
-      handleSlashCommand,
     ],
   );
 
@@ -426,13 +336,6 @@ export default function AgentsTerminalTool() {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       sendMessage();
-      return;
-    }
-
-    // Tab to accept ghost suggestion
-    if (e.key === "Tab" && ghostText) {
-      e.preventDefault();
-      setInput(input + ghostText);
       return;
     }
 
@@ -503,6 +406,8 @@ export default function AgentsTerminalTool() {
 
   const providerConfig =
     PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const providerLabel =
+    provider === "gemini" ? "Gemini 2.5 Flash" : providerConfig.label;
 
   const crtStyle = {
     background:
@@ -511,7 +416,7 @@ export default function AgentsTerminalTool() {
   };
 
   return (
-    <div className="flex h-full overflow-hidden select-none relative">
+    <div className="flex h-full min-h-0 flex-col lg:flex-row overflow-hidden select-none relative">
       {/* CRT overlay */}
       {crtEnabled && (
         <div
@@ -522,7 +427,7 @@ export default function AgentsTerminalTool() {
 
       {/* ── LEFT: Agent List - Terminal Sidebar ── */}
       <div
-        className="w-[240px] shrink-0 flex flex-col border-r"
+        className={`w-full lg:w-[240px] shrink-0 flex flex-col border-r ${isMobile ? "hidden" : "lg:flex"}`}
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: "#1a1a1a",
@@ -553,67 +458,53 @@ export default function AgentsTerminalTool() {
           </span>
         </div>
 
-        {/* Project context badge */}
-        <button
-          onClick={() => { setProjectDraft({ ...projectCtx }); setShowProjectEditor(true); }}
-          className="mx-2 mb-1 mt-1 flex items-center gap-1.5 px-2 py-1 rounded text-left transition-all hover:opacity-90"
-          style={{
-            backgroundColor: hasProjectContext(projectCtx) ? T.accentColor + "18" : "transparent",
-            border: `1px solid ${hasProjectContext(projectCtx) ? T.accentColor + "40" : T.borderColor + "20"}`,
-          }}
-        >
-          <FolderOpen size={9} style={{ color: hasProjectContext(projectCtx) ? T.accentColor : T.textMuted, flexShrink: 0 }} />
-          <span className="text-[9px] truncate" style={{ color: hasProjectContext(projectCtx) ? T.textColor : T.textMuted }}>
-            {hasProjectContext(projectCtx) ? projectContextSummary(projectCtx) : "Set project context…"}
-          </span>
-        </button>
-
         {/* Agent list */}
         <div className="flex-1 overflow-y-auto py-1">
-          {AGENT_LIST.map((agent) => {
+          {AGENT_LIST.map((agent, idx) => {
             const isActive = selectedAgentId === agent.id;
-            const agentColor = agent.color ?? "#00ffff";
             return (
               <button
                 key={agent.id}
                 onClick={() => setSelectedAgentId(agent.id)}
-                className="w-full text-left px-3 py-2 transition-all border-l-2"
+                className="w-full text-left px-3 py-2 transition-all group border-l-2"
                 style={{
-                  backgroundColor: isActive ? agentColor + "12" : "transparent",
-                  borderLeftColor: isActive ? agentColor : "transparent",
+                  backgroundColor: isActive
+                    ? agent.color + "08"
+                    : "transparent",
+                  borderLeftColor: isActive ? agent.color : "transparent",
                 }}
               >
                 <div className="flex items-center gap-2">
+                  <span
+                    className="text-[9px] font-mono w-4 shrink-0"
+                    style={{ color: T.textMuted + "60" }}
+                  >
+                    {String(idx + 1).padStart(2, "0")}
+                  </span>
                   <div
                     className="w-2 h-2 rounded-full shrink-0"
                     style={{
-                      backgroundColor: agentColor,
-                      boxShadow: isActive ? `0 0 8px ${agentColor}` : "none",
+                      backgroundColor: agent.color,
+                      boxShadow: isActive ? `0 0 6px ${agent.color}` : "none",
                     }}
                   />
                   <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-1.5">
-                      <span
-                        className="text-[11px] font-bold"
-                        style={{ color: isActive ? agentColor : T.textColor }}
-                      >
-                        {agent.name}
-                      </span>
-                      <span
-                        className="text-[8px] font-mono px-1 rounded"
-                        style={{ backgroundColor: agentColor + "18", color: agentColor }}
-                      >
-                        {agent.tag ?? agent.id.toUpperCase()}
-                      </span>
+                    <div
+                      className="text-[11px] font-bold truncate"
+                      style={{ color: isActive ? agent.color : T.textColor }}
+                    >
+                      {agent.name}
                     </div>
                     <div
-                      className="text-[9px] truncate mt-0.5"
-                      style={{ color: T.textMuted + "80" }}
+                      className="text-[9px] truncate"
+                      style={{
+                        color: isActive ? T.textMuted : T.textMuted + "60",
+                      }}
                     >
                       {agent.role}
                     </div>
                   </div>
-                  {isActive && <ChevronRight size={10} style={{ color: agentColor }} />}
+                  {isActive && <span style={{ color: agent.color }}>▶</span>}
                 </div>
               </button>
             );
@@ -625,14 +516,19 @@ export default function AgentsTerminalTool() {
           className="border-t px-3 py-2 space-y-1"
           style={{ borderColor: T.borderColor + "20" }}
         >
-          <div className="text-[9px] font-mono" style={{ color: T.textMuted + "60" }}>Commands:</div>
-          <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-[9px] font-mono">
-            {[["/help", "help"], ["/clear", "clear"], ["/project", "context"], ["/image", "gen img"], ["/agents", "list"], ["/model", "switch"]].map(([cmd, label]) => (
-              <div key={cmd} className="contents">
-                <button onClick={() => { setInput(cmd); }} className="text-left hover:opacity-80" style={{ color: T.accentColor }}>{cmd}</button>
-                <span style={{ color: T.textMuted + "50" }}>{label}</span>
-              </div>
-            ))}
+          <div
+            className="text-[9px] font-mono"
+            style={{ color: T.textMuted + "60" }}
+          >
+            Quick commands:
+          </div>
+          <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
+            <span style={{ color: T.accentColor }}>/help</span>
+            <span style={{ color: T.textMuted + "60" }}>show help</span>
+            <span style={{ color: T.accentColor }}>/clear</span>
+            <span style={{ color: T.textMuted + "60" }}>clear chat</span>
+            <span style={{ color: T.accentColor }}>/image</span>
+            <span style={{ color: T.textMuted + "60" }}>gen image</span>
           </div>
         </div>
 
@@ -658,23 +554,23 @@ export default function AgentsTerminalTool() {
 
       {/* ── CENTER: Terminal ── */}
       <div
-        className="flex-1 flex flex-col min-w-0"
+        className="flex-1 flex flex-col min-w-0 min-h-0"
         style={{ backgroundColor: "rgba(0,0,0,0.4)" }}
       >
         {/* Top controls bar - Terminal title bar style */}
         <div
-          className="flex items-center justify-between px-3 h-9 border-b shrink-0"
+          className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 border-b shrink-0"
           style={{
             borderColor: T.borderColor + "20",
             backgroundColor: "#1a1a1a",
           }}
         >
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 min-w-0 flex-wrap">
             {/* Window controls */}
             <div className="flex gap-1.5">
-              <span className="w-3 h-3 rounded-full bg-[#ff5f56]" />
-              <span className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
-              <span className="w-3 h-3 rounded-full bg-[#27ca40]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[#ff5f56]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[#ffbd2e]" />
+              <span className="w-2.5 h-2.5 rounded-full bg-[#27ca40]" />
             </div>
 
             <div
@@ -685,7 +581,7 @@ export default function AgentsTerminalTool() {
             {/* Terminal icon */}
             <Terminal size={12} style={{ color: selectedAgent.color }} />
             <span
-              className="text-[10px] font-bold"
+              className="text-[10px] sm:text-[11px] font-bold truncate max-w-[110px] sm:max-w-none"
               style={{ color: T.textColor }}
             >
               {selectedAgent.name}
@@ -716,30 +612,34 @@ export default function AgentsTerminalTool() {
             )}
           </div>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-end">
             {/* Provider selector */}
-            <div
-              className="flex items-center gap-1 px-2 py-1 rounded text-[9px]"
-              style={{ backgroundColor: T.boxBg }}
+            <button
+              type="button"
+              onClick={() =>
+                setProvider((prev) =>
+                  prev === "gemini" ? "openrouter-free" : "gemini",
+                )
+              }
+              className="flex items-center gap-2 rounded-md border px-2 py-1.5 text-[9px] font-mono transition-all max-w-full"
+              style={{
+                backgroundColor: T.boxBg,
+                borderColor: providerConfig.color + "30",
+                color: providerConfig.color,
+              }}
+              title="Toggle provider"
             >
-              <span style={{ color: T.textMuted }}>Model:</span>
-              <select
-                value={provider}
-                onChange={(e) => setProvider(e.target.value)}
-                className="bg-transparent outline-none cursor-pointer font-mono"
-                style={{ color: providerConfig.color }}
-              >
-                {PROVIDERS.map((p) => (
-                  <option
-                    key={p.id}
-                    value={p.id}
-                    style={{ backgroundColor: T.bgColor }}
-                  >
-                    {p.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{
+                  backgroundColor: providerConfig.color,
+                  boxShadow: `0 0 8px ${providerConfig.color}`,
+                }}
+              />
+              <span className="hidden sm:inline" style={{ color: T.textMuted }}>Model</span>
+              <span className="font-bold truncate max-w-[120px]">{providerLabel}</span>
+              <span style={{ color: T.textMuted }}>▾</span>
+            </button>
 
             {/* CRT toggle */}
             <button
@@ -748,7 +648,7 @@ export default function AgentsTerminalTool() {
                 setCrtEnabled(next);
                 localStorage.setItem("crt_global_scanlines", String(next));
               }}
-              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all"
+              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all shrink-0"
               style={{
                 backgroundColor: crtEnabled ? T.accentColor + "15" : T.boxBg,
                 border: `1px solid ${crtEnabled ? T.accentColor + "30" : T.borderColor + "20"}`,
@@ -762,7 +662,7 @@ export default function AgentsTerminalTool() {
             {/* Clear */}
             <button
               onClick={clearChat}
-              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all hover:bg-red-500/10"
+              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all hover:bg-red-500/10 shrink-0"
               style={{
                 border: `1px solid ${T.borderColor + "20"}`,
                 color: T.textMuted,
@@ -777,7 +677,7 @@ export default function AgentsTerminalTool() {
         {/* Terminal scrollback - PowerShell style */}
         <div
           ref={scrollRef}
-          className="flex-1 overflow-y-auto p-3 space-y-1 font-mono text-[11px] leading-relaxed"
+          className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1 font-mono text-[11px] leading-relaxed"
           style={{ backgroundColor: "#0c0c0c" }}
         >
           {lines.length === 0 && !streaming && (
@@ -790,10 +690,10 @@ export default function AgentsTerminalTool() {
                   className="text-[12px] font-bold"
                   style={{ color: T.accentColor }}
                 >
-                  LiTTree LabStudios Terminal
+                  LiTree Labs Terminal
                 </div>
                 <div className="text-[10px] opacity-60">
-                  Copyright (c) LiTTree LabStudios. All rights reserved.
+                  Copyright (c) LiTree Lab Studios. All rights reserved.
                 </div>
                 <div className="mt-4 text-[10px] opacity-40">
                   Connected to{" "}
@@ -812,14 +712,14 @@ export default function AgentsTerminalTool() {
             <div key={line.id} className="group">
               {/* User input - PowerShell style prompt */}
               {line.role === "user" ? (
-                <div className="flex items-start gap-1">
+                <div className="flex items-start gap-1 flex-wrap">
                   <span
                     className="shrink-0 font-bold"
                     style={{ color: "#00a2ed" }}
                   >
                     PS
                   </span>
-                  <span style={{ color: T.textMuted + "80" }}>
+                  <span className="whitespace-nowrap" style={{ color: T.textMuted + "80" }}>
                     [{line.ts}] {selectedAgent.name}&gt;
                   </span>
                   <div className="flex-1" style={{ color: T.textColor }}>
@@ -842,10 +742,8 @@ export default function AgentsTerminalTool() {
                   <span style={{ color: "#ff6b6b" }}>{line.content}</span>
                 </div>
               ) : line.role === "system" ? (
-                <div className="pl-4 opacity-60">
-                  {line.content.split("\n").map((l, i) => (
-                    <div key={i} style={{ color: T.textMuted }}>  {l}</div>
-                  ))}
+                <div className="flex items-start gap-1 pl-4 opacity-50">
+                  <span style={{ color: T.textMuted }}># {line.content}</span>
                 </div>
               ) : (
                 /* AI Response */
@@ -866,7 +764,7 @@ export default function AgentsTerminalTool() {
 
           {/* Current streaming response */}
           {streaming && (
-            <div className="flex items-start gap-1 pl-4">
+            <div className="flex items-start gap-1 pl-4 flex-wrap">
               <span style={{ color: selectedAgent.color + "80" }}>&lt;</span>
               <span
                 className="animate-pulse"
@@ -884,7 +782,7 @@ export default function AgentsTerminalTool() {
         {/* Image attachment preview */}
         {attachedImageUrl && (
           <div className="px-3 pb-1">
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
                 src={attachedImageUrl}
@@ -913,7 +811,7 @@ export default function AgentsTerminalTool() {
         >
           {/* Image URL input */}
           {showImageInput && (
-            <div className="flex gap-1.5 mb-2">
+            <div className="flex gap-1.5 mb-2 flex-wrap">
               <span
                 className="shrink-0 text-[10px] py-1"
                 style={{ color: "#00a2ed" }}
@@ -928,7 +826,7 @@ export default function AgentsTerminalTool() {
                   if (e.key === "Enter") attachImage();
                   if (e.key === "Escape") setShowImageInput(false);
                 }}
-                className="flex-1 px-2 py-1 text-[11px] outline-none font-mono"
+                className="min-w-0 flex-1 px-2 py-1 text-[11px] outline-none font-mono"
                 style={{
                   backgroundColor: "transparent",
                   border: `1px solid ${T.borderColor}30`,
@@ -938,7 +836,7 @@ export default function AgentsTerminalTool() {
               />
               <button
                 onClick={attachImage}
-                className="px-2 py-1 text-[9px] font-bold"
+                className="px-2 py-1 text-[9px] font-bold shrink-0"
                 style={{
                   color: T.accentColor,
                 }}
@@ -955,7 +853,7 @@ export default function AgentsTerminalTool() {
           )}
 
           {attachedImageUrl && (
-            <div className="flex items-center gap-2 mb-2 px-1">
+            <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
               <span style={{ color: T.textMuted + "60" }}>📎 Attached:</span>
               <span
                 className="text-[10px] truncate max-w-[200px]"
@@ -974,9 +872,9 @@ export default function AgentsTerminalTool() {
           )}
 
           {/* PowerShell-style input line */}
-          <div className="flex gap-2 items-start">
+          <div className="flex gap-2 items-start flex-wrap">
             {/* PowerShell prompt */}
-            <div className="shrink-0 pt-1 select-none">
+            <div className="shrink-0 pt-1 select-none whitespace-nowrap">
               <span className="font-bold" style={{ color: "#00a2ed" }}>
                 PS
               </span>
@@ -987,7 +885,7 @@ export default function AgentsTerminalTool() {
             </div>
 
             {/* Input area */}
-            <div className="flex-1 flex gap-2 items-start relative">
+            <div className="flex-1 min-w-0 flex gap-2 items-start">
               <textarea
                 ref={textareaRef}
                 value={input}
@@ -996,26 +894,13 @@ export default function AgentsTerminalTool() {
                 placeholder={`Type message or /help...`}
                 rows={1}
                 disabled={isLoading}
-                className="flex-1 py-1 text-[11px] outline-none resize-none overflow-hidden font-mono disabled:opacity-40 bg-transparent"
+                className="min-w-0 flex-1 py-1 text-[11px] outline-none resize-none overflow-hidden font-mono disabled:opacity-40 bg-transparent"
                 style={{
                   color: T.textColor,
                   minHeight: "22px",
                   maxHeight: "140px",
-                  caretColor: T.accentColor,
                 }}
               />
-              {ghostText && (
-                <div
-                  className="absolute left-0 top-1 pointer-events-none text-[11px] font-mono select-none overflow-hidden"
-                  style={{
-                    color: T.textMuted + "40",
-                    whiteSpace: "pre",
-                    paddingLeft: "0.25rem",
-                  }}
-                >
-                  {ghostText}
-                </div>
-              )}
 
               {/* Quick actions */}
               <div className="flex gap-1 shrink-0">
@@ -1051,11 +936,11 @@ export default function AgentsTerminalTool() {
 
           {/* Status bar */}
           <div
-            className="flex items-center justify-between mt-2 px-0.5 text-[9px]"
+            className="flex flex-wrap items-center justify-between gap-2 mt-2 px-0.5 text-[9px]"
             style={{ color: T.textMuted + "40" }}
           >
-            <div className="flex gap-3">
-              <span>{providerConfig.label}</span>
+            <div className="flex flex-wrap gap-3">
+              <span>{providerLabel}</span>
               <span>↑↓ History</span>
               <span>Shift+Enter Newline</span>
               {input.length > 0 && <span>{input.length} chars</span>}
@@ -1071,7 +956,7 @@ export default function AgentsTerminalTool() {
 
       {/* ── RIGHT: Info + Logs ── */}
       <div
-        className="w-[270px] shrink-0 flex flex-col border-l"
+        className={`w-full lg:w-[270px] shrink-0 flex flex-col border-l ${isMobile ? "hidden" : "lg:flex"}`}
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: T.boxBg + "90",
@@ -1142,39 +1027,20 @@ export default function AgentsTerminalTool() {
               </div>
             </div>
 
-            {/* Role + domains */}
+            {/* Description */}
             <div>
-              <div className="text-[8px] font-bold uppercase tracking-widest mb-1" style={{ color: T.accentColor }}>Role</div>
-              <p className="text-[10px] leading-relaxed opacity-70" style={{ color: T.textColor }}>{selectedAgent.role}</p>
-              {(selectedAgent.domains ?? []).length > 0 && (
-                <div className="flex flex-wrap gap-1 mt-2">
-                  {(selectedAgent.domains ?? []).map((d) => (
-                    <span key={d} className="text-[8px] px-1.5 py-0.5 rounded font-mono"
-                      style={{ backgroundColor: (selectedAgent.color ?? T.accentColor) + "18", color: selectedAgent.color ?? T.accentColor, border: `1px solid ${selectedAgent.color ?? T.accentColor}30` }}
-                    >{d}</span>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Project context */}
-            <div>
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-[8px] font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>Project Context</div>
-                <button onClick={() => { setProjectDraft({ ...projectCtx }); setShowProjectEditor(true); }}
-                  className="text-[8px] px-1.5 py-0.5 rounded hover:opacity-80"
-                  style={{ color: T.accentColor, border: `1px solid ${T.accentColor}40` }}
-                >Edit</button>
+              <div
+                className="text-[8px] font-bold uppercase tracking-widest mb-1"
+                style={{ color: T.accentColor }}
+              >
+                Description
               </div>
-              {hasProjectContext(projectCtx) ? (
-                <div className="text-[9px] font-mono space-y-0.5" style={{ color: T.textMuted }}>
-                  {Object.entries(projectCtx).filter(([, v]) => v).map(([k, v]) => (
-                    <div key={k}><span style={{ color: T.accentColor }}>{k}:</span> {String(v).slice(0, 50)}{String(v).length > 50 ? "…" : ""}</div>
-                  ))}
-                </div>
-              ) : (
-                <div className="text-[9px] opacity-50" style={{ color: T.textMuted }}>Not set — agents can't see your project yet.</div>
-              )}
+              <p
+                className="text-[10px] leading-relaxed opacity-70"
+                style={{ color: T.textColor }}
+              >
+                {selectedAgent.desc}
+              </p>
             </div>
 
             {/* System Prompt */}
@@ -1354,109 +1220,6 @@ export default function AgentsTerminalTool() {
           </div>
         )}
       </div>
-
-      {/* ── Project Context Editor Modal ─────────────────────────────── */}
-      {showProjectEditor && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          style={{ backgroundColor: "rgba(0,0,0,0.75)", backdropFilter: "blur(4px)" }}
-          onClick={(e) => { if (e.target === e.currentTarget) setShowProjectEditor(false); }}
-        >
-          <div
-            className="w-full max-w-lg rounded-xl border overflow-hidden"
-            style={{ backgroundColor: "#0f0f12", borderColor: T.accentColor + "40" }}
-          >
-            {/* Modal header */}
-            <div className="flex items-center justify-between px-5 py-4 border-b" style={{ borderColor: T.borderColor + "30" }}>
-              <div className="flex items-center gap-2">
-                <FolderOpen size={15} style={{ color: T.accentColor }} />
-                <span className="font-bold text-sm" style={{ color: T.textColor }}>Project Context</span>
-                <span className="text-[9px] px-1.5 py-0.5 rounded font-mono" style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}>
-                  agents read this every message
-                </span>
-              </div>
-              <button onClick={() => setShowProjectEditor(false)} style={{ color: T.textMuted }}>
-                <X size={15} />
-              </button>
-            </div>
-
-            {/* Fields */}
-            <div className="p-5 space-y-4 max-h-[70vh] overflow-y-auto">
-              {([
-                ["name", "Project Name", "e.g. LiTTree LabStudios", false],
-                ["description", "Description", "What does it do? Who is it for?", true],
-                ["stack", "Tech Stack", "e.g. Next.js 16, Supabase, Tailwind, Clerk", false],
-                ["goals", "Current Goals", "e.g. Launch v1, improve onboarding, hit 1k users", true],
-                ["repoUrl", "Repo / URL", "https://github.com/...", false],
-                ["customInstructions", "Custom Instructions", "e.g. Always use TypeScript strict mode. Prefer functional components.", true],
-              ] as [keyof ProjectContext, string, string, boolean][]).map(([key, label, placeholder, multi]) => (
-                <div key={key}>
-                  <label className="block text-[10px] font-bold uppercase tracking-wider mb-1" style={{ color: T.accentColor }}>
-                    {label}
-                  </label>
-                  {multi ? (
-                    <textarea
-                      value={projectDraft[key] ?? ""}
-                      onChange={(e) => setProjectDraft((p) => ({ ...p, [key]: e.target.value }))}
-                      placeholder={placeholder}
-                      rows={3}
-                      className="w-full rounded px-3 py-2 text-[11px] font-mono outline-none resize-none"
-                      style={{ backgroundColor: "#1a1a1f", border: `1px solid ${T.borderColor}40`, color: T.textColor }}
-                    />
-                  ) : (
-                    <input
-                      value={projectDraft[key] ?? ""}
-                      onChange={(e) => setProjectDraft((p) => ({ ...p, [key]: e.target.value }))}
-                      placeholder={placeholder}
-                      className="w-full rounded px-3 py-2 text-[11px] font-mono outline-none"
-                      style={{ backgroundColor: "#1a1a1f", border: `1px solid ${T.borderColor}40`, color: T.textColor }}
-                    />
-                  )}
-                </div>
-              ))}
-            </div>
-
-            {/* Footer */}
-            <div className="flex items-center justify-between px-5 py-3 border-t" style={{ borderColor: T.borderColor + "30" }}>
-              <button
-                onClick={() => {
-                  const empty = { ...EMPTY_CONTEXT };
-                  setProjectDraft(empty);
-                  setProjectCtx(empty);
-                  saveProjectContext(empty);
-                  addSystemLine("Project context cleared.");
-                  setShowProjectEditor(false);
-                }}
-                className="text-[11px] px-3 py-1.5 rounded hover:opacity-80"
-                style={{ color: "#ff5f56", border: "1px solid #ff5f5640" }}
-              >
-                Clear
-              </button>
-              <div className="flex gap-2">
-                <button
-                  onClick={() => setShowProjectEditor(false)}
-                  className="text-[11px] px-3 py-1.5 rounded hover:opacity-80"
-                  style={{ color: T.textMuted, border: `1px solid ${T.borderColor}40` }}
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={() => {
-                    saveProjectContext(projectDraft);
-                    setProjectCtx({ ...projectDraft });
-                    addSystemLine(`Project context saved. All agents now know about: ${projectDraft.name || "your project"}.`);
-                    setShowProjectEditor(false);
-                  }}
-                  className="text-[11px] px-4 py-1.5 rounded font-bold hover:opacity-90"
-                  style={{ backgroundColor: T.accentColor, color: "#000" }}
-                >
-                  Save
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

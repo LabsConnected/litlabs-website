@@ -1,7 +1,7 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -24,6 +24,7 @@ export default function ProfilePage() {
   const [editingSection, setEditingSection] = useState<string | null>(null);
   const [visitorCount, setVisitorCount] = useState(133742);
   const [newInterest, setNewInterest] = useState("");
+  const [saving, setSaving] = useState(false);
   const avatarInputRef = useRef<HTMLInputElement>(null);
   const coverInputRef = useRef<HTMLInputElement>(null);
 
@@ -50,25 +51,68 @@ export default function ProfilePage() {
   ]);
   const [newCommentText, setNewCommentText] = useState("");
 
-  const handleAvatarUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const saveProfile = useCallback(
+    async (updates: Record<string, unknown>) => {
+      setSaving(true);
+      try {
+        const res = await fetch("/api/settings/profile", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(updates),
+        });
+        const data = await res.json().catch(() => ({}));
+        if (!res.ok) throw new Error(data.error || "Failed to save profile");
+        if (typeof data.user === "object" && data.user) {
+          updateProfile({
+            displayName: String((data.user as Record<string, unknown>).name || profile.displayName),
+            username: String((data.user as Record<string, unknown>).username || profile.username),
+            avatarUrl:
+              (data.user as Record<string, unknown>).avatar_url === undefined
+                ? profile.avatarUrl
+                : String((data.user as Record<string, unknown>).avatar_url || ""),
+            bio: String((data.user as Record<string, unknown>).bio || profile.bio),
+            website: String((data.user as Record<string, unknown>).website || profile.website),
+            location: String((data.user as Record<string, unknown>).location || profile.location),
+          });
+        }
+      } finally {
+        setSaving(false);
+      }
+    },
+    [profile, updateProfile],
+  );
+
+  const uploadAndSave = useCallback(
+    async (file: File, field: "avatar_url" | "cover_url") => {
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok || !data.url) throw new Error(data.error || "Upload failed");
+      if (field === "avatar_url") updateProfile({ avatarUrl: data.url });
+      if (field === "cover_url") updateProfile({ coverUrl: data.url });
+      await saveProfile({ [field]: data.url });
+    },
+    [saveProfile, updateProfile],
+  );
+
+  const handleAvatarUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        updateProfile({ avatarUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+      await uploadAndSave(file, "avatar_url").catch(() => {
+        updateProfile({ avatarUrl: URL.createObjectURL(file) });
+      });
     }
   };
 
-  const handleCoverUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCoverUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => {
-        updateProfile({ coverUrl: reader.result as string });
-      };
-      reader.readAsDataURL(file);
+      await uploadAndSave(file, "cover_url").catch(() => {
+        updateProfile({ coverUrl: URL.createObjectURL(file) });
+      });
     }
   };
 
@@ -1007,7 +1051,7 @@ export default function ProfilePage() {
           </button>
         </div>
         <div style={{ color: T.textColor }} className="opacity-50">
-          © {new Date().getFullYear()} LiTTree LabStudios NETWORK HUB | SYSTEM
+          © {new Date().getFullYear()} LiTreeLabStudios NETWORK HUB | SYSTEM
           CORE v5.24 | POWERED BY ⚡GOD-CORE SPECIALISTS
         </div>
       </div>
