@@ -1,7 +1,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
+import { supabase } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
+
+async function resolveDbUserId(clerkId: string): Promise<string | null> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
 
 /**
  * POST /api/users/[userId]/credits
@@ -12,7 +22,7 @@ export async function POST(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   // Rate limiting
-  const { success, remaining, resetTime } = rateLimit(req, 50, 60);
+  const { success, remaining, resetTime } = await rateLimit(req, 50, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429,
@@ -34,9 +44,20 @@ export async function POST(
 
     const { userId } = await params;
 
+    // Resolve the target user's DB ID (userId param could be clerk_id or uuid)
+    const { data: targetUser } = await supabase
+      .from("users")
+      .select("id, clerk_id")
+      .or(`id.eq.${userId},clerk_id.eq.${userId}`)
+      .single();
+
+    if (!targetUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
     // Only the user themselves or an admin can modify credits
     const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").filter(Boolean);
-    const isSelf = clerkId === userId;
+    const isSelf = clerkId === targetUser.clerk_id;
     const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
     if (!isSelf && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
@@ -46,7 +67,7 @@ export async function POST(
     const amount = Number(body.amount) || 0;
 
     // Get current wallet
-    const wallet = await getUserWallet(userId);
+    const wallet = await getUserWallet(targetUser.clerk_id);
     const newBalance = wallet.balance + amount;
     if (newBalance < 0) {
       return NextResponse.json(
@@ -55,7 +76,7 @@ export async function POST(
       );
     }
 
-    const updated = await updateWalletBalance(userId, newBalance);
+    const updated = await updateWalletBalance(targetUser.clerk_id, newBalance);
 
     const response = NextResponse.json({
       ok: true,
@@ -87,7 +108,7 @@ export async function GET(
   { params }: { params: Promise<{ userId: string }> },
 ) {
   // Rate limiting
-  const { success, resetTime } = rateLimit(req, 100, 60);
+  const { success, resetTime } = await rateLimit(req, 100, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429,
@@ -107,7 +128,27 @@ export async function GET(
     }
 
     const { userId } = await params;
-    const wallet = await getUserWallet(userId);
+
+    // Resolve the target user — param could be clerk_id or uuid
+    const { data: targetUser } = await supabase
+      .from("users")
+      .select("id, clerk_id")
+      .or(`id.eq.${userId},clerk_id.eq.${userId}`)
+      .single();
+
+    if (!targetUser) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
+    }
+
+    // Only the user themselves or an admin can view credits
+    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").filter(Boolean);
+    const isSelf = clerkId === targetUser.clerk_id;
+    const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
+    if (!isSelf && !isAdmin) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
+    const wallet = await getUserWallet(targetUser.clerk_id);
     return NextResponse.json({ credits: wallet.balance });
   } catch {
     // Error fetching credits:

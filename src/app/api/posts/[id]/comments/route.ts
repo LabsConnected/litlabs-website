@@ -11,7 +11,7 @@ export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { success, remaining, resetTime } = rateLimit(req, 100, 60);
+  const { success, remaining, resetTime } = await rateLimit(req, 100, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429,
@@ -53,7 +53,7 @@ export async function POST(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const { success, remaining, resetTime } = rateLimit(req, 30, 60);
+  const { success, remaining, resetTime } = await rateLimit(req, 30, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429,

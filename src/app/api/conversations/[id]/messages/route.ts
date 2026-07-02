@@ -4,16 +4,30 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { generateText } from "@/lib/llm";
 
+async function resolveDbUserId(clerkId: string): Promise<string | null> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
+
 // GET: Load messages for conversation
 export async function GET(
   req: NextRequest,
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const dbUserId = await resolveDbUserId(clerkId);
+    if (!dbUserId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { id: conversationId } = await params;
@@ -23,7 +37,7 @@ export async function GET(
       .from("conversations")
       .select("*")
       .eq("id", conversationId)
-      .eq("user_id", userId)
+      .eq("user_id", dbUserId)
       .single();
 
     if (!conversation) {
@@ -66,10 +80,15 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const dbUserId = await resolveDbUserId(clerkId);
+    if (!dbUserId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { id: conversationId } = await params;
@@ -90,7 +109,7 @@ export async function POST(
       `,
       )
       .eq("id", conversationId)
-      .eq("user_id", userId)
+      .eq("user_id", dbUserId)
       .single();
 
     if (!conversation) {

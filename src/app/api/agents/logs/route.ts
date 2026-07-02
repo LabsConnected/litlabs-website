@@ -49,7 +49,7 @@ function getAdminIds(): string[] {
 function isAdmin(userId: string | null | undefined): boolean {
   if (!userId) return false;
   const admins = getAdminIds();
-  if (admins.length === 0) return userId === "user_litbit";
+  if (admins.length === 0) return false;
   return admins.includes(userId);
 }
 

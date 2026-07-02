@@ -1,25 +1,23 @@
 // API Route: Start and manage background agent conversations
+// NOTE: Serverless-incompatible patterns (setInterval, in-memory state) removed.
+// For production, use a queue system (e.g. Supabase Edge Functions + pg_cron).
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { orchestrator, CONVERSATION_TOPERS } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
 
-// Store active background conversations
-const activeBackgroundConversations: Map<string, NodeJS.Timeout> = new Map();
-
 async function handler(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   if (req.method === "POST") {
     try {
       const body = await req.json();
-      const {
-        action,
-        agent1,
-        agent2,
-        topic,
-        conversationId,
-        interval = 5000,
-      } = body;
+      const { action, agent1, agent2, topic, conversationId } = body;
 
-      // Start background conversation
+      // Start a conversation (single turn — client polls for updates)
       if (action === "start") {
         if (!agent1 || !agent2) {
           return NextResponse.json(
@@ -34,29 +32,13 @@ async function handler(req: NextRequest) {
             Math.floor(Math.random() * CONVERSATION_TOPERS.length)
           ];
 
-        // Create conversation
         const conversation = await orchestrator.startBackgroundConversation(
           agent1,
           agent2,
           selectedTopic,
         );
 
-        // Set up interval for continuous conversation
-        const intervalId = setInterval(async () => {
-          const lastMsg =
-            conversation.messages[conversation.messages.length - 1];
-          if (lastMsg && conversation.messages.length < 20) {
-            // Limit to 20 messages
-            await orchestrator.continueConversation(conversation.id);
-          } else {
-            // End conversation if too long
-            conversation.status = "completed";
-            clearInterval(intervalId);
-            activeBackgroundConversations.delete(conversation.id);
-          }
-        }, interval);
-
-        activeBackgroundConversations.set(conversation.id, intervalId);
+        await orchestrator.continueConversation(conversation.id);
 
         return NextResponse.json({
           success: true,
@@ -67,33 +49,31 @@ async function handler(req: NextRequest) {
             status: conversation.status,
             startedAt: conversation.startedAt,
             messageCount: conversation.messages.length,
+            messages: conversation.messages,
           },
-          message: `Started background conversation between ${agent1} and ${agent2} on topic: ${selectedTopic}`,
+          message: `Started conversation between ${agent1} and ${agent2} on topic: ${selectedTopic}`,
         });
       }
 
-      // Stop background conversation
-      if (action === "stop" && conversationId) {
-        const intervalId = activeBackgroundConversations.get(conversationId);
-        if (intervalId) {
-          clearInterval(intervalId);
-          activeBackgroundConversations.delete(conversationId);
-
-          const conversation = orchestrator.getConversation(conversationId);
-          if (conversation) {
-            conversation.status = "paused";
-          }
-
-          return NextResponse.json({
-            success: true,
-            message: `Stopped conversation ${conversationId}`,
-          });
+      // Continue a conversation (client-driven, one more turn)
+      if (action === "continue" && conversationId) {
+        await orchestrator.continueConversation(conversationId);
+        const conversation = orchestrator.getConversation(conversationId);
+        if (!conversation) {
+          return NextResponse.json(
+            { error: "Conversation not found" },
+            { status: 404 },
+          );
         }
-
-        return NextResponse.json(
-          { error: "Conversation not found or already stopped" },
-          { status: 404 },
-        );
+        return NextResponse.json({
+          success: true,
+          conversation: {
+            id: conversation.id,
+            status: conversation.status,
+            messageCount: conversation.messages.length,
+            messages: conversation.messages,
+          },
+        });
       }
 
       // Get conversation status
@@ -127,11 +107,10 @@ async function handler(req: NextRequest) {
       }
 
       return NextResponse.json(
-        { error: "Invalid action. Use: start, stop, status" },
+        { error: "Invalid action. Use: start, continue, status" },
         { status: 400 },
       );
     } catch {
-      // Error in orchestration:
       return NextResponse.json(
         { error: "Failed to orchestrate agents" },
         { status: 500 },
@@ -154,7 +133,6 @@ async function handler(req: NextRequest) {
     return NextResponse.json({
       activeConversations: conversations,
       totalActive: conversations.length,
-      totalRunning: activeBackgroundConversations.size,
     });
   }
 

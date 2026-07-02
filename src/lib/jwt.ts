@@ -1,8 +1,12 @@
 import { SignJWT, jwtVerify } from "jose";
 
-const SECRET = new TextEncoder().encode(
-  process.env.AUTH_SECRET || "homebase-dev-secret-change-in-production"
-);
+const raw = process.env.AUTH_SECRET;
+if (!raw) {
+  throw new Error(
+    "AUTH_SECRET environment variable is required. Generate one with: openssl rand -hex 32",
+  );
+}
+const SECRET = new TextEncoder().encode(raw);
 
 export async function signToken(payload: Record<string, unknown>) {
   return await new SignJWT(payload)

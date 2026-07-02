@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { generateText } from "@/lib/llm";
 
@@ -14,6 +15,10 @@ export const maxDuration = 60;
  * Now backed by the unified LLM client (Gemini → OpenRouter free → specific models).
  */
 async function handler(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { message, systemPrompt, task, preferFree } = await req.json();
     if (!message) {

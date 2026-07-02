@@ -12,203 +12,15 @@ import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
 
 // ─── Demo gallery items ──────────────────────────────────────────────────────
-/* ─── Real AI-generated art via Pollinations ───────────────────────── */
-const P = (prompt: string, w: number, h: number, seed: number) =>
-  `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=${w}&height=${h}&nologo=true&seed=${seed}&enhance=true`;
-
-const DEMO_ITEMS: GalleryItem[] = [
-  {
-    id: "1",
-    title: "Neon Cyber City",
-    artist: "Pixel Forge",
-    category: "360-worlds",
-    imageUrl: P(
-      "futuristic neon cyberpunk city at night with flying cars holographic billboards rain soaked streets cinematic lighting 8k ultra detailed digital art",
-      1024,
-      768,
-      42,
-    ),
-    likes: 234,
-    createdAt: "2026-06-01",
-  },
-  {
-    id: "2",
-    title: "Ethereal Dreamscape",
-    artist: "DreamWeaver",
-    category: "abstract",
-    imageUrl: P(
-      "ethereal abstract dreamscape floating islands waterfalls of light aurora borealis colors swirling cosmic dust fantasy art highly detailed",
-      768,
-      1024,
-      77,
-    ),
-    likes: 189,
-    createdAt: "2026-06-02",
-  },
-  {
-    id: "3",
-    title: "Lost Temple Ruins",
-    artist: "Explorer-X",
-    category: "landscape",
-    imageUrl: P(
-      "massive ancient alien temple ruins overgrown with bioluminescent vines floating above clouds sunset god rays concept art epic scale",
-      1024,
-      768,
-      13,
-    ),
-    likes: 312,
-    createdAt: "2026-05-28",
-  },
-  {
-    id: "4",
-    title: "Quantum Warrior",
-    artist: "Pixel Forge",
-    category: "character",
-    imageUrl: P(
-      "female quantum warrior in glowing nanotech armor holding energy sword helmet off fierce expression sci fi character portrait detailed",
-      768,
-      1024,
-      88,
-    ),
-    likes: 156,
-    createdAt: "2026-06-03",
-  },
-  {
-    id: "5",
-    title: "Crystal Cavern",
-    artist: "GeoMancer",
-    category: "360-worlds",
-    imageUrl: P(
-      "vast underground crystal cavern with massive glowing amethyst geodes underground lake reflections fantasy environment art",
-      1024,
-      768,
-      55,
-    ),
-    likes: 278,
-    createdAt: "2026-05-30",
-  },
-  {
-    id: "6",
-    title: "Void Entity",
-    artist: "ShadowNet",
-    category: "character",
-    imageUrl: P(
-      "mysterious void entity humanoid shape made of swirling darkness and stars glowing purple eyes cosmic horror elegant digital painting",
-      768,
-      1024,
-      99,
-    ),
-    likes: 421,
-    createdAt: "2026-06-04",
-  },
-  {
-    id: "7",
-    title: "Sunset Megacity",
-    artist: "Pixel Forge",
-    category: "landscape",
-    imageUrl: P(
-      "futuristic megacity at sunset from above infinite skyscrapers connected by sky bridges flying vehicles orange pink sky sci fi matte painting",
-      1024,
-      768,
-      21,
-    ),
-    likes: 198,
-    createdAt: "2026-05-25",
-  },
-  {
-    id: "8",
-    title: "Fractal Mind",
-    artist: "DreamWeaver",
-    category: "abstract",
-    imageUrl: P(
-      "abstract human head profile made of glowing fractal patterns neural networks electric blue magenta synapses digital art high detail",
-      1024,
-      1024,
-      66,
-    ),
-    likes: 267,
-    createdAt: "2026-05-29",
-  },
-  {
-    id: "9",
-    title: "Underwater Utopia",
-    artist: "AquaBot",
-    category: "360-worlds",
-    imageUrl: P(
-      "underwater bioluminescent city with dome structures jellyfish swimming around coral towers fantasy sci fi environment art",
-      1024,
-      768,
-      33,
-    ),
-    likes: 345,
-    createdAt: "2026-06-01",
-  },
-  {
-    id: "10",
-    title: "Cyber Samurai",
-    artist: "Pixel Forge",
-    category: "character",
-    imageUrl: P(
-      "cyberpunk samurai with glowing katana red neon armor dark rainy Tokyo street detailed character art cinematic lighting",
-      768,
-      1024,
-      11,
-    ),
-    likes: 189,
-    createdAt: "2026-05-27",
-  },
-  {
-    id: "11",
-    title: "Starfield Station",
-    artist: "StarWalker",
-    category: "landscape",
-    imageUrl: P(
-      "massive ring shaped space station orbiting a gas planet with rings thousands of windows glowing milky way background sci fi art",
-      1024,
-      768,
-      72,
-    ),
-    likes: 567,
-    createdAt: "2026-06-04",
-  },
-  {
-    id: "12",
-    title: "Neural Network",
-    artist: "DataMancer",
-    category: "abstract",
-    imageUrl: P(
-      "abstract visualization of artificial neural network nodes and connections glowing fiber optic threads brain shape dark background digital art",
-      1024,
-      1024,
-      44,
-    ),
-    likes: 234,
-    createdAt: "2026-05-26",
-  },
-];
+// The API handles demo fallback when Supabase is not configured.
+// This page only renders items from the API + user uploads.
 
 const CATEGORIES = [
-  { id: "all", label: "🌌 All Works", count: DEMO_ITEMS.length },
-  {
-    id: "360-worlds",
-    label: "🌍 360° Worlds",
-    count: DEMO_ITEMS.filter((i) => i.category === "360-worlds").length,
-  },
-  {
-    id: "character",
-    label: "👤 Characters",
-    count: DEMO_ITEMS.filter((i) => i.category === "character").length,
-  },
-  {
-    id: "landscape",
-    label: "🏔️ Landscapes",
-    count: DEMO_ITEMS.filter((i) => i.category === "landscape").length,
-  },
-  {
-    id: "abstract",
-    label: "🎨 Abstract",
-    count: DEMO_ITEMS.filter((i) => i.category === "abstract").length,
-  },
+  { id: "all", label: "🌌 All Works" },
+  { id: "360-worlds", label: "🌍 360° Worlds" },
+  { id: "character", label: "👤 Characters" },
+  { id: "landscape", label: "🏔️ Landscapes" },
+  { id: "abstract", label: "🎨 Abstract" },
 ];
 
 const SORT_OPTIONS = [
@@ -315,11 +127,11 @@ export default function Gallery() {
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [isMock, setIsMock] = useState(false);
 
-  // Real API items first; demo items only when API returns nothing (fallback)
+  // Real API items first; fall back to user items only when API returns nothing
   const baseItems =
     apiItems.length > 0
       ? [...apiItems, ...userItems]
-      : [...DEMO_ITEMS, ...userItems];
+      : [...userItems];
   const items = baseItems.map((item) => ({
     ...item,
     likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
@@ -676,7 +488,10 @@ export default function Gallery() {
       >
         {(() => {
           const featured =
-            [...items].sort((a, b) => b.likes - a.likes)[0] || DEMO_ITEMS[0];
+            items.length > 0
+              ? [...items].sort((a, b) => b.likes - a.likes)[0]
+              : null;
+          if (!featured) return null;
           return (
             <div className="relative h-[280px] sm:h-[380px] md:h-[480px] group">
               {brokenImages.has(featured.imageUrl) ? (

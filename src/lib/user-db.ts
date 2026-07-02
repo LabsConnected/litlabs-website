@@ -248,7 +248,7 @@ export async function getUserWallet(clerkId: string): Promise<Wallet> {
   // Default fallback wallet
   return {
     id: "fallback",
-    user_id: clerkId,
+    user_id: "00000000-0000-0000-0000-000000000000",
     balance: 9999,
     last_claim_date: null,
     created_at: new Date().toISOString(),

@@ -128,6 +128,21 @@ create table if not exists public.user_media (
   created_at timestamp with time zone default timezone('utc'::text, now()) not null
 );
 
+-- Rate Limiting (serverless-safe, Supabase-backed)
+create table if not exists public.rate_limits (
+  id bigint primary key generated always as identity,
+  ip text not null,
+  created_at timestamp with time zone default timezone('utc'::text, now()) not null
+);
+create index if not exists idx_rate_limits_ip_created on public.rate_limits(ip, created_at desc);
+
+-- Auto-cleanup old rate limit entries (older than 5 minutes)
+select cron.schedule(
+  'cleanup-rate-limits',
+  '*/5 * * * *',
+  $$delete from public.rate_limits where created_at < now() - interval '5 minutes'$$
+);
+
 -- ============================================
 -- RLS: ENABLED with service_role bypass
 -- Auth enforced in Next.js API routes via Clerk.

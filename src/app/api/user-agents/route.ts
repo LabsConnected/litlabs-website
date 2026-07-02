@@ -4,13 +4,27 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 
+async function resolveDbUserId(clerkId: string): Promise<string | null> {
+  const { data: user } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
+
 // GET: List user's installed agents
 async function getHandler() {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const dbUserId = await resolveDbUserId(clerkId);
+    if (!dbUserId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { data: userAgents, error } = await supabase
@@ -21,7 +35,7 @@ async function getHandler() {
         agent:agent_id (*)
       `,
       )
-      .eq("user_id", userId)
+      .eq("user_id", dbUserId)
       .eq("is_active", true);
 
     if (error) {
@@ -48,10 +62,15 @@ async function getHandler() {
 // POST: Install an agent (add to dock)
 async function postHandler(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const dbUserId = await resolveDbUserId(clerkId);
+    if (!dbUserId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const body = await req.json();
@@ -80,7 +99,7 @@ async function postHandler(req: NextRequest) {
     const { data: existing } = await supabase
       .from("user_agents")
       .select("*")
-      .eq("user_id", userId)
+      .eq("user_id", dbUserId)
       .eq("agent_id", agentId)
       .single();
 
@@ -95,7 +114,7 @@ async function postHandler(req: NextRequest) {
     const { data: userAgent, error } = await supabase
       .from("user_agents")
       .insert({
-        user_id: userId,
+        user_id: dbUserId,
         agent_id: agentId,
         is_active: true,
       })
@@ -126,10 +145,15 @@ async function postHandler(req: NextRequest) {
 // DELETE: Remove agent from dock
 async function deleteHandler(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const dbUserId = await resolveDbUserId(clerkId);
+    if (!dbUserId) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -142,7 +166,7 @@ async function deleteHandler(req: NextRequest) {
     const { error } = await supabase
       .from("user_agents")
       .delete()
-      .eq("user_id", userId)
+      .eq("user_id", dbUserId)
       .eq("agent_id", agentId);
 
     if (error) {

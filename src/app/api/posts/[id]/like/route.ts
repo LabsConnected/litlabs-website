@@ -5,7 +5,7 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import { rateLimit } from "@/lib/rate-limiter";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { success, remaining, resetTime } = rateLimit(req, 50, 60);
+  const { success, remaining, resetTime } = await rateLimit(req, 50, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429, headers: { "Retry-After": String(resetTime), "X-RateLimit-Limit": "50", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(resetTime) },
@@ -54,7 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { success, remaining, resetTime } = rateLimit(req, 50, 60);
+  const { success, remaining, resetTime } = await rateLimit(req, 50, 60);
   if (!success) {
     return new NextResponse(JSON.stringify({ error: "Rate limit exceeded" }), {
       status: 429, headers: { "Retry-After": String(resetTime), "X-RateLimit-Limit": "50", "X-RateLimit-Remaining": "0", "X-RateLimit-Reset": String(resetTime) },

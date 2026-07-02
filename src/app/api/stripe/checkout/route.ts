@@ -1,8 +1,14 @@
 // Stripe checkout session creation — supports both price IDs and ad-hoc price_data
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 
 export async function POST(req: NextRequest) {
   try {
+    const { userId: clerkId } = await auth();
+    if (!clerkId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await req.json();
     const { priceId, mode = "payment", priceData } = body;
 
@@ -65,14 +71,18 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Pass metadata for coin pack tracking (clerk_id, coin_amount)
+    // Metadata: always use authenticated clerk_id (never trust client-supplied value)
+    const metadata: Record<string, string> = { clerk_id: clerkId };
     if (body.metadata && typeof body.metadata === "object") {
       Object.entries(body.metadata).forEach(([key, value]) => {
-        if (value !== undefined && value !== null) {
-          params.append(`metadata[${key}]`, String(value));
+        if (key !== "clerk_id" && value !== undefined && value !== null) {
+          metadata[key] = String(value);
         }
       });
     }
+    Object.entries(metadata).forEach(([key, value]) => {
+      params.append(`metadata[${key}]`, value);
+    });
 
     if (body.email) {
       params.append("customer_email", body.email);

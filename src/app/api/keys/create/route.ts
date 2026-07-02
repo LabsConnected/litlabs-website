@@ -1,20 +1,27 @@
-// POST /api/keys/create
-// Auth required. Generates a new API key for the current user.
-// The raw key is returned ONCE in this response — only the hash is stored.
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { generateApiKey } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
+import { supabase } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function handler(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+  }
+
+  const { data: user } = await supabase
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  if (!user) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   const body = await req.json().catch(() => ({}));
@@ -30,7 +37,7 @@ async function handler(req: NextRequest) {
   const { count } = await sb
     .from("api_keys")
     .select("*", { count: "exact", head: true })
-    .eq("user_id", userId)
+    .eq("user_id", user.id)
     .is("revoked_at", null);
 
   if ((count ?? 0) >= 10) {
@@ -45,7 +52,7 @@ async function handler(req: NextRequest) {
   const { data, error } = await sb
     .from("api_keys")
     .insert({
-      user_id: userId,
+      user_id: user.id,
       name,
       prefix,
       key_hash: hash,
@@ -58,9 +65,8 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Failed to create API key" }, { status: 500 });
   }
 
-  // Return the raw key ONCE — client must copy it now
   return NextResponse.json({
-    key: raw,           // show once, never stored
+    key: raw,
     id: data.id,
     name: data.name,
     prefix: data.prefix,
@@ -69,5 +75,4 @@ async function handler(req: NextRequest) {
   });
 }
 
-// Strict limit — creating keys shouldn't happen often
 export const POST = withRateLimit(handler, 10, 60);

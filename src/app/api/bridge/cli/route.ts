@@ -6,7 +6,7 @@ import { spawn, ChildProcess } from "child_process";
 import { auth } from "@clerk/nextjs/server";
 
 // Admin user ID - only this user can use CLI bridge
-const ADMIN_USER_ID = "user_litbit"; // Will be replaced with actual Clerk ID
+const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
 
 // Active sessions storage
 const activeSessions = new Map<

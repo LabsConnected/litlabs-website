@@ -12,22 +12,18 @@ async function creditCoinPack(
   sessionId: string,
 ) {
   if (!isAdminSupabaseConfigured()) {
-    // Supabase not configured — skipping wallet credit
     return;
   }
   try {
     const sb = getAdminSupabase();
-    // Find user
     const { data: user } = await sb
       .from("users")
       .select("id")
       .eq("clerk_id", clerkId)
       .single();
     if (!user) {
-      // User not found for clerk_id — skip
       return;
     }
-    // Get current wallet
     const { data: wallet } = await sb
       .from("wallets")
       .select("balance")
@@ -35,12 +31,10 @@ async function creditCoinPack(
       .single();
     const currentBalance = wallet?.balance || 0;
     const newBalance = currentBalance + coinAmount;
-    // Update wallet
     await sb
       .from("wallets")
       .update({ balance: newBalance, updated_at: new Date().toISOString() })
       .eq("user_id", user.id);
-    // Record transaction
     await sb.from("transactions").insert({
       user_id: user.id,
       type: "purchase",
@@ -49,9 +43,8 @@ async function creditCoinPack(
       description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
       metadata: { stripe_session_id: sessionId },
     });
-    // Credited coins — balance updated
-  } catch {
-    // Failed to credit coin pack — log to error tracking service in production
+  } catch (err) {
+    console.error("[stripe/webhook] creditCoinPack failed:", err);
   }
 }
 
@@ -62,62 +55,159 @@ export async function POST(req: NextRequest) {
   const key = process.env.STRIPE_SECRET_KEY;
 
   if (!key) {
-    // No STRIPE_SECRET_KEY configured — reject
     return NextResponse.json({ error: "No secret key" }, { status: 500 });
   }
 
   if (!signingSecret) {
-    // No STRIPE_WEBHOOK_SECRET configured — reject
     return NextResponse.json({ error: "No webhook secret" }, { status: 500 });
   }
 
   const stripe = new Stripe(key, { apiVersion: "2025-08-27.basil" });
 
-  // Verify webhook signature
   let event: Stripe.Event;
   try {
     event = stripe.webhooks.constructEvent(body, sig || "", signingSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    // Webhook signature verification failed — reject
+    console.error("[stripe/webhook] Signature verification failed:", message);
     return NextResponse.json(
       { error: `Webhook Error: ${message}` },
       { status: 400 },
     );
   }
 
-  // Process event
-  switch (event.type) {
-    case "checkout.session.completed": {
-      const session = event.data.object as Stripe.Checkout.Session;
-      // Checkout completed — process coin pack
-      const meta = session.metadata || {};
-      const coinAmount = parseInt(meta.coin_amount || "0", 10);
-      const clerkId = meta.clerk_id;
-      if (coinAmount > 0 && clerkId) {
-        await creditCoinPack(clerkId, coinAmount, session.id);
+  const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
+
+  try {
+    switch (event.type) {
+      case "checkout.session.completed": {
+        const session = event.data.object as Stripe.Checkout.Session;
+        const meta = session.metadata || {};
+        const coinAmount = parseInt(meta.coin_amount || "0", 10);
+        const clerkId = meta.clerk_id;
+        if (coinAmount > 0 && clerkId) {
+          await creditCoinPack(clerkId, coinAmount, session.id);
+        }
+        break;
       }
-      break;
+
+      case "customer.subscription.created":
+      case "customer.subscription.updated": {
+        if (!sb) break;
+        const sub = event.data.object as Stripe.Subscription;
+        const subMeta = sub.metadata || {};
+        const subClerkId = subMeta.clerk_id;
+        let subUserId: string | null = null;
+        if (subClerkId) {
+          const { data: subUser } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", subClerkId)
+            .single();
+          subUserId = subUser?.id ?? null;
+        }
+        if (!subUserId && sub.customer && typeof sub.customer === "object") {
+          const { data: subMatch } = await sb
+            .from("subscriptions")
+            .select("user_id")
+            .eq("stripe_customer_id", (sub.customer as Stripe.Customer).id)
+            .single();
+          subUserId = subMatch?.user_id ?? null;
+        }
+        if (subUserId) {
+          await sb.from("subscriptions").upsert(
+            {
+              user_id: subUserId,
+              stripe_customer_id:
+                typeof sub.customer === "string"
+                  ? sub.customer
+                  : sub.customer?.id,
+              stripe_subscription_id: sub.id,
+              plan: sub.items?.data?.[0]?.price?.nickname || "pro",
+              status: sub.status,
+              current_period_start: sub.current_period_start
+                ? new Date(sub.current_period_start * 1000).toISOString()
+                : null,
+              current_period_end: sub.current_period_end
+                ? new Date(sub.current_period_end * 1000).toISOString()
+                : null,
+              updated_at: new Date().toISOString(),
+            },
+            { onConflict: "user_id", ignoreDuplicates: false },
+          );
+        }
+        break;
+      }
+
+      case "customer.subscription.deleted": {
+        if (!sb) break;
+        const delSub = event.data.object as Stripe.Subscription;
+        const { data: delMatch } = await sb
+          .from("subscriptions")
+          .select("user_id")
+          .eq("stripe_subscription_id", delSub.id)
+          .single();
+        if (delMatch) {
+          await sb
+            .from("subscriptions")
+            .update({
+              status: "canceled",
+              updated_at: new Date().toISOString(),
+            })
+            .eq("user_id", delMatch.user_id);
+        }
+        break;
+      }
+
+      case "invoice.payment_succeeded": {
+        if (!sb) break;
+        const inv = event.data.object as Stripe.Invoice;
+        if (inv.subscription && typeof inv.subscription === "string") {
+          const { data: invMatch } = await sb
+            .from("subscriptions")
+            .select("user_id")
+            .eq("stripe_subscription_id", inv.subscription)
+            .single();
+          if (invMatch) {
+            await sb
+              .from("subscriptions")
+              .update({
+                status: "active",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", invMatch.user_id);
+          }
+        }
+        break;
+      }
+
+      case "invoice.payment_failed": {
+        if (!sb) break;
+        const failInv = event.data.object as Stripe.Invoice;
+        if (
+          failInv.subscription &&
+          typeof failInv.subscription === "string"
+        ) {
+          const { data: failMatch } = await sb
+            .from("subscriptions")
+            .select("user_id")
+            .eq("stripe_subscription_id", failInv.subscription)
+            .single();
+          if (failMatch) {
+            await sb
+              .from("subscriptions")
+              .update({
+                status: "past_due",
+                updated_at: new Date().toISOString(),
+              })
+              .eq("user_id", failMatch.user_id);
+          }
+        }
+        break;
+      }
     }
-    case "customer.subscription.created":
-    case "customer.subscription.updated": {
-      // Subscription event
-      break;
-    }
-    case "customer.subscription.deleted": {
-      // Subscription cancelled
-      break;
-    }
-    case "invoice.payment_succeeded": {
-      // Payment succeeded
-      break;
-    }
-    case "invoice.payment_failed": {
-      // Payment failed
-      break;
-    }
-    default:
-    // Unhandled event type
+  } catch (err) {
+    console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
   }
 
   return NextResponse.json({ received: true });

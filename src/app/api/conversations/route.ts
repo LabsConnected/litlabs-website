@@ -7,10 +7,19 @@ import { withRateLimit } from "@/lib/rate-limiter";
 // GET: List user's conversations
 async function getHandler(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: user } = await supabase
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkId)
+      .single();
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
@@ -24,7 +33,7 @@ async function getHandler(req: NextRequest) {
         agent:agent_id (*)
       `,
       )
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .order("updated_at", { ascending: false });
 
     if (agentId) {
@@ -57,10 +66,19 @@ async function getHandler(req: NextRequest) {
 // POST: Create new conversation
 async function postHandler(req: NextRequest) {
   try {
-    const { userId } = await auth();
+    const { userId: clerkId } = await auth();
 
-    if (!userId) {
+    if (!clerkId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
+    const { data: user } = await supabase
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkId)
+      .single();
+    if (!user) {
+      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const body = await req.json();
@@ -74,7 +92,7 @@ async function postHandler(req: NextRequest) {
     await supabase
       .from("user_agents")
       .select("id")
-      .eq("user_id", userId)
+      .eq("user_id", user.id)
       .eq("agent_id", agentId)
       .single();
 
@@ -90,7 +108,7 @@ async function postHandler(req: NextRequest) {
     const { data: conversation, error } = await supabase
       .from("conversations")
       .insert({
-        user_id: userId,
+        user_id: user.id,
         agent_id: agentId,
         title: conversationTitle,
       })

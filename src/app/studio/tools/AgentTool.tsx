@@ -17,6 +17,7 @@ import {
 import { AGENT_AVATAR_META } from "@/lib/avatars";
 
 const ACTIVEPIECES_WEBHOOK =
+  process.env.NEXT_PUBLIC_ACTIVEPIECES_WEBHOOK_URL ||
   "https://cloud.activepieces.com/api/v1/webhooks/VoccE3SEr4bciLvkThTlO";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */

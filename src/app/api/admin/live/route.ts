@@ -7,7 +7,7 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import type { TelemetryData } from "@/components/TelemetryPanel";
 import type { AdminEvent } from "@/components/EventStream";
 
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
+const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
 
 function fallbackStats(): TelemetryData {
   return {

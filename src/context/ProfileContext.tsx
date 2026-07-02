@@ -5,10 +5,11 @@ import {
   useContext,
   useState,
   useEffect,
+  useRef,
+  useCallback,
   ReactNode,
 } from "react";
 
-// Wallpaper types
 export type WallpaperId =
   | "default"
   | "gradient"
@@ -26,7 +27,6 @@ export type WallpaperId =
   | "minimal"
   | "glass";
 
-// User profile type
 export interface UserProfile {
   displayName: string;
   username: string;
@@ -54,14 +54,12 @@ export interface UserProfile {
     linkedin?: string;
   };
   badges: string[];
-  // Wallpaper & theme sync
   wallpaper: WallpaperId;
   customWallpaperUrl: string | null;
   sidebarStyle: "compact" | "comfortable" | "spacious";
   accentColor: string;
 }
 
-// Default profile
 const defaultProfile: UserProfile = {
   displayName: "Creator",
   username: "creator",
@@ -82,52 +80,112 @@ const defaultProfile: UserProfile = {
   accentColor: "#fbbf24",
 };
 
-// Context
 interface ProfileContextType {
   profile: UserProfile;
   updateProfile: (updates: Partial<UserProfile>) => void;
   resetProfile: () => void;
+  loading: boolean;
 }
 
 const ProfileContext = createContext<ProfileContextType | undefined>(undefined);
 
-export function ProfileProvider({ children }: { children: ReactNode }) {
-  const [profile, setProfile] = useState<UserProfile>(() => {
-    if (typeof window === "undefined") return defaultProfile;
+function loadLocal(): UserProfile {
+  if (typeof window === "undefined") return defaultProfile;
+  try {
     const stored = localStorage.getItem("litlabs-profile");
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        /* ignore */
-      }
-    }
-    return defaultProfile;
-  });
+    if (stored) return { ...defaultProfile, ...JSON.parse(stored) };
+  } catch { /* ignore */ }
+  return defaultProfile;
+}
+
+function saveLocal(profile: UserProfile) {
+  try {
+    localStorage.setItem("litlabs-profile", JSON.stringify(profile));
+  } catch { /* ignore */ }
+}
+
+function profileToApi(p: UserProfile) {
+  return {
+    name: p.displayName,
+    username: p.username,
+    bio: p.bio,
+    location: p.location,
+    website: p.website,
+    avatar_url: p.avatarUrl,
+  };
+}
+
+export function ProfileProvider({ children }: { children: ReactNode }) {
+  const [profile, setProfile] = useState<UserProfile>(loadLocal);
+  const [loading, setLoading] = useState(true);
   const [mounted, setMounted] = useState(false);
+  const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const initialLoadDone = useRef(false);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Save to localStorage on change
+  // Load from API on mount
   useEffect(() => {
-    if (mounted) {
-      localStorage.setItem("litlabs-profile", JSON.stringify(profile));
-    }
+    if (initialLoadDone.current) return;
+    initialLoadDone.current = true;
+
+    fetch("/api/settings/profile")
+      .then((r) => r.json())
+      .then((data) => {
+        if (data?.user) {
+          const api = data.user;
+          setProfile((prev) => ({
+            ...prev,
+            displayName: api.name || prev.displayName,
+            username: api.username || prev.username,
+            bio: api.bio ?? prev.bio,
+            location: api.location ?? prev.location,
+            website: api.website ?? prev.website,
+            avatarUrl: api.avatar_url ?? prev.avatarUrl,
+          }));
+        }
+      })
+      .catch(() => {
+        // API unavailable — keep localStorage data
+      })
+      .finally(() => setLoading(false));
+  }, []);
+
+  // Save to localStorage on change + debounce API sync
+  useEffect(() => {
+    if (!mounted) return;
+    saveLocal(profile);
+
+    if (syncTimer.current) clearTimeout(syncTimer.current);
+    syncTimer.current = setTimeout(() => {
+      const body = profileToApi(profile);
+      fetch("/api/settings/profile", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      }).catch(() => {
+        // silent fail — localStorage has the data
+      });
+    }, 2000);
+
+    return () => {
+      if (syncTimer.current) clearTimeout(syncTimer.current);
+    };
   }, [profile, mounted]);
 
-  const updateProfile = (updates: Partial<UserProfile>) => {
+  const updateProfile = useCallback((updates: Partial<UserProfile>) => {
     setProfile((prev) => ({ ...prev, ...updates }));
-  };
+  }, []);
 
-  const resetProfile = () => {
+  const resetProfile = useCallback(() => {
     setProfile(defaultProfile);
-  };
+  }, []);
 
   return (
-    <ProfileContext.Provider value={{ profile, updateProfile, resetProfile }}>
+    <ProfileContext.Provider value={{ profile, updateProfile, resetProfile, loading }}>
       {children}
     </ProfileContext.Provider>
   );
