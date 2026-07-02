@@ -475,7 +475,7 @@ function SidebarContent({
                 className="bg-transparent border-none outline-none flex-1 min-w-0 text-xs"
                 style={{ color: T.textColor }}
               />
-              <button type="submit" className="p-1 rounded hover:bg-white/10" style={{ color: T.accentColor }}>
+              <button type="submit" aria-label="Submit Jarvis query" className="p-1 rounded hover:bg-white/10" style={{ color: T.accentColor }}>
                 <Send size={14} />
               </button>
             </div>

@@ -248,6 +248,7 @@ export default function SocialPageContent() {
               onClick={() => loadPosts(activeTab)}
               className="p-1.5 border hover:opacity-80"
               style={{ borderColor: C.borderColor }}
+              aria-label="Refresh social feed"
             >
               <RefreshCw size={12} style={{ color: C.textMuted }} />
             </button>
@@ -671,6 +672,7 @@ export default function SocialPageContent() {
                           : C.textMuted,
                         opacity: likedPosts.has(post.id) ? 1 : 0.6,
                       }}
+                      aria-label={likedPosts.has(post.id) ? "Unlike post" : "Like post"}
                     >
                       <Heart
                         size={14}
@@ -678,25 +680,33 @@ export default function SocialPageContent() {
                           likedPosts.has(post.id) ? C.linkColor : "transparent"
                         }
                       />
+                      <span className="sr-only">{likedPosts.has(post.id) ? "Unlike" : "Like"}</span>
                       {post.likes_count}
                     </button>
                     <button
                       className="flex items-center gap-1.5 text-[11px] opacity-60 hover:opacity-100"
                       style={{ color: C.textMuted }}
+                      aria-label="Comment on post"
                     >
-                      <MessageSquare size={14} /> {post.comments_count}
+                      <MessageSquare size={14} />
+                      <span className="sr-only">Comments</span>
+                      {post.comments_count}
                     </button>
                     <button
                       className="flex items-center gap-1.5 text-[11px] opacity-60 hover:opacity-100"
                       style={{ color: C.textMuted }}
+                      aria-label="Share post"
                     >
                       <Share2 size={14} />
+                      <span className="sr-only">Share</span>
                     </button>
                     <button
                       className="flex items-center gap-1.5 text-[11px] opacity-60 hover:opacity-100 ml-auto"
                       style={{ color: C.textMuted }}
+                      aria-label="Send post"
                     >
                       <Send size={14} />
+                      <span className="sr-only">Send</span>
                     </button>
                   </div>
                 </div>

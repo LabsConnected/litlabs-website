@@ -46,7 +46,7 @@ function CustomAuthFallback({ linkColor }: NavAuthProps) {
       <div className="flex items-center gap-1.5">
         <span className="text-[11px] font-bold truncate max-w-[80px]" style={{ color: linkColor }}>{name}</span>
         <form action="/api/auth/logout" method="POST">
-          <button type="submit" className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-black cursor-pointer hover:opacity-80 transition-opacity"
+          <button type="submit" aria-label="Sign out" className="w-7 h-7 rounded-full flex items-center justify-center text-[9px] font-black cursor-pointer hover:opacity-80 transition-opacity"
             style={{ backgroundColor: linkColor + "20", color: linkColor, border: `1px solid ${linkColor}40` }} title="Sign out">
             ✕
           </button>

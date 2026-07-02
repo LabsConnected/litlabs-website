@@ -786,6 +786,7 @@ export default function SocialFeed({
                             ? "pointer"
                             : "not-allowed",
                         }}
+                        aria-label="Post comment"
                       >
                         <Send size={16} />
                       </button>
