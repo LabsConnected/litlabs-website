@@ -4,12 +4,7 @@ import { ClerkProvider } from "@clerk/nextjs";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
-import CookieConsent from "@/components/CookieConsent";
-import UserSync from "@/components/UserSync";
-import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
-import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleTagManager } from "@next/third-parties/google";
 import "./globals.css";
@@ -109,41 +104,11 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const inner = (
-    <ThemeProvider>
-      <ProfileProvider>
-        <WalletProvider>
-          <AnimatedBackgroundWrapper />
-          <div className="relative z-10 flex flex-col min-h-screen">
-            <UserSync />
-            <Navbar />
-            <main className="flex-1 w-full max-w-full overflow-x-hidden">
-              {children}
-            </main>
-            <Footer />
-            <CookieConsent />
-            <ServiceWorkerRegistration />
-          </div>
-        </WalletProvider>
-      </ProfileProvider>
-    </ThemeProvider>
-  );
-
   const shell = (
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <AnimatedBackgroundWrapper />
-          <div className="relative z-10 flex flex-col min-h-screen">
-            <UserSync />
-            <Navbar />
-            <main className="flex-1 w-full max-w-full overflow-x-hidden">
-              {children}
-            </main>
-            <Footer />
-            <CookieConsent />
-            <ServiceWorkerRegistration />
-          </div>
+          <LayoutShell>{children}</LayoutShell>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
