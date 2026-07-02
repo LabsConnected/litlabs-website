@@ -125,11 +125,11 @@ export async function POST(req: NextRequest) {
               stripe_subscription_id: sub.id,
               plan: sub.items?.data?.[0]?.price?.nickname || "pro",
               status: sub.status,
-              current_period_start: sub.current_period_start
-                ? new Date(sub.current_period_start * 1000).toISOString()
+              current_period_start: sub.items?.data?.[0]?.current_period_start
+                ? new Date(sub.items.data[0].current_period_start * 1000).toISOString()
                 : null,
-              current_period_end: sub.current_period_end
-                ? new Date(sub.current_period_end * 1000).toISOString()
+              current_period_end: sub.items?.data?.[0]?.current_period_end
+                ? new Date(sub.items.data[0].current_period_end * 1000).toISOString()
                 : null,
               updated_at: new Date().toISOString(),
             },
