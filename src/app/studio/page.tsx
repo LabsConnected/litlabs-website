@@ -44,6 +44,9 @@ const GalleryTool = nextDynamic(() => import("./tools/GalleryTool"), {
   ssr: false,
 });
 const SpaceTool = nextDynamic(() => import("./tools/SpaceTool"), { ssr: false });
+const ColorByNumberTool = nextDynamic(() => import("./tools/ColorByNumberTool"), {
+  ssr: false,
+});
 const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
   ssr: false,
 });
@@ -60,6 +63,7 @@ const TOOL_TO_TAB: Record<StudioTool, WorkspaceTab> = {
   gallery: "context",
   space: "context",
   clibridge: "terminal",
+  color: "model",
 };
 
 const TAB_ICONS: Record<WorkspaceTab, ReactNode> = {
@@ -75,8 +79,8 @@ const CREATIVE_TEMPLATES = [
     title: "Color by Number",
     desc: "Build printable paint-by-number pages with bold regions and simple palettes.",
     badge: "Art + Print",
-    action: "Open Image Tool",
-    tool: "image" as StudioTool,
+    action: "Open Color Tool",
+    tool: "color" as StudioTool,
   },
   {
     title: "Mini Game Kit",
@@ -121,6 +125,8 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
       return <GalleryTool />;
     case "space":
       return <SpaceTool />;
+    case "color":
+      return <ColorByNumberTool />;
     default:
       return <ImageTool />;
   }

@@ -6,6 +6,7 @@ import {
   Image,
   Film,
   Music,
+  Palette,
   LayoutGrid,
   Bot,
   Rocket,
@@ -26,7 +27,8 @@ export type StudioTool =
   | "pipeline"
   | "gallery"
   | "space"
-  | "clibridge";
+  | "clibridge"
+  | "color";
 
 type ToolItem = {
   id: StudioTool;
@@ -40,21 +42,22 @@ const CREATE_TOOLS: ToolItem[] = [
   { id: "image",  label: "Image",   icon: Image,   shortcut: "1" },
   { id: "video",  label: "Video",   icon: Film,    shortcut: "2" },
   { id: "audio",  label: "Audio",   icon: Music,   shortcut: "3" },
+  { id: "color",  label: "Color",   icon: Palette, shortcut: "4" },
 ];
 
 const AI_TOOLS: ToolItem[] = [
-  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "4" },
-  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "5" },
-  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "6" },
+  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "5" },
+  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "6" },
+  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell,   shortcut: "0" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "7" },
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "8" },
 ];
 
 const EXTERNAL_TOOLS: ToolItem[] = [
-  { id: "space", label: "Space", icon: Rocket, shortcut: "8" },
+  { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
 ];
 
 /* All tools flat — used for mobile bottom bar */
@@ -66,7 +69,7 @@ const ALL_TOOLS: ToolItem[] = [
 ];
 
 /* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = ["image", "audio", "agents", "terminal", "gallery"];
+const MOBILE_PRIMARY: StudioTool[] = ["image", "color", "agents", "terminal", "gallery"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
