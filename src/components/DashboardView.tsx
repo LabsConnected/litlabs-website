@@ -9,7 +9,6 @@ import { useSearchParams } from "next/navigation";
 import { Activity, X, PanelLeft, PanelRight } from "lucide-react";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 import DashboardWidgets from "@/components/dashboard/DashboardWidgets";
-import Sidebar from "@/components/Sidebar";
 import Navbar from "@/components/Navbar";
 
 export default function DashboardView() {
@@ -25,7 +24,6 @@ export default function DashboardView() {
 
   const appFromUrl = searchParams?.get("app") ?? null;
   const [manualApp, setManualApp] = useState("home");
-  const [sidebarOpen, setSidebarOpen] = useState(false);
   const [statusOpen, setStatusOpen] = useState(false);
   const [widgetSide, setWidgetSide] = useState<"left" | "right">(() => {
     if (typeof window === "undefined") return "right";
@@ -47,16 +45,10 @@ export default function DashboardView() {
       className="flex min-h-screen"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
-      {/* Grouped sidebar — handles all 3 modes internally */}
-      <Sidebar
-        open={sidebarOpen}
-        onClose={() => setSidebarOpen(false)}
-      />
-
       {/* Main column: top bar + content + right rail */}
       <div className="flex flex-col flex-1 min-w-0">
         {/* Slim top bar — global actions only */}
-        <Navbar onMenuClick={() => setSidebarOpen(true)} />
+        <Navbar />
 
         <div className="flex flex-1 min-h-0">
           {/* Left rail — shown when widgetSide === "left" */}

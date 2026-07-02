@@ -1,0 +1,21 @@
+{
+  "project": "LiTTree LabStudios",
+  "repository": "https://github.com/Litree-Ceo/litlabs-website",
+  "codespace": "https://turbo-space-spork-wv5jqrjgg59h6q.github.dev/",
+  "environment": "github-codespaces",
+  "branch": "main",
+  "packageManager": "pnpm",
+  "nodeVersion": "22",
+  "devCommand": "pnpm dev",
+  "buildCommand": "pnpm build",
+  "instructions": {
+    "setup": "Use GitHub Codespaces environment. Do not use local WSL for heavy builds.",
+    "workflow": "Work from main branch. Create PRs for changes.",
+    "localRole": "Use local PC only for small edits, testing /jarvis, reviewing changes, and emergency fixes.",
+    "heavyBuilds": "Use Codespaces for /studio page and other heavy builds."
+  },
+  "paths": {
+    "primary": "/workspaces/litlabs-website",
+    "localAlternative": "/home/litbit/CascadeProjectsFast"
+  }
+}
