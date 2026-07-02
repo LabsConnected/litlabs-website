@@ -23,7 +23,7 @@ const BENEFITS = [
 ];
 
 const PROOF_POINTS = [
-  { value: '500+', label: 'starter credits' },
+  { value: 'Free', label: 'to get started' },
   { value: '< 5 min', label: 'to first launch' },
   { value: '24/7', label: 'agent runtime' },
   { value: '6', label: 'core specialists' },
@@ -208,10 +208,10 @@ function LandingPage() {
               <Users size={12} /> Built for creators, teams, and solo builders
             </div>
             <h2 className="text-3xl md:text-4xl font-black mb-4" style={{ color: '#f8fafc' }}>
-              One site, three jobs: impress, onboard, and convert.
+              One workspace. Every tool. Zero friction.
             </h2>
             <p className="opacity-55 max-w-2xl leading-relaxed">
-              The best upgrade here is clarity. Visitors should instantly know what this site does, who it is for, and what to do next. This section helps the page feel less like a dump of features and more like a product with a point of view.
+              From idea to live product in one session. Generate content, build agents, launch a storefront, and grow your audience — all without leaving the platform.
             </p>
           </div>
           <div className="grid gap-4">
@@ -221,16 +221,16 @@ function LandingPage() {
                 <h3 className="font-bold" style={{ color: '#f8fafc' }}>Best first click</h3>
               </div>
               <p className="text-sm opacity-55 leading-relaxed">
-                Take people straight to <span className="font-bold text-slate-100">Studio</span> if they want to build, or <span className="font-bold text-slate-100">Agents</span> if they want to explore.
+                Start in <span className="font-bold text-slate-100">Studio</span> to build, or browse <span className="font-bold text-slate-100">Agents</span> to see what's possible. Either way, you're productive in minutes.
               </p>
             </div>
             <div className="rounded-3xl border p-6" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
               <div className="flex items-center gap-3 mb-3">
                 <Shield size={18} className="text-emerald-300" />
-                <h3 className="font-bold" style={{ color: '#f8fafc' }}>Trust signal</h3>
+                <h3 className="font-bold" style={{ color: '#f8fafc' }}>No credit card required</h3>
               </div>
               <p className="text-sm opacity-55 leading-relaxed">
-                Keep the “no credit card” and “cancel anytime” line, but make it feel like a real product promise instead of a generic badge row.
+                500 starter credits, full platform access. Upgrade only when you need more power.
               </p>
             </div>
           </div>
@@ -243,7 +243,7 @@ function LandingPage() {
           <div className="absolute inset-0 pointer-events-none opacity-10" style={{ background: 'radial-gradient(circle at 50% 50%, #6366f1, transparent 70%)' }} />
           <div className="relative">
             <h2 className="text-3xl md:text-4xl font-black mb-4" style={{ color: '#f8fafc' }}>Ready to Build?</h2>
-            <p className="opacity-50 mb-8 max-w-lg mx-auto">Join 50,000+ creators already building with LiTTree Lab Studios. Start free — no credit card required.</p>
+            <p className="opacity-50 mb-8 max-w-lg mx-auto">Start building with LiTTree Lab Studios today. Free to try — no credit card required.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link href="/sign-up" className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all hover:scale-105" style={{ backgroundColor: '#6366f1', color: '#fff' }}>
                 Get Started Free <ArrowRight size={16} />

@@ -101,7 +101,7 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline' https://*.clerk.com",
               "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live",
               "font-src 'self' https://*.clerk.com",
-              "connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net",
+              "connect-src 'self' https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net",
               "frame-src 'self' https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
               "worker-src 'self' blob: https://litlabs.net",
               "object-src 'none'",
@@ -116,13 +116,13 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Prevent caching of HTML pages (force fresh content)
+      // Allow browser caching but force revalidation (enables bfcache)
       {
         source: "/:path*",
         headers: [
           {
             key: "Cache-Control",
-            value: "public, max-age=0, must-revalidate",
+            value: "no-cache, must-revalidate",
           },
         ],
       },

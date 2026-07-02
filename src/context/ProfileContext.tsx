@@ -116,8 +116,9 @@ function profileToApi(p: UserProfile) {
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
-  const [profile, setProfile] = useState<UserProfile>(loadLocal);
+  const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [loading, setLoading] = useState(true);
+  const [hydrated, setHydrated] = useState(false);
   const [mounted, setMounted] = useState(false);
   const syncTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const initialLoadDone = useRef(false);
@@ -125,6 +126,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const id = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Hydrate from localStorage after mount
+  useEffect(() => {
+    const stored = loadLocal();
+    setProfile(stored);
+    setHydrated(true);
   }, []);
 
   // Load from API on mount
@@ -156,7 +164,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
 
   // Save to localStorage on change + debounce API sync
   useEffect(() => {
-    if (!mounted) return;
+    if (!hydrated) return;
     saveLocal(profile);
 
     if (syncTimer.current) clearTimeout(syncTimer.current);

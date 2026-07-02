@@ -23,7 +23,7 @@ import {
   CrownIcon,
   Home,
 } from "lucide-react";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   NAV_GROUPS,
   AI_SUGGESTIONS,
@@ -287,10 +287,11 @@ function SidebarContent({
   });
   const [pinned, setPinned] = useState<string[]>(() => loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]));
   const [hidden, setHidden] = useState<string[]>(() => loadJson(HIDDEN_KEY, []));
-  const [mode, setMode] = useState<string>(() => {
-    if (typeof window === "undefined") return "creator";
-    return localStorage.getItem(MODE_KEY) || "creator";
-  });
+  const [mode, setMode] = useState<string>("creator");
+
+  useEffect(() => {
+    setMode(localStorage.getItem(MODE_KEY) || "creator");
+  }, []);
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [jarvisFocused, setJarvisFocused] = useState(false);
@@ -657,10 +658,11 @@ function SidebarContent({
 
 export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(COLLAPSED_KEY) === "true";
-  });
+  const [collapsed, setCollapsed] = useState(false);
+
+  useEffect(() => {
+    setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "true");
+  }, []);
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((v) => {

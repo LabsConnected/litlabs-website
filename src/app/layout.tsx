@@ -71,7 +71,7 @@ export const metadata: Metadata = {
     description: META_DESC,
     images: [
       {
-        url: "/og-image.png",
+        url: "/og-image.webp",
         width: 1200,
         height: 630,
         alt: META_TITLE,
@@ -83,7 +83,7 @@ export const metadata: Metadata = {
     title: META_TITLE,
     description: META_DESC,
     creator: "@litlabs",
-    images: ["/og-image.png"],
+    images: ["/og-image.webp"],
   },
   icons: {
     icon: [
