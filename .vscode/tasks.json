@@ -5,43 +5,63 @@
       "label": "Dev Server",
       "type": "shell",
       "command": "pnpm dev",
-      "group": "build",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
       "isBackground": true,
       "problemMatcher": {
         "pattern": {
-          "regexp": ".",
-          "file": 1,
-          "location": 2,
-          "message": 3
+          "regexp": "^(.*)$",
+          "message": 1
         },
         "background": {
           "activeOnStart": true,
-          "beginsPattern": "starting",
+          "beginsPattern": "next dev",
           "endsPattern": "Ready in"
         }
       },
       "presentation": {
         "reveal": "always",
-        "panel": "new"
+        "panel": "new",
+        "focus": true
       }
     },
     {
       "label": "Build",
       "type": "shell",
       "command": "pnpm build",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
       "group": {
         "kind": "build",
         "isDefault": true
       },
       "presentation": {
         "reveal": "always",
-        "panel": "shared"
+        "panel": "shared",
+        "focus": true
       }
     },
     {
       "label": "Lint",
       "type": "shell",
       "command": "pnpm lint",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
       "group": "test",
       "presentation": {
         "reveal": "always",
@@ -51,8 +71,31 @@
     {
       "label": "Push to Main",
       "type": "shell",
-      "command": "git add -A && git commit -m \"${input:commitMsg}\" && git push origin main",
-      "group": "none",
+      "command": "git add -A; git commit -m '${input:commitMsg}'; git push origin main",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
+      "presentation": {
+        "reveal": "always",
+        "panel": "shared",
+        "focus": true
+      }
+    },
+    {
+      "label": "Install Dependencies",
+      "type": "shell",
+      "command": "pnpm install",
+      "options": {
+        "cwd": "${workspaceFolder}",
+        "shell": {
+          "executable": "powershell.exe",
+          "args": ["-NoProfile", "-Command"]
+        }
+      },
       "presentation": {
         "reveal": "always",
         "panel": "shared"
