@@ -6,13 +6,17 @@ import type { Game } from "@/lib/games";
 export default function GameCard({
   game,
   showProgress = false,
+  onClick,
 }: {
   game: Game;
   showProgress?: boolean;
+  onClick?: () => void;
 }) {
-
   return (
-    <article className="rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group">
+    <article
+      onClick={onClick}
+      className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group ${onClick ? "cursor-pointer" : ""}`}
+    >
       <div className="aspect-video bg-gradient-to-br from-purple-900 to-orange-900 relative overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
@@ -53,7 +57,13 @@ export default function GameCard({
           </div>
         )}
 
-        <button className="mt-3 w-full rounded-xl bg-orange-500 py-2 text-xs font-black text-black hover:bg-orange-400 transition-colors">
+        <button
+          onClick={(e) => {
+            e.stopPropagation();
+            onClick?.();
+          }}
+          className="mt-3 w-full rounded-xl bg-orange-500 py-2 text-xs font-black text-black hover:bg-orange-400 transition-colors"
+        >
           Play
         </button>
       </div>

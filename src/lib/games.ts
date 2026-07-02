@@ -64,7 +64,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Classic Atari Pong in your browser.",
     category: "retro",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/3b82f6?text=Pong",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/retro%20arcade%20pong%20game%20cover%20neon%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=101",
     html5Url: "https://sethclydesdale.github.io/browser-pong/",
     year: 1972,
     developer: "Atari",
@@ -80,7 +81,7 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/thumb/8/8a/2048_logo.svg/1200px-2048_logo.svg.png",
+      "https://image.pollinations.ai/prompt/2048%20puzzle%20game%20cover%20numbered%20tiles%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=202",
     html5Url: "https://gabrielecirulli.github.io/2048/",
     year: 2014,
     developer: "Gabriele Cirulli",
@@ -95,7 +96,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fast-paced hexagon stacking puzzle.",
     category: "puzzle",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/8b5cf6?text=Hextris",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/hextris%20hexagon%20stacking%20puzzle%20game%20cover%20colorful%20neon%20dark%20background?width=400&height=250&nologo=true&seed=303",
     html5Url: "https://hextris.github.io/hextris/",
     year: 2014,
     developer: "Logan Engstrom",
@@ -111,7 +113,7 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://upload.wikimedia.org/wikipedia/en/7/7d/Tetris_NES_cover.jpg",
+      "https://image.pollinations.ai/prompt/tetris%20block%20puzzle%20game%20cover%20retro%20neon%20falling%20blocks%20dark%20background?width=400&height=250&nologo=true&seed=404",
     html5Url: "https://chvin.github.io/react-tetris/",
     year: 1984,
     developer: "Alexey Pajitnov",
@@ -127,7 +129,7 @@ export const GAME_LIBRARY: Game[] = [
     category: "arcade",
     platform: "html5",
     coverUrl:
-      "https://upload.wikimedia.org/wikipedia/commons/2/26/Pacman_HD.png",
+      "https://image.pollinations.ai/prompt/pacman%20arcade%20maze%20game%20cover%20neon%20yellow%20character%20dark%20background?width=400&height=250&nologo=true&seed=505",
     html5Url: "https://pacman.platzh1rsch.ch/",
     year: 1980,
     developer: "Namco",
@@ -142,7 +144,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Eat, grow, and don't crash into yourself.",
     category: "arcade",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/22c55e?text=Snake",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/retro%20snake%20arcade%20game%20cover%20neon%20green%20pixel%20snake%20dark%20background?width=400&height=250&nologo=true&seed=606",
     html5Url: "https://alfredang.github.io/snake-game/",
     year: 1976,
     developer: "Various",
@@ -157,7 +160,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fill the grid with numbers 1–9.",
     category: "puzzle",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/3b82f6?text=Sudoku",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/sudoku%20puzzle%20game%20cover%20numbers%20grid%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=707",
     html5Url: "https://www.sudoku100.com/embed/interactive",
     year: 2004,
     developer: "Various",
@@ -172,7 +176,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Tap to fly between the pipes.",
     category: "arcade",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/eab308?text=Flappy+Bird",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/flappy%20bird%20arcade%20game%20cover%20pixel%20art%20bird%20pipes%20dark%20background?width=400&height=250&nologo=true&seed=808",
     html5Url: "https://chaping.github.io/game/flappy-bird/",
     year: 2013,
     developer: "Dong Nguyen",
@@ -187,7 +192,8 @@ export const GAME_LIBRARY: Game[] = [
     description: "Clear the board without detonating a mine.",
     category: "puzzle",
     platform: "html5",
-    coverUrl: "https://placehold.co/400x250/0a0a12/ef4444?text=Minesweeper",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/minesweeper%20puzzle%20game%20cover%20retro%20mines%20grid%20dark%20background?width=400&height=250&nologo=true&seed=909",
     html5Url: "https://minesweeper.github.io/",
     year: 1990,
     developer: "Microsoft",

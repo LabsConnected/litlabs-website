@@ -81,3 +81,4 @@ litlabs/
 # Misc
 *.backup
 bun.lock
+.quadcodeai/
