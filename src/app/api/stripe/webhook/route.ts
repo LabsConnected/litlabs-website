@@ -162,11 +162,12 @@ export async function POST(req: NextRequest) {
       case "invoice.payment_succeeded": {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
-        if (inv.subscription && typeof inv.subscription === "string") {
+        const invSubId = inv.parent?.subscription_details?.subscription;
+        if (invSubId && typeof invSubId === "string") {
           const { data: invMatch } = await sb
             .from("subscriptions")
             .select("user_id")
-            .eq("stripe_subscription_id", inv.subscription)
+            .eq("stripe_subscription_id", invSubId)
             .single();
           if (invMatch) {
             await sb
@@ -184,14 +185,12 @@ export async function POST(req: NextRequest) {
       case "invoice.payment_failed": {
         if (!sb) break;
         const failInv = event.data.object as Stripe.Invoice;
-        if (
-          failInv.subscription &&
-          typeof failInv.subscription === "string"
-        ) {
+        const failSubId = failInv.parent?.subscription_details?.subscription;
+        if (failSubId && typeof failSubId === "string") {
           const { data: failMatch } = await sb
             .from("subscriptions")
             .select("user_id")
-            .eq("stripe_subscription_id", failInv.subscription)
+            .eq("stripe_subscription_id", failSubId)
             .single();
           if (failMatch) {
             await sb
