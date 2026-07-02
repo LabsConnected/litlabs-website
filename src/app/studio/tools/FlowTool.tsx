@@ -92,32 +92,14 @@ export default function FlowTool() {
       return [];
     }
   });
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use shared WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Then sync from API
-    fetch("/api/wallet")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.balance === "number") {
-          setCoinBalance(d.balance);
-          try {
-            localStorage.setItem("litcoins", String(d.balance));
-          } catch {}
-        }
-      })
-      .catch(() => {});
-  }, []);
+    // Ensure wallet data is loaded
+    refreshWallet().catch(() => {});
+  }, [refreshWallet]);
 
   const cellCosts = useMemo(
     () =>

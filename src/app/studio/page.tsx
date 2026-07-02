@@ -9,6 +9,12 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { Bot, Sparkles, Image as ImageIcon, PanelLeftClose } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useWallet } from "@/context/WalletContext";
+import { StudioTool } from "./components/StudioSidebar";
+import ModelPicker from "@/components/ModelPicker";
+import KeyManager from "@/components/KeyManager";
+import { CHAT_ROOMS } from "@/lib/chatRooms";
+import { THEMES } from "@/lib/themes";
 
 const CanvasTool = nextDynamic(() => import("./tools/CanvasTool"), { ssr: false });
 const AgentTool = nextDynamic(() => import("./tools/AgentTool"), { ssr: false });
@@ -27,8 +33,14 @@ function StudioInner() {
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const [activeTool, setActiveTool] = useState<Tool>("canvas");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [selectedModel, setSelectedModel] = useState("adaptive");
+  const [activeTool, setActiveTool] = useState<StudioTool>("image");
+  const [activeTab, setActiveTab] = useState<WorkspaceTab>("model");
+  const [terminalOpen, setTerminalOpen] = useState(true);
+  const { balance: walletBalance, isLoading: walletLoading } = useWallet();
+  const [litcoins] = useState(() => walletBalance ?? 500);
+  const [leftRailOpen, setLeftRailOpen] = useState(true);
+  const [rightRailOpen, setRightRailOpen] = useState(true);
 
   useEffect(() => {
     const toolParam = searchParams.get("tool") as Tool | null;

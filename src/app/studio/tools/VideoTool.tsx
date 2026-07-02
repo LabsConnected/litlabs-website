@@ -91,16 +91,8 @@ export default function VideoTool() {
       return [];
     }
   });
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
 
   const cost = VIDEO_MODELS.find((m) => m.id === model)?.cost || 5;
   const canAfford = coinBalance === null || coinBalance >= cost;

@@ -98,16 +98,8 @@ export default function AudioTool() {
     }
   });
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const cost =
@@ -237,7 +229,10 @@ export default function AudioTool() {
         }),
       });
       const wdata = await wres.json();
-      if (typeof wdata.balance === "number") setCoinBalance(wdata.balance);
+      if (typeof wdata.balance === "number") {
+        // WalletContext updates via its periodic refresh; call refresh to sync immediately
+        refreshWallet().catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Audio generation failed");
       setCurrent((prev) =>

@@ -371,16 +371,8 @@ export default function ImageTool() {
   const [imgError, setImgError] = useState<string | null>(null);
 
   /* ── UI state ── */
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const raw = localStorage.getItem("litcoins");
-      const val = raw ? Number(raw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use shared WalletContext rather than localStorage or ad-hoc fetches
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
   const [showLogs, setShowLogs] = useState(false);
   const [logs, setLogs] = useState<LogEntry[]>([]);
@@ -529,26 +521,11 @@ export default function ImageTool() {
       );
   }, [history]);
 
+  // No longer fetch directly here; rely on WalletContext which already fetches /api/wallet and refreshes periodically.
   useEffect(() => {
-    const id = requestAnimationFrame(() => {
-      fetch("/api/wallet")
-        .then((r) => r.json())
-        .then((d) => {
-          if (typeof d.balance === "number") {
-            setCoinBalance(d.balance);
-            try {
-              localStorage.setItem("litcoins", String(d.balance));
-            } catch {
-              /* ignore */
-            }
-          }
-        })
-        .catch(() => {
-          /* silent */
-        });
-    });
-    return () => cancelAnimationFrame(id);
-  }, []);
+    // Make sure WalletContext has refreshed at least once
+    refreshWallet().catch(() => {});
+  }, [refreshWallet]);
 
   /* Close mobile drawers on Escape */
   useEffect(() => {
