@@ -11,17 +11,43 @@ export const maxDuration = 60;
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "director";
-// Keep last 12 turns (6 exchanges) to give the model solid context without bloating the prompt
 const HISTORY_LIMIT = 12;
+
+async function fetchMemories(query: string, userId: string): Promise<string> {
+  try {
+    const smKey = process.env.SUPERMEMORY_API_KEY;
+    if (!smKey) return "";
+    const { Supermemory } = await import("supermemory");
+    const sm = new Supermemory({ apiKey: smKey });
+    const results = await sm.search.memories({ q: query, containerTag: userId, limit: 5 });
+    const memories = (results.results || []).map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk || "").filter(Boolean);
+    if (!memories.length) return "";
+    return `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}\n---`;
+  } catch {
+    return "";
+  }
+}
+
+async function saveMemory(content: string, userId: string, agentId: string): Promise<void> {
+  try {
+    const smKey = process.env.SUPERMEMORY_API_KEY;
+    if (!smKey) return;
+    const { Supermemory } = await import("supermemory");
+    const sm = new Supermemory({ apiKey: smKey });
+    await sm.add({ content, containerTag: userId, metadata: { type: "agent-chat", agent: agentId } });
+  } catch {
+    // non-fatal
+  }
+}
 
 function buildPrompt(
   agent: Agent,
   message: string,
   history: HistoryEntry[],
+  memoryContext: string,
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
 
-  // Build a turn-by-turn conversation transcript so the model can track the full thread
   const transcript = recentHistory
     .map((entry) =>
       entry.role === "user"
@@ -32,6 +58,7 @@ function buildPrompt(
 
   return [
     agent.systemPrompt,
+    memoryContext,
     "",
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
     `User: ${message}`,
@@ -94,7 +121,10 @@ async function handler(req: NextRequest) {
     const agent =
       AGENTS[agentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
-    const prompt = buildPrompt(agent, message, history);
+
+    const uid = userId || "anonymous";
+    const memoryContext = await fetchMemories(message, uid);
+    const prompt = buildPrompt(agent, message, history, memoryContext);
 
     if (!stream) {
       const r = await generateText(
@@ -103,6 +133,7 @@ async function handler(req: NextRequest) {
         undefined,
       );
       await logConversation(agent, userId, message, r.text);
+      await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
       return NextResponse.json({
         response: r.text,
         provider: r.provider,
@@ -141,6 +172,7 @@ async function handler(req: NextRequest) {
           controller.close();
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
+            await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
           }
         }
       },
