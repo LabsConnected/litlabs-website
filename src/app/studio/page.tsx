@@ -50,6 +50,9 @@ const ColorByNumberTool = nextDynamic(() => import("./tools/ColorByNumberTool"),
 const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
   ssr: false,
 });
+const CanvasTool = nextDynamic(() => import("./tools/CanvasTool"), {
+  ssr: false,
+});
 
 type WorkspaceTab = "agent" | "model" | "terminal" | "workflow" | "context";
 
@@ -64,6 +67,7 @@ const TOOL_TO_TAB: Record<StudioTool, WorkspaceTab> = {
   space: "context",
   clibridge: "terminal",
   color: "model",
+  canvas: "model",
 };
 
 const TAB_ICONS: Record<WorkspaceTab, ReactNode> = {
@@ -75,6 +79,13 @@ const TAB_ICONS: Record<WorkspaceTab, ReactNode> = {
 };
 
 const CREATIVE_TEMPLATES = [
+  {
+    title: "Canvas Builder",
+    desc: "Chat with AI to build code. Describe what you want and watch it come to life.",
+    badge: "AI Builder",
+    action: "Open Canvas",
+    tool: "canvas" as StudioTool,
+  },
   {
     title: "Color by Number",
     desc: "Build printable paint-by-number pages with bold regions and simple palettes.",
@@ -95,13 +106,6 @@ const CREATIVE_TEMPLATES = [
     badge: "Characters",
     action: "Open Image Tool",
     tool: "image" as StudioTool,
-  },
-  {
-    title: "Maze & Puzzle Pages",
-    desc: "Create mazes, dot-to-dot sheets, and activity pages for kids or fans.",
-    badge: "Activities",
-    action: "Open Gallery",
-    tool: "gallery" as StudioTool,
   },
 ];
 
@@ -127,6 +131,8 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
       return <SpaceTool />;
     case "color":
       return <ColorByNumberTool />;
+    case "canvas":
+      return <CanvasTool />;
     default:
       return <ImageTool />;
   }

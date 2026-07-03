@@ -82,3 +82,8 @@ litlabs/
 *.backup
 bun.lock
 .quadcodeai/
+
+# Chrome browser binaries and profiles
+chrome/
+**/lighthouse.*/
+**/AppData/Local/lighthouse*/

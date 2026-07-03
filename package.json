@@ -14,6 +14,8 @@
     "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat"
   },
   "dependencies": {
+    "@ai-sdk/openai": "^4.0.7",
+    "@ai-sdk/react": "^4.0.15",
     "@aws-sdk/client-s3": "^3.0.0",
     "@aws-sdk/s3-request-presigner": "^3.0.0",
     "@clerk/nextjs": "^6.39.5",
@@ -24,6 +26,7 @@
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.106.2",
     "@usejarvis/brain": "^0.8.0",
+    "ai": "^7.0.14",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.3",
     "jsnes": "^2.1.0",
@@ -35,6 +38,7 @@
     "react-markdown": "^10.1.0",
     "sharp": "^0.33.0",
     "stripe": "^18.0.0",
+    "supermemory": "^4.24.12",
     "svix": "^1.95.1"
   },
   "devDependencies": {

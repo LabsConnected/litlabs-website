@@ -5,8 +5,7 @@ import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { AGENTS, buildSystemPrompt } from "@/lib/agents";
-import { loadProjectContext } from "@/lib/project-context";
+import { AGENTS } from "@/lib/agents";
 import { getCommandsForAgent, executeCommand } from "@/lib/agentCommands";
 import { ArrowLeft, Send, Circle, Loader2, Terminal, Command, HelpCircle, Clock } from "lucide-react";
 
@@ -113,18 +112,34 @@ export default function AgentPage() {
     if (sending) return;
     setSending(true);
     try {
-      const ctx = loadProjectContext();
-      const systemPrompt = buildSystemPrompt(agent.systemPrompt, ctx ?? undefined);
       const res = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: [{ role: "user", content: text }], systemPrompt, stream: false }),
+        body: JSON.stringify({
+          agentSlug: agent.id,
+          message: text,
+          history: messages
+            .filter((m) => m.role === "user" || m.role === "agent")
+            .map((m) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.text,
+            })),
+        }),
       });
       const data = await res.json();
-      const reply = data.text || data.response || "…";
+      if (!res.ok) {
+        throw new Error(data.error || "Request failed");
+      }
+      const reply = data.response || data.text || "…";
       setMessages((prev) => [...prev, { role: "agent", text: reply }]);
-    } catch {
-      setMessages((prev) => [...prev, { role: "agent", text: "Connection error. Try again." }]);
+    } catch (err) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          text: `Error: ${err instanceof Error ? err.message : "Connection error. Try again."}`,
+        },
+      ]);
     } finally {
       setSending(false);
     }
