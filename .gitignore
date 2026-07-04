@@ -7,6 +7,7 @@
 
 # Dependencies
 /node_modules
+**/node_modules
 /.pnp
 .pnp.js
 .yarn/install-state.gz
@@ -75,10 +76,21 @@ hermes-*.sh
 nuke-clean.ps1
 RECOVERY_MANIFEST.md
 Modelfile
+.temp/
+outputs/
+plans/
+build_output*.txt
+tsc_*.txt
+lint_output.txt
+git_status.txt
+git_status_*.txt
+AGENTS.md
+meta/
 
 # Large internal libs / virtualenvs
 lib/oracle-cli/
 litlabs/
+litlabs-website/
 
 # Misc
 *.backup

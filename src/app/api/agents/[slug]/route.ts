@@ -1,6 +1,6 @@
 // API Route: Get single agent by slug
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 
 export async function GET(
   req: NextRequest,
@@ -9,7 +9,7 @@ export async function GET(
   try {
     const { slug } = await params;
 
-    const { data: agent, error } = await supabase
+    const { data: agent, error } = await supabaseAdmin
       .from("agents")
       .select("*")
       .eq("slug", slug)

@@ -56,8 +56,10 @@ export async function POST(
     }
 
     // Only the user themselves or an admin can modify credits
-    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").filter(Boolean);
-    const isSelf = clerkId === targetUser.clerk_id;
+    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
+      .split(",")
+      .filter(Boolean);
+    const isSelf = clerkId === userId;
     const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
     if (!isSelf && !isAdmin) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });

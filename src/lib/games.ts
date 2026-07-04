@@ -1,10 +1,10 @@
 /**
  * Game Cloud System for LiTTree Lab Studios
- * Browser-based gaming with retro emulators and HTML5 games
+ * Browser-based gaming with HTML5 games
  */
 
 export type GameCategory = "retro" | "arcade" | "puzzle" | "multiplayer";
-export type GamePlatform = "nes" | "snes" | "genesis" | "gb" | "gba" | "html5";
+export type GamePlatform = "html5";
 
 export interface Game {
   id: string;
@@ -13,14 +13,12 @@ export interface Game {
   category: GameCategory;
   platform: GamePlatform;
   coverUrl: string;
-  romUrl?: string;
   html5Url?: string;
   year: number;
   developer: string;
   players: number;
   rating: number;
   tags: string[];
-  // Platform features
   plays: string;
   progress?: number;
   difficulty?: "easy" | "medium" | "hard" | "expert";
@@ -272,8 +270,8 @@ export function getGamesByCategory(category: GameCategory): Game[] {
   return GAME_LIBRARY.filter((g) => g.category === category);
 }
 
-export function getGamesByPlatform(platform: GamePlatform): Game[] {
-  return GAME_LIBRARY.filter((g) => g.platform === platform);
+export function getGamesByPlatform(): Game[] {
+  return GAME_LIBRARY;
 }
 
 export function searchGames(query: string): Game[] {

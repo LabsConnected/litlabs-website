@@ -6,7 +6,6 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import PageShell from "@/components/PageShell";
-import GameEmulator from "@/components/GameEmulator";
 import {
   Search,
   Gamepad2,
@@ -148,14 +147,14 @@ export default function GamesPage() {
         </div>
       </div>
 
-      {/* Retro Ticker */}
+      {/* Games Ticker */}
       <div
         className="w-full bg-black py-1 border-b-2 overflow-hidden flex mt-4"
         style={{ borderColor: T.borderColor, color: T.accentColor }}
       >
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>🎮 GAME CLOUD ONLINE // 8 EMULATORS READY</span>
-          <span>⚡ NES SNES GENESIS GB GBA ARCADE SUPPORT</span>
+          <span>🎮 GAME CLOUD ONLINE // HTML5 GAMES</span>
+          <span>⚡ PUZZLE • ARCADE • RETRO • MULTIPLAYER</span>
           <span>🏆 LEADERBOARDS ACTIVE // MULTIPLAYER ENABLED</span>
           <span>💾 CLOUD SAVES SYNCED ACROSS DEVICES</span>
         </div>
@@ -183,8 +182,7 @@ export default function GamesPage() {
                 LiTTree Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
-                {GAME_LIBRARY.length} games available • NES • SNES • Genesis •
-                HTML5
+                {GAME_LIBRARY.length} games available • HTML5 games
               </p>
             </div>
           </div>
@@ -266,7 +264,6 @@ export default function GamesPage() {
                     referrerPolicy="no-referrer"
                     style={{ border: "none" }}
                   />
-                  {/* Overlay for external link */}
                   <a
                     href={selectedGame.html5Url}
                     target="_blank"
@@ -282,22 +279,16 @@ export default function GamesPage() {
                     Open in New Tab
                   </a>
                 </div>
-              ) : selectedGame.romUrl && selectedGame.platform !== "html5" ? (
-                <GameEmulator
-                  romUrl={selectedGame.romUrl}
-                  platform={selectedGame.platform}
-                  onError={(err) => console.error("Emulator error:", err)}
-                />
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-4xl mb-4">🎮</div>
                     <p className="text-sm opacity-60 mb-4">
-                      No game file available
+                      No playable game available.
                     </p>
                     <p className="text-[10px] opacity-40 max-w-md">
-                      This game requires a ROM file that hasn&apos;t been added
-                      yet.
+                      This game is configured for HTML5. Check back later for
+                      updates.
                     </p>
                   </div>
                 </div>

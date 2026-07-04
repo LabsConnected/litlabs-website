@@ -4,12 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { ShoppingBag, Zap, ArrowRight, Coins } from "lucide-react";
+import { ShoppingBag, Zap, ArrowRight, ShieldCheck } from "lucide-react";
 
-const COIN_PACKS = [
-  { id: "starter", coins: 500, price: "$1", label: "Starter", color: "#00f0ff" },
-  { id: "popular", coins: 1200, price: "$5", label: "Popular", popular: true, color: "#ff00a0" },
-  { id: "pro", coins: 3000, price: "$10", label: "Pro", color: "#8b5cf6" },
+const TIER_PACKAGES = [
+  { id: "free", coins: 100, price: "$0", priceId: "", label: "Free", tier: "free", popular: false, color: "#6b7280" },
+  { id: "starter", coins: 500, price: "$5", priceId: "price_1TogVaJ53kgx4fp5pclmzUZv", label: "Starter", tier: "starter", popular: true, color: "#00f0ff" },
+  { id: "pro", coins: 1500, price: "$19.99", priceId: "price_1TogZdJ53kgx4fp56g6bewkx", label: "Pro", tier: "pro", popular: false, color: "#8b5cf6" },
+  { id: "elite", coins: 5000, price: "$50", priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8", label: "Elite", tier: "elite", popular: false, color: "#fbbf24" },
 ];
 
 const CATEGORIES = [
@@ -126,41 +127,44 @@ export default function MarketplacePreview() {
         })}
       </div>
 
-      {/* Coin packs */}
+      {/* Membership Tiers */}
       <div>
         <div className="flex items-center gap-2 mb-3">
-          <Coins size={14} style={{ color: T.textMuted }} />
+          <ShieldCheck size={14} style={{ color: T.textMuted }} />
           <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
-            Coin Packs
+            Membership Tiers
           </span>
         </div>
-        <div className="grid grid-cols-3 gap-3">
-          {COIN_PACKS.map((pack) => (
+        <div className="grid grid-cols-2 gap-3">
+          {TIER_PACKAGES.map((tier) => (
             <button
-              key={pack.id}
+              key={tier.id}
               onClick={() => router.push("/marketplace?tab=plans")}
               className="relative p-3 rounded-xl border text-center transition-all hover:scale-[1.02]"
               style={{
-                backgroundColor: `${pack.color}08`,
-                borderColor: pack.popular ? pack.color + "50" : pack.color + "20",
+                backgroundColor: `${tier.color}08`,
+                borderColor: tier.popular ? tier.color + "50" : tier.color + "20",
               }}
             >
-              {pack.popular && (
+              {tier.popular && (
                 <span
                   className="absolute -top-2 left-1/2 -translate-x-1/2 text-[9px] font-black px-2 py-0.5 rounded-full"
-                  style={{ backgroundColor: pack.color, color: "#000" }}
+                  style={{ backgroundColor: tier.color, color: "#000" }}
                 >
                   POPULAR
                 </span>
               )}
-              <div className="text-lg font-black" style={{ color: pack.color }}>
-                {pack.coins.toLocaleString()}
+              <div className="text-xs font-bold mb-1" style={{ color: T.textMuted }}>
+                {tier.label}
+              </div>
+              <div className="text-lg font-black" style={{ color: tier.color }}>
+                {tier.coins.toLocaleString()}
               </div>
               <div className="text-[10px] font-bold" style={{ color: T.textMuted }}>
                 LitBits
               </div>
               <div className="text-xs font-black mt-1" style={{ color: T.textColor }}>
-                {pack.price}
+                {tier.price}
               </div>
             </button>
           ))}

@@ -28,6 +28,7 @@ export interface CommandLogEntry {
 export async function logCommandExecution(entry: CommandLogEntry): Promise<void> {
   try {
     const admin = getSupabaseAdmin();
+    if (!admin) return;
 
     const { data: agent } = await admin
       .from("agents")
@@ -74,6 +75,7 @@ export async function getRecentCommandLogs(limit = 50): Promise<Array<{
 }>> {
   try {
     const admin = getSupabaseAdmin();
+    if (!admin) return [];
     const { data: rows, error } = await admin
       .from("agent_logs")
       .select("id, level, message, metadata, created_at, agent_id, agents(display_name)")

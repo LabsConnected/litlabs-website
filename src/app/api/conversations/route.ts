@@ -1,31 +1,32 @@
 // API Route: Conversations
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+
+async function getUserId() {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return null;
+  const { data: user } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
 
 // GET: List user's conversations
 async function getHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
-
-    if (!clerkId) {
+    const dbUserId = await getUserId();
+    if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: user } = await supabase
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);
     const agentId = searchParams.get("agentId");
 
-    let query = supabase
+    let query = supabaseAdmin
       .from("conversations")
       .select(
         `
@@ -33,7 +34,7 @@ async function getHandler(req: NextRequest) {
         agent:agent_id (*)
       `,
       )
-      .eq("user_id", user.id)
+      .eq("user_id", dbUserId)
       .order("updated_at", { ascending: false });
 
     if (agentId) {
@@ -43,7 +44,6 @@ async function getHandler(req: NextRequest) {
     const { data: conversations, error } = await query;
 
     if (error) {
-      // Supabase error:
       return NextResponse.json(
         { error: "Failed to fetch conversations" },
         { status: 500 },
@@ -55,7 +55,6 @@ async function getHandler(req: NextRequest) {
       total: conversations?.length || 0,
     });
   } catch {
-    // Error fetching conversations:
     return NextResponse.json(
       { error: "Failed to fetch conversations" },
       { status: 500 },
@@ -66,19 +65,9 @@ async function getHandler(req: NextRequest) {
 // POST: Create new conversation
 async function postHandler(req: NextRequest) {
   try {
-    const { userId: clerkId } = await auth();
-
-    if (!clerkId) {
+    const dbUserId = await getUserId();
+    if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: user } = await supabase
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const body = await req.json();
@@ -89,26 +78,26 @@ async function postHandler(req: NextRequest) {
     }
 
     // Verify user owns this agent
-    await supabase
+    await supabaseAdmin
       .from("user_agents")
       .select("id")
-      .eq("user_id", user.id)
+      .eq("user_id", dbUserId)
       .eq("agent_id", agentId)
       .single();
 
     // Get agent info for title
-    const { data: agent } = await supabase
+    const { data: agent } = await supabaseAdmin
       .from("agents")
-      .select("name")
+      .select("display_name")
       .eq("id", agentId)
       .single();
 
-    const conversationTitle = title || `Chat with ${agent?.name || "Agent"}`;
+    const conversationTitle = title || `Chat with ${agent?.display_name || "Agent"}`;
 
-    const { data: conversation, error } = await supabase
+    const { data: conversation, error } = await supabaseAdmin
       .from("conversations")
       .insert({
-        user_id: user.id,
+        user_id: dbUserId,
         agent_id: agentId,
         title: conversationTitle,
       })
@@ -116,7 +105,6 @@ async function postHandler(req: NextRequest) {
       .single();
 
     if (error) {
-      // Supabase error:
       return NextResponse.json(
         { error: "Failed to create conversation" },
         { status: 500 },
@@ -128,7 +116,6 @@ async function postHandler(req: NextRequest) {
       message: "Conversation created",
     });
   } catch {
-    // Error creating conversation:
     return NextResponse.json(
       { error: "Failed to create conversation" },
       { status: 500 },

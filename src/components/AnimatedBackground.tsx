@@ -45,17 +45,31 @@ export type BackgroundMode =
   | "minimal"
   | "holo";
 
+const cssBackgrounds: Record<BackgroundMode, string> = {
+  constellation:
+    "radial-gradient(circle at 50% 50%, rgba(100,100,255,0.06), transparent 60%)",
+  nebula:
+    "radial-gradient(circle at 20% 30%, rgba(167,139,250,0.12), transparent 40%), radial-gradient(circle at 80% 70%, rgba(34,211,238,0.10), transparent 45%), radial-gradient(circle at 50% 50%, rgba(236,72,153,0.06), transparent 60%)",
+  waves:
+    "linear-gradient(135deg, rgba(34,211,238,0.06) 0%, transparent 50%, rgba(167,139,250,0.06) 100%)",
+  minimal: "radial-gradient(circle at 50% 0%, rgba(255,255,255,0.03), transparent 50%)",
+  holo:
+    "repeating-linear-gradient(45deg, rgba(34,211,238,0.04) 0px, transparent 2px, transparent 40px), repeating-linear-gradient(-45deg, rgba(236,72,153,0.04) 0px, transparent 2px, transparent 40px)",
+};
+
 export default function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scanlineRef = useRef<HTMLDivElement>(null);
-  const { resolvedColors } = useTheme();
+  const { theme, resolvedColors } = useTheme();
   const colorsRef = useRef(resolvedColors);
+  const mode = theme.backgroundMode || "constellation";
 
   useEffect(() => {
     colorsRef.current = resolvedColors;
   }, [resolvedColors]);
 
   useEffect(() => {
+    if (mode !== "constellation") return;
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -404,23 +418,40 @@ export default function AnimatedBackground() {
       window.removeEventListener("mousemove", onMouseMove);
       window.removeEventListener("mouseleave", onMouseLeave);
     };
-  }, []);
+  }, [mode]);
 
   return (
     <>
-      <canvas
-        ref={canvasRef}
-        style={{
-          position: "fixed",
-          top: 0,
-          left: 0,
-          width: "100%",
-          height: "100%",
-          zIndex: 0,
-          pointerEvents: "none",
-          willChange: "transform",
-        }}
-      />
+      {mode === "constellation" ? (
+        <canvas
+          ref={canvasRef}
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
+            pointerEvents: "none",
+            willChange: "transform",
+          }}
+        />
+      ) : (
+        <div
+          style={{
+            position: "fixed",
+            top: 0,
+            left: 0,
+            width: "100%",
+            height: "100%",
+            zIndex: 0,
+            pointerEvents: "none",
+            background: cssBackgrounds[mode],
+            backgroundColor: resolvedColors.bgColor,
+            transition: "background 0.5s ease",
+          }}
+        />
+      )}
       {/* Static scanlines — lightweight, no animation */}
       <div
         ref={scanlineRef}

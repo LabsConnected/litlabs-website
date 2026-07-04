@@ -8,12 +8,12 @@ import { useClerkAuth } from '@/hooks/useClerkAuth';
 import { Code2, Bot, BarChart3, ChevronRight, Shield, ArrowRight, Globe, Coins, Sparkles, Rocket, Workflow, Layers3, MessageSquareText, Users } from 'lucide-react';
 
 const FEATURES = [
-  { icon: Bot, title: 'Specialized AI Agents', desc: 'Deploy purpose-built agents for coding, writing, data analysis, social growth, and more. Each agent is finely tuned for its domain.' },
-  { icon: Code2, title: 'No-Code Workflow Builder', desc: 'Build complex multi-agent pipelines with a visual drag-and-drop interface. No coding required — just connect and deploy.' },
-  { icon: BarChart3, title: 'Real-Time Analytics', desc: 'Monitor agent performance, user engagement, and system metrics with live dashboards and actionable insights.' },
-  { icon: Coins, title: 'Token Economy', desc: 'Earn LitCoins through platform activity. Use them to unlock premium agents, features, and marketplace listings.' },
-  { icon: Globe, title: 'Social Engine', desc: 'Built-in social feed, comments, and community features. Share your creations and discover what others are building.' },
-  { icon: Shield, title: 'Enterprise Security', desc: 'Enterprise-grade security with Clerk auth, encrypted data, and role-based access control. Your data stays yours.' },
+  { icon: Bot, title: 'Agent Workforce', desc: 'Start with specialist agents for code, writing, media, research, and distribution, then route bigger work through Director.' },
+  { icon: Workflow, title: 'Workflow Studio', desc: 'Chain prompts, tools, media generation, and publishing tasks from one workspace instead of hopping between AI apps.' },
+  { icon: BarChart3, title: 'Creator Dashboard', desc: 'Track agent activity, wallet balance, gallery output, and community signals from a single operating view.' },
+  { icon: Coins, title: 'Marketplace Economy', desc: 'Install free and premium agents, package your own workflows, and prepare them for a creator-first marketplace.' },
+  { icon: Globe, title: 'Publishing Loop', desc: 'Move from idea to asset to post. The platform is built around creation that actually leaves the workspace.' },
+  { icon: Shield, title: 'Owned Workspace', desc: 'Keep your agents, profile, media, and data under your account with auth, wallet, and storage foundations already in place.' },
 ];
 
 const BENEFITS = [
@@ -23,10 +23,10 @@ const BENEFITS = [
 ];
 
 const PROOF_POINTS = [
-  { value: 'Free', label: 'to get started' },
-  { value: '< 5 min', label: 'to first launch' },
-  { value: '24/7', label: 'agent runtime' },
-  { value: '6', label: 'core specialists' },
+  { value: 'Studio', label: 'build workspace' },
+  { value: 'Agents', label: 'specialist crew' },
+  { value: 'Flow', label: 'automation canvas' },
+  { value: 'Market', label: 'agent economy' },
 ];
 
 const AGENTS = [
@@ -52,18 +52,18 @@ function LandingPage() {
         <div className="relative max-w-6xl mx-auto">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold mb-8 border" style={{ borderColor: '#26262e', backgroundColor: '#12121a' }}>
             <Sparkles size={12} className="text-cyan-300" />
-            Build, launch, and grow with a single AI workspace
+            Marketplace + studio for specialized AI agents
           </div>
 
           <h1 className="text-4xl md:text-7xl font-black tracking-tight mb-6 leading-tight" style={{ color: '#f8fafc' }}>
-            Deploy AI Agents{' '}
+            Deploy an AI agent in{' '}
             <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #6366f1, #3b82f6)' }}>
-              That Actually Work
+              minutes, not sprints
             </span>
           </h1>
 
           <p className="text-lg md:text-xl mb-8 max-w-3xl mx-auto opacity-70 leading-relaxed">
-            LiTTree Lab Studios is the AI-first creator platform. Build agent workflows, launch a public-facing studio, and turn your ideas into something people can actually use.
+            Discover ready-made agents, customize your own in the Creative Studio, and wire them into automated workflows without piecing together the infrastructure yourself.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
@@ -72,14 +72,14 @@ function LandingPage() {
               className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all hover:scale-105"
               style={{ backgroundColor: '#6366f1', color: '#fff', boxShadow: '0 0 30px #6366f130' }}
             >
-              Launch Studio <ArrowRight size={16} />
+              Browse the Agent Market <ArrowRight size={16} />
             </Link>
             <Link
               href="/sign-up"
               className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold border transition-all hover:bg-white/5"
               style={{ borderColor: '#26262e' }}
             >
-              Create Free Account
+              Build Your First Agent
             </Link>
           </div>
 
@@ -117,7 +117,7 @@ function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>Everything You Need</h2>
-            <p className="opacity-50 max-w-xl mx-auto">A complete platform for building, deploying, and scaling AI agents, from ideation to production.</p>
+            <p className="opacity-50 max-w-xl mx-auto">The clearest version of LiTTree is not another AI chat page. It is the place where agents help creators build, package, and publish.</p>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -142,14 +142,14 @@ function LandingPage() {
         <div className="max-w-5xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>How It Works</h2>
-            <p className="opacity-50 max-w-xl mx-auto">Get started in three simple steps. No complex setup required.</p>
+            <p className="opacity-50 max-w-xl mx-auto">Keep the path short: pick an agent, make something useful, then publish or automate the next step.</p>
           </div>
 
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { step: '01', title: 'Choose Your Agent', desc: 'Browse our marketplace of specialized AI agents. Each is purpose-built for specific tasks — coding, writing, analytics, and more.' },
-              { step: '02', title: 'Customize & Deploy', desc: "Configure behavior, knowledge, and tools, then ship with one click to your studio or workspace." },
-              { step: '03', title: 'Scale & Earn', desc: 'Monitor performance, iterate quickly, and publish to the marketplace when you are ready.' },
+              { step: '01', title: 'Pick the Right Crew', desc: 'Use Director for orchestration or jump straight into code, writing, media, research, or growth specialists.' },
+              { step: '02', title: 'Build in Studio', desc: "Generate assets, chain workflows, test agents, and keep the useful output in your gallery or dashboard." },
+              { step: '03', title: 'Publish the Result', desc: 'Turn the work into a post, a reusable workflow, a marketplace listing, or the next task in your automation loop.' },
             ].map(s => (
               <div key={s.step} className="text-center">
                 <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5 text-sm font-black" style={{ backgroundColor: '#6366f120', color: '#6366f1', border: '1px solid #6366f140' }}>
@@ -211,7 +211,7 @@ function LandingPage() {
               One workspace. Every tool. Zero friction.
             </h2>
             <p className="opacity-55 max-w-2xl leading-relaxed">
-              From idea to live product in one session. Generate content, build agents, launch a storefront, and grow your audience — all without leaving the platform.
+              The platform is strongest when it leads with one promise: agents help builders create useful work and get it out into the world. Everything else should support that path.
             </p>
           </div>
           <div className="grid gap-4">
@@ -243,7 +243,7 @@ function LandingPage() {
           <div className="absolute inset-0 pointer-events-none opacity-10" style={{ background: 'radial-gradient(circle at 50% 50%, #6366f1, transparent 70%)' }} />
           <div className="relative">
             <h2 className="text-3xl md:text-4xl font-black mb-4" style={{ color: '#f8fafc' }}>Ready to Build?</h2>
-            <p className="opacity-50 mb-8 max-w-lg mx-auto">Start building with LiTTree Lab Studios today. Free to try — no credit card required.</p>
+            <p className="opacity-50 mb-8 max-w-lg mx-auto">Start in Studio, install your first agents, and turn the next idea into something you can ship or share.</p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link href="/sign-up" className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all hover:scale-105" style={{ backgroundColor: '#6366f1', color: '#fff' }}>
                 Get Started Free <ArrowRight size={16} />

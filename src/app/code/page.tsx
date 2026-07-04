@@ -18,6 +18,8 @@ import {
   Command,
   Cpu,
   FolderTree,
+  ScanLine,
+  RefreshCw,
 } from "lucide-react";
 import {
   DEMO_FILE_TREE,
@@ -306,11 +308,17 @@ export default function CodeScannerPage() {
     new Set(["/", "/src", "/src/app"]),
   );
   const [sidebarView, setSidebarView] = useState<
-    "explorer" | "search" | "git" | "errors"
+    "explorer" | "search" | "git" | "errors" | "scan"
   >("explorer");
   const [searchQuery, setSearchQuery] = useState("");
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
+
+  const [scan, setScan] = useState<{
+    loading: boolean;
+    error: string | null;
+    data: any | null;
+  }>({ loading: false, error: null, data: null });
 
   const selectedFile = getFileByPath(DEMO_FILE_TREE, selectedPath);
   const fileContent =
@@ -318,6 +326,18 @@ export default function CodeScannerPage() {
     "// File content not available in demo mode";
   const totalFiles = countFiles(DEMO_FILE_TREE);
   const errorCount = DEMO_ERRORS.length;
+
+  const runProjectScan = useCallback(async () => {
+    setScan({ loading: true, error: null, data: null });
+    try {
+      const res = await fetch("/api/jarvis/scan");
+      if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
+      const data = await res.json();
+      setScan({ loading: false, error: null, data });
+    } catch (err) {
+      setScan({ loading: false, error: err instanceof Error ? err.message : "Scan failed", data: null });
+    }
+  }, []);
 
   const handleToggleExpand = useCallback((path: string) => {
     setExpandedPaths((prev) => {
@@ -468,6 +488,16 @@ export default function CodeScannerPage() {
               </span>
             )}
           </button>
+          <button
+            onClick={() => setSidebarView("scan")}
+            className={`p-2 rounded transition-all ${sidebarView === "scan" ? "opacity-100" : "opacity-40"}`}
+            style={{
+              color: sidebarView === "scan" ? T.accentColor : T.textMuted,
+            }}
+            title="Project Scan"
+          >
+            <ScanLine size={24} />
+          </button>
           <div className="flex-1" />
           <button
             className="p-2 rounded opacity-40 hover:opacity-100 transition-all"
@@ -497,9 +527,11 @@ export default function CodeScannerPage() {
               {sidebarView === "search" && "Search"}
               {sidebarView === "git" && "Source Control"}
               {sidebarView === "errors" && "Problems"}
+              {sidebarView === "scan" && "Project Scan"}
             </span>
             <span className="opacity-50" style={{ color: T.textMuted }}>
               {sidebarView === "explorer" && `${totalFiles} files`}
+              {sidebarView === "scan" && scan.data ? `${scan.data.totalFiles} files` : ""}
             </span>
           </div>
 
@@ -621,6 +653,106 @@ export default function CodeScannerPage() {
                   <div>0 changes</div>
                   <div>0 untracked</div>
                 </div>
+              </div>
+            )}
+
+            {sidebarView === "scan" && (
+              <div className="p-3 space-y-3">
+                <button
+                  onClick={runProjectScan}
+                  disabled={scan.loading}
+                  className="w-full flex items-center justify-center gap-2 px-3 py-2 rounded-lg text-xs font-bold transition-colors"
+                  style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                >
+                  {scan.loading ? (
+                    <RefreshCw size={14} className="animate-spin" />
+                  ) : (
+                    <ScanLine size={14} />
+                  )}
+                  {scan.loading ? "Scanning..." : "Scan Project"}
+                </button>
+
+                {scan.error && (
+                  <div className="text-xs text-red-400">{scan.error}</div>
+                )}
+
+                {scan.data && (
+                  <div className="space-y-3 text-xs">
+                    <div
+                      className="p-2 rounded-lg border"
+                      style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+                    >
+                      <div className="font-bold mb-1" style={{ color: T.accentColor }}>
+                        {scan.data.projectName}
+                      </div>
+                      <div style={{ color: T.textMuted }}>
+                        {scan.data.totalFiles} files · {scan.data.totalLines.toLocaleString()} lines
+                      </div>
+                      <div style={{ color: T.textMuted }}>
+                        {scan.data.health.buildStatus}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                        Tech Stack
+                      </div>
+                      <div className="flex flex-wrap gap-1">
+                        {scan.data.techStack.map((tech: string) => (
+                          <span
+                            key={tech}
+                            className="px-2 py-0.5 rounded-full text-[10px] font-bold"
+                            style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}
+                          >
+                            {tech}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div>
+                      <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                        Features
+                      </div>
+                      <div className="space-y-1" style={{ color: T.textColor }}>
+                        {scan.data.keyFeatures.map((feature: string, i: number) => (
+                          <div key={i} className="flex items-center gap-2">
+                            <span style={{ color: T.accentColor }}>•</span>
+                            {feature}
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    {scan.data.health.envVarsMissing.length > 0 && (
+                      <div>
+                        <div className="font-bold mb-1 uppercase tracking-wider text-red-400">
+                          Missing Env Vars
+                        </div>
+                        <div className="space-y-1">
+                          {scan.data.health.envVarsMissing.map((env: string) => (
+                            <div key={env} style={{ color: T.textMuted }}>
+                              {env}
+                            </div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {scan.data.recentChanges.length > 0 && (
+                      <div>
+                        <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                          Recent Commits
+                        </div>
+                        <div className="space-y-1" style={{ color: T.textColor }}>
+                          {scan.data.recentChanges.slice(0, 5).map((change: string, i: number) => (
+                            <div key={i} className="truncate">{change}</div>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
               </div>
             )}
           </div>
