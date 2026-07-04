@@ -347,7 +347,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.System,
     items: [
       { label: "Settings", href: "/settings", icon: Settings },
-      { label: "Profile", href: "/settings?tab=profile", icon: User },
+      { label: "Profile", href: "/profile", icon: User },
       {
         label: "Notifications",
         href: "/settings?tab=notifications",

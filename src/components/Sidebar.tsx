@@ -460,32 +460,42 @@ function SidebarContent({
         >
           <Link
             href="/profile"
-            className="flex items-center gap-3 p-2 rounded-lg transition-colors hover:bg-white/5"
+            onClick={onClose}
+            className="flex items-center gap-3 p-2.5 rounded-xl transition-all hover:bg-white/5"
+            style={{ backgroundColor: `${T.boxBg}40` }}
           >
-            <div className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2" style={{ borderColor: T.accentColor }}>
-              {user.imageUrl ? (
+            <div className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border-2" style={{ borderColor: T.accentColor }}>
+              {profile?.avatarUrl || user.imageUrl ? (
                 <NextImage
-                  src={user.imageUrl}
+                  src={profile?.avatarUrl || user.imageUrl || ""}
                   alt="Profile"
                   fill
                   className="object-cover"
-                  sizes="40px"
+                  sizes="44px"
                 />
               ) : (
                 <div
                   className="w-full h-full flex items-center justify-center text-sm font-bold"
                   style={{ backgroundColor: T.boxBg, color: T.accentColor }}
                 >
-                  {(user.firstName?.[0] || user.username?.[0] || "?").toUpperCase()}
+                  {(profile?.displayName?.[0] || user.firstName?.[0] || user.username?.[0] || "?").toUpperCase()}
                 </div>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
-                {profile?.displayName || user.firstName || user.username || "Creator"}
+              <div className="flex items-center gap-1.5">
+                <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
+                  {profile?.displayName || user.firstName || user.username || "Creator"}
+                </div>
+                <span
+                  className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider"
+                  style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}
+                >
+                  Profile
+                </span>
               </div>
               <div className="text-xs truncate" style={{ color: T.textMuted }}>
-                @{user.username || "litree"}
+                @{profile?.username || user.username || "litree"}
               </div>
             </div>
           </Link>
