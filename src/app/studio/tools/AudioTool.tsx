@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import {
   Music,
   Wand2,
@@ -109,17 +110,7 @@ export default function AudioTool() {
   const canAfford = coinBalance === null || coinBalance >= cost;
 
   useEffect(() => {
-    fetch("/api/wallet")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.balance === "number") {
-          setCoinBalance(d.balance);
-          try {
-            localStorage.setItem("litcoins", String(d.balance));
-          } catch {}
-        }
-      })
-      .catch(() => {});
+    refreshWallet();
   }, []);
 
   useEffect(() => {
@@ -360,6 +351,8 @@ export default function AudioTool() {
                 setText(e.target.value);
                 setError(null);
               }}
+              aria-label="Audio prompt text"
+              title="Audio prompt text"
               placeholder={
                 mode === "tts"
                   ? "Hello world, this is a test of text-to-speech..."
@@ -629,6 +622,7 @@ export default function AudioTool() {
                           onClick={() => togglePlay(g.id, g.audioUrl!)}
                           className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.accentColor }}
+                          aria-label={playingId === g.id ? "Pause audio" : "Play audio"}
                         >
                           {playingId === g.id ? (
                             <Pause size={14} />
@@ -640,6 +634,7 @@ export default function AudioTool() {
                           onClick={() => handleDownload(g.audioUrl!, g.mode)}
                           className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.textMuted }}
+                          aria-label="Download audio"
                         >
                           <Download size={14} />
                         </button>

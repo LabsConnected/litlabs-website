@@ -3,25 +3,38 @@
 // Users can only revoke their own keys.
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
+import {
+  getAdminSupabase,
+  isAdminSupabaseConfigured,
+} from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 async function handler(
   _req: NextRequest,
-  { params }: { params: Promise<{ id: string }> }
+  ctx?: { params: Promise<{ id: string }> },
 ) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const { id } = await params;
+  if (!ctx?.params) {
+    return NextResponse.json(
+      { error: "Missing route params" },
+      { status: 400 },
+    );
+  }
+
+  const { id } = await ctx.params;
   if (!id) {
     return NextResponse.json({ error: "id is required" }, { status: 400 });
   }
 
   if (!isAdminSupabaseConfigured()) {
-    return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+    return NextResponse.json(
+      { error: "Database not configured" },
+      { status: 503 },
+    );
   }
 
   const sb = getAdminSupabase();
@@ -49,7 +62,10 @@ async function handler(
     .eq("id", id);
 
   if (error) {
-    return NextResponse.json({ error: "Failed to revoke key" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to revoke key" },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ revoked: true });

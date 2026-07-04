@@ -21,7 +21,18 @@ export default function AgentsPage() {
       try {
         const res = await fetch("/api/agents/status");
         const data = await res.json();
-        if (alive) setAgents(Array.isArray(data) ? data : []);
+        if (alive) {
+          const mapped: AgentStatus[] = Array.isArray(data)
+            ? data.map((item: Record<string, unknown>) => ({
+                name: String(item.name ?? ""),
+                role: String(item.role ?? ""),
+                status: item.status === "running" ? "running" as const : "idle" as const,
+                lastAction: String(item.lastAction ?? ""),
+                uptime: String(item.uptime ?? ""),
+              }))
+            : [];
+          setAgents(mapped);
+        }
       } finally {
         if (alive) setLoading(false);
       }

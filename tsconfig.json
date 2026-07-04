@@ -8,7 +8,7 @@
     ],
     "allowJs": true,
     "skipLibCheck": true,
-    "strict": false,
+    "strict": true,
     "noEmit": true,
     "incremental": true,
     "module": "esnext",
@@ -36,6 +36,7 @@
   ],
   "exclude": [
     "node_modules",
-    "litlabs"
+    "litlabs",
+    "litlabs-website"
   ]
 }

@@ -43,61 +43,57 @@ function getCategoryColor(category: string): string {
   return colors[category] || "#fbbf24";
 }
 
-// CREDIT PACKS — Stripe price_id required for each (create in Stripe Dashboard)
-// Note: Found price_1TYs4AJ53kgx4fp5RgAChEmk (Pro Membership) in Stripe, but not specific coin packs.
-const CREDIT_PACKS: {
+// TIER PACKAGES — Stripe price_id required for each (create in Stripe Dashboard)
+// All prices created in test mode: Starter($5), Pro($19.99), Elite($50)
+const TIER_PACKAGES: {
   id: string;
   coins: number;
   price: number;
   priceId: string;
   label: string;
+  tier: string;
   popular: boolean;
-  savings: string;
+  features: string[];
 }[] = [
   {
-    id: "starter",
+    id: "tier-free",
+    coins: 100,
+    price: 0,
+    priceId: "",
+    label: "Free",
+    tier: "free",
+    popular: false,
+    features: ["1 agent slot", "Basic tools", "Community support"],
+  },
+  {
+    id: "tier-starter",
     coins: 500,
-    price: 1,
-    priceId: "",
-    label: "Starter",
-    popular: false,
-    savings: "Entry pack",
-  },
-  {
-    id: "popular",
-    coins: 1200,
     price: 5,
-    priceId: "",
-    label: "Popular",
+    priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
+    label: "Starter",
+    tier: "starter",
     popular: true,
-    savings: "Save 20%",
+    features: ["5 agent slots", "All basic tools", "Priority support", "Daily bonus +50"],
   },
   {
-    id: "pro",
-    coins: 3000,
-    price: 10,
-    priceId: "",
+    id: "tier-pro",
+    coins: 1500,
+    price: 19.99,
+    priceId: "price_1TogZdJ53kgx4fp56g6bewkx",
     label: "Pro",
+    tier: "pro",
     popular: false,
-    savings: "Save 33%",
+    features: ["Unlimited agent slots", "All premium tools", "24/7 support", "Daily bonus +200", "Priority processing"],
   },
   {
-    id: "whale",
-    coins: 7000,
-    price: 25,
-    priceId: "",
-    label: "Whale",
-    popular: false,
-    savings: "Save 43%",
-  },
-  {
-    id: "max",
-    coins: 15000,
+    id: "tier-elite",
+    coins: 5000,
     price: 50,
-    priceId: "",
-    label: "Max",
+    priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
+    label: "Elite",
+    tier: "elite",
     popular: false,
-    savings: "Save 50%",
+    features: ["Unlimited agent slots", "All tools + beta", "Dedicated support", "Daily bonus +1000", "Highest priority", "Early access"],
   },
 ];
 
@@ -675,9 +671,9 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
-  const buyPack = async (pack: (typeof CREDIT_PACKS)[0]) => {
+  const buyPack = async (pack: (typeof TIER_PACKAGES)[0]) => {
     if (!isSignedIn || !userId) {
-      showToast("Please sign in to purchase coins.", "error");
+      showToast("Please sign in to purchase.", "error");
       return;
     }
     try {
@@ -685,14 +681,15 @@ function MarketplaceInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "payment",
+          mode: "subscription",
+          priceId: pack.priceId || "",
           priceData: {
             amount: pack.price * 100,
             currency: "usd",
-            name: `${pack.coins} LiTBit Coins`,
-            description: `${pack.label} pack — ${pack.savings}`,
+            name: `${pack.label} Membership`,
+            description: `${pack.features.slice(0, 2).join(", ")}`,
           },
-          metadata: { clerk_id: userId, coin_amount: String(pack.coins) },
+          metadata: { clerk_id: userId, tier: pack.tier, coin_amount: String(pack.coins) },
         }),
       });
       const data = await res.json();
@@ -1646,7 +1643,7 @@ function MarketplaceInner() {
             width: "100%",
           }}
         >
-          {/* SMART COIN PACKS */}
+          {/* MEMBERSHIP TIERS */}
           <div style={{ marginBottom: "32px" }}>
             <div
               style={{
@@ -1668,14 +1665,14 @@ function MarketplaceInner() {
                     fontWeight: "bold",
                   }}
                 >
-                  🪙 BUY COINS
+                  ⭐ CHOOSE YOUR TIER
                 </div>
                 <p
                   style={{ color: T.textColor, fontSize: "12px", opacity: 0.7 }}
                 >
-                  Purchase LiTBit Coins to unlock premium agents and features.
+                  Unlock features and capabilities based on your membership level.
                   <strong style={{ color: T.accentColor }}>
-                    1 LBC = $0.01
+                    Free forever, upgrade anytime.
                   </strong>
                 </p>
               </div>
@@ -1695,7 +1692,7 @@ function MarketplaceInner() {
                     opacity: claimLoading ? 0.6 : 1,
                   }}
                 >
-                  {claimLoading ? "⏳ Claiming..." : "⚡ Claim Daily +50"}
+                  {claimLoading ? "⏳ Claiming..." : "⚡ Claim Daily Bonus"}
                 </button>
               </div>
             </div>
@@ -1703,29 +1700,29 @@ function MarketplaceInner() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                 gap: "16px",
               }}
             >
-              {CREDIT_PACKS.map((pack) => (
+              {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => (
                 <div
-                  key={pack.id}
+                  key={tier.id}
                   style={{
                     position: "relative",
                     padding: "24px 20px",
-                    border: `2px solid ${pack.popular ? "gold" : T.borderColor}`,
-                    backgroundColor: pack.popular
+                    border: `2px solid ${tier.popular ? "gold" : T.borderColor}`,
+                    backgroundColor: tier.popular
                       ? "rgba(255,215,0,0.12)"
                       : T.boxBg,
                     textAlign: "center",
                     borderRadius: "12px",
                     transition: "all 0.2s",
-                    boxShadow: pack.popular
+                    boxShadow: tier.popular
                       ? "0 8px 32px rgba(255,215,0,0.15)"
                       : "none",
                   }}
                 >
-                  {pack.popular && (
+                  {tier.popular && (
                     <div
                       style={{
                         position: "absolute",
@@ -1753,17 +1750,17 @@ function MarketplaceInner() {
                       letterSpacing: "1px",
                     }}
                   >
-                    {pack.label}
+                    {tier.label}
                   </div>
                   <div
                     style={{
-                      color: pack.popular ? "gold" : T.headerColor,
+                      color: tier.popular ? "gold" : T.headerColor,
                       fontSize: "36px",
                       fontWeight: "bold",
                       marginBottom: "4px",
                     }}
                   >
-                    {pack.coins.toLocaleString()}
+                    {tier.price}
                   </div>
                   <div
                     style={{
@@ -1773,17 +1770,7 @@ function MarketplaceInner() {
                       opacity: 0.8,
                     }}
                   >
-                    LiTBit Coins
-                  </div>
-                  <div
-                    style={{
-                      color: pack.popular ? "gold" : T.accentColor,
-                      fontSize: "24px",
-                      fontWeight: "bold",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    ${pack.price}
+                    {tier.coins.toLocaleString()} LiTBit Coins included
                   </div>
                   <div
                     style={{
@@ -1793,15 +1780,15 @@ function MarketplaceInner() {
                       marginBottom: "16px",
                     }}
                   >
-                    {pack.savings}
+                    {tier.features.slice(0, 3).join(" • ")}
                   </div>
                   <button
-                    onClick={() => buyPack(pack)}
+                    onClick={() => buyPack(tier)}
                     style={{
                       width: "100%",
                       padding: "12px",
-                      backgroundColor: pack.popular ? "gold" : T.linkColor,
-                      color: pack.popular ? "black" : "white",
+                      backgroundColor: tier.popular ? "gold" : T.linkColor,
+                      color: tier.popular ? "black" : "white",
                       border: "none",
                       fontWeight: "bold",
                       fontSize: "13px",
@@ -1809,7 +1796,7 @@ function MarketplaceInner() {
                       borderRadius: "6px",
                     }}
                   >
-                    {pack.popular ? "⚡ Buy Best Value" : "Buy Pack"}
+                    {tier.popular ? "⚡ Get Best Value" : "Get " + tier.label}
                   </button>
                 </div>
               ))}

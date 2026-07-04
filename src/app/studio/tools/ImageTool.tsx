@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import {
   Wand2,
   Download,
@@ -823,14 +824,7 @@ export default function ImageTool() {
           "success",
           `[${i + 1}/${batchSize}] ✓ Done · ${data.free ? "FREE" : data.cost + " 🪙"}`,
         );
-        if (typeof data.balance === "number") {
-          setCoinBalance(data.balance);
-          try {
-            localStorage.setItem("litcoins", String(data.balance));
-          } catch {
-            /* ignore */
-          }
-        }
+        refreshWallet().catch(() => {});
       } catch (err) {
         const msg = err instanceof Error ? err.message : "Forge failed";
         addLog("error", `[${i + 1}/${batchSize}] ${msg}`);
@@ -936,7 +930,9 @@ export default function ImageTool() {
       });
       const data = await res.json();
       if (res.ok && typeof data.balance === "number") {
-        setCoinBalance(data.balance);
+        // Pull fresh balance from the shared WalletContext instead of
+        // mutating local state (the context already reflects the server).
+        refreshWallet().catch(() => {});
         setError("Daily bonus claimed! +50 🪙");
         setTimeout(() => setError(null), 3000);
       } else {
@@ -1029,6 +1025,9 @@ export default function ImageTool() {
                         setEditingWsName(null);
                       }
                     }}
+                    aria-label="Workspace name"
+                    title="Workspace name"
+                    placeholder="Workspace name"
                     className="h-6 px-2 text-[10px] font-bold rounded outline-none w-20"
                     style={{
                       backgroundColor: T.bgColor,
@@ -1330,6 +1329,8 @@ export default function ImageTool() {
                   accept="image/*"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
+                  aria-label="Upload reference image"
+                  title="Upload reference image"
                   className="hidden"
                 />
                 {referenceImage ? (
@@ -1720,6 +1721,9 @@ export default function ImageTool() {
                   </div>
                   <button
                     onClick={() => setAutoEnhance(!autoEnhance)}
+                    aria-label="Toggle auto-enhance prompt"
+                    aria-pressed={autoEnhance}
+                    title={autoEnhance ? "Auto-enhance on" : "Auto-enhance off"}
                     className="relative w-10 h-5 rounded-full transition-colors"
                     style={{
                       backgroundColor: autoEnhance
@@ -1982,6 +1986,11 @@ export default function ImageTool() {
                       setGuidanceScale(parseFloat(e.target.value))
                     }
                     disabled={isWorking}
+                    aria-label="Guidance scale (CFG)"
+                    title="Guidance scale (CFG)"
+                    aria-valuemin={1}
+                    aria-valuemax={15}
+                    aria-valuenow={guidanceScale}
                     className="w-full accent-current cursor-pointer"
                     style={{ accentColor: T.accentColor }}
                   />
@@ -2037,6 +2046,11 @@ export default function ImageTool() {
                       setInferenceSteps(parseInt(e.target.value))
                     }
                     disabled={isWorking}
+                    aria-label="Inference steps"
+                    title="Inference steps"
+                    aria-valuemin={10}
+                    aria-valuemax={100}
+                    aria-valuenow={inferenceSteps}
                     className="w-full accent-current cursor-pointer"
                     style={{ accentColor: T.accentColor }}
                   />
@@ -2135,6 +2149,11 @@ export default function ImageTool() {
                       value={strength}
                       onChange={(e) => setStrength(parseFloat(e.target.value))}
                       disabled={isWorking}
+                      aria-label="Img2Img strength"
+                      title="Img2Img strength"
+                      aria-valuemin={0.1}
+                      aria-valuemax={1}
+                      aria-valuenow={strength}
                       className="w-full accent-current cursor-pointer"
                       style={{ accentColor: T.accentColor }}
                     />
@@ -2202,6 +2221,9 @@ export default function ImageTool() {
                     min={0}
                     max={2147483647}
                     disabled={isWorking}
+                    aria-label="Seed for reproducible generation"
+                    title="Seed for reproducible generation"
+                    placeholder="0"
                     className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40"
                     style={{
                       backgroundColor: T.bgColor,
@@ -2378,6 +2400,8 @@ export default function ImageTool() {
                       <select
                         value={galleryCategory}
                         onChange={(e) => setGalleryCategory(e.target.value)}
+                        aria-label="Gallery category"
+                        title="Gallery category"
                         className="h-6 px-1 text-[9px] outline-none cursor-pointer"
                         style={{
                           backgroundColor: T.bgColor,

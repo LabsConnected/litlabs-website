@@ -4,10 +4,22 @@ import { generateApiKey } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { supabase } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { supabaseAdmin } from "@/lib/supabase";
+
+async function getUserId() {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return null;
+  const { data: user } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
 
 async function handler(req: NextRequest) {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) {
+  const dbUserId = await getUserId();
+  if (!dbUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -37,7 +49,7 @@ async function handler(req: NextRequest) {
   const { count } = await sb
     .from("api_keys")
     .select("*", { count: "exact", head: true })
-    .eq("user_id", user.id)
+    .eq("user_id", dbUserId)
     .is("revoked_at", null);
 
   if ((count ?? 0) >= 10) {
@@ -52,7 +64,7 @@ async function handler(req: NextRequest) {
   const { data, error } = await sb
     .from("api_keys")
     .insert({
-      user_id: user.id,
+      user_id: dbUserId,
       name,
       prefix,
       key_hash: hash,

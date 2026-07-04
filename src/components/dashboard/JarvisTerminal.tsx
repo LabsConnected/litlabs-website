@@ -274,7 +274,7 @@ export default function JarvisTerminal() {
   >([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
   const [showVoicePicker, setShowVoicePicker] = useState(false);
-  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number>>({});
+  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number | undefined>>({});
   const [micPermission, setMicPermission] = useState<
     "prompt" | "granted" | "denied" | "unknown"
   >("unknown");

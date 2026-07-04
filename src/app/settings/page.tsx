@@ -6,6 +6,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
+import CLIBridgeTool from "@/app/studio/tools/CLIBridgeTool";
 import { THEMES } from "@/lib/themes";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
 import type { SkinPreset, AccentColor } from "@/context/ThemeContext";
@@ -25,6 +26,8 @@ import {
   ScanLine,
   AlertTriangle,
   ExternalLink,
+  Terminal,
+  ShieldCheck,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -46,6 +49,7 @@ const TABS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workspace", label: "Workspace", icon: LayoutGrid },
+  { id: "cli", label: "CLI Tools", icon: Terminal },
   { id: "keys", label: "BYOK", icon: Key },
   { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
@@ -765,6 +769,101 @@ export default function SettingsPage() {
                 </div>
               </div>
             </div>
+          </div>
+        )}
+
+        {/* CLI Tools Tab */}
+        {activeTab === "cli" && (
+          <div className="space-y-6">
+            <section className="grid xl:grid-cols-[0.75fr_1.25fr] gap-6">
+              <div className="space-y-4">
+                <div className="rounded-3xl border p-4 sm:p-6" style={cardStyle}>
+                  <div className="flex items-start gap-3">
+                    <div
+                      className="h-10 w-10 shrink-0 rounded-2xl flex items-center justify-center border"
+                      style={{
+                        backgroundColor: `${T.accentColor}14`,
+                        borderColor: `${T.accentColor}35`,
+                        color: T.accentColor,
+                      }}
+                    >
+                      <Terminal size={18} />
+                    </div>
+                    <div>
+                      <h2 className="text-xl font-black" style={{ color: T.headerColor }}>
+                        CLI Tools
+                      </h2>
+                      <p className="text-xs mt-1 leading-relaxed" style={{ color: T.textMuted }}>
+                        Launch Qwen, Hermes, Gemini, OpenClaw, or a shell from the same bridge used
+                        in Studio. Access is limited to authorized admin accounts.
+                      </p>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="rounded-3xl border p-4 sm:p-6" style={cardStyle}>
+                  <h3 className="text-sm font-black mb-3" style={{ color: T.headerColor }}>
+                    Connected Surfaces
+                  </h3>
+                  <div className="grid gap-3">
+                    {[
+                      {
+                        href: "/studio",
+                        label: "Studio Tools",
+                        desc: "Open the full creative workspace.",
+                        icon: LayoutGrid,
+                      },
+                      {
+                        href: "/admin/terminal",
+                        label: "Admin Terminal",
+                        desc: "Jump to the dedicated terminal view.",
+                        icon: Terminal,
+                      },
+                      {
+                        href: "/admin",
+                        label: "Admin Console",
+                        desc: "Review health, live activity, and platform controls.",
+                        icon: ShieldCheck,
+                      },
+                    ].map((item) => {
+                      const Icon = item.icon;
+                      return (
+                        <Link
+                          key={item.href}
+                          href={item.href}
+                          className="flex items-center gap-3 rounded-2xl border px-4 py-3 transition-all hover:opacity-90"
+                          style={{
+                            backgroundColor: `${T.boxBg}55`,
+                            borderColor: `${T.borderColor}30`,
+                          }}
+                        >
+                          <Icon size={16} style={{ color: T.accentColor }} />
+                          <span className="min-w-0">
+                            <span className="block text-sm font-black" style={{ color: T.textColor }}>
+                              {item.label}
+                            </span>
+                            <span className="block text-xs mt-0.5" style={{ color: T.textMuted }}>
+                              {item.desc}
+                            </span>
+                          </span>
+                          <ExternalLink size={14} className="ml-auto shrink-0 opacity-60" style={{ color: T.textMuted }} />
+                        </Link>
+                      );
+                    })}
+                  </div>
+                </div>
+              </div>
+
+              <div
+                className="min-h-[560px] overflow-hidden rounded-3xl border"
+                style={{
+                  backgroundColor: `${T.boxBg}60`,
+                  borderColor: `${T.borderColor}30`,
+                }}
+              >
+                <CLIBridgeTool />
+              </div>
+            </section>
           </div>
         )}
 

@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { getOrCreateUser } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 
@@ -53,7 +53,7 @@ async function deleteHandler() {
     }
 
     // Find user in our database
-    const { data: user, error: findError } = await supabase
+    const { data: user, error: findError } = await supabaseAdmin
       .from("users")
       .select("id")
       .eq("clerk_id", clerkId)
@@ -64,7 +64,7 @@ async function deleteHandler() {
     }
 
     // Delete all user data (cascade deletes will handle related tables)
-    const { error: deleteError } = await supabase
+    const { error: deleteError } = await supabaseAdmin
       .from("users")
       .delete()
       .eq("id", user.id);

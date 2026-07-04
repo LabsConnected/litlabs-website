@@ -658,11 +658,11 @@ function SidebarContent({
 
 export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(false);
-
-  useEffect(() => {
-    setCollapsed(localStorage.getItem(COLLAPSED_KEY) === "true");
-  }, []);
+  const [collapsed, setCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    // Force expanded on desktop by default; allow user to toggle if they want
+    return false;
+  });
 
   const toggleCollapse = useCallback(() => {
     setCollapsed((v) => {
@@ -680,19 +680,12 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
   return (
     <>
       <aside
-        className={`hidden lg:flex flex-col h-screen sticky top-0 border-r shrink-0 transition-all duration-300 ${
+        className={`hidden md:flex flex-col h-screen sticky top-0 border-r shrink-0 transition-all duration-300 ${
           collapsed ? "w-16" : "w-72"
         }`}
         style={sidebarBase}
       >
         <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
-      </aside>
-
-      <aside
-        className="hidden md:flex lg:hidden flex-col w-16 h-screen sticky top-0 border-r shrink-0"
-        style={sidebarBase}
-      >
-        <SidebarContent collapsed={true} />
       </aside>
 
       {open && (

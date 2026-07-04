@@ -1,21 +1,55 @@
-import Link from "next/link";
+export const metadata = {
+  title: "Terms",
+  description: "Terms of service for LiTTree Lab Studios.",
+};
+
+const UPDATED = "July 2, 2026";
 
 export default function TermsPage() {
   return (
-    <div className="max-w-3xl mx-auto px-4 py-12" style={{ color: "var(--text-color)" }}>
-      <h1 className="text-3xl font-bold mb-6" style={{ color: "var(--header-color)" }}>Terms of Service</h1>
-      <div className="space-y-4 text-sm leading-relaxed" style={{ color: "var(--text-muted)" }}>
-        <p>Welcome to LiTTree Lab Studios. By using our platform, you agree to these terms.</p>
-        <h2 className="text-lg font-semibold" style={{ color: "var(--header-color)" }}>1. Use of Service</h2>
-        <p>You must be 13 or older to use this platform. You are responsible for all activity under your account.</p>
-        <h2 className="text-lg font-semibold" style={{ color: "var(--header-color)" }}>2. AI-Generated Content</h2>
-        <p>Content created by AI agents on your behalf is your responsibility. You retain ownership of your original content.</p>
-        <h2 className="text-lg font-semibold" style={{ color: "var(--header-color)" }}>3. Limitation of Liability</h2>
-        <p>LiTTree Lab Studios is provided &ldquo;as is&rdquo; without warranties. We are not liable for damages arising from use of the platform.</p>
-        <p className="pt-4">
-          <Link href="/" className="underline hover:no-underline" style={{ color: "var(--link-color)" }}>Back to Home</Link>
-        </p>
-      </div>
-    </div>
+    <main className="min-h-screen px-4 py-16" style={{ backgroundColor: "#08080c", color: "#e2e2e9" }}>
+      <article className="mx-auto max-w-3xl">
+        <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-cyan-300">Terms</p>
+        <h1 className="mb-3 text-4xl font-black tracking-tight text-slate-50">Terms of Service</h1>
+        <p className="mb-10 text-sm opacity-55">Last updated {UPDATED}</p>
+
+        <div className="space-y-8 text-sm leading-relaxed opacity-75">
+          <section>
+            <h2 className="mb-2 text-lg font-black text-slate-50">Use of the Platform</h2>
+            <p>
+              LiTTree Lab Studios provides creative AI tools, agent workflows, gallery features,
+              marketplace experiences, and related services. Use the platform lawfully and do not
+              attempt to disrupt, abuse, or bypass security controls.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-lg font-black text-slate-50">Accounts and Content</h2>
+            <p>
+              You are responsible for activity under your account and for the prompts, assets,
+              agents, posts, and other content you create or publish. Keep credentials private and
+              only upload content you have the right to use.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-lg font-black text-slate-50">AI Output</h2>
+            <p>
+              AI-generated output can be inaccurate, incomplete, or unsuitable for some uses.
+              Review important output before relying on it, especially for legal, financial,
+              medical, safety, or production decisions.
+            </p>
+          </section>
+
+          <section>
+            <h2 className="mb-2 text-lg font-black text-slate-50">Payments and Credits</h2>
+            <p>
+              Paid plans, credits, marketplace listings, and generation costs may change as the
+              platform evolves. Any paid feature should clearly show its cost before purchase or use.
+            </p>
+          </section>
+        </div>
+      </article>
+    </main>
   );
 }

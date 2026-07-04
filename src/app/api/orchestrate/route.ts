@@ -5,6 +5,16 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { orchestrator, CONVERSATION_TOPERS } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { supabaseAdmin } from "@/lib/supabase";
+
+async function ensureDbUser(clerkId: string): Promise<string | null> {
+  const { data: user } = await supabaseAdmin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  return user?.id ?? null;
+}
 
 async function handler(req: NextRequest) {
   const { userId } = await auth();
@@ -12,12 +22,16 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const dbUserId = await ensureDbUser(userId);
+  if (!dbUserId) {
+    return NextResponse.json({ error: "User not found" }, { status: 404 });
+  }
+
   if (req.method === "POST") {
     try {
       const body = await req.json();
       const { action, agent1, agent2, topic, conversationId } = body;
 
-      // Start a conversation (single turn — client polls for updates)
       if (action === "start") {
         if (!agent1 || !agent2) {
           return NextResponse.json(
@@ -38,7 +52,17 @@ async function handler(req: NextRequest) {
           selectedTopic,
         );
 
-        await orchestrator.continueConversation(conversation.id);
+        await supabaseAdmin.from("orchestration_jobs").insert({
+          conversation_id: conversation.id,
+          user_id: dbUserId,
+          agent1_id: agent1,
+          agent2_id: agent2,
+          topic: selectedTopic,
+          status: "running",
+          message_count: conversation.messages.length,
+          max_messages: 20,
+          created_at: new Date().toISOString(),
+        });
 
         return NextResponse.json({
           success: true,
@@ -55,35 +79,32 @@ async function handler(req: NextRequest) {
         });
       }
 
-      // Continue a conversation (client-driven, one more turn)
-      if (action === "continue" && conversationId) {
-        await orchestrator.continueConversation(conversationId);
+      if (action === "stop" && conversationId) {
+        const { error } = await supabaseAdmin
+          .from("orchestration_jobs")
+          .update({ status: "paused" })
+          .eq("conversation_id", conversationId);
+
         const conversation = orchestrator.getConversation(conversationId);
-        if (!conversation) {
-          return NextResponse.json(
-            { error: "Conversation not found" },
-            { status: 404 },
-          );
+        if (conversation) {
+          conversation.status = "paused";
         }
-        return NextResponse.json({
-          success: true,
-          conversation: {
-            id: conversation.id,
-            status: conversation.status,
-            messageCount: conversation.messages.length,
-            messages: conversation.messages,
-          },
-        });
+
+        return NextResponse.json({ success: true, message: `Stopped conversation ${conversationId}` });
       }
 
-      // Get conversation status
       if (action === "status" && conversationId) {
         const conversation = orchestrator.getConversation(conversationId);
         if (!conversation) {
-          return NextResponse.json(
-            { error: "Conversation not found" },
-            { status: 404 },
-          );
+          const { data } = await supabaseAdmin
+            .from("orchestration_jobs")
+            .select("*")
+            .eq("conversation_id", conversationId)
+            .single();
+          if (!data) {
+            return NextResponse.json({ error: "Conversation not found" }, { status: 404 });
+          }
+          return NextResponse.json({ conversation: data });
         }
 
         return NextResponse.json({
@@ -106,19 +127,12 @@ async function handler(req: NextRequest) {
         });
       }
 
-      return NextResponse.json(
-        { error: "Invalid action. Use: start, continue, status" },
-        { status: 400 },
-      );
+      return NextResponse.json({ error: "Invalid action. Use: start, stop, status" }, { status: 400 });
     } catch {
-      return NextResponse.json(
-        { error: "Failed to orchestrate agents" },
-        { status: 500 },
-      );
+      return NextResponse.json({ error: "Failed to orchestrate agents" }, { status: 500 });
     }
   }
 
-  // GET all active conversations
   if (req.method === "GET") {
     const conversations = orchestrator.getActiveConversations().map((c) => ({
       id: c.id,
@@ -130,10 +144,7 @@ async function handler(req: NextRequest) {
       lastMessageAt: c.lastMessageAt,
     }));
 
-    return NextResponse.json({
-      activeConversations: conversations,
-      totalActive: conversations.length,
-    });
+    return NextResponse.json({ activeConversations: conversations, totalActive: conversations.length });
   }
 
   return NextResponse.json({ error: "Method not allowed" }, { status: 405 });

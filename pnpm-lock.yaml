@@ -53,9 +53,6 @@ importers:
       jose:
         specifier: ^6.2.3
         version: 6.2.3
-      jsnes:
-        specifier: ^2.1.0
-        version: 2.1.0
       keytar:
         specifier: ^7.9.0
         version: 7.9.0
@@ -2490,9 +2487,6 @@ packages:
     resolution: {integrity: sha512-/sM3dO2FOzXjKQhJuo0Q173wf2KOo8t4I8vHy6lF9poUp7bKT0/NHE8fPX23PwfhnykfqnC2xRxOnVw5XuGIaA==}
     engines: {node: '>=6'}
     hasBin: true
-
-  jsnes@2.1.0:
-    resolution: {integrity: sha512-LUa++E5Dfs1A6ZYB5HiSOR4JrUzrZEXGLZ5Imczhu9lkg7f+94SqnLZ/MXwGa7oc02+j/xYyHR0azGQ6LCU68g==}
 
   json-bigint@1.0.0:
     resolution: {integrity: sha512-SiPv/8VpZuWbvLSMtTDU8hEfrZWg/mH/nV/b4o0CYbSxu1UIQPLdwKOCIyLQX+VIPO5vrLX3i8qtqFyhdPSUSQ==}
@@ -6444,8 +6438,6 @@ snapshots:
       argparse: 2.0.1
 
   jsesc@3.1.0: {}
-
-  jsnes@2.1.0: {}
 
   json-bigint@1.0.0:
     dependencies:
