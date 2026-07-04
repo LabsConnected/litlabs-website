@@ -627,46 +627,8 @@ function SidebarContent({
 
       {/* Footer */}
       <div className="px-3 py-3 border-t" style={{ borderColor: `${T.borderColor}30` }}>
-        <Link href="/profile" onClick={onClose} className="block">
-          <div
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-white/5"
-            style={{ backgroundColor: `${T.boxBg}60` }}
-          >
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-              style={{
-                backgroundColor: T.accentColor + "20",
-                border: `1.5px solid ${T.accentColor}40`,
-                color: T.accentColor,
-              }}
-            >
-              {profile.avatarUrl ? (
-                <NextImage
-                  src={profile.avatarUrl}
-                  alt={profile.displayName}
-                  width={36}
-                  height={36}
-                  className="w-full h-full rounded-full object-cover"
-                />
-              ) : (
-                profile.displayName?.charAt(0)?.toUpperCase() || "?"
-              )}
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
-                  {profile.displayName || "Guest"}
-                </div>
-                <div className="text-[10px] opacity-60 truncate" style={{ color: T.textMuted }}>
-                  {isSignedIn ? "@" + (profile.username || "user") : "Sign in"}
-                </div>
-              </div>
-            )}
-          </div>
-        </Link>
-
         {!collapsed && (
-          <div className="mt-2 space-y-1.5">
+          <div className="space-y-1.5">
             <div
               className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
               style={{ backgroundColor: T.bgColor + "30", border: `1px solid ${T.borderColor}20` }}

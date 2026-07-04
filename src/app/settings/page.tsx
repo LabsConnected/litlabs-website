@@ -129,6 +129,7 @@ export default function SettingsPage() {
     () => (typeof window !== "undefined" && localStorage.getItem("litlabs-workspace-default")) || "studio",
   );
   const [workspaceSaved, setWorkspaceSaved] = useState(false);
+  const [themeSaved, setThemeSaved] = useState(false);
 
   /* Load remote profile once */
   useEffect(() => {
@@ -520,7 +521,13 @@ export default function SettingsPage() {
                   </h2>
                   <div className="grid grid-cols-2 gap-3">
                     <button
-                      className="rounded-2xl border px-4 py-3 text-left"
+                      onClick={() => {
+                        if (typeof window === "undefined") return;
+                        localStorage.setItem("litlabs-theme-saved", JSON.stringify(theme));
+                        setThemeSaved(true);
+                        setTimeout(() => setThemeSaved(false), 2000);
+                      }}
+                      className="rounded-2xl border px-4 py-3 text-left transition-all"
                       style={{
                         backgroundColor: T.accentColor + "12",
                         borderColor: T.accentColor + "30",
@@ -528,9 +535,11 @@ export default function SettingsPage() {
                       }}
                     >
                       <div className="text-xs uppercase tracking-[0.18em]" style={{ color: T.textMuted }}>
-                        Save
+                        {themeSaved ? "Saved" : "Save"}
                       </div>
-                      <div className="mt-1 text-sm font-bold">Store current look</div>
+                      <div className="mt-1 text-sm font-bold">
+                        {themeSaved ? "Current look stored" : "Store current look"}
+                      </div>
                     </button>
                     <button
                       className="rounded-2xl border px-4 py-3 text-left"
