@@ -4,14 +4,11 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
-    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbo",
+    "dev": "next dev --turbo",
+    "dev:webpack": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "pages:build": "npx @cloudflare/next-on-pages@1",
-    "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
-    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat"
+    "lint": "eslint"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.7",
@@ -42,12 +39,10 @@
     "svix": "^1.95.1"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",
