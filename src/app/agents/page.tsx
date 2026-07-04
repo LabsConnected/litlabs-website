@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
-import { Activity, ArrowRight, Bot, Clock3, Filter, MessageSquare, Search, Sparkles, Terminal } from "lucide-react";
+import { Activity, ArrowRight, Bot, Clock3, Filter, Search, Sparkles, Terminal } from "lucide-react";
 import { JarvisFeaturedCard } from "@/components/jarvis/JarvisFeaturedCard";
 
 type AgentStatus = { name: string; slug?: string; role: string; status: "running" | "idle"; lastAction: string; uptime: string };
@@ -116,7 +116,7 @@ export default function AgentsPage() {
                     <div className="rounded-xl p-3" style={{ backgroundColor: T.bgColor + "60" }}><div className="flex items-center gap-1.5 opacity-60"><Activity size={11} /> Status</div><div className="mt-1 font-black capitalize">{agent.status}</div></div>
                   </div>
                   <div className="mt-4 flex items-center gap-2">
-                    <Link href={`/agents/${agent.slug || agent.name.toLowerCase().replace(/\s+/g, "-")}`} className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold" style={{ backgroundColor: meta.color + "15", color: meta.color, border: `1px solid ${meta.color}30` }}><MessageSquare size={14} /> Chat</Link>
+                    <Link href={`/agents/${agent.slug || agent.name.toLowerCase().replace(/\s+/g, "-")}`} className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold" style={{ backgroundColor: meta.color + "15", color: meta.color, border: `1px solid ${meta.color}30` }}><Bot size={14} /> Agent</Link>
                     <Link href="/studio?tool=agents" className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold" style={{ backgroundColor: T.bgColor + "60", color: T.textMuted, border: `1px solid ${T.borderColor}30` }}><Terminal size={14} /> Open</Link>
                   </div>
                 </article>
