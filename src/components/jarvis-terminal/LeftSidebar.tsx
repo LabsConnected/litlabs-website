@@ -60,6 +60,7 @@ export function LeftSidebar() {
             <div className="flex-1 overflow-hidden">
               <div className="truncate text-sm font-semibold">{user.fullName || user.username || "User"}</div>
               <div className="truncate text-xs text-neutral-500">{user.primaryEmailAddress?.emailAddress}</div>
+              <div className="text-[10px] uppercase tracking-wider text-orange-400">{(user.publicMetadata as { role?: string } | undefined)?.role || "user"}</div>
             </div>
             <LogOut className="h-4 w-4 text-neutral-500" />
           </div>

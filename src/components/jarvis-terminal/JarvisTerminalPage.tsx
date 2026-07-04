@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { TerminalPanel } from "./TerminalPanel";
 import { JarvisAssistantPanel } from "./JarvisAssistantPanel";
 import { AgentRunner } from "./AgentRunner";
@@ -8,6 +8,7 @@ import { LogsPanel } from "./LogsPanel";
 import { CommandHistory } from "./CommandHistory";
 import { FileExplorer } from "./FileExplorer";
 import { CodeEditor } from "./CodeEditor";
+import { DeployButton } from "./DeployButton";
 import { LeftSidebar } from "./LeftSidebar";
 import { Cpu, Activity, Zap } from "lucide-react";
 
@@ -22,6 +23,7 @@ export function JarvisTerminalPage() {
   const [commands, setCommands] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [usage, setUsage] = useState<{ allowed: boolean; used: number; limit: number; role?: string } | null>(null);
 
   const addLog = (entry: string) => {
     setLogs((prev) => [...prev.slice(-99), entry]);
@@ -30,6 +32,21 @@ export function JarvisTerminalPage() {
   const addCommand = (cmd: string) => {
     setCommands((prev) => [...prev.slice(-49), cmd]);
   };
+
+  useEffect(() => {
+    let active = true;
+    fetch("/api/usage/check")
+      .then((res) => res.json())
+      .then((data) => {
+        if (active && data) {
+          setUsage(data);
+        }
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, []);
 
   return (
     <main className="min-h-screen bg-[#050505] text-white">
@@ -59,9 +76,16 @@ export function JarvisTerminalPage() {
               >
                 {connected ? "WebSocket Live" : "WebSocket Offline"}
               </div>
-              <button className="rounded-lg bg-orange-600 px-5 py-2 font-bold text-white hover:bg-orange-500">
-                Deploy
-              </button>
+              {usage && (
+                <div
+                  className={`rounded-full px-3 py-1 text-xs font-bold ${
+                    usage.allowed ? "bg-blue-500/20 text-blue-400" : "bg-red-500/20 text-red-400"
+                  }`}
+                >
+                  {usage.role === "admin" ? "Unlimited" : `${usage.used}/${usage.limit} cmds/hr`}
+                </div>
+              )}
+              <DeployButton />
             </div>
           </header>
 
