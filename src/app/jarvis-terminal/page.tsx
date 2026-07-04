@@ -1,11 +1,5 @@
-import { Metadata } from "next";
-import { JarvisTerminalPage } from "@/components/jarvis-terminal/JarvisTerminalPage";
-
-export const metadata: Metadata = {
-  title: "Jarvis Terminal | LiTTree OS",
-  description: "AI-powered browser terminal for LiTTree LabStudios.",
-};
+import { redirect } from "next/navigation";
 
 export default function Page() {
-  return <JarvisTerminalPage />;
+  redirect("/jarvis");
 }

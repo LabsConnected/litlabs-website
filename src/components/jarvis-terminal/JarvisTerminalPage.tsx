@@ -10,7 +10,7 @@ import { FileExplorer } from "./FileExplorer";
 import { CodeEditor } from "./CodeEditor";
 import { DeployButton } from "./DeployButton";
 import { LeftSidebar } from "./LeftSidebar";
-import { Cpu, Activity, Zap } from "lucide-react";
+import { Cpu, Activity, Zap, Menu } from "lucide-react";
 
 export function JarvisTerminalPage() {
   const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">("terminal");
@@ -24,6 +24,7 @@ export function JarvisTerminalPage() {
   const [connected, setConnected] = useState(false);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [usage, setUsage] = useState<{ allowed: boolean; used: number; limit: number; role?: string } | null>(null);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
   const addLog = (entry: string) => {
     setLogs((prev) => [...prev.slice(-99), entry]);
@@ -51,18 +52,34 @@ export function JarvisTerminalPage() {
   return (
     <main className="min-h-screen bg-[#050505] text-white">
       <div className="grid min-h-screen grid-cols-1 lg:grid-cols-[260px_1fr_360px]">
-        <LeftSidebar />
+        <LeftSidebar mobileOpen={mobileSidebarOpen} />
+
+        {mobileSidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+            onClick={() => setMobileSidebarOpen(false)}
+          />
+        )}
 
         <section className="flex flex-col border-x border-neutral-900">
           <header className="flex flex-col gap-4 border-b border-neutral-900 px-6 py-4 lg:flex-row lg:items-center lg:justify-between">
-            <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.35em] text-orange-500">
-                LiTTree LabStudios
+            <div className="flex items-center gap-3">
+              <button
+                className="rounded-lg border border-neutral-800 p-2 text-neutral-400 hover:bg-neutral-900 lg:hidden"
+                onClick={() => setMobileSidebarOpen((open) => !open)}
+                aria-label="Toggle menu"
+              >
+                <Menu size={20} />
+              </button>
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.35em] text-orange-500">
+                  LiTTree LabStudios
+                </div>
+                <h1 className="text-2xl font-bold lg:text-3xl">Jarvis Terminal</h1>
+                <p className="text-sm text-neutral-400">
+                  AI Dev OS • Build, Ship, Scale.
+                </p>
               </div>
-              <h1 className="text-2xl font-bold lg:text-3xl">Jarvis Terminal</h1>
-              <p className="text-sm text-neutral-400">
-                AI Dev OS • Build, Ship, Scale.
-              </p>
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs">

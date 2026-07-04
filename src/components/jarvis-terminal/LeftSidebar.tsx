@@ -14,7 +14,7 @@ import {
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard", active: false },
-  { label: "Jarvis Terminal", icon: Terminal, href: "/jarvis-terminal", active: true },
+  { label: "Jarvis Terminal", icon: Terminal, href: "/jarvis", active: true },
   { label: "Files", icon: FolderOpen, href: "#", active: false },
   { label: "Agents", icon: Bot, href: "#", active: false },
   { label: "Deployments", icon: Rocket, href: "#", active: false },
@@ -22,11 +22,15 @@ const navItems = [
   { label: "Billing", icon: CreditCard, href: "#", active: false },
 ];
 
-export function LeftSidebar() {
+export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
   const { user, isLoaded } = useUser();
 
   return (
-    <aside className="hidden flex-col border-r border-neutral-900 bg-[#0b0b0c] p-4 lg:flex">
+    <aside
+      className={`flex-col border-r border-neutral-900 bg-[#0b0b0c] p-4 lg:flex ${
+        mobileOpen ? "flex fixed inset-y-0 left-0 z-50 w-[260px]" : "hidden"
+      }`}
+    >
       <div className="mb-8 text-orange-500 font-bold tracking-wide">
         LiTTree OS
       </div>
