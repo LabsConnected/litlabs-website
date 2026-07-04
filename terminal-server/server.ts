@@ -216,8 +216,8 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`🔥 LiTTree Terminal Server running on http://localhost:${PORT}`);
+server.listen(PORT, "0.0.0.0", () => {
+  console.log(`🔥 LiTTree Terminal Server running on http://0.0.0.0:${PORT}`);
   console.log(`   Allowed origin: ${ALLOWED_ORIGIN}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
