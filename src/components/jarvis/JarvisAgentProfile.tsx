@@ -2,14 +2,17 @@
 
 import Link from "next/link";
 import NextImage from "next/image";
-import { Terminal, Rocket, ScanLine, ArrowLeft, Brain, Settings, Zap, ArrowRight } from "lucide-react";
+import { Terminal, Rocket, ScanLine, ArrowLeft, Brain, Settings, Zap, ArrowRight, Loader2 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { JarvisToolGrid } from "./JarvisToolGrid";
 import { JarvisChatPanel } from "./JarvisChatPanel";
 import { JarvisSystemStatus } from "./JarvisSystemStatus";
+import { JarvisActionPanel } from "./JarvisActionPanel";
+import { useJarvisActions } from "./useJarvisActions";
 
 export function JarvisAgentProfile() {
   const { resolvedColors: T } = useTheme();
+  const { loading, result, error, runScan, startWorkflow, deploy, clear } = useJarvisActions();
 
   return (
     <main className="min-h-screen" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
@@ -68,14 +71,15 @@ export function JarvisAgentProfile() {
               <Terminal className="h-4 w-4" />
               Open Terminal
             </Link>
-            <Link
-              href="/jarvis"
-              className="flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition"
+            <button
+              onClick={runScan}
+              disabled={loading === "scan"}
+              className="flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition disabled:opacity-50"
               style={{ borderColor: T.borderColor + "30", color: T.textColor }}
             >
-              <ScanLine className="h-4 w-4" />
+              {loading === "scan" ? <Loader2 className="h-4 w-4 animate-spin" /> : <ScanLine className="h-4 w-4" />}
               Run Scan
-            </Link>
+            </button>
             <Link
               href="/settings?tab=agents"
               className="flex items-center gap-2 rounded-xl border px-4 py-2.5 text-sm font-bold transition"
@@ -117,6 +121,8 @@ export function JarvisAgentProfile() {
 
             <JarvisSystemStatus />
 
+            <JarvisActionPanel loading={loading} result={result} error={error} onClear={clear} />
+
             <Link
               href="/jarvis"
               className="flex items-center justify-between rounded-2xl border p-5 transition"
@@ -153,30 +159,33 @@ export function JarvisAgentProfile() {
                   <Terminal className="h-5 w-5" style={{ color: T.accentColor }} />
                   Terminal
                 </Link>
-                <Link
-                  href="/jarvis"
-                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition"
+                <button
+                  onClick={runScan}
+                  disabled={loading === "scan"}
+                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition disabled:opacity-50"
                   style={{ borderColor: T.borderColor + "25", color: T.textMuted }}
                 >
-                  <ScanLine className="h-5 w-5" style={{ color: T.accentColor }} />
+                  {loading === "scan" ? <Loader2 className="h-5 w-5 animate-spin" style={{ color: T.accentColor }} /> : <ScanLine className="h-5 w-5" style={{ color: T.accentColor }} />}
                   Scan
-                </Link>
-                <Link
-                  href="/jarvis"
-                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition"
+                </button>
+                <button
+                  onClick={startWorkflow}
+                  disabled={loading === "workflow"}
+                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition disabled:opacity-50"
                   style={{ borderColor: T.borderColor + "25", color: T.textMuted }}
                 >
-                  <Zap className="h-5 w-5" style={{ color: T.accentColor }} />
+                  {loading === "workflow" ? <Loader2 className="h-5 w-5 animate-spin" style={{ color: T.accentColor }} /> : <Zap className="h-5 w-5" style={{ color: T.accentColor }} />}
                   Workflow
-                </Link>
-                <Link
-                  href="/jarvis"
-                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition"
+                </button>
+                <button
+                  onClick={deploy}
+                  disabled={loading === "deploy"}
+                  className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition disabled:opacity-50"
                   style={{ borderColor: T.borderColor + "25", color: T.textMuted }}
                 >
-                  <Rocket className="h-5 w-5" style={{ color: T.accentColor }} />
+                  {loading === "deploy" ? <Loader2 className="h-5 w-5 animate-spin" style={{ color: T.accentColor }} /> : <Rocket className="h-5 w-5" style={{ color: T.accentColor }} />}
                   Deploy
-                </Link>
+                </button>
               </div>
             </div>
           </div>

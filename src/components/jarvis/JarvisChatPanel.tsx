@@ -83,10 +83,51 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
     }
   }
 
+  async function executeAction(action: JarvisAction) {
+    const label = (action.label || "").toLowerCase();
+    if (label.includes("scan")) {
+      const res = await fetch("/api/jarvis/scan");
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      return `Scan complete: ${data.totalFiles} files, ${data.totalLines} lines. ${data.health?.buildStatus}`;
+    }
+    if (label.includes("deploy")) {
+      const res = await fetch("/api/deploy/trigger", { method: "POST" });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      return data.url ? `Deploy triggered: ${data.url}` : "Deploy queued.";
+    }
+    if (label.includes("workflow") || label.includes("agent")) {
+      const res = await fetch("/api/agents/task", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agent: "jarvis", task: action.command || "execute requested action" }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      const data = await res.json();
+      return data.message || "Workflow initiated.";
+    }
+    return `Action "${action.label}" triggered.`;
+  }
+
   function handleAction(action: JarvisAction) {
-    if (action.type === "insert_command" && action.command) onInsertCommand?.(action.command);
-    else if (action.type === "run_command" && action.command) {
-      if (window.confirm(`Run: ${action.command}?`)) onRunCommand?.(action.command);
+    if (!action.command && !action.label) return;
+    if (action.type === "insert_command" && action.command) {
+      if (onInsertCommand) {
+        onInsertCommand(action.command);
+      } else {
+        executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
+      }
+    } else if (action.type === "run_command" && action.command) {
+      if (onRunCommand) {
+        if (window.confirm(`Run: ${action.command}?`)) onRunCommand(action.command);
+      } else {
+        if (window.confirm(`Run: ${action.command}?`)) {
+          executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
+        }
+      }
+    } else {
+      executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
     }
   }
 
