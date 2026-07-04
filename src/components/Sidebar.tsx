@@ -90,11 +90,12 @@ function NavItemRow({
 
   const iconColor = groupActive ? accent : T.textMuted;
   const baseClasses =
-    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all group select-none";
+    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group select-none hover:bg-white/5";
   const style = {
-    backgroundColor: groupActive ? `${accent}12` : "transparent",
+    backgroundColor: groupActive ? `${accent}14` : "transparent",
     color: groupActive ? accent : T.textMuted,
     paddingLeft: collapsed ? undefined : `${12 + depth * 8}px`,
+    boxShadow: groupActive ? `inset 2px 0 0 0 ${accent}` : "none",
   };
 
   const icon = (
@@ -119,13 +120,6 @@ function NavItemRow({
     </span>
   ) : null;
 
-  const activeBar = groupActive ? (
-    <span
-      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full"
-      style={{ backgroundColor: accent }}
-    />
-  ) : null;
-
   if (hidden) return null;
 
   if (hasChildren) {
@@ -137,7 +131,6 @@ function NavItemRow({
           style={style}
           type="button"
         >
-          {activeBar}
           {icon}
           {label}
           {badge}
@@ -174,7 +167,6 @@ function NavItemRow({
   return (
     <Link href={item.href || "#"} onClick={onClose} className="block">
       <div className={baseClasses} style={style}>
-        {activeBar}
         {icon}
         {label}
         {badge}
@@ -205,19 +197,22 @@ function GroupSection({
   if (hidden) return null;
 
   return (
-    <div className="group-section">
+    <div className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`} style={{ borderColor: group.label === "System" ? `${group.accent}20` : undefined }}>
       {!collapsed && (
         <button
           onClick={onToggle}
-          className="w-full flex items-center justify-between px-3 mb-1.5 text-[9px] font-bold uppercase tracking-widest opacity-80 hover:opacity-100 transition-opacity"
-          style={{ color: group.accent + "cc" }}
+          className="w-full flex items-center justify-between px-3 py-1.5 mb-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+          style={{
+            color: group.accent,
+            backgroundColor: `${group.accent}12`,
+          }}
           type="button"
         >
           <span className="flex items-center gap-1.5">
             <group.icon size={12} />
             {group.label}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 opacity-70">
             {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
           </span>
         </button>
