@@ -23,7 +23,7 @@ import {
   CrownIcon,
   Home,
 } from "lucide-react";
-import { useState, useCallback, useMemo, useEffect } from "react";
+import { useState, useCallback, useMemo } from "react";
 import {
   NAV_GROUPS,
   AI_SUGGESTIONS,
@@ -40,6 +40,7 @@ import {
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
+  collapsed?: boolean;
 }
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -259,6 +260,32 @@ function GroupSection({
             ))}
         </div>
       )}
+
+      {collapsed && (
+        <div className="flex flex-col items-center gap-1">
+          {group.items
+            .filter((i) => !i.children)
+            .map((item) => {
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href || item.label}
+                  href={item.href || "#"}
+                  onClick={onClose}
+                  title={item.label}
+                  aria-label={item.label}
+                  className="flex items-center justify-center w-10 h-10 rounded-lg transition-colors hover:opacity-100"
+                  style={{
+                    backgroundColor: active ? `${group.accent}20` : "transparent",
+                    color: active ? group.accent : `${group.accent}80`,
+                  }}
+                >
+                  <item.icon size={18} />
+                </Link>
+              );
+            })}
+        </div>
+      )}
     </div>
   );
 }
@@ -287,11 +314,10 @@ function SidebarContent({
   });
   const [pinned, setPinned] = useState<string[]>(() => loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]));
   const [hidden, setHidden] = useState<string[]>(() => loadJson(HIDDEN_KEY, []));
-  const [mode, setMode] = useState<string>("creator");
-
-  useEffect(() => {
-    setMode(localStorage.getItem(MODE_KEY) || "creator");
-  }, []);
+  const [mode, setMode] = useState<string>(() => {
+    if (typeof window === "undefined") return "creator";
+    return localStorage.getItem(MODE_KEY) || "creator";
+  });
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [jarvisFocused, setJarvisFocused] = useState(false);
@@ -656,16 +682,17 @@ function SidebarContent({
   );
 }
 
-export default function Sidebar({ open = false, onClose }: SidebarProps) {
+export default function Sidebar({ open = false, onClose, collapsed: externalCollapsed }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(() => {
+  const [internalCollapsed, setInternalCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
-    // Force expanded on desktop by default; allow user to toggle if they want
-    return false;
+    return localStorage.getItem(COLLAPSED_KEY) === "true";
   });
 
+  const collapsed = externalCollapsed ?? internalCollapsed;
+
   const toggleCollapse = useCallback(() => {
-    setCollapsed((v) => {
+    setInternalCollapsed((v) => {
       const next = !v;
       if (typeof window !== "undefined") localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;
