@@ -1,0 +1,28 @@
+name: Deploy Terminal Server
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "terminal-server/**"
+      - "docker/Dockerfile.terminal"
+      - "pnpm-workspace.yaml"
+      - ".github/workflows/deploy-terminal.yml"
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          cd terminal-server
+          railway up --service litlabs-terminal-server
