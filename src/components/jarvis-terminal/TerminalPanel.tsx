@@ -119,10 +119,17 @@ export function TerminalPanel({
         const cmd = commandBufferRef.current.trim();
         if (cmd) {
           onCommand?.(cmd);
+          if (cmd.startsWith("jarvis ")) {
+            socket.emit("jarvis:command", cmd);
+            commandBufferRef.current = "";
+            return;
+          }
         }
         commandBufferRef.current = "";
       } else if (data === "\u007f") {
         commandBufferRef.current = commandBufferRef.current.slice(0, -1);
+      } else if (data === "\u0003") {
+        commandBufferRef.current = "";
       } else {
         commandBufferRef.current += data;
       }

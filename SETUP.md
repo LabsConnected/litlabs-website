@@ -147,9 +147,9 @@ services:
 ## Phase roadmap
 
 - **Phase 1-4 (done):** xterm UI, WebSocket backend, node-pty, auth guard.
-- **Phase 5:** Command history persistence.
-- **Phase 6:** Docker sandboxing in production.
-- **Phase 7:** Jarvis AI helper with agent commands.
-- **Phase 8:** File explorer + Monaco editor.
+- **Phase 5 (done):** Command history persistence via `/api/terminal/history`.
+- **Phase 6 (done):** Docker sandboxing files and scripts.
+- **Phase 7 (done):** Jarvis AI helper with `jarvis <command>` terminal commands.
+- **Phase 8 (done):** File explorer + Monaco editor.
 - **Phase 9:** Deploy button + agent runner.
 - **Phase 10:** Admin roles + usage limits.

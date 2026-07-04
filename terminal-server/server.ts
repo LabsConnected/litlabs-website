@@ -5,10 +5,11 @@ import cors from "cors";
 import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
-import { resolve } from "path";
-import { mkdirSync } from "fs";
+import { resolve, normalize } from "path";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
+import { handleJarvisCommand } from "./jarvis-ai";
 
 const PORT = Number(process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
@@ -44,6 +45,74 @@ const sessions = new Map<string, Session>();
 
 app.get("/health", (_req, res) => {
   res.json({ ok: true, sessions: sessions.size, docker: USE_DOCKER });
+});
+
+function getUserWorkspace(userId: string) {
+  const workspace = resolve(WORKSPACE_ROOT, userId);
+  mkdirSync(workspace, { recursive: true });
+  return workspace;
+}
+
+function safePath(userId: string, filePath: string) {
+  const workspace = getUserWorkspace(userId);
+  const target = normalize(resolve(workspace, filePath));
+  if (!target.startsWith(workspace)) {
+    throw new Error("Invalid path");
+  }
+  return target;
+}
+
+app.get("/files", (req, res) => {
+  const userId = String(req.query.userId || "dev-user");
+  const dirPath = String(req.query.path || ".");
+  try {
+    const target = safePath(userId, dirPath);
+    const entries = readdirSync(target, { withFileTypes: true }).map((entry) => ({
+      name: entry.name,
+      type: entry.isDirectory() ? "folder" : "file",
+    }));
+    res.json({ entries });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list files" });
+  }
+});
+
+app.post("/files/read", (req, res) => {
+  const userId = String(req.body.userId || "dev-user");
+  const filePath = String(req.body.path || "");
+  try {
+    const target = safePath(userId, filePath);
+    const content = readFileSync(target, "utf-8");
+    res.json({ content });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to read file" });
+  }
+});
+
+app.post("/files/write", (req, res) => {
+  const userId = String(req.body.userId || "dev-user");
+  const filePath = String(req.body.path || "");
+  const content = String(req.body.content || "");
+  try {
+    const target = safePath(userId, filePath);
+    mkdirSync(resolve(target, ".."), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+    res.json({ saved: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to write file" });
+  }
+});
+
+app.post("/files/delete", (req, res) => {
+  const userId = String(req.body.userId || "dev-user");
+  const filePath = String(req.body.path || "");
+  try {
+    const target = safePath(userId, filePath);
+    rmSync(target, { recursive: true, force: true });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete file" });
+  }
 });
 
 io.on("connection", (socket) => {
@@ -119,6 +188,19 @@ io.on("connection", (socket) => {
     }
 
     ptyProcess.write(data);
+  });
+
+  socket.on("jarvis:command", async (input: string) => {
+    if (typeof input !== "string") return;
+    socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis is thinking...\x1b[0m\r\n");
+    try {
+      const reply = await handleJarvisCommand(input);
+      socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis:\x1b[0m\r\n");
+      socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Jarvis failed";
+      socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
+    }
   });
 
   socket.on("terminal:resize", ({ cols, rows }: { cols: number; rows: number }) => {

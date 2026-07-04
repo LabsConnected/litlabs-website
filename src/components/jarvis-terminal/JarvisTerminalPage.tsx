@@ -7,6 +7,7 @@ import { AgentRunner } from "./AgentRunner";
 import { LogsPanel } from "./LogsPanel";
 import { CommandHistory } from "./CommandHistory";
 import { FileExplorer } from "./FileExplorer";
+import { CodeEditor } from "./CodeEditor";
 import { LeftSidebar } from "./LeftSidebar";
 import { Cpu, Activity, Zap } from "lucide-react";
 
@@ -20,6 +21,7 @@ export function JarvisTerminalPage() {
   ]);
   const [commands, setCommands] = useState<string[]>([]);
   const [connected, setConnected] = useState(false);
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
 
   const addLog = (entry: string) => {
     setLogs((prev) => [...prev.slice(-99), entry]);
@@ -63,8 +65,8 @@ export function JarvisTerminalPage() {
             </div>
           </header>
 
-          <div className="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[240px_1fr]">
-            <FileExplorer />
+          <div className="grid flex-1 grid-cols-1 gap-4 p-4 lg:grid-cols-[240px_1fr_1fr]">
+            <FileExplorer onOpenFile={setSelectedFile} />
 
             <div className="flex flex-col gap-4">
               <div className="h-[60vh] min-h-[420px] rounded-xl border border-neutral-800 bg-black">
@@ -78,6 +80,19 @@ export function JarvisTerminalPage() {
               <div className="grid flex-1 grid-cols-1 gap-4 lg:grid-cols-2">
                 <LogsPanel logs={logs} />
                 <CommandHistory commands={commands} />
+              </div>
+            </div>
+
+            <div className={`hidden flex-col gap-4 lg:flex ${selectedFile ? "" : "opacity-50"}`}>
+              <div className="flex-1 min-h-[300px]">
+                {selectedFile ? (
+                  <CodeEditor filePath={selectedFile} onClose={() => setSelectedFile(null)} />
+                ) : (
+                  <div className="flex h-full flex-col items-center justify-center rounded-xl border border-neutral-800 bg-neutral-950 text-neutral-500">
+                    <div className="text-sm">Select a file from the explorer</div>
+                    <div className="text-xs">Monaco Editor will open here</div>
+                  </div>
+                )}
               </div>
             </div>
           </div>
