@@ -88,6 +88,7 @@ meta/
 # Large internal libs / virtualenvs
 lib/oracle-cli/
 litlabs/
+litlabs-website/
 
 # Misc
 *.backup
