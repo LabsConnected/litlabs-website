@@ -1,10 +1,12 @@
 "use client";
 
 import Link from "next/link";
-import { Terminal, Rocket, ScanLine, ArrowLeft, Brain, Settings, Zap } from "lucide-react";
+import NextImage from "next/image";
+import { Terminal, Rocket, ScanLine, ArrowLeft, Brain, Settings, Zap, ArrowRight } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { JarvisToolGrid } from "./JarvisToolGrid";
 import { JarvisChatPanel } from "./JarvisChatPanel";
+import { JarvisSystemStatus } from "./JarvisSystemStatus";
 
 export function JarvisAgentProfile() {
   const { resolvedColors: T } = useTheme();
@@ -101,15 +103,39 @@ export function JarvisAgentProfile() {
               </div>
 
               <div className="relative my-5 aspect-video w-full overflow-hidden rounded-xl border" style={{ borderColor: T.borderColor + "20" }}>
-                <img
+                <NextImage
                   src="/showcase/control-center.png"
                   alt="Jarvis control center"
-                  className="h-full w-full object-cover"
+                  fill
+                  className="object-cover"
+                  sizes="(max-width: 768px) 100vw, 800px"
                 />
               </div>
 
               <JarvisToolGrid />
             </div>
+
+            <JarvisSystemStatus />
+
+            <Link
+              href="/jarvis"
+              className="flex items-center justify-between rounded-2xl border p-5 transition"
+              style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
+            >
+              <div className="flex items-center gap-3">
+                <div
+                  className="flex h-10 w-10 items-center justify-center rounded-xl border"
+                  style={{ backgroundColor: T.accentColor + "15", borderColor: T.accentColor + "30" }}
+                >
+                  <Terminal className="h-5 w-5" style={{ color: T.accentColor }} />
+                </div>
+                <div>
+                  <h3 className="font-bold" style={{ color: T.headerColor }}>Open Jarvis Terminal</h3>
+                  <p className="text-xs" style={{ color: T.textMuted }}>Full command center with terminal, files, logs, and code editor</p>
+                </div>
+              </div>
+              <ArrowRight className="h-5 w-5" style={{ color: T.accentColor }} />
+            </Link>
 
             <div
               className="rounded-2xl border p-5"
