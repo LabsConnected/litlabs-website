@@ -1,10 +1,10 @@
 {
   "build": {
     "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
+    "dockerfilePath": "terminal-server/Dockerfile"
   },
   "deploy": {
-    "startCommand": "node dist/server.js",
+    "startCommand": "node terminal-server/dist/server.js",
     "healthcheckPath": "/health",
     "healthcheckTimeout": 30,
     "restartPolicyType": "ON_FAILURE",
