@@ -134,15 +134,21 @@ services:
 - `terminal-server/docker-manager.ts` — Docker sandbox session manager
 - `terminal-server/tsconfig.json` — server TypeScript config
 - `docker/Dockerfile.terminal` — sandbox image
+- `terminal-server/Dockerfile` — production terminal server image
+- `terminal-server/railway.json` — Railway deployment config
+- `terminal-server/fly.toml` — Fly.io deployment config
+- `render.yaml` — Render deployment config
+- `docker-compose.yml` — local frontend + terminal server
 - `SETUP.md` — this file
 
 ## Next steps
 
-1. Run locally and test `pnpm dev:all`.
-2. Deploy terminal server to a separate Linux host.
-3. Set `NEXT_PUBLIC_TERMINAL_WS_URL` to the deployed server.
-4. Build the Docker image and enable `TERMINAL_USE_DOCKER=true`.
-5. Add Supabase/Prisma tables for session/command history persistence.
+1. Run `pnpm dev:all` locally and test the terminal.
+2. Apply the Supabase migrations in `supabase/migrations/`.
+3. Deploy the terminal server using Railway, Render, Fly.io, or Docker.
+4. Set `NEXT_PUBLIC_TERMINAL_WS_URL` in Vercel to the deployed terminal server URL.
+5. Set `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` for the Deploy button.
+6. Build the sandbox image (`pnpm terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.
 
 ## Phase roadmap
 
@@ -151,5 +157,5 @@ services:
 - **Phase 6 (done):** Docker sandboxing files and scripts.
 - **Phase 7 (done):** Jarvis AI helper with `jarvis <command>` terminal commands.
 - **Phase 8 (done):** File explorer + Monaco editor.
-- **Phase 9:** Deploy button + agent runner.
-- **Phase 10:** Admin roles + usage limits.
+- **Phase 9 (done):** Deploy button + agent runner.
+- **Phase 10 (done):** Admin roles + usage limits.

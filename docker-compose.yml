@@ -48,3 +48,29 @@ services:
       timeout: 10s
       retries: 3
       start_period: 40s
+
+  terminal:
+    build:
+      context: .
+      dockerfile: terminal-server/Dockerfile
+    ports:
+      - "4001:4001"
+    environment:
+      - TERMINAL_SERVER_PORT=4001
+      - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
+      - TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
+      - TERMINAL_USE_DOCKER=false
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
+    volumes:
+      - littree-workspaces:/tmp/littree-workspaces
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:4001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+
+volumes:
+  littree-workspaces:
