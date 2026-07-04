@@ -99,6 +99,15 @@ export function JarvisAgentProfile() {
                   Jarvis understands your full development context and can take actionable steps.
                 </p>
               </div>
+
+              <div className="relative my-5 aspect-video w-full overflow-hidden rounded-xl border" style={{ borderColor: T.borderColor + "20" }}>
+                <img
+                  src="/showcase/control-center.png"
+                  alt="Jarvis control center"
+                  className="h-full w-full object-cover"
+                />
+              </div>
+
               <JarvisToolGrid />
             </div>
 
