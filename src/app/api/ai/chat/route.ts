@@ -20,25 +20,36 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    const reply = await runAI({
-      provider: "ollama",
-      model,
-      messages: [
-        {
-          role: "system",
-          content:
-            "You are Jarvis, the AI operating layer for LiTTree LabStudios. Be direct, useful, and practical.",
-        },
-        {
-          role: "user",
-          content: message,
-        },
-      ],
-    });
+    const messages = [
+      {
+        role: "system" as const,
+        content:
+          "You are Jarvis, the AI operating layer for LiTTree LabStudios. Be direct, useful, and practical.",
+      },
+      { role: "user" as const, content: message },
+    ];
+
+    let reply: string;
+    let provider: "ollama" | "openrouter" = "ollama";
+    try {
+      reply = await runAI({ provider: "ollama", model, messages });
+    } catch (ollamaErr) {
+      try {
+        reply = await runAI({
+          provider: "openrouter",
+          model: "google/gemini-2.5-flash",
+          messages,
+        });
+        provider = "openrouter";
+      } catch {
+        const errMsg = ollamaErr instanceof Error ? ollamaErr.message : "AI backend unavailable";
+        throw new Error(errMsg);
+      }
+    }
 
     return NextResponse.json({
       ok: true,
-      provider: "ollama",
+      provider,
       model,
       reply,
     });
