@@ -11,7 +11,7 @@ import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleJarvisCommand } from "./jarvis-ai";
 
-const PORT = Number(process.env.TERMINAL_SERVER_PORT || 4001);
+const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
 const WORKSPACE_ROOT = process.env.TERMINAL_WORKSPACE_ROOT || resolve("/tmp/littree-workspaces");
 const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
