@@ -8,9 +8,10 @@ import { Save, FileCode, X, Loader2 } from "lucide-react";
 interface CodeEditorProps {
   filePath?: string;
   onClose?: () => void;
+  onContentChange?: (content: string) => void;
 }
 
-export function CodeEditor({ filePath, onClose }: CodeEditorProps) {
+export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorProps) {
   const { user } = useUser();
   const userId = user?.id ?? "anonymous";
   const [content, setContent] = useState("");
@@ -133,7 +134,11 @@ export function CodeEditor({ filePath, onClose }: CodeEditorProps) {
             height="100%"
             language={filePath ? getLanguage(filePath) : "plaintext"}
             value={content}
-            onChange={(value) => setContent(value ?? "")}
+            onChange={(value) => {
+              const next = value ?? "";
+              setContent(next);
+              onContentChange?.(next);
+            }}
             theme="vs-dark"
             options={{
               minimap: { enabled: false },

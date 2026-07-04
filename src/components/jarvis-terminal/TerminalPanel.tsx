@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
@@ -12,18 +12,24 @@ interface TerminalPanelProps {
   onLog?: (entry: string) => void;
   onCommand?: (cmd: string) => void;
   onConnectionChange?: (connected: boolean) => void;
+  onTerminalOutput?: (output: string) => void;
 }
 
-export function TerminalPanel({
-  onLog,
-  onCommand,
-  onConnectionChange,
-}: TerminalPanelProps) {
+export interface TerminalPanelHandle {
+  insertCommand: (cmd: string) => void;
+  runCommand: (cmd: string) => void;
+}
+
+export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(function TerminalPanel(
+  { onLog, onCommand, onConnectionChange, onTerminalOutput },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<Socket | null>(null);
   const commandBufferRef = useRef<string>("");
+  const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const { user, isLoaded } = useUser();
@@ -107,10 +113,16 @@ export function TerminalPanel({
 
     socket.on("terminal:output", (data: string) => {
       term.write(data);
+      outputBufferRef.current += data;
+      if (outputBufferRef.current.length > 4000) {
+        outputBufferRef.current = outputBufferRef.current.slice(-4000);
+      }
+      onTerminalOutput?.(outputBufferRef.current);
     });
 
     socket.on("terminal:error", (msg: string) => {
       term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
+      outputBufferRef.current += `\n⚠ ${msg}`;
       onLog?.(`[ERROR] ${msg}`);
     });
 
@@ -152,7 +164,25 @@ export function TerminalPanel({
       socket.disconnect();
       term.dispose();
     };
-  }, [isLoaded, userId, sessionId, onLog, onCommand, onConnectionChange]);
+  }, [isLoaded, userId, sessionId, onLog, onCommand, onConnectionChange, onTerminalOutput]);
+
+  useImperativeHandle(ref, () => ({
+    insertCommand: (cmd: string) => {
+      const term = termRef.current;
+      const socket = socketRef.current;
+      if (!term || !socket) return;
+      term.write(cmd);
+      commandBufferRef.current = cmd;
+    },
+    runCommand: (cmd: string) => {
+      const term = termRef.current;
+      const socket = socketRef.current;
+      if (!term || !socket) return;
+      term.write(cmd + "\r");
+      socket.emit("terminal:input", cmd + "\r");
+      commandBufferRef.current = "";
+    },
+  }));
 
   const resetTerminal = () => {
     termRef.current?.clear();
@@ -206,4 +236,4 @@ export function TerminalPanel({
       />
     </div>
   );
-}
+});
