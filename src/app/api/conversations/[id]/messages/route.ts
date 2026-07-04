@@ -26,11 +26,6 @@ export async function GET(
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const dbUserId = await resolveDbUserId(clerkId);
-    if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     const { id: conversationId } = await params;
 
     // Verify conversation belongs to user
@@ -82,11 +77,6 @@ export async function POST(
     const dbUserId = await getUserId();
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const dbUserId = await resolveDbUserId(clerkId);
-    if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { id: conversationId } = await params;

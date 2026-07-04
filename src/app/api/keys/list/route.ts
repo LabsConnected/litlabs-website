@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
-import { supabase } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -24,15 +23,6 @@ async function handler(_req: NextRequest) {
 
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json({ keys: [] });
-  }
-
-  const { data: user } = await supabase
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .single();
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   const sb = getAdminSupabase();

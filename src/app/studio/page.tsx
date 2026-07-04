@@ -231,8 +231,6 @@ function StudioCommandCenter() {
     );
   }
 
-  const currentTool = TOOLS.find((t) => t.id === activeTool)!;
-
   return (
     <div
       className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden"

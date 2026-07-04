@@ -23,15 +23,6 @@ async function getHandler(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const { data: user } = await supabase
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     const { searchParams } = new URL(req.url);
     const agentId = searchParams.get("agentId");
 
@@ -77,15 +68,6 @@ async function postHandler(req: NextRequest) {
     const dbUserId = await getUserId();
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const { data: user } = await supabase
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const body = await req.json();

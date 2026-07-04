@@ -61,11 +61,6 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const dbUserId = await resolveDbUserId(clerkId);
-    if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
-    }
-
     const body = await req.json();
     const { agentId } = body;
 
@@ -139,11 +134,6 @@ async function deleteHandler(req: NextRequest) {
     const dbUserId = await getUserId();
     if (!dbUserId) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const dbUserId = await resolveDbUserId(clerkId);
-    if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
     const { searchParams } = new URL(req.url);

@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { generateApiKey } from "@/lib/tokens";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
-import { supabase } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { supabaseAdmin } from "@/lib/supabase";
 
@@ -25,15 +24,6 @@ async function handler(req: NextRequest) {
 
   if (!isAdminSupabaseConfigured()) {
     return NextResponse.json({ error: "Database not configured" }, { status: 503 });
-  }
-
-  const { data: user } = await supabase
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .single();
-  if (!user) {
-    return NextResponse.json({ error: "User not found" }, { status: 404 });
   }
 
   const body = await req.json().catch(() => ({}));
