@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { isAdmin } from "@/lib/roles";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
@@ -19,8 +20,20 @@ export async function GET(
   const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
     .split(",")
     .filter(Boolean);
-  if (clerkId !== userId && !ADMIN_CLERK_IDS.includes(clerkId)) {
+  const isOwnerOrAdmin =
+    clerkId === userId &&
+    (ADMIN_CLERK_IDS.includes(clerkId) || (await isAdmin()));
+  if (clerkId !== userId && !ADMIN_CLERK_IDS.includes(clerkId) && !(await isAdmin())) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+  }
+
+  if (isOwnerOrAdmin) {
+    return NextResponse.json({
+      plan: "elite",
+      status: "active",
+      current_period_end: null,
+      is_admin: true,
+    });
   }
 
   if (!isAdminSupabaseConfigured()) {

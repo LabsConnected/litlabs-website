@@ -23,7 +23,7 @@ import {
   CrownIcon,
   Home,
 } from "lucide-react";
-import { useState, useCallback, useMemo } from "react";
+import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   NAV_GROUPS,
   AI_SUGGESTIONS,
@@ -316,6 +316,21 @@ function SidebarContent({
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [jarvisFocused, setJarvisFocused] = useState(false);
+  const [plan, setPlan] = useState<string>("free");
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.id) return;
+    let active = true;
+    fetch(`/api/users/${user.id}/plan`)
+      .then((res) => (res.ok ? res.json() : { plan: "free" }))
+      .then((data) => {
+        if (active && data.plan) setPlan(data.plan);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isSignedIn, user?.id]);
 
   const isActive = useCallback(
     (href?: string) => {
@@ -668,7 +683,7 @@ function SidebarContent({
               <span className="flex items-center gap-1" style={{ color: T.accentColor }}>
                 <CrownIcon size={10} /> Plan
               </span>
-              <span style={{ color: T.textColor }}>Free</span>
+              <span style={{ color: T.textColor }}>{plan.charAt(0).toUpperCase() + plan.slice(1)}</span>
             </div>
           </div>
         )}

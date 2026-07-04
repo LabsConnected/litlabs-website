@@ -554,6 +554,7 @@ function MarketplaceInner() {
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"agents" | "coins">("agents");
+  const [currentPlan, setCurrentPlan] = useState<string>("free");
 
   const showToast = (
     msg: string,
@@ -648,6 +649,14 @@ function MarketplaceInner() {
     const id = requestAnimationFrame(() => {
       loadAgents();
       fetchWallet();
+      if (isSignedIn && userId) {
+        fetch(`/api/users/${userId}/plan`)
+          .then((r) => (r.ok ? r.json() : { plan: "free" }))
+          .then((data) => {
+            if (data.plan) setCurrentPlan(data.plan);
+          })
+          .catch(() => {});
+      }
 
       // Stripe return detection
       const success = searchParams.get("success");
@@ -662,7 +671,7 @@ function MarketplaceInner() {
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [loadAgents, fetchWallet, searchParams]);
+  }, [loadAgents, fetchWallet, searchParams, isSignedIn, userId]);
 
   useEffect(() => {
     if (isSignedIn) {
@@ -1704,24 +1713,49 @@ function MarketplaceInner() {
                 gap: "16px",
               }}
             >
-              {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => (
+              {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
+                const isCurrent = currentPlan === tier.tier;
+                const missingPrice = !tier.priceId && tier.price > 0;
+                return (
                 <div
                   key={tier.id}
                   style={{
                     position: "relative",
                     padding: "24px 20px",
-                    border: `2px solid ${tier.popular ? "gold" : T.borderColor}`,
-                    backgroundColor: tier.popular
+                    border: `2px solid ${isCurrent ? "#22d3ee" : tier.popular ? "gold" : T.borderColor}`,
+                    backgroundColor: isCurrent
+                      ? "rgba(34,211,238,0.10)"
+                      : tier.popular
                       ? "rgba(255,215,0,0.12)"
                       : T.boxBg,
                     textAlign: "center",
                     borderRadius: "12px",
                     transition: "all 0.2s",
-                    boxShadow: tier.popular
+                    boxShadow: isCurrent
+                      ? "0 8px 32px rgba(34,211,238,0.15)"
+                      : tier.popular
                       ? "0 8px 32px rgba(255,215,0,0.15)"
                       : "none",
                   }}
                 >
+                  {isCurrent && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "-12px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        backgroundColor: "#22d3ee",
+                        color: "black",
+                        padding: "4px 16px",
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      ✓ CURRENT PLAN
+                    </div>
+                  )}
                   {tier.popular && (
                     <div
                       style={{
@@ -1782,24 +1816,38 @@ function MarketplaceInner() {
                   >
                     {tier.features.slice(0, 3).join(" • ")}
                   </div>
+                  {missingPrice && (
+                    <div style={{ color: "#ff6b6b", fontSize: "10px", marginBottom: "8px" }}>
+                      ⚠ Stripe price ID missing — update in code/env
+                    </div>
+                  )}
                   <button
-                    onClick={() => buyPack(tier)}
+                    onClick={() => !isCurrent && !missingPrice && buyPack(tier)}
+                    disabled={isCurrent || missingPrice}
                     style={{
                       width: "100%",
                       padding: "12px",
-                      backgroundColor: tier.popular ? "gold" : T.linkColor,
-                      color: tier.popular ? "black" : "white",
+                      backgroundColor: isCurrent
+                        ? "#22d3ee"
+                        : missingPrice
+                        ? "#444"
+                        : tier.popular
+                        ? "gold"
+                        : T.linkColor,
+                      color: isCurrent ? "black" : tier.popular ? "black" : "white",
                       border: "none",
                       fontWeight: "bold",
                       fontSize: "13px",
-                      cursor: "pointer",
+                      cursor: isCurrent || missingPrice ? "not-allowed" : "pointer",
                       borderRadius: "6px",
+                      opacity: isCurrent || missingPrice ? 0.7 : 1,
                     }}
                   >
-                    {tier.popular ? "⚡ Get Best Value" : "Get " + tier.label}
+                    {isCurrent ? "Current Plan" : missingPrice ? "Not Configured" : tier.popular ? "⚡ Get Best Value" : "Get " + tier.label}
                   </button>
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
 
