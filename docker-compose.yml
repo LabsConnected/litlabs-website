@@ -51,8 +51,8 @@ services:
 
   terminal:
     build:
-      context: .
-      dockerfile: terminal-server/Dockerfile
+      context: ./terminal-server
+      dockerfile: Dockerfile
     ports:
       - "4001:4001"
     environment:

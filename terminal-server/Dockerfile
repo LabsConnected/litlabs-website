@@ -8,22 +8,18 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy root workspace files (build context is repo root)
-COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
-COPY terminal-server/package.json ./terminal-server/
-COPY terminal-server/tsconfig.json ./terminal-server/
+# Copy terminal server package files
+COPY package.json ./
+COPY tsconfig.json ./
 
-# Install pnpm
-RUN npm install -g pnpm
-
-# Install workspace dependencies
-RUN pnpm install --frozen-lockfile
+# Install dependencies using npm (no workspace root required)
+RUN npm install
 
 # Copy terminal server source
-COPY terminal-server ./terminal-server
+COPY . .
 
 # Build the terminal server
-RUN pnpm --filter terminal-server build
+RUN npm run build
 
 # Workspace root
 ENV TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
@@ -32,4 +28,4 @@ ENV TERMINAL_USE_DOCKER=false
 
 EXPOSE 4001
 
-CMD ["node", "terminal-server/dist/server.js"]
+CMD ["node", "dist/server.js"]
