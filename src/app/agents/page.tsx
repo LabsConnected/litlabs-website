@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { Activity, ArrowRight, Bot, Clock3, Filter, MessageSquare, Search, Sparkles, Terminal } from "lucide-react";
+import { JarvisFeaturedCard } from "@/components/jarvis/JarvisFeaturedCard";
 
 type AgentStatus = { name: string; slug?: string; role: string; status: "running" | "idle"; lastAction: string; uptime: string };
 const statusMeta = { running: { label: "Working", color: "#22d3ee" }, idle: { label: "Ready", color: "#34d399" } } as const;
@@ -88,6 +89,10 @@ export default function AgentsPage() {
             ))}
           </div>
         </div>
+      </section>
+
+      <section className="max-w-7xl mx-auto px-4 mt-6">
+        <JarvisFeaturedCard />
       </section>
 
       <section className="max-w-7xl mx-auto px-4 mt-6">

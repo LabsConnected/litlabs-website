@@ -8,6 +8,7 @@ import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { AGENTS } from "@/lib/agents";
 import { getCommandsForAgent, executeCommand } from "@/lib/agentCommands";
 import { ArrowLeft, Send, Circle, Loader2, Terminal, Command, HelpCircle, Clock } from "lucide-react";
+import { JarvisAgentProfile } from "@/components/jarvis/JarvisAgentProfile";
 
 type ChatMessage = { role: "user" | "agent" | "system"; text: string; isCommand?: boolean };
 
@@ -76,6 +77,10 @@ export default function AgentPage() {
         <Loader2 size={28} className="animate-spin" style={{ color: T.accentColor }} />
       </div>
     );
+  }
+
+  if (slug === "jarvis") {
+    return <JarvisAgentProfile />;
   }
 
   if (!agent) {
