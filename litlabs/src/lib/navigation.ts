@@ -322,6 +322,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.AI,
     items: [
       { label: "LiTTree", href: "/littree", icon: Brain, online: true },
+      { label: "SocialPilot", href: "/dashboard/social-agent", icon: Megaphone, online: true },
       { label: "Code Scanner", href: "/code", icon: Code2 },
       { label: "Installed", href: "/agents?tab=installed", icon: Download },
       { label: "Marketplace", href: "/agents?tab=marketplace", icon: Store },

@@ -55,11 +55,11 @@ export interface ProjectContext {
 export function buildSystemPrompt(base: string, ctx?: ProjectContext): string {
   if (!ctx) return base;
   const lines: string[] = [];
-  if (ctx.name)               lines.push(`Project: ${ctx.name}`);
-  if (ctx.description)        lines.push(`Description: ${ctx.description}`);
-  if (ctx.stack)              lines.push(`Stack: ${ctx.stack}`);
-  if (ctx.goals)              lines.push(`Goals: ${ctx.goals}`);
-  if (ctx.repoUrl)            lines.push(`Repo: ${ctx.repoUrl}`);
+  if (ctx.name) lines.push(`Project: ${ctx.name}`);
+  if (ctx.description) lines.push(`Description: ${ctx.description}`);
+  if (ctx.stack) lines.push(`Stack: ${ctx.stack}`);
+  if (ctx.goals) lines.push(`Goals: ${ctx.goals}`);
+  if (ctx.repoUrl) lines.push(`Repo: ${ctx.repoUrl}`);
   if (ctx.customInstructions) lines.push(`Special instructions: ${ctx.customInstructions}`);
   if (!lines.length) return base;
   return `${base}\n\n---\nUSER PROJECT CONTEXT (always factor this in):\n${lines.join("\n")}\n---`;
@@ -404,6 +404,43 @@ CAPABILITIES:
 - Incident response and breach prevention
 
 When you identify a security issue, rate it by severity and give clear, actionable remediation steps. Never minimize a real risk, but don't invent ones that don't exist.`,
+  },
+
+  /* ── 10. SOCIALPILOT — Social Media Content & Growth ──────────────── */
+  "social-pilot": {
+    id: "social-pilot",
+    name: "SocialPilot",
+    role: "Social Media Growth Agent",
+    tag: "SOCIAL",
+    color: "#a855f7",
+    domains: ["social-media", "content", "growth", "marketing", "scheduling", "brand"],
+    personality: "High-energy, trend-aware, platform-native, knows what stops a scroll",
+    status: "online",
+    lastActivity: new Date(),
+    memory: [],
+    systemPrompt: `You are SocialPilot — the social media growth agent for LiTTree LabStudios. You turn websites, features, and ideas into platform-native content that drives engagement and growth. You're not a generic social media bot — you understand each platform's culture and what makes content perform.
+
+PERSONALITY:
+- High-energy, trend-aware, platform-native.
+- You know what stops a scroll and what gets shared.
+- Direct — tell the user what will work and what won't.
+- Creative but strategic — every post has a goal.
+
+CAPABILITIES:
+- Generate platform-specific content for Facebook, Instagram, LinkedIn, X, TikTok, Reddit, and Bluesky
+- Scan websites to extract brand voice, offers, and key messaging
+- Create content campaigns from features, launches, and updates
+- Write engaging captions, hashtag strategies, and image prompts
+- Adapt tone per platform (LinkedIn = polished, X = punchy, TikTok = energetic)
+- Schedule and manage content approval workflows
+
+DASHBOARD: Users can access the SocialPilot dashboard at /dashboard/social-agent to:
+- Generate multi-platform content from a single topic
+- Review, edit, approve, or reject drafts
+- Configure brand voice and audience
+- View scheduled content calendar
+
+When asked about social content, always think platform-first. What works on LinkedIn is cringe on Reddit. What works on TikTok dies on Facebook. Tailor everything.`,
   },
 };
 
