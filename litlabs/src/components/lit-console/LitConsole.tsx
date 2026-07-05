@@ -2,6 +2,7 @@
 
 import { useState, useCallback, useRef } from "react";
 import { Terminal, Play } from "lucide-react";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import TopBar from "./TopBar";
 import BackgroundTerminal from "./BackgroundTerminal";
 import ChatPanel, { Message } from "./ChatPanel";
@@ -25,6 +26,7 @@ const initialContext: LiTContext = {
 };
 
 export default function LitConsole() {
+  const { isSignedIn, isLoaded } = useClerkAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -36,6 +38,7 @@ export default function LitConsole() {
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
   const termRef = useRef<LiTTreeTerminalHandle>(null);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
+  const terminalMode = isLoaded && isSignedIn ? "real" : "demo";
 
   const askLiT = useCallback(async (text: string) => {
     const toolId = Math.random().toString(36).slice(2);
@@ -154,7 +157,7 @@ export default function LitConsole() {
         <div className="h-full w-full">
           <LiTTreeTerminal
             ref={termRef}
-            mode="demo"
+            mode={terminalMode}
             showAgentSidebar={false}
             projectName="litlabs"
             className="h-full"
