@@ -1,13 +1,13 @@
 "use client";
 
 import { useState, useCallback, useRef } from "react";
-import { Terminal, Play } from "lucide-react";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { Play } from "lucide-react";
 import TopBar from "./TopBar";
 import BackgroundTerminal from "./BackgroundTerminal";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock from "./CommandDock";
 import DrawerPanel from "./DrawerPanel";
+import LeftRail from "./LeftRail";
 import {
   LiTTreeTerminal,
   LiTTreeTerminalHandle,
@@ -25,20 +25,19 @@ const initialContext: LiTContext = {
   websocketStatus: "offline",
 };
 
+type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory";
+
 export default function LitConsole() {
-  const { isSignedIn, isLoaded } = useClerkAuth();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<
-    "terminal" | "files" | "preview" | "agents" | "memory"
-  >("terminal");
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>("terminal");
   const [activeAgent, setActiveAgent] = useState("Director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
-  const termRef = useRef<LiTTreeTerminalHandle>(null);
+  const [railCollapsed, setRailCollapsed] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
-  const terminalMode = isLoaded && isSignedIn ? "real" : "demo";
+  const termRef = useRef<LiTTreeTerminalHandle>(null);
 
   const askLiT = useCallback(async (text: string) => {
     const toolId = Math.random().toString(36).slice(2);
@@ -133,22 +132,46 @@ export default function LitConsole() {
     [input, loading, askLiT],
   );
 
-  const handleApprove = useCallback((command: string) => {
-    if (!command) return;
+  const handleApprove = useCallback(() => {
+    if (!pendingCommand) return;
     setMessages((prev) => [
       ...prev,
       {
         id: Math.random().toString(36).slice(2),
         role: "system",
-        content: `Running: \`${command}\``,
+        content: `Running: \`${pendingCommand}\``,
       },
     ]);
     setDrawerOpen(true);
     setDrawerTab("terminal");
     setTimeout(() => {
-      termRef.current?.runCommand(command);
+      termRef.current?.runCommand(pendingCommand);
     }, 300);
     setPendingCommand(null);
+  }, [pendingCommand]);
+
+  const handleAgentChange = useCallback((agent: string) => {
+    setActiveAgent(agent);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2),
+        role: "system",
+        content: `Switched to ${agent} agent.`,
+      },
+    ]);
+  }, []);
+
+  const handleModelChange = useCallback((model: string) => {
+    setActiveModel(model);
+    setMessages((prev) => [
+      ...prev,
+      {
+        id: Math.random().toString(36).slice(2),
+        role: "system",
+        content: `Switched to ${model}.`,
+      },
+    ]);
   }, []);
 
   const drawerContent = (() => {
@@ -157,7 +180,7 @@ export default function LitConsole() {
         <div className="h-full w-full">
           <LiTTreeTerminal
             ref={termRef}
-            mode={terminalMode}
+            mode="demo"
             showAgentSidebar={false}
             projectName="litlabs"
             className="h-full"
@@ -174,7 +197,7 @@ export default function LitConsole() {
           <div className="text-sm font-semibold" style={{ color: LC.text }}>
             Files
           </div>
-          <div className="text-xs mt-1">
+          <div className="mt-1 text-xs">
             Connect to a workspace to browse files.
           </div>
         </div>
@@ -189,7 +212,7 @@ export default function LitConsole() {
           <div className="text-sm font-semibold" style={{ color: LC.text }}>
             Preview
           </div>
-          <div className="text-xs mt-1">
+          <div className="mt-1 text-xs">
             Live preview will appear when you run a dev server.
           </div>
         </div>
@@ -204,8 +227,8 @@ export default function LitConsole() {
           <div className="text-sm font-semibold" style={{ color: LC.text }}>
             Agents
           </div>
-          <div className="text-xs mt-1">
-            Director, Coder, Security Auditor, DevOps.
+          <div className="mt-1 text-xs">
+            Director, Coder, Writer, Social, Data.
           </div>
         </div>
       );
@@ -218,7 +241,7 @@ export default function LitConsole() {
         <div className="text-sm font-semibold" style={{ color: LC.text }}>
           Memory
         </div>
-        <div className="text-xs mt-1">
+        <div className="mt-1 text-xs">
           Long-term project context and learnings.
         </div>
       </div>
@@ -236,18 +259,54 @@ export default function LitConsole() {
         status="online"
       />
 
-      <main className="relative z-10 flex flex-1 justify-center overflow-hidden p-4 pb-2">
-        <ChatPanel
-          messages={messages}
-          onSend={handleSend}
-          loading={loading}
-          onApprove={handleApprove}
+      <div className="relative z-10 flex flex-1 overflow-hidden">
+        <LeftRail
+          activeAgent={activeAgent}
+          onAgentChange={handleAgentChange}
+          collapsed={railCollapsed}
+          onToggle={() => setRailCollapsed((v) => !v)}
         />
-      </main>
+
+        <main className="flex min-w-0 flex-1 flex-col">
+          <div className="flex-1 overflow-hidden p-4 pb-2">
+            <ChatPanel
+              messages={messages}
+              onSend={handleSend}
+              loading={loading}
+              onApprove={(cmd) => {
+                setPendingCommand(cmd);
+                handleApprove();
+              }}
+            />
+          </div>
+
+          <CommandDock
+            value={input}
+            onChange={setInput}
+            onSend={() => handleSend()}
+            onRun={() => handleSend("/scan")}
+            agent={activeAgent}
+            model={activeModel}
+            onAgentChange={handleAgentChange}
+            onModelChange={handleModelChange}
+            onAttach={() => handleSend("Attach a file...")}
+            onTools={() => setDrawerOpen((v) => !v)}
+            onToggleTerminal={() => {
+              setDrawerTab("terminal");
+              setDrawerOpen((v) => !v);
+            }}
+            onCreateFile={() => handleSend("Create a new file")}
+            onBuild={() => handleSend("Build the project")}
+            onGenerateMedia={() => handleSend("Generate media")}
+            onDeploy={() => handleSend("Deploy to production")}
+            onSaveWorkflow={() => handleSend("Save this workflow")}
+          />
+        </main>
+      </div>
 
       {pendingCommand && (
         <div
-          className="fixed bottom-28 left-1/2 z-40 -translate-x-1/2 flex items-center gap-3 rounded-full border px-4 py-2 text-xs font-semibold shadow-lg"
+          className="fixed bottom-28 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border px-4 py-2 text-xs font-semibold shadow-lg"
           style={{
             backgroundColor: LC.bgPanel,
             borderColor: LC.accentOrange,
@@ -261,7 +320,7 @@ export default function LitConsole() {
             </code>
           </span>
           <button
-            onClick={() => handleApprove(pendingCommand)}
+            onClick={handleApprove}
             className="flex items-center gap-1 rounded-full px-2.5 py-1 font-bold"
             style={{ backgroundColor: LC.accentOrange, color: "#000" }}
           >
@@ -270,49 +329,12 @@ export default function LitConsole() {
         </div>
       )}
 
-      <CommandDock
-        value={input}
-        onChange={setInput}
-        onSend={() => handleSend()}
-        onRun={() => handleSend("/scan")}
-        agent={activeAgent}
-        model={activeModel}
-        onAgentChange={setActiveAgent}
-        onModelChange={setActiveModel}
-        onToggleTerminal={() => {
-          setDrawerOpen(true);
-          setDrawerTab("terminal");
-        }}
-        onCreateFile={() => {
-          setDrawerOpen(true);
-          setDrawerTab("files");
-        }}
-        onBuild={() => {
-          setDrawerOpen(true);
-          setDrawerTab("preview");
-        }}
-        onGenerateMedia={() => setDrawerOpen(true)}
-        onDeploy={() => setDrawerOpen(true)}
-        onSaveWorkflow={() => setDrawerOpen(true)}
-      />
-
-      <button
-        onClick={() => {
-          setDrawerOpen(true);
-          setDrawerTab("terminal");
-        }}
-        className="fixed bottom-20 right-5 z-50 flex h-10 w-10 items-center justify-center rounded-full shadow-lg transition-transform hover:scale-105"
-        style={{ backgroundColor: LC.accentCyan, color: "#000" }}
-      >
-        <Terminal size={18} />
-      </button>
-
       <DrawerPanel
         open={drawerOpen}
         onClose={() => setDrawerOpen(false)}
         position="right"
         activeTab={drawerTab}
-        onTabChange={(tab) => setDrawerTab(tab as typeof drawerTab)}
+        onTabChange={(tab) => setDrawerTab(tab as DrawerTab)}
       >
         {drawerContent}
       </DrawerPanel>

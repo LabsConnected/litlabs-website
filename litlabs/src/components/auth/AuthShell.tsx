@@ -28,13 +28,34 @@ interface AuthShellProps {
 }
 
 const BENEFITS = [
-  { icon: Bot, label: "Specialist agents", desc: "Code, content, media, research, and distribution." },
-  { icon: Terminal, label: "LiT Console", desc: "Chat, terminal, and agent orchestration in one workspace." },
-  { icon: Zap, label: "Workflow Studio", desc: "Chain prompts, tools, and publishing in one canvas." },
-  { icon: Rocket, label: "Deploy-ready", desc: "From idea to asset to published post without leaving the workspace." },
+  {
+    icon: Bot,
+    label: "Specialist agents",
+    desc: "Code, content, media, research, and distribution.",
+  },
+  {
+    icon: Terminal,
+    label: "LiT Console",
+    desc: "Chat, terminal, and agent orchestration in one workspace.",
+  },
+  {
+    icon: Zap,
+    label: "Workflow Studio",
+    desc: "Chain prompts, tools, and publishing in one canvas.",
+  },
+  {
+    icon: Rocket,
+    label: "Deploy-ready",
+    desc: "From idea to asset to published post without leaving the workspace.",
+  },
 ];
 
-export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps) {
+export function AuthShell({
+  children,
+  mode,
+  headline,
+  subcopy,
+}: AuthShellProps) {
   const isSignUp = mode === "sign-up";
 
   return (
@@ -44,7 +65,10 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
     >
       <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10 items-stretch">
         {/* Left panel: brand promise */}
-        <div className="flex flex-col justify-between rounded-2xl p-6 sm:p-8 lg:p-10 border order-2 lg:order-1" style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}>
+        <div
+          className="flex flex-col justify-between rounded-2xl p-6 sm:p-8 lg:p-10 border order-2 lg:order-1"
+          style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}
+        >
           <div>
             <Link
               href="/"
@@ -53,7 +77,10 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
             >
               <div
                 className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black"
-                style={{ background: `linear-gradient(135deg, ${ACCENT_INDIGO}, ${ACCENT_CYAN})`, color: "#fff" }}
+                style={{
+                  background: `linear-gradient(135deg, ${ACCENT_INDIGO}, ${ACCENT_CYAN})`,
+                  color: "#fff",
+                }}
               >
                 L
               </div>
@@ -63,14 +90,20 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
             <h1 className="text-3xl sm:text-4xl font-black tracking-tight mb-4 leading-tight">
               {headline}
             </h1>
-            <p className="text-base mb-8 leading-relaxed" style={{ color: TEXT_MUTED }}>
+            <p
+              className="text-base mb-8 leading-relaxed"
+              style={{ color: TEXT_MUTED }}
+            >
               {subcopy}
             </p>
 
             {isSignUp && (
               <div
                 className="mb-8 rounded-xl border p-4 flex items-center gap-4"
-                style={{ backgroundColor: "#00f5ff08", borderColor: "#00f5ff30" }}
+                style={{
+                  backgroundColor: "#00f5ff08",
+                  borderColor: "#00f5ff30",
+                }}
               >
                 <div
                   className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
@@ -79,7 +112,10 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
                   <Coins className="h-6 w-6" style={{ color: ACCENT_CYAN }} />
                 </div>
                 <div>
-                  <div className="text-lg font-black" style={{ color: ACCENT_CYAN }}>
+                  <div
+                    className="text-lg font-black"
+                    style={{ color: ACCENT_CYAN }}
+                  >
                     500 starter credits
                   </div>
                   <div className="text-xs" style={{ color: TEXT_MUTED }}>
@@ -98,7 +134,10 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
                       className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
                       style={{ backgroundColor: "#ffffff08" }}
                     >
-                      <Icon className="h-4 w-4" style={{ color: ACCENT_CYAN }} />
+                      <Icon
+                        className="h-4 w-4"
+                        style={{ color: ACCENT_CYAN }}
+                      />
                     </div>
                     <div>
                       <div className="text-sm font-bold">{item.label}</div>
@@ -112,21 +151,30 @@ export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps)
             </div>
           </div>
 
-          <div className="mt-8 flex items-center gap-2 text-xs" style={{ color: TEXT_MUTED }}>
+          <div
+            className="mt-8 flex items-center gap-2 text-xs"
+            style={{ color: TEXT_MUTED }}
+          >
             <CreditCard className="h-3.5 w-3.5" />
-            <span>Free to start. Upgrade only when you need more credits or agents.</span>
+            <span>
+              Free to start. Upgrade only when you need more credits or agents.
+            </span>
           </div>
         </div>
 
         {/* Right panel: Clerk form */}
-        <div className="flex flex-col rounded-2xl p-6 sm:p-8 border order-1 lg:order-2" style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}>
+        <div
+          className="flex flex-col rounded-2xl p-6 sm:p-8 border order-1 lg:order-2"
+          style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}
+        >
           <div className="flex-1 flex items-center justify-center">
-            <div className="w-full max-w-sm">
-              {children}
-            </div>
+            <div className="w-full max-w-sm">{children}</div>
           </div>
 
-          <div className="mt-6 pt-6 border-t text-center" style={{ borderColor: PANEL_BORDER }}>
+          <div
+            className="mt-6 pt-6 border-t text-center"
+            style={{ borderColor: PANEL_BORDER }}
+          >
             <Link
               href="/"
               className="inline-flex items-center gap-1.5 text-xs font-bold transition-opacity hover:opacity-80"

@@ -338,7 +338,7 @@ export function LiTTreeCorePage() {
             </div>
           </div>
           <Link
-            href="/lit-console"
+            href="/jarvis"
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition"
             style={{
               backgroundColor: T.bgColor + "60",
@@ -346,7 +346,7 @@ export function LiTTreeCorePage() {
               color: T.textMuted,
             }}
           >
-            <Zap size={14} /> Open Terminal
+            <Zap size={14} /> Open Jarvis Terminal
           </Link>
         </div>
       </section>

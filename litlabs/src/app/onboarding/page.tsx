@@ -60,7 +60,8 @@ export default function OnboardingPage() {
           What do you want to build first?
         </h1>
         <p className="text-base" style={{ color: MUTED }}>
-          Pick one starting point. You can access everything from the dashboard later.
+          Pick one starting point. You can access everything from the dashboard
+          later.
         </p>
       </div>
 
@@ -107,11 +108,11 @@ export default function OnboardingPage() {
       </div>
 
       <Link
-        href="/dashboard"
+        href="/lit-console"
         className="mt-8 inline-flex items-center gap-2 px-6 py-2.5 rounded-xl text-sm font-bold border transition-all hover:bg-white/5"
         style={{ borderColor: BORDER, color: MUTED }}
       >
-        Skip to Dashboard
+        Skip to LiT Console
       </Link>
     </main>
   );
