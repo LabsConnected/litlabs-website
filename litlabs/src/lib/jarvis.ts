@@ -31,7 +31,7 @@ export interface NotificationConfig {
   resendApiKey?: string;
 }
 
-class Jarvis {
+class LiT {
   private config: NotificationConfig;
   private initialized = false;
 
@@ -46,7 +46,7 @@ class Jarvis {
 
   async notify(payload: NotificationPayload): Promise<boolean> {
     if (!this.initialized) {
-      // Jarvis not initialized — using default config
+      // LiT not initialized — using default config
     }
 
     const channels = payload.channels || ["discord"];
@@ -119,10 +119,10 @@ class Jarvis {
       timestamp: new Date().toISOString(),
       fields: payload.data
         ? Object.entries(payload.data).map(([key, value]) => ({
-            name: key,
-            value: String(value).substring(0, 1000),
-            inline: true,
-          }))
+          name: key,
+          value: String(value).substring(0, 1000),
+          inline: true,
+        }))
         : [],
       footer: { text: `LiTTree Labs \u2022 ${payload.priority.toUpperCase()}` },
     };
@@ -153,7 +153,7 @@ class Jarvis {
           body: payload.body,
           data: payload.data,
           timestamp: new Date().toISOString(),
-          source: "jarvis",
+          source: "lit",
         }),
       });
       return response.ok;
@@ -214,7 +214,7 @@ class Jarvis {
           Authorization: `Bearer ${this.config.resendApiKey}`,
         },
         body: JSON.stringify({
-          from: "Jarvis <notifications@litlabs.net>",
+          from: "LiT <notifications@litlabs.net>",
           to: this.config.adminEmail,
           subject: `[${payload.priority.toUpperCase()}] ${payload.title}`,
           html: `
@@ -328,13 +328,13 @@ class Jarvis {
   }
 }
 
-export const jarvis = new Jarvis();
+export const lit = new LiT();
 
 if (typeof window === "undefined") {
-  jarvis.init({
+  lit.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
-    webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+    webhookEndpoint: process.env.LIT_WEBHOOK_URL,
     pushVapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
     pushVapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
     pushVapidSubject: process.env.VAPID_SUBJECT || "mailto:admin@litlabs.net",
@@ -342,4 +342,4 @@ if (typeof window === "undefined") {
   });
 }
 
-export default jarvis;
+export default lit;

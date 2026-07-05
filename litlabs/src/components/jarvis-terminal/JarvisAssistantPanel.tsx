@@ -21,9 +21,9 @@ import {
   RotateCcw,
 } from "lucide-react";
 import type {
-  JarvisContext,
-  JarvisAction,
-  JarvisThinkResponse,
+  LiTContext,
+  LiTAction,
+  LiTThinkResponse,
 } from "@/lib/jarvis-context";
 
 const slashCommands = [
@@ -55,14 +55,14 @@ const quickActions = [
 ];
 
 type Message = {
-  role: "user" | "jarvis";
+  role: "user" | "lit";
   text: string;
-  actions?: JarvisAction[];
+  actions?: LiTAction[];
   loading?: boolean;
 };
 
 interface JarvisAssistantPanelProps {
-  context: JarvisContext;
+  context: LiTContext;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
   onCreateFile?: (path: string, content: string) => void;
@@ -81,7 +81,7 @@ export function JarvisAssistantPanel({
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
-      role: "jarvis",
+      role: "lit",
       text: "I am connected to your terminal, files, logs, and agents. Ask me to scan, fix, explain, or run commands. Use `/` for quick commands.",
     },
   ]);
@@ -104,7 +104,7 @@ export function JarvisAssistantPanel({
     setMessages((prev) => [
       ...prev,
       { role: "user", text },
-      { role: "jarvis", text: "", loading: true },
+      { role: "lit", text: "", loading: true },
     ]);
     setPrompt("");
     setLoading(true);
@@ -116,12 +116,12 @@ export function JarvisAssistantPanel({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, context }),
       });
-      const data: JarvisThinkResponse & { error?: string } = await res.json();
+      const data: LiTThinkResponse & { error?: string } = await res.json();
 
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last?.role === "jarvis" && last.loading) {
+        if (last?.role === "lit" && last.loading) {
           last.text = data.error || data.answer || "No response.";
           last.actions = data.actions || [];
           last.loading = false;
@@ -132,7 +132,7 @@ export function JarvisAssistantPanel({
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last?.role === "jarvis" && last.loading) {
+        if (last?.role === "lit" && last.loading) {
           last.text =
             err instanceof Error ? err.message : "Failed to reach LiTTree.";
           last.loading = false;
@@ -144,7 +144,7 @@ export function JarvisAssistantPanel({
     }
   }
 
-  function handleAction(action: JarvisAction) {
+  function handleAction(action: LiTAction) {
     if (action.type === "insert_command" && action.command) {
       onInsertCommand?.(action.command);
     } else if (action.type === "run_command" && action.command) {
@@ -259,20 +259,20 @@ export function JarvisAssistantPanel({
             }`}
           >
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {msg.role === "user" ? "You" : "LiTTree"}
+              {msg.role === "user" ? "You" : "LiT"}
             </div>
             {msg.loading ? (
               <div className="flex items-center gap-2 text-neutral-400">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
-                LiTTree is thinking...
+                LiT is thinking...
               </div>
             ) : (
               <div className="prose prose-invert prose-sm max-w-none">
-                <JarvisMarkdown text={msg.text} />
+                <LitMarkdown text={msg.text} />
               </div>
             )}
 
-            {msg.role === "jarvis" && !msg.loading && (
+            {msg.role === "lit" && !msg.loading && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {msg.actions?.map((action) => (
                   <button
@@ -367,7 +367,7 @@ export function JarvisAssistantPanel({
   );
 }
 
-function ActionIcon({ type }: { type: JarvisAction["type"] }) {
+function ActionIcon({ type }: { type: LiTAction["type"] }) {
   if (type === "run_command") return <Play className="h-3 w-3" />;
   if (type === "insert_command") return <Terminal className="h-3 w-3" />;
   if (type === "create_file" || type === "edit_file")
@@ -377,7 +377,7 @@ function ActionIcon({ type }: { type: JarvisAction["type"] }) {
   return <Sparkles className="h-3 w-3" />;
 }
 
-function JarvisMarkdown({ text }: { text: string }) {
+function LitMarkdown({ text }: { text: string }) {
   const parts = text.split(/(```[\s\S]*?```)/g);
   return (
     <>

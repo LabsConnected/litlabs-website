@@ -24,7 +24,7 @@ export default function DashboardView() {
       {/* Center */}
       <main
         className={`flex-1 min-w-0 p-4 lg:p-6 ${
-          activeApp === "littree" || activeApp === "jarvis"
+          activeApp === "littree" || activeApp === "lit"
             ? "flex flex-col overflow-hidden"
             : "overflow-y-auto"
         }`}

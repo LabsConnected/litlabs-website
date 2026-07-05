@@ -13,7 +13,7 @@
 | Package Manager | pnpm 9.15.0                               |
 | Pages           | 62 (all compile)                          |
 | API Routes      | 50+                                       |
-| Components       | ~40                                       |
+| Components      | ~40                                       |
 | Hooks           | 12                                        |
 | Library Files   | 40+ (src/lib/)                            |
 | Test Coverage   | 0%                                        |
@@ -89,8 +89,8 @@ const dbUserId = user.id; // UUID
 | H-4  | Settings localStorage only          | settings/page.tsx |
 | H-5  | Boardroom orchestrator is mock      | page.tsx          |
 | H-6  | chat API in-memory only             | /api/chat         |
-| H-7  | users/plan in-memory Map             | API route         |
-| H-8  | Dual auth (Clerk + custom JWT)       | Multiple files    |
+| H-7  | users/plan in-memory Map            | API route         |
+| H-8  | Dual auth (Clerk + custom JWT)      | Multiple files    |
 | H-9  | agents/commits uses execSync        | API route         |
 | H-10 | agents/status refs active_tasks     | Table missing     |
 | H-11 | supabaseAdmin export unverified     | lib/supabase.ts   |
@@ -119,16 +119,16 @@ const dbUserId = user.id; // UUID
 
 ## 4. LOW — Backlog
 
-| #   | Issue                          |
-| --- | ------------------------------ |
-| L-1 | Settings clear() no confirm    |
-| L-2 | Empty style tag on CSS clear    |
-| L-3 | agent-chat false positives      |
-| L-4 | sellPrice no validation         |
-| L-5 | posts/like masks errors        |
-| L-6 | Showcase static (fine)          |
-| L-7 | /social redirect stub           |
-| L-8 | CRT missing on 4 pages          |
+| #   | Issue                        |
+| --- | ---------------------------- |
+| L-1 | Settings clear() no confirm  |
+| L-2 | Empty style tag on CSS clear |
+| L-3 | agent-chat false positives   |
+| L-4 | sellPrice no validation      |
+| L-5 | posts/like masks errors      |
+| L-6 | Showcase static (fine)       |
+| L-7 | /social redirect stub        |
+| L-8 | CRT missing on 4 pages       |
 
 ---
 
@@ -168,7 +168,7 @@ src/
 │   ├── flow/              # Flow/canvas editor
 │   ├── gallery/           # Media gallery
 │   ├── games/             # Games section
-│   ├── jarvis/            # Jarvis interface
+│   ├── lit/               # LiTTree LiT interface
 │   ├── library/           # File library
 │   ├── marketplace/       # Agent marketplace
 │   ├── profile/           # User profiles
@@ -186,34 +186,34 @@ src/
 
 ### Component Inventory (37 files)
 
-| Component | Purpose |
-|-----------|---------|
-| `AgentBuilder.tsx` | 3-step wizard for creating custom agents |
-| `AgentDashboard.tsx` | Live agent pipeline viewer with real-time tasks |
-| `AnimatedBackground.tsx` | CSS-based animated background |
-| `AssetLibrary.tsx` | Asset browser with search |
-| `ClerkAuth.tsx` | Clerk authentication wrapper |
-| `CookieConsent.tsx` | Cookie consent banner |
-| `CreateFAB.tsx` | Floating action button for quick create |
-| `DragDropCanvas.tsx` | Drag-and-drop canvas component |
-| `ErrorBoundary.tsx` | React error boundary |
-| `GalaxyMap.tsx` | Galaxy map visualization |
-| `GlassCard.tsx` | Reusable glass-morphism card |
-| `ImageLightbox.tsx` | Image lightbox viewer |
-| `Footer.tsx` | Site footer |
+| Component                | Purpose                                         |
+| ------------------------ | ----------------------------------------------- |
+| `AgentBuilder.tsx`       | 3-step wizard for creating custom agents        |
+| `AgentDashboard.tsx`     | Live agent pipeline viewer with real-time tasks |
+| `AnimatedBackground.tsx` | CSS-based animated background                   |
+| `AssetLibrary.tsx`       | Asset browser with search                       |
+| `ClerkAuth.tsx`          | Clerk authentication wrapper                    |
+| `CookieConsent.tsx`      | Cookie consent banner                           |
+| `CreateFAB.tsx`          | Floating action button for quick create         |
+| `DragDropCanvas.tsx`     | Drag-and-drop canvas component                  |
+| `ErrorBoundary.tsx`      | React error boundary                            |
+| `GalaxyMap.tsx`          | Galaxy map visualization                        |
+| `GlassCard.tsx`          | Reusable glass-morphism card                    |
+| `ImageLightbox.tsx`      | Image lightbox viewer                           |
+| `Footer.tsx`             | Site footer                                     |
 
 ### Hooks (12)
 
-| Hook | Purpose |
-|------|---------|
+| Hook                   | Purpose                      |
+| ---------------------- | ---------------------------- |
 | `useAgentSubscription` | Real-time agent task updates |
-| `useTheme` | Theme context consumer |
-| `useAuth` | Auth context consumer |
-| + 9 more | Various utility hooks |
+| `useTheme`             | Theme context consumer       |
+| `useAuth`              | Auth context consumer        |
+| + 9 more               | Various utility hooks        |
 
 ### Library Files (40+ in src/lib/)
 
-Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logger.ts`, `jarvis.ts`, Stripe helpers, Clerk helpers, and more.
+Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logger.ts`, `lit.ts`, Stripe helpers, Clerk helpers, and more.
 
 ### DB Schema (11 tables in schema.sql)
 
@@ -229,12 +229,12 @@ Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logge
 
 ### Deploy Targets (4)
 
-| Target | Config File | Status |
-|--------|-------------|--------|
-| Vercel | `vercel.json` | ✅ Primary |
-| Netlify | `netlify.toml` | ⚠️ Secondary |
-| Cloudflare Pages | `wrangler.toml` | ⚠️ Experimental |
-| Docker | `Dockerfile` + `docker-compose.yml` | ✅ Self-hosted |
+| Target           | Config File                         | Status          |
+| ---------------- | ----------------------------------- | --------------- |
+| Vercel           | `vercel.json`                       | ✅ Primary      |
+| Netlify          | `netlify.toml`                      | ⚠️ Secondary    |
+| Cloudflare Pages | `wrangler.toml`                     | ⚠️ Experimental |
+| Docker           | `Dockerfile` + `docker-compose.yml` | ✅ Self-hosted  |
 
 ### Config Issues
 
@@ -256,22 +256,27 @@ Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logge
 ## 7. Documentation, Plans & Tasks
 
 ### Documentation
+
 - `docs/agents-terminal-design.md` — Agents Terminal UI design (Draft v1)
 - `docs/deep-scan-report.md` — This report
 
 ### Plans
+
 - `plans/code-fixes.md` — Code fix roadmap
 - `plans/implementation-settings-cli-tools.md` — Settings CLI implementation
 - `plans/settings-cli-enhancement*.md` — Settings CLI enhancement details
 
 ### PRDs
+
 - `prds/ai-studio-optimization.md` — AI Studio optimization PRD
 
 ### Prompts
+
 - `prompts/director.md` — Director agent prompt
 - `prompts/executor.md` — Executor agent prompt
 
 ### Tasks
+
 - **Active**: "System Initialization" — pending
 - **Backlog**: 3 items (Settings P1, Dashboard P2, Agent Chat P3)
 - **Completed**: empty
@@ -361,6 +366,7 @@ Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logge
 | **Total** | **37** | Down from 40 — 3 issues resolved since last scan                             |
 
 **Top 3 Actions:**
+
 1. Fix User ID mismatch in `conversations` + `user-agents` routes
 2. Add missing DB tables (`agents`, `active_tasks`, `rate_limit_store`, `orchestration_jobs`)
 3. Enable TypeScript strict mode and fix resulting errors

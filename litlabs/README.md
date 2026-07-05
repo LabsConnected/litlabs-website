@@ -50,7 +50,7 @@ Copy `.env.example` to `.env.local` and fill in:
 - `src/components/` — React components
 - `src/lib/` — shared libraries and AI/agent logic
 - `src/context/` — React context providers
-- `terminal-server/` — separate Node.js service for browser terminal + Jarvis AI
+- `terminal-server/` — separate Node.js service for browser terminal + LiTTree LiT AI
 - `supabase/` — migrations and schema
 - `docs/` — design docs and audits
 - `scripts/` — deployment and utility scripts

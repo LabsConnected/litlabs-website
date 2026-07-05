@@ -39,13 +39,13 @@ export function useJarvisActions() {
       const res = await fetch("/api/agents/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent: "jarvis", task: "review project status and suggest next steps" }),
+        body: JSON.stringify({ agent: "lit", task: "review project status and suggest next steps" }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setResult({
         title: "Workflow Started",
-        content: data.message || "Jarvis workflow initiated.",
+        content: data.message || "LiT workflow initiated.",
         type: "info",
       });
     } catch (err) {
@@ -84,17 +84,17 @@ export function useJarvisActions() {
       const res = await fetch("/api/jarvis/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: question, context: { route: "/agents/jarvis" } }),
+        body: JSON.stringify({ message: question, context: { route: "/agents/lit" } }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setResult({
-        title: "Jarvis",
+        title: "LiT",
         content: data.answer || "No response.",
         type: "info",
       });
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Jarvis failed");
+      setError(err instanceof Error ? err.message : "LiT failed");
     } finally {
       setLoading(null);
     }

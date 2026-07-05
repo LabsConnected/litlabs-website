@@ -1,4 +1,4 @@
-export type JarvisActionType =
+export type LiTActionType =
   | "run_command"
   | "insert_command"
   | "create_file"
@@ -6,8 +6,8 @@ export type JarvisActionType =
   | "start_agent"
   | "deploy";
 
-export type JarvisAction = {
-  type: JarvisActionType;
+export type LiTAction = {
+  type: LiTActionType;
   label: string;
   command?: string;
   filePath?: string;
@@ -15,9 +15,9 @@ export type JarvisAction = {
   agentName?: string;
 };
 
-export type JarvisAgentStatus = "online" | "idle" | "running" | "error";
+export type LiTAgentStatus = "online" | "idle" | "running" | "error";
 
-export type JarvisContext = {
+export type LiTContext = {
   route: string;
   terminalOutput: string;
   commandHistory: string[];
@@ -29,19 +29,19 @@ export type JarvisContext = {
   fileTree: string[];
   agents: {
     name: string;
-    status: JarvisAgentStatus;
+    status: LiTAgentStatus;
   }[];
   websocketStatus: "connected" | "offline" | "connecting";
 };
 
-export type JarvisThinkResponse = {
+export type LiTThinkResponse = {
   answer: string;
-  actions?: JarvisAction[];
+  actions?: LiTAction[];
 };
 
-export function buildJarvisPrompt(message: string, context: JarvisContext): string {
+export function buildLitPrompt(message: string, context: LiTContext): string {
   return `
-You are Jarvis inside LiTTree OS.
+You are LiT inside LiTTree OS.
 
 You are not a normal chatbot.
 You are an AI developer command center.
@@ -85,8 +85,8 @@ Rules:
 `;
 }
 
-export function parseJarvisActions(answer: string): JarvisAction[] {
-  const actions: JarvisAction[] = [];
+export function parseLitActions(answer: string): LiTAction[] {
+  const actions: LiTAction[] = [];
 
   // Extract bash commands from the first code block and offer to insert/run
   const codeBlockMatch = answer.match(/```(?:bash|sh|shell)?\n([\s\S]*?)```/);
@@ -101,9 +101,9 @@ export function parseJarvisActions(answer: string): JarvisAction[] {
   return actions;
 }
 
-export function collectJarvisContext(
-  partial: Partial<JarvisContext> & { route: string },
-): JarvisContext {
+export function collectLitContext(
+  partial: Partial<LiTContext> & { route: string },
+): LiTContext {
   return {
     route: partial.route,
     terminalOutput: partial.terminalOutput || "",

@@ -1,6 +1,6 @@
-# LiTTree Jarvis Terminal Server
+# LiTTree LiT Terminal Server
 
-Backend for the Jarvis terminal, file system, agents, and logs.
+Backend for the LiT terminal, file system, agents, and logs.
 
 ## Deploy to Railway
 

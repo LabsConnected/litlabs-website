@@ -171,8 +171,8 @@ export const TerminalPanel = forwardRef<
         const cmd = commandBufferRef.current.trim();
         if (cmd) {
           onCommand?.(cmd);
-          if (cmd.startsWith("jarvis ")) {
-            socket.emit("jarvis:command", cmd);
+          if (cmd.startsWith("lit ")) {
+            socket.emit("lit:command", cmd);
             commandBufferRef.current = "";
             return;
           }
@@ -235,7 +235,7 @@ export const TerminalPanel = forwardRef<
 
   const resetTerminal = () => {
     termRef.current?.clear();
-    termRef.current?.writeln("\x1b[1;32m🔥 LiTTree OS Jarvis Terminal\x1b[0m");
+    termRef.current?.writeln("\x1b[1;32m🔥 LiTTree OS LiT Terminal\x1b[0m");
   };
 
   const clearTerminal = () => {

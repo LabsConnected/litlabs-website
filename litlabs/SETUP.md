@@ -1,6 +1,6 @@
-# LiTTree OS Jarvis Terminal Setup
+# LiTTree OS LiTTree LiT Terminal Setup
 
-This adds a real browser-based terminal to `https://litlabs.net/jarvis-terminal`.
+This adds a real browser-based terminal to `https://litlabs.net/lit-terminal`.
 
 ## Architecture
 
@@ -9,7 +9,7 @@ Browser (xterm.js)
   ↓ WebSocket / Socket.IO
 Next.js app (frontend)
   ↓ REST API
-Jarvis AI helper (/api/jarvis/command)
+LiTTree LiT AI helper (/api/lit/command)
   ↓
 Terminal Server (Node.js + node-pty) [run on VPS / Railway / Fly.io / Render]
   ↓
@@ -126,9 +126,9 @@ services:
 
 ## Files added
 
-- `src/app/jarvis-terminal/page.tsx` — terminal page
-- `src/components/jarvis-terminal/*` — terminal UI components
-- `src/app/api/jarvis/command/route.ts` — Jarvis AI helper
+- `src/app/lit-terminal/page.tsx` — terminal page
+- `src/components/lit-terminal/*` — terminal UI components
+- `src/app/api/lit/command/route.ts` — LiTTree LiT AI helper
 - `terminal-server/server.ts` — WebSocket terminal server
 - `terminal-server/security.ts` — command blocking + secret redaction
 - `terminal-server/docker-manager.ts` — Docker sandbox session manager
@@ -155,7 +155,7 @@ services:
 - **Phase 1-4 (done):** xterm UI, WebSocket backend, node-pty, auth guard.
 - **Phase 5 (done):** Command history persistence via `/api/terminal/history`.
 - **Phase 6 (done):** Docker sandboxing files and scripts.
-- **Phase 7 (done):** Jarvis AI helper with `jarvis <command>` terminal commands.
+- **Phase 7 (done):** LiTTree LiT AI helper with `lit <command>` terminal commands.
 - **Phase 8 (done):** File explorer + Monaco editor.
 - **Phase 9 (done):** Deploy button + agent runner.
 - **Phase 10 (done):** Admin roles + usage limits.

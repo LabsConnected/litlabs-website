@@ -1,40 +1,60 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Sparkles, Wrench, Copy, Check, Terminal, FileCode, Logs, Wifi, WifiOff } from "lucide-react";
-import type { JarvisContext, JarvisAction, JarvisThinkResponse } from "@/lib/jarvis-context";
+import {
+  Send,
+  Sparkles,
+  Wrench,
+  Copy,
+  Check,
+  Terminal,
+  FileCode,
+  Logs,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
+import type {
+  LiTContext,
+  LiTAction,
+  LiTThinkResponse,
+} from "@/lib/jarvis-context";
 
 type Message = {
-  role: "user" | "jarvis";
+  role: "user" | "lit";
   text: string;
-  actions?: JarvisAction[];
+  actions?: LiTAction[];
   loading?: boolean;
 };
 
 interface JarvisChatPanelProps {
-  context?: Partial<JarvisContext>;
+  context?: Partial<LiTContext>;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
   compact?: boolean;
 }
 
-const defaultContext: JarvisContext = {
-  route: "/agents/jarvis",
+const defaultContext: LiTContext = {
+  route: "/agents/lit",
   terminalOutput: "",
   commandHistory: [],
   logs: [],
   fileTree: [],
-  agents: [{ name: "Jarvis", status: "online" }],
+  agents: [{ name: "LiT", status: "online" }],
   websocketStatus: "offline",
 };
 
-export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compact }: JarvisChatPanelProps) {
+export function JarvisChatPanel({
+  context,
+  onInsertCommand,
+  onRunCommand,
+  compact,
+}: JarvisChatPanelProps) {
   const ctx = { ...defaultContext, ...context };
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
-      role: "jarvis",
-      text: "I'm Jarvis. I can scan your project, explain errors, generate commands, and run agent workflows. Ask me anything.",
+      role: "lit",
+      text: "I'm LiTTree LiT. I can scan your project, explain errors, generate commands, and run agent workflows. Ask me anything.",
     },
   ]);
   const [loading, setLoading] = useState(false);
@@ -42,12 +62,19 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages]);
 
   async function askJarvis(text: string) {
     if (!text.trim()) return;
-    setMessages((prev) => [...prev, { role: "user", text }, { role: "jarvis", text: "", loading: true }]);
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text },
+      { role: "lit", text: "", loading: true },
+    ]);
     setPrompt("");
     setLoading(true);
 
@@ -57,11 +84,11 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, context: ctx }),
       });
-      const data: JarvisThinkResponse & { error?: string } = await res.json();
+      const data: LiTThinkResponse & { error?: string } = await res.json();
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last?.role === "jarvis" && last.loading) {
+        if (last?.role === "lit" && last.loading) {
           last.text = data.error || data.answer || "No response.";
           last.actions = data.actions || [];
           last.loading = false;
@@ -72,8 +99,9 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
       setMessages((prev) => {
         const next = [...prev];
         const last = next[next.length - 1];
-        if (last?.role === "jarvis" && last.loading) {
-          last.text = err instanceof Error ? err.message : "Failed to reach Jarvis.";
+        if (last?.role === "lit" && last.loading) {
+          last.text =
+            err instanceof Error ? err.message : "Failed to reach LiT.";
           last.loading = false;
         }
         return next;
@@ -83,7 +111,7 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
     }
   }
 
-  async function executeAction(action: JarvisAction) {
+  async function executeAction(action: LiTAction) {
     const label = (action.label || "").toLowerCase();
     if (label.includes("scan")) {
       const res = await fetch("/api/jarvis/scan");
@@ -101,7 +129,10 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
       const res = await fetch("/api/agents/task", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agent: "jarvis", task: action.command || "execute requested action" }),
+        body: JSON.stringify({
+          agent: "lit",
+          task: action.command || "execute requested action",
+        }),
       });
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
@@ -110,32 +141,70 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
     return `Action "${action.label}" triggered.`;
   }
 
-  function handleAction(action: JarvisAction) {
+  function handleAction(action: LiTAction) {
     if (!action.command && !action.label) return;
     if (action.type === "insert_command" && action.command) {
       if (onInsertCommand) {
         onInsertCommand(action.command);
       } else {
-        executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
+        executeAction(action)
+          .then((text) =>
+            setMessages((prev) => [...prev, { role: "lit", text }]),
+          )
+          .catch((err) =>
+            setMessages((prev) => [
+              ...prev,
+              { role: "lit", text: `Action failed: ${err.message}` },
+            ]),
+          );
       }
     } else if (action.type === "run_command" && action.command) {
       if (onRunCommand) {
-        if (window.confirm(`Run: ${action.command}?`)) onRunCommand(action.command);
+        if (window.confirm(`Run: ${action.command}?`))
+          onRunCommand(action.command);
       } else {
         if (window.confirm(`Run: ${action.command}?`)) {
-          executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
+          executeAction(action)
+            .then((text) =>
+              setMessages((prev) => [...prev, { role: "lit", text }]),
+            )
+            .catch((err) =>
+              setMessages((prev) => [
+                ...prev,
+                { role: "lit", text: `Action failed: ${err.message}` },
+              ]),
+            );
         }
       }
     } else {
-      executeAction(action).then(text => setMessages(prev => [...prev, { role: "jarvis", text }])).catch(err => setMessages(prev => [...prev, { role: "jarvis", text: `Action failed: ${err.message}` }]));
+      executeAction(action)
+        .then((text) => setMessages((prev) => [...prev, { role: "lit", text }]))
+        .catch((err) =>
+          setMessages((prev) => [
+            ...prev,
+            { role: "lit", text: `Action failed: ${err.message}` },
+          ]),
+        );
     }
   }
 
   const contextChips = [
-    { label: "Terminal", active: ctx.terminalOutput.length > 0, icon: Terminal },
-    { label: ctx.selectedFile?.path || "No file", active: !!ctx.selectedFile, icon: FileCode },
+    {
+      label: "Terminal",
+      active: ctx.terminalOutput.length > 0,
+      icon: Terminal,
+    },
+    {
+      label: ctx.selectedFile?.path || "No file",
+      active: !!ctx.selectedFile,
+      icon: FileCode,
+    },
     { label: "Logs", active: ctx.logs.length > 0, icon: Logs },
-    { label: ctx.websocketStatus === "connected" ? "Online" : "Offline", active: ctx.websocketStatus === "connected", icon: ctx.websocketStatus === "connected" ? Wifi : WifiOff },
+    {
+      label: ctx.websocketStatus === "connected" ? "Online" : "Offline",
+      active: ctx.websocketStatus === "connected",
+      icon: ctx.websocketStatus === "connected" ? Wifi : WifiOff,
+    },
   ];
 
   return (
@@ -146,8 +215,10 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
             <Wrench className="h-4 w-4 text-orange-400" />
           </div>
           <div>
-            <h3 className="text-sm font-bold">Jarvis Chat</h3>
-            <p className="text-[10px] text-neutral-500">Connected to terminal context</p>
+            <h3 className="text-sm font-bold">LiT Chat</h3>
+            <p className="text-[10px] text-neutral-500">
+              Connected to terminal context
+            </p>
           </div>
         </div>
         {!compact && (
@@ -172,7 +243,10 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
         )}
       </div>
 
-      <div ref={scrollRef} className={`flex-1 overflow-y-auto p-3 space-y-3 ${compact ? "max-h-64" : ""}`}>
+      <div
+        ref={scrollRef}
+        className={`flex-1 overflow-y-auto p-3 space-y-3 ${compact ? "max-h-64" : ""}`}
+      >
         {messages.map((msg, idx) => (
           <div
             key={idx}
@@ -183,7 +257,7 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
             }`}
           >
             <div className="mb-0.5 text-[9px] font-bold uppercase tracking-wider text-neutral-500">
-              {msg.role === "user" ? "You" : "Jarvis"}
+              {msg.role === "user" ? "You" : "LiT"}
             </div>
             {msg.loading ? (
               <div className="flex items-center gap-1.5 text-neutral-400">
@@ -193,30 +267,37 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
             ) : (
               <div className="whitespace-pre-wrap">{msg.text}</div>
             )}
-            {msg.role === "jarvis" && !msg.loading && msg.actions && msg.actions.length > 0 && (
-              <div className="mt-2 flex flex-wrap gap-1.5">
-                {msg.actions.map((action) => (
+            {msg.role === "lit" &&
+              !msg.loading &&
+              msg.actions &&
+              msg.actions.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {msg.actions.map((action) => (
+                    <button
+                      key={action.label}
+                      onClick={() => handleAction(action)}
+                      className="flex items-center gap-1 rounded-lg border border-orange-600/40 bg-orange-600/10 px-2 py-1 text-[10px] font-bold text-orange-400 hover:bg-orange-600 hover:text-white"
+                    >
+                      {action.label}
+                    </button>
+                  ))}
                   <button
-                    key={action.label}
-                    onClick={() => handleAction(action)}
-                    className="flex items-center gap-1 rounded-lg border border-orange-600/40 bg-orange-600/10 px-2 py-1 text-[10px] font-bold text-orange-400 hover:bg-orange-600 hover:text-white"
+                    onClick={() => {
+                      navigator.clipboard.writeText(msg.text);
+                      setCopied(idx);
+                      setTimeout(() => setCopied(null), 1500);
+                    }}
+                    className="flex items-center gap-1 rounded-lg border border-neutral-800 px-2 py-1 text-[10px] font-bold text-neutral-400 hover:text-neutral-200"
                   >
-                    {action.label}
+                    {copied === idx ? (
+                      <Check className="h-2.5 w-2.5" />
+                    ) : (
+                      <Copy className="h-2.5 w-2.5" />
+                    )}
+                    {copied === idx ? "Copied" : "Copy"}
                   </button>
-                ))}
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(msg.text);
-                    setCopied(idx);
-                    setTimeout(() => setCopied(null), 1500);
-                  }}
-                  className="flex items-center gap-1 rounded-lg border border-neutral-800 px-2 py-1 text-[10px] font-bold text-neutral-400 hover:text-neutral-200"
-                >
-                  {copied === idx ? <Check className="h-2.5 w-2.5" /> : <Copy className="h-2.5 w-2.5" />}
-                  {copied === idx ? "Copied" : "Copy"}
-                </button>
-              </div>
-            )}
+                </div>
+              )}
           </div>
         ))}
       </div>
@@ -232,7 +313,7 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
                 askJarvis(prompt);
               }
             }}
-            placeholder="Ask Jarvis..."
+            placeholder="Ask LiT..."
             className={`w-full resize-none rounded-lg border border-neutral-800 bg-black p-2.5 pr-9 text-xs outline-none focus:border-orange-600 ${compact ? "h-16" : "h-20"}`}
           />
           <button
@@ -245,7 +326,11 @@ export function JarvisChatPanel({ context, onInsertCommand, onRunCommand, compac
         </div>
         {!compact && (
           <div className="mt-2 flex gap-1.5">
-            {["scan and see what needed", "explain current errors", "generate build command"].map((q) => (
+            {[
+              "scan and see what needed",
+              "explain current errors",
+              "generate build command",
+            ].map((q) => (
               <button
                 key={q}
                 onClick={() => askJarvis(q)}

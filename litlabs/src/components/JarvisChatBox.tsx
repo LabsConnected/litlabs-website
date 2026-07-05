@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { askJarvis } from "@/lib/ai/client";
+import { askLit } from "@/lib/ai/client";
 
 export default function JarvisChatBox() {
   const [message, setMessage] = useState("");
@@ -15,10 +15,10 @@ export default function JarvisChatBox() {
     setReply("");
 
     try {
-      const data = await askJarvis(message);
+      const data = await askLit(message);
       setReply(data.reply || "No reply returned.");
     } catch (err) {
-      setReply(err instanceof Error ? err.message : "Jarvis failed.");
+      setReply(err instanceof Error ? err.message : "LiT failed.");
     } finally {
       setLoading(false);
     }
@@ -46,7 +46,7 @@ export default function JarvisChatBox() {
         disabled={loading}
         className="rounded-xl bg-orange-500 px-4 py-2 font-bold text-black disabled:opacity-50"
       >
-        {loading ? "Thinking..." : "Ask Jarvis"}
+        {loading ? "Thinking..." : "Ask LiT"}
       </button>
 
       {reply && (

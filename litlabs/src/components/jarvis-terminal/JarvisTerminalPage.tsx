@@ -9,8 +9,15 @@ import { FileExplorer } from "./FileExplorer";
 import { CodeEditor } from "./CodeEditor";
 import { DeployButton } from "./DeployButton";
 import { LeftSidebar } from "./LeftSidebar";
-import { Cpu, Activity, Zap, Menu, RefreshCw, AlertTriangle } from "lucide-react";
-import { JarvisContext } from "@/lib/jarvis-context";
+import {
+  Cpu,
+  Activity,
+  Zap,
+  Menu,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
+import { LiTContext } from "@/lib/jarvis-context";
 
 const AGENTS = [
   { name: "LiTTree", status: "online" as const },
@@ -22,7 +29,9 @@ const AGENTS = [
 ];
 
 export function JarvisTerminalPage() {
-  const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">("terminal");
+  const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">(
+    "terminal",
+  );
   const [logs, setLogs] = useState<string[]>([
     "[SYSTEM] LiTTree OS Terminal initialized",
     "[SYSTEM] Waiting for terminal server connection...",
@@ -33,7 +42,12 @@ export function JarvisTerminalPage() {
   const [fileContent, setFileContent] = useState("");
   const [fileTree, setFileTree] = useState<string[]>([]);
   const [terminalOutput, setTerminalOutput] = useState("");
-  const [usage, setUsage] = useState<{ allowed: boolean; used: number; limit: number; role?: string } | null>(null);
+  const [usage, setUsage] = useState<{
+    allowed: boolean;
+    used: number;
+    limit: number;
+    role?: string;
+  } | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [connectionError, setConnectionError] = useState<string | null>(null);
   const terminalRef = useRef<TerminalPanelHandle>(null);
@@ -76,15 +90,21 @@ export function JarvisTerminalPage() {
     };
   }, [loadFileTree]);
 
-  const context: JarvisContext = {
+  const context: LiTContext = {
     route: "/littree",
     terminalOutput,
     commandHistory: commands,
     logs,
-    selectedFile: selectedFile ? { path: selectedFile, content: fileContent } : undefined,
+    selectedFile: selectedFile
+      ? { path: selectedFile, content: fileContent }
+      : undefined,
     fileTree,
     agents: AGENTS.map((a) => ({ name: a.name, status: a.status })),
-    websocketStatus: connected ? "connected" : terminalOutput ? "offline" : "connecting",
+    websocketStatus: connected
+      ? "connected"
+      : terminalOutput
+        ? "offline"
+        : "connecting",
   };
 
   const handleInsertCommand = (cmd: string) => {
@@ -106,7 +126,9 @@ export function JarvisTerminalPage() {
       if (data.error) throw new Error(data.error);
       addLog(`[FILE] Created ${path}`);
     } catch (err) {
-      addLog(`[ERROR] Failed to create ${path}: ${err instanceof Error ? err.message : ""}`);
+      addLog(
+        `[ERROR] Failed to create ${path}: ${err instanceof Error ? err.message : ""}`,
+      );
     }
   };
 
@@ -118,7 +140,8 @@ export function JarvisTerminalPage() {
     addLog("[DEPLOY] Deployment requested via LiTTree");
   };
 
-  const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+  const wsUrl =
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
 
   return (
     <main className="min-h-screen bg-[#050505] text-white">
@@ -154,12 +177,29 @@ export function JarvisTerminalPage() {
             </div>
 
             <div className="flex flex-wrap items-center gap-3 text-xs">
-              <Status label="System" value="Operational" icon={Activity} color="text-green-400" />
-              <Status label="Agents" value="3 / 6" icon={Cpu} color="text-orange-400" />
-              <Status label="CPU" value="18%" icon={Zap} color="text-blue-400" />
+              <Status
+                label="System"
+                value="Operational"
+                icon={Activity}
+                color="text-green-400"
+              />
+              <Status
+                label="Agents"
+                value="3 / 6"
+                icon={Cpu}
+                color="text-orange-400"
+              />
+              <Status
+                label="CPU"
+                value="18%"
+                icon={Zap}
+                color="text-blue-400"
+              />
               <div
                 className={`rounded-full px-3 py-1 text-xs font-bold ${
-                  connected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"
+                  connected
+                    ? "bg-green-500/20 text-green-400"
+                    : "bg-red-500/20 text-red-400"
                 }`}
               >
                 {connected ? "WebSocket Live" : "WebSocket Offline"}
@@ -167,10 +207,14 @@ export function JarvisTerminalPage() {
               {usage && (
                 <div
                   className={`rounded-full px-3 py-1 text-xs font-bold ${
-                    usage.allowed ? "bg-blue-500/20 text-blue-400" : "bg-red-500/20 text-red-400"
+                    usage.allowed
+                      ? "bg-blue-500/20 text-blue-400"
+                      : "bg-red-500/20 text-red-400"
                   }`}
                 >
-                  {usage.role === "admin" ? "Unlimited" : `${usage.used}/${usage.limit} cmds/hr`}
+                  {usage.role === "admin"
+                    ? "Unlimited"
+                    : `${usage.used}/${usage.limit} cmds/hr`}
                 </div>
               )}
               <DeployButton />
@@ -203,7 +247,7 @@ export function JarvisTerminalPage() {
                     setConnected(c);
                     if (!c) {
                       setConnectionError(
-                        `Terminal server not connected. Check NEXT_PUBLIC_TERMINAL_WS_URL (${wsUrl}).`
+                        `Terminal server not connected. Check NEXT_PUBLIC_TERMINAL_WS_URL (${wsUrl}).`,
                       );
                     } else {
                       setConnectionError(null);
@@ -219,7 +263,9 @@ export function JarvisTerminalPage() {
               </div>
             </div>
 
-            <div className={`hidden flex-col gap-4 lg:flex ${selectedFile ? "" : "opacity-50"}`}>
+            <div
+              className={`hidden flex-col gap-4 lg:flex ${selectedFile ? "" : "opacity-50"}`}
+            >
               <div className="flex-1 min-h-[300px]">
                 {selectedFile ? (
                   <CodeEditor
@@ -229,7 +275,9 @@ export function JarvisTerminalPage() {
                   />
                 ) : (
                   <div className="flex h-full flex-col items-center justify-center rounded-xl border border-neutral-800 bg-neutral-950 text-neutral-500">
-                    <div className="text-sm">Select a file from the explorer</div>
+                    <div className="text-sm">
+                      Select a file from the explorer
+                    </div>
                     <div className="text-xs">Monaco Editor will open here</div>
                   </div>
                 )}
@@ -259,7 +307,9 @@ export function JarvisTerminalPage() {
               key={tab.id}
               onClick={() => setActiveTab(tab.id as typeof activeTab)}
               className={`flex-1 px-3 py-3 text-xs font-bold ${
-                activeTab === tab.id ? "bg-orange-600/20 text-orange-400" : "text-neutral-400"
+                activeTab === tab.id
+                  ? "bg-orange-600/20 text-orange-400"
+                  : "text-neutral-400"
               }`}
             >
               {tab.label}

@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { logAgentEvent } from "@/lib/agent-logger";
-import { jarvis } from "@/lib/jarvis";
+import { lit } from "@/lib/jarvis";
 import { OpenRouterExecutor } from "@/lib/llm-executor";
 
 export interface WorkerConfig {
@@ -55,7 +55,7 @@ export class AgentWorkerMatrix {
       throw err;
     }
 
-    await jarvis.systemAlert({
+    await lit.systemAlert({
       message: `Background execution matrix initialized for ${this.config.agentSlug}. Concurrency limit: ${this.config.maxConcurrency}`,
       severity: "low",
     });
@@ -228,7 +228,7 @@ export class AgentWorkerMatrix {
         })
         .eq("id", task.id);
 
-      await jarvis.systemAlert({
+      await lit.systemAlert({
         message: `Fatal thread crash on task [${task.id}]: ${message}`,
         severity: "critical",
       });

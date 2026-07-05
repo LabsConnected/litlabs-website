@@ -1,9 +1,9 @@
-// Jarvis Notification API
+// LiT Notification API
 // Triggers notifications to Discord, webhooks, etc.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { jarvis, NotificationPayload } from "@/lib/jarvis";
+import { lit, NotificationPayload } from "@/lib/jarvis";
 
 // Admin user ID
 const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
@@ -11,7 +11,7 @@ const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
-    
+
     // Only admin or server can trigger notifications
     if (!userId || userId !== ADMIN_USER_ID) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -27,16 +27,16 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure Jarvis is initialized
+    // Ensure LiT is initialized
     if (typeof process.env.DISCORD_WEBHOOK_URL === "string") {
-      jarvis.init({
+      lit.init({
         discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
         adminEmail: process.env.ADMIN_EMAIL,
-        webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+        webhookEndpoint: process.env.LIT_WEBHOOK_URL,
       });
     }
 
-    const success = await jarvis.notify(payload);
+    const success = await lit.notify(payload);
 
     if (success) {
       return NextResponse.json({ success: true, message: "Notification sent" });
@@ -56,7 +56,7 @@ export async function POST(req: NextRequest) {
 export async function PUT(req: NextRequest) {
   try {
     const { userId } = await auth();
-    
+
     if (!userId || userId !== ADMIN_USER_ID) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
@@ -66,10 +66,10 @@ export async function PUT(req: NextRequest) {
 
     // Ensure initialized
     if (typeof process.env.DISCORD_WEBHOOK_URL === "string") {
-      jarvis.init({
+      lit.init({
         discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
         adminEmail: process.env.ADMIN_EMAIL,
-        webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+        webhookEndpoint: process.env.LIT_WEBHOOK_URL,
       });
     }
 
@@ -77,19 +77,19 @@ export async function PUT(req: NextRequest) {
 
     switch (action) {
       case "sale":
-        success = await jarvis.sale(data);
+        success = await lit.sale(data);
         break;
       case "signup":
-        success = await jarvis.signup(data);
+        success = await lit.signup(data);
         break;
       case "agent_created":
-        success = await jarvis.agentCreated(data);
+        success = await lit.agentCreated(data);
         break;
       case "system_alert":
-        success = await jarvis.systemAlert(data);
+        success = await lit.systemAlert(data);
         break;
       case "cli_event":
-        success = await jarvis.cliEvent(data);
+        success = await lit.cliEvent(data);
         break;
       default:
         return NextResponse.json({ error: "Unknown action" }, { status: 400 });

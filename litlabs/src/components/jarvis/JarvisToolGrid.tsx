@@ -14,7 +14,7 @@ import {
   History,
 } from "lucide-react";
 
-const JARVIS_TOOLS = [
+const LIT_TOOLS = [
   { icon: Terminal, label: "Terminal", connected: true },
   { icon: FileCode, label: "File System", connected: true },
   { icon: Logs, label: "Logs", connected: true },
@@ -23,7 +23,7 @@ const JARVIS_TOOLS = [
   { icon: Rocket, label: "Deployments", connected: true },
 ];
 
-const JARVIS_CAPABILITIES = [
+const LIT_CAPABILITIES = [
   { icon: ScanLine, label: "Scan project" },
   { icon: Bug, label: "Explain errors" },
   { icon: Terminal, label: "Generate commands" },
@@ -48,7 +48,7 @@ export function JarvisToolGrid() {
           Connected Tools
         </h3>
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
-          {JARVIS_TOOLS.map((tool) => {
+          {LIT_TOOLS.map((tool) => {
             const Icon = tool.icon;
             return (
               <div
@@ -69,7 +69,7 @@ export function JarvisToolGrid() {
           Capabilities
         </h3>
         <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-          {JARVIS_CAPABILITIES.map((cap) => {
+          {LIT_CAPABILITIES.map((cap) => {
             const Icon = cap.icon;
             return (
               <div

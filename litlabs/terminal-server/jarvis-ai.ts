@@ -33,12 +33,12 @@ async function chatWithOpenRouter(messages: ChatMessage[], model = "google/gemin
   return data.choices?.[0]?.message?.content ?? "";
 }
 
-export async function askJarvis(prompt: string) {
+export async function askLiT(prompt: string) {
   const messages: ChatMessage[] = [
     {
       role: "system",
       content:
-        "You are Jarvis, the AI operating layer for LiTTree LabStudios. You help users build software. " +
+        "You are LiT, the AI builder agent for LiTTree LabStudios. You help users build software. " +
         "When asked for commands, prefer safe, explainable commands. " +
         "Warn about destructive operations. Keep responses concise and actionable.",
     },
@@ -52,12 +52,12 @@ export async function askJarvis(prompt: string) {
   }
 }
 
-export async function handleJarvisCommand(input: string): Promise<string> {
+export async function handleLiTCommand(input: string): Promise<string> {
   const args = input.trim().split(/\s+/).slice(1);
   const command = args[0]?.toLowerCase();
   const rest = args.slice(1).join(" ");
 
-  const systemContext = `You are the Jarvis agent inside LiTTree OS Terminal.
+  const systemContext = `You are the LiT agent inside LiTTree OS Terminal.
 The user typed: ${input}
 
 Available commands:
@@ -74,5 +74,5 @@ Be concise. If the command is unclear, list the available commands.
 `;
 
   const prompt = `${systemContext}\n\nCommand: ${command || "help"}\nArguments: ${rest || "none"}`;
-  return await askJarvis(prompt);
+  return await askLiT(prompt);
 }
