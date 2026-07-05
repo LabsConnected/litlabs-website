@@ -1,10 +1,34 @@
 "use client";
 
 import { useAuth } from "@clerk/nextjs";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
+
+/** Sentinel returned when ClerkProvider is absent (no publishable key). */
+const CLERK_EMPTY = {
+  isLoaded: true,
+  isSignedIn: false,
+  userId: null,
+  sessionId: null,
+  sessionClaims: undefined,
+  orgId: null,
+  orgRole: null,
+  orgSlug: null,
+  signOut: async () => { },
+  getToken: async () => null,
+  has: () => false,
+} as const;
+
+function useClerkSafe() {
+  try {
+    // useAuth throws if there's no ClerkProvider ancestor
+    return useAuth();
+  } catch {
+    return CLERK_EMPTY;
+  }
+}
 
 export function useClerkAuth() {
-  const clerk = useAuth();
+  const clerk = useClerkSafe();
   const [sessionUser, setSessionUser] = useState<{
     id: string;
     name: string | null;
@@ -42,15 +66,18 @@ export function useClerkAuth() {
   const isLoaded = clerk.isLoaded || sessionLoaded;
   const isSignedIn = clerk.isSignedIn || !!sessionUser;
   const userId = clerk.userId || sessionUser?.id || null;
-  const sessionClaims:
-    | { name?: string | null; username?: string | null }
-    | undefined =
-    (clerk.sessionClaims as
-      | { name?: string | null; username?: string | null }
-      | undefined) ||
-    (sessionUser
-      ? { name: sessionUser.name, username: sessionUser.email }
-      : undefined);
+  const sessionClaims = useMemo<
+    { name?: string | null; username?: string | null } | undefined
+  >(
+    () =>
+      (clerk.sessionClaims as
+        | { name?: string | null; username?: string | null }
+        | undefined) ||
+      (sessionUser
+        ? { name: sessionUser.name, username: sessionUser.email }
+        : undefined),
+    [clerk.sessionClaims, sessionUser]
+  );
 
   return { ...clerk, isLoaded, isSignedIn, userId, sessionClaims };
 }

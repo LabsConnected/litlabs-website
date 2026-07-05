@@ -1,8 +1,11 @@
 # Environment variables — NEVER commit secrets
+.env
 .env.local
 .env*.local
 .env.vercel-production
 .env.vercel-secrets
+.env.local.*
+*.env.backup
 .sb_anon_key
 
 # Dependencies
@@ -32,9 +35,7 @@ yarn-debug.log*
 yarn-error.log*
 *.log
 
-# Local env files
-.env*.local
-.env
+# Local env files (duplicates removed — see top of file)
 
 # Vercel
 .vercel
@@ -50,8 +51,6 @@ fix-ssh-complete.ps1
 reinstall-openssh.ps1
 use-wsl-ssh.ps1
 add-external-ssh.ps1
-
-.env*
 
 # Local Netlify folder
 .netlify
@@ -82,7 +81,6 @@ tsc_*.txt
 lint_output.txt
 git_status.txt
 git_status_*.txt
-AGENTS.md
 meta/
 
 # Large internal libs / virtualenvs
