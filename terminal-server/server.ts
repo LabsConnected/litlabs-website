@@ -7,30 +7,48 @@ import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { resolve, normalize } from "path";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { createClerkClient, verifyToken } from "@clerk/backend";
+import { createClient } from "@supabase/supabase-js";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleJarvisCommand } from "./jarvis-ai";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
-const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
+const ALLOWED_ORIGINS = (process.env.TERMINAL_ALLOWED_ORIGINS || process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 const WORKSPACE_ROOT = process.env.TERMINAL_WORKSPACE_ROOT || resolve("/tmp/littree-workspaces");
 const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
+const CLERK_SECRET = process.env.CLERK_SECRET_KEY;
+const SUPABASE_URL = process.env.SUPABASE_URL;
+const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const clerk = CLERK_SECRET ? createClerkClient({ secretKey: CLERK_SECRET }) : null;
+const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : null;
 
 mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 const app = express();
-app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }));
-app.use(express.json());
+app.use(cors({
+  origin: (origin, callback) => {
+    if (!origin || ALLOWED_ORIGINS.includes(origin)) return callback(null, true);
+    callback(new Error("Not allowed by CORS"));
+  },
+  credentials: true,
+}));
+app.use(express.json({ limit: "2mb" }));
 
 const server = http.createServer(app);
 
 const io = new Server(server, {
   cors: {
-    origin: ALLOWED_ORIGIN,
+    origin: ALLOWED_ORIGINS,
     credentials: true,
   },
   pingTimeout: 60000,
   pingInterval: 25000,
+  transports: ["websocket", "polling"],
 });
 
 interface Session {
@@ -41,10 +59,60 @@ interface Session {
   cwd: string;
 }
 
+interface AuthenticatedRequest extends express.Request {
+  userId?: string;
+}
+
 const sessions = new Map<string, Session>();
 
+function getUserId(req: AuthenticatedRequest, bodyOrQuery?: { userId?: string }): string {
+  return String(req.userId || bodyOrQuery?.userId || "dev-user");
+}
+
+async function verifyClerkToken(token: string): Promise<string | null> {
+  if (!CLERK_SECRET) return null;
+  try {
+    const payload = await verifyToken(token, { secretKey: CLERK_SECRET });
+    return typeof payload.sub === "string" ? payload.sub : null;
+  } catch {
+    return null;
+  }
+}
+
+async function requireAuth(req: express.Request, res: express.Response, next: express.NextFunction) {
+  if (!clerk) return next();
+  try {
+    const token = req.headers.authorization?.replace("Bearer ", "") || req.cookies?.__session;
+    if (!token) return res.status(401).json({ error: "Unauthorized" });
+    const userId = await verifyClerkToken(token);
+    if (!userId) return res.status(401).json({ error: "Unauthorized" });
+    (req as AuthenticatedRequest).userId = userId;
+    next();
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
+async function logCommand(userId: string, sessionId: string, command: string, output?: string) {
+  if (!supabase) return;
+  try {
+    await supabase.from("terminal_logs").insert({ user_id: userId, session_id: sessionId, command, output: output?.slice(0, 4000), created_at: new Date().toISOString() });
+  } catch (err) {
+    console.error("[Supabase] log failed", err);
+  }
+}
+
+async function logEvent(userId: string, event: string, details?: string) {
+  if (!supabase) return;
+  try {
+    await supabase.from("terminal_logs").insert({ user_id: userId, session_id: "system", command: event, output: details?.slice(0, 4000), created_at: new Date().toISOString() });
+  } catch (err) {
+    console.error("[Supabase] log failed", err);
+  }
+}
+
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, sessions: sessions.size, docker: USE_DOCKER });
+  res.json({ ok: true, sessions: sessions.size, docker: USE_DOCKER, clerk: !!clerk, supabase: !!supabase });
 });
 
 function getUserWorkspace(userId: string) {
@@ -62,8 +130,8 @@ function safePath(userId: string, filePath: string) {
   return target;
 }
 
-app.get("/files", (req, res) => {
-  const userId = String(req.query.userId || "dev-user");
+app.get("/api/files", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.query as { userId?: string });
   const dirPath = String(req.query.path || ".");
   try {
     const target = safePath(userId, dirPath);
@@ -77,8 +145,36 @@ app.get("/files", (req, res) => {
   }
 });
 
-app.post("/files/read", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/api/files/create", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const filePath = String(req.body.path || "");
+  const content = String(req.body.content || "");
+  try {
+    const target = safePath(userId, filePath);
+    mkdirSync(resolve(target, ".."), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+    res.json({ created: true, path: filePath });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to create file" });
+  }
+});
+
+app.post("/api/files/update", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const filePath = String(req.body.path || "");
+  const content = String(req.body.content || "");
+  try {
+    const target = safePath(userId, filePath);
+    mkdirSync(resolve(target, ".."), { recursive: true });
+    writeFileSync(target, content, "utf-8");
+    res.json({ saved: true, path: filePath });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to update file" });
+  }
+});
+
+app.post("/api/files/read", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
   const filePath = String(req.body.path || "");
   try {
     const target = safePath(userId, filePath);
@@ -89,8 +185,89 @@ app.post("/files/read", (req, res) => {
   }
 });
 
-app.post("/files/write", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/api/files/delete", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const filePath = String(req.body.path || "");
+  try {
+    const target = safePath(userId, filePath);
+    rmSync(target, { recursive: true, force: true });
+    res.json({ deleted: true });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete file" });
+  }
+});
+
+app.post("/api/terminal/session", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const sessionId = req.body.sessionId || randomUUID();
+  res.json({ sessionId, userId, status: "ready", workspace: getUserWorkspace(userId) });
+});
+
+const activeAgents = new Map<string, { running: boolean; startedAt: string }>();
+
+app.post("/api/agents/run", requireAuth, async (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const agentId = String(req.body.agentId || "jarvis");
+  const task = String(req.body.task || "execute");
+  activeAgents.set(agentId, { running: true, startedAt: new Date().toISOString() });
+  await logEvent(userId, "agent:run", `Agent ${agentId} started: ${task}`);
+  res.json({ ok: true, agentId, status: "running" });
+});
+
+app.post("/api/agents/stop", requireAuth, (req: AuthenticatedRequest, res) => {
+  const agentId = String(req.body.agentId || "jarvis");
+  activeAgents.set(agentId, { running: false, startedAt: new Date().toISOString() });
+  res.json({ ok: true, agentId, status: "stopped" });
+});
+
+app.get("/api/logs", requireAuth, async (req: AuthenticatedRequest, res) => {
+  void req;
+  if (!supabase) return res.json({ logs: [] });
+  try {
+    const { data, error } = await supabase.from("terminal_logs").select("*").order("created_at", { ascending: false }).limit(100);
+    if (error) throw error;
+    res.json({ logs: data || [] });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to fetch logs" });
+  }
+});
+
+app.post("/api/deploy", requireAuth, async (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  await logEvent(userId, "deploy", "Deploy requested via terminal API");
+  res.json({ ok: true, message: "Deploy request received. Connect Vercel webhook to complete." });
+});
+
+// Legacy routes preserved for backward compatibility
+app.get("/files", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.query as { userId?: string });
+  const dirPath = String(req.query.path || ".");
+  try {
+    const target = safePath(userId, dirPath);
+    const entries = readdirSync(target, { withFileTypes: true }).map((entry) => ({
+      name: entry.name,
+      type: entry.isDirectory() ? "folder" : "file",
+    }));
+    res.json({ entries });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list files" });
+  }
+});
+
+app.post("/files/read", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
+  const filePath = String(req.body.path || "");
+  try {
+    const target = safePath(userId, filePath);
+    const content = readFileSync(target, "utf-8");
+    res.json({ content });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to read file" });
+  }
+});
+
+app.post("/files/write", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
   const filePath = String(req.body.path || "");
   const content = String(req.body.content || "");
   try {
@@ -103,8 +280,8 @@ app.post("/files/write", (req, res) => {
   }
 });
 
-app.post("/files/delete", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/files/delete", requireAuth, (req: AuthenticatedRequest, res) => {
+  const userId = getUserId(req, req.body);
   const filePath = String(req.body.path || "");
   try {
     const target = safePath(userId, filePath);
@@ -115,8 +292,21 @@ app.post("/files/delete", (req, res) => {
   }
 });
 
+io.use(async (socket, next) => {
+  const token = String(socket.handshake.auth?.token || "");
+  if (!CLERK_SECRET || !token) return next();
+  try {
+    const userId = await verifyClerkToken(token);
+    if (!userId) return next(new Error("Unauthorized"));
+    socket.data.userId = userId;
+    next();
+  } catch {
+    next(new Error("Unauthorized"));
+  }
+});
+
 io.on("connection", (socket) => {
-  const userId = String(socket.handshake.auth?.userId || "dev-user");
+  const userId = String(socket.data.userId || socket.handshake.auth?.userId || "dev-user");
   const sessionId = String(socket.handshake.auth?.sessionId || randomUUID());
 
   console.log("[Terminal] Connected:", { userId, sessionId });
@@ -187,6 +377,11 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (data.includes("\r")) {
+      const cmd = data.replace("\r", "").trim();
+      if (cmd) logCommand(userId, sessionId, cmd).catch(() => {});
+    }
+
     ptyProcess.write(data);
   });
 
@@ -218,7 +413,7 @@ io.on("connection", (socket) => {
 
 server.listen(PORT, "0.0.0.0", () => {
   console.log(`🔥 LiTTree Terminal Server running on http://0.0.0.0:${PORT}`);
-  console.log(`   Allowed origin: ${ALLOWED_ORIGIN}`);
+  console.log(`   Allowed origins: ${ALLOWED_ORIGINS.join(", ")}`);
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
 });

@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
 
 interface FileNode {
@@ -18,15 +18,22 @@ interface FileExplorerProps {
 
 export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const userId = user?.id ?? "anonymous";
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+
+  const authHeaders = useCallback(async () => {
+    const token = await getToken();
+    return { Authorization: token ? `Bearer ${token}` : "", "Content-Type": "application/json" };
+  }, [getToken]);
 
   const fetchEntries = useCallback(
     async (path: string) => {
-      const res = await fetch(`${wsUrl}/files?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}`);
+      const headers = await authHeaders();
+      const res = await fetch(`${apiUrl}/api/files?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}`, { headers });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return (data.entries as { name: string; type: "folder" | "file" }[]).map((entry) => ({
@@ -34,7 +41,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
         path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
       }));
     },
-    [userId, wsUrl]
+    [userId, apiUrl, authHeaders]
   );
 
   const loadRoot = useCallback(async () => {
@@ -101,9 +108,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
     const name = prompt("New file name?");
     if (!name) return;
     try {
-      const res = await fetch(`${wsUrl}/files/write`, {
+      const headers = await authHeaders();
+      const res = await fetch(`${apiUrl}/api/files/create`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, path: name, content: "" }),
       });
       const data = await res.json();
@@ -117,9 +125,10 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const deleteFile = async (path: string) => {
     if (!confirm(`Delete ${path}?`)) return;
     try {
-      const res = await fetch(`${wsUrl}/files/delete`, {
+      const headers = await authHeaders();
+      const res = await fetch(`${apiUrl}/api/files/delete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, path }),
       });
       const data = await res.json();

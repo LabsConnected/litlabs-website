@@ -5,7 +5,7 @@ import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useUser } from "@clerk/nextjs";
-import { Maximize2, Minimize2, RotateCcw, Trash2 } from "lucide-react";
+import { Maximize2, Minimize2, RotateCcw, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
@@ -31,10 +31,12 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
   const commandBufferRef = useRef<string>("");
   const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
+  const [connectionError, setConnectionError] = useState<string | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   const { user, isLoaded } = useUser();
   const userId = user?.id ?? "anonymous";
   const [sessionId] = useState(() => `session-${Date.now()}`);
+  const reconnectRef = useRef<() => void>(() => {});
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded) return;
@@ -80,31 +82,50 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
     term.writeln("");
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
 
-    const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
-    const socket = io(wsUrl, {
-      auth: {
-        userId,
-        sessionId,
-      },
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
-    });
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+    const token = user ? String(user.id) : undefined;
+    const connect = () => {
+      setConnectionError(null);
+      const socket = io(wsUrl, {
+        auth: { userId, sessionId, token },
+        transports: ["websocket", "polling"],
+        reconnectionAttempts: 5,
+        reconnectionDelay: 2000,
+      });
 
-    socketRef.current = socket;
+      socketRef.current = socket;
 
-    socket.on("connect", () => {
-      setConnected(true);
-      onConnectionChange?.(true);
-      term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
-      onLog?.("[WS] Connected to terminal server");
-    });
+      socket.on("connect", () => {
+        setConnected(true);
+        setConnectionError(null);
+        onConnectionChange?.(true);
+        term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+        onLog?.("[WS] Connected to terminal server");
+      });
 
-    socket.on("disconnect", (reason) => {
-      setConnected(false);
-      onConnectionChange?.(false);
-      term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
-      onLog?.(`[WS] Disconnected: ${reason}`);
-    });
+      socket.on("connect_error", (err) => {
+        setConnected(false);
+        setConnectionError(err.message);
+        onConnectionChange?.(false);
+        term.writeln(`\x1b[31m❌ Connection error: ${err.message}\x1b[0m`);
+        onLog?.(`[WS] Error: ${err.message}`);
+      });
+
+      socket.on("disconnect", (reason) => {
+        setConnected(false);
+        onConnectionChange?.(false);
+        term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
+        onLog?.(`[WS] Disconnected: ${reason}`);
+      });
+
+      return socket;
+    };
+
+    const socket = connect();
+    reconnectRef.current = () => {
+      socket.disconnect();
+      connect();
+    };
 
     socket.on("session:ready", ({ sessionId: sid }) => {
       term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
@@ -164,7 +185,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
       socket.disconnect();
       term.dispose();
     };
-  }, [isLoaded, userId, sessionId, onLog, onCommand, onConnectionChange, onTerminalOutput]);
+  }, [isLoaded, user, userId, sessionId, onLog, onCommand, onConnectionChange, onTerminalOutput]);
 
   useImperativeHandle(ref, () => ({
     insertCommand: (cmd: string) => {
@@ -206,6 +227,20 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
         </div>
 
         <div className="flex items-center gap-2">
+          {connectionError && (
+            <>
+              <span className="hidden items-center gap-1 text-xs text-red-400 sm:flex">
+                <AlertTriangle className="h-3.5 w-3.5" /> {connectionError}
+              </span>
+              <button
+                onClick={() => reconnectRef.current()}
+                title="Reconnect"
+                className="rounded p-1.5 text-orange-400 hover:bg-neutral-800 hover:text-orange-300"
+              >
+                <RefreshCw className="h-4 w-4" />
+              </button>
+            </>
+          )}
           <button
             onClick={resetTerminal}
             title="Reset"
@@ -229,6 +264,13 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
           </button>
         </div>
       </div>
+
+      {connectionError && (
+        <div className="flex items-center justify-between gap-2 border-b border-red-900/30 bg-red-950/20 px-4 py-2 text-xs text-red-400 sm:hidden">
+          <span className="flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> {connectionError}</span>
+          <button onClick={() => reconnectRef.current()} className="font-bold text-orange-400 hover:text-orange-300">Reconnect</button>
+        </div>
+      )}
 
       <div
         ref={containerRef}

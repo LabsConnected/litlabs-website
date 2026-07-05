@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Editor from "@monaco-editor/react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import { Save, FileCode, X, Loader2 } from "lucide-react";
 
 interface CodeEditorProps {
@@ -13,22 +13,30 @@ interface CodeEditorProps {
 
 export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorProps) {
   const { user } = useUser();
+  const { getToken } = useAuth();
   const userId = user?.id ?? "anonymous";
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+  const [loadTrigger, setLoadTrigger] = useState(0);
+  const apiUrl = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+
+  const authHeaders = useCallback(async () => {
+    const token = await getToken();
+    return { Authorization: token ? `Bearer ${token}` : "", "Content-Type": "application/json" };
+  }, [getToken]);
 
   const loadFile = useCallback(async () => {
     if (!filePath) return;
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${wsUrl}/files/read`, {
+      const headers = await authHeaders();
+      const res = await fetch(`${apiUrl}/api/files/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, path: filePath }),
       });
       const data = await res.json();
@@ -40,20 +48,24 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
     } finally {
       setLoading(false);
     }
-  }, [filePath, userId, wsUrl]);
+  }, [filePath, userId, apiUrl, authHeaders]);
 
   useEffect(() => {
-    loadFile();
-  }, [loadFile]);
+    if (!filePath) return;
+    let cancelled = false;
+    loadFile().then(() => { if (cancelled) return; });
+    return () => { cancelled = true; };
+  }, [filePath, loadFile]);
 
   const saveFile = async () => {
     if (!filePath) return;
     setSaving(true);
     setError(null);
     try {
-      const res = await fetch(`${wsUrl}/files/write`, {
+      const headers = await authHeaders();
+      const res = await fetch(`${apiUrl}/api/files/update`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers,
         body: JSON.stringify({ userId, path: filePath, content }),
       });
       const data = await res.json();
