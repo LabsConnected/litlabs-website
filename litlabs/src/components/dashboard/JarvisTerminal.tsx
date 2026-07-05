@@ -1,6 +1,12 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
@@ -268,13 +274,17 @@ export default function JarvisTerminal() {
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
   const [alexaOutEnabled, setAlexaOutEnabled] = useState(false);
-  const conversationHistory = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const conversationHistory = useRef<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
   const [availableVoices, setAvailableVoices] = useState<
     SpeechSynthesisVoice[]
   >([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
   const [showVoicePicker, setShowVoicePicker] = useState(false);
-  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number | undefined>>({});
+  const [voicePickerStyle, setVoicePickerStyle] = useState<
+    Record<string, string | number | undefined>
+  >({});
   const [micPermission, setMicPermission] = useState<
     "prompt" | "granted" | "denied" | "unknown"
   >("unknown");
@@ -552,7 +562,7 @@ export default function JarvisTerminal() {
         addLog({
           type: "brain",
           text: fullText || "No response received.",
-          agentName: "JARVIS",
+          agentName: "LiTTree",
         });
         speak(fullText);
       } catch (err) {
@@ -616,7 +626,7 @@ export default function JarvisTerminal() {
         case "help":
           addLog({
             type: "success",
-            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route JARVIS speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey JARVIS' to activate",
+            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route LiTTree speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey LiTTree' to activate",
           });
           setIsProcessing(false);
           return;
@@ -779,7 +789,7 @@ export default function JarvisTerminal() {
             ]
               .filter(Boolean)
               .join("\n");
-            addLog({ type: "agent", text: report, agentName: "JARVIS" });
+            addLog({ type: "agent", text: report, agentName: "LiTTree" });
           } catch (err) {
             addLog({
               type: "error",
@@ -861,9 +871,9 @@ export default function JarvisTerminal() {
       if (results[results.length - 1].isFinal) {
         if (wakeWordEnabled) {
           const lower = transcript.toLowerCase();
-          if (lower.startsWith("hey jarvis") || lower.startsWith("jarvis")) {
+          if (lower.startsWith("hey littree") || lower.startsWith("littree")) {
             const cmd = transcript
-              .replace(/^(hey\s+)?jarvis[,\s]*/i, "")
+              .replace(/^(hey\s+)?littree[,\s]*/i, "")
               .trim();
             setInput(cmd);
             if (cmd) {
@@ -1011,7 +1021,7 @@ export default function JarvisTerminal() {
             className="text-[#00ff9d] drop-shadow-[0_0_6px_#00ff9d]"
           />
           <span className="text-xs font-mono uppercase tracking-[0.2em] font-bold text-white">
-            JARVIS<span className="text-[#00ff9d]">.MAD</span>
+            LiTTree<span className="text-[#00ff9d]">.CORE</span>
           </span>
           <span
             className="w-2 h-2 rounded-full animate-pulse"
@@ -1199,7 +1209,7 @@ export default function JarvisTerminal() {
                 {log.type === "brain" && (
                   <>
                     <span className="font-bold mr-1 text-[#ff66cc] drop-shadow-[0_0_4px_rgba(255,102,204,0.5)]">
-                      [JARVIS]
+                      [LiTTree]
                     </span>
                     <span className="text-gray-200">{log.text}</span>
                   </>
@@ -1227,7 +1237,7 @@ export default function JarvisTerminal() {
                 <span className="opacity-30 mr-1.5 text-[10px]">
                   [{getTimestamp()}]
                 </span>
-                <span className="font-bold mr-1 text-[#ff66cc]">[JARVIS]</span>
+                <span className="font-bold mr-1 text-[#ff66cc]">[LiTTree]</span>
                 <span className="text-gray-200">{brainText}</span>
                 <span className="inline-block w-1.5 h-4 bg-[#ff66cc] ml-0.5 animate-pulse" />
               </div>
@@ -1300,7 +1310,7 @@ export default function JarvisTerminal() {
                   const next = !v;
                   addLog({
                     type: "success",
-                    text: `Wake word ${next ? "ENABLED" : "DISABLED"} — say "Hey JARVIS".`,
+                    text: `Wake word ${next ? "ENABLED" : "DISABLED"} — say "Hey LiTTree".`,
                   });
                   return next;
                 });
@@ -1340,7 +1350,7 @@ export default function JarvisTerminal() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Command JARVIS... (try /scan, /help)"
+                placeholder="Command LiTTree... (try /scan, /help)"
                 className="w-full bg-transparent border-none outline-none text-white text-sm font-mono placeholder:text-white/20 min-w-0"
                 style={{ caretColor: "#00ff9d" }}
               />

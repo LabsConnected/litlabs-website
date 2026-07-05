@@ -1,11 +1,24 @@
 "use client";
 
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "react";
+import {
+  useEffect,
+  useRef,
+  useState,
+  forwardRef,
+  useImperativeHandle,
+} from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useUser } from "@clerk/nextjs";
-import { Maximize2, Minimize2, RotateCcw, Trash2, RefreshCw, AlertTriangle } from "lucide-react";
+import {
+  Maximize2,
+  Minimize2,
+  RotateCcw,
+  Trash2,
+  RefreshCw,
+  AlertTriangle,
+} from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
@@ -20,7 +33,10 @@ export interface TerminalPanelHandle {
   runCommand: (cmd: string) => void;
 }
 
-export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>(function TerminalPanel(
+export const TerminalPanel = forwardRef<
+  TerminalPanelHandle,
+  TerminalPanelProps
+>(function TerminalPanel(
   { onLog, onCommand, onConnectionChange, onTerminalOutput },
   ref,
 ) {
@@ -77,12 +93,15 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
     termRef.current = term;
     fitAddonRef.current = fit;
 
-    term.writeln("\x1b[1;32m🔥 LiTTree OS Jarvis Terminal\x1b[0m");
+    term.writeln("\x1b[1;32m🔥 LiTTree OS Terminal\x1b[0m");
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
 
-    const wsUrl = process.env.NEXT_PUBLIC_WS_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+    const wsUrl =
+      process.env.NEXT_PUBLIC_WS_URL ||
+      process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+      "http://localhost:4001";
     const token = user ? String(user.id) : undefined;
     const connect = () => {
       setConnectionError(null);
@@ -185,7 +204,16 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
       socket.disconnect();
       term.dispose();
     };
-  }, [isLoaded, user, userId, sessionId, onLog, onCommand, onConnectionChange, onTerminalOutput]);
+  }, [
+    isLoaded,
+    user,
+    userId,
+    sessionId,
+    onLog,
+    onCommand,
+    onConnectionChange,
+    onTerminalOutput,
+  ]);
 
   useImperativeHandle(ref, () => ({
     insertCommand: (cmd: string) => {
@@ -218,10 +246,18 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="flex items-center gap-2 text-sm">
-          <span className="rounded bg-orange-600/20 px-3 py-1 text-orange-400 font-bold">bash</span>
-          <span className="rounded bg-neutral-900 px-3 py-1 text-neutral-400">node</span>
-          <span className="rounded bg-neutral-900 px-3 py-1 text-neutral-400">docker</span>
-          <span className={`rounded px-3 py-1 text-xs font-bold ${connected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}>
+          <span className="rounded bg-orange-600/20 px-3 py-1 text-orange-400 font-bold">
+            bash
+          </span>
+          <span className="rounded bg-neutral-900 px-3 py-1 text-neutral-400">
+            node
+          </span>
+          <span className="rounded bg-neutral-900 px-3 py-1 text-neutral-400">
+            docker
+          </span>
+          <span
+            className={`rounded px-3 py-1 text-xs font-bold ${connected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+          >
             {connected ? "Online" : "Offline"}
           </span>
         </div>
@@ -260,15 +296,26 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
             title="Toggle fullscreen"
             className="rounded p-1.5 text-neutral-400 hover:bg-neutral-800 hover:text-white"
           >
-            {fullScreen ? <Minimize2 className="h-4 w-4" /> : <Maximize2 className="h-4 w-4" />}
+            {fullScreen ? (
+              <Minimize2 className="h-4 w-4" />
+            ) : (
+              <Maximize2 className="h-4 w-4" />
+            )}
           </button>
         </div>
       </div>
 
       {connectionError && (
         <div className="flex items-center justify-between gap-2 border-b border-red-900/30 bg-red-950/20 px-4 py-2 text-xs text-red-400 sm:hidden">
-          <span className="flex items-center gap-1"><AlertTriangle className="h-3.5 w-3.5" /> {connectionError}</span>
-          <button onClick={() => reconnectRef.current()} className="font-bold text-orange-400 hover:text-orange-300">Reconnect</button>
+          <span className="flex items-center gap-1">
+            <AlertTriangle className="h-3.5 w-3.5" /> {connectionError}
+          </span>
+          <button
+            onClick={() => reconnectRef.current()}
+            className="font-bold text-orange-400 hover:text-orange-300"
+          >
+            Reconnect
+          </button>
         </div>
       )}
 

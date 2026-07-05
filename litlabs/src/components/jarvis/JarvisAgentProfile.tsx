@@ -39,10 +39,8 @@ export function JarvisAgentProfile() {
                 <Brain className="h-6 w-6" style={{ color: T.accentColor }} />
               </div>
               <div>
-                <h1 className="text-2xl font-black md:text-3xl" style={{ color: T.headerColor }}>
-                  Jarvis
-                </h1>
-                <p className="text-sm" style={{ color: T.textMuted }}>AI Dev OS Brain</p>
+                <h1 className="text-2xl font-black md:text-3xl" style={{ color: T.headerColor }}>\n                  LiTTree\n                </h1>
+                <p className="text-sm" style={{ color: T.textMuted }}>Core AI Copilot & Navigator</p>
               </div>
             </div>
             <div className="mt-3 flex items-center gap-2">
@@ -64,7 +62,7 @@ export function JarvisAgentProfile() {
 
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/jarvis"
+              href="/littree"
               className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition"
               style={{ backgroundColor: T.accentColor, color: T.bgColor }}
             >
@@ -98,18 +96,16 @@ export function JarvisAgentProfile() {
               style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
             >
               <div className="mb-4">
-                <h2 className="text-lg font-bold" style={{ color: T.headerColor }}>About Jarvis</h2>
+                <h2 className="text-lg font-bold" style={{ color: T.headerColor }}>About LiTTree</h2>
                 <p className="mt-1 text-sm leading-relaxed" style={{ color: T.textMuted }}>
-                  Jarvis is the AI operating layer for LiTTree OS. It connects directly to your terminal,
-                  file system, logs, command history, and agent workflows. Unlike a separate chatbot,
-                  Jarvis understands your full development context and can take actionable steps.
+                  LiTTree is the flagship AI brain of LitLabs. It connects your ideas to the right specialist agent or studio tool — Studio, Code, Flow, Market, Social, Music, or Games. Unlike a generic assistant, LiTTree grows with your projects, remembers your context, and routes tasks to the right branch.
                 </p>
               </div>
 
               <div className="relative my-5 aspect-video w-full overflow-hidden rounded-xl border" style={{ borderColor: T.borderColor + "20" }}>
                 <NextImage
                   src="/showcase/control-center.png"
-                  alt="Jarvis control center"
+                  alt="LiTTree control center"
                   fill
                   className="object-cover"
                   sizes="(max-width: 768px) 100vw, 800px"
@@ -124,7 +120,7 @@ export function JarvisAgentProfile() {
             <JarvisActionPanel loading={loading} result={result} error={error} onClear={clear} />
 
             <Link
-              href="/jarvis"
+              href="/littree"
               className="flex items-center justify-between rounded-2xl border p-5 transition"
               style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
             >
@@ -136,8 +132,8 @@ export function JarvisAgentProfile() {
                   <Terminal className="h-5 w-5" style={{ color: T.accentColor }} />
                 </div>
                 <div>
-                  <h3 className="font-bold" style={{ color: T.headerColor }}>Open Jarvis Terminal</h3>
-                  <p className="text-xs" style={{ color: T.textMuted }}>Full command center with terminal, files, logs, and code editor</p>
+                  <h3 className="font-bold" style={{ color: T.headerColor }}>Open LiTTree Core</h3>
+                  <p className="text-xs" style={{ color: T.textMuted }}>Main command center for building, creating, selling, and automating</p>
                 </div>
               </div>
               <ArrowRight className="h-5 w-5" style={{ color: T.accentColor }} />
@@ -152,7 +148,7 @@ export function JarvisAgentProfile() {
               </h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Link
-                  href="/jarvis"
+                  href="/littree"
                   className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition"
                   style={{ borderColor: T.borderColor + "25", color: T.textMuted }}
                 >

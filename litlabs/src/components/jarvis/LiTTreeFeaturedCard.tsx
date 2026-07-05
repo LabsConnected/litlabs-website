@@ -12,17 +12,17 @@ const tools = [
   { icon: Rocket, label: "Deploy" },
 ];
 
-export function JarvisFeaturedCard() {
+export function LiTTreeFeaturedCard() {
   return (
     <div className="rounded-2xl border border-orange-500/30 bg-black p-6 shadow-[0_0_40px_rgba(249,115,22,0.12)]">
       <div className="mb-4 flex items-start justify-between">
         <div>
           <p className="text-xs font-bold uppercase tracking-[0.3em] text-orange-500">
-            Featured System Agent
+            Flagship System Agent
           </p>
-          <h2 className="mt-1 text-3xl font-black text-white">Jarvis</h2>
+          <h2 className="mt-1 text-3xl font-black text-white">LiTTree Core</h2>
           <p className="mt-1 text-sm text-neutral-400">
-            AI Dev OS brain for terminal, files, logs, agents, and deployment.
+            Your main AI brain for building, creating, selling, and automating. One tree. Many agents.
           </p>
         </div>
         <span className="flex items-center gap-1.5 rounded-full bg-green-500/10 px-3 py-1 text-sm font-bold text-green-400">
@@ -48,17 +48,17 @@ export function JarvisFeaturedCard() {
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Link
-          href="/jarvis"
+          href="/littree"
           className="flex items-center gap-2 rounded-xl bg-orange-600 px-5 py-3 font-bold text-white transition hover:bg-orange-500"
         >
           <Terminal className="h-4 w-4" />
-          Open Jarvis Terminal
+          Open LiTTree Core
         </Link>
         <Link
-          href="/agents/jarvis"
+          href="/agents/littree"
           className="flex items-center gap-2 rounded-xl border border-neutral-700 px-5 py-3 font-bold text-white transition hover:border-orange-500 hover:text-orange-400"
         >
-          View Agent Profile
+          View LiTTree Profile
           <ArrowRight className="h-4 w-4" />
         </Link>
       </div>

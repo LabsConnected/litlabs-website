@@ -7,10 +7,23 @@ import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { AGENTS } from "@/lib/agents";
 import { getCommandsForAgent, executeCommand } from "@/lib/agentCommands";
-import { ArrowLeft, Send, Circle, Loader2, Terminal, Command, HelpCircle, Clock } from "lucide-react";
+import {
+  ArrowLeft,
+  Send,
+  Circle,
+  Loader2,
+  Terminal,
+  Command,
+  HelpCircle,
+  Clock,
+} from "lucide-react";
 import { JarvisAgentProfile } from "@/components/jarvis/JarvisAgentProfile";
 
-type ChatMessage = { role: "user" | "agent" | "system"; text: string; isCommand?: boolean };
+type ChatMessage = {
+  role: "user" | "agent" | "system";
+  text: string;
+  isCommand?: boolean;
+};
 
 export default function AgentPage() {
   const params = useParams();
@@ -24,7 +37,7 @@ export default function AgentPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
-  
+
   // Konami code easter egg
   const [konamiSequence, setKonamiSequence] = useState<string[]>([]);
   const [easterEggUnlocked, setEasterEggUnlocked] = useState(false);
@@ -33,12 +46,24 @@ export default function AgentPage() {
   const [historyIndex, setHistoryIndex] = useState(-1);
   const [showHelp, setShowHelp] = useState(false);
   const terminalInputRef = useRef<HTMLInputElement>(null);
-  
-  const KONAMI_CODE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"];
+
+  const KONAMI_CODE = [
+    "ArrowUp",
+    "ArrowUp",
+    "ArrowDown",
+    "ArrowDown",
+    "ArrowLeft",
+    "ArrowRight",
+    "ArrowLeft",
+    "ArrowRight",
+    "b",
+    "a",
+  ];
   const commands = agent ? getCommandsForAgent(agent.id) : [];
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) router.push(`/sign-in?redirect_url=/agents/${slug}`);
+    if (isLoaded && !isSignedIn)
+      router.push(`/sign-in?redirect_url=/agents/${slug}`);
   }, [isLoaded, isSignedIn, router, slug]);
 
   // Konami code easter egg detection
@@ -47,17 +72,20 @@ export default function AgentPage() {
       const key = e.key;
       const newSequence = [...konamiSequence, key].slice(-10);
       setKonamiSequence(newSequence);
-      
+
       if (newSequence.join(",") === KONAMI_CODE.join(",")) {
         setEasterEggUnlocked(true);
-        setMessages((prev) => [...prev, { 
-          role: "system", 
-          text: "🎮 KONAMI CODE ACTIVATED! Secret mode unlocked. You've discovered the hidden agent protocol. Type /matrix or /vault for bonus commands.",
-          isCommand: true
-        }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            text: "🎮 KONAMI CODE ACTIVATED! Secret mode unlocked. You've discovered the hidden agent protocol. Type /matrix or /vault for bonus commands.",
+            isCommand: true,
+          },
+        ]);
       }
     };
-    
+
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
   }, [konamiSequence]);
@@ -68,27 +96,46 @@ export default function AgentPage() {
   }, []);
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+    chatEndRef.current?.scrollIntoView({
+      behavior: "smooth",
+      block: "nearest",
+    });
   }, [messages]);
 
   if (!isLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
-        <Loader2 size={28} className="animate-spin" style={{ color: T.accentColor }} />
+      <div
+        className="min-h-screen flex items-center justify-center"
+        style={{ backgroundColor: T.bgColor }}
+      >
+        <Loader2
+          size={28}
+          className="animate-spin"
+          style={{ color: T.accentColor }}
+        />
       </div>
     );
   }
 
-  if (slug === "jarvis") {
+  if (slug === "littree" || slug === "jarvis") {
     return <JarvisAgentProfile />;
   }
 
   if (!agent) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center gap-4" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+      <div
+        className="min-h-screen flex flex-col items-center justify-center gap-4"
+        style={{ backgroundColor: T.bgColor, color: T.textColor }}
+      >
         <div className="text-4xl">🤖</div>
         <div className="text-lg font-bold">Agent not found</div>
-        <Link href="/agents" className="text-sm underline" style={{ color: T.accentColor }}>← Back to agents</Link>
+        <Link
+          href="/agents"
+          className="text-sm underline"
+          style={{ color: T.accentColor }}
+        >
+          ← Back to agents
+        </Link>
       </div>
     );
   }
@@ -96,17 +143,32 @@ export default function AgentPage() {
   const handleCommand = async (command: string) => {
     const isCommand = command.startsWith("/");
     const cleanCommand = isCommand ? command.slice(1) : command;
-    
-    setMessages((prev) => [...prev, { role: "user", text: command, isCommand }]);
+
+    setMessages((prev) => [
+      ...prev,
+      { role: "user", text: command, isCommand },
+    ]);
     setCommandHistory((prev) => [...prev, command]);
     setHistoryIndex(-1);
-    
+
     if (isCommand) {
       try {
         const response = await executeCommand(agent, cleanCommand);
-        setMessages((prev) => [...prev, { role: "system", text: response, isCommand: true }]);
+        setMessages((prev) => [
+          ...prev,
+          { role: "system", text: response, isCommand: true },
+        ]);
       } catch (error) {
-        setMessages((prev) => [...prev, { role: "system", text: "Error: " + (error instanceof Error ? error.message : "Unknown error"), isCommand: true }]);
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "system",
+            text:
+              "Error: " +
+              (error instanceof Error ? error.message : "Unknown error"),
+            isCommand: true,
+          },
+        ]);
       }
     } else {
       await sendMessage(command);
@@ -178,7 +240,9 @@ export default function AgentPage() {
       }
     } else if (e.key === "Tab") {
       e.preventDefault();
-      const match = commands.find((cmd) => cmd.name.startsWith(terminalInput.toLowerCase()));
+      const match = commands.find((cmd) =>
+        cmd.name.startsWith(terminalInput.toLowerCase()),
+      );
       if (match) {
         setTerminalInput(match.name);
       }
@@ -186,37 +250,71 @@ export default function AgentPage() {
   };
 
   return (
-    <div className="min-h-screen flex flex-col" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+    <div
+      className="min-h-screen flex flex-col"
+      style={{ backgroundColor: T.bgColor, color: T.textColor }}
+    >
       {/* Top bar */}
-      <div className="flex items-center gap-3 px-5 py-3 border-b shrink-0"
-        style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}>
-        <Link href="/agents" className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity shrink-0"
-          style={{ color: T.textMuted }}>
+      <div
+        className="flex items-center gap-3 px-5 py-3 border-b shrink-0"
+        style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
+      >
+        <Link
+          href="/agents"
+          className="flex items-center gap-1.5 text-xs hover:opacity-70 transition-opacity shrink-0"
+          style={{ color: T.textMuted }}
+        >
           <ArrowLeft size={13} /> Agents
         </Link>
-        <div className="w-px h-4 shrink-0" style={{ backgroundColor: T.borderColor + "40" }} />
-        <div className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-          style={{ backgroundColor: agent.color + "20", border: `1px solid ${agent.color}30` }}>
+        <div
+          className="w-px h-4 shrink-0"
+          style={{ backgroundColor: T.borderColor + "40" }}
+        />
+        <div
+          className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
+          style={{
+            backgroundColor: agent.color + "20",
+            border: `1px solid ${agent.color}30`,
+          }}
+        >
           <Terminal size={16} style={{ color: agent.color }} />
         </div>
         <div className="flex-1 min-w-0">
-          <div className="text-sm font-black truncate" style={{ color: T.textColor }}>{agent.name}</div>
-          <div className="text-[10px] truncate" style={{ color: agent.color }}>{agent.role}</div>
+          <div
+            className="text-sm font-black truncate"
+            style={{ color: T.textColor }}
+          >
+            {agent.name}
+          </div>
+          <div className="text-[10px] truncate" style={{ color: agent.color }}>
+            {agent.role}
+          </div>
         </div>
         <div className="flex items-center gap-1.5 shrink-0">
-          <Circle size={6} className="fill-current animate-pulse" style={{ color: agent.color }} />
-          <span className="text-[9px] font-bold" style={{ color: agent.color }}>ONLINE</span>
+          <Circle
+            size={6}
+            className="fill-current animate-pulse"
+            style={{ color: agent.color }}
+          />
+          <span className="text-[9px] font-bold" style={{ color: agent.color }}>
+            ONLINE
+          </span>
         </div>
       </div>
 
       {/* Easter egg indicator */}
       {easterEggUnlocked && (
-        <div className="px-5 py-2 border-b animate-pulse"
-          style={{ 
-            borderColor: "#00ff00", 
-            backgroundColor: "rgba(0, 255, 0, 0.1)" 
-          }}>
-          <div className="text-[10px] font-mono text-center" style={{ color: "#00ff00" }}>
+        <div
+          className="px-5 py-2 border-b animate-pulse"
+          style={{
+            borderColor: "#00ff00",
+            backgroundColor: "rgba(0, 255, 0, 0.1)",
+          }}
+        >
+          <div
+            className="text-[10px] font-mono text-center"
+            style={{ color: "#00ff00" }}
+          >
             🎮 SECRET MODE ACTIVATED - Type /matrix or /vault
           </div>
         </div>
@@ -225,44 +323,93 @@ export default function AgentPage() {
       {/* Two-column layout */}
       <div className="flex flex-1 overflow-hidden">
         {/* Sidebar — agent info */}
-        <div className="hidden lg:flex flex-col w-64 shrink-0 border-r overflow-y-auto p-5 gap-5"
-          style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+        <div
+          className="hidden lg:flex flex-col w-64 shrink-0 border-r overflow-y-auto p-5 gap-5"
+          style={{
+            borderColor: T.borderColor + "20",
+            backgroundColor: T.boxBg + "80",
+          }}
+        >
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>Role</div>
-            <div className="text-sm font-bold" style={{ color: T.textColor }}>{agent.role}</div>
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest mb-2"
+              style={{ color: T.textMuted }}
+            >
+              Role
+            </div>
+            <div className="text-sm font-bold" style={{ color: T.textColor }}>
+              {agent.role}
+            </div>
           </div>
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>Personality</div>
-            <div className="text-xs italic" style={{ color: T.textMuted }}>{agent.personality}</div>
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest mb-2"
+              style={{ color: T.textMuted }}
+            >
+              Personality
+            </div>
+            <div className="text-xs italic" style={{ color: T.textMuted }}>
+              {agent.personality}
+            </div>
           </div>
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>Domains</div>
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest mb-2"
+              style={{ color: T.textMuted }}
+            >
+              Domains
+            </div>
             <div className="flex flex-wrap gap-1">
               {agent.domains.map((d) => (
-                <span key={d} className="text-[9px] px-2 py-0.5 rounded-full font-bold capitalize"
-                  style={{ backgroundColor: agent.color + "15", color: agent.color }}>{d}</span>
+                <span
+                  key={d}
+                  className="text-[9px] px-2 py-0.5 rounded-full font-bold capitalize"
+                  style={{
+                    backgroundColor: agent.color + "15",
+                    color: agent.color,
+                  }}
+                >
+                  {d}
+                </span>
               ))}
             </div>
           </div>
           <div>
-            <div className="text-[9px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>Quick Commands</div>
+            <div
+              className="text-[9px] font-bold uppercase tracking-widest mb-2"
+              style={{ color: T.textMuted }}
+            >
+              Quick Commands
+            </div>
             <div className="flex flex-wrap gap-1">
               {commands.slice(0, 4).map((cmd) => (
                 <button
                   key={cmd.name}
                   onClick={() => handleCommand("/" + cmd.name)}
                   className="text-[9px] px-2 py-0.5 rounded font-mono transition-all hover:scale-105"
-                  style={{ backgroundColor: agent.color + "15", color: agent.color }}
+                  style={{
+                    backgroundColor: agent.color + "15",
+                    color: agent.color,
+                  }}
                 >
                   /{cmd.name}
                 </button>
               ))}
             </div>
           </div>
-          <div className="mt-auto pt-4 border-t" style={{ borderColor: T.borderColor + "20" }}>
-            <Link href="/studio?tool=agents"
+          <div
+            className="mt-auto pt-4 border-t"
+            style={{ borderColor: T.borderColor + "20" }}
+          >
+            <Link
+              href="/studio?tool=agents"
               className="block w-full py-2 rounded-xl text-xs font-black text-center transition-all hover:scale-[1.02]"
-              style={{ backgroundColor: agent.color + "20", color: agent.color, border: `1px solid ${agent.color}30` }}>
+              style={{
+                backgroundColor: agent.color + "20",
+                color: agent.color,
+                border: `1px solid ${agent.color}30`,
+              }}
+            >
               Open in Studio Terminal
             </Link>
           </div>
@@ -273,47 +420,105 @@ export default function AgentPage() {
           <div className="flex-1 overflow-y-auto p-5 space-y-4">
             {messages.length === 0 && (
               <div className="flex justify-start">
-                <div className="max-w-lg rounded-2xl rounded-tl-sm px-4 py-3"
-                  style={{ backgroundColor: agent.color + "12", border: `1px solid ${agent.color}20` }}>
-                  <div className="text-[10px] font-bold mb-1" style={{ color: agent.color }}>{agent.name}</div>
-                  <p className="text-sm leading-relaxed" style={{ color: T.textColor }}>
-                    Hey — I&apos;m {agent.name}. {agent.personality.split("·")[0].trim()}. Use terminal commands or just chat. Type /help for commands.
+                <div
+                  className="max-w-lg rounded-2xl rounded-tl-sm px-4 py-3"
+                  style={{
+                    backgroundColor: agent.color + "12",
+                    border: `1px solid ${agent.color}20`,
+                  }}
+                >
+                  <div
+                    className="text-[10px] font-bold mb-1"
+                    style={{ color: agent.color }}
+                  >
+                    {agent.name}
+                  </div>
+                  <p
+                    className="text-sm leading-relaxed"
+                    style={{ color: T.textColor }}
+                  >
+                    Hey — I&apos;m {agent.name}.{" "}
+                    {agent.personality.split("·")[0].trim()}. Use terminal
+                    commands or just chat. Type /help for commands.
                   </p>
                 </div>
               </div>
             )}
             {messages.map((msg, i) => (
-              <div key={i} className={"flex " + (msg.role === "user" ? "justify-end" : msg.role === "system" ? "justify-center" : "justify-start")}>
+              <div
+                key={i}
+                className={
+                  "flex " +
+                  (msg.role === "user"
+                    ? "justify-end"
+                    : msg.role === "system"
+                      ? "justify-center"
+                      : "justify-start")
+                }
+              >
                 {msg.role === "system" ? (
-                  <div className="max-w-2xl w-full rounded-xl px-4 py-3 font-mono text-sm"
+                  <div
+                    className="max-w-2xl w-full rounded-xl px-4 py-3 font-mono text-sm"
                     style={{
                       backgroundColor: agent.color + "08",
                       border: "1px solid " + agent.color + "20",
                       color: agent.color,
-                    }}>
+                    }}
+                  >
                     <pre className="whitespace-pre-wrap">{msg.text}</pre>
                   </div>
                 ) : (
-                  <div className={"max-w-lg rounded-2xl px-4 py-3 " + (msg.role === "user" ? "rounded-tr-sm" : "rounded-tl-sm")}
+                  <div
+                    className={
+                      "max-w-lg rounded-2xl px-4 py-3 " +
+                      (msg.role === "user" ? "rounded-tr-sm" : "rounded-tl-sm")
+                    }
                     style={{
-                      backgroundColor: msg.role === "user" ? T.accentColor + "15" : agent.color + "12",
-                      border: "1px solid " + (msg.role === "user" ? T.accentColor + "25" : agent.color + "20"),
-                    }}>
-                    <div className="text-[10px] font-bold mb-1"
-                      style={{ color: msg.role === "user" ? T.accentColor : agent.color }}>
+                      backgroundColor:
+                        msg.role === "user"
+                          ? T.accentColor + "15"
+                          : agent.color + "12",
+                      border:
+                        "1px solid " +
+                        (msg.role === "user"
+                          ? T.accentColor + "25"
+                          : agent.color + "20"),
+                    }}
+                  >
+                    <div
+                      className="text-[10px] font-bold mb-1"
+                      style={{
+                        color:
+                          msg.role === "user" ? T.accentColor : agent.color,
+                      }}
+                    >
                       {msg.role === "user" ? "You" : agent.name}
                     </div>
-                    <p className="text-sm leading-relaxed whitespace-pre-wrap" style={{ color: T.textColor }}>{msg.text}</p>
+                    <p
+                      className="text-sm leading-relaxed whitespace-pre-wrap"
+                      style={{ color: T.textColor }}
+                    >
+                      {msg.text}
+                    </p>
                   </div>
                 )}
               </div>
             ))}
             {sending && (
               <div className="flex justify-start">
-                <div className="rounded-2xl rounded-tl-sm px-4 py-3"
-                  style={{ backgroundColor: agent.color + "12", border: `1px solid ${agent.color}20` }}>
-                  <div className="flex items-center gap-2 text-xs" style={{ color: agent.color }}>
-                    <Loader2 size={12} className="animate-spin" /> {agent.name} is thinking…
+                <div
+                  className="rounded-2xl rounded-tl-sm px-4 py-3"
+                  style={{
+                    backgroundColor: agent.color + "12",
+                    border: `1px solid ${agent.color}20`,
+                  }}
+                >
+                  <div
+                    className="flex items-center gap-2 text-xs"
+                    style={{ color: agent.color }}
+                  >
+                    <Loader2 size={12} className="animate-spin" /> {agent.name}{" "}
+                    is thinking…
                   </div>
                 </div>
               </div>
@@ -322,7 +527,13 @@ export default function AgentPage() {
           </div>
 
           {/* Terminal Command Panel */}
-          <div className="shrink-0 px-5 py-4 border-t" style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "80" }}>
+          <div
+            className="shrink-0 px-5 py-4 border-t"
+            style={{
+              borderColor: T.borderColor + "20",
+              backgroundColor: T.boxBg + "80",
+            }}
+          >
             {/* Quick command buttons */}
             <div className="flex flex-wrap gap-2 mb-3">
               {commands.slice(0, 6).map((cmd) => (
@@ -363,7 +574,10 @@ export default function AgentPage() {
                   borderColor: T.borderColor + "30",
                 }}
               >
-                <div className="text-[10px] font-bold uppercase tracking-widest mb-3" style={{ color: agent.color }}>
+                <div
+                  className="text-[10px] font-bold uppercase tracking-widest mb-3"
+                  style={{ color: agent.color }}
+                >
                   Available Commands
                 </div>
                 <div className="space-y-2">
@@ -379,10 +593,16 @@ export default function AgentPage() {
                         {cmd.name}
                       </code>
                       <div className="flex-1">
-                        <div className="text-[10px] font-bold" style={{ color: T.textColor }}>
+                        <div
+                          className="text-[10px] font-bold"
+                          style={{ color: T.textColor }}
+                        >
                           {cmd.description}
                         </div>
-                        <div className="text-[9px]" style={{ color: T.textMuted }}>
+                        <div
+                          className="text-[9px]"
+                          style={{ color: T.textMuted }}
+                        >
                           {cmd.category}
                         </div>
                       </div>
@@ -409,12 +629,17 @@ export default function AgentPage() {
                   value={terminalInput}
                   onChange={(e) => setTerminalInput(e.target.value)}
                   onKeyDown={handleTerminalKeyDown}
-                  placeholder={"Type a command or message for " + agent.name + "..."}
+                  placeholder={
+                    "Type a command or message for " + agent.name + "..."
+                  }
                   className="flex-1 bg-transparent outline-none text-sm font-mono"
                   style={{ color: T.textColor }}
                 />
                 {commandHistory.length > 0 && (
-                  <div className="flex items-center gap-1 text-[9px]" style={{ color: T.textMuted }}>
+                  <div
+                    className="flex items-center gap-1 text-[9px]"
+                    style={{ color: T.textMuted }}
+                  >
                     <Clock size={10} />
                     {commandHistory.length}
                   </div>

@@ -4,12 +4,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { Gamepad2, Clapperboard, Play, ExternalLink } from "lucide-react";
-import {
-  GAMES,
-  WATCH,
-  TOOLS,
-  type IconComponent,
-} from "./dashboard-data";
+import { GAMES, WATCH, TOOLS, type IconComponent } from "./dashboard-data";
 import dynamic from "next/dynamic";
 import { useState } from "react";
 import SocialFeed from "@/components/SocialFeed";
@@ -18,7 +13,6 @@ import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
 
 const SpotifyPlayer = dynamic(() => import("./SpotifyPlayer"), { ssr: false });
-
 
 /* Lazy-load heavy dashboard panes so the initial dashboard bundle stays small */
 const DashboardContent = dynamic(() => import("./DashboardContent"), {
@@ -93,7 +87,10 @@ export function HeroCard({
       >
         {title}
       </h2>
-      <p className="relative text-sm max-w-lg font-medium" style={{ color: T.textMuted }}>
+      <p
+        className="relative text-sm max-w-lg font-medium"
+        style={{ color: T.textMuted }}
+      >
         {subtitle}
       </p>
     </div>
@@ -141,7 +138,10 @@ export function QuickActionGrid({
             >
               <Icon size={20} style={{ color: a.color }} />
             </div>
-            <span className="relative text-xs font-black" style={{ color: T.textColor }}>
+            <span
+              className="relative text-xs font-black"
+              style={{ color: T.textColor }}
+            >
               {a.label}
             </span>
           </Link>
@@ -267,8 +267,18 @@ export function CenterStage({
             {[
               { label: "AI", icon: Zap, href: "/agents", color: "#ff9ff3" },
               { label: "Post", icon: Send, href: "/social", color: "#00f0ff" },
-              { label: "Img", icon: ImageIcon, href: "/studio?tool=image", color: "#ff00a0" },
-              { label: "Music", icon: Mic, href: "/dashboard?app=music", color: "#8b5cf6" },
+              {
+                label: "Img",
+                icon: ImageIcon,
+                href: "/studio?tool=image",
+                color: "#ff00a0",
+              },
+              {
+                label: "Music",
+                icon: Mic,
+                href: "/dashboard?app=music",
+                color: "#8b5cf6",
+              },
             ].map((action) => {
               const Icon = action.icon;
               return (
@@ -276,10 +286,16 @@ export function CenterStage({
                   key={action.label}
                   href={action.href}
                   className="flex flex-col items-center gap-1.5 p-2 rounded-lg transition-all"
-                  style={{ backgroundColor: `${T.boxBg}60`, border: `1px solid ${action.color}20` }}
+                  style={{
+                    backgroundColor: `${T.boxBg}60`,
+                    border: `1px solid ${action.color}20`,
+                  }}
                 >
                   <Icon size={16} style={{ color: action.color }} />
-                  <span className="text-[9px] font-bold" style={{ color: T.textColor }}>
+                  <span
+                    className="text-[9px] font-bold"
+                    style={{ color: T.textColor }}
+                  >
                     {action.label}
                   </span>
                 </Link>
@@ -336,9 +352,15 @@ export function CenterStage({
                   key={item.label}
                   href={item.href}
                   className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs transition-all"
-                  style={{ backgroundColor: `${T.boxBg}60`, color: T.textColor }}
+                  style={{
+                    backgroundColor: `${T.boxBg}60`,
+                    color: T.textColor,
+                  }}
                 >
-                  <div className="w-1 h-1 rounded-full" style={{ backgroundColor: T.accentColor }} />
+                  <div
+                    className="w-1 h-1 rounded-full"
+                    style={{ backgroundColor: T.accentColor }}
+                  />
                   {item.label}
                 </Link>
               ))}
@@ -348,7 +370,10 @@ export function CenterStage({
           {/* Mobile: Stats */}
           <div className="md:hidden">
             <div className="flex items-center gap-2 mb-2">
-              <span className="text-xs font-bold" style={{ color: T.textMuted }}>
+              <span
+                className="text-xs font-bold"
+                style={{ color: T.textMuted }}
+              >
                 📊 Stats
               </span>
             </div>
@@ -360,10 +385,15 @@ export function CenterStage({
                 <div
                   key={stat.label}
                   className="px-3 py-2 rounded-lg text-xs"
-                  style={{ backgroundColor: `${T.boxBg}60`, color: T.textColor }}
+                  style={{
+                    backgroundColor: `${T.boxBg}60`,
+                    color: T.textColor,
+                  }}
                 >
                   <div className="font-bold">{stat.label}</div>
-                  <div className="opacity-60" style={{ color: T.textMuted }}>{stat.value}</div>
+                  <div className="opacity-60" style={{ color: T.textMuted }}>
+                    {stat.value}
+                  </div>
                 </div>
               ))}
             </div>
@@ -431,23 +461,39 @@ export function CenterStage({
               <div
                 key={v.title}
                 className="group relative rounded-xl border overflow-hidden transition-all hover:scale-[1.01] cursor-pointer"
-                style={{ backgroundColor: `${T.boxBg}80`, borderColor: `${v.color}20` }}
+                style={{
+                  backgroundColor: `${T.boxBg}80`,
+                  borderColor: `${v.color}20`,
+                }}
                 onClick={() => router.push("/showcase")}
               >
                 <div
                   className="h-28 flex items-center justify-center relative"
-                  style={{ background: `linear-gradient(135deg, ${v.color}20, ${T.boxBg})` }}
+                  style={{
+                    background: `linear-gradient(135deg, ${v.color}20, ${T.boxBg})`,
+                  }}
                 >
                   <div
                     className="w-12 h-12 rounded-full flex items-center justify-center transition-transform group-hover:scale-110"
-                    style={{ backgroundColor: `${v.color}25`, border: `1px solid ${v.color}40` }}
+                    style={{
+                      backgroundColor: `${v.color}25`,
+                      border: `1px solid ${v.color}40`,
+                    }}
                   >
                     <Play size={20} style={{ color: v.color }} />
                   </div>
                 </div>
                 <div className="p-3">
-                  <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>{v.title}</div>
-                  <div className="text-[11px] mt-0.5 flex items-center justify-between" style={{ color: T.textMuted }}>
+                  <div
+                    className="text-sm font-bold truncate"
+                    style={{ color: T.textColor }}
+                  >
+                    {v.title}
+                  </div>
+                  <div
+                    className="text-[11px] mt-0.5 flex items-center justify-between"
+                    style={{ color: T.textMuted }}
+                  >
                     <span>{v.channel}</span>
                     <span>{v.views} views</span>
                   </div>
@@ -486,6 +532,7 @@ export function CenterStage({
           <AudioTool />
         </div>
       );
+    case "littree":
     case "jarvis":
       return (
         <div className="h-full flex flex-col min-h-0">
@@ -515,17 +562,33 @@ export function CenterStage({
                   key={t.title}
                   href={href}
                   className="group flex items-start gap-3 p-4 rounded-xl border transition-all hover:scale-[1.01]"
-                  style={{ backgroundColor: `${T.boxBg}80`, borderColor: `${t.color}20` }}
+                  style={{
+                    backgroundColor: `${T.boxBg}80`,
+                    borderColor: `${t.color}20`,
+                  }}
                 >
                   <div
                     className="w-9 h-9 rounded-lg flex items-center justify-center shrink-0 transition-transform group-hover:scale-110"
-                    style={{ backgroundColor: `${t.color}15`, border: `1px solid ${t.color}30` }}
+                    style={{
+                      backgroundColor: `${t.color}15`,
+                      border: `1px solid ${t.color}30`,
+                    }}
                   >
                     <Icon size={16} style={{ color: t.color }} />
                   </div>
                   <div>
-                    <div className="text-sm font-bold" style={{ color: T.textColor }}>{t.title}</div>
-                    <div className="text-[11px] mt-0.5" style={{ color: T.textMuted }}>{t.desc}</div>
+                    <div
+                      className="text-sm font-bold"
+                      style={{ color: T.textColor }}
+                    >
+                      {t.title}
+                    </div>
+                    <div
+                      className="text-[11px] mt-0.5"
+                      style={{ color: T.textMuted }}
+                    >
+                      {t.desc}
+                    </div>
                   </div>
                 </Link>
               );
@@ -545,14 +608,25 @@ export function CenterStage({
 
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
-              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+              <div
+                className="w-1 h-4 rounded-full"
+                style={{ backgroundColor: T.accentColor }}
+              />
+              <span
+                className="text-xs font-black uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
                 Quick Actions
               </span>
             </div>
             <QuickActionGrid
               actions={[
-                { label: "New Post", icon: Send, color: "#00f0ff", href: "/social" },
+                {
+                  label: "New Post",
+                  icon: Send,
+                  color: "#00f0ff",
+                  href: "/social",
+                },
                 {
                   label: "Image Gen",
                   icon: ImageIcon,
@@ -577,8 +651,14 @@ export function CenterStage({
 
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
-              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+              <div
+                className="w-1 h-4 rounded-full"
+                style={{ backgroundColor: T.accentColor }}
+              />
+              <span
+                className="text-xs font-black uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
                 Overview
               </span>
             </div>
@@ -587,8 +667,14 @@ export function CenterStage({
 
           <div>
             <div className="flex items-center gap-2 mb-3">
-              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
-              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+              <div
+                className="w-1 h-4 rounded-full"
+                style={{ backgroundColor: T.accentColor }}
+              />
+              <span
+                className="text-xs font-black uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
                 Community Feed
               </span>
             </div>
@@ -604,9 +690,9 @@ export function CenterStage({
 /* ------------------------------------------------------------------ */
 const MUSIC_TABS = [
   { id: "spotify", label: "Spotify", color: "#1DB954" },
-  { id: "player",  label: "LiTTree LabStudios Player", color: "#ff00a0" },
-  { id: "radio",   label: "Radio", color: "#00f0ff" },
-  { id: "tools",   label: "Audio Tools", color: "#8b5cf6" },
+  { id: "player", label: "LiTTree LabStudios Player", color: "#ff00a0" },
+  { id: "radio", label: "Radio", color: "#00f0ff" },
+  { id: "tools", label: "Audio Tools", color: "#8b5cf6" },
 ] as const;
 
 type MusicTab = (typeof MUSIC_TABS)[number]["id"];
@@ -617,10 +703,20 @@ function MusicHub() {
 
   return (
     <div className="space-y-4">
-      <HeroCard title="Music" subtitle="Stream, create & broadcast." color="#1DB954" />
+      <HeroCard
+        title="Music"
+        subtitle="Stream, create & broadcast."
+        color="#1DB954"
+      />
 
       {/* Tab bar */}
-      <div className="flex gap-1 p-1 rounded-xl" style={{ backgroundColor: `${T.boxBg}60`, border: `1px solid ${T.borderColor}20` }}>
+      <div
+        className="flex gap-1 p-1 rounded-xl"
+        style={{
+          backgroundColor: `${T.boxBg}60`,
+          border: `1px solid ${T.borderColor}20`,
+        }}
+      >
         {MUSIC_TABS.map((t) => (
           <button
             key={t.id}
@@ -629,7 +725,10 @@ function MusicHub() {
             style={{
               backgroundColor: tab === t.id ? `${t.color}20` : "transparent",
               color: tab === t.id ? t.color : T.textMuted,
-              border: tab === t.id ? `1px solid ${t.color}30` : "1px solid transparent",
+              border:
+                tab === t.id
+                  ? `1px solid ${t.color}30`
+                  : "1px solid transparent",
             }}
           >
             {t.label}
@@ -638,10 +737,10 @@ function MusicHub() {
       </div>
 
       {/* Tab content */}
-      {tab === "spotify"  && <SpotifyPlayer />}
-      {tab === "player"   && <MusicPlayer mode="full" />}
-      {tab === "radio"    && <RadioPanel mode="full" />}
-      {tab === "tools"    && <AudioTool />}
+      {tab === "spotify" && <SpotifyPlayer />}
+      {tab === "player" && <MusicPlayer mode="full" />}
+      {tab === "radio" && <RadioPanel mode="full" />}
+      {tab === "tools" && <AudioTool />}
     </div>
   );
 }

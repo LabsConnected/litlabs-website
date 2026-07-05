@@ -13,7 +13,7 @@ import { Cpu, Activity, Zap, Menu, RefreshCw, AlertTriangle } from "lucide-react
 import { JarvisContext } from "@/lib/jarvis-context";
 
 const AGENTS = [
-  { name: "JARVIS", status: "online" as const },
+  { name: "LiTTree", status: "online" as const },
   { name: "Code Architect", status: "idle" as const },
   { name: "DevOps Engineer", status: "idle" as const },
   { name: "Security Auditor", status: "idle" as const },
@@ -77,7 +77,7 @@ export function JarvisTerminalPage() {
   }, [loadFileTree]);
 
   const context: JarvisContext = {
-    route: "/jarvis",
+    route: "/littree",
     terminalOutput,
     commandHistory: commands,
     logs,
@@ -115,7 +115,7 @@ export function JarvisTerminalPage() {
   };
 
   const handleDeploy = () => {
-    addLog("[DEPLOY] Deployment requested via Jarvis");
+    addLog("[DEPLOY] Deployment requested via LiTTree");
   };
 
   const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
@@ -146,9 +146,9 @@ export function JarvisTerminalPage() {
                 <div className="text-[10px] font-black uppercase tracking-[0.35em] text-orange-500">
                   LiTTree LabStudios
                 </div>
-                <h1 className="text-2xl font-bold lg:text-3xl">Jarvis Terminal</h1>
+                <h1 className="text-2xl font-bold lg:text-3xl">LiTTree Core</h1>
                 <p className="text-sm text-neutral-400">
-                  AI Dev OS • Build, Ship, Scale.
+                  AI Creation System • Build, Grow, Launch.
                 </p>
               </div>
             </div>

@@ -20,7 +20,11 @@ import {
   FilePlus,
   RotateCcw,
 } from "lucide-react";
-import type { JarvisContext, JarvisAction, JarvisThinkResponse } from "@/lib/jarvis-context";
+import type {
+  JarvisContext,
+  JarvisAction,
+  JarvisThinkResponse,
+} from "@/lib/jarvis-context";
 
 const slashCommands = [
   { label: "/scan", desc: "Scan project and terminal state" },
@@ -36,8 +40,16 @@ const slashCommands = [
 ];
 
 const quickActions = [
-  { label: "Explain error", icon: Sparkles, prompt: "explain the current terminal error" },
-  { label: "Generate command", icon: Command, prompt: "generate a command to fix the current issue" },
+  {
+    label: "Explain error",
+    icon: Sparkles,
+    prompt: "explain the current terminal error",
+  },
+  {
+    label: "Generate command",
+    icon: Command,
+    prompt: "generate a command to fix the current issue",
+  },
   { label: "Create agent", icon: Bot, prompt: "create an agent workflow" },
   { label: "Deploy app", icon: Rocket, prompt: "deploy the app" },
 ];
@@ -70,8 +82,7 @@ export function JarvisAssistantPanel({
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "jarvis",
-      text:
-        "I am connected to your terminal, files, logs, and agents. Ask me to scan, fix, explain, or run commands. Use `/` for quick commands.",
+      text: "I am connected to your terminal, files, logs, and agents. Ask me to scan, fix, explain, or run commands. Use `/` for quick commands.",
     },
   ]);
   const [loading, setLoading] = useState(false);
@@ -80,7 +91,10 @@ export function JarvisAssistantPanel({
   const scrollRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
+    scrollRef.current?.scrollTo({
+      top: scrollRef.current.scrollHeight,
+      behavior: "smooth",
+    });
   }, [messages]);
 
   async function askJarvis(rawInput: string) {
@@ -119,7 +133,8 @@ export function JarvisAssistantPanel({
         const next = [...prev];
         const last = next[next.length - 1];
         if (last?.role === "jarvis" && last.loading) {
-          last.text = err instanceof Error ? err.message : "Failed to reach Jarvis.";
+          last.text =
+            err instanceof Error ? err.message : "Failed to reach LiTTree.";
           last.loading = false;
         }
         return next;
@@ -133,15 +148,25 @@ export function JarvisAssistantPanel({
     if (action.type === "insert_command" && action.command) {
       onInsertCommand?.(action.command);
     } else if (action.type === "run_command" && action.command) {
-      const confirmed = window.confirm(`Run this command?\n\n${action.command}`);
+      const confirmed = window.confirm(
+        `Run this command?\n\n${action.command}`,
+      );
       if (confirmed) onRunCommand?.(action.command);
-    } else if (action.type === "create_file" && action.filePath && action.content) {
+    } else if (
+      action.type === "create_file" &&
+      action.filePath &&
+      action.content
+    ) {
       onCreateFile?.(action.filePath, action.content);
     } else if (action.type === "start_agent" && action.agentName) {
       onStartAgent?.(action.agentName);
     } else if (action.type === "deploy") {
       onDeploy?.();
-    } else if (action.type === "edit_file" && action.filePath && action.content) {
+    } else if (
+      action.type === "edit_file" &&
+      action.filePath &&
+      action.content
+    ) {
       onCreateFile?.(action.filePath, action.content);
     }
   }
@@ -169,11 +194,23 @@ export function JarvisAssistantPanel({
     : [];
 
   const contextChips = [
-    { label: "Terminal", active: context.terminalOutput.length > 0, icon: Terminal },
-    { label: context.selectedFile?.path || "No file", active: !!context.selectedFile, icon: FileCode },
+    {
+      label: "Terminal",
+      active: context.terminalOutput.length > 0,
+      icon: Terminal,
+    },
+    {
+      label: context.selectedFile?.path || "No file",
+      active: !!context.selectedFile,
+      icon: FileCode,
+    },
     { label: "Logs", active: context.logs.length > 0, icon: Logs },
     { label: "Agents", active: context.agents.length > 0, icon: Cpu },
-    { label: context.websocketStatus === "connected" ? "Online" : "Offline", active: context.websocketStatus === "connected", icon: context.websocketStatus === "connected" ? Wifi : WifiOff },
+    {
+      label: context.websocketStatus === "connected" ? "Online" : "Offline",
+      active: context.websocketStatus === "connected",
+      icon: context.websocketStatus === "connected" ? Wifi : WifiOff,
+    },
   ];
 
   return (
@@ -184,8 +221,10 @@ export function JarvisAssistantPanel({
             <Wrench className="h-4 w-4 text-orange-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold">Jarvis Command Center</h2>
-            <p className="text-xs text-neutral-500">AI connected to terminal, files, logs, agents</p>
+            <h2 className="text-lg font-bold">LiTTree Command Center</h2>
+            <p className="text-xs text-neutral-500">
+              AI connected to terminal, files, logs, agents
+            </p>
           </div>
         </div>
 
@@ -220,12 +259,12 @@ export function JarvisAssistantPanel({
             }`}
           >
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {msg.role === "user" ? "You" : "Jarvis"}
+              {msg.role === "user" ? "You" : "LiTTree"}
             </div>
             {msg.loading ? (
               <div className="flex items-center gap-2 text-neutral-400">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
-                Jarvis is thinking...
+                LiTTree is thinking...
               </div>
             ) : (
               <div className="prose prose-invert prose-sm max-w-none">
@@ -249,7 +288,11 @@ export function JarvisAssistantPanel({
                   onClick={() => copyText(msg.text, idx)}
                   className="flex items-center gap-1.5 rounded-lg border border-neutral-800 px-3 py-1.5 text-xs font-bold text-neutral-400 hover:border-neutral-600 hover:text-neutral-200"
                 >
-                  {copied === idx ? <Check className="h-3 w-3" /> : <Copy className="h-3 w-3" />}
+                  {copied === idx ? (
+                    <Check className="h-3 w-3" />
+                  ) : (
+                    <Copy className="h-3 w-3" />
+                  )}
                   {copied === idx ? "Copied" : "Copy"}
                 </button>
               </div>
@@ -285,7 +328,7 @@ export function JarvisAssistantPanel({
               setShowSlash(e.target.value.startsWith("/"));
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Jarvis or type / for commands..."
+            placeholder="Ask LiTTree or type / for commands..."
             className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-orange-600"
           />
           <button
@@ -327,7 +370,8 @@ export function JarvisAssistantPanel({
 function ActionIcon({ type }: { type: JarvisAction["type"] }) {
   if (type === "run_command") return <Play className="h-3 w-3" />;
   if (type === "insert_command") return <Terminal className="h-3 w-3" />;
-  if (type === "create_file" || type === "edit_file") return <FilePlus className="h-3 w-3" />;
+  if (type === "create_file" || type === "edit_file")
+    return <FilePlus className="h-3 w-3" />;
   if (type === "start_agent") return <Bot className="h-3 w-3" />;
   if (type === "deploy") return <Rocket className="h-3 w-3" />;
   return <Sparkles className="h-3 w-3" />;
@@ -339,7 +383,10 @@ function JarvisMarkdown({ text }: { text: string }) {
     <>
       {parts.map((part, i) => {
         if (part.startsWith("```")) {
-          const code = part.replace(/```(?:\w+)?\n?/, "").replace(/```$/, "").trim();
+          const code = part
+            .replace(/```(?:\w+)?\n?/, "")
+            .replace(/```$/, "")
+            .trim();
           return (
             <pre
               key={i}

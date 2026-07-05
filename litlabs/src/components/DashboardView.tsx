@@ -24,13 +24,21 @@ export default function DashboardView() {
       {/* Center */}
       <main
         className={`flex-1 min-w-0 p-4 lg:p-6 ${
-          activeApp === "jarvis"
+          activeApp === "littree" || activeApp === "jarvis"
             ? "flex flex-col overflow-hidden"
             : "overflow-y-auto"
         }`}
       >
         {/* Mobile app bar */}
-        <div className="md:hidden flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide" onWheel={(e) => { if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) { e.currentTarget.scrollLeft += e.deltaY; e.preventDefault(); } }}>
+        <div
+          className="md:hidden flex gap-2 overflow-x-auto pb-4 mb-4 scrollbar-hide"
+          onWheel={(e) => {
+            if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+              e.currentTarget.scrollLeft += e.deltaY;
+              e.preventDefault();
+            }
+          }}
+        >
           {APPS.map((app) => {
             const Icon = app.icon;
             const active = activeApp === app.id;
@@ -59,5 +67,3 @@ export default function DashboardView() {
     </div>
   );
 }
-
-

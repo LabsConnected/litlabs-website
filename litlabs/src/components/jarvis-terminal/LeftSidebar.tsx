@@ -20,8 +20,8 @@ import {
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Jarvis Terminal", icon: Terminal, href: "/jarvis" },
-  { label: "Files", icon: FolderOpen, href: "/jarvis?tab=files" },
+  { label: "LiTTree Core", icon: Terminal, href: "/littree" },
+  { label: "Files", icon: FolderOpen, href: "/littree?tab=files" },
   { label: "Agents", icon: Bot, href: "/agents" },
   { label: "Deployments", icon: Rocket, href: "/deployments" },
   { label: "API Keys", icon: Key, href: "/settings?tab=cli" },
@@ -49,7 +49,9 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-xs font-black">
           L
         </div>
-        <div className="text-orange-500 font-black tracking-wide">LiTTree OS</div>
+        <div className="text-orange-500 font-black tracking-wide">
+          LiTTree OS
+        </div>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto">
@@ -59,7 +61,9 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
           </div>
           {navItems.map((item) => {
             const Icon = item.icon;
-            const active = pathname === item.href || pathname.startsWith(item.href.split("?")[0]);
+            const active =
+              pathname === item.href ||
+              pathname.startsWith(item.href.split("?")[0]);
             return (
               <Link
                 key={item.label}
@@ -109,11 +113,21 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
               {user.firstName?.[0] || user.username?.[0] || "U"}
             </div>
             <div className="flex-1 overflow-hidden">
-              <div className="truncate text-sm font-semibold">{user.fullName || user.username || "User"}</div>
-              <div className="truncate text-[10px] text-neutral-500">{user.primaryEmailAddress?.emailAddress}</div>
-              <div className="text-[10px] uppercase tracking-wider text-orange-400">{(user.publicMetadata as { role?: string } | undefined)?.role || "user"}</div>
+              <div className="truncate text-sm font-semibold">
+                {user.fullName || user.username || "User"}
+              </div>
+              <div className="truncate text-[10px] text-neutral-500">
+                {user.primaryEmailAddress?.emailAddress}
+              </div>
+              <div className="text-[10px] uppercase tracking-wider text-orange-400">
+                {(user.publicMetadata as { role?: string } | undefined)?.role ||
+                  "user"}
+              </div>
             </div>
-            <Link href="/sign-in" className="rounded p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-white">
+            <Link
+              href="/sign-in"
+              className="rounded p-1.5 text-neutral-500 hover:bg-neutral-800 hover:text-white"
+            >
               <LogOut className="h-4 w-4" />
             </Link>
           </div>

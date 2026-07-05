@@ -27,7 +27,7 @@ export default function JarvisChatBox() {
   return (
     <section className="rounded-2xl border border-white/10 bg-zinc-950/80 p-4 shadow-2xl space-y-3">
       <div>
-        <h2 className="text-xl font-black">🤖 Jarvis Gateway</h2>
+        <h2 className="text-xl font-black">🌳 LiTTree Gateway</h2>
         <p className="text-sm text-zinc-400">
           Local AI powered by Ollama through LiTTree&apos;s unified AI route.
         </p>
@@ -38,7 +38,7 @@ export default function JarvisChatBox() {
         rows={5}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Ask Jarvis anything..."
+        placeholder="Ask LiTTree anything..."
       />
 
       <button
