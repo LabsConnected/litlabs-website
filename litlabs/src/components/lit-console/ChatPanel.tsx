@@ -1,7 +1,16 @@
 "use client";
 
-import { useEffect, useRef } from "react";
-import { User, Bot, Loader2, FileCode, Terminal } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  User,
+  Bot,
+  Loader2,
+  FileCode,
+  Terminal,
+  Copy,
+  Check,
+  Play,
+} from "lucide-react";
 import StarterActions from "./StarterActions";
 import { LC, LC_SHADOW } from "./lit-console-theme";
 
@@ -16,52 +25,186 @@ interface ChatPanelProps {
   messages: Message[];
   onSend: (text: string) => void;
   loading?: boolean;
+  onApprove?: (command: string) => void;
+}
+
+function CodeBlock({ lang, code }: { lang: string; code: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = useCallback(() => {
+    navigator.clipboard.writeText(code).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    });
+  }, [code]);
+
+  return (
+    <div
+      className="group relative my-2 overflow-hidden rounded-lg border"
+      style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+    >
+      <div
+        className="flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-wider"
+        style={{ backgroundColor: LC.bgPanelHover, color: LC.textDim }}
+      >
+        <span>{lang || "code"}</span>
+        <button
+          onClick={handleCopy}
+          className="rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
+          style={{ color: LC.textMuted }}
+          title="Copy"
+        >
+          {copied ? (
+            <Check size={12} style={{ color: LC.success }} />
+          ) : (
+            <Copy size={12} />
+          )}
+        </button>
+      </div>
+      <pre
+        className="overflow-x-auto p-3 text-xs"
+        style={{ color: LC.textDim, fontFamily: LC.fontMono }}
+      >
+        <code>{code}</code>
+      </pre>
+    </div>
+  );
 }
 
 function formatContent(text: string) {
   const parts = text.split(/(```[\s\S]*?```)/g);
   return parts.map((part, i) => {
     if (part.startsWith("```")) {
-      const code = part.replace(/```[a-z]*\n?/, "").replace(/```$/, "");
-      return (
-        <pre
-          key={i}
-          className="my-2 overflow-x-auto rounded-lg border p-3 text-xs"
-          style={{
-            backgroundColor: LC.bgSecondary,
-            borderColor: LC.border,
-            color: LC.textDim,
-            fontFamily: LC.fontMono,
-          }}
-        >
-          <code>{code}</code>
-        </pre>
-      );
+      const fence = part.match(/^```(\w+)?\n?/);
+      const lang = fence?.[1] || "";
+      const code = part.replace(/^```(\w+)?\n?/, "").replace(/```$/, "");
+      return <CodeBlock key={i} lang={lang} code={code} />;
     }
     return (
-      <div key={i} className="whitespace-pre-wrap text-sm leading-relaxed" style={{ color: LC.text }}>
+      <div
+        key={i}
+        className="whitespace-pre-wrap text-sm leading-relaxed"
+        style={{ color: LC.text }}
+      >
         {part}
       </div>
     );
   });
 }
 
-export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps) {
+export default function ChatPanel({
+  messages,
+  onSend,
+  loading,
+  onApprove,
+}: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollRef = useRef<HTMLDivElement>(null);
+  const isScrolledRef = useRef(false);
+  const [activeLitId, setActiveLitId] = useState<string | null>(
+    () => [...messages].reverse().find((m) => m.role === "lit")?.id || null,
+  );
+  const [revealed, setRevealed] = useState<Record<string, number>>(() => {
+    const latest = [...messages].reverse().find((m) => m.role === "lit");
+    const init: Record<string, number> = {};
+    messages.forEach((m) => {
+      if (m.role === "lit") {
+        init[m.id] = m.id === latest?.id ? 0 : m.content.length;
+      }
+    });
+    return init;
+  });
+
+  useEffect(() => {
+    const latestLit = [...messages].reverse().find((m) => m.role === "lit");
+    if (!latestLit || latestLit.id === activeLitId) return;
+    setActiveLitId(latestLit.id);
+    isScrolledRef.current = false;
+    setRevealed((prev) => {
+      const next: Record<string, number> = { ...prev, [latestLit.id]: 0 };
+      messages.forEach((m) => {
+        if (m.role === "lit" && m.id !== latestLit.id) {
+          next[m.id] = m.content.length;
+        }
+      });
+      return next;
+    });
+  }, [messages, activeLitId]);
+
+  useEffect(() => {
+    if (!activeLitId || isScrolledRef.current) return;
+    const content = messages.find((m) => m.id === activeLitId)?.content || "";
+    const timer = setInterval(() => {
+      setRevealed((prev) => {
+        const c = prev[activeLitId] || 0;
+        if (c >= content.length) {
+          clearInterval(timer);
+          return prev;
+        }
+        return { ...prev, [activeLitId]: c + 1 };
+      });
+    }, 10);
+    return () => clearInterval(timer);
+  }, [activeLitId]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, loading]);
 
+  const handleScroll = useCallback(() => {
+    if (!activeLitId || isScrolledRef.current) return;
+    const el = scrollRef.current;
+    if (!el) return;
+    const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+    if (isAtBottom) return;
+    isScrolledRef.current = true;
+    setRevealed((prev) => {
+      const content = messages.find((m) => m.id === activeLitId)?.content || "";
+      return { ...prev, [activeLitId]: content.length };
+    });
+  }, [activeLitId, messages]);
+
   const isEmpty = messages.length === 0;
+
+  const renderLitContent = (m: Message) => {
+    const rawLen = revealed[m.id];
+    const isStreaming =
+      m.id === activeLitId &&
+      (rawLen === undefined || rawLen < m.content.length);
+    const len = rawLen ?? 0;
+    if (isStreaming) {
+      return (
+        <div
+          className="whitespace-pre-wrap text-sm leading-relaxed"
+          style={{ color: LC.text }}
+        >
+          {m.content.slice(0, len)}
+          <span
+            className="ml-0.5 inline-block h-4 w-0.5 animate-pulse"
+            style={{ backgroundColor: LC.accentCyan }}
+          />
+        </div>
+      );
+    }
+    return <div className="text-sm">{formatContent(m.content)}</div>;
+  };
 
   return (
     <div
       className="mx-auto flex h-full w-full max-w-[820px] flex-col overflow-hidden rounded-2xl border"
-      style={{ backgroundColor: LC.bgPanel, borderColor: LC.border, boxShadow: LC_SHADOW.panel }}
+      style={{
+        backgroundColor: LC.bgPanel,
+        borderColor: LC.border,
+        boxShadow: LC_SHADOW.panel,
+      }}
     >
-      <div className="flex items-center gap-3 border-b px-5 py-4" style={{ borderColor: LC.border }}>
-        <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: LC.bgSecondary }}>
+      <div
+        className="flex items-center gap-3 border-b px-5 py-4"
+        style={{ borderColor: LC.border }}
+      >
+        <div
+          className="flex h-8 w-8 items-center justify-center rounded-lg"
+          style={{ backgroundColor: LC.bgSecondary }}
+        >
           <Terminal size={18} style={{ color: LC.accentCyan }} />
         </div>
         <div>
@@ -74,23 +217,48 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
         </div>
       </div>
 
-      <div className="flex-1 space-y-4 overflow-y-auto p-5">
+      <div
+        ref={scrollRef}
+        onScroll={handleScroll}
+        className="flex-1 space-y-4 overflow-y-auto p-5"
+      >
         {isEmpty ? (
           <div className="flex h-full flex-col justify-center">
             <StarterActions onSelect={onSend} />
+            <p
+              className="mt-4 text-center text-xs"
+              style={{ color: LC.textDim }}
+            >
+              Or type a command, question, or build request.
+            </p>
           </div>
         ) : (
           messages.map((m) => (
-            <div key={m.id} className={m.role === "user" ? "flex justify-end" : "flex justify-start"}>
+            <div
+              key={m.id}
+              className={
+                m.role === "user" ? "flex justify-end" : "flex justify-start"
+              }
+            >
               {m.role === "user" && (
                 <div className="flex max-w-[80%] items-end gap-2">
                   <div
                     className="rounded-2xl rounded-br-md px-4 py-2.5 text-sm"
-                    style={{ backgroundColor: LC.bgPanelHover, borderRight: `3px solid ${LC.accentCyan}`, color: LC.text }}
+                    style={{
+                      backgroundColor: LC.bgPanelHover,
+                      borderRight: `3px solid ${LC.accentCyan}`,
+                      color: LC.text,
+                    }}
                   >
                     {m.content}
                   </div>
-                  <div className="rounded-full p-1.5" style={{ backgroundColor: LC.bgSecondary, color: LC.accentCyan }}>
+                  <div
+                    className="rounded-full p-1.5"
+                    style={{
+                      backgroundColor: LC.bgSecondary,
+                      color: LC.accentCyan,
+                    }}
+                  >
                     <User size={14} />
                   </div>
                 </div>
@@ -98,10 +266,16 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
 
               {m.role === "lit" && (
                 <div className="flex w-full gap-3">
-                  <div className="mt-1 shrink-0 rounded-full p-1.5" style={{ backgroundColor: LC.bgSecondary, color: LC.accentCyan }}>
+                  <div
+                    className="mt-1 shrink-0 rounded-full p-1.5"
+                    style={{
+                      backgroundColor: LC.bgSecondary,
+                      color: LC.accentCyan,
+                    }}
+                  >
                     <Bot size={14} />
                   </div>
-                  <div className="min-w-0 flex-1 text-sm">{formatContent(m.content)}</div>
+                  <div className="min-w-0 flex-1">{renderLitContent(m)}</div>
                 </div>
               )}
 
@@ -109,7 +283,10 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
                 <div className="flex w-full gap-3">
                   <div
                     className="mt-1 shrink-0 rounded-full p-1.5"
-                    style={{ backgroundColor: `${LC.accentOrange}15`, color: LC.accentOrange }}
+                    style={{
+                      backgroundColor: `${LC.accentOrange}15`,
+                      color: LC.accentOrange,
+                    }}
                   >
                     <FileCode size={14} />
                   </div>
@@ -121,23 +298,45 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
                       borderLeft: `3px solid ${LC.accentOrange}`,
                     }}
                   >
-                    <div className="flex items-center gap-2 text-xs font-medium" style={{ color: LC.text }}>
+                    <div
+                      className="flex items-center gap-2 text-xs font-medium"
+                      style={{ color: LC.text }}
+                    >
                       {m.meta?.status === "running" && (
-                        <Loader2 size={14} className="animate-spin" style={{ color: LC.accentOrange }} />
+                        <Loader2
+                          size={14}
+                          className="animate-spin"
+                          style={{ color: LC.accentOrange }}
+                        />
                       )}
                       {m.meta?.status === "done" && (
-                        <span className="rounded px-1 py-0.5 text-[10px]" style={{ backgroundColor: `${LC.success}20`, color: LC.success }}>
+                        <span
+                          className="rounded px-1 py-0.5 text-[10px]"
+                          style={{
+                            backgroundColor: `${LC.success}20`,
+                            color: LC.success,
+                          }}
+                        >
                           done
                         </span>
                       )}
                       {m.meta?.status === "error" && (
-                        <span className="rounded px-1 py-0.5 text-[10px]" style={{ backgroundColor: `${LC.danger}20`, color: LC.danger }}>
+                        <span
+                          className="rounded px-1 py-0.5 text-[10px]"
+                          style={{
+                            backgroundColor: `${LC.danger}20`,
+                            color: LC.danger,
+                          }}
+                        >
                           error
                         </span>
                       )}
                       {m.meta?.tool || "Tool"}
                     </div>
-                    <div className="mt-1 text-xs" style={{ color: LC.textMuted }}>
+                    <div
+                      className="mt-1 text-xs"
+                      style={{ color: LC.textMuted }}
+                    >
                       {m.content}
                     </div>
                   </div>
@@ -145,9 +344,35 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
               )}
 
               {m.role === "system" && (
-                <div className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-xs" style={{ backgroundColor: LC.bgSecondary, color: LC.textDim }}>
-                  <Terminal size={14} />
-                  {m.content}
+                <div
+                  className="flex w-full flex-col gap-2 rounded-md px-3 py-2 text-xs"
+                  style={{ backgroundColor: LC.bgSecondary, color: LC.textDim }}
+                >
+                  <div className="flex items-center gap-2">
+                    <Terminal size={14} />
+                    {m.content}
+                  </div>
+                  {(() => {
+                    const cmd = m.content.match(/`([^`]+)`/)?.[1];
+                    if (
+                      !cmd ||
+                      !onApprove ||
+                      !m.content.toLowerCase().includes("approve")
+                    )
+                      return null;
+                    return (
+                      <button
+                        onClick={() => onApprove(cmd)}
+                        className="flex w-fit items-center gap-1 rounded px-2 py-1 text-xs font-semibold"
+                        style={{
+                          backgroundColor: LC.accentOrange,
+                          color: "#000",
+                        }}
+                      >
+                        <Play size={12} /> Approve
+                      </button>
+                    );
+                  })()}
                 </div>
               )}
             </div>
@@ -155,8 +380,14 @@ export default function ChatPanel({ messages, onSend, loading }: ChatPanelProps)
         )}
 
         {loading && (
-          <div className="flex items-center gap-2 text-xs" style={{ color: LC.textMuted }}>
-            <Loader2 size={14} className="animate-spin" style={{ color: LC.accentCyan }} />
+          <div
+            className="flex items-center gap-2 text-xs"
+            style={{ color: LC.textMuted }}
+          >
+            <span
+              className="h-2 w-2 animate-pulse rounded-full"
+              style={{ backgroundColor: LC.accentCyan }}
+            />
             LiT is thinking...
           </div>
         )}

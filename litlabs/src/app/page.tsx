@@ -563,7 +563,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (supabaseSignedIn || clerkSignedIn) {
-      router.replace("/dashboard");
+      router.replace("/lit-console");
     }
   }, [supabaseSignedIn, clerkSignedIn, router]);
 

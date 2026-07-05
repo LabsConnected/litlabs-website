@@ -133,23 +133,23 @@ export default function LitConsole() {
     [input, loading, askLiT],
   );
 
-  const handleApprove = useCallback(() => {
-    if (!pendingCommand) return;
+  const handleApprove = useCallback((command: string) => {
+    if (!command) return;
     setMessages((prev) => [
       ...prev,
       {
         id: Math.random().toString(36).slice(2),
         role: "system",
-        content: `Running: \`${pendingCommand}\``,
+        content: `Running: \`${command}\``,
       },
     ]);
     setDrawerOpen(true);
     setDrawerTab("terminal");
     setTimeout(() => {
-      termRef.current?.runCommand(pendingCommand);
+      termRef.current?.runCommand(command);
     }, 300);
     setPendingCommand(null);
-  }, [pendingCommand]);
+  }, []);
 
   const drawerContent = (() => {
     if (drawerTab === "terminal") {
@@ -237,7 +237,12 @@ export default function LitConsole() {
       />
 
       <main className="relative z-10 flex flex-1 justify-center overflow-hidden p-4 pb-2">
-        <ChatPanel messages={messages} onSend={handleSend} loading={loading} />
+        <ChatPanel
+          messages={messages}
+          onSend={handleSend}
+          loading={loading}
+          onApprove={handleApprove}
+        />
       </main>
 
       {pendingCommand && (
@@ -256,7 +261,7 @@ export default function LitConsole() {
             </code>
           </span>
           <button
-            onClick={handleApprove}
+            onClick={() => handleApprove(pendingCommand)}
             className="flex items-center gap-1 rounded-full px-2.5 py-1 font-bold"
             style={{ backgroundColor: LC.accentOrange, color: "#000" }}
           >
@@ -272,14 +277,23 @@ export default function LitConsole() {
         onRun={() => handleSend("/scan")}
         agent={activeAgent}
         model={activeModel}
-        onAgentChange={() =>
-          setActiveAgent((a) => (a === "Director" ? "Coder" : "Director"))
-        }
-        onModelChange={() =>
-          setActiveModel((m) =>
-            m === "gemini-2.5-flash" ? "gemini-2.5-pro" : "gemini-2.5-flash",
-          )
-        }
+        onAgentChange={setActiveAgent}
+        onModelChange={setActiveModel}
+        onToggleTerminal={() => {
+          setDrawerOpen(true);
+          setDrawerTab("terminal");
+        }}
+        onCreateFile={() => {
+          setDrawerOpen(true);
+          setDrawerTab("files");
+        }}
+        onBuild={() => {
+          setDrawerOpen(true);
+          setDrawerTab("preview");
+        }}
+        onGenerateMedia={() => setDrawerOpen(true)}
+        onDeploy={() => setDrawerOpen(true)}
+        onSaveWorkflow={() => setDrawerOpen(true)}
       />
 
       <button
