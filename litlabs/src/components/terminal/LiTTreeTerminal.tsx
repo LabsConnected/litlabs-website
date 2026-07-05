@@ -268,7 +268,7 @@ function DemoTerminal({
         {outputLines.map((line) => (
           <div
             key={line.id}
-            className="whitespace-pre-wrap break-words leading-snug min-h-[1.4em]"
+            className="whitespace-pre-wrap wrap-break-word leading-snug min-h-[1.4em]"
           >
             {line.isInput ? (
               <span>

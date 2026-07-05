@@ -20,7 +20,7 @@ export default function MemoriesPage() {
     setLoading(true);
     try {
       const res = await fetch(
-        `/api/memory/search?q=${encodeURIComponent(q)}&limit=30`
+        `/api/memory/search?q=${encodeURIComponent(q)}&limit=30`,
       );
       const data = await res.json();
       setMemories(data.results || []);
@@ -82,7 +82,9 @@ export default function MemoriesPage() {
 
         {!loading && memories.length === 0 && (
           <p className="text-zinc-500 text-center py-12">
-            {query ? "No memories match your search." : "No memories yet. Start chatting to create some."}
+            {query
+              ? "No memories match your search."
+              : "No memories yet. Start chatting to create some."}
           </p>
         )}
 
@@ -93,7 +95,7 @@ export default function MemoriesPage() {
               className="rounded-xl border border-white/10 bg-zinc-950/80 p-4 flex justify-between items-start gap-4"
             >
               <div className="flex-1 min-w-0">
-                <p className="text-sm leading-relaxed break-words">
+                <p className="text-sm leading-relaxed wrap-break-word">
                   {mem.memory || mem.chunk}
                 </p>
                 <div className="flex gap-4 mt-2 text-xs text-zinc-500">
