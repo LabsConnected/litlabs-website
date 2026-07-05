@@ -373,7 +373,9 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                               {n.content}
                             </div>
                             <div className="text-[9px] opacity-40 mt-0.5">
-                              {n.created_at ? new Date(n.created_at).toLocaleDateString() : ""}
+                              {n.created_at
+                                ? new Date(n.created_at).toLocaleDateString()
+                                : ""}
                             </div>
                           </div>
                         </div>
@@ -581,18 +583,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                 {authLoaded && isSignedIn ? (
                   <WalletBadge accentColor={resolvedColors.accentColor} />
                 ) : (
-                  <>
-                    <Coins
-                      size={12}
-                      style={{ color: resolvedColors.accentColor }}
-                    />
-                    <span
-                      className="text-xs font-bold"
-                      style={{ color: resolvedColors.accentColor }}
-                    >
-                      Sign In
-                    </span>
-                  </>
+                  <Link
+                    href="/sign-up"
+                    className="flex items-center gap-1.5 text-xs font-bold"
+                    style={{ color: resolvedColors.accentColor }}
+                  >
+                    <Coins size={12} />
+                    Get 500 free credits
+                  </Link>
                 )}
               </div>
               <button
@@ -615,9 +613,3 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
     </nav>
   );
 }
-
-
-
-
-
-

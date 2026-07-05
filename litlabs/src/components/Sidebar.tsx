@@ -731,7 +731,7 @@ function SidebarContent({
         className="px-3 py-3 border-t"
         style={{ borderColor: `${T.borderColor}30` }}
       >
-        {!collapsed && (
+        {!collapsed && isSignedIn && (
           <div className="space-y-1.5">
             <div
               className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
@@ -768,6 +768,19 @@ function SidebarContent({
               </span>
             </div>
           </div>
+        )}
+        {!collapsed && !isSignedIn && (
+          <Link
+            href="/sign-up"
+            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold transition-opacity hover:opacity-90"
+            style={{
+              backgroundColor: T.accentColor + "15",
+              color: T.accentColor,
+              border: `1px solid ${T.accentColor}30`,
+            }}
+          >
+            <Coins size={10} /> Get 500 free credits
+          </Link>
         )}
       </div>
     </div>
