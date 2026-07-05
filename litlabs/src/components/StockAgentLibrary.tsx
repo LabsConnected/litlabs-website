@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, type ComponentType } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { Search, Download, Sparkles, Filter, Star, Users, TrendingUp, Code, Palette, Music, Pencil, BarChart3, Globe, Shield, Zap } from "lucide-react";
 
@@ -170,7 +170,7 @@ const STOCK_AGENTS: StockAgent[] = [
   },
 ];
 
-const ICONS: Record<string, any> = {
+const ICONS: Record<string, ComponentType<{ className?: string; size?: number; style?: React.CSSProperties }>> = {
   brain: Sparkles,
   sparkles: Sparkles,
   code: Code,

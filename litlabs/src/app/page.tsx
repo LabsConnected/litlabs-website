@@ -221,7 +221,7 @@ function LandingPage() {
                 <h3 className="font-bold" style={{ color: '#f8fafc' }}>Best first click</h3>
               </div>
               <p className="text-sm opacity-55 leading-relaxed">
-                Start in <span className="font-bold text-slate-100">Studio</span> to build, or browse <span className="font-bold text-slate-100">Agents</span> to see what's possible. Either way, you're productive in minutes.
+                Start in <span className="font-bold text-slate-100">Studio</span> to build, or browse <span className="font-bold text-slate-100">Agents</span> to see what&apos;s possible. Either way, you&apos;re productive in minutes.
               </p>
             </div>
             <div className="rounded-3xl border p-6" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>

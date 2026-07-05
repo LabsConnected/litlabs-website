@@ -1,0 +1,99 @@
+# Environment variables — NEVER commit secrets
+.env.local
+.env*.local
+.env.vercel-production
+.env.vercel-secrets
+.sb_anon_key
+
+# Dependencies
+/node_modules
+**/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Testing
+/coverage
+
+# Next.js
+/.next/
+/out/
+
+# Production
+/build
+
+# Misc
+.DS_Store
+*.pem
+
+# Debug
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.log
+
+# Local env files
+.env*.local
+.env
+
+# Vercel
+.vercel
+
+# TypeScript
+*.tsbuildinfo
+next-env.d.ts
+
+# Admin scripts
+fix-ssh-admin.ps1
+fix-portproxy.ps1
+fix-ssh-complete.ps1
+reinstall-openssh.ps1
+use-wsl-ssh.ps1
+add-external-ssh.ps1
+
+.env*
+
+# Local Netlify folder
+.netlify
+.backup/
+android/
+src/mobile/
+.venv
+__pycache__/
+*.pyc
+
+# Temporary / local scratch files
+.tmp.driveupload/
+.vs/
+git_log.txt
+wsl_fix*.txt
+unimported-report.txt
+test-route.ps1
+fix_wsl.sh
+hermes-*.sh
+nuke-clean.ps1
+RECOVERY_MANIFEST.md
+Modelfile
+.temp/
+outputs/
+plans/
+build_output*.txt
+tsc_*.txt
+lint_output.txt
+git_status.txt
+git_status_*.txt
+AGENTS.md
+meta/
+
+# Large internal libs / virtualenvs
+lib/oracle-cli/
+
+# Misc
+*.backup
+bun.lock
+.quadcodeai/
+
+# Chrome browser binaries and profiles
+chrome/
+**/lighthouse.*/
+**/AppData/Local/lighthouse*/

@@ -314,10 +314,23 @@ export default function CodeScannerPage() {
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
 
-  const [scan, setScan] = useState<{
+  interface ScanData {
+  projectName: string;
+  totalFiles: number;
+  totalLines: number;
+  health: {
+    buildStatus: string;
+    envVarsMissing: string[];
+  };
+  techStack: string[];
+  keyFeatures: string[];
+  recentChanges: string[];
+}
+
+const [scan, setScan] = useState<{
     loading: boolean;
     error: string | null;
-    data: any | null;
+    data: ScanData | null;
   }>({ loading: false, error: null, data: null });
 
   const selectedFile = getFileByPath(DEMO_FILE_TREE, selectedPath);

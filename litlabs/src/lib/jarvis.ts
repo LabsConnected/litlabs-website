@@ -177,8 +177,8 @@ class Jarvis {
       if (subs.length === 0) return false;
 
       const results = await Promise.allSettled(
-        subs.map(async (row: any) => {
-          const sub = row.subscription;
+        subs.map(async (row) => {
+          const sub = (row as { subscription: { endpoint: string } }).subscription;
           await fetch(sub.endpoint, {
             method: "POST",
             headers: {

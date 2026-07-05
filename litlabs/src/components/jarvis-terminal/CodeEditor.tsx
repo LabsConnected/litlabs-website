@@ -20,7 +20,6 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [loadTrigger, setLoadTrigger] = useState(0);
   const apiUrl = process.env.NEXT_PUBLIC_API_URL || process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
 
   const authHeaders = useCallback(async () => {
@@ -53,7 +52,10 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
   useEffect(() => {
     if (!filePath) return;
     let cancelled = false;
-    loadFile().then(() => { if (cancelled) return; });
+    (async () => {
+      await loadFile();
+      if (cancelled) return;
+    })();
     return () => { cancelled = true; };
   }, [filePath, loadFile]);
 

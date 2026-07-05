@@ -1,5 +1,5 @@
 {
-  "name": "frontend",
+  "name": "litlabs",
   "version": "0.1.0",
   "private": true,
   "packageManager": "pnpm@9.15.0",
@@ -9,6 +9,8 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "check": "pnpm lint && pnpm typecheck && pnpm build",
     "pages:build": "npx @cloudflare/next-on-pages@1",
     "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
     "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat",
