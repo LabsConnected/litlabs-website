@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useMemo } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -24,6 +24,8 @@ import {
   Loader2,
   Brain,
   Zap,
+  Hammer,
+  BarChart3,
 } from "lucide-react";
 
 const SPECIALISTS = [
@@ -34,6 +36,7 @@ const SPECIALISTS = [
     icon: Palette,
     href: "/studio",
     color: "#f472b6",
+    keywords: ["build", "design", "image", "video", "brand", "ui", "mockup", "poster"],
   },
   {
     slug: "code",
@@ -42,6 +45,7 @@ const SPECIALISTS = [
     icon: Code2,
     href: "/code",
     color: "#22d3ee",
+    keywords: ["code", "debug", "deploy", "api", "component", "fix", "build"],
   },
   {
     slug: "flow",
@@ -50,6 +54,7 @@ const SPECIALISTS = [
     icon: Workflow,
     href: "/flow",
     color: "#a78bfa",
+    keywords: ["workflow", "automate", "flow", "trigger", "pipeline"],
   },
   {
     slug: "market",
@@ -58,6 +63,7 @@ const SPECIALISTS = [
     icon: ShoppingBag,
     href: "/marketplace",
     color: "#fbbf24",
+    keywords: ["market", "sell", "price", "listing", "offer", "agent"],
   },
   {
     slug: "social",
@@ -66,6 +72,7 @@ const SPECIALISTS = [
     icon: Users,
     href: "/social",
     color: "#34d399",
+    keywords: ["social", "post", "caption", "content", "profile", "follow"],
   },
   {
     slug: "music",
@@ -74,6 +81,7 @@ const SPECIALISTS = [
     icon: Music,
     href: "/music",
     color: "#60a5fa",
+    keywords: ["music", "audio", "song", "promo", "sound"],
   },
   {
     slug: "games",
@@ -82,14 +90,16 @@ const SPECIALISTS = [
     icon: Gamepad2,
     href: "/games",
     color: "#f87171",
+    keywords: ["game", "play", "emulator", "clips"],
   },
   {
-    slug: "agents",
-    label: "Agents",
-    description: "Browse and install agents",
-    icon: Bot,
-    href: "/agents",
-    color: "#94a3b8",
+    slug: "terminal",
+    label: "Terminal",
+    description: "Command center and shell",
+    icon: Terminal,
+    href: "/lit-console",
+    color: "#34d399",
+    keywords: ["terminal", "shell", "command", "scan", "run"],
   },
 ];
 
@@ -100,12 +110,27 @@ const SUGGESTIONS = [
   "Make an AI agent for selling beats",
 ];
 
+function routePrompt(prompt: string) {
+  const lower = prompt.toLowerCase();
+  const match = SPECIALISTS.slice().sort((a, b) => {
+    const aMatch = a.keywords.filter((k) => lower.includes(k)).length;
+    const bMatch = b.keywords.filter((k) => lower.includes(k)).length;
+    return bMatch - aMatch;
+  })[0];
+
+  if (!match) return null;
+  if (match.slug === "terminal") return "/lit-console";
+  if (match.slug === "code") return "/code";
+  return match.href;
+}
+
 export function LiTTreeCorePage() {
   const { resolvedColors: T } = useTheme();
   const { isSignedIn } = useClerkAuth();
   const router = useRouter();
   const [prompt, setPrompt] = useState("");
   const [loading, setLoading] = useState(false);
+  const [route, setRoute] = useState<string | null>(null);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -126,8 +151,13 @@ export function LiTTreeCorePage() {
         }),
       });
       const data = await res.json();
+      const target = routePrompt(prompt) || "/littree";
+      setRoute(target);
       if (data.response || data.text) {
-        router.push(`/agents/director?prompt=${encodeURIComponent(prompt)}`);
+        const qs = new URLSearchParams();
+        qs.set("prompt", prompt);
+        qs.set("from", "littree");
+        router.push(`${target}?${qs.toString()}`);
       }
     } finally {
       setLoading(false);
@@ -135,14 +165,8 @@ export function LiTTreeCorePage() {
   };
 
   return (
-    <main
-      className="min-h-screen pb-12"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
-    >
-      <section
-        className="relative overflow-hidden border-b"
-        style={{ borderColor: T.borderColor + "20" }}
-      >
+    <main className="min-h-screen pb-12" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+      <section className="relative overflow-hidden border-b" style={{ borderColor: T.borderColor + "20" }}>
         <div
           className="absolute inset-0 pointer-events-none"
           style={{
@@ -160,31 +184,19 @@ export function LiTTreeCorePage() {
                 color: T.accentColor,
               }}
             >
-              <Circle size={10} className="fill-current" /> Flagship System
-              Agent
+              <Circle size={10} className="fill-current" /> Flagship System Agent
             </div>
-            <h1
-              className="text-4xl md:text-7xl font-black tracking-tight"
-              style={{ color: T.headerColor }}
-            >
+            <h1 className="text-4xl md:text-7xl font-black tracking-tight" style={{ color: T.headerColor }}>
               LiTTree Core
             </h1>
             <p className="max-w-2xl text-base md:text-xl opacity-75">
-              Your main AI brain for building, creating, selling, and
-              automating. Type what you want and LiTTree routes it to the right
-              branch.
+              Your main AI brain for building, creating, selling, and automating. Type what you want and LiTTree routes it to the right branch.
             </p>
 
-            <form
-              onSubmit={handleSubmit}
-              className="relative w-full max-w-2xl mt-4"
-            >
+            <form onSubmit={handleSubmit} className="relative w-full max-w-2xl mt-4">
               <div
                 className="flex items-center gap-3 rounded-2xl border px-4 py-4 md:px-5 md:py-5"
-                style={{
-                  backgroundColor: T.boxBg,
-                  borderColor: T.borderColor + "30",
-                }}
+                style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "30" }}
               >
                 <Sparkles size={20} style={{ color: T.accentColor }} />
                 <input
@@ -200,13 +212,14 @@ export function LiTTreeCorePage() {
                   className="rounded-xl px-4 py-2 text-sm font-bold transition disabled:opacity-50"
                   style={{ backgroundColor: T.accentColor, color: T.bgColor }}
                 >
-                  {loading ? (
-                    <Loader2 size={16} className="animate-spin" />
-                  ) : (
-                    <Send size={16} />
-                  )}
+                  {loading ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />}
                 </button>
               </div>
+              {route && (
+                <div className="mt-2 text-left text-[11px] font-bold" style={{ color: T.textMuted }}>
+                  Routing to: <span style={{ color: T.accentColor }}>{route}</span>
+                </div>
+              )}
             </form>
 
             <div className="flex flex-wrap items-center justify-center gap-2 mt-2">
@@ -231,30 +244,10 @@ export function LiTTreeCorePage() {
 
       <section className="max-w-7xl mx-auto px-4 mt-8">
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-          <ActionCard
-            href="/studio"
-            icon={Palette}
-            label="Build"
-            color={T.accentColor}
-          />
-          <ActionCard
-            href="/agents"
-            icon={Bot}
-            label="Create Agent"
-            color={T.linkColor}
-          />
-          <ActionCard
-            href="/code"
-            icon={ScanLine}
-            label="Scan Site"
-            color="#34d399"
-          />
-          <ActionCard
-            href="/deployments"
-            icon={Rocket}
-            label="Launch"
-            color="#fbbf24"
-          />
+          <ActionCard href="/studio" icon={Palette} label="Build" color={T.accentColor} />
+          <ActionCard href="/lit-console" icon={Terminal} label="Terminal" color="#34d399" />
+          <ActionCard href="/code" icon={ScanLine} label="Scan Site" color="#22d3ee" />
+          <ActionCard href="/marketplace" icon={Rocket} label="Launch" color="#fbbf24" />
         </div>
       </section>
 
@@ -279,10 +272,7 @@ export function LiTTreeCorePage() {
                 key={agent.slug}
                 href={agent.href}
                 className="group rounded-2xl border p-4 transition hover:-translate-y-1"
-                style={{
-                  backgroundColor: T.boxBg,
-                  borderColor: T.borderColor + "25",
-                }}
+                style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "25" }}
               >
                 <div className="flex items-start justify-between">
                   <div
@@ -300,10 +290,7 @@ export function LiTTreeCorePage() {
                 <h3 className="mt-3 font-bold" style={{ color: T.headerColor }}>
                   {agent.label}
                 </h3>
-                <p
-                  className="text-xs mt-1 opacity-60"
-                  style={{ color: T.textColor }}
-                >
+                <p className="text-xs mt-1 opacity-60" style={{ color: T.textColor }}>
                   {agent.description}
                 </p>
               </Link>
@@ -315,49 +302,7 @@ export function LiTTreeCorePage() {
       <section className="max-w-7xl mx-auto px-4 mt-10">
         <div
           className="rounded-2xl border p-5"
-          style={{
-            backgroundColor: T.boxBg,
-            borderColor: T.borderColor + "20",
-          }}
-        >
-          <div className="flex items-center gap-3 mb-3">
-            <div
-              className="flex h-10 w-10 items-center justify-center rounded-xl"
-              style={{ backgroundColor: T.accentColor + "15" }}
-            >
-              <Terminal size={20} style={{ color: T.accentColor }} />
-            </div>
-            <div>
-              <h3 className="font-bold" style={{ color: T.headerColor }}>
-                LiTTree Terminal
-              </h3>
-              <p className="text-xs opacity-60" style={{ color: T.textColor }}>
-                Full terminal with AI agents, tabs, command palette, and real
-                shell access.
-              </p>
-            </div>
-          </div>
-          <Link
-            href="/jarvis"
-            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-bold transition"
-            style={{
-              backgroundColor: T.bgColor + "60",
-              border: `1px solid ${T.borderColor}30`,
-              color: T.textMuted,
-            }}
-          >
-            <Zap size={14} /> Open Jarvis Terminal
-          </Link>
-        </div>
-      </section>
-
-      <section className="max-w-7xl mx-auto px-4 mt-10">
-        <div
-          className="rounded-2xl border p-5"
-          style={{
-            backgroundColor: T.boxBg,
-            borderColor: T.borderColor + "20",
-          }}
+          style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
         >
           <div className="flex items-start gap-3">
             <div
@@ -370,14 +315,8 @@ export function LiTTreeCorePage() {
               <h3 className="font-bold" style={{ color: T.headerColor }}>
                 What LiTTree can do
               </h3>
-              <p
-                className="text-sm mt-1 opacity-75 leading-relaxed"
-                style={{ color: T.textColor }}
-              >
-                LiTTree Core is your AI operating system. It can route tasks to
-                specialist agents, remember your projects, help you plan offers
-                and funnels, generate component ideas, and navigate the platform
-                for you. Grow one idea at a time.
+              <p className="text-sm mt-1 opacity-75 leading-relaxed" style={{ color: T.textColor }}>
+                LiTTree Core is your AI operating system. It can route tasks to specialist agents, remember your projects, help you plan offers and funnels, generate component ideas, and navigate the platform for you. Grow one idea at a time.
               </p>
             </div>
           </div>

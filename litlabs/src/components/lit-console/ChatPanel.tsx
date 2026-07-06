@@ -26,6 +26,18 @@ interface ChatPanelProps {
   onSend: (text: string) => void;
   loading?: boolean;
   onApprove?: (command: string) => void;
+  plan?: {
+    runId: string | null;
+    steps: Array<{
+      id: string;
+      title: string;
+      command?: string | null;
+      needs_approval?: boolean;
+      risk_level?: string;
+    }>;
+  };
+  onApproveStep?: (runId: string, command: string) => void;
+  onApprovePlan?: () => void;
 }
 
 function CodeBlock({ lang, code }: { lang: string; code: string }) {
@@ -96,6 +108,9 @@ export default function ChatPanel({
   onSend,
   loading,
   onApprove,
+  plan,
+  onApproveStep,
+  onApprovePlan,
 }: ChatPanelProps) {
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -353,7 +368,7 @@ export default function ChatPanel({
                     {m.content}
                   </div>
                   {(() => {
-                    const cmd = m.content.match(/`([^`]+)`/)?.[1];
+                    const cmd = (m.content.match(/`([^`]+)`/) || [])[1];
                     if (
                       !cmd ||
                       !onApprove ||
@@ -379,6 +394,118 @@ export default function ChatPanel({
           ))
         )}
 
+        {plan && (
+          <div
+            className="flex flex-col gap-2 rounded-xl border p-4"
+            style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+          >
+            <div className="flex items-center justify-between">
+              <div className="text-xs font-semibold" style={{ color: LC.text }}>
+                Run Plan
+              </div>
+              <div className="flex items-center gap-2">
+                <div
+                  className="mr-2 text-[10px]"
+                  style={{ color: LC.textMuted }}
+                >
+                  {plan.runId
+                    ? `Run #${plan.runId.slice(0, 8)}`
+                    : "Unsaved preview"}
+                </div>
+                {onApprovePlan && plan.steps.some((s) => s.needs_approval) ? (
+                  <button
+                    onClick={onApprovePlan}
+                    className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
+                    style={{ backgroundColor: LC.accentOrange, color: "#000" }}
+                  >
+                    <Play size={12} /> Approve Plan
+                  </button>
+                ) : !plan.steps.some((s) => s.needs_approval) &&
+                  onApprovePlan ? (
+                  <button
+                    onClick={onApprovePlan}
+                    className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
+                    style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+                  >
+                    Execute Plan
+                  </button>
+                ) : null}
+              </div>
+            </div>
+            <div className="text-xs" style={{ color: LC.textDim }}>
+              {plan.steps[0]?.title || "No steps."}
+            </div>
+            <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto pr-1">
+              {plan.steps.map((step, idx) => (
+                <div
+                  key={step.id}
+                  className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs"
+                  style={{
+                    backgroundColor: LC.bgPanel,
+                    borderColor: LC.border,
+                  }}
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium" style={{ color: LC.text }}>
+                      {idx + 1}. {step.title}
+                    </div>
+                    {step.command ? (
+                      <div
+                        className="mt-1 truncate font-mono"
+                        style={{ color: LC.accentOrange }}
+                      >
+                        {step.command}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span
+                      style={{
+                        backgroundColor:
+                          step.risk_level === "critical" ||
+                          step.risk_level === "high"
+                            ? `${LC.danger}25`
+                            : `${LC.success}15`,
+                        color:
+                          step.risk_level === "critical" ||
+                          step.risk_level === "high"
+                            ? LC.danger
+                            : LC.success,
+                      }}
+                    >
+                      {step.risk_level || "low"}
+                    </span>
+                    {step.needs_approval ? (
+                      <span
+                        style={{
+                          backgroundColor: `${LC.accentOrange}20`,
+                          color: LC.accentOrange,
+                        }}
+                      >
+                        approve
+                      </span>
+                    ) : null}
+                    {step.command ? (
+                      <button
+                        onClick={() => {
+                          if (!plan.runId || !onApproveStep) return;
+                          onApproveStep(plan.runId, step.command as string);
+                        }}
+                        className="rounded-full px-2 py-1 font-semibold"
+                        style={{
+                          backgroundColor: LC.accentOrange,
+                          color: "#000",
+                        }}
+                      >
+                        Run
+                      </button>
+                    ) : null}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
         {loading && (
           <div
             className="flex items-center gap-2 text-xs"

@@ -5,6 +5,10 @@ export const metadata: Metadata = {
   description: "Main AI command center for LiTTree LabStudios.",
 };
 
-export default function agentsLayout({ children }: { children: React.ReactNode }) {
+export default function LiTTreeRouteLayout({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
   return <>{children}</>;
 }

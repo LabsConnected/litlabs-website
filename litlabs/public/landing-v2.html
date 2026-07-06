@@ -1,0 +1,603 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>LiT Console — Project-aware AI command center</title>
+  <meta name="description" content="LiT Console combines chat, terminal, agents, files, workflows, and live project context so your team moves from idea to deploy without switching tools." />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #08080c;
+      --bg-2: #0c0c14;
+      --bg-3: #101018;
+      --bg-4: #141421;
+      --border: #252538;
+      --border-subtle: #1a1a28;
+      --cyan: #00f5ff;
+      --cyan-20: rgba(0, 245, 255, 0.2);
+      --orange: #ff7a1a;
+      --orange-20: rgba(255, 122, 26, 0.2);
+      --green: #22c55e;
+      --red: #ef4444;
+      --text: #f8fafc;
+      --muted: #94a3b8;
+      --dim: #64748b;
+      --font: 'Inter', system-ui, -apple-system, sans-serif;
+      --mono: 'JetBrains Mono', 'Fira Code', Consolas, monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: var(--font);
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    a { color: inherit; text-decoration: none; }
+
+    .container { width: 92%; max-width: 1200px; margin: 0 auto; }
+
+    /* Grid background */
+    .bg-grid {
+      position: fixed; inset: 0; z-index: -1;
+      background-image:
+        linear-gradient(var(--border-subtle) 1px, transparent 1px),
+        linear-gradient(90deg, var(--border-subtle) 1px, transparent 1px);
+      background-size: 60px 60px;
+      mask-image: radial-gradient(circle at 50% 0%, black 0%, transparent 70%);
+      -webkit-mask-image: radial-gradient(circle at 50% 0%, black 0%, transparent 70%);
+      opacity: 0.4;
+    }
+
+    .glow-orb {
+      position: fixed; top: -200px; right: -200px; width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--cyan-20) 0%, transparent 70%);
+      border-radius: 50%; filter: blur(80px); z-index: -1; pointer-events: none;
+    }
+    .glow-orb-2 {
+      position: fixed; bottom: -200px; left: -200px; width: 600px; height: 600px;
+      background: radial-gradient(circle, var(--orange-20) 0%, transparent 70%);
+      border-radius: 50%; filter: blur(80px); z-index: -1; pointer-events: none;
+    }
+
+    /* Header */
+    .site-header {
+      position: sticky; top: 0; z-index: 50;
+      background: rgba(8, 8, 12, 0.8);
+      backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    .nav { display: flex; align-items: center; justify-content: space-between; padding: 16px 0; }
+    .brand { display: flex; align-items: center; gap: 12px; }
+    .brand-mark {
+      display: flex; align-items: center; justify-content: center;
+      width: 40px; height: 40px; border-radius: 10px;
+      background: linear-gradient(135deg, var(--cyan), var(--orange));
+      font-family: var(--mono); font-weight: 700; font-size: 14px; color: #000;
+    }
+    .brand-copy { display: flex; flex-direction: column; }
+    .brand-copy strong { font-size: 15px; font-weight: 700; }
+    .brand-copy small { font-size: 11px; color: var(--dim); font-family: var(--mono); }
+    .nav-links { display: none; gap: 32px; font-size: 14px; color: var(--muted); }
+    .nav-links a:hover { color: var(--cyan); }
+    .button {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 10px 18px; border-radius: 8px; font-size: 13px; font-weight: 600;
+      background: var(--cyan); color: #000; border: 1px solid var(--cyan);
+      transition: all 0.2s ease;
+    }
+    .button:hover { transform: translateY(-1px); box-shadow: 0 0 20px var(--cyan-20); }
+    .button-ghost { background: transparent; color: var(--text); border-color: var(--border); }
+    .button-ghost:hover { border-color: var(--cyan); color: var(--cyan); background: var(--bg-3); }
+
+    /* Hero */
+    .hero { padding: 80px 0 60px; }
+    .hero-grid { display: grid; grid-template-columns: 1fr; gap: 48px; align-items: center; }
+    .eyebrow {
+      display: inline-flex; align-items: center; gap: 8px;
+      padding: 6px 12px; border-radius: 999px; border: 1px solid var(--border);
+      font-size: 12px; color: var(--muted); font-family: var(--mono); margin-bottom: 24px;
+    }
+    .status-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--green); box-shadow: 0 0 8px var(--green); }
+    h1 { font-size: 42px; line-height: 1.1; font-weight: 800; letter-spacing: -0.02em; margin-bottom: 20px; }
+    h1 span { background: linear-gradient(90deg, var(--cyan), var(--orange)); -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text; }
+    .lede { font-size: 17px; color: var(--muted); max-width: 540px; margin-bottom: 32px; }
+    .hero-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+    .metrics { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; margin-bottom: 40px; }
+    .metrics article { padding: 16px; border-radius: 12px; background: var(--bg-3); border: 1px solid var(--border); }
+    .metrics strong { display: block; font-size: 28px; font-weight: 800; color: var(--cyan); font-family: var(--mono); }
+    .metrics span { font-size: 12px; color: var(--dim); }
+
+    .terminal-card {
+      background: var(--bg-3); border: 1px solid var(--border); border-radius: 16px;
+      overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,0.5);
+    }
+    .terminal-top {
+      display: flex; align-items: center; gap: 8px; padding: 12px 16px;
+      background: var(--bg-4); border-bottom: 1px solid var(--border);
+    }
+    .terminal-top span { width: 10px; height: 10px; border-radius: 50%; }
+    .terminal-top span:nth-child(1) { background: var(--red); }
+    .terminal-top span:nth-child(2) { background: #f59e0b; }
+    .terminal-top span:nth-child(3) { background: var(--green); }
+    .terminal-top p { flex: 1; text-align: center; font-size: 11px; color: var(--dim); font-family: var(--mono); }
+    .terminal-body { padding: 20px; font-family: var(--mono); font-size: 13px; line-height: 1.8; }
+    .terminal-body p { margin-bottom: 4px; }
+    .prompt { color: var(--cyan); margin-right: 8px; }
+    .muted { color: var(--dim); }
+    .success { color: var(--green); }
+
+    .hero-visual { position: relative; min-height: 360px; display: flex; align-items: center; justify-content: center; }
+    .hero-orb {
+      position: absolute; width: 280px; height: 280px; border-radius: 50%;
+      background: radial-gradient(circle, var(--cyan-20) 0%, transparent 70%);
+      filter: blur(40px); animation: pulse 6s ease-in-out infinite;
+    }
+    .mascot-main { position: relative; width: 260px; height: auto; z-index: 2; filter: drop-shadow(0 20px 40px rgba(0,0,0,0.6)); }
+    .floating-card {
+      position: absolute; padding: 14px 18px; border-radius: 12px;
+      background: var(--bg-3); border: 1px solid var(--border); box-shadow: 0 12px 32px rgba(0,0,0,0.4);
+      z-index: 3; backdrop-filter: blur(8px);
+    }
+    .floating-card small { display: block; font-size: 10px; color: var(--dim); font-family: var(--mono); text-transform: uppercase; }
+    .floating-card strong { display: block; font-size: 13px; color: var(--text); margin-top: 4px; }
+    .floating-left { top: 40px; left: 0; border-left: 3px solid var(--cyan); }
+    .floating-right { bottom: 60px; right: 0; border-left: 3px solid var(--orange); }
+
+    @keyframes pulse { 0%, 100% { transform: scale(1); opacity: 0.6; } 50% { transform: scale(1.1); opacity: 0.9; } }
+
+    /* Sections */
+    .section { padding: 80px 0; }
+    .section-dark { background: var(--bg-2); border-top: 1px solid var(--border-subtle); border-bottom: 1px solid var(--border-subtle); }
+    .section-heading { text-align: center; max-width: 720px; margin: 0 auto 56px; }
+    .section-heading h2 { font-size: 32px; font-weight: 700; margin-bottom: 16px; }
+    .section-heading p { color: var(--muted); font-size: 16px; }
+
+    /* Feature grid */
+    .feature-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    .feature-card {
+      padding: 28px; border-radius: 16px; background: var(--bg-3); border: 1px solid var(--border);
+      transition: all 0.2s ease;
+    }
+    .feature-card:hover { border-color: var(--cyan); transform: translateY(-2px); }
+    .feature-card h3 { font-size: 18px; font-weight: 700; margin-bottom: 10px; }
+    .feature-card p { font-size: 14px; color: var(--muted); }
+
+    /* Pipeline */
+    .pipeline { display: grid; grid-template-columns: 1fr; gap: 16px; }
+    .pipeline article {
+      padding: 24px; border-radius: 16px; background: var(--bg-3); border: 1px solid var(--border);
+      position: relative;
+    }
+    .pipeline article span {
+      display: inline-block; margin-bottom: 12px; font-family: var(--mono); font-size: 12px;
+      color: var(--orange); border: 1px solid var(--orange-20); padding: 4px 10px; border-radius: 999px;
+    }
+    .pipeline article h3 { font-size: 18px; font-weight: 700; margin-bottom: 8px; }
+    .pipeline article p { font-size: 14px; color: var(--muted); }
+
+    /* Showcase */
+    .showcase-grid { display: grid; grid-template-columns: 1fr; gap: 24px; margin-top: 48px; }
+    .showcase-card { border-radius: 16px; overflow: hidden; background: var(--bg-3); border: 1px solid var(--border); }
+    .showcase-card img { width: 100%; height: 240px; object-fit: cover; display: block; background: var(--bg-4); }
+    .showcase-card figcaption { padding: 16px; font-size: 13px; color: var(--dim); text-align: center; }
+
+    /* Agents */
+    .agents-grid { display: grid; grid-template-columns: 1fr; gap: 20px; }
+    .agent-card {
+      display: flex; align-items: center; gap: 18px; padding: 22px; border-radius: 16px;
+      background: var(--bg-3); border: 1px solid var(--border);
+    }
+    .agent-card img { width: 64px; height: 64px; border-radius: 12px; object-fit: cover; background: var(--bg-4); }
+    .agent-card h3 { font-size: 17px; font-weight: 700; margin-bottom: 4px; }
+    .agent-card p { font-size: 13px; color: var(--muted); }
+
+    /* Two col */
+    .two-col { display: grid; grid-template-columns: 1fr; gap: 40px; align-items: start; }
+    .check-list { list-style: none; margin-top: 24px; }
+    .check-list li {
+      display: flex; align-items: center; gap: 12px; padding: 10px 0;
+      font-size: 15px; color: var(--muted); border-bottom: 1px solid var(--border-subtle);
+    }
+    .check-list li::before {
+      content: "✓"; display: flex; align-items: center; justify-content: center;
+      width: 20px; height: 20px; border-radius: 50%; background: var(--green-20);
+      color: var(--green); font-size: 11px; flex-shrink: 0;
+    }
+    .stack-card { padding: 28px; border-radius: 16px; background: var(--bg-3); border: 1px solid var(--border); }
+    .stack-line { display: flex; justify-content: space-between; padding: 14px 0; border-bottom: 1px solid var(--border-subtle); }
+    .stack-line:last-child { border-bottom: none; }
+    .stack-line span { font-size: 13px; color: var(--dim); }
+    .stack-line strong { font-size: 13px; color: var(--text); font-weight: 600; }
+
+    /* Pricing */
+    .pricing-grid { display: grid; grid-template-columns: 1fr; gap: 24px; }
+    .pricing-card {
+      padding: 32px; border-radius: 20px; background: var(--bg-3); border: 1px solid var(--border);
+    }
+    .pricing-card-featured {
+      border-color: var(--orange); background: linear-gradient(180deg, var(--bg-3) 0%, rgba(255,122,26,0.05) 100%);
+      position: relative;
+    }
+    .badge {
+      position: absolute; top: -12px; left: 50%; transform: translateX(-50%);
+      background: var(--orange); color: #000; font-size: 11px; font-weight: 700;
+      padding: 5px 14px; border-radius: 999px; font-family: var(--mono);
+    }
+    .pricing-card h3 { font-size: 20px; font-weight: 700; margin-bottom: 16px; }
+    .price { font-size: 40px; font-weight: 800; margin-bottom: 20px; font-family: var(--mono); }
+    .price span { font-size: 15px; color: var(--dim); font-weight: 500; }
+    .pricing-card ul { list-style: none; }
+    .pricing-card li { display: flex; align-items: center; gap: 10px; padding: 8px 0; font-size: 14px; color: var(--muted); }
+    .pricing-card li::before { content: "—"; color: var(--cyan); font-weight: 700; }
+
+    /* CTA */
+    .cta-section { padding: 60px 0 100px; }
+    .cta-card {
+      display: grid; grid-template-columns: 1fr; gap: 32px; align-items: center;
+      padding: 48px; border-radius: 24px; background: var(--bg-3); border: 1px solid var(--border);
+      background: linear-gradient(135deg, var(--bg-3) 0%, rgba(0,245,255,0.04) 100%);
+    }
+    .waitlist-form { display: flex; gap: 12px; flex-wrap: wrap; }
+    .waitlist-form input {
+      flex: 1; min-width: 240px; padding: 14px 16px; border-radius: 10px;
+      background: var(--bg); border: 1px solid var(--border); color: var(--text); font-size: 14px;
+    }
+    .waitlist-form input:focus { outline: none; border-color: var(--cyan); }
+    .form-result { margin-top: 12px; font-size: 13px; color: var(--green); min-height: 20px; }
+
+    /* Footer */
+    .site-footer { padding: 32px 0; border-top: 1px solid var(--border-subtle); }
+    .footer-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 16px; font-size: 13px; color: var(--dim); }
+    .footer-links { display: flex; gap: 24px; }
+    .footer-links a:hover { color: var(--cyan); }
+
+    /* Responsive */
+    @media (min-width: 768px) {
+      .nav-links { display: flex; }
+      .hero-grid { grid-template-columns: 1.1fr 0.9fr; }
+      h1 { font-size: 54px; }
+      .feature-grid { grid-template-columns: repeat(2, 1fr); }
+      .pipeline { grid-template-columns: repeat(2, 1fr); }
+      .agents-grid { grid-template-columns: repeat(2, 1fr); }
+      .pricing-grid { grid-template-columns: repeat(3, 1fr); }
+      .showcase-grid { grid-template-columns: repeat(2, 1fr); }
+      .two-col { grid-template-columns: 1fr 1fr; }
+      .cta-card { grid-template-columns: 1fr auto; }
+    }
+
+    @media (min-width: 1024px) {
+      .feature-grid { grid-template-columns: repeat(3, 1fr); }
+      .pipeline { grid-template-columns: repeat(4, 1fr); }
+    }
+  </style>
+</head>
+<body>
+  <div class="bg-grid"></div>
+  <div class="glow-orb"></div>
+  <div class="glow-orb-2"></div>
+
+  <header class="site-header">
+    <div class="container nav">
+      <a class="brand" href="#top">
+        <span class="brand-mark">LiT</span>
+        <span class="brand-copy">
+          <strong>LiT Console</strong>
+          <small>LiTTree Lab Studios</small>
+        </span>
+      </a>
+      <nav class="nav-links">
+        <a href="#product">Product</a>
+        <a href="#agents">Agents</a>
+        <a href="#workflow">Workflow</a>
+        <a href="#pricing">Pricing</a>
+      </nav>
+      <a class="button" href="#waitlist">Get Early Access</a>
+    </div>
+  </header>
+
+  <main id="top">
+    <section class="hero">
+      <div class="container hero-grid">
+        <div class="hero-copy">
+          <div class="eyebrow">
+            <span class="status-dot"></span>
+            Project-aware AI command center
+          </div>
+          <h1>Build, run, fix, and ship with one <span>LiT</span> workspace.</h1>
+          <p class="lede">
+            LiT Console combines chat, terminal, agents, files, workflows, and live project context
+            so your team can move from idea to deploy without bouncing across tools.
+          </p>
+
+          <div class="hero-actions">
+            <a class="button" href="#waitlist">Join the waitlist</a>
+            <a class="button button-ghost" href="#product">See the workflow</a>
+          </div>
+
+          <div class="metrics">
+            <article>
+              <strong>6</strong>
+              <span>Specialized agents</span>
+            </article>
+            <article>
+              <strong>1</strong>
+              <span>Workspace for chat + terminal</span>
+            </article>
+            <article>
+              <strong>∞</strong>
+              <span>Ways to build weird</span>
+            </article>
+          </div>
+
+          <div class="terminal-card">
+            <div class="terminal-top">
+              <span></span><span></span><span></span>
+              <p>run.litlabs.net / director session</p>
+            </div>
+            <div class="terminal-body">
+              <p><span class="prompt">$</span> plan “ship landing page v2 with auth, preview, and deploy”</p>
+              <p class="muted">→ Director created plan with 5 tasks, 3 agents, 2 approvals</p>
+              <p><span class="prompt">$</span> assign codechamp “build Next.js sections + pricing”</p>
+              <p class="muted">→ patch ready · 9 files changed · tests passed</p>
+              <p><span class="prompt">$</span> preview --share</p>
+              <p class="success">→ live preview available · vercel deploy ready</p>
+            </div>
+          </div>
+        </div>
+
+        <div class="hero-visual">
+          <div class="hero-orb"></div>
+          <img class="mascot-main" src="https://placehold.co/520x520/101018/00f5ff?text=LiT+Mascot" alt="LiT mascot presenting holographic product elements" />
+          <div class="floating-card floating-left">
+            <small>Director</small>
+            <strong>Plan → delegate → verify</strong>
+          </div>
+          <div class="floating-card floating-right">
+            <small>Console</small>
+            <strong>Chat + terminal + files + tools</strong>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section id="product" class="section">
+      <div class="container">
+        <div class="section-heading">
+          <span class="eyebrow">Why this feels better</span>
+          <h2>The tools you already want, stitched into one clear loop.</h2>
+          <p>Top dev tools win on execution, memory, preview, approvals, and trust. LiT Console makes that loop visible and fast.</p>
+        </div>
+
+        <div class="feature-grid">
+          <article class="feature-card">
+            <h3>Plan with proof</h3>
+            <p>Every request becomes a visible plan with steps, owners, diffs, logs, and approvals.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Persistent project memory</h3>
+            <p>Rules, AGENTS.md, repo knowledge, and session context survive beyond one prompt.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Live terminal execution</h3>
+            <p>Persistent shells, streamed output, retries, and safe command boundaries built in.</p>
+          </article>
+          <article class="feature-card">
+            <h3>App preview loop</h3>
+            <p>Open previews, capture errors, inspect routes, and feed fixes right back into the run.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Workflow automation</h3>
+            <p>Deploy, review, refactor, content, and support workflows as reusable runs.</p>
+          </article>
+          <article class="feature-card">
+            <h3>Approval + sandbox controls</h3>
+            <p>Make autonomy feel safe with clear permission scopes and user checkpoints.</p>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="workflow" class="section section-dark">
+      <div class="container">
+        <div class="section-heading">
+          <span class="eyebrow">Workflow</span>
+          <h2>Intent in. Orchestration out.</h2>
+          <p>A simple architecture for what users actually care about: reliable output, visible state, and fewer handoffs.</p>
+        </div>
+
+        <div class="pipeline">
+          <article>
+            <span>01</span>
+            <h3>Intent parser</h3>
+            <p>Turn messy prompts into a scoped request with context, files, goals, and constraints.</p>
+          </article>
+          <article>
+            <span>02</span>
+            <h3>Director planning</h3>
+            <p>Build a task graph, pick agents, set approvals, and generate a safe run plan.</p>
+          </article>
+          <article>
+            <span>03</span>
+            <h3>Executor run</h3>
+            <p>Use terminal, code tools, docs, and integrations to complete the work in bounded steps.</p>
+          </article>
+          <article>
+            <span>04</span>
+            <h3>Logs + artifacts</h3>
+            <p>Stream diffs, screenshots, files, tests, and summaries so the result is easy to trust.</p>
+          </article>
+        </div>
+
+        <div class="showcase-grid">
+          <figure class="showcase-card">
+            <img src="https://placehold.co/800x480/101018/00f5ff?text=LiT+Console+UI" alt="LiT Console interface with projects, agents, tools, and action cards" />
+            <figcaption>Current console shell — strong foundation for the core workspace.</figcaption>
+          </figure>
+          <figure class="showcase-card">
+            <img src="https://placehold.co/800x480/101018/ff7a1a?text=Vision+Dashboard" alt="Stylized command-center dashboard concept for LiTTree Lab Studios" />
+            <figcaption>Vision direction — richer telemetry, identity, and command-center energy.</figcaption>
+          </figure>
+        </div>
+      </div>
+    </section>
+
+    <section id="agents" class="section">
+      <div class="container">
+        <div class="section-heading">
+          <span class="eyebrow">Specialized agents</span>
+          <h2>Make each agent useful, not just branded.</h2>
+          <p>Personalities are fun. Reliability, role clarity, and handoffs are what make teams stay.</p>
+        </div>
+
+        <div class="agents-grid">
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/00f5ff?text=Dir" alt="Director agent" />
+            <div>
+              <h3>Director</h3>
+              <p>Owns decomposition, sequencing, approvals, and the final answer.</p>
+            </div>
+          </article>
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/22c55e?text=CC" alt="Code Champ agent" />
+            <div>
+              <h3>Code Champ</h3>
+              <p>Builds features, patches bugs, runs tests, and ships clean diffs.</p>
+            </div>
+          </article>
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/ff6b6b?text=SD" alt="Social Dom agent" />
+            <div>
+              <h3>Social Dom</h3>
+              <p>Turns launches, wins, and updates into content that actually feels on-brand.</p>
+            </div>
+          </article>
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/f59e0b?text=DS" alt="Data Slayer agent" />
+            <div>
+              <h3>Data Slayer</h3>
+              <p>Queries, charts, migrations, and data-driven decisions.</p>
+            </div>
+          </article>
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/e879f9?text=Wr" alt="Writer agent" />
+            <div>
+              <h3>Writer</h3>
+              <p>Docs, copy, scripts, and anything that needs a clear voice.</p>
+            </div>
+          </article>
+          <article class="agent-card">
+            <img src="https://placehold.co/128x128/101018/3b82f6?text=Ch" alt="Champion agent" />
+            <div>
+              <h3>Champion</h3>
+              <p>General helper for quick questions and everyday tasks.</p>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section class="section section-dark">
+      <div class="container two-col">
+        <div>
+          <span class="eyebrow">What to build next</span>
+          <h2>The best version of LiT Console is not “more UI.” It is a stronger execution loop.</h2>
+          <ul class="check-list">
+            <li>Plan → diff → test → approve run timeline</li>
+            <li>Persistent memories, repo rules, and AGENTS.md support</li>
+            <li>Background jobs with resumable runs</li>
+            <li>Live app preview, browser logs, and route-aware debugging</li>
+            <li>GitHub, Supabase, Vercel, docs, and MCP integrations</li>
+            <li>Explicit approval modes and sandbox controls</li>
+          </ul>
+        </div>
+        <div class="stack-card">
+          <div class="stack-line"><span>Frontend</span><strong>Next.js · React · Tailwind</strong></div>
+          <div class="stack-line"><span>Identity</span><strong>Clerk</strong></div>
+          <div class="stack-line"><span>Data + logs</span><strong>Supabase</strong></div>
+          <div class="stack-line"><span>Deploy</span><strong>Vercel</strong></div>
+          <div class="stack-line"><span>AI layer</span><strong>Director + specialized agents</strong></div>
+          <div class="stack-line"><span>Trust layer</span><strong>Approvals · policies · artifacts</strong></div>
+        </div>
+      </div>
+    </section>
+
+    <section id="pricing" class="section">
+      <div class="container">
+        <div class="section-heading">
+          <span class="eyebrow">Pricing concept</span>
+          <h2>Simple enough to understand, serious enough to grow.</h2>
+        </div>
+
+        <div class="pricing-grid">
+          <article class="pricing-card">
+            <h3>Explorer</h3>
+            <p class="price">$0<span>/forever</span></p>
+            <ul>
+              <li>3 active agents</li>
+              <li>Basic chat + terminal</li>
+              <li>1 shared project</li>
+              <li>Community access</li>
+            </ul>
+          </article>
+          <article class="pricing-card pricing-card-featured">
+            <div class="badge">Most popular</div>
+            <h3>Architect</h3>
+            <p class="price">$29<span>/month</span></p>
+            <ul>
+              <li>Unlimited agent runs</li>
+              <li>Workflow builder</li>
+              <li>Persistent memory + rules</li>
+              <li>Priority compute + previews</li>
+            </ul>
+          </article>
+          <article class="pricing-card">
+            <h3>Commander</h3>
+            <p class="price">Custom</p>
+            <ul>
+              <li>Dedicated infra</li>
+              <li>SSO + enterprise controls</li>
+              <li>Private integrations</li>
+              <li>Custom onboarding</li>
+            </ul>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <section id="waitlist" class="section cta-section">
+      <div class="container cta-card">
+        <div>
+          <span class="eyebrow">Ready to synchronize?</span>
+          <h2>Build weird. Build powerful. Build LiT.</h2>
+          <p>Use this page as a stronger v2 starting point, then wire the CTA to your actual waitlist or auth flow.</p>
+        </div>
+        <form class="waitlist-form" onsubmit="event.preventDefault(); document.querySelector('#waitlist-result').textContent='You are on the list. Time to build.';">
+          <input type="email" placeholder="you@company.com" aria-label="Email address" required />
+          <button class="button" type="submit">Join waitlist</button>
+        </form>
+        <p id="waitlist-result" class="form-result" aria-live="polite"></p>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="container footer-row">
+      <p>© 2026 LiTTree Lab Studios</p>
+      <div class="footer-links">
+        <a href="#top">Back to top</a>
+        <a href="#product">Product</a>
+        <a href="#pricing">Pricing</a>
+      </div>
+    </div>
+  </footer>
+</body>
+</html>

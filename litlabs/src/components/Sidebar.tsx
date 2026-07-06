@@ -7,7 +7,6 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
 import {
   X,
   ChevronLeft,
@@ -308,7 +307,7 @@ function SidebarContent({
   const { balance } = useWallet();
   const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { userId, sessionClaims } = useClerkAuth();
 
   const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(
     () => {
@@ -335,9 +334,9 @@ function SidebarContent({
   const [plan, setPlan] = useState<string>("free");
 
   useEffect(() => {
-    if (!isSignedIn || !user?.id) return;
+    if (!isSignedIn || !userId) return;
     let active = true;
-    fetch(`/api/users/${user.id}/plan`)
+    fetch(`/api/users/${userId}/plan`)
       .then((res) => (res.ok ? res.json() : { plan: "free" }))
       .then((data) => {
         if (active && data.plan) setPlan(data.plan);
@@ -346,7 +345,7 @@ function SidebarContent({
     return () => {
       active = false;
     };
-  }, [isSignedIn, user?.id]);
+  }, [isSignedIn, userId]);
 
   const isActive = useCallback(
     (href?: string) => {
@@ -489,7 +488,7 @@ function SidebarContent({
       </div>
 
       {/* User profile card */}
-      {!collapsed && isSignedIn && user && (
+      {!collapsed && isSignedIn && userId && (
         <div
           className="px-3 py-3 border-b"
           style={{ borderColor: `${T.borderColor}30` }}
@@ -504,10 +503,10 @@ function SidebarContent({
               className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border-2"
               style={{ borderColor: T.accentColor }}
             >
-              {profile?.avatarUrl || user.imageUrl ? (
+              {profile?.avatarUrl || sessionClaims?.name ? (
                 <NextImage
-                  src={profile?.avatarUrl || user.imageUrl || ""}
-                  alt="Profile"
+                  src={profile?.avatarUrl || ""}
+                  alt={profile?.displayName || sessionClaims?.name || "Profile"}
                   fill
                   className="object-cover"
                   sizes="44px"
@@ -519,8 +518,8 @@ function SidebarContent({
                 >
                   {(
                     profile?.displayName?.[0] ||
-                    user.firstName?.[0] ||
-                    user.username?.[0] ||
+                    sessionClaims?.name?.[0] ||
+                    sessionClaims?.username?.[0] ||
                     "?"
                   ).toUpperCase()}
                 </div>
@@ -533,8 +532,8 @@ function SidebarContent({
                   style={{ color: T.textColor }}
                 >
                   {profile?.displayName ||
-                    user.firstName ||
-                    user.username ||
+                    sessionClaims?.name ||
+                    sessionClaims?.username ||
                     "Creator"}
                 </div>
                 <span
@@ -548,7 +547,7 @@ function SidebarContent({
                 </span>
               </div>
               <div className="text-xs truncate" style={{ color: T.textMuted }}>
-                @{profile?.username || user.username || "litree"}
+                @{profile?.username || sessionClaims?.username || "litree"}
               </div>
             </div>
           </Link>

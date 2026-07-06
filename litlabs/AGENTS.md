@@ -77,3 +77,11 @@ These are transitive dependencies with no available fix. Monitor for upstream re
 - Components use `useTheme()` for resolved colors (`T.bgColor`, `T.accentColor`, etc.)
 - Navigation defined in `src/lib/navigation.ts` (8 groups, 50+ items)
 - Agent definitions in `src/lib/agents.ts` (5 core agents)
+
+## Run lifecycle
+
+- User intent starts at `CommandDock` `Run` or chat `/run`.
+- Frontend requests `POST /api/plan` → returns a persisted run + plain JSON plan.
+- UI renders plan steps in `ChatPanel` with risk badges and per-step `Run` buttons.
+- Approval checkpoints still use the existing `pendingCommand` + `handleApprove()` flow for terminal execution.
+- Successful runs can later be expanded to write `run_steps` and `run_artifacts`.
