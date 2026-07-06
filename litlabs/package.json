@@ -9,8 +9,6 @@
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
     "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbo",
-    "prebuild": "node scripts/build-project-tree.js",
-    "predev": "node scripts/build-project-tree.js",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
