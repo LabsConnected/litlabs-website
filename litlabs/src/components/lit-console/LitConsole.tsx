@@ -2,13 +2,10 @@
 
 import { useState, useCallback, useRef } from "react";
 import { LayoutDashboard, Play } from "lucide-react";
-import TopBar from "./TopBar";
-import BackgroundTerminal from "./BackgroundTerminal";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock from "./CommandDock";
 import ConsoleDashboard from "./ConsoleDashboard";
 import DrawerPanel from "./DrawerPanel";
-import LeftRail from "./LeftRail";
 import {
   LiTTreeTerminal,
   LiTTreeTerminalHandle,
@@ -38,7 +35,6 @@ export default function LitConsole() {
   const [view, setView] = useState<ConsoleView>("dashboard");
   const [activeAgent, setActiveAgent] = useState("Director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
-  const [railCollapsed, setRailCollapsed] = useState(false);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingRun, setPendingRun] = useState<{
     runId: string | null;
@@ -333,113 +329,97 @@ export default function LitConsole() {
   })();
 
   return (
-    <div className="relative flex h-screen w-full flex-col overflow-hidden">
-      <BackgroundTerminal />
-
-      <TopBar
-        projectName="litlabs"
-        agentName={activeAgent}
-        modelName={activeModel}
-        status="online"
-      />
-
-      <div className="relative z-10 flex flex-1 overflow-hidden">
-        <LeftRail
-          activeAgent={activeAgent}
-          onAgentChange={handleAgentChange}
-          collapsed={railCollapsed}
-          onToggle={() => setRailCollapsed((v) => !v)}
-        />
-
-        <main className="flex min-w-0 flex-1 flex-col">
-          <div className="relative flex-1 overflow-hidden p-4 pb-2">
-            {view === "chat" && (
-              <button
-                onClick={() => setView("dashboard")}
-                className="absolute right-6 top-6 z-20 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold"
-                style={{
-                  backgroundColor: LC.bgPanel,
-                  borderColor: LC.border,
-                  color: LC.accentCyan,
-                  boxShadow: LC_SHADOW.glowCyan,
-                }}
-              >
-                <LayoutDashboard size={14} />
-                Dashboard
-              </button>
-            )}
-            {view === "dashboard" ? (
-              <ConsoleDashboard
-                activeAgent={activeAgent}
-                activeModel={activeModel}
-                onPrompt={(prompt) => handleSend(prompt)}
-                onRunPrompt={(prompt) => handleRun(prompt)}
-                onOpenChat={() => setView("chat")}
-                onOpenTerminal={() => {
-                  setDrawerTab("terminal");
-                  setDrawerOpen(true);
-                }}
-              />
-            ) : (
-              <ChatPanel
-                messages={messages}
-                onSend={(text) => {
-                  if (text === "/run") return handleRun();
-                  handleSend(text);
-                }}
-                loading={loading}
-                plan={
-                  pendingRun
-                    ? {
-                        runId: pendingRun.runId,
-                        steps: pendingRun.plan.steps.map((s) => ({
-                          id: s.id,
-                          title: s.title,
-                          command: s.command ?? null,
-                          needs_approval: s.needs_approval,
-                          risk_level: s.risk_level,
-                        })),
-                      }
-                    : undefined
-                }
-                onApprove={(cmd) => approveCommand(cmd)}
-                onApproveStep={async (_runId, command) =>
-                  approveCommand(command)
-                }
-                onApprovePlan={() => {
-                  if (!pendingRun?.plan?.steps?.length) return;
-                  const first = pendingRun.plan.steps[0];
-                  if (first.command) approveCommand(first.command);
-                  setPendingRun(null);
-                }}
-              />
-            )}
-          </div>
-
-          <CommandDock
-            value={input}
-            onChange={setInput}
-            onSend={() => handleSend()}
-            onRun={!loading ? handleRun : undefined}
-            agent={activeAgent}
-            model={activeModel}
-            onAgentChange={handleAgentChange}
-            onModelChange={handleModelChange}
-            onAttach={() => handleSend("Attach a file...")}
-            onTools={() => setDrawerOpen((v) => !v)}
-            onToggleTerminal={() => {
-              setDrawerTab("terminal");
-              setDrawerOpen((v) => !v);
+    <div className="flex h-full w-full flex-col" style={{ backgroundColor: LC.bg }}>
+      {/* Main content area */}
+      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
+        {view === "chat" && (
+          <button
+            onClick={() => setView("dashboard")}
+            className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold"
+            style={{
+              backgroundColor: LC.bgPanel,
+              borderColor: LC.border,
+              color: LC.accentCyan,
+              boxShadow: LC_SHADOW.glowCyan,
             }}
-            onCreateFile={() => handleSend("Create a new file")}
-            onBuild={() => handleSend("Build the project")}
-            onGenerateMedia={() => handleSend("Generate media")}
-            onDeploy={() => handleSend("Deploy to production")}
-            onSaveWorkflow={() => handleSend("Save this workflow")}
+          >
+            <LayoutDashboard size={14} />
+            Dashboard
+          </button>
+        )}
+
+        {view === "dashboard" ? (
+          <ConsoleDashboard
+            activeAgent={activeAgent}
+            activeModel={activeModel}
+            onPrompt={(prompt) => handleSend(prompt)}
+            onRunPrompt={(prompt) => handleRun(prompt)}
+            onOpenChat={() => setView("chat")}
+            onOpenTerminal={() => {
+              setDrawerTab("terminal");
+              setDrawerOpen(true);
+            }}
           />
-        </main>
+        ) : (
+          <div className="flex-1 overflow-hidden">
+            <ChatPanel
+              messages={messages}
+              onSend={(text) => {
+                if (text === "/run") return handleRun();
+                handleSend(text);
+              }}
+              loading={loading}
+              plan={
+                pendingRun
+                  ? {
+                      runId: pendingRun.runId,
+                      steps: pendingRun.plan.steps.map((s) => ({
+                        id: s.id,
+                        title: s.title,
+                        command: s.command ?? null,
+                        needs_approval: s.needs_approval,
+                        risk_level: s.risk_level,
+                      })),
+                    }
+                  : undefined
+              }
+              onApprove={(cmd) => approveCommand(cmd)}
+              onApproveStep={async (_runId, command) => approveCommand(command)}
+              onApprovePlan={() => {
+                if (!pendingRun?.plan?.steps?.length) return;
+                const first = pendingRun.plan.steps[0];
+                if (first.command) approveCommand(first.command);
+                setPendingRun(null);
+              }}
+            />
+          </div>
+        )}
       </div>
 
+      {/* Command dock always at bottom */}
+      <CommandDock
+        value={input}
+        onChange={setInput}
+        onSend={() => handleSend()}
+        onRun={!loading ? handleRun : undefined}
+        agent={activeAgent}
+        model={activeModel}
+        onAgentChange={handleAgentChange}
+        onModelChange={handleModelChange}
+        onAttach={() => handleSend("Attach a file...")}
+        onTools={() => setDrawerOpen((v) => !v)}
+        onToggleTerminal={() => {
+          setDrawerTab("terminal");
+          setDrawerOpen((v) => !v);
+        }}
+        onCreateFile={() => handleSend("Create a new file")}
+        onBuild={() => handleSend("Build the project")}
+        onGenerateMedia={() => handleSend("Generate media")}
+        onDeploy={() => handleSend("Deploy to production")}
+        onSaveWorkflow={() => handleSend("Save this workflow")}
+      />
+
+      {/* Pending command approval toast */}
       {pendingCommand && (
         <div
           className="fixed bottom-28 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border px-4 py-2 text-xs font-semibold shadow-lg"

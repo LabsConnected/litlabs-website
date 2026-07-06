@@ -65,20 +65,20 @@ export default function ConsoleDashboard({
   };
 
   return (
-    <div className="flex h-full w-full flex-col gap-4 overflow-y-auto px-4 pb-3 pt-1">
+    <div className="flex h-full w-full flex-col gap-3 overflow-y-auto px-3 pb-3 pt-2">
       {/* Hero header with composer */}
       <section
-        className="relative overflow-hidden rounded-2xl border p-4 sm:p-5"
+        className="relative overflow-hidden rounded-2xl border px-4 py-3"
         style={{
           backgroundColor: `${LC.bgPanel}e6`,
           borderColor: LC.border,
           boxShadow: LC_SHADOW.panel,
         }}
       >
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-          <div className="max-w-3xl">
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+          <div className="min-w-0">
             <div
-              className="mb-2 flex w-fit items-center gap-2 rounded-full border px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em]"
+              className="mb-1 flex w-fit items-center gap-2 rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
               style={{
                 borderColor: `${LC.accentCyan}33`,
                 color: LC.accentCyan,
@@ -88,10 +88,10 @@ export default function ConsoleDashboard({
               <Sparkles size={13} />
               Creator OS online
             </div>
-            <h1 className="text-2xl font-black tracking-normal sm:text-3xl" style={{ color: LC.text }}>
+            <h1 className="text-lg font-black tracking-normal sm:text-xl" style={{ color: LC.text }}>
               LiT Console command center
             </h1>
-            <p className="mt-2 max-w-2xl text-sm leading-relaxed" style={{ color: LC.textMuted }}>
+            <p className="mt-1 max-w-2xl text-xs leading-relaxed" style={{ color: LC.textMuted }}>
               Your creator OS is live. Agents, tools, social feed, telemetry, and terminal — all in one workspace. LiT is always here to help.
             </p>
           </div>
@@ -103,7 +103,7 @@ export default function ConsoleDashboard({
           </div>
         </div>
 
-        <div className="mt-5 grid gap-3 lg:grid-cols-[1fr_auto] lg:items-center">
+        <div className="mt-3 grid gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
           <div
             className="flex min-w-0 flex-col gap-2 rounded-xl border p-2 sm:flex-row"
             style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
@@ -149,8 +149,8 @@ export default function ConsoleDashboard({
         </div>
       </section>
 
-      {/* Tabs */}
-      <div className="flex items-center gap-1 rounded-xl border p-1" style={{ borderColor: LC.border, backgroundColor: LC.bgPanel }}>
+      {/* Tabs — sticky */}
+      <div className="sticky top-0 z-10 flex items-center gap-1 rounded-xl border p-1" style={{ borderColor: LC.border, backgroundColor: LC.bgPanel }}>
         {tabs.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -170,7 +170,7 @@ export default function ConsoleDashboard({
 
       {/* TAB: Command Center */}
       {tab === "command" && (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+        <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(220px,0.7fr)_minmax(0,1.4fr)_minmax(220px,0.7fr)]">
           {/* LEFT COLUMN: Telemetry + Quick Access + Agent Discovery */}
           <div className="flex flex-col gap-4">
             <TelemetryWidget />

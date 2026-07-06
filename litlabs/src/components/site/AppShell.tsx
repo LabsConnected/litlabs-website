@@ -40,26 +40,26 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         />
         <div className="flex-1 flex flex-col min-h-screen">
           {!isConsole && (
-            <>
-              <button
-                onClick={() => setMobileSidebarOpen(true)}
-                className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-lg backdrop-blur-md border"
-                style={{
-                  backgroundColor: `${T.bgColor}e0`,
-                  borderColor: `${T.borderColor}30`,
-                  color: T.textMuted,
-                }}
-                aria-label="Open navigation"
-              >
-                <Menu size={20} />
-              </button>
-              {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-              <NavbarWrapper
-                onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
-              />
-            </>
+            <button
+              onClick={() => setMobileSidebarOpen(true)}
+              className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-lg backdrop-blur-md border"
+              style={{
+                backgroundColor: `${T.bgColor}e0`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textMuted,
+              }}
+              aria-label="Open navigation"
+            >
+              <Menu size={20} />
+            </button>
           )}
-          <main className="flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0">
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+          {!isConsole && (
+            <NavbarWrapper
+              onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+            />
+          )}
+          <main className={isConsole ? "flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
             {children}
           </main>
           <MobileBottomNav />
