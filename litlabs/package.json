@@ -9,6 +9,8 @@
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
     "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbo",
+    "prebuild": "tsx scripts/build-project-tree.ts",
+    "predev": "tsx scripts/build-project-tree.ts",
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
