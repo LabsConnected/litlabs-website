@@ -7,6 +7,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useUser } from "@clerk/nextjs";
 import {
   X,
   ChevronLeft,
@@ -308,6 +309,7 @@ function SidebarContent({
   const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
   const { userId, sessionClaims } = useClerkAuth();
+  const { user: clerkUser } = useUser();
 
   const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(
     () => {
@@ -503,13 +505,14 @@ function SidebarContent({
               className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border-2"
               style={{ borderColor: T.accentColor }}
             >
-              {profile?.avatarUrl || sessionClaims?.name ? (
+              {profile?.avatarUrl || clerkUser?.imageUrl ? (
                 <NextImage
-                  src={profile?.avatarUrl || ""}
+                  src={profile?.avatarUrl || clerkUser?.imageUrl || ""}
                   alt={profile?.displayName || sessionClaims?.name || "Profile"}
                   fill
                   className="object-cover"
                   sizes="44px"
+                  unoptimized={!profile?.avatarUrl}
                 />
               ) : (
                 <div
