@@ -690,10 +690,10 @@ export default function AgentsTerminalTool() {
                   className="text-[12px] font-bold"
                   style={{ color: T.accentColor }}
                 >
-                  LiTree Labs Terminal
+                  LiTTree OS Terminal
                 </div>
                 <div className="text-[10px] opacity-60">
-                  Copyright (c) LiTree Lab Studios. All rights reserved.
+                  Copyright (c) LiTTree OS. All rights reserved.
                 </div>
                 <div className="mt-4 text-[10px] opacity-40">
                   Connected to{" "}

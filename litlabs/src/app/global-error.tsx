@@ -19,13 +19,13 @@ export default function GlobalError({
   return (
     <html lang="en">
       <head>
-        <title>Error — LiTTree Lab Studios</title>
+        <title>Error — LiTTree OS</title>
         <meta name="description" content="An unexpected error occurred." />
       </head>
       <body
         style={{
-          backgroundColor: "#0f0f14",
-          color: "#e2e8f0",
+          backgroundColor: "#08080c",
+          color: "#f0f0f6",
           margin: 0,
           fontFamily: "system-ui, -apple-system, sans-serif",
         }}

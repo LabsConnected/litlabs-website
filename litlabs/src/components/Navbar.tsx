@@ -200,7 +200,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             >
               <Image
                 src="/logo.png"
-                alt="LiTree Lab Studios"
+                alt="LiTTree OS"
                 fill
                 className="object-contain p-0.5"
                 unoptimized
@@ -220,7 +220,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
                 }}
               >
-                LiTree Labs
+                LiTTree OS
               </span>
               <span
                 className="text-[9px] font-bold tracking-widest uppercase"
@@ -230,7 +230,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   textShadow: `0 0 8px ${resolvedColors.bgColor}`,
                 }}
               >
-                AI Platform
+                AI Operating System
               </span>
             </div>
           </Link>

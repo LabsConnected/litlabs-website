@@ -188,13 +188,13 @@ export const GAMES = [
 export const WATCH = [
   {
     title: "Agent Setup Guide",
-    channel: "LiTree LabStudios",
+    channel: "LiTTree OS",
     views: "12k",
     color: "#ff00a0",
   },
   {
     title: "Studio Deep Dive",
-    channel: "LiTree LabStudios",
+    channel: "LiTTree OS",
     views: "8.5k",
     color: "#00f0ff",
   },

@@ -27,18 +27,18 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#0d0d0d",
+  themeColor: "#08080c",
 };
 
-const META_TITLE = "LiTTree Lab Studios — AI Agents for Creators";
+const META_TITLE = "LiTTree OS — The AI Operating System for Creators";
 const META_DESC =
-  "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
+  "Chat, code, create, deploy agents, play games, and collaborate — all in one AI OS. Build with specialist agents, ship with Studio, sell in the Marketplace.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTTree Lab Studios",
+    template: "%s | LiTTree OS",
   },
   description: META_DESC,
   keywords: [
@@ -54,6 +54,10 @@ export const metadata: Metadata = {
     "LiTTree",
     "LiTPage",
     "AI platform",
+    "LiTTree OS",
+    "AI games",
+    "agent marketplace",
+    "creator AI tools",
   ],
   authors: [{ name: "LiTTree Lab Studios", url: SITE_URL }],
   creator: "LiTTree Lab Studios",
@@ -67,7 +71,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree Lab Studios",
+    siteName: "LiTTree OS",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -120,7 +124,7 @@ export default function RootLayout({
       <GoogleTagManager gtmId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
-        style={{ backgroundColor: "#0a0a0f" }}
+        style={{ backgroundColor: "#08080c" }}
       >
         {clerkKey ? (
           <ClerkProvider

@@ -9,6 +9,7 @@ const PRODUCT_LINKS = [
   { href: "/studio", label: "Studio" },
   { href: "/gallery", label: "Gallery" },
   { href: "/marketplace", label: "Marketplace" },
+  { href: "/games/cloud", label: "Game Arcade" },
 ];
 
 const RESOURCE_LINKS = [
@@ -169,7 +170,7 @@ export default function Footer() {
               className="text-sm font-black"
               style={{ color: C.headerColor }}
             >
-              LiTTree Labs
+              LiTTree OS
             </span>
             <span className="text-xs opacity-60">© 2026</span>
           </div>
