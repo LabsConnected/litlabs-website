@@ -37,7 +37,7 @@ export function getProjectFiles(): { tree: string[]; contents: Map<string, strin
   if (cachedFileTree && cachedFileContents) {
     return { tree: cachedFileTree, contents: cachedFileContents };
   }
-  const cwd = process.cwd();
+  const cwd = /*turbopackIgnore: true*/ process.cwd();
   const tree: string[] = [];
   const contents = new Map<string, string>();
   const roots = [
