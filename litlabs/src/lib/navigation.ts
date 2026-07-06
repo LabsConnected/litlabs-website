@@ -367,10 +367,10 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const MOBILE_BOTTOM_ITEMS = [
   { label: "Home", href: "/dashboard", icon: Home },
+  { label: "LiT", href: "/lit-console", icon: Bot },
   { label: "Create", href: "/studio", icon: Sparkles },
-  { label: "Social", href: "/social", icon: MessagesSquare, badge: 4 },
-  { label: "Games", href: "/games", icon: Gamepad2 },
-  { label: "More", href: "#menu", icon: Menu },
+  { label: "Games", href: "/games/cloud", icon: Gamepad2 },
+  { label: "Profile", href: "/profile", icon: User },
 ];
 
 export const MOBILE_MORE_ITEMS = [
