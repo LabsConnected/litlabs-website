@@ -11,22 +11,21 @@ const STATUS_MESSAGES: Record<string, { running: string; idle: string }> = {
   director:       { running: "Coordinating agent strategy & platform health",  idle: "Awaiting orchestration requests"    },
   forge:          { running: "Reviewing latest TypeScript changes",              idle: "Awaiting code review requests"      },
   pulse:          { running: "Scheduling social content queue",                  idle: "Content calendar up to date"        },
-  "pixel-forge":  { running: "Crafting enhanced visual prompts",                 idle: "Standing by for creative requests"  },
+  visionary:      { running: "Crafting enhanced visual/audio prompts",           idle: "Standing by for creative requests"  },
   home:           { running: "Checking integration & automation state",          idle: "All systems nominal"                },
-  "data-slayer":  { running: "Processing telemetry batch",                       idle: "Telemetry stream nominal"           },
-  "writing-coach":{ running: "Editing active draft",                            idle: "Standing by for content requests"    },
-  "music-producer":{ running: "Generating audio from prompt",                    idle: "Waiting for audio prompt"           },
-  "security-chief":{ running: "Running security audit",                          idle: "Monitoring for threats"             },
 };
 
 export async function GET() {
   try {
     const minute = new Date().getMinutes();
-    const runningIdx = new Set([minute % 9, (minute + 3) % 9, (minute + 5) % 9]);
+    const agentIds = ["director", "forge", "pulse", "visionary", "home"];
+    const runningIdx = new Set([minute % 5, (minute + 2) % 5]);
 
-    const agents = Object.values(AGENTS).map((a, i) => {
+    const agents = agentIds.map((id, i) => {
+      const a = AGENTS[id];
+      if (!a) return null;
       const isRunning = runningIdx.has(i);
-      const msgs = STATUS_MESSAGES[a.id] ?? { running: "Processing active task", idle: "Standing by" };
+      const msgs = STATUS_MESSAGES[id] ?? { running: "Processing active task", idle: "Standing by" };
       return {
         name: a.name,
         slug: a.id,
@@ -35,7 +34,7 @@ export async function GET() {
         lastAction: isRunning ? msgs.running : msgs.idle,
         uptime: uptimeFromHour(a.name),
       };
-    });
+    }).filter(Boolean);
 
     return NextResponse.json(agents);
   } catch {

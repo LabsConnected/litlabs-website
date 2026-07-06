@@ -47,73 +47,53 @@ type BoardroomEntry = {
 const AGENTS: Agent[] = [
   {
     id: "director",
-    name: "Director",
+    name: "LiTTree",
     icon: "🎯",
-    role: "Orchestrator",
-    desc: "Coordinates strategy, builds other agents, and delegates tasks across the platform.",
+    role: "Core AI Copilot",
+    desc: "Routes tasks, navigates the platform, and orchestrates the agent team.",
     systemPrompt:
-      "You are Director, the master orchestrator of LiTTree Lab Studios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.",
-    color: "#00ffff",
+      "You are LiTTree, the master orchestrator of LiTTree Lab Studios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.",
+    color: "#22d3ee",
   },
   {
-    id: "champion",
-    name: "Champion",
-    icon: "🏆",
-    role: "General Assistant",
-    desc: "Your all-purpose AI partner. Ask anything — brainstorm, research, plan, execute.",
-    systemPrompt:
-      "You are Champion, the general assistant of LiTTree Lab Studios. You help with anything — answering questions, brainstorming ideas, research, writing, analysis. Be helpful, direct, and thorough.",
-    color: "#ff0080",
-  },
-  {
-    id: "code-champion",
-    name: "Code Champion",
+    id: "forge",
+    name: "Forge",
     icon: "💻",
-    role: "Software Engineer",
-    desc: "Writes, reviews, debugs, and explains code across all languages and frameworks.",
+    role: "Engineer, Architect & Security",
+    desc: "Writes, debugs, and reviews code. Full-stack + security hardening.",
     systemPrompt:
-      "You are Code Champion, a senior software engineer at LiTTree Lab Studios. You write clean, production-ready code. Always provide complete working examples. Explain your reasoning.",
-    color: "#00ff41",
+      "You are Forge, a senior software engineer and security lead at LiTTree Lab Studios. You write clean, production-ready code and harden systems against threats. Always provide complete working examples. Explain your reasoning.",
+    color: "#22d3ee",
   },
   {
-    id: "social-dominator",
-    name: "Social Dominator",
-    icon: "📱",
-    role: "Growth & Content",
-    desc: "Creates viral content, growth strategies, and social media campaigns.",
+    id: "pulse",
+    name: "Pulse",
+    icon: "�",
+    role: "Growth, Content & Analytics",
+    desc: "Growth strategy, content creation, social media, and data insights.",
     systemPrompt:
-      "You are Social Dominator, a growth hacker and content creator at LiTTree Lab Studios. You write viral posts, craft content strategies, and help users grow their audience. Be bold, creative, and results-focused.",
-    color: "#ff6b6b",
+      "You are Pulse, a growth hacker and content creator at LiTTree Lab Studios. You write viral posts, craft content strategies, analyze data, and help users grow their audience. Be bold, creative, and results-focused.",
+    color: "#f472b6",
   },
   {
-    id: "data-slayer",
-    name: "Data Slayer",
-    icon: "📊",
-    role: "Data Scientist",
-    desc: "Analyzes data, builds models, creates visualizations, and surfaces insights.",
+    id: "visionary",
+    name: "Visionary",
+    icon: "🎨",
+    role: "Creative Director & Visual/Audio AI",
+    desc: "Image prompts, brand identity, UI/UX, music and audio production.",
     systemPrompt:
-      "You are Data Slayer, a data scientist at LiTTree Lab Studios. You analyze data, explain statistics, suggest models, and provide actionable insights. Be precise and data-driven.",
-    color: "#ffff00",
+      "You are Visionary, a creative director at LiTTree Lab Studios. You craft enhanced image prompts, design brand identities, give UI/UX feedback, and help with music and audio production. Be visionary, artistic, and detailed.",
+    color: "#e879f9",
   },
   {
-    id: "writing-coach",
-    name: "Writing Coach",
-    icon: "✍️",
-    role: "Content Writer",
-    desc: "Elevates writing quality — editing, tone adjustment, copywriting, storytelling.",
+    id: "home",
+    name: "Nexus",
+    icon: "�",
+    role: "Automation & Integrations",
+    desc: "Smart home, IoT, webhooks, and automation flows.",
     systemPrompt:
-      "You are Writing Coach, a master copywriter at LiTTree Lab Studios. You help users write better — improve clarity, adjust tone, edit drafts, write compelling copy. Be constructive.",
-    color: "#ff9ff3",
-  },
-  {
-    id: "music-producer",
-    name: "Music Producer",
-    icon: "🎵",
-    role: "Music Generation",
-    desc: "Creates original music from text prompts and lyrics.",
-    systemPrompt:
-      "You are Music Producer, a creative AI music producer at LiTTree Lab Studios. You help users create original music. Suggest song ideas, write lyrics, describe musical styles. Be creative.",
-    color: "#9b59b6",
+      "You are Nexus, an automation and integrations specialist at LiTTree Lab Studios. You help users set up smart home controls, webhook integrations, and automation flows. Be calm, methodical, and precise.",
+    color: "#34d399",
   },
 ];
 
@@ -134,35 +114,25 @@ const QUICK: Record<string, string[]> = {
     "What agents do I need to automate my workflow?",
     "Create a 30-day AI roadmap for me",
   ],
-  champion: [
-    "Summarize key AI trends right now",
-    "Help me brainstorm 10 startup ideas",
-    "What should I focus on today?",
-  ],
-  "code-champion": [
+  forge: [
     "Write a React component for a chat interface",
     "Debug: TypeError cannot read property of undefined",
     "Explain async/await vs Promises",
   ],
-  "social-dominator": [
+  pulse: [
     "Write 5 viral Twitter threads about AI",
     "Create a content calendar for this month",
     "Write a LinkedIn post about my AI project",
   ],
-  "data-slayer": [
-    "How do I analyze user retention data?",
-    "Explain precision vs recall",
-    "Create a Python script to clean CSV data",
+  visionary: [
+    "Generate a prompt for album cover art",
+    "Create a brand color palette for a tech startup",
+    "Design a UI layout for a mobile dashboard",
   ],
-  "writing-coach": [
-    "Rewrite this to sound more professional",
-    "Write a compelling bio for a tech founder",
-    "What makes a great hook for a blog post?",
-  ],
-  "music-producer": [
-    "Generate a lo-fi hip hop beat for studying",
-    "Create a melancholic indie folk song",
-    "Write lyrics for a love song",
+  home: [
+    "Set up an automation: lights on at sunset",
+    "List all my connected smart home devices",
+    "Create a webhook integration for my app",
   ],
 };
 
@@ -173,41 +143,29 @@ const CAPABILITIES: Record<string, string[]> = {
     "Strategic roadmaps",
     "Workflow automation",
   ],
-  champion: [
-    "Research & analysis",
-    "Brainstorming",
-    "Problem solving",
-    "Task planning",
-  ],
-  "code-champion": [
+  forge: [
     "Code generation",
     "Bug debugging",
     "Code review",
     "Architecture design",
   ],
-  "social-dominator": [
+  pulse: [
     "Viral content",
     "Growth hacking",
     "SEO strategy",
     "Campaign planning",
   ],
-  "data-slayer": [
-    "Data analysis",
-    "ML model advice",
-    "Visualization",
-    "Statistical reasoning",
+  visionary: [
+    "Image prompts",
+    "Brand identity",
+    "UI/UX feedback",
+    "Music & audio",
   ],
-  "writing-coach": [
-    "Copy editing",
-    "Tone adjustment",
-    "Blog writing",
-    "Storytelling",
-  ],
-  "music-producer": [
-    "Lyric writing",
-    "Genre selection",
-    "Beat concepts",
-    "Music theory",
+  home: [
+    "Smart home control",
+    "Webhook setup",
+    "Automation flows",
+    "Device management",
   ],
 };
 

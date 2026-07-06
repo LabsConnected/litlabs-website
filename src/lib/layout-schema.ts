@@ -26,7 +26,7 @@ export const EXAMPLE_LAYOUT: LayoutSchema = {
   layout: "dashboard",
   theme: "neon",
   userId: "highlife4real1989@gmail.com",
-  agentId: "social-dominator",
+  agentId: "pulse",
   widgets: [
     {
       id: "w1",

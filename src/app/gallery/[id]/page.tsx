@@ -14,45 +14,45 @@ interface Message {
 
 const GALLERY_AGENTS = [
   {
-    id: "code-champion",
-    name: "Code Champion",
-    avatar: AGENT_AVATARS["code-champion"],
+    id: "director",
+    name: "LiTTree",
+    avatar: AGENT_AVATARS.director,
     greeting:
-      "Code Champion online. Transmit your technical problem or architecture idea. How can I help you build today?",
+      "LiTTree online. I coordinate the agent team and help you navigate the platform. What's your goal today?",
   },
   {
-    id: "social-dominator",
-    name: "Social Dominator",
-    avatar: AGENT_AVATARS["social-dominator"],
+    id: "forge",
+    name: "Forge",
+    avatar: AGENT_AVATARS.forge,
     greeting:
-      "What's the vibe? Give me a topic and I'll craft something worth sharing. Let's make you go viral.",
+      "Forge online. Transmit your technical problem or architecture idea. How can I help you build today?",
   },
   {
-    id: "data-slayer",
-    name: "Data Slayer",
-    avatar: AGENT_AVATARS["data-slayer"],
+    id: "pulse",
+    name: "Pulse",
+    avatar: AGENT_AVATARS.pulse,
     greeting:
-      "Data Slayer initialized. Transmit your dataset or analytical problem. I'll extract the insights you need.",
+      "Pulse online. Give me a topic and I'll craft something worth sharing. Let's grow your audience.",
   },
   {
-    id: "writing-coach",
-    name: "Writing Coach",
-    avatar: AGENT_AVATARS["writing-coach"],
+    id: "visionary",
+    name: "Visionary",
+    avatar: AGENT_AVATARS.visionary,
     greeting:
-      "Neural link established. Ready to refine your linguistic output. What are we working on?",
+      "Visionary online. Ready to craft stunning visuals, brand identity, or audio. What are we creating?",
+  },
+  {
+    id: "home",
+    name: "Nexus",
+    avatar: AGENT_AVATARS.home,
+    greeting:
+      "Nexus online. Smart home, IoT, webhooks, and automation flows. What shall we automate?",
   },
   {
     id: "support-agent",
     name: "Support Agent",
     avatar: AGENT_AVATARS["support-agent"],
     greeting: "Support Node active. How can I assist you or your users today?",
-  },
-  {
-    id: "trading-oracle",
-    name: "Trading Oracle",
-    avatar: AGENT_AVATARS.champion,
-    greeting:
-      "Market analysis node online. Transmit the asset or sector you want me to evaluate.",
   },
 ];
 

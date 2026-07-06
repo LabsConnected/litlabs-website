@@ -30,12 +30,11 @@ const PROOF_POINTS = [
 ];
 
 const AGENTS = [
-  { icon: '🎯', name: 'Director', role: 'Orchestrator', desc: 'Routes tasks across your agent workforce. The brain of your operation.', color: '#00ffff', href: '/agents/director' },
-  { icon: '🏆', name: 'Champion', role: 'General', desc: 'Takes charge of complex missions. Your most versatile agent.', color: '#ff0080', href: '/agents/champion' },
-  { icon: '💻', name: 'Code Champ', role: 'Engineer', desc: 'Writes, debugs, and reviews code. Full-stack capable.', color: '#00ff41', href: '/agents/code-champion' },
-  { icon: '📱', name: 'Social Dom', role: 'Growth', desc: 'Plans content, schedules posts, and grows your audience.', color: '#ff6b6b', href: '/agents/social-dominator' },
-  { icon: '📊', name: 'Data Slayer', role: 'Analytics', desc: 'Crunch numbers, find patterns, build dashboards.', color: '#ffff00', href: '/agents/data-slayer' },
-  { icon: '✍️', name: 'Writer', role: 'Content', desc: 'Crafts copy, stories, and marketing content.', color: '#ff9ff3', href: '/agents/writing-coach' },
+  { icon: '🎯', name: 'LiTTree', role: 'Core AI Copilot & Navigator', desc: 'The brain — routes tasks, navigates the platform, orchestrates the team.', color: '#22d3ee', href: '/agents' },
+  { icon: '💻', name: 'Forge', role: 'Engineer, Architect & Security', desc: 'Writes, debugs, and reviews code. Full-stack + security hardening.', color: '#22d3ee', href: '/agents' },
+  { icon: '�', name: 'Pulse', role: 'Growth, Content & Analytics', desc: 'Growth strategy, content creation, social media, and data insights.', color: '#f472b6', href: '/agents' },
+  { icon: '🎨', name: 'Visionary', role: 'Creative Director & Visual/Audio AI', desc: 'Image prompts, brand identity, UI/UX, music and audio production.', color: '#e879f9', href: '/agents' },
+  { icon: '🏠', name: 'Nexus', role: 'Automation & Integrations', desc: 'Smart home, IoT, webhooks, and automation flows.', color: '#34d399', href: '/agents' },
 ];
 
 function LandingPage() {

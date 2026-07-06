@@ -96,6 +96,7 @@ litlabs-website/
 *.backup
 bun.lock
 .quadcodeai/
+package-lock.json
 
 # Chrome browser binaries and profiles
 chrome/

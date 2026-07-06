@@ -10,24 +10,24 @@ import { useTheme } from "@/context/ThemeContext";
 // ─── Agents that can generate worlds ──────────────────────────────────────────
 const WORLD_AGENTS = [
   {
-    id: "pixel-forge",
-    name: "Pixel Forge",
+    id: "visionary",
+    name: "Visionary",
     icon: "🎨",
-    color: "#e74c3c",
+    color: "#e879f9",
     desc: "AI image and 3D world generation specialist - understands context deeply",
   },
   {
     id: "director",
-    name: "Director",
+    name: "LiTTree",
     icon: "🎯",
-    color: "#00ffff",
+    color: "#22d3ee",
     desc: "Orchestrates creative vision and world-building strategy",
   },
   {
-    id: "champion",
-    name: "Champion",
-    icon: "🏆",
-    color: "#ff0080",
+    id: "forge",
+    name: "Forge",
+    icon: "💻",
+    color: "#22d3ee",
     desc: "General creative partner for any visual concept",
   },
 ];
@@ -99,7 +99,7 @@ export default function AgentChat() {
   // Enhance prompt using Pixel Forge's intelligence
   const enhancePrompt = useCallback(
     async (userPrompt: string): Promise<string> => {
-      if (selectedAgent.id !== "pixel-forge") return userPrompt;
+      if (selectedAgent.id !== "visionary") return userPrompt;
 
       try {
         const res = await fetch("/api/gemini", {
@@ -229,7 +229,7 @@ export default function AgentChat() {
     } else {
       // Regular chat response via Gemini
       try {
-        const isPixelForge = selectedAgent.id === "pixel-forge";
+        const isPixelForge = selectedAgent.id === "visionary";
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },

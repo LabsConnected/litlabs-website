@@ -34,8 +34,8 @@ const PREVIEW_AGENTS: PreviewAgent[] = [
   { slug: "director", name: "Director", category: "general", description: "Orchestrates tasks across your agent workforce. The brain of your operation.", price: 0, emoji: "🎯" },
   { slug: "forge", name: "Forge", category: "developer", description: "Writes, debugs, and reviews code. TypeScript, Next.js, Supabase specialist.", price: 0, emoji: "💻" },
   { slug: "pulse", name: "Pulse", category: "marketing", description: "Plans content, grows your audience, and crafts SEO-optimized copy.", price: 0, emoji: "📱" },
-  { slug: "pixel-forge", name: "Pixel Forge", category: "content", description: "Visual creative — images, brand identity, UI/UX, and art direction.", price: 50, emoji: "🎨" },
-  { slug: "data-slayer", name: "Data Slayer", category: "developer", description: "Crunch numbers, find patterns, build dashboards and analytics.", price: 50, emoji: "📊" },
+  { slug: "visionary", name: "Visionary", category: "content", description: "Visual creative — images, brand identity, UI/UX, music and art direction.", price: 50, emoji: "🎨" },
+  { slug: "home", name: "Nexus", category: "automation", description: "Smart home, IoT, webhooks, and automation flows.", price: 50, emoji: "🏠" },
   { slug: "writer", name: "Writer", category: "content", description: "Crafts compelling copy, stories, scripts and marketing content.", price: 0, emoji: "✍️" },
 ];
 
