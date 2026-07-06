@@ -19,7 +19,7 @@ import StudioModeSwitcher, {
   defaultToolForMode,
   type StudioMode,
 } from "./components/StudioModeSwitcher";
-import { Sparkles, X } from "lucide-react";
+import { Sparkles, X, Image as ImageIcon, Film, Music, Zap } from "lucide-react";
 
 const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
   ssr: false,
@@ -298,44 +298,42 @@ function StudioCommandCenter() {
             />
           </div>
 
-          {/* Welcome strip (quickstart) */}
+          {/* Activity strip — recent actions or quickstart templates */}
           <div
-            className="px-3 sm:px-4 py-3 shrink-0"
+            className="px-3 sm:px-4 py-2 shrink-0 flex items-center gap-2 overflow-x-auto"
             style={{ borderBottom: `1px solid ${T.borderColor}10` }}
           >
-            <div className="flex items-end justify-between gap-3 mb-2">
-              <div>
-                <div
-                  className="text-[9px] uppercase tracking-[0.25em]"
-                  style={{ color: T.textMuted }}
-                >
-                  {headline.subtitle}
-                </div>
-                <div
-                  className="text-[10px] font-bold mt-0.5"
-                  style={{ color: T.textColor }}
-                >
-                  Quick start
-                </div>
-              </div>
-            </div>
-            <div className="flex gap-2 overflow-x-auto pb-0.5">
-              {quickstart.map((q) => (
-                <button
-                  key={q.id}
-                  onClick={() => handleAction(q)}
-                  className="shrink-0 flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:scale-[1.02]"
-                  style={{
-                    backgroundColor: T.bgColor + "65",
-                    borderColor: T.borderColor + "25",
-                    color: T.textColor,
-                  }}
-                >
-                  <Sparkles size={10} style={{ color: T.accentColor }} />
-                  {q.label}
-                </button>
-              ))}
-            </div>
+            {recentActions.length > 0 ? (
+              <>
+                <span className="text-[9px] uppercase tracking-[0.2em] shrink-0" style={{ color: T.textMuted }}>Recent</span>
+                {recentActions.map((a, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleToolChange(a.tool)}
+                    className="shrink-0 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all hover:scale-[1.02]"
+                    style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.textColor }}
+                  >
+                    {a.tool === "image" ? <ImageIcon size={9} style={{ color: T.accentColor }} /> :
+                     a.tool === "video" ? <Film size={9} style={{ color: "#ff6b6b" }} /> :
+                     a.tool === "audio" ? <Music size={9} style={{ color: "#9b59b6" }} /> :
+                     <Zap size={9} style={{ color: T.accentColor }} />}
+                    {a.label}
+                  </button>
+                ))}
+                <div className="w-px h-4 shrink-0" style={{ backgroundColor: T.borderColor + "30" }} />
+              </>
+            ) : null}
+            {quickstart.map((q) => (
+              <button
+                key={q.id}
+                onClick={() => handleAction(q)}
+                className="shrink-0 flex items-center gap-1.5 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all hover:scale-[1.02]"
+                style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.textColor }}
+              >
+                <Sparkles size={9} style={{ color: T.accentColor }} />
+                {q.label}
+              </button>
+            ))}
           </div>
 
           {/* Active tool */}

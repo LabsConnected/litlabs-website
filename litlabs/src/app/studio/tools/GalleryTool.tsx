@@ -312,10 +312,15 @@ export default function GalleryTool() {
     setIsSharing(false);
   };
 
-  const allItems = useMemo(
-    () => [...myItems, ...apiItems, ...DEMO_ITEMS],
-    [myItems, apiItems],
-  );
+  const allItems = useMemo(() => {
+    const merged = [...myItems, ...apiItems, ...DEMO_ITEMS];
+    const seen = new Set<string>();
+    return merged.filter((item) => {
+      if (seen.has(item.id)) return false;
+      seen.add(item.id);
+      return true;
+    });
+  }, [myItems, apiItems]);
 
   const videoItems = useMemo(
     () =>
@@ -651,6 +656,11 @@ export default function GalleryTool() {
                 >
                   {item.title}
                 </div>
+                {item.prompt && (
+                  <div className="text-[9px] truncate mt-0.5 opacity-40" style={{ color: T.textMuted }}>
+                    {item.prompt.slice(0, 48)}
+                  </div>
+                )}
                 <div className="flex items-center justify-between mt-1">
                   <span
                     className="text-[9px] opacity-50"
@@ -658,6 +668,29 @@ export default function GalleryTool() {
                   >
                     {item.artist} · {item.createdAt}
                   </span>
+                  <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
+                    {(item.imageUrl || item.audioUrl) && (
+                      <button
+                        onClick={() => handleDownload(
+                          item.imageUrl || item.audioUrl!,
+                          `litbit-${item.id}`
+                        )}
+                        className="p-1 rounded opacity-60 hover:opacity-100 transition-opacity"
+                        style={{ color: T.accentColor }}
+                        title="Download"
+                      >
+                        <Download size={10} />
+                      </button>
+                    )}
+                    <button
+                      onClick={(e) => { handleDelete(item.id, e); }}
+                      className="p-1 rounded opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity"
+                      style={{ color: "#ff4444" }}
+                      title="Delete"
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

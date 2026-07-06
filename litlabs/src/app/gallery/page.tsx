@@ -30,6 +30,15 @@ const SORT_OPTIONS = [
 ];
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
+function dedupeById<T extends { id: string }>(arr: T[]): T[] {
+  const seen = new Set<string>();
+  return arr.filter((item) => {
+    if (seen.has(item.id)) return false;
+    seen.add(item.id);
+    return true;
+  });
+}
+
 function stringToColor(str: string): string {
   let hash = 0;
   for (let i = 0; i < str.length; i++)
@@ -128,10 +137,11 @@ export default function Gallery() {
   const [isMock, setIsMock] = useState(false);
 
   // Real API items first; fall back to user items only when API returns nothing
-  const baseItems =
+  const baseItems = dedupeById(
     apiItems.length > 0
       ? [...apiItems, ...userItems]
-      : [...userItems];
+      : [...userItems]
+  );
   const items = baseItems.map((item) => ({
     ...item,
     likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
