@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Bell, MessageSquare, Play, Sparkles, LayoutGrid, MessageSquareText, User } from "lucide-react";
+import { Activity, Bell, Sparkles, LayoutGrid, MessageSquareText, User } from "lucide-react";
 import { BentoCard } from "@/components/site/BentoCard";
 import StarterActions from "./StarterActions";
 import { ActiveAgentsWidget } from "./widgets/ActiveAgentsWidget";
@@ -47,7 +47,6 @@ export default function ConsoleDashboard({
   onOpenChat,
   onOpenTerminal,
 }: ConsoleDashboardProps) {
-  const [composer, setComposer] = useState("");
   const [tab, setTab] = useState<"command" | "social" | "profile">("command");
 
   const tabs = [
@@ -56,27 +55,18 @@ export default function ConsoleDashboard({
     { id: "profile" as const, label: "My Profile", icon: User },
   ];
 
-  const submit = (mode: "chat" | "run") => {
-    const prompt = composer.trim();
-    if (!prompt) return;
-    setComposer("");
-    if (mode === "run") onRunPrompt(prompt);
-    else onPrompt(prompt);
-  };
-
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-y-auto px-3 pb-3 pt-2">
-      {/* Hero header — compact command bar */}
+      {/* Hero header — status bar only */}
       <section
-        className="relative overflow-hidden rounded-2xl border px-4 py-3"
+        className="relative overflow-hidden rounded-2xl border px-4 py-2.5"
         style={{
           backgroundColor: `${LC.bgPanel}e6`,
           borderColor: LC.border,
           boxShadow: LC_SHADOW.panel,
         }}
       >
-        {/* Title row + status chips */}
-        <div className="mb-2 flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2">
           <div className="flex items-center gap-2 mr-auto">
             <div
               className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
@@ -92,43 +82,6 @@ export default function ConsoleDashboard({
           <StatusChip label={`${activeAgent} online`} tone="cyan" />
           <StatusChip label={activeModel} tone="orange" />
           <StatusChip label="litlabs active" tone="green" />
-        </div>
-
-        {/* Composer row */}
-        <div className="flex min-w-0 items-center gap-2 rounded-xl border p-2"
-          style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
-        >
-          <input
-            value={composer}
-            onChange={(e) => setComposer(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") submit(e.shiftKey ? "run" : "chat"); }}
-            placeholder="Ask LiT, start a build, or describe the next move..."
-            className="min-h-8 flex-1 bg-transparent px-2 text-sm outline-none"
-            style={{ color: LC.text }}
-          />
-          <div className="flex shrink-0 gap-2">
-            <button
-              onClick={() => submit("chat")}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold"
-              style={{ backgroundColor: `${LC.accentCyan}18`, color: LC.accentCyan }}
-            >
-              <MessageSquare size={13} /> Chat
-            </button>
-            <button
-              onClick={() => submit("run")}
-              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold"
-              style={{ backgroundColor: LC.accentOrange, color: "#000" }}
-            >
-              <Play size={13} /> Run
-            </button>
-            <button
-              onClick={onOpenTerminal}
-              className="hidden sm:flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold"
-              style={{ borderColor: `${LC.accentOrange}35`, color: LC.accentOrange, backgroundColor: `${LC.accentOrange}10` }}
-            >
-              Terminal
-            </button>
-          </div>
         </div>
       </section>
 
