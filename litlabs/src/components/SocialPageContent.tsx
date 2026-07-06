@@ -60,13 +60,8 @@ const TRENDING = [
 ];
 
 const ONLINE_AGENTS = [
-  { name: "Code Champ", icon: "💻", status: "online", task: "Coding..." },
-  {
-    name: "Creative Muse",
-    icon: "🎨",
-    status: "online",
-    task: "Generating...",
-  },
+  { name: "Forge", icon: "💻", status: "online", task: "Coding..." },
+  { name: "Visionary", icon: "🎨", status: "online", task: "Generating..." },
   { name: "Data Slayer", icon: "📊", status: "busy", task: "Analyzing..." },
   { name: "Writing Coach", icon: "✍️", status: "online", task: "Drafting..." },
 ];
