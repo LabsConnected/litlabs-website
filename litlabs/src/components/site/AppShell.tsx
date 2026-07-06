@@ -14,7 +14,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { resolvedColors: T } = useTheme();
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const isConsole = pathname === "/lit-console";
 
   useEffect(() => {
@@ -36,7 +35,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <Sidebar
           open={mobileSidebarOpen}
           onClose={() => setMobileSidebarOpen(false)}
-          collapsed={desktopSidebarCollapsed}
         />
         <div className={`flex-1 flex flex-col ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
           {!isConsole && (
@@ -55,9 +53,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           )}
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           {!isConsole && (
-            <NavbarWrapper
-              onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
-            />
+            <NavbarWrapper />
           )}
           <main className={isConsole ? "h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
             {children}
