@@ -1,14 +1,5 @@
 import { readdirSync, statSync, readFileSync } from "fs";
-import { resolve, join, relative } from "path";
-
-const SCANNED_ROOTS = [
-  "src/app",
-  "src/components",
-  "src/lib",
-  "src/hooks",
-  "src/context",
-  "terminal-server",
-];
+import { join, relative } from "path";
 
 const SKIP_DIRS = new Set(["node_modules", ".next", "dist", ".git", "coverage", ".vercel", "out", "build"]);
 const MAX_FILE_BYTES = 12_000;
@@ -46,15 +37,22 @@ export function getProjectFiles(): { tree: string[]; contents: Map<string, strin
   if (cachedFileTree && cachedFileContents) {
     return { tree: cachedFileTree, contents: cachedFileContents };
   }
-  const base = process.cwd();
+  const cwd = process.cwd();
   const tree: string[] = [];
   const contents = new Map<string, string>();
-  for (const root of SCANNED_ROOTS) {
-    const dir = resolve(base, root);
-    scanDir(base, dir, tree, contents);
+  const roots = [
+    join(cwd, "src", "app"),
+    join(cwd, "src", "components"),
+    join(cwd, "src", "lib"),
+    join(cwd, "src", "hooks"),
+    join(cwd, "src", "context"),
+    join(cwd, "terminal-server"),
+  ];
+  for (const dir of roots) {
+    scanDir(cwd, dir, tree, contents);
   }
   for (const file of ["package.json", "README.md", "AGENTS.md", "vercel.json", "tsconfig.json"]) {
-    const path = resolve(base, file);
+    const path = join(cwd, file);
     try {
       tree.push(file);
       contents.set(file, readFileSync(path, "utf-8"));
