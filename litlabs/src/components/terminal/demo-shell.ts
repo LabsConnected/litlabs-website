@@ -6,30 +6,94 @@ import { ANSI } from "./terminal-theme";
 const hr = `${ANSI.dim}${"─".repeat(52)}${ANSI.reset}`;
 
 export const DEFAULT_PROJECT_FILES = [
+  // root
   "package.json",
   "pnpm-lock.yaml",
   "README.md",
   "AGENTS.md",
   "vercel.json",
   "tsconfig.json",
-  "src/app/page.tsx",
+  "next.config.ts",
+  "tailwind.config.ts",
+  "middleware.ts",
+  // app pages
   "src/app/layout.tsx",
+  "src/app/page.tsx",
+  "src/app/dashboard/page.tsx",
+  "src/app/social/page.tsx",
+  "src/app/social/layout.tsx",
+  "src/app/profile/page.tsx",
+  "src/app/profile/[username]/page.tsx",
+  "src/app/studio/page.tsx",
+  "src/app/studio/image/page.tsx",
+  "src/app/gallery/page.tsx",
+  "src/app/gallery/[id]/page.tsx",
+  "src/app/marketplace/page.tsx",
+  "src/app/agents/page.tsx",
+  "src/app/agents/[slug]/page.tsx",
+  "src/app/littree/page.tsx",
+  "src/app/games/page.tsx",
+  "src/app/games/cloud/page.tsx",
   "src/app/lit-console/page.tsx",
   "src/app/lit-console/layout.tsx",
-  "src/components/Navbar.tsx",
-  "src/components/LayoutShell.tsx",
+  "src/app/flow/page.tsx",
+  "src/app/docs/page.tsx",
+  "src/app/settings/page.tsx",
+  "src/app/wallet/page.tsx",
+  "src/app/memories/page.tsx",
+  "src/app/jarvis/page.tsx",
+  "src/app/chat/page.tsx",
+  "src/app/code/page.tsx",
+  "src/app/generate/page.tsx",
+  "src/app/ai-builder/page.tsx",
+  "src/app/builder/page.tsx",
+  "src/app/creator/page.tsx",
+  "src/app/onboarding/page.tsx",
+  "src/app/showcase/page.tsx",
+  "src/app/sign-in/[[...sign-in]]/page.tsx",
+  "src/app/sign-up/[[...sign-up]]/page.tsx",
+  "src/app/privacy/page.tsx",
+  "src/app/terms/page.tsx",
+  "src/app/cookies/page.tsx",
+  "src/app/admin/page.tsx",
+  "src/app/admin/terminal/page.tsx",
+  // api routes
+  "src/app/api/feed/route.ts",
+  "src/app/api/posts/route.ts",
+  "src/app/api/litt/chat/route.ts",
+  "src/app/api/settings/profile/route.ts",
+  "src/app/api/upload/route.ts",
+  "src/app/api/wallet/route.ts",
+  "src/app/api/agents/execute/route.ts",
+  // components
   "src/components/Sidebar.tsx",
-  "src/components/lit-console/LitConsole.tsx",
+  "src/components/Navbar.tsx",
+  "src/components/SocialPageContent.tsx",
+  "src/components/site/AppShell.tsx",
+  "src/components/lit-console/LitConsoleClient.tsx",
   "src/components/lit-console/ChatPanel.tsx",
   "src/components/lit-console/CommandDock.tsx",
   "src/components/lit-console/TopBar.tsx",
   "src/components/lit-console/LeftRail.tsx",
+  "src/components/littree/LiTTreeCorePage.tsx",
+  "src/components/litt/LiTTFace.tsx",
+  "src/components/litt/LiTTHub.tsx",
+  "src/components/games/GameCloudHome.tsx",
+  "src/components/games/GameCard.tsx",
   "src/components/terminal/LiTTreeTerminal.tsx",
-  "src/lib/jarvis-context.ts",
-  "src/lib/project-scan.ts",
+  "src/components/terminal/demo-shell.ts",
+  // lib
   "src/lib/agents.ts",
+  "src/lib/games.ts",
   "src/lib/navigation.ts",
+  "src/lib/supabase-admin.ts",
+  "src/lib/command-executor.ts",
+  // hooks & context
   "src/hooks/useClerkAuth.ts",
+  "src/context/ThemeContext.tsx",
+  "src/context/ProfileContext.tsx",
+  "src/context/WalletContext.tsx",
+  // terminal server
   "terminal-server/server.ts",
   "terminal-server/security.ts",
 ];
@@ -117,26 +181,28 @@ function joinPath(cwd: string, target: string) {
 }
 
 function toRel(abs: string) {
-  return abs.replace("/home/littree/litlabs", "").replace(/^\//, "");
+  return abs.replace("/home/creator/litlabs", "").replace(/^\//, "");
 }
 
 function isProjectPath(path: string) {
-  return path === "/home/littree/litlabs" || path.startsWith("/home/littree/litlabs/");
+  return path === "/home/creator/litlabs" || path.startsWith("/home/creator/litlabs/");
 }
 
 export class DemoShell {
-  cwd = "/home/littree/litlabs";
+  cwd = "/home/creator/litlabs";
   history: string[] = [];
   env: Record<string, string> = {
     NEXT_PUBLIC_TERMINAL_WS_URL: "",
     NODE_ENV: "production",
-    HOME: "/home/littree",
+    HOME: "/home/creator",
     PATH: "/usr/local/bin:/usr/bin:/bin",
   };
 
+  username = "creator";
+
   prompt() {
-    const short = this.cwd.replace("/home/littree", "~");
-    return `${ANSI.cyan}littree${ANSI.reset}${ANSI.dim}@studio${ANSI.reset}:${ANSI.green}${short}${ANSI.reset}$ `;
+    const short = this.cwd.replace("/home/creator", "~");
+    return `${ANSI.cyan}${this.username}${ANSI.reset}${ANSI.dim}@litlabs${ANSI.reset}:${ANSI.green}${short}${ANSI.reset}$ `;
   }
 
   exec(raw: string): string {
@@ -229,11 +295,11 @@ export class DemoShell {
   }
 
   cd(target: string) {
-    const resolved = target === "~" ? "/home/littree" : normalizePath(joinPath(this.cwd, target));
-    if (!isProjectPath(resolved) && resolved !== "/home/littree") {
+    const resolved = target === "~" ? "/home/creator" : normalizePath(joinPath(this.cwd, target));
+    if (!isProjectPath(resolved) && resolved !== "/home/creator") {
       return `${ANSI.red}cd: permission denied: ${target}${ANSI.reset}`;
     }
-    if (resolved === "/home/littree" || resolved === "/home/littree/litlabs") {
+    if (resolved === "/home/creator" || resolved === "/home/creator/litlabs") {
       this.cwd = resolved;
       return "";
     }
@@ -325,7 +391,7 @@ export class DemoShell {
   }
 
   tree() {
-    const tree: string[] = ["/home/littree/litlabs"];
+    const tree: string[] = ["/home/creator/litlabs"];
     const sorted = [...DEFAULT_PROJECT_FILES].sort();
     for (const file of sorted) {
       const parts = file.split("/").filter(Boolean);
@@ -353,6 +419,7 @@ export class DemoShell {
       `  ${ANSI.green}●${ANSI.reset} Project Files             ${ANSI.green}loaded${ANSI.reset}`,
       hr,
       `  Workspace: ${ANSI.cyan}${this.cwd}${ANSI.reset}`,
+      `  User:      ${ANSI.cyan}${this.username}@litlabs${ANSI.reset}`,
       `  Files: ${ANSI.green}${DEFAULT_PROJECT_FILES.length}${ANSI.reset}`,
     ].join("\n");
   }
@@ -374,6 +441,7 @@ export class DemoShell {
       `  Shell: ${ANSI.green}LiTTree Demo Terminal${ANSI.reset}`,
       `  Mode:  ${ANSI.yellow}demo${ANSI.reset} (read-only sandbox)`,
       `  Cwd:   ${ANSI.cyan}${this.cwd}${ANSI.reset}`,
+      `  User:  ${ANSI.cyan}${this.username}${ANSI.reset}`,
       hr,
       `${ANSI.dim}Switch to real mode by deploying the terminal-server backend.${ANSI.reset}`,
     ].join("\n");
