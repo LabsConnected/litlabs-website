@@ -12,9 +12,9 @@ import {
 } from "react";
 import { RefreshCw } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
-import { AGENTS } from "@/lib/agents";
 import { TERMINAL_THEME, ANSI } from "./terminal-theme";
 import { TerminalToolbar } from "./TerminalToolbar";
+import { DemoShell } from "./demo-shell";
 import type {
   ConnectionStatus,
   LiTTreeTerminalProps,
@@ -104,127 +104,6 @@ function ansiToSpans(text: string): React.ReactNode[] {
 
 /* ─── Demo command handlers ──────────────────────────────────────────────── */
 
-const PROMPT = `${ANSI.cyan}littree${ANSI.reset}${ANSI.dim}@studio${ANSI.reset}:${ANSI.green}~${ANSI.reset}$ `;
-
-function buildDemoOutput(cmd: string): string {
-  const trimmed = cmd.trim().toLowerCase();
-  const [base, ...args] = trimmed.split(/\s+/);
-
-  const T = TERMINAL_THEME;
-  const hr = `${ANSI.dim}${"─".repeat(52)}${ANSI.reset}`;
-
-  switch (base) {
-    case "help":
-      return [
-        `${ANSI.bold}${ANSI.magenta}LiTTree Terminal — Available Commands${ANSI.reset}`,
-        hr,
-        `  ${ANSI.cyan}help${ANSI.reset}      — show this help`,
-        `  ${ANSI.cyan}agents${ANSI.reset}    — list AI agents and their status`,
-        `  ${ANSI.cyan}status${ANSI.reset}    — system status overview`,
-        `  ${ANSI.cyan}scan${ANSI.reset}      — scan project structure`,
-        `  ${ANSI.cyan}deploy${ANSI.reset}    — deployment instructions`,
-        `  ${ANSI.cyan}whoami${ANSI.reset}    — show user info`,
-        `  ${ANSI.cyan}version${ANSI.reset}   — show platform version`,
-        `  ${ANSI.cyan}clear${ANSI.reset}     — clear terminal`,
-        hr,
-        `${ANSI.dim}Tip: switch to ${ANSI.reset}${ANSI.yellow}real${ANSI.reset}${ANSI.dim} mode for a full shell.${ANSI.reset}`,
-      ].join("\n");
-
-    case "agents": {
-      const agentList = Object.values(AGENTS);
-      const lines = [
-        `${ANSI.bold}${ANSI.magenta}LiTTree Agents${ANSI.reset}  (${agentList.length} active)`,
-        hr,
-      ];
-      for (const agent of agentList) {
-        const dot =
-          agent.status === "online"
-            ? `${ANSI.green}●${ANSI.reset}`
-            : agent.status === "busy"
-              ? `${ANSI.yellow}●${ANSI.reset}`
-              : `${ANSI.red}●${ANSI.reset}`;
-        lines.push(
-          `  ${dot} ${ANSI.bold}${agent.name}${ANSI.reset}  ${ANSI.dim}[${agent.tag}]${ANSI.reset}  — ${agent.role}`,
-        );
-        lines.push(
-          `      ${ANSI.dim}domains: ${agent.domains.slice(0, 4).join(", ")}${ANSI.reset}`,
-        );
-      }
-      return lines.join("\n");
-    }
-
-    case "status":
-      return [
-        `${ANSI.bold}${ANSI.cyan}System Status${ANSI.reset}`,
-        hr,
-        `  ${ANSI.green}●${ANSI.reset} Next.js 16 App Router    ${ANSI.green}online${ANSI.reset}`,
-        `  ${ANSI.green}●${ANSI.reset} Supabase PostgreSQL       ${ANSI.green}online${ANSI.reset}`,
-        `  ${ANSI.green}●${ANSI.reset} Gemini 2.5 Flash LLM     ${ANSI.green}online${ANSI.reset}`,
-        `  ${ANSI.green}●${ANSI.reset} Clerk Auth                ${ANSI.green}online${ANSI.reset}`,
-        `  ${ANSI.yellow}●${ANSI.reset} Terminal WebSocket        ${ANSI.yellow}demo mode${ANSI.reset}`,
-        `  ${ANSI.green}●${ANSI.reset} Cloudflare R2             ${ANSI.green}online${ANSI.reset}`,
-        hr,
-        `  Uptime: ${ANSI.green}99.9%${ANSI.reset}  |  Build: ${ANSI.cyan}production${ANSI.reset}`,
-      ].join("\n");
-
-    case "scan":
-      return [
-        `${ANSI.bold}${ANSI.yellow}Scanning project…${ANSI.reset}`,
-        hr,
-        `  ${ANSI.cyan}src/app/${ANSI.reset}           — Next.js pages & API routes`,
-        `  ${ANSI.cyan}src/components/${ANSI.reset}    — React components`,
-        `  ${ANSI.cyan}src/lib/${ANSI.reset}           — Core libraries & agents`,
-        `  ${ANSI.cyan}src/hooks/${ANSI.reset}         — Custom React hooks`,
-        `  ${ANSI.cyan}src/context/${ANSI.reset}       — React context providers`,
-        `  ${ANSI.cyan}terminal-server/${ANSI.reset}   — Express + Socket.IO backend`,
-        hr,
-        `  Files: ${ANSI.green}247${ANSI.reset}  |  TS errors: ${ANSI.green}0${ANSI.reset}  |  Coverage: ${ANSI.yellow}—${ANSI.reset}`,
-        `${ANSI.dim}Scan complete.${ANSI.reset}`,
-      ].join("\n");
-
-    case "deploy":
-      return [
-        `${ANSI.bold}${ANSI.magenta}Deploy Instructions${ANSI.reset}`,
-        hr,
-        `  1. ${ANSI.cyan}pnpm build${ANSI.reset}       — production build`,
-        `  2. ${ANSI.cyan}pnpm check${ANSI.reset}       — lint + typecheck + build`,
-        `  3. Push to ${ANSI.green}main${ANSI.reset} → Vercel auto-deploys`,
-        "",
-        `  ${ANSI.yellow}Or run:${ANSI.reset} vercel --prod`,
-        hr,
-        `  Domain: ${ANSI.cyan}https://litlabs.net${ANSI.reset}`,
-      ].join("\n");
-
-    case "whoami":
-      return [
-        `${ANSI.bold}${ANSI.cyan}Current User${ANSI.reset}`,
-        hr,
-        `  Shell: ${ANSI.green}LiTTree Demo Terminal${ANSI.reset}`,
-        `  Mode:  ${ANSI.yellow}demo${ANSI.reset} (read-only sandbox)`,
-        `  Host:  ${ANSI.cyan}studio.litlabs.net${ANSI.reset}`,
-        `${ANSI.dim}Switch to real mode for full shell access.${ANSI.reset}`,
-      ].join("\n");
-
-    case "version":
-      return [
-        `${ANSI.bold}${ANSI.magenta}LiTTree LabStudios${ANSI.reset}`,
-        hr,
-        `  Platform:   ${ANSI.cyan}Next.js 16 (App Router)${ANSI.reset}`,
-        `  Language:   ${ANSI.cyan}TypeScript 5${ANSI.reset}`,
-        `  Styling:    ${ANSI.cyan}Tailwind CSS v4${ANSI.reset}`,
-        `  AI Engine:  ${ANSI.cyan}Google Gemini 2.5 Flash${ANSI.reset}`,
-        `  Terminal:   ${ANSI.cyan}xterm.js v6 / LiTTree Demo v1.0${ANSI.reset}`,
-        `  Node:       ${ANSI.cyan}>= 22${ANSI.reset}`,
-      ].join("\n");
-
-    case "":
-      return "";
-
-    default:
-      return `${ANSI.red}command not found: ${ANSI.reset}${ANSI.bold}${base}${ANSI.reset}\n${ANSI.dim}Type ${ANSI.reset}${ANSI.cyan}help${ANSI.reset}${ANSI.dim} for available commands.${ANSI.reset}`;
-  }
-}
-
 /* ─── Demo Terminal ──────────────────────────────────────────────────────── */
 
 interface DemoTerminalProps {
@@ -234,6 +113,7 @@ interface DemoTerminalProps {
   onKeyDown: (e: React.KeyboardEvent<HTMLInputElement>) => void;
   inputRef: React.RefObject<HTMLInputElement | null>;
   outputRef: React.RefObject<HTMLDivElement | null>;
+  prompt: string;
 }
 
 function DemoTerminal({
@@ -243,6 +123,7 @@ function DemoTerminal({
   onKeyDown,
   inputRef,
   outputRef,
+  prompt,
 }: DemoTerminalProps) {
   return (
     <div
@@ -272,7 +153,7 @@ function DemoTerminal({
           >
             {line.isInput ? (
               <span>
-                {ansiToSpans(PROMPT)}
+                {ansiToSpans(prompt)}
                 <span style={{ color: TERMINAL_THEME.xterm.foreground }}>
                   {line.content}
                 </span>
@@ -289,7 +170,7 @@ function DemoTerminal({
         className="flex items-center px-3 py-1.5 shrink-0"
         style={{ borderTop: `1px solid ${TERMINAL_THEME.ui.border}22` }}
       >
-        <span className="shrink-0 mr-1">{ansiToSpans(PROMPT)}</span>
+        <span className="shrink-0 mr-1">{ansiToSpans(prompt)}</span>
         <div className="relative flex-1 flex items-center">
           <input
             ref={inputRef}
@@ -491,6 +372,8 @@ export const LiTTreeTerminal = forwardRef<
   const demoInputRef = useRef<HTMLInputElement>(null);
   const outputScrollRef = useRef<HTMLDivElement>(null);
   const lineId = useRef(1);
+  const shellRef = useRef(new DemoShell());
+  const [demoPrompt, setDemoPrompt] = useState(() => shellRef.current.prompt());
 
   const addLine = useCallback((content: string, isInput = false) => {
     setOutputLines((prev) => [
@@ -513,8 +396,13 @@ export const LiTTreeTerminal = forwardRef<
       }
       addLine(trimmed, true);
       onCommand?.(trimmed);
-      const out = buildDemoOutput(trimmed);
-      if (out) addLine(out);
+      const out = shellRef.current.exec(trimmed);
+      if (out === "__CLEAR__") {
+        setOutputLines([]);
+      } else if (out) {
+        addLine(out);
+      }
+      setDemoPrompt(shellRef.current.prompt());
     },
     [addLine, onCommand],
   );
@@ -744,6 +632,7 @@ export const LiTTreeTerminal = forwardRef<
               onKeyDown={handleDemoKeyDown}
               inputRef={demoInputRef}
               outputRef={outputScrollRef}
+              prompt={demoPrompt}
             />
           ) : (
             <RealTerminal

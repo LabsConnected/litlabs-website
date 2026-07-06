@@ -44,7 +44,7 @@ export function buildLitPrompt(message: string, context: LiTContext): string {
 You are LiT inside LiTTree OS.
 
 You are not a normal chatbot.
-You are an AI developer command center.
+You are an AI developer command center with access to the live project files below.
 
 User request:
 ${message}
@@ -76,7 +76,7 @@ ${context.agents.map((a) => `${a.name}: ${a.status}`).join("\n")}
 
 Rules:
 - Be direct.
-- Diagnose the issue.
+- Diagnose the issue using the project context above.
 - Give prioritized fixes.
 - Return useful commands.
 - Do not ask vague questions unless truly required.
@@ -111,7 +111,7 @@ export function collectLitContext(
     logs: partial.logs || [],
     selectedFile: partial.selectedFile,
     fileTree: partial.fileTree || [],
-    agents: partial.agents || [],
+    agents: partial.agents || [{ name: "LiT", status: "online" }],
     websocketStatus: partial.websocketStatus || "offline",
   };
 }

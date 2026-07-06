@@ -8,6 +8,7 @@ import {
   LiTAction,
   parseLitActions,
 } from "@/lib/jarvis-context";
+import { getProjectFiles } from "@/lib/project-scan";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -24,7 +25,15 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
-    const context = collectLitContext(contextRaw || { route: "/lit" });
+    const projectFiles = getProjectFiles();
+    const selectedFile = projectFiles.tree[0]
+      ? { path: projectFiles.tree[0], content: projectFiles.contents.get(projectFiles.tree[0]) || "" }
+      : undefined;
+    const context = collectLitContext({
+      ...(contextRaw || { route: "/lit" }),
+      fileTree: projectFiles.tree,
+      selectedFile,
+    });
     const prompt = buildLitPrompt(message, context);
 
     const messages = [

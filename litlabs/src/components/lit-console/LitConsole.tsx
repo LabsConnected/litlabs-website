@@ -22,7 +22,7 @@ const initialContext: LiTContext = {
   logs: [],
   fileTree: [],
   agents: [{ name: "LiT", status: "online" }],
-  websocketStatus: "offline",
+  websocketStatus: "connected",
 };
 
 type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory";
