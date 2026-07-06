@@ -3,8 +3,20 @@
  * Browser-based gaming with HTML5 games
  */
 
-export type GameCategory = "retro" | "arcade" | "puzzle" | "multiplayer";
+export type GameCategory = "retro" | "arcade" | "puzzle" | "multiplayer" | "classic" | "action";
 export type GamePlatform = "html5";
+
+export type GameMeta = {
+  id: string;
+  title: string;
+  href: string;
+  category: GameCategory;
+  difficulty: "easy" | "medium" | "hard";
+  controls: string[];
+  description: string;
+  achievements?: string[];
+  featured?: boolean;
+};
 
 export interface Game {
   id: string;
@@ -24,6 +36,7 @@ export interface Game {
   difficulty?: "easy" | "medium" | "hard" | "expert";
   controls?: string[];
   achievements?: Achievement[];
+  featured?: boolean;
   bestScore?: number;
   totalPlays?: number;
   playersToday?: number;
@@ -71,6 +84,9 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.5,
     tags: ["retro", "classic", "arcade"],
     plays: "12.8K",
+    difficulty: "easy",
+    controls: ["Mouse", "Arrow Keys"],
+    featured: true,
   },
   {
     id: "2048",
@@ -87,6 +103,9 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.5,
     tags: ["puzzle", "numbers", "minimalist"],
     plays: "28.6K",
+    difficulty: "easy",
+    controls: ["Arrow Keys"],
+    featured: true,
   },
   {
     id: "hextris",
@@ -103,6 +122,8 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.3,
     tags: ["puzzle", "fast", "reaction"],
     plays: "31.4K",
+    difficulty: "medium",
+    controls: ["Arrow Keys"],
   },
   {
     id: "tetris-react",
@@ -119,6 +140,9 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.8,
     tags: ["puzzle", "classic", "blocks"],
     plays: "45.2K",
+    difficulty: "medium",
+    controls: ["Arrow Keys"],
+    featured: true,
   },
   {
     id: "pacman",
@@ -135,6 +159,8 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.9,
     tags: ["arcade", "classic", "maze"],
     plays: "52.1K",
+    difficulty: "medium",
+    controls: ["Arrow Keys"],
   },
   {
     id: "snake",
@@ -151,6 +177,9 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.4,
     tags: ["arcade", "classic", "reflexes"],
     plays: "19.2K",
+    difficulty: "easy",
+    controls: ["Arrow Keys"],
+    featured: true,
   },
   {
     id: "sudoku",
@@ -167,6 +196,8 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.4,
     tags: ["puzzle", "numbers", "logic"],
     plays: "15.8K",
+    difficulty: "medium",
+    controls: ["Mouse"],
   },
   {
     id: "flappy",
@@ -183,6 +214,8 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.2,
     tags: ["arcade", "skill", "endless"],
     plays: "38.7K",
+    difficulty: "hard",
+    controls: ["Space", "Click"],
   },
   {
     id: "minesweeper",
@@ -199,6 +232,8 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.5,
     tags: ["puzzle", "logic", "classic"],
     plays: "22.3K",
+    difficulty: "hard",
+    controls: ["Mouse"],
   },
 ];
 
@@ -286,4 +321,27 @@ export function searchGames(query: string): Game[] {
 
 export function getGameById(id: string): Game | undefined {
   return GAME_LIBRARY.find((g) => g.id === id);
+}
+
+export function getFeaturedGames(limit = 4): Game[] {
+  const featured = GAME_LIBRARY.filter((g) => g.featured);
+  return featured.length > 0 ? featured.slice(0, limit) : GAME_LIBRARY.slice(0, limit);
+}
+
+export function getLastPlayedGameId(): string | null {
+  if (typeof window === "undefined") return null;
+  try {
+    return localStorage.getItem(STORAGE_KEYS.lastPlayed);
+  } catch {
+    return null;
+  }
+}
+
+export function setLastPlayedGameId(gameId: string): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(STORAGE_KEYS.lastPlayed, gameId);
+  } catch {
+    // ignore storage errors
+  }
 }
