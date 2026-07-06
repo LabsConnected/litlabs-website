@@ -205,7 +205,7 @@ export default function ChatPanel({
 
   return (
     <div
-      className="mx-auto flex h-full w-full max-w-[820px] flex-col overflow-hidden rounded-2xl border"
+      className="flex h-full w-full flex-col overflow-hidden rounded-2xl border"
       style={{
         backgroundColor: LC.bgPanel,
         borderColor: LC.border,

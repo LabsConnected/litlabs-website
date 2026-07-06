@@ -769,17 +769,29 @@ function SidebarContent({
           </div>
         )}
         {!collapsed && !isSignedIn && (
-          <Link
-            href="/sign-up"
-            className="flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold transition-opacity hover:opacity-90"
-            style={{
-              backgroundColor: T.accentColor + "15",
-              color: T.accentColor,
-              border: `1px solid ${T.accentColor}30`,
-            }}
-          >
-            <Coins size={10} /> Get 500 free credits
-          </Link>
+          <div className="flex items-center gap-2">
+            <Link
+              href="/sign-in"
+              className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold transition-opacity hover:opacity-90"
+              style={{
+                color: T.accentColor,
+                border: `1px solid ${T.accentColor}30`,
+              }}
+            >
+              Sign In
+            </Link>
+            <Link
+              href="/sign-up"
+              className="flex flex-1 items-center justify-center gap-1.5 px-3 py-2 rounded-lg text-[10px] font-bold transition-opacity hover:opacity-90"
+              style={{
+                backgroundColor: T.accentColor + "15",
+                color: T.accentColor,
+                border: `1px solid ${T.accentColor}30`,
+              }}
+            >
+              Get Started
+            </Link>
+          </div>
         )}
       </div>
     </div>

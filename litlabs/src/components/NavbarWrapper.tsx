@@ -3,6 +3,12 @@
 import { useState, useEffect } from "react";
 import { Menu, Bell, Search } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import dynamic from "next/dynamic";
+
+const NavAuth = dynamic(
+  () => import("@/components/ClerkAuth").then((m) => ({ default: m.NavAuth })),
+  { ssr: false },
+);
 
 export default function NavbarWrapper({
   onMenuClick,
@@ -58,6 +64,7 @@ export default function NavbarWrapper({
         >
           <Bell size={18} />
         </button>
+        <NavAuth linkColor={T.accentColor} />
       </div>
     </header>
   );

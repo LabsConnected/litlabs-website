@@ -6,7 +6,6 @@ import { useEffect } from "react";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
-  Code2,
   Bot,
   BarChart3,
   ChevronRight,
@@ -20,6 +19,8 @@ import {
   Layers3,
   MessageSquareText,
   Users,
+  LogIn,
+  UserPlus,
 } from "lucide-react";
 
 const FEATURES = [
@@ -137,6 +138,41 @@ function LandingPage() {
       className="min-h-screen"
       style={{ backgroundColor: "#08080c", color: "#e2e2e9" }}
     >
+      {/* Sticky auth header */}
+      <header
+        className="sticky top-0 z-50 flex items-center justify-between px-4 sm:px-6 h-14"
+        style={{
+          backgroundColor: "#08080ccc",
+          backdropFilter: "blur(12px)",
+          borderBottom: "1px solid #26262e30",
+        }}
+      >
+        <Link href="/" className="flex items-center gap-2">
+          <span className="font-black text-sm" style={{ color: "#f8fafc" }}>
+            LiTTree OS
+          </span>
+        </Link>
+        <div className="flex items-center gap-2">
+          <Link
+            href="/sign-in"
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-[11px] font-bold transition-all hover:opacity-80"
+            style={{ color: "#a5b4fc" }}
+          >
+            <LogIn size={14} /> Sign In
+          </Link>
+          <Link
+            href="/sign-up"
+            className="flex items-center gap-1.5 px-3.5 py-1.5 rounded-md text-[11px] font-bold transition-all hover:scale-105"
+            style={{
+              backgroundColor: "#6366f1",
+              color: "#fff",
+            }}
+          >
+            <UserPlus size={14} /> Get Started
+          </Link>
+        </div>
+      </header>
+
       {/* Hero */}
       <section className="relative px-4 pt-20 pb-16 md:pt-28 md:pb-24 text-center overflow-hidden">
         <div className="absolute inset-0 pointer-events-none">

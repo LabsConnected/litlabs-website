@@ -52,7 +52,7 @@ export default function ConsoleDashboard({
   };
 
   return (
-    <div className="mx-auto flex h-full w-full max-w-[1480px] flex-col gap-4 overflow-y-auto px-3 pb-3 pt-1 sm:px-4">
+    <div className="flex h-full w-full flex-col gap-4 overflow-y-auto px-4 pb-3 pt-1">
       <section
         className="relative overflow-hidden rounded-2xl border p-4 sm:p-5"
         style={{

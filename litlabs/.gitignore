@@ -93,3 +93,6 @@ bun.lock
 chrome/
 **/lighthouse.*/
 **/AppData/Local/lighthouse*/
+
+.vercel
+.env*
