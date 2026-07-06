@@ -27,7 +27,7 @@ pnpm dev:all      # Dev server + terminal server
 ## Architecture
 
 - `src/app/` - Next.js App Router pages and API routes
-- `src/components/` - React components (Sidebar, Dashboard, LiTTree LiT terminal, etc.)
+- `src/components/` - React components (Sidebar, Dashboard, Jarvis terminal, etc.)
 - `src/lib/` - Core libraries (agents, LLM, Supabase, auth, navigation)
 - `src/hooks/` - Custom React hooks (useClerkAuth, etc.)
 - `src/context/` - React context providers (Theme, Profile, Wallet)
@@ -36,7 +36,6 @@ pnpm dev:all      # Dev server + terminal server
 ## Auth
 
 The app supports two auth modes:
-
 1. **Clerk** (production) - Set `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` and `CLERK_SECRET_KEY`
 2. **Custom JWT** (fallback) - Works when Clerk keys are missing; uses `/api/auth/session`
 
@@ -46,7 +45,6 @@ when Clerk is not configured.
 ## Environment Variables
 
 Copy `.env.example` to `.env.local` and fill in values. Required for full functionality:
-
 - `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` / `CLERK_SECRET_KEY` - Authentication
 - `NEXT_PUBLIC_SUPABASE_URL` / `NEXT_PUBLIC_SUPABASE_ANON_KEY` / `SUPABASE_SERVICE_ROLE_KEY` - Database
 - `GEMINI_API_KEY` - AI features
@@ -58,10 +56,10 @@ Copy `.env.example` to `.env.local` and fill in values. Required for full functi
 
 ### Remaining npm audit findings (6 moderate, all upstream)
 
-| Package             | Via            | Issue                | Status                    |
-| ------------------- | -------------- | -------------------- | ------------------------- |
-| dompurify <= 3.4.10 | monaco-editor  | XSS variants         | Waiting on Monaco update  |
-| postcss < 8.5.10    | next (bundled) | XSS in CSS stringify | Waiting on Next.js update |
+| Package | Via | Issue | Status |
+|---------|-----|-------|--------|
+| dompurify <= 3.4.10 | monaco-editor | XSS variants | Waiting on Monaco update |
+| postcss < 8.5.10 | next (bundled) | XSS in CSS stringify | Waiting on Next.js update |
 
 These are transitive dependencies with no available fix. Monitor for upstream releases.
 

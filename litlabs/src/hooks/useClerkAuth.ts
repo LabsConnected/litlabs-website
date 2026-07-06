@@ -13,7 +13,7 @@ const CLERK_EMPTY = {
   orgId: null,
   orgRole: null,
   orgSlug: null,
-  signOut: async () => { },
+  signOut: async () => {},
   getToken: async () => null,
   has: () => false,
 } as const;
