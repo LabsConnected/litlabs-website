@@ -66,7 +66,7 @@ export default function ConsoleDashboard({
 
   return (
     <div className="flex h-full w-full flex-col gap-3 overflow-y-auto px-3 pb-3 pt-2">
-      {/* Hero header with composer */}
+      {/* Hero header — compact command bar */}
       <section
         className="relative overflow-hidden rounded-2xl border px-4 py-3"
         style={{
@@ -75,77 +75,60 @@ export default function ConsoleDashboard({
           boxShadow: LC_SHADOW.panel,
         }}
       >
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-          <div className="min-w-0">
+        {/* Title row + status chips */}
+        <div className="mb-2 flex flex-wrap items-center gap-2">
+          <div className="flex items-center gap-2 mr-auto">
             <div
-              className="mb-1 flex w-fit items-center gap-2 rounded-full border px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
-              style={{
-                borderColor: `${LC.accentCyan}33`,
-                color: LC.accentCyan,
-                backgroundColor: `${LC.accentCyan}10`,
-              }}
+              className="flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.14em]"
+              style={{ borderColor: `${LC.accentCyan}33`, color: LC.accentCyan, backgroundColor: `${LC.accentCyan}10` }}
             >
-              <Sparkles size={13} />
+              <Sparkles size={11} />
               Creator OS online
             </div>
-            <h1 className="text-lg font-black tracking-normal sm:text-xl" style={{ color: LC.text }}>
-              LiT Console command center
+            <h1 className="text-sm font-black tracking-wide" style={{ color: LC.text }}>
+              LiT Console
             </h1>
-            <p className="mt-1 max-w-2xl text-xs leading-relaxed" style={{ color: LC.textMuted }}>
-              Your creator OS is live. Agents, tools, social feed, telemetry, and terminal — all in one workspace. LiT is always here to help.
-            </p>
           </div>
-
-          <div className="grid min-w-0 grid-cols-2 gap-2 sm:grid-cols-3">
-            <StatusChip label={`${activeAgent} online`} tone="cyan" />
-            <StatusChip label={activeModel} tone="orange" />
-            <StatusChip label="litlabs active" tone="green" />
-          </div>
+          <StatusChip label={`${activeAgent} online`} tone="cyan" />
+          <StatusChip label={activeModel} tone="orange" />
+          <StatusChip label="litlabs active" tone="green" />
         </div>
 
-        <div className="mt-3 grid gap-2 lg:grid-cols-[1fr_auto] lg:items-center">
-          <div
-            className="flex min-w-0 flex-col gap-2 rounded-xl border p-2 sm:flex-row"
-            style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
-          >
-            <input
-              value={composer}
-              onChange={(e) => setComposer(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") submit(e.shiftKey ? "run" : "chat");
-              }}
-              placeholder="Ask LiT, start a build, or describe the next move..."
-              className="min-h-10 flex-1 bg-transparent px-2 text-sm outline-none"
-              style={{ color: LC.text }}
-            />
-            <div className="flex gap-2">
-              <button
-                onClick={() => submit("chat")}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold sm:flex-none"
-                style={{ backgroundColor: `${LC.accentCyan}18`, color: LC.accentCyan }}
-              >
-                <MessageSquare size={14} /> Chat
-              </button>
-              <button
-                onClick={() => submit("run")}
-                className="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-bold sm:flex-none"
-                style={{ backgroundColor: LC.accentOrange, color: "#000" }}
-              >
-                <Play size={14} /> Run
-              </button>
-            </div>
+        {/* Composer row */}
+        <div className="flex min-w-0 items-center gap-2 rounded-xl border p-2"
+          style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+        >
+          <input
+            value={composer}
+            onChange={(e) => setComposer(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") submit(e.shiftKey ? "run" : "chat"); }}
+            placeholder="Ask LiT, start a build, or describe the next move..."
+            className="min-h-8 flex-1 bg-transparent px-2 text-sm outline-none"
+            style={{ color: LC.text }}
+          />
+          <div className="flex shrink-0 gap-2">
+            <button
+              onClick={() => submit("chat")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold"
+              style={{ backgroundColor: `${LC.accentCyan}18`, color: LC.accentCyan }}
+            >
+              <MessageSquare size={13} /> Chat
+            </button>
+            <button
+              onClick={() => submit("run")}
+              className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold"
+              style={{ backgroundColor: LC.accentOrange, color: "#000" }}
+            >
+              <Play size={13} /> Run
+            </button>
+            <button
+              onClick={onOpenTerminal}
+              className="hidden sm:flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-bold"
+              style={{ borderColor: `${LC.accentOrange}35`, color: LC.accentOrange, backgroundColor: `${LC.accentOrange}10` }}
+            >
+              Terminal
+            </button>
           </div>
-          <button
-            onClick={onOpenTerminal}
-            className="rounded-xl border px-4 py-3 text-xs font-bold uppercase tracking-[0.14em]"
-            style={{
-              borderColor: `${LC.accentOrange}35`,
-              color: LC.accentOrange,
-              backgroundColor: `${LC.accentOrange}10`,
-            }}
-          >
-            Open terminal drawer
-          </button>
         </div>
       </section>
 
