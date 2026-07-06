@@ -13,7 +13,7 @@ import { TerminalLauncherWidget } from "./widgets/TerminalLauncherWidget";
 import { TelemetryWidget } from "./widgets/TelemetryWidget";
 import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
 import { SocialFeedWidget } from "./widgets/SocialFeedWidget";
-import { PostComposerWidget } from "./widgets/PostComposerWidget";
+import { ProfileWidget } from "./widgets/ProfileWidget";
 import { AgentDiscoveryWidget, SystemStatusWidget } from "./widgets/AgentDiscoveryWidget";
 import { LiveTelemetryWidget } from "./widgets/LiveTelemetryWidget";
 import { LC, LC_SHADOW } from "./lit-console-theme";
@@ -151,9 +151,10 @@ export default function ConsoleDashboard({
           <AgentDiscoveryWidget />
         </div>
 
-        {/* CENTER COLUMN: Start Here + Composer + Social Feed + Games + Agents */}
+        {/* CENTER COLUMN: Start Here + Profile + Social Feed + Games + Agents */}
         <div className="flex flex-col gap-4">
           <LittMiniWidget />
+          <ProfileWidget />
           <BentoCard
             title="Start Here"
             icon={<Sparkles size={14} />}
@@ -169,7 +170,6 @@ export default function ConsoleDashboard({
           >
             <StarterActions onSelect={onPrompt} />
           </BentoCard>
-          <PostComposerWidget />
           <SocialFeedWidget />
           <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <GameArcadeWidget />
