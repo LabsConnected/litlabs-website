@@ -21,7 +21,6 @@ import {
   Send,
   MoreHorizontal,
   CrownIcon,
-  Home,
 } from "lucide-react";
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
@@ -90,19 +89,19 @@ function NavItemRow({
 
   const iconColor = groupActive ? accent : T.textMuted;
   const baseClasses =
-    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group select-none hover:bg-white/5";
+    "relative flex items-center gap-2.5 px-3 py-[7px] rounded-xl text-[13px] font-medium transition-all duration-150 group select-none";
   const style = {
-    backgroundColor: groupActive ? `${accent}14` : "transparent",
+    backgroundColor: groupActive ? `${accent}12` : "transparent",
     color: groupActive ? accent : T.textMuted,
-    paddingLeft: collapsed ? undefined : `${12 + depth * 8}px`,
-    boxShadow: groupActive ? `inset 2px 0 0 0 ${accent}` : "none",
+    paddingLeft: collapsed ? undefined : `${12 + depth * 10}px`,
+    boxShadow: groupActive ? `inset 3px 0 0 0 ${accent}` : "none",
   };
 
   const icon = (
-    <div className="relative shrink-0">
-      <item.icon size={17} style={{ color: iconColor }} />
+    <div className="relative shrink-0 w-[18px]">
+      <item.icon size={16} style={{ color: iconColor }} />
       {item.online && !collapsed && (
-        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 ring-1 ring-[#0a0b14]" />
+        <span className="absolute -top-0.5 -right-0.5 w-1.5 h-1.5 rounded-full bg-green-400 ring-1 ring-black/40" />
       )}
     </div>
   );
@@ -114,8 +113,8 @@ function NavItemRow({
   const badge =
     !collapsed && item.badge ? (
       <span
-        className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-        style={{ backgroundColor: accent, color: "#0a0b14" }}
+        className="ml-auto min-w-[18px] text-center text-[10px] font-black px-1.5 py-0.5 rounded-full"
+        style={{ backgroundColor: accent, color: "#08080c" }}
       >
         {item.badge > 99 ? "99+" : item.badge}
       </span>
@@ -199,26 +198,21 @@ function GroupSection({
 
   return (
     <div
-      className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`}
-      style={{
-        borderColor: group.label === "System" ? `${group.accent}20` : undefined,
-      }}
+      className={`group-section ${group.label === "System" ? "pt-3 mt-1 border-t border-white/5" : ""}`}
     >
       {!collapsed && (
         <button
           onClick={onToggle}
-          className="w-full flex items-center justify-between px-3 py-1.5 mb-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
-          style={{
-            color: group.accent,
-            backgroundColor: `${group.accent}12`,
-          }}
+          className="w-full flex items-center justify-between px-2 py-1 mb-1.5 rounded-lg text-[10px] font-black uppercase tracking-[0.12em] transition-all hover:bg-white/[0.04]"
+          style={{ color: group.accent }}
           type="button"
         >
           <span className="flex items-center gap-1.5">
-            <group.icon size={12} />
+            <div className="w-1 h-3.5 rounded-full" style={{ backgroundColor: group.accent, opacity: 0.8 }} />
+            <group.icon size={11} />
             {group.label}
           </span>
-          <span className="flex items-center gap-1 opacity-70">
+          <span style={{ opacity: 0.5 }}>
             {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
           </span>
         </button>
@@ -428,82 +422,79 @@ function SidebarContent({
     <div className="flex flex-col h-full">
       {/* Header */}
       <div
-        className="flex items-center justify-between px-3 py-3 border-b"
-        style={{ borderColor: `${T.borderColor}30` }}
+        className="flex items-center justify-between px-3 py-2.5 border-b"
+        style={{ borderColor: `${T.borderColor}20` }}
       >
         {onClose && (
-          <span
-            className="text-xs font-bold uppercase tracking-widest"
-            style={{ color: T.textMuted }}
-          >
+          <span className="text-[11px] font-black uppercase tracking-[0.15em]" style={{ color: T.textMuted }}>
             Menu
           </span>
         )}
         {!onClose && (
-          <Link href="/dashboard" className="flex items-center gap-2">
+          <Link href="/dashboard" className="flex items-center gap-2 group">
             {!collapsed && (
-              <span
-                className="text-xs font-bold uppercase tracking-widest"
-                style={{ color: T.accentColor }}
-              >
-                LiTTree OS
-              </span>
+              <>
+                <div
+                  className="w-6 h-6 rounded-lg flex items-center justify-center text-[10px] font-black transition-all group-hover:scale-105"
+                  style={{ background: `linear-gradient(135deg, #6366f1, #22d3ee)`, color: "#fff" }}
+                >
+                  L
+                </div>
+                <span className="text-[11px] font-black uppercase tracking-[0.15em]" style={{ color: T.accentColor }}>
+                  LiTTree OS
+                </span>
+              </>
             )}
-            {collapsed && <Home size={16} style={{ color: T.accentColor }} />}
+            {collapsed && (
+              <div
+                className="w-7 h-7 rounded-lg flex items-center justify-center text-[10px] font-black"
+                style={{ background: `linear-gradient(135deg, #6366f1, #22d3ee)`, color: "#fff" }}
+              >
+                L
+              </div>
+            )}
           </Link>
         )}
-        <div className="flex items-center gap-1">
+        <div className="flex items-center gap-0.5">
           {!collapsed && (
             <button
               onClick={() => setShowPersonalize((v) => !v)}
-              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-              style={{ color: T.textMuted }}
+              className="p-1.5 rounded-lg hover:bg-white/8 transition-colors"
+              style={{ color: showPersonalize ? T.accentColor : T.textMuted }}
               title="Personalize sidebar"
             >
-              <MoreHorizontal size={16} />
+              <MoreHorizontal size={15} />
             </button>
           )}
           {onToggleCollapse && !onClose && (
             <button
               onClick={onToggleCollapse}
-              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+              className="p-1.5 rounded-lg hover:bg-white/8 transition-colors"
               style={{ color: T.textMuted }}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {collapsed ? (
-                <ChevronRight size={16} />
-              ) : (
-                <ChevronLeft size={16} />
-              )}
+              {collapsed ? <ChevronRight size={15} /> : <ChevronLeft size={15} />}
             </button>
           )}
         </div>
         {onClose && (
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-            style={{ color: T.textMuted }}
-          >
-            <X size={16} />
+          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors" style={{ color: T.textMuted }}>
+            <X size={15} />
           </button>
         )}
       </div>
 
       {/* User profile card */}
       {!collapsed && isSignedIn && userId && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
+        <div className="px-3 py-2.5 border-b" style={{ borderColor: `${T.borderColor}20` }}>
           <Link
             href="/profile"
             onClick={onClose}
-            className="flex items-center gap-3 p-2.5 rounded-xl transition-all hover:bg-white/5"
-            style={{ backgroundColor: `${T.boxBg}40` }}
+            className="flex items-center gap-3 p-2 rounded-xl transition-all hover:bg-white/[0.04]"
           >
             <div
-              className="relative shrink-0 w-11 h-11 rounded-full overflow-hidden border-2"
-              style={{ borderColor: T.accentColor }}
+              className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden"
+              style={{ boxShadow: `0 0 0 2px #22d3ee40, 0 0 0 3px #22d3ee15` }}
             >
               {profile?.avatarUrl || clerkUser?.imageUrl ? (
                 <NextImage
@@ -511,13 +502,13 @@ function SidebarContent({
                   alt={profile?.displayName || sessionClaims?.name || "Profile"}
                   fill
                   className="object-cover"
-                  sizes="44px"
+                  sizes="40px"
                   unoptimized={!profile?.avatarUrl}
                 />
               ) : (
                 <div
-                  className="w-full h-full flex items-center justify-center text-sm font-bold"
-                  style={{ backgroundColor: T.boxBg, color: T.accentColor }}
+                  className="w-full h-full flex items-center justify-center text-sm font-black"
+                  style={{ background: `linear-gradient(135deg, #6366f1, #22d3ee)`, color: "#fff" }}
                 >
                   {(
                     profile?.displayName?.[0] ||
@@ -529,27 +520,18 @@ function SidebarContent({
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-1.5">
-                <div
-                  className="text-sm font-bold truncate"
-                  style={{ color: T.textColor }}
-                >
-                  {profile?.displayName ||
-                    sessionClaims?.name ||
-                    sessionClaims?.username ||
-                    "Creator"}
+              <div className="flex items-center gap-1.5 mb-0.5">
+                <div className="text-[13px] font-bold truncate" style={{ color: T.textColor }}>
+                  {profile?.displayName || sessionClaims?.name || sessionClaims?.username || "Creator"}
                 </div>
                 <span
-                  className="px-1.5 py-0.5 rounded text-[9px] font-black uppercase tracking-wider"
-                  style={{
-                    backgroundColor: T.accentColor + "20",
-                    color: T.accentColor,
-                  }}
+                  className="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider shrink-0"
+                  style={{ backgroundColor: `#22d3ee18`, color: "#22d3ee" }}
                 >
-                  Profile
+                  {plan === "elite" ? "Elite" : plan === "creator" ? "Creator" : "Free"}
                 </span>
               </div>
-              <div className="text-xs truncate" style={{ color: T.textMuted }}>
+              <div className="text-[11px] truncate" style={{ color: T.textMuted }}>
                 @{profile?.username || sessionClaims?.username || "litree"}
               </div>
             </div>
@@ -559,18 +541,14 @@ function SidebarContent({
 
       {/* LiTTree / AI assistant */}
       {!collapsed && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
+        <div className="px-3 py-2.5 border-b" style={{ borderColor: `${T.borderColor}20` }}>
           <form onSubmit={handleLiTTreeSubmit} className="relative">
             <div
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all"
+              className="flex items-center gap-2 px-3 py-2 rounded-xl border text-sm transition-all"
               style={{
-                backgroundColor: T.boxBg,
-                borderColor: littreeFocused
-                  ? T.accentColor
-                  : `${T.borderColor}30`,
+                backgroundColor: `${T.boxBg}80`,
+                borderColor: littreeFocused ? `#22d3ee50` : `${T.borderColor}25`,
+                boxShadow: littreeFocused ? `0 0 0 2px #22d3ee10` : "none",
                 color: T.textMuted,
               }}
             >
@@ -712,7 +690,7 @@ function SidebarContent({
       )}
 
       {/* Navigation groups */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-4">
+      <nav className="flex-1 overflow-y-auto py-3 px-2 space-y-3">
         {orderedGroups.map((group) => (
           <GroupSection
             key={group.label}
@@ -729,44 +707,32 @@ function SidebarContent({
       </nav>
 
       {/* Footer */}
-      <div
-        className="px-3 py-3 border-t"
-        style={{ borderColor: `${T.borderColor}30` }}
-      >
+      <div className="px-3 py-3 border-t" style={{ borderColor: `${T.borderColor}20` }}>
         {!collapsed && isSignedIn && (
           <div className="space-y-1.5">
             <div
-              className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
-              style={{
-                backgroundColor: T.bgColor + "30",
-                border: `1px solid ${T.borderColor}20`,
-              }}
+              className="flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-bold"
+              style={{ backgroundColor: `#22d3ee08`, border: `1px solid #22d3ee20` }}
             >
-              <span
-                className="flex items-center gap-1"
-                style={{ color: "#fbbf24" }}
-              >
+              <span className="flex items-center gap-1.5" style={{ color: "#fbbf24" }}>
                 <Coins size={10} /> Balance
               </span>
-              <span style={{ color: T.textColor }}>
+              <span className="font-black" style={{ color: "#f0f0f6" }}>
                 {balance.toLocaleString()} LBC
               </span>
             </div>
             <div
-              className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
+              className="flex items-center justify-between px-3 py-2 rounded-xl text-[10px] font-bold"
               style={{
-                backgroundColor: T.bgColor + "30",
-                border: `1px solid ${T.borderColor}20`,
+                backgroundColor: plan === "elite" ? `#a3f54608` : plan === "creator" ? `#6366f108` : `${T.borderColor}10`,
+                border: `1px solid ${plan === "elite" ? "#a3f54630" : plan === "creator" ? "#6366f130" : `${T.borderColor}20`}`,
               }}
             >
-              <span
-                className="flex items-center gap-1"
-                style={{ color: T.accentColor }}
-              >
+              <span className="flex items-center gap-1.5" style={{ color: plan === "elite" ? "#a3f546" : plan === "creator" ? "#a78bfa" : T.textMuted }}>
                 <CrownIcon size={10} /> Plan
               </span>
-              <span style={{ color: T.textColor }}>
-                {plan.charAt(0).toUpperCase() + plan.slice(1)}
+              <span className="font-black" style={{ color: plan === "elite" ? "#a3f546" : plan === "creator" ? "#a78bfa" : "#f0f0f6" }}>
+                {plan === "elite" ? "Elite" : plan === "creator" ? "Creator" : "Free"}
               </span>
             </div>
           </div>
