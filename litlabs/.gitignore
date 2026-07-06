@@ -52,8 +52,6 @@ reinstall-openssh.ps1
 use-wsl-ssh.ps1
 add-external-ssh.ps1
 
-# Local Netlify folder
-.netlify
 .backup/
 android/
 src/mobile/
