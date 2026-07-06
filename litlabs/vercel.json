@@ -1,8 +1,8 @@
 {
-  "buildCommand": "pnpm build",
+  "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "pnpm install",
+  "installCommand": "npm install",
   "crons": [
     {
       "path": "/api/deployments/digest",
@@ -19,6 +19,7 @@
     "src/app/api/media/video-status/route.ts": { "maxDuration": 30 },
     "src/app/api/media/video-download/route.ts": { "maxDuration": 60 },
     "src/app/api/music/generate/route.ts": { "maxDuration": 60 },
-    "src/app/api/flow/route.ts": { "maxDuration": 60 }
+    "src/app/api/flow/route.ts": { "maxDuration": 60 },
+    "src/app/api/litt/chat/route.ts": { "maxDuration": 60 }
   }
 }
