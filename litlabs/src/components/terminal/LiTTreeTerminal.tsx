@@ -373,7 +373,10 @@ export const LiTTreeTerminal = forwardRef<
   const outputScrollRef = useRef<HTMLDivElement>(null);
   const lineId = useRef(1);
   const shellRef = useRef(new DemoShell());
-  const [demoPrompt, setDemoPrompt] = useState(() => shellRef.current.prompt());
+  const [demoPrompt, setDemoPrompt] = useState<string>("");
+  useEffect(() => {
+    setDemoPrompt(shellRef.current.prompt());
+  }, []);
 
   const addLine = useCallback((content: string, isInput = false) => {
     setOutputLines((prev) => [

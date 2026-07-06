@@ -1,9 +1,8 @@
 "use client";
 
 import { AGENTS } from "@/lib/agents";
-import { TERMINAL_THEME, ANSI } from "./terminal-theme";
+import { ANSI } from "./terminal-theme";
 
-const T = TERMINAL_THEME;
 const hr = `${ANSI.dim}${"─".repeat(52)}${ANSI.reset}`;
 
 export const DEFAULT_PROJECT_FILES = [

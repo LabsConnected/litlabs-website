@@ -16,7 +16,6 @@ import {
   Image,
   Rocket,
   Save,
-  X,
 } from "lucide-react";
 import { LC } from "./lit-console-theme";
 
