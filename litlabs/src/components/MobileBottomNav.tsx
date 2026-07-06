@@ -12,8 +12,6 @@ export default function MobileBottomNav() {
   const { resolvedColors: T } = useTheme();
   const [moreOpen, setMoreOpen] = useState(false);
 
-  if (pathname === "/lit-console") return null;
-
   const isActive = (href: string) => {
     if (href === "#menu") return false;
     if (href === "/") return pathname === "/";
