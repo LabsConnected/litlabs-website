@@ -12,6 +12,8 @@ export default function MobileBottomNav() {
   const { resolvedColors: T } = useTheme();
   const [moreOpen, setMoreOpen] = useState(false);
 
+  if (pathname === "/lit-console") return null;
+
   const isActive = (href: string) => {
     if (href === "#menu") return false;
     if (href === "/") return pathname === "/";
@@ -36,7 +38,14 @@ export default function MobileBottomNav() {
               <Link
                 key={item.label}
                 href={isMore ? "#" : item.href}
-                onClick={isMore ? (e) => { e.preventDefault(); setMoreOpen(true); } : undefined}
+                onClick={
+                  isMore
+                    ? (e) => {
+                        e.preventDefault();
+                        setMoreOpen(true);
+                      }
+                    : undefined
+                }
                 className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-all"
                 style={{
                   color: active ? T.accentColor : T.textMuted,
@@ -71,8 +80,16 @@ export default function MobileBottomNav() {
               borderColor: `${T.borderColor}30`,
             }}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: `${T.borderColor}30` }}>
-              <span className="text-sm font-bold" style={{ color: T.textColor }}>More</span>
+            <div
+              className="flex items-center justify-between px-4 py-3 border-b"
+              style={{ borderColor: `${T.borderColor}30` }}
+            >
+              <span
+                className="text-sm font-bold"
+                style={{ color: T.textColor }}
+              >
+                More
+              </span>
               <button
                 onClick={() => setMoreOpen(false)}
                 className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
@@ -92,13 +109,17 @@ export default function MobileBottomNav() {
                     onClick={() => setMoreOpen(false)}
                     className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all"
                     style={{
-                      backgroundColor: active ? `${T.accentColor}12` : `${T.boxBg}60`,
+                      backgroundColor: active
+                        ? `${T.accentColor}12`
+                        : `${T.boxBg}60`,
                       border: `1px solid ${active ? T.accentColor : T.borderColor}30`,
                       color: active ? T.accentColor : T.textMuted,
                     }}
                   >
                     <Icon size={22} />
-                    <span className="text-[10px] font-bold text-center">{item.label}</span>
+                    <span className="text-[10px] font-bold text-center">
+                      {item.label}
+                    </span>
                   </Link>
                 );
               })}
