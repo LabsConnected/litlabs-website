@@ -75,8 +75,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Classic Atari Pong in your browser.",
     category: "retro",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/retro%20arcade%20pong%20game%20cover%20neon%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=101",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/f/f8/Pong.png/320px-Pong.png",
     html5Url: "https://sethclydesdale.github.io/browser-pong/",
     year: 1972,
     developer: "Atari",
@@ -94,8 +93,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Slide tiles to reach the legendary 2048 tile.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/2048%20puzzle%20game%20cover%20numbered%20tiles%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=202",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/1/18/2048_logo.svg/320px-2048_logo.svg.png",
     html5Url: "https://gabrielecirulli.github.io/2048/",
     year: 2014,
     developer: "Gabriele Cirulli",
@@ -113,8 +111,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fast-paced hexagon stacking puzzle.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/hextris%20hexagon%20stacking%20puzzle%20game%20cover%20colorful%20neon%20dark%20background?width=400&height=250&nologo=true&seed=303",
+    coverUrl: "https://hextris.github.io/hextris/favicon.png",
     html5Url: "https://hextris.github.io/hextris/",
     year: 2014,
     developer: "Logan Engstrom",
@@ -131,8 +128,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Classic block-stacking puzzle game.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/tetris%20block%20puzzle%20game%20cover%20retro%20neon%20falling%20blocks%20dark%20background?width=400&height=250&nologo=true&seed=404",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/7/7c/Emacs_Tetris_vector_based_detail.svg/240px-Emacs_Tetris_vector_based_detail.svg.png",
     html5Url: "https://chvin.github.io/react-tetris/",
     year: 1984,
     developer: "Alexey Pajitnov",
@@ -150,8 +146,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "The classic arcade maze chase.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/pacman%20arcade%20maze%20game%20cover%20neon%20yellow%20character%20dark%20background?width=400&height=250&nologo=true&seed=505",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/0/0e/Pacman_%28video_game%29.jpg/320px-Pacman_%28video_game%29.jpg",
     html5Url: "https://pacman.platzh1rsch.ch/",
     year: 1980,
     developer: "Namco",
@@ -168,8 +163,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Eat, grow, and don't crash into yourself.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/retro%20snake%20arcade%20game%20cover%20neon%20green%20pixel%20snake%20dark%20background?width=400&height=250&nologo=true&seed=606",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/5/55/Snake_can_be_completed.png/320px-Snake_can_be_completed.png",
     html5Url: "https://alfredang.github.io/snake-game/",
     year: 1976,
     developer: "Various",
@@ -187,8 +181,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fill the grid with numbers 1–9.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/sudoku%20puzzle%20game%20cover%20numbers%20grid%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=707",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/e/e0/Sudoku_Puzzle_by_L2G-20050714_standardized_layout.svg/320px-Sudoku_Puzzle_by_L2G-20050714_standardized_layout.svg.png",
     html5Url: "https://www.sudoku100.com/embed/interactive",
     year: 2004,
     developer: "Various",
@@ -205,8 +198,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Tap to fly between the pipes.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/flappy%20bird%20arcade%20game%20cover%20pixel%20art%20bird%20pipes%20dark%20background?width=400&height=250&nologo=true&seed=808",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/en/0/0a/Flappy_Bird_icon.png",
     html5Url: "https://chaping.github.io/game/flappy-bird/",
     year: 2013,
     developer: "Dong Nguyen",
@@ -223,8 +215,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Clear the board without detonating a mine.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "https://image.pollinations.ai/prompt/minesweeper%20puzzle%20game%20cover%20retro%20mines%20grid%20dark%20background?width=400&height=250&nologo=true&seed=909",
+    coverUrl: "https://upload.wikimedia.org/wikipedia/commons/thumb/8/83/Minesweeper_Windows.png/320px-Minesweeper_Windows.png",
     html5Url: "https://minesweeper.github.io/",
     year: 1990,
     developer: "Microsoft",
