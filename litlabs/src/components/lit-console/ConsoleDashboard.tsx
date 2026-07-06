@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { Activity, Bell, MessageSquare, Play, Sparkles } from "lucide-react";
+import { Activity, Bell, MessageSquare, Play, Sparkles, LayoutGrid, MessageSquareText, User } from "lucide-react";
 import { BentoCard } from "@/components/site/BentoCard";
 import StarterActions from "./StarterActions";
 import { ActiveAgentsWidget } from "./widgets/ActiveAgentsWidget";
@@ -13,7 +13,7 @@ import { TerminalLauncherWidget } from "./widgets/TerminalLauncherWidget";
 import { TelemetryWidget } from "./widgets/TelemetryWidget";
 import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
 import { SocialFeedWidget } from "./widgets/SocialFeedWidget";
-import { ProfileWidget } from "./widgets/ProfileWidget";
+import { ProfilePanel } from "./widgets/ProfilePanel";
 import { AgentDiscoveryWidget, SystemStatusWidget } from "./widgets/AgentDiscoveryWidget";
 import { LiveTelemetryWidget } from "./widgets/LiveTelemetryWidget";
 import { LC, LC_SHADOW } from "./lit-console-theme";
@@ -48,6 +48,13 @@ export default function ConsoleDashboard({
   onOpenTerminal,
 }: ConsoleDashboardProps) {
   const [composer, setComposer] = useState("");
+  const [tab, setTab] = useState<"command" | "social" | "profile">("command");
+
+  const tabs = [
+    { id: "command" as const, label: "Command Center", icon: LayoutGrid },
+    { id: "social" as const, label: "Social Feed", icon: MessageSquareText },
+    { id: "profile" as const, label: "My Profile", icon: User },
+  ];
 
   const submit = (mode: "chat" | "run") => {
     const prompt = composer.trim();
@@ -142,95 +149,149 @@ export default function ConsoleDashboard({
         </div>
       </section>
 
-      {/* Main grid: 3 columns */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)_minmax(260px,0.8fr)]">
-        {/* LEFT COLUMN: Telemetry + Quick Access + Agent Discovery */}
-        <div className="flex flex-col gap-4">
-          <TelemetryWidget />
-          <QuickAccessWidget />
-          <AgentDiscoveryWidget />
-        </div>
-
-        {/* CENTER COLUMN: Start Here + Profile + Social Feed + Games + Agents */}
-        <div className="flex flex-col gap-4">
-          <LittMiniWidget />
-          <ProfileWidget />
-          <BentoCard
-            title="Start Here"
-            icon={<Sparkles size={14} />}
-            action={
-              <button
-                onClick={onOpenChat}
-                className="text-[10px] font-bold uppercase tracking-wider"
-                style={{ color: LC.accentCyan }}
-              >
-                Open Chat
-              </button>
-            }
+      {/* Tabs */}
+      <div className="flex items-center gap-1 rounded-xl border p-1" style={{ borderColor: LC.border, backgroundColor: LC.bgPanel }}>
+        {tabs.map(({ id, label, icon: Icon }) => (
+          <button
+            key={id}
+            onClick={() => setTab(id)}
+            className="flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-[11px] font-bold transition-all"
+            style={{
+              backgroundColor: tab === id ? `${LC.accentCyan}18` : "transparent",
+              color: tab === id ? LC.accentCyan : LC.textMuted,
+              border: `1px solid ${tab === id ? `${LC.accentCyan}30` : "transparent"}`,
+            }}
           >
-            <StarterActions onSelect={onPrompt} />
-          </BentoCard>
-          <SocialFeedWidget />
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <GameArcadeWidget />
-            <ActiveAgentsWidget />
-          </div>
-          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-            <TerminalLauncherWidget />
-            <ProjectsWidget />
-          </div>
-          <DailyMissionsWidget />
-        </div>
-
-        {/* RIGHT COLUMN: Live Telemetry + Recent Runs + Updates + System Status */}
-        <div className="flex flex-col gap-4">
-          <LiveTelemetryWidget />
-          <BentoCard title="Recent Runs" icon={<Activity size={14} />}>
-            <div className="flex flex-col gap-2">
-              {recentRuns.map((run) => (
-                <button
-                  key={run.id}
-                  onClick={() => onPrompt(`Open ${run.label}`)}
-                  className="flex items-center justify-between rounded-xl border p-3 text-left"
-                  style={{ borderColor: `${LC.border}cc`, backgroundColor: LC.bgSecondary }}
-                >
-                  <div>
-                    <div className="text-sm font-bold" style={{ color: LC.text }}>
-                      {run.label}
-                    </div>
-                    <div className="text-[10px]" style={{ color: LC.textMuted }}>
-                      {run.agent}
-                    </div>
-                  </div>
-                  <span
-                    className="rounded-full px-2 py-1 text-[10px] font-bold"
-                    style={{
-                      color: run.status === "building" ? LC.accentOrange : LC.success,
-                      backgroundColor: run.status === "building" ? `${LC.accentOrange}18` : `${LC.success}18`,
-                    }}
-                  >
-                    {run.status}
-                  </span>
-                </button>
-              ))}
-            </div>
-          </BentoCard>
-          <BentoCard title="Social Dom Updates" icon={<Bell size={14} />}>
-            <div className="flex flex-col gap-2">
-              {updates.map((update) => (
-                <div
-                  key={update}
-                  className="rounded-xl border p-3 text-sm leading-relaxed"
-                  style={{ borderColor: `${LC.border}cc`, backgroundColor: LC.bgSecondary, color: LC.textMuted }}
-                >
-                  {update}
-                </div>
-              ))}
-            </div>
-          </BentoCard>
-          <SystemStatusWidget />
-        </div>
+            <Icon size={14} />
+            {label}
+          </button>
+        ))}
       </div>
+
+      {/* TAB: Command Center */}
+      {tab === "command" && (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+          {/* LEFT COLUMN: Telemetry + Quick Access + Agent Discovery */}
+          <div className="flex flex-col gap-4">
+            <TelemetryWidget />
+            <QuickAccessWidget />
+            <AgentDiscoveryWidget />
+          </div>
+
+          {/* CENTER COLUMN: Start Here + Litt + Games + Agents */}
+          <div className="flex flex-col gap-4">
+            <LittMiniWidget />
+            <BentoCard
+              title="Start Here"
+              icon={<Sparkles size={14} />}
+              action={
+                <button
+                  onClick={onOpenChat}
+                  className="text-[10px] font-bold uppercase tracking-wider"
+                  style={{ color: LC.accentCyan }}
+                >
+                  Open Chat
+                </button>
+              }
+            >
+              <StarterActions onSelect={onPrompt} />
+            </BentoCard>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <GameArcadeWidget />
+              <ActiveAgentsWidget />
+            </div>
+            <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+              <TerminalLauncherWidget />
+              <ProjectsWidget />
+            </div>
+            <DailyMissionsWidget />
+          </div>
+
+          {/* RIGHT COLUMN: Live Telemetry + Recent Runs + Updates + System Status */}
+          <div className="flex flex-col gap-4">
+            <LiveTelemetryWidget />
+            <BentoCard title="Recent Runs" icon={<Activity size={14} />}>
+              <div className="flex flex-col gap-2">
+                {recentRuns.map((run) => (
+                  <button
+                    key={run.id}
+                    onClick={() => onPrompt(`Open ${run.label}`)}
+                    className="flex items-center justify-between rounded-xl border p-3 text-left"
+                    style={{ borderColor: `${LC.border}cc`, backgroundColor: LC.bgSecondary }}
+                  >
+                    <div>
+                      <div className="text-sm font-bold" style={{ color: LC.text }}>
+                        {run.label}
+                      </div>
+                      <div className="text-[10px]" style={{ color: LC.textMuted }}>
+                        {run.agent}
+                      </div>
+                    </div>
+                    <span
+                      className="rounded-full px-2 py-1 text-[10px] font-bold"
+                      style={{
+                        color: run.status === "building" ? LC.accentOrange : LC.success,
+                        backgroundColor: run.status === "building" ? `${LC.accentOrange}18` : `${LC.success}18`,
+                      }}
+                    >
+                      {run.status}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </BentoCard>
+            <BentoCard title="Social Dom Updates" icon={<Bell size={14} />}>
+              <div className="flex flex-col gap-2">
+                {updates.map((update) => (
+                  <div
+                    key={update}
+                    className="rounded-xl border p-3 text-sm leading-relaxed"
+                    style={{ borderColor: `${LC.border}cc`, backgroundColor: LC.bgSecondary, color: LC.textMuted }}
+                  >
+                    {update}
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+            <SystemStatusWidget />
+          </div>
+        </div>
+      )}
+
+      {/* TAB: Social Feed */}
+      {tab === "social" && (
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
+          <SocialFeedWidget />
+          <div className="flex flex-col gap-4">
+            <BentoCard title="Trending" icon={<Sparkles size={14} />}>
+              <div className="flex flex-col gap-2">
+                {["#AIAgents", "#CodeChampion", "#LiTTreeLabStudios", "#AgentBuilder", "#NeonVibes"].map((tag, i) => (
+                  <div key={tag} className="flex items-center justify-between rounded-lg border p-2" style={{ borderColor: `${LC.border}40`, backgroundColor: LC.bgSecondary }}>
+                    <span className="text-[11px] font-bold" style={{ color: LC.textMuted }}>{tag}</span>
+                    <span className="text-[10px]" style={{ color: LC.accentCyan }}>#{i + 1}</span>
+                  </div>
+                ))}
+              </div>
+            </BentoCard>
+            <BentoCard title="Community" icon={<Activity size={14} />}>
+              <div className="grid grid-cols-2 gap-2 text-center">
+                <div className="rounded-lg border p-2" style={{ borderColor: `${LC.border}40`, backgroundColor: LC.bgSecondary }}>
+                  <div className="text-lg font-black" style={{ color: LC.accentCyan }}>4</div>
+                  <div className="text-[9px] uppercase" style={{ color: LC.textMuted }}>Posts</div>
+                </div>
+                <div className="rounded-lg border p-2" style={{ borderColor: `${LC.border}40`, backgroundColor: LC.bgSecondary }}>
+                  <div className="text-lg font-black" style={{ color: LC.accentOrange }}>140</div>
+                  <div className="text-[9px] uppercase" style={{ color: LC.textMuted }}>Likes</div>
+                </div>
+              </div>
+            </BentoCard>
+            <AgentDiscoveryWidget />
+          </div>
+        </div>
+      )}
+
+      {/* TAB: Profile */}
+      {tab === "profile" && <ProfilePanel />}
     </div>
   );
 }

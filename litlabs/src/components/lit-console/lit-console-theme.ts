@@ -9,11 +9,13 @@ export const LC = {
   borderSubtle: "#1a1a28",
   accentCyan: "#00f5ff",
   accentOrange: "#ff7a1a",
+  accentPurple: "#a855f7",
   success: "#22c55e",
   danger: "#ef4444",
   text: "#f8fafc",
   textMuted: "#94a3b8",
   textDim: "#64748b",
+  linkColor: "#60a5fa",
   fontMono: "'JetBrains Mono', 'Fira Code', Consolas, monospace",
 } as const;
 
