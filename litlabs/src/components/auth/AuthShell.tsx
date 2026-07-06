@@ -2,23 +2,16 @@
 
 import Link from "next/link";
 import { ReactNode } from "react";
-import {
-  Bot,
-  Coins,
-  CreditCard,
-  Rocket,
-  Zap,
-  ArrowLeft,
-  Terminal,
-} from "lucide-react";
+import { ArrowLeft, Check, Zap, Star, Crown } from "lucide-react";
 
 const AUTH_BG = "#08080c";
 const PANEL_BG = "#101018";
-const PANEL_BORDER = "#252538";
-const ACCENT_CYAN = "#00f5ff";
-const ACCENT_INDIGO = "#6366f1";
-const TEXT = "#f8fafc";
-const TEXT_MUTED = "#94a3b8";
+const PANEL_BORDER = "#1e1e2e";
+const CYAN = "#22d3ee";
+const GREEN = "#a3f546";
+const INDIGO = "#6366f1";
+const TEXT = "#f0f0f6";
+const MUTED = "#64748b";
 
 interface AuthShellProps {
   children: ReactNode;
@@ -27,122 +20,90 @@ interface AuthShellProps {
   subcopy: string;
 }
 
-const BENEFITS = [
-  {
-    icon: Bot,
-    label: "Specialist agents",
-    desc: "Code, content, media, research, and distribution.",
-  },
-  {
-    icon: Terminal,
-    label: "LiT Console",
-    desc: "Chat, terminal, and agent orchestration in one workspace.",
-  },
-  {
-    icon: Zap,
-    label: "Workflow Studio",
-    desc: "Chain prompts, tools, and publishing in one canvas.",
-  },
-  {
-    icon: Rocket,
-    label: "Deploy-ready",
-    desc: "From idea to asset to published post without leaving the workspace.",
-  },
+const TIER_PREVIEW = [
+  { icon: Zap,   name: "Starter", price: "Free",  color: MUTED,  items: ["500 credits","3 agents","All games","LiT Chat"] },
+  { icon: Star,  name: "Creator", price: "$12/mo", color: CYAN,   items: ["5K credits","10 agents","Flow Studio","Terminal"] },
+  { icon: Crown, name: "Elite",   price: "$39/mo", color: GREEN,  items: ["Unlimited","Custom agents","Sell agents","API access"] },
 ];
 
-export function AuthShell({
-  children,
-  mode,
-  headline,
-  subcopy,
-}: AuthShellProps) {
+export function AuthShell({ children, mode, headline, subcopy }: AuthShellProps) {
   const isSignUp = mode === "sign-up";
 
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4 py-8"
+      className="min-h-screen flex items-center justify-center px-4 py-8 relative overflow-hidden"
       style={{ backgroundColor: AUTH_BG, color: TEXT }}
     >
-      <div className="w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-6 lg:gap-10 items-stretch">
-        {/* Left panel: brand promise */}
+      {/* Background ambient glows */}
+      <div className="absolute inset-0 pointer-events-none overflow-hidden">
+        <div className="absolute -top-40 -left-40 w-96 h-96 rounded-full opacity-10"
+          style={{ background: `radial-gradient(circle, ${INDIGO} 0%, transparent 70%)`, filter: "blur(80px)" }} />
+        <div className="absolute -bottom-40 -right-40 w-96 h-96 rounded-full opacity-10"
+          style={{ background: `radial-gradient(circle, ${CYAN} 0%, transparent 70%)`, filter: "blur(80px)" }} />
+      </div>
+
+      <div className="relative w-full max-w-5xl grid grid-cols-1 lg:grid-cols-2 gap-5 items-stretch">
+
+        {/* ── LEFT: Brand panel ── */}
         <div
-          className="flex flex-col justify-between rounded-2xl p-6 sm:p-8 lg:p-10 border order-2 lg:order-1"
+          className="flex flex-col justify-between rounded-2xl p-7 border order-2 lg:order-1"
           style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}
         >
           <div>
-            <Link
-              href="/"
-              className="inline-flex items-center gap-2 text-xs font-bold mb-8 transition-opacity hover:opacity-80"
-              style={{ color: TEXT_MUTED }}
-            >
-              <div
-                className="w-7 h-7 rounded-lg flex items-center justify-center text-xs font-black"
-                style={{
-                  background: `linear-gradient(135deg, ${ACCENT_INDIGO}, ${ACCENT_CYAN})`,
-                  color: "#fff",
-                }}
-              >
-                L
-              </div>
-              LiTTree OS
+            {/* Logo */}
+            <Link href="/" className="inline-flex items-center gap-2.5 mb-8 group">
+              <div className="w-8 h-8 rounded-xl flex items-center justify-center font-black text-xs transition-all group-hover:scale-110"
+                style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff" }}>L</div>
+              <span className="font-black text-sm tracking-wide" style={{ color: TEXT }}>LiTTree OS</span>
             </Link>
 
-            <h1 className="text-3xl sm:text-4xl font-black tracking-tight mb-4 leading-tight">
-              {headline}
-            </h1>
-            <p
-              className="text-base mb-8 leading-relaxed"
-              style={{ color: TEXT_MUTED }}
-            >
-              {subcopy}
-            </p>
+            {/* LiTT mascot + headline */}
+            <div className="flex items-start gap-4 mb-6">
+              <div className="w-14 h-14 rounded-2xl flex items-center justify-center text-3xl shrink-0"
+                style={{ background: `linear-gradient(135deg, ${INDIGO}20, ${CYAN}15)`, border: `1px solid ${INDIGO}30` }}>
+                🤖
+              </div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-black leading-tight mb-1">{headline}</h1>
+                <p className="text-sm leading-relaxed" style={{ color: MUTED }}>{subcopy}</p>
+              </div>
+            </div>
 
+            {/* Sign-up: credits banner */}
             {isSignUp && (
-              <div
-                className="mb-8 rounded-xl border p-4 flex items-center gap-4"
-                style={{
-                  backgroundColor: "#00f5ff08",
-                  borderColor: "#00f5ff30",
-                }}
-              >
-                <div
-                  className="w-12 h-12 rounded-full flex items-center justify-center shrink-0"
-                  style={{ backgroundColor: "#00f5ff15" }}
-                >
-                  <Coins className="h-6 w-6" style={{ color: ACCENT_CYAN }} />
-                </div>
+              <div className="rounded-xl border p-4 mb-6 flex items-center gap-3"
+                style={{ backgroundColor: `${CYAN}08`, borderColor: `${CYAN}30` }}>
+                <div className="text-2xl">🎁</div>
                 <div>
-                  <div
-                    className="text-lg font-black"
-                    style={{ color: ACCENT_CYAN }}
-                  >
-                    500 starter credits
-                  </div>
-                  <div className="text-xs" style={{ color: TEXT_MUTED }}>
-                    No credit card required. First agent in minutes.
-                  </div>
+                  <div className="font-black text-sm" style={{ color: CYAN }}>500 free starter credits</div>
+                  <div className="text-xs" style={{ color: MUTED }}>No credit card. Boot into LiT OS in seconds.</div>
                 </div>
               </div>
             )}
 
-            <div className="space-y-4">
-              {BENEFITS.map((item) => {
-                const Icon = item.icon;
+            {/* Tier preview */}
+            <div className="space-y-2">
+              <div className="text-[10px] font-black uppercase tracking-widest mb-3" style={{ color: MUTED }}>
+                {isSignUp ? "Choose your plan after sign-up" : "Your active plan"}
+              </div>
+              {TIER_PREVIEW.map((tier) => {
+                const Icon = tier.icon;
                 return (
-                  <div key={item.label} className="flex items-start gap-3">
-                    <div
-                      className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
-                      style={{ backgroundColor: "#ffffff08" }}
-                    >
-                      <Icon
-                        className="h-4 w-4"
-                        style={{ color: ACCENT_CYAN }}
-                      />
-                    </div>
-                    <div>
-                      <div className="text-sm font-bold">{item.label}</div>
-                      <div className="text-xs" style={{ color: TEXT_MUTED }}>
-                        {item.desc}
+                  <div key={tier.name}
+                    className="flex items-start gap-3 rounded-xl p-3 border"
+                    style={{ backgroundColor: `${tier.color}06`, borderColor: `${tier.color}20` }}>
+                    <Icon size={14} className="shrink-0 mt-0.5" style={{ color: tier.color }} />
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center justify-between mb-1">
+                        <span className="text-xs font-black" style={{ color: TEXT }}>{tier.name}</span>
+                        <span className="text-[10px] font-bold" style={{ color: tier.color }}>{tier.price}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-x-2 gap-y-0.5">
+                        {tier.items.map((f) => (
+                          <span key={f} className="inline-flex items-center gap-1 text-[9px]" style={{ color: MUTED }}>
+                            <Check size={8} style={{ color: tier.color }} />{f}
+                          </span>
+                        ))}
                       </div>
                     </div>
                   </div>
@@ -151,37 +112,29 @@ export function AuthShell({
             </div>
           </div>
 
-          <div
-            className="mt-8 flex items-center gap-2 text-xs"
-            style={{ color: TEXT_MUTED }}
-          >
-            <CreditCard className="h-3.5 w-3.5" />
-            <span>
-              Free to start. Upgrade only when you need more credits or agents.
-            </span>
+          <div className="mt-6 flex items-center justify-between">
+            <span className="text-[10px]" style={{ color: MUTED }}>No credit card required to start.</span>
+            <div className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
+              <span className="text-[10px]" style={{ color: MUTED }}>All systems online</span>
+            </div>
           </div>
         </div>
 
-        {/* Right panel: Clerk form */}
+        {/* ── RIGHT: Clerk form ── */}
         <div
-          className="flex flex-col rounded-2xl p-6 sm:p-8 border order-1 lg:order-2"
+          className="flex flex-col rounded-2xl p-7 border order-1 lg:order-2"
           style={{ backgroundColor: PANEL_BG, borderColor: PANEL_BORDER }}
         >
           <div className="flex-1 flex items-center justify-center">
             <div className="w-full max-w-sm">{children}</div>
           </div>
 
-          <div
-            className="mt-6 pt-6 border-t text-center"
-            style={{ borderColor: PANEL_BORDER }}
-          >
-            <Link
-              href="/"
+          <div className="mt-6 pt-5 border-t text-center" style={{ borderColor: PANEL_BORDER }}>
+            <Link href="/"
               className="inline-flex items-center gap-1.5 text-xs font-bold transition-opacity hover:opacity-80"
-              style={{ color: TEXT_MUTED }}
-            >
-              <ArrowLeft className="h-3.5 w-3.5" />
-              Back to Home
+              style={{ color: MUTED }}>
+              <ArrowLeft className="h-3.5 w-3.5" /> Back to LiTTree OS
             </Link>
           </div>
         </div>
@@ -193,7 +146,7 @@ export function AuthShell({
 export const clerkAuthAppearance = {
   elements: {
     formButtonPrimary: {
-      backgroundColor: ACCENT_INDIGO,
+      backgroundColor: INDIGO,
       color: "#fff",
       border: "none",
       fontSize: "13px",
@@ -206,28 +159,28 @@ export const clerkAuthAppearance = {
       color: TEXT,
       borderRadius: "8px",
     },
-    footerActionLink: { color: ACCENT_CYAN },
+    footerActionLink: { color: CYAN },
     headerTitle: { color: TEXT },
-    headerSubtitle: { color: TEXT_MUTED },
+    headerSubtitle: { color: MUTED },
     socialButtonsBlockButton: {
       border: `1px solid ${PANEL_BORDER}`,
       backgroundColor: "transparent",
       borderRadius: "8px",
     },
     card: { backgroundColor: "transparent", boxShadow: "none" },
-    formFieldLabel: { color: TEXT_MUTED, fontSize: "12px" },
+    formFieldLabel: { color: MUTED, fontSize: "12px" },
     identityPreviewText: { color: TEXT },
     alternativeMethodsBlockButton: {
       border: `1px solid ${PANEL_BORDER}`,
-      color: TEXT_MUTED,
+      color: MUTED,
       borderRadius: "8px",
     },
   },
   variables: {
-    colorPrimary: ACCENT_INDIGO,
+    colorPrimary: INDIGO,
     colorBackground: PANEL_BG,
     colorText: TEXT,
-    colorTextSecondary: TEXT_MUTED,
+    colorTextSecondary: MUTED,
     colorInputBackground: "#0a0a0f",
     colorInputText: TEXT,
     borderRadius: "8px",
