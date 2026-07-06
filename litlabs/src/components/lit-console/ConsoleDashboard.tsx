@@ -10,6 +10,12 @@ import { GameArcadeWidget } from "./widgets/GameArcadeWidget";
 import { LittMiniWidget } from "./widgets/LittMiniWidget";
 import { ProjectsWidget } from "./widgets/ProjectsWidget";
 import { TerminalLauncherWidget } from "./widgets/TerminalLauncherWidget";
+import { TelemetryWidget } from "./widgets/TelemetryWidget";
+import { QuickAccessWidget } from "./widgets/QuickAccessWidget";
+import { SocialFeedWidget } from "./widgets/SocialFeedWidget";
+import { PostComposerWidget } from "./widgets/PostComposerWidget";
+import { AgentDiscoveryWidget, SystemStatusWidget } from "./widgets/AgentDiscoveryWidget";
+import { LiveTelemetryWidget } from "./widgets/LiveTelemetryWidget";
 import { LC, LC_SHADOW } from "./lit-console-theme";
 
 type ConsoleDashboardProps = {
@@ -53,6 +59,7 @@ export default function ConsoleDashboard({
 
   return (
     <div className="flex h-full w-full flex-col gap-4 overflow-y-auto px-4 pb-3 pt-1">
+      {/* Hero header with composer */}
       <section
         className="relative overflow-hidden rounded-2xl border p-4 sm:p-5"
         style={{
@@ -78,7 +85,7 @@ export default function ConsoleDashboard({
               LiT Console command center
             </h1>
             <p className="mt-2 max-w-2xl text-sm leading-relaxed" style={{ color: LC.textMuted }}>
-              Games, agents, LiTT, projects, and terminal actions are surfaced here first. Chat stays ready, while deeper tools open only when the work needs them.
+              Your creator OS is live. Agents, tools, social feed, telemetry, and terminal — all in one workspace. LiT is always here to help.
             </p>
           </div>
 
@@ -135,36 +142,49 @@ export default function ConsoleDashboard({
         </div>
       </section>
 
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1.15fr)_minmax(280px,0.85fr)]">
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+      {/* Main grid: 3 columns */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(260px,0.8fr)_minmax(0,1.2fr)_minmax(260px,0.8fr)]">
+        {/* LEFT COLUMN: Telemetry + Quick Access + Agent Discovery */}
+        <div className="flex flex-col gap-4">
+          <TelemetryWidget />
+          <QuickAccessWidget />
+          <AgentDiscoveryWidget />
+        </div>
+
+        {/* CENTER COLUMN: Start Here + Composer + Social Feed + Games + Agents */}
+        <div className="flex flex-col gap-4">
           <LittMiniWidget />
-          <div className="lg:col-span-2">
-            <BentoCard
-              title="Start Here"
-              icon={<Sparkles size={14} />}
-              action={
-                <button
-                  onClick={onOpenChat}
-                  className="text-[10px] font-bold uppercase tracking-wider"
-                  style={{ color: LC.accentCyan }}
-                >
-                  Open Chat
-                </button>
-              }
-            >
-              <StarterActions onSelect={onPrompt} />
-            </BentoCard>
-          </div>
-          <div className="lg:col-span-2">
+          <BentoCard
+            title="Start Here"
+            icon={<Sparkles size={14} />}
+            action={
+              <button
+                onClick={onOpenChat}
+                className="text-[10px] font-bold uppercase tracking-wider"
+                style={{ color: LC.accentCyan }}
+              >
+                Open Chat
+              </button>
+            }
+          >
+            <StarterActions onSelect={onPrompt} />
+          </BentoCard>
+          <PostComposerWidget />
+          <SocialFeedWidget />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
             <GameArcadeWidget />
+            <ActiveAgentsWidget />
           </div>
-          <TerminalLauncherWidget />
-          <ProjectsWidget />
-          <ActiveAgentsWidget />
+          <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+            <TerminalLauncherWidget />
+            <ProjectsWidget />
+          </div>
           <DailyMissionsWidget />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 content-start">
+        {/* RIGHT COLUMN: Live Telemetry + Recent Runs + Updates + System Status */}
+        <div className="flex flex-col gap-4">
+          <LiveTelemetryWidget />
           <BentoCard title="Recent Runs" icon={<Activity size={14} />}>
             <div className="flex flex-col gap-2">
               {recentRuns.map((run) => (
@@ -195,7 +215,6 @@ export default function ConsoleDashboard({
               ))}
             </div>
           </BentoCard>
-
           <BentoCard title="Social Dom Updates" icon={<Bell size={14} />}>
             <div className="flex flex-col gap-2">
               {updates.map((update) => (
@@ -209,6 +228,7 @@ export default function ConsoleDashboard({
               ))}
             </div>
           </BentoCard>
+          <SystemStatusWidget />
         </div>
       </div>
     </div>

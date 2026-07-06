@@ -1,12 +1,5 @@
-"use client";
-
-import nextDynamic from "next/dynamic";
-
-const DashboardView = nextDynamic(
-  () => import("@/components/DashboardView"),
-  { ssr: false },
-);
+import { redirect } from "next/navigation";
 
 export default function DashboardPage() {
-  return <DashboardView />;
+  redirect("/lit-console");
 }
