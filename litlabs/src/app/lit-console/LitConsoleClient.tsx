@@ -8,5 +8,5 @@ const LitConsole = dynamic(
 );
 
 export default function LitConsoleClient() {
-  return <LitConsole />;
+  return <div className="h-full flex flex-col"><LitConsole /></div>;
 }

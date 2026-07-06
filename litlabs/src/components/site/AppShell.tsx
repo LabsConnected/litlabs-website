@@ -32,13 +32,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className="relative z-10 flex min-h-screen">
+      <div className={`relative z-10 flex ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
         <Sidebar
           open={mobileSidebarOpen}
           onClose={() => setMobileSidebarOpen(false)}
           collapsed={desktopSidebarCollapsed}
         />
-        <div className="flex-1 flex flex-col min-h-screen">
+        <div className={`flex-1 flex flex-col ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
           {!isConsole && (
             <button
               onClick={() => setMobileSidebarOpen(true)}
@@ -59,7 +59,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
             />
           )}
-          <main className={isConsole ? "flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
+          <main className={isConsole ? "h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
             {children}
           </main>
           <MobileBottomNav />
