@@ -39,16 +39,16 @@ interface CommandDockProps {
 }
 
 const AGENTS = [
-  { id: "Director", label: "Director", desc: "Orchestrator", color: "#00f5ff" },
-  { id: "Code Champ", label: "Code Champ", desc: "Engineer", color: "#22c55e" },
-  { id: "Writer", label: "Writer", desc: "Content", color: "#ff9ff3" },
-  { id: "Social Dom", label: "Social Dom", desc: "Growth", color: "#ff6b6b" },
-  {
-    id: "Data Slayer",
-    label: "Data Slayer",
-    desc: "Analytics",
-    color: "#f59e0b",
-  },
+  { id: "director",       label: "LiTTree",       desc: "Core AI Copilot",       color: "#22d3ee" },
+  { id: "forge",          label: "Forge",          desc: "Engineer & Architect",   color: "#22d3ee" },
+  { id: "pulse",          label: "Pulse",          desc: "Growth & Analytics",     color: "#f472b6" },
+  { id: "pixel-forge",    label: "Visionary",      desc: "Creative Director",      color: "#e879f9" },
+  { id: "social-pilot",   label: "SocialPilot",    desc: "Social Media Growth",    color: "#a855f7" },
+  { id: "data-slayer",    label: "Data Slayer",    desc: "Analytics & Insights",   color: "#fbbf24" },
+  { id: "writing-coach",  label: "Writing Coach",  desc: "Content & Copy",         color: "#a78bfa" },
+  { id: "music-producer", label: "Music Producer", desc: "Audio & Sound",          color: "#fb7185" },
+  { id: "nexus",          label: "Nexus",          desc: "Automation",             color: "#34d399" },
+  { id: "security-chief", label: "Security Chief", desc: "Security & Privacy",     color: "#ef4444" },
 ];
 
 const MODELS = [

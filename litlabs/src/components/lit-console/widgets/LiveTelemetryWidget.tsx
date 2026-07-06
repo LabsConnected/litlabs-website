@@ -6,11 +6,14 @@ import { BentoCard } from "@/components/site/BentoCard";
 import { LC } from "../lit-console-theme";
 
 const TELEMETRY_LINES = [
-  { agent: "Code Champion", msg: "Synchronized local Supabase client instance." },
-  { agent: "Data Slayer", msg: "Optimized ledger indexing. Uptime: 99.98%" },
-  { agent: "Director", msg: "Orchestration thread compiled for boardroom session." },
-  { agent: "Pixel Forge", msg: "Queued 3 image generation requests. Latency: 12ms" },
-  { agent: "Social Dom", msg: "Posted to 4 channels. Impressions +1,247 this hour." },
+  { agent: "Forge",         msg: "Synchronized local Supabase client instance." },
+  { agent: "Data Slayer",   msg: "Optimized ledger indexing. Uptime: 99.98%" },
+  { agent: "LiTTree",       msg: "Orchestration thread compiled for boardroom session." },
+  { agent: "Visionary",     msg: "Queued 3 image generation requests. Latency: 12ms" },
+  { agent: "SocialPilot",   msg: "Posted to 4 channels. Impressions +1,247 this hour." },
+  { agent: "Pulse",         msg: "Growth loop triggered — 3 new signups from referral." },
+  { agent: "Music Producer",msg: "Audio render complete. Track duration: 2:47" },
+  { agent: "Nexus",         msg: "Webhook delivered. Integration latency: 82ms" },
 ];
 
 export function LiveTelemetryWidget() {

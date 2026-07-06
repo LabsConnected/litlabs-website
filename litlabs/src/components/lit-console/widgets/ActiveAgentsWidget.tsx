@@ -7,41 +7,15 @@ import { Bot, Play, Loader2 } from "lucide-react";
 import { BentoCard } from "@/components/site/BentoCard";
 
 const AGENTS = [
-  {
-    id: "director",
-    name: "Director",
-    role: "Orchestrator",
-    status: "online",
-    color: "#00f5ff",
-  },
-  {
-    id: "code-champ",
-    name: "Code Champ",
-    role: "Engineer",
-    status: "idle",
-    color: "#ff7a1a",
-  },
-  {
-    id: "writer",
-    name: "Writer",
-    role: "Content",
-    status: "idle",
-    color: "#a855f7",
-  },
-  {
-    id: "social-dom",
-    name: "Social Dom",
-    role: "Social",
-    status: "online",
-    color: "#22c55e",
-  },
-  {
-    id: "data-slayer",
-    name: "Data Slayer",
-    role: "Analytics",
-    status: "offline",
-    color: "#ef4444",
-  },
+  { id: "director",      name: "LiTTree",       role: "Core AI Copilot",    status: "online",  color: "#22d3ee" },
+  { id: "forge",         name: "Forge",          role: "Engineer & Architect", status: "online", color: "#22d3ee" },
+  { id: "pulse",         name: "Pulse",          role: "Growth & Analytics",  status: "online", color: "#f472b6" },
+  { id: "pixel-forge",   name: "Visionary",      role: "Creative Director",   status: "idle",   color: "#e879f9" },
+  { id: "social-pilot",  name: "SocialPilot",    role: "Social Media Growth", status: "idle",   color: "#a855f7" },
+  { id: "data-slayer",   name: "Data Slayer",    role: "Analytics & Insights",status: "online", color: "#fbbf24" },
+  { id: "writing-coach", name: "Writing Coach",  role: "Content & Copy",      status: "idle",   color: "#a78bfa" },
+  { id: "music-producer",name: "Music Producer", role: "Audio & Sound",       status: "idle",   color: "#fb7185" },
+  { id: "nexus",         name: "Nexus",          role: "Automation & Integrations", status: "idle", color: "#34d399" },
 ];
 
 export function ActiveAgentsWidget() {

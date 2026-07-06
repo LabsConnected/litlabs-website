@@ -34,7 +34,7 @@ export default function LitConsole() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("terminal");
   const [view, setView] = useState<ConsoleView>("dashboard");
-  const [activeAgent, setActiveAgent] = useState("Director");
+  const [activeAgent, setActiveAgent] = useState("director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingRun, setPendingRun] = useState<{
@@ -498,12 +498,16 @@ function PreviewPanel() {
 }
 
 const AGENT_LIST = [
-  { id: "Director", role: "Orchestrator", color: "#00f5ff", status: "online", desc: "Plans and routes tasks to the right agents." },
-  { id: "Code Champ", role: "Engineer", color: "#22c55e", status: "online", desc: "Writes, reviews, and fixes code." },
-  { id: "Writer", role: "Content", color: "#ff9ff3", status: "idle", desc: "Docs, posts, scripts, and copy." },
-  { id: "Social Dom", role: "Growth", color: "#ff6b6b", status: "idle", desc: "Posts to channels, tracks impressions." },
-  { id: "Data Slayer", role: "Analytics", color: "#f59e0b", status: "online", desc: "Queries, indexes, and reports data." },
-  { id: "Pixel Forge", role: "Media", color: "#a78bfa", status: "idle", desc: "Generates images and visual assets." },
+  { id: "director",       name: "LiTTree",        role: "Core AI Copilot",        color: "#22d3ee", status: "online", desc: "Your main AI brain — plans, routes, and navigates." },
+  { id: "forge",          name: "Forge",           role: "Engineer & Architect",    color: "#22d3ee", status: "online", desc: "Writes, reviews, debugs, and ships production code." },
+  { id: "pulse",          name: "Pulse",           role: "Growth & Analytics",      color: "#f472b6", status: "online", desc: "Growth loops, content strategy, and data insights." },
+  { id: "pixel-forge",    name: "Visionary",       role: "Creative Director",       color: "#e879f9", status: "idle",   desc: "Crafts prompts, brand visuals, and UI direction." },
+  { id: "social-pilot",   name: "SocialPilot",     role: "Social Media Growth",     color: "#a855f7", status: "idle",   desc: "Platform-native content that stops the scroll." },
+  { id: "data-slayer",    name: "Data Slayer",     role: "Analytics & Insights",    color: "#fbbf24", status: "online", desc: "Interprets metrics and turns numbers into decisions." },
+  { id: "writing-coach",  name: "Writing Coach",   role: "Content & Copy",          color: "#a78bfa", status: "idle",   desc: "Edits, rewrites, and sharpens all words." },
+  { id: "music-producer", name: "Music Producer",  role: "Audio & Sound",           color: "#fb7185", status: "idle",   desc: "Composition, mixing, and sound design guidance." },
+  { id: "nexus",          name: "Nexus",           role: "Automation & Integrations",color: "#34d399", status: "idle",   desc: "Connects devices, APIs, webhooks, smart home." },
+  { id: "security-chief", name: "Security Chief",  role: "Security & Privacy",      color: "#ef4444", status: "online", desc: "Audits, protects, and locks down your systems." },
 ];
 
 function AgentsPanel({ activeAgent, onSelect, onPrompt }: { activeAgent: string; onSelect: (a: string) => void; onPrompt: (t: string) => void }) {
@@ -526,7 +530,7 @@ function AgentsPanel({ activeAgent, onSelect, onPrompt }: { activeAgent: string;
             <div className="flex items-center justify-between mb-1">
               <div className="flex items-center gap-2">
                 <div className="w-2 h-2 rounded-full" style={{ backgroundColor: a.status === "online" ? "#22c55e" : "#6b7280" }} />
-                <span className="text-xs font-bold" style={{ color: a.color }}>{a.id}</span>
+                <span className="text-xs font-bold" style={{ color: a.color }}>{a.name}</span>
                 <span className="text-[9px] uppercase tracking-wider opacity-50" style={{ color: LC.textMuted }}>{a.role}</span>
               </div>
               <div className="flex gap-1">
@@ -534,7 +538,7 @@ function AgentsPanel({ activeAgent, onSelect, onPrompt }: { activeAgent: string;
                   className="rounded-md px-2 py-0.5 text-[10px] font-bold"
                   style={{ backgroundColor: isActive ? a.color : a.color + "20", color: isActive ? "#000" : a.color }}
                 >Use</button>
-                <button onClick={() => onPrompt(`Ask ${a.id}: `)}
+                <button onClick={() => onPrompt(`Ask ${a.name}: `)}
                   className="rounded-md px-2 py-0.5 text-[10px] border"
                   style={{ borderColor: LC.border, color: LC.textMuted }}
                 >Chat</button>
