@@ -126,11 +126,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Image", href: "/studio?tool=image", icon: Image },
       { label: "Video", href: "/studio?tool=video", icon: Video },
       { label: "Music", href: "/studio?tool=audio", icon: Music },
-      { label: "Canvas", href: "/studio?tool=canvas", icon: PenTool },
+      { label: "Build with LiTTree", href: "/studio?tool=chat", icon: Code2 },
       { label: "Color by Number", href: "/color", icon: Paintbrush },
-      { label: "AI Agents", href: "/studio?tool=agents", icon: Bot },
-      { label: "AI Builder", href: "/studio?tool=builder", icon: Code2 },
-      { label: "Gallery", href: "/studio?tool=gallery", icon: Library },
+      { label: "Agent Skills", href: "/studio?tool=chat", icon: Bot },
+      { label: "Gallery", href: "/gallery", icon: Library },
     ],
   },
   {
@@ -186,15 +185,15 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "Agents",
-    href: "/studio?tool=agents",
+    href: "/studio?tool=chat",
     icon: Bot,
     accent: GROUP_ACCENTS.Agents,
     items: [
       { label: "LiTTree", href: "/studio?tool=chat", icon: Brain, online: true },
-      { label: "Forge", href: "/studio?tool=agents", icon: Code2, online: true },
-      { label: "Pulse", href: "/studio?tool=agents", icon: Activity, online: true },
-      { label: "Visionary", href: "/studio?tool=agents", icon: Sparkles, online: true },
-      { label: "SocialPilot", href: "/studio?tool=agents", icon: Megaphone, online: true },
+      { label: "Forge", href: "/studio?tool=chat", icon: Code2, online: true },
+      { label: "Pulse", href: "/studio?tool=chat", icon: Activity, online: true },
+      { label: "Visionary", href: "/studio?tool=chat", icon: Sparkles, online: true },
+      { label: "SocialPilot", href: "/studio?tool=chat", icon: Megaphone, online: true },
       { label: "LiT Console", href: "/studio?tool=chat", icon: Terminal },
     ],
   },
@@ -215,7 +214,8 @@ export const MOBILE_BOTTOM_ITEMS = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "LiT", href: "/studio?tool=chat", icon: Bot },
   { label: "Create", href: "/studio", icon: Sparkles },
-  { label: "Games", href: "/games", icon: Gamepad2 },
+  { label: "Market", href: "/marketplace", icon: Store },
+  { label: "Games", href: "/games/cloud", icon: Gamepad2 },
   { label: "Profile", href: "/profile", icon: User },
 ];
 
@@ -223,7 +223,7 @@ export const MOBILE_MORE_ITEMS = [
   { label: "Profile", href: "/profile", icon: User },
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Paintbrush },
-  { label: "Agents", href: "/studio?tool=agents", icon: Bot },
+  { label: "Agent", href: "/studio?tool=chat", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games/cloud", icon: Gamepad2 },
@@ -250,7 +250,7 @@ export const QUICK_CREATE_ITEMS = [
   { label: "Create Image", href: "/studio?tool=image", icon: Image },
   { label: "Create Music", href: "/studio?tool=audio", icon: Music },
   { label: "Create Video", href: "/studio?tool=video", icon: Video },
-  { label: "Create Agent", href: "/studio?tool=agents", icon: Bot },
+  { label: "Ask LiTTree", href: "/studio?tool=chat", icon: Bot },
   { label: "Create Post", href: "/social?create=post", icon: MessagesSquare },
 ];
 

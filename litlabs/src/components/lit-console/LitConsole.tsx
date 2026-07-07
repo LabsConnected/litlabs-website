@@ -490,9 +490,9 @@ const STUDIO_TOOLS = [
   { id: "image", label: "Image Generator", href: "/studio?tool=image", icon: "🎨" },
   { id: "video", label: "Video Studio", href: "/studio?tool=video", icon: "🎬" },
   { id: "audio", label: "Music Studio", href: "/studio?tool=audio", icon: "🎵" },
-  { id: "agents", label: "Agent Builder", href: "/studio?tool=agents", icon: "🤖" },
+  { id: "agents", label: "LiTTree Agent", href: "/studio?tool=chat", icon: "🤖" },
   { id: "gallery", label: "Asset Gallery", href: "/studio?tool=gallery", icon: "🖼" },
-  { id: "terminal", label: "Terminal", href: "/studio?tool=terminal", icon: "⚡" },
+  { id: "terminal", label: "Command Tools", href: "/studio?tool=chat", icon: "⚡" },
 ];
 
 function FilesPanel({ onPrompt }: { onPrompt: (t: string) => void }) {

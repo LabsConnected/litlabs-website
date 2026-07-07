@@ -6,12 +6,12 @@ import { useTheme } from "@/context/ThemeContext";
 import { Plus, X, Image as ImageIcon, Music, Video, Bot, Workflow, Globe, Terminal } from "lucide-react";
 
 const CREATE_OPTIONS = [
-  { label: "Build App", icon: Workflow, href: "/studio?tool=builder", color: "#22d3ee" },
-  { label: "Create Agent", icon: Bot, href: "/studio?tool=agents", color: "#a3f546" },
+  { label: "Build App", icon: Workflow, href: "/studio?tool=chat", color: "#22d3ee" },
+  { label: "Ask LiTTree", icon: Bot, href: "/studio?tool=chat", color: "#a3f546" },
   { label: "Generate Image", icon: ImageIcon, href: "/studio?tool=image", color: "#e879f9" },
   { label: "Music", icon: Music, href: "/studio?tool=audio", color: "#fb923c" },
-  { label: "Website", icon: Globe, href: "/studio?tool=canvas", color: "#f472b6" },
-  { label: "AI Chat", icon: Terminal, href: "/studio?tool=chat", color: "#4ade80" },
+  { label: "Website", icon: Globe, href: "/studio?tool=chat", color: "#f472b6" },
+  { label: "Run Command", icon: Terminal, href: "/studio?tool=chat", color: "#4ade80" },
   { label: "Create Video", icon: Video, href: "/studio?tool=video", color: "#38bdf8" },
 ];
 

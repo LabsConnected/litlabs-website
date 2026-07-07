@@ -46,44 +46,44 @@ const RULES: IntentRule[] = [
   // Color by Number app
   {
     keywords: ["color by number", "coloring", "paint by numbers", "coloring page", "color book"],
-    route: "/color",
+    route: "/studio?tool=color",
     label: "Color by Number",
     reason: "That belongs in the Color by Number app.",
   },
   // Studio — Canvas
   {
     keywords: ["canvas", "paint", "sketch", "drawing", "pixel art"],
-    route: "/studio?tool=canvas",
-    label: "Studio — Canvas",
-    reason: "That belongs in the Canvas tool.",
+    route: "/studio?tool=chat",
+    label: "LiTTree Agent",
+    reason: "LiTTree can route that from the main agent.",
   },
   // Builder
   {
     keywords: ["build", "code", "app", "website", "react", "component", "landing page", "dashboard", "frontend", "backend", "api", "function", "bug fix", "debug", "refactor", "html", "css", "typescript", "javascript", "next.js", "game code"],
-    route: "/studio?tool=builder",
-    label: "Builder",
-    reason: "That belongs in the AI Builder.",
+    route: "/studio?tool=chat",
+    label: "LiTTree Agent",
+    reason: "LiTTree can build that from the main agent.",
   },
   // Canvas (code gen)
   {
     keywords: ["generate code", "scaffold", "template", "starter code", "boilerplate"],
-    route: "/studio?tool=canvas",
-    label: "Canvas",
-    reason: "That belongs in the Canvas code generator.",
+    route: "/studio?tool=chat",
+    label: "LiTTree Agent",
+    reason: "LiTTree can generate that from the main agent.",
   },
   // Agents
   {
     keywords: ["agent", "ai agent", "create agent", "agent marketplace", "forge", "pulse", "visionary", "nexus", "social pilot", "automation agent", "custom agent", "agent dna"],
-    route: "/studio?tool=agents",
-    label: "Agents",
-    reason: "That belongs in the Agent builder.",
+    route: "/studio?tool=chat",
+    label: "LiTTree Agent",
+    reason: "LiTTree is the main agent hub.",
   },
   // Terminal
   {
     keywords: ["terminal", "console", "command", "shell", "bash", "cli", "deploy", "git push", "build command", "run command"],
-    route: "/studio?tool=terminal",
-    label: "Terminal",
-    reason: "That belongs in the Terminal.",
+    route: "/studio?tool=chat",
+    label: "LiTTree Agent",
+    reason: "LiTTree can run commands from the main agent.",
   },
   // Gallery
   {
@@ -95,7 +95,7 @@ const RULES: IntentRule[] = [
   // Games
   {
     keywords: ["game", "play", "arcade", "hextris", "play game", "gaming", "retro game", "browser game"],
-    route: "/games",
+    route: "/games/cloud",
     label: "Games",
     reason: "That belongs in the Arcade.",
   },

@@ -4,14 +4,14 @@ import { useEffect } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { Terminal, Bot } from "lucide-react";
+import { Bot } from "lucide-react";
 
 export default function AgentsPage() {
   const { resolvedColors: T } = useTheme();
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/studio?tool=agents");
+    router.replace("/studio?tool=chat");
   }, [router]);
 
   return (
@@ -21,14 +21,14 @@ export default function AgentsPage() {
     >
       <div className="text-center space-y-3">
         <Bot className="mx-auto h-8 w-8" style={{ color: T.accentColor }} />
-        <div className="text-lg font-black">Agents are now in Studio</div>
+        <div className="text-lg font-black">Agents now route through LiTTree</div>
         <Link
-          href="/studio?tool=agents"
+          href="/studio?tool=chat"
           className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition"
           style={{ backgroundColor: T.accentColor, color: T.bgColor }}
         >
-          <Terminal className="h-4 w-4" />
-          Open Studio Agents
+          <Bot className="h-4 w-4" />
+          Open LiTTree Agent
         </Link>
       </div>
     </main>

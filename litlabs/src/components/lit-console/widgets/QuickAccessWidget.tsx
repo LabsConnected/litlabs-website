@@ -6,7 +6,7 @@ import { BentoCard } from "@/components/site/BentoCard";
 import { LC } from "../lit-console-theme";
 
 const QUICK_LINKS = [
-  { href: "/studio?tool=agents", label: "Agent Chat", icon: Bot, desc: "Talk to any AI agent" },
+  { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Bot, desc: "Build, code, route, and ask" },
   { href: "/studio?tool=image", label: "Imaging Lab", icon: ImageIcon, desc: "Generate images & art" },
   { href: "/studio?tool=audio", label: "Music Studio", icon: Music, desc: "Create AI music" },
   { href: "/studio?tool=chat", label: "Terminal", icon: Terminal, desc: "Agent dev console" },
