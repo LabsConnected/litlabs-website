@@ -220,24 +220,32 @@ export default function ChatPanel({
         <div className="mx-auto max-w-3xl px-4 py-6">
         {isEmpty ? (
           <div className="flex h-full min-h-[60vh] flex-col items-center justify-center">
-            <div
-              className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
-              style={{
-                background: `linear-gradient(135deg, ${LC.accentCyan}30, ${LC.accentOrange}20)`,
-                border: `1px solid ${LC.border}`,
-              }}
-            >
-              <Terminal size={28} style={{ color: LC.accentCyan }} />
+            <div className="flex w-full max-w-3xl flex-col items-start gap-3 px-4">
+              <div className="flex w-full gap-3">
+                <div
+                  className="mt-1 shrink-0 rounded-full p-1.5"
+                  style={{
+                    backgroundColor: LC.bgSecondary,
+                    color: LC.accentCyan,
+                  }}
+                >
+                  <Bot size={14} />
+                </div>
+                <div
+                  className="rounded-2xl rounded-tl-none px-4 py-3 text-sm"
+                  style={{
+                    backgroundColor: LC.bgSecondary,
+                    border: `1px solid ${LC.border}`,
+                    color: LC.text,
+                  }}
+                >
+                  Hi, I&apos;m LiTTree. What are we making today?
+                </div>
+              </div>
             </div>
-            <h2
-              className="mb-2 text-center text-2xl font-bold"
-              style={{ color: LC.text }}
-            >
-              What are we making today?
-            </h2>
-            <p className="mb-8 max-w-xl text-center text-sm leading-relaxed" style={{ color: LC.textMuted }}>
+            <p className="mt-6 mb-4 max-w-xl text-center text-sm leading-relaxed" style={{ color: LC.textMuted }}>
               One command box for images, apps, code, content, agents, and deploys.
-              Ask LiTTree directly, or start with a quick action.
+              Ask me directly, or start with a quick action.
             </p>
             <StarterActions onSelect={onSend} />
           </div>

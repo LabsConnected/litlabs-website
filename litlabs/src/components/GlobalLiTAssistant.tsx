@@ -85,9 +85,9 @@ export default function GlobalLiTAssistant() {
     setLoading(false);
   };
 
-  const handleQuickAction = (href: string) => {
-    router.push(href);
-    setOpen(false);
+  const handleQuickAction = (prompt: string) => {
+    setInput(prompt);
+    sendMessage(prompt);
   };
 
   const toggleVoice = () => {
@@ -239,13 +239,13 @@ export default function GlobalLiTAssistant() {
                 </p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {[
-                    { label: "Build app", icon: Wand2, href: "/studio?tool=chat" },
-                    { label: "Generate image", icon: ImageIcon, href: "/studio?tool=chat" },
-                    { label: "Open chat", icon: Terminal, href: "/studio?tool=chat" },
+                    { label: "Build app", icon: Wand2, prompt: "Build me a simple app" },
+                    { label: "Generate image", icon: ImageIcon, prompt: "Generate a hero image" },
+                    { label: "Chat with LiT", icon: Terminal, prompt: "Hi LiT, what can you do?" },
                   ].map((a) => (
                     <button
                       key={a.label}
-                      onClick={() => handleQuickAction(a.href)}
+                      onClick={() => handleQuickAction(a.prompt)}
                       className="flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-[10px] font-bold transition hover:bg-white/10"
                       style={{ color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
                     >
