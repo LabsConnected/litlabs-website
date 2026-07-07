@@ -201,6 +201,7 @@ const nextConfig: NextConfig = {
       { source: "/jarvis", destination: "/studio?tool=chat", permanent: true },
       { source: "/lit-console", destination: "/studio?tool=chat", permanent: true },
       { source: "/jarvis-terminal", destination: "/studio?tool=chat", permanent: true },
+      { source: "/console", destination: "/studio?tool=chat", permanent: true },
     ];
   },
 
