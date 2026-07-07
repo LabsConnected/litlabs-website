@@ -11,7 +11,6 @@ const BG = "#08080c";
 const PANEL = "#101018";
 const BORDER = "#252538";
 const CYAN = "#00f5ff";
-const INDIGO = "#6366f1";
 const TEXT = "#f8fafc";
 const MUTED = "#94a3b8";
 

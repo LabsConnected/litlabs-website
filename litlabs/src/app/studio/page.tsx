@@ -21,8 +21,6 @@ import StudioModeSwitcher, {
 } from "./components/StudioModeSwitcher";
 import { Sparkles, X, Image as ImageIcon, Film, Music, Zap, Coins, Settings } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
-import { detectIntent } from "@/lib/intent-router";
-import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 
 const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
   ssr: false,
