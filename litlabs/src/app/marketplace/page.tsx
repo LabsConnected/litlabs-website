@@ -68,6 +68,17 @@ const TIER_PACKAGES: {
     features: ["500 credits/mo", "3 agent slots", "All games", "LiT Chat"],
   },
   {
+    id: "tier-basic",
+    coins: 1500,
+    price: 9.99,
+    priceId: "price_1TqeW9J53kgx4fp5dyxzyN0N",
+    productId: "prod_UqLClkd2zQbOBc",
+    label: "Basic",
+    tier: "basic",
+    popular: false,
+    features: ["1,500 credits/mo", "5 agent slots", "All games", "LiT Chat", "Priority support"],
+  },
+  {
     id: "tier-creator",
     coins: 5000,
     price: 12,

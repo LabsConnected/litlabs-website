@@ -8,6 +8,7 @@ import {
 
 // Map Stripe product IDs to plan tiers. Add more as you create them.
 const PRODUCT_TO_PLAN: Record<string, string> = {
+  prod_UqLClkd2zQbOBc: "basic",
   prod_UoIJ3gU5CzKIWn: "elite",
 };
 
