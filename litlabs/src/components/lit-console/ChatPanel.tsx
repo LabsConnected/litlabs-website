@@ -18,7 +18,11 @@ export interface Message {
   id: string;
   role: "user" | "lit" | "tool" | "system";
   content: string;
-  meta?: { tool?: string; status?: "running" | "done" | "error" };
+  meta?: {
+    tool?: string;
+    status?: "running" | "done" | "error";
+    images?: Array<{ url: string; prompt: string; provider: string }>;
+  };
 }
 
 interface ChatPanelProps {
@@ -226,13 +230,14 @@ export default function ChatPanel({
               <Terminal size={28} style={{ color: LC.accentCyan }} />
             </div>
             <h2
-              className="mb-2 text-2xl font-bold"
+              className="mb-2 text-center text-2xl font-bold"
               style={{ color: LC.text }}
             >
-              What can I help you build?
+              What are we making today?
             </h2>
-            <p className="mb-8 text-sm" style={{ color: LC.textMuted }}>
-              Ask anything — code, deploy, generate, analyze.
+            <p className="mb-8 max-w-xl text-center text-sm leading-relaxed" style={{ color: LC.textMuted }}>
+              One command box for images, apps, code, content, agents, and deploys.
+              Ask LiTTree directly, or start with a quick action.
             </p>
             <StarterActions onSelect={onSend} />
           </div>
@@ -343,6 +348,40 @@ export default function ChatPanel({
                     >
                       {m.content}
                     </div>
+                    {m.meta?.images?.length ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                        {m.meta.images.map((image, index) => (
+                          <a
+                            key={`${image.url}-${index}`}
+                            href={image.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="group overflow-hidden rounded-xl border"
+                            style={{
+                              backgroundColor: LC.bgPanel,
+                              borderColor: LC.border,
+                              boxShadow: "0 14px 40px rgba(0,0,0,0.25)",
+                            }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={image.url}
+                              alt={image.prompt}
+                              className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.02]"
+                            />
+                            <div
+                              className="flex items-center justify-between gap-2 px-3 py-2 text-[10px]"
+                              style={{ color: LC.textMuted }}
+                            >
+                              <span className="truncate font-semibold" style={{ color: LC.text }}>
+                                {image.provider}
+                              </span>
+                              <span style={{ color: LC.accentCyan }}>Open image</span>
+                            </div>
+                          </a>
+                        ))}
+                      </div>
+                    ) : null}
                   </div>
                 </div>
               )}

@@ -33,7 +33,7 @@ import {
 } from "lucide-react";
 import { MediaProviderId } from "@/lib/media";
 
-/* ─── Types ───────────────────────────────────────────────────────────── */
+/* Types */
 
 type Workspace = {
   id: string;
@@ -77,7 +77,7 @@ type Generation = {
   cost: number;
 };
 
-/* ─── Constants ───────────────────────────────────────────────────────── */
+/* Constants */
 
 const STORAGE_KEY = "litlabs-generate-history";
 const MAX_HISTORY = 20;
@@ -125,7 +125,7 @@ const REMIX_MODES: {
   },
 ];
 
-/* ─── Enhanced Style Presets ─────────────────────────────────────────────── */
+/* Enhanced Style Presets */
 
 const STYLE_PRESETS = [
   "Cyberpunk neon noir",
@@ -307,19 +307,19 @@ const PROVIDER_OPTIONS = [
   },
 ];
 
-/* ─── Component ───────────────────────────────────────────────────────── */
+/* Component */
 
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
 
-  /* ── Prompt state ── */
+  /* Prompt state */
   const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [remixMode, setRemixMode] = useState<RemixMode>("reskin");
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  /* ── Provider / format state ── */
+  /* Provider / format state */
   const [providerId, setProviderId] = useState<MediaProviderId>("pollinations");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:3" | "3:4" | "16:9" | "9:16"
@@ -329,7 +329,7 @@ export default function ImageTool() {
   const [batchSize, setBatchSize] = useState<1 | 2 | 4>(1);
   const [negativePromptOpen, setNegativePromptOpen] = useState(false);
 
-  /* ── Advanced generation controls ── */
+  /* Advanced generation controls */
   const [guidanceScale, setGuidanceScale] = useState<number>(7.5);
   const [inferenceSteps, setInferenceSteps] = useState<number>(30);
   const [sampler, setSampler] = useState<string>("dpmpp_2m");
@@ -337,11 +337,11 @@ export default function ImageTool() {
   const [seedLocked, setSeedLocked] = useState<boolean>(false);
   const [qualityPreset, setQualityPreset] = useState<string>("balanced");
 
-  /* ── Gallery save options ── */
+  /* Gallery save options */
   const [gallerySharePublic, setGallerySharePublic] = useState<boolean>(true);
   const [galleryCategory, setGalleryCategory] = useState<string>("abstract");
 
-  /* ── Style enhancers ── */
+  /* Style enhancers */
   const [selectedStyle, setSelectedStyle] = useState<string | null>(null);
   const [selectedLighting, setSelectedLighting] = useState<string | null>(null);
   const [selectedMood, setSelectedMood] = useState<string | null>(null);
@@ -356,7 +356,7 @@ export default function ImageTool() {
     PROVIDER_OPTIONS.find((p) => p.id === providerId) || PROVIDER_OPTIONS[0];
   const providerCost = currentProvider.cost;
 
-  /* ── Generation state ── */
+  /* Generation state */
   const [status, setStatus] = useState<GenerationStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [currentResult, setCurrentResult] = useState<Generation | null>(null);
@@ -371,7 +371,7 @@ export default function ImageTool() {
   });
   const [imgError, setImgError] = useState<string | null>(null);
 
-  /* ── UI state ── */
+  /* UI state */
   // Use shared WalletContext rather than localStorage or ad-hoc fetches
   const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const [claiming, setClaiming] = useState(false);
@@ -384,7 +384,7 @@ export default function ImageTool() {
   const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
 
-  /* ── Resizable panel widths ── */
+  /* Resizable panel widths */
   const [leftWidth, setLeftWidth] = useState(() => {
     if (typeof window === "undefined") return 288;
     try {
@@ -472,7 +472,7 @@ export default function ImageTool() {
     };
   }, []);
 
-  /* ── Workspaces ── */
+  /* Workspaces */
   const [workspaces, setWorkspaces] = useState<Workspace[]>(() => {
     const defaultWs: Workspace = {
       id: "ws_default",
@@ -512,7 +512,7 @@ export default function ImageTool() {
   const isWorking =
     status === "submitting" || status === "polling" || status === "forging";
 
-  /* ─── Effects ─────────────────────────────────────────────────────────── */
+  /* Effects */
 
   useEffect(() => {
     if (history.length > 0)
@@ -577,7 +577,7 @@ export default function ImageTool() {
     activeWsId,
   ]);
 
-  /* ─── Callbacks ───────────────────────────────────────────────────────── */
+  /* Callbacks */
 
   const addLog = useCallback((level: LogEntry["level"], message: string) => {
     const now = new Date();
@@ -945,7 +945,7 @@ export default function ImageTool() {
     }
   }, []);
 
-  /* ─── Shared style helpers ─────────────────────────────────────────── */
+  /* Shared style helpers */
 
   const pill = (active: boolean) => ({
     backgroundColor: active ? T.accentColor + "22" : "transparent",
@@ -958,14 +958,14 @@ export default function ImageTool() {
     borderColor: T.borderColor + "40",
   };
 
-  /* ─── Render ────────────────────────────────────────────────────────── */
+  /* Render */
 
   return (
     <div
       className="flex flex-col h-full overflow-hidden"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
-      {/* ── Top chrome ──────────────────────────────────────────────── */}
+      {/* Top chrome */}
       <header
         className="shrink-0 flex items-center justify-between px-4 h-11 gap-3"
         style={{
@@ -1156,7 +1156,7 @@ export default function ImageTool() {
         </div>
       </header>
 
-      {/* ── Body ────────────────────────────────────────────────────────── */}
+      {/* Body */}
       <div className="flex-1 flex min-h-0 relative">
         {/* Mobile backdrop */}
         {(mobileLeftOpen || mobileRightOpen) && (
@@ -1169,7 +1169,7 @@ export default function ImageTool() {
           />
         )}
 
-        {/* ── LEFT PANEL: Controls ──────────────────────────────────── */}
+        {/* LEFT PANEL: Controls */}
         <div
           className={`shrink-0 flex flex-col overflow-y-auto transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-30 ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{
@@ -1215,7 +1215,7 @@ export default function ImageTool() {
             ))}
           </div>
 
-          {/* ── PROMPT TAB ── */}
+          {/* PROMPT TAB */}
           {activeTab === "prompt" && (
             <div className="flex-1 px-3 pb-3 space-y-3">
               {/* Main prompt */}
@@ -1394,7 +1394,7 @@ export default function ImageTool() {
             </div>
           )}
 
-          {/* ── STYLE TAB ── */}
+          {/* STYLE TAB */}
           {activeTab === "style" && (
             <div className="flex-1 px-3 pb-3 space-y-3">
               {/* Remix mode */}
@@ -1745,7 +1745,7 @@ export default function ImageTool() {
             </div>
           )}
 
-          {/* ── SETTINGS TAB ── */}
+          {/* SETTINGS TAB */}
           {activeTab === "settings" && (
             <div className="flex-1 px-3 pb-3 space-y-3">
               {/* Provider */}
@@ -2242,7 +2242,7 @@ export default function ImageTool() {
             </div>
           )}
 
-          {/* ── Forge button — always visible ── */}
+          {/* Forge button - always visible */}
           <div className="shrink-0 px-3 pb-3 pt-1 space-y-2">
             <button
               onClick={handleGenerate}
@@ -2314,7 +2314,7 @@ export default function ImageTool() {
           />
         </div>
 
-        {/* ── CENTER + RIGHT: Canvas + History ──────────────────────── */}
+        {/* CENTER + RIGHT: Canvas + History */}
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {/* Canvas area */}
           <div className="flex-1 flex items-stretch min-h-0 overflow-hidden">
@@ -2749,7 +2749,7 @@ export default function ImageTool() {
             </div>
           </div>
 
-          {/* ── Forge Log (bottom) ── */}
+          {/* Forge Log (bottom) */}
           {showLogs && (
             <div
               className="shrink-0 border-t"

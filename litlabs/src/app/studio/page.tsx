@@ -16,7 +16,18 @@ import StudioCommandDock, {
   type DockAction,
 } from "./components/StudioCommandDock";
 import type { StudioMode } from "./components/StudioModeSwitcher";
-import { Sparkles, X, Image as ImageIcon, Film, Music, Zap, Coins, Settings } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  Image as ImageIcon,
+  Film,
+  Music,
+  Sparkles,
+  X,
+  Zap,
+  Coins,
+  Settings,
+} from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 
 const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
@@ -90,11 +101,12 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
     case "builder":
       return <BuilderTool />;
     default:
-      return <ImageTool />;
+      return <ChatTool />;
   }
 });
 
 const CANONICAL_TOOL: Partial<Record<StudioTool, StudioTool>> = {
+  image: "chat",
   agents: "chat",
   builder: "chat",
   terminal: "chat",
@@ -211,13 +223,11 @@ function StudioCommandCenter() {
     if (toolParam) {
       const next = CANONICAL_TOOL[toolParam] ?? toolParam;
       setActiveTool((prev) => (prev === next ? prev : next));
+      if (next !== toolParam) {
+        router.replace(`/studio?tool=${next}`, { scroll: false });
+      }
     }
-  }, [searchParams]);
-
-  // Auth gate
-  useEffect(() => {
-    if (isLoaded && !isSignedIn) router.push("/sign-in?redirect_url=/studio");
-  }, [isLoaded, isSignedIn, router]);
+  }, [router, searchParams]);
 
   const handleToolChange = (t: StudioTool) => {
     const next = CANONICAL_TOOL[t] ?? t;
@@ -273,14 +283,72 @@ function StudioCommandCenter() {
   }
   if (!isSignedIn) {
     return (
-      <div className="min-h-[60vh] grid place-items-center">
-        <Link
-          href="/sign-in?redirect_url=/studio"
-          className="rounded-xl px-4 py-2 font-bold text-white"
-          style={{ backgroundColor: T.accentColor }}
-        >
-          Sign in to continue
-        </Link>
+      <div
+        className="grid min-h-[calc(100vh-64px)] place-items-center px-4"
+        style={{
+          background: `radial-gradient(circle at 50% 0%, ${T.accentColor}18, transparent 34%), ${T.bgColor}`,
+          color: T.textColor,
+        }}
+      >
+        <div className="w-full max-w-3xl text-center">
+          <div
+            className="mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-2xl border"
+            style={{
+              backgroundColor: T.boxBg,
+              borderColor: T.borderColor + "35",
+              boxShadow: `0 0 32px ${T.accentColor}22`,
+            }}
+          >
+            <Bot size={28} style={{ color: T.accentColor }} />
+          </div>
+          <p
+            className="mb-3 text-xs font-black uppercase tracking-[0.28em]"
+            style={{ color: T.accentColor }}
+          >
+            LiTTree Agent
+          </p>
+          <h1
+            className="mx-auto mb-4 max-w-2xl text-3xl font-black tracking-tight sm:text-5xl"
+            style={{ color: T.headerColor }}
+          >
+            One command box for images, apps, agents, and deploys.
+          </h1>
+          <p
+            className="mx-auto mb-7 max-w-xl text-sm leading-relaxed sm:text-base"
+            style={{ color: T.textMuted }}
+          >
+            The old Image Studio now routes into LiTTree Agent. Type a prompt like
+            “generate a hero image” and the image comes back inside the same chat.
+          </p>
+          <div className="mb-7 flex flex-wrap justify-center gap-2">
+            {[
+              "Generate image",
+              "Build app",
+              "Fix code",
+              "Create agent",
+              "Open terminal",
+            ].map((label) => (
+              <span
+                key={label}
+                className="rounded-full border px-3 py-1.5 text-xs font-bold"
+                style={{
+                  backgroundColor: T.boxBg + "aa",
+                  borderColor: T.borderColor + "30",
+                  color: T.textColor,
+                }}
+              >
+                {label}
+              </span>
+            ))}
+          </div>
+          <Link
+            href="/sign-in?redirect_url=/studio?tool=chat"
+            className="inline-flex items-center gap-2 rounded-xl px-5 py-3 text-sm font-black text-black transition-transform hover:scale-[1.02]"
+            style={{ backgroundColor: T.accentColor }}
+          >
+            Sign in to launch Studio <ArrowRight size={16} />
+          </Link>
+        </div>
       </div>
     );
   }

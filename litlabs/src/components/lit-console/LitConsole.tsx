@@ -15,6 +15,7 @@ import { LC } from "./lit-console-theme";
 import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
+import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 
 const initialContext: LiTContext = {
   route: "/studio?tool=chat",
@@ -186,6 +187,62 @@ export default function LitConsole() {
       // Intent detection — auto-navigate if clear
       const intent = detectIntent(t);
       if (intent.route && !intent.isAmbiguous) {
+        const action = actionFromIntent(t, {
+          route: { path: intent.route.path, label: intent.route.label },
+          confidence: intent.confidence,
+          isAmbiguous: intent.isAmbiguous,
+        });
+        if (action && action.type !== "navigate") {
+          const toolId = Math.random().toString(36).slice(2);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: toolId,
+              role: "tool",
+              content: actionMessage(action),
+              meta: { tool: action.type, status: "running" },
+            },
+          ]);
+          executeAction(action)
+            .then((result) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === toolId
+                    ? {
+                        ...m,
+                        content: result.ok
+                          ? result.message
+                          : `${result.message}${result.error ? ` ${result.error}` : ""}`,
+                        meta: {
+                          tool: action.type,
+                          status: result.ok ? "done" : "error",
+                          images: result.images,
+                        },
+                      }
+                    : m,
+                ),
+              );
+            })
+            .catch((err) => {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === toolId
+                    ? {
+                        ...m,
+                        content:
+                          err instanceof Error
+                            ? err.message
+                            : "Action failed.",
+                        meta: { tool: action.type, status: "error" },
+                      }
+                    : m,
+                ),
+              );
+            })
+            .finally(() => setLoading(false));
+          return;
+        }
+
         const navMsg = buildNavigationMessage(intent);
         setMessages((prev) => [
           ...prev,
@@ -487,7 +544,7 @@ export default function LitConsole() {
 // ─── Drawer Panel Components ──────────────────────────────────────────────────
 
 const STUDIO_TOOLS = [
-  { id: "image", label: "Image Generator", href: "/studio?tool=image", icon: "🎨" },
+  { id: "image", label: "Image Agent", href: "/studio?tool=chat", icon: "🎨" },
   { id: "video", label: "Video Studio", href: "/studio?tool=video", icon: "🎬" },
   { id: "audio", label: "Music Studio", href: "/studio?tool=audio", icon: "🎵" },
   { id: "agents", label: "LiTTree Agent", href: "/studio?tool=chat", icon: "🤖" },

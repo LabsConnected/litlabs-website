@@ -3,18 +3,22 @@
 import { useState, useEffect } from "react";
 
 export default function CookieConsent() {
-  const [visible, setVisible] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return !localStorage.getItem("cookie-consent");
-  });
+  const [mounted, setMounted] = useState(false);
+  const [visible, setVisible] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
 
   useEffect(() => {
+    setMounted(true);
+    setVisible(!localStorage.getItem("cookie-consent"));
+  }, []);
+
+  useEffect(() => {
+    if (!mounted) return;
     if (visible) {
       const timer = setTimeout(() => setAnimateIn(true), 100);
       return () => clearTimeout(timer);
     }
-  }, [visible]);
+  }, [mounted, visible]);
 
   const acceptAll = () => {
     localStorage.setItem(
@@ -46,7 +50,7 @@ export default function CookieConsent() {
     setTimeout(() => setVisible(false), 300);
   };
 
-  if (!visible) return null;
+  if (!mounted || !visible) return null;
 
   return (
     <div
