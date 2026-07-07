@@ -60,13 +60,29 @@ export default function LitConsole() {
   } | null>(null);
   const termRef = useRef<LiTTreeTerminalHandle>(null);
 
-  const { startListening, stopListening, isSupported: voiceSupported } = useLiTVoice({
+  const {
+    startListening,
+    stopListening,
+    isSupported: voiceSupported,
+    state: voiceState,
+    speak,
+  } = useLiTVoice({
     onTranscript: (text: string) => {
       if (!text.trim()) return;
       setInput(text);
       handleSend(text);
     },
   });
+
+  const lastSpokenIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!speak) return;
+    const lastLit = [...messages].reverse().find((m) => m.role === "lit");
+    if (!lastLit || lastLit.id === lastSpokenIdRef.current) return;
+    lastSpokenIdRef.current = lastLit.id;
+    speak(lastLit.content.replace(/\n/g, " ").slice(0, 250));
+  }, [messages, speak]);
 
   // Debounced LiT-Tip scan as the user types
   useEffect(() => {
@@ -509,6 +525,8 @@ export default function LitConsole() {
         onDeploy={() => handleSend("Run: npx vercel --prod to deploy the current project")}
         onSaveWorkflow={() => handleSend("Save this workflow as a reusable automation")}
         onVoice={voiceSupported ? () => startListening() : undefined}
+        onVoiceStop={stopListening}
+        voiceState={voiceState}
       />
 
       {/* Pending command approval toast */}

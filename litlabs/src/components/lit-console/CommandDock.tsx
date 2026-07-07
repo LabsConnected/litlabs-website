@@ -44,6 +44,8 @@ interface CommandDockProps {
   onDeploy?: () => void;
   onSaveWorkflow?: () => void;
   onVoice?: () => void;
+  onVoiceStop?: () => void;
+  voiceState?: "idle" | "listening" | "thinking" | "speaking" | "error";
 }
 
 const AGENTS = [
@@ -141,6 +143,8 @@ export default function CommandDock(props: CommandDockProps) {
     onDeploy,
     onSaveWorkflow,
     onVoice,
+    onVoiceStop,
+    voiceState,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -269,12 +273,20 @@ export default function CommandDock(props: CommandDockProps) {
             </button>
             {onVoice && (
               <button
-                onClick={onVoice}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors hover:bg-white/5"
-                style={{ color: LC.accentCyan }}
-                title="Live voice conversation"
+                type="button"
+                onClick={voiceState === "listening" ? onVoiceStop : onVoice}
+                className={`flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
+                  voiceState === "listening" ? "animate-pulse" : "hover:bg-white/5"
+                }`}
+                style={{
+                  color: voiceState === "listening" ? "#000" : LC.accentCyan,
+                  backgroundColor: voiceState === "listening" ? LC.accentCyan : "transparent",
+                  border: `1px solid ${LC.accentCyan}`,
+                }}
+                title={voiceState === "listening" ? "Stop listening" : "Tap to speak (Android / Chrome)"}
               >
-                <Mic size={18} />
+                <Mic size={18} fill={voiceState === "listening" ? "currentColor" : "none"} />
+                {voiceState === "listening" && <span className="hidden sm:inline">Listening</span>}
               </button>
             )}
             <button
