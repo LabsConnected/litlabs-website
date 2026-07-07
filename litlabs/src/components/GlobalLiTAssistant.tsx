@@ -54,7 +54,7 @@ export default function GlobalLiTAssistant() {
     await sendMessage(text);
   };
 
-  const { state: voiceState, isSupported, startListening, stopListening, speak, stopSpeaking } = useLiTVoice({
+  const { state: voiceState, transcript: voiceTranscript, isSupported, startListening, stopListening, speak, stopSpeaking } = useLiTVoice({
     onTranscript: onVoiceTranscript,
   });
 
@@ -311,6 +311,40 @@ export default function GlobalLiTAssistant() {
                     {task.status === "done" ? "✅" : "❌"} {task.title}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {/* Voice listening indicator */}
+            {voiceState === "listening" && (
+              <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
+                <div className="flex items-end gap-1 h-6">
+                  {[...Array(5)].map((_, i) => (
+                    <span
+                      key={i}
+                      className="w-1 rounded-full animate-pulse"
+                      style={{
+                        backgroundColor: "#ff4444",
+                        height: `${12 + (i % 3) * 8}px`,
+                        animationDelay: `${i * 0.1}s`,
+                      }}
+                    />
+                  ))}
+                </div>
+                <div className="text-xs font-bold" style={{ color: "#ff4444" }}>
+                  Listening…
+                </div>
+                {voiceTranscript && (
+                  <div className="max-w-[90%] text-[11px] italic" style={{ color: T.textMuted }}>
+                    “{voiceTranscript}”
+                  </div>
+                )}
+              </div>
+            )}
+
+            {voiceState === "speaking" && (
+              <div className="flex items-center justify-center gap-2 py-3 text-[11px] font-bold" style={{ color: T.accentColor }}>
+                <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: T.accentColor }} />
+                LiT is speaking…
               </div>
             )}
           </div>

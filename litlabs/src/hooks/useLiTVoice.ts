@@ -4,6 +4,11 @@ import { useState, useCallback, useEffect, useRef } from "react";
 
 type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
 
+type VoiceInfo = {
+  name: string;
+  lang: string;
+};
+
 interface LiTSpeechRecognitionErrorEvent extends Event {
   error: string;
 }
@@ -60,8 +65,19 @@ export function useLiTVoice({
 }) {
   const [state, setState] = useState<VoiceState>("idle");
   const [isSupported, setIsSupported] = useState(false);
+  const [transcript, setTranscript] = useState("");
+  const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
   const recognitionRef = useRef<LiTSpeechRecognition | null>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
+
+  const pickBestVoice = useCallback((voices: SpeechSynthesisVoice[]) => {
+    const preferred = voices.find((v) =>
+      v.lang.startsWith("en") &&
+      (/Google US English/i.test(v.name) || /Samantha/i.test(v.name) || /Daniel/i.test(v.name))
+    );
+    const fallback = voices.find((v) => v.lang.startsWith("en") && v.default);
+    return preferred || fallback || voices[0] || null;
+  }, []);
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -73,8 +89,13 @@ export function useLiTVoice({
       rec.continuous = false;
       rec.interimResults = true;
       rec.lang = "en-US";
-      rec.onstart = () => setState("listening");
-      rec.onend = () => setState("idle");
+      rec.onstart = () => {
+        setTranscript("");
+        setState("listening");
+      };
+      rec.onend = () => {
+        setState((prev) => (prev === "listening" ? "idle" : prev));
+      };
       rec.onerror = (e: LiTSpeechRecognitionErrorEvent) => {
         if (e.error !== "aborted" && e.error !== "no-speech") {
           setState("error");
@@ -86,23 +107,39 @@ export function useLiTVoice({
         const results = e.results;
         if (!results.length) return;
         const last = results[results.length - 1];
-        const transcript = last[0].transcript;
+        const text = last[0].transcript;
+        setTranscript(text);
         if (last.isFinal) {
           setState("thinking");
-          onTranscript(transcript);
+          onTranscript(text);
         }
       };
       recognitionRef.current = rec;
     }
-    synthRef.current = window.speechSynthesis;
+
+    const synth = window.speechSynthesis;
+    synthRef.current = synth;
+
+    const loadVoices = () => {
+      const voices = synth.getVoices();
+      if (voices.length) setSelectedVoice(pickBestVoice(voices));
+    };
+    loadVoices();
+    if (synth.onvoiceschanged !== undefined) {
+      synth.onvoiceschanged = loadVoices;
+    }
+
     return () => {
       try {
         recognitionRef.current?.abort();
       } catch {
         // ignore
       }
+      if (synth.onvoiceschanged !== undefined) {
+        synth.onvoiceschanged = null;
+      }
     };
-  }, [onTranscript]);
+  }, [onTranscript, pickBestVoice]);
 
   useEffect(() => {
     onStateChange?.(state);
@@ -115,6 +152,7 @@ export function useLiTVoice({
     }
     try {
       synthRef.current?.cancel();
+      setTranscript("");
       recognitionRef.current.start();
     } catch {
       // already started or not allowed
@@ -128,6 +166,7 @@ export function useLiTVoice({
       // ignore
     }
     setState("idle");
+    setTranscript("");
   }, []);
 
   const speak = useCallback((text: string) => {
@@ -135,12 +174,13 @@ export function useLiTVoice({
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = 1.05;
     utter.pitch = 1.0;
+    if (selectedVoice) utter.voice = selectedVoice;
     utter.onstart = () => setState("speaking");
     utter.onend = () => setState("idle");
     utter.onerror = () => setState("idle");
     synthRef.current.cancel();
     synthRef.current.speak(utter);
-  }, []);
+  }, [selectedVoice]);
 
   const stopSpeaking = useCallback(() => {
     synthRef.current?.cancel();
@@ -149,6 +189,7 @@ export function useLiTVoice({
 
   return {
     state,
+    transcript,
     isSupported,
     startListening,
     stopListening,
