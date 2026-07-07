@@ -44,7 +44,7 @@ export async function GET(
     }
 
     const { data: messages, error } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .select("*")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
@@ -109,7 +109,7 @@ export async function POST(
 
     // Save user message
     const { data: userMessage, error: msgError } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .insert({
         conversation_id: conversationId,
         role: "user",
@@ -124,7 +124,7 @@ export async function POST(
 
     // Get recent conversation history
     const { data: recentMessages } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .select("role, content")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
@@ -161,7 +161,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
 
     // Save AI response
     const { data: assistantMessage, error: aiMsgError } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .insert({
         conversation_id: conversationId,
         role: "assistant",

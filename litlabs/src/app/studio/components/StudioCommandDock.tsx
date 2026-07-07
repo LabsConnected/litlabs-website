@@ -14,6 +14,7 @@ import {
   Square,
   TerminalSquare,
   Wand2,
+  Code2,
 } from "lucide-react";
 import type { StudioTool } from "./StudioSidebar";
 
@@ -84,6 +85,79 @@ export default function StudioCommandDock({
     { id: "terminal", label: "Term", icon: TerminalSquare, tool: "terminal" },
   ];
 
+  type Skill = { label: string; prompt: string; icon: typeof Sparkles };
+
+  const SKILLS: Record<StudioTool, Skill[]> = {
+    chat: [
+      { label: "Ask LiT", prompt: "What can you help me with today?", icon: Bot },
+      { label: "Plan project", prompt: "Plan a full-stack SaaS project", icon: Sparkles },
+      { label: "Explain code", prompt: "Explain this code like I'm 5", icon: Code2 },
+    ],
+    image: [
+      { label: "Wallpaper", prompt: "Make a cyberpunk city wallpaper at night with neon reflections", icon: ImageIcon },
+      { label: "Logo", prompt: "Design a modern minimalist logo for a tech brand", icon: ImageIcon },
+      { label: "Portrait", prompt: "Generate a photorealistic portrait of a futuristic astronaut", icon: ImageIcon },
+      { label: "Anime", prompt: "Create an anime character with cyberpunk outfit", icon: ImageIcon },
+    ],
+    video: [
+      { label: "Cinematic", prompt: "Generate a cinematic sci-fi city fly-through", icon: Film },
+      { label: "Reel", prompt: "Create a 15-second product showcase reel", icon: Film },
+      { label: "B-roll", prompt: "Generate abstract tech b-roll footage", icon: Film },
+    ],
+    audio: [
+      { label: "Beat", prompt: "Make a chill lo-fi hip hop beat", icon: Music },
+      { label: "Song", prompt: "Generate an upbeat electronic pop song", icon: Music },
+      { label: "SFX", prompt: "Create futuristic UI sound effects", icon: Music },
+      { label: "Voice", prompt: "Synthesize a calm narrator voiceover", icon: Music },
+    ],
+    color: [
+      { label: "Mandala", prompt: "Color a mandala", icon: Palette },
+      { label: "Landscape", prompt: "Color a mountain landscape", icon: Palette },
+      { label: "Pixel art", prompt: "Color a pixel art character", icon: Palette },
+    ],
+    canvas: [
+      { label: "Dashboard", prompt: "Build a dashboard with stat cards, chart placeholder, and sidebar", icon: Code2 },
+      { label: "Landing page", prompt: "Build a modern landing page with hero, features, and CTA", icon: Code2 },
+      { label: "Todo app", prompt: "Build a todo app with add, delete, and mark complete", icon: Code2 },
+      { label: "Counter", prompt: "Create a React counter with increment, decrement, and reset", icon: Code2 },
+    ],
+    builder: [
+      { label: "Landing page", prompt: "Build a modern landing page with hero, features, and CTA", icon: Code2 },
+      { label: "Dashboard", prompt: "Build a dashboard with stat cards, chart, and sidebar", icon: Code2 },
+      { label: "Fixer", prompt: "Fix any errors and improve the current page", icon: Wand2 },
+      { label: "Component", prompt: "Build a reusable card component with Tailwind", icon: Code2 },
+    ],
+    agents: [
+      { label: "Code reviewer", prompt: "Create an agent that reviews code and suggests improvements", icon: Bot },
+      { label: "Planner", prompt: "Create a project planner agent", icon: Bot },
+      { label: "Social pilot", prompt: "Create a social media manager agent", icon: Bot },
+    ],
+    terminal: [
+      { label: "/status", prompt: "/status", icon: TerminalSquare },
+      { label: "/image", prompt: "/image generate a cyberpunk city", icon: ImageIcon },
+      { label: "/build", prompt: "/build a landing page", icon: Code2 },
+      { label: "/help", prompt: "/help", icon: Wand2 },
+    ],
+    pipeline: [
+      { label: "New run", prompt: "Run the default pipeline", icon: Wand2 },
+      { label: "View logs", prompt: "Show latest pipeline logs", icon: TerminalSquare },
+    ],
+    gallery: [
+      { label: "Search", prompt: "Search gallery for cyberpunk", icon: Wand2 },
+      { label: "Refresh", prompt: "Refresh recent generations", icon: Wand2 },
+    ],
+    space: [
+      { label: "Skybox", prompt: "Generate a nebula skybox", icon: Wand2 },
+      { label: "Planet", prompt: "Create a procedural planet texture", icon: Wand2 },
+    ],
+    clibridge: [
+      { label: "Connect", prompt: "Connect to default CLI bridge", icon: TerminalSquare },
+      { label: "Run", prompt: "Run ls -la on the bridge", icon: TerminalSquare },
+    ],
+  };
+
+  const activeSkills: Skill[] = SKILLS[activeTool] ?? SKILLS.chat;
+
   return (
     <div
       className="border-t shrink-0"
@@ -96,24 +170,56 @@ export default function StudioCommandDock({
       {/* Toggle bar */}
       <button
         onClick={() => setExpanded((v) => !v)}
-        className="w-full flex items-center justify-between px-3 h-8 text-[10px] font-bold uppercase tracking-[0.2em] transition-colors hover:bg-white/5"
+        className="w-full flex items-center justify-between px-4 h-10 text-xs font-bold uppercase tracking-[0.2em] transition-colors hover:bg-white/5"
         style={{ color: T.textMuted }}
         aria-label={expanded ? "Collapse command dock" : "Expand command dock"}
         title={expanded ? "Collapse dock" : "Expand dock"}
       >
         <span className="flex items-center gap-2">
-          <Wand2 size={11} style={{ color: T.accentColor }} />
+          <Wand2 size={13} style={{ color: T.accentColor }} />
           Command dock
         </span>
         <ChevronUp
-          size={12}
+          size={14}
           className="transition-transform"
           style={{ transform: expanded ? "rotate(0deg)" : "rotate(180deg)" }}
         />
       </button>
 
       {expanded && (
-        <div className="p-2 space-y-2">
+        <div className="p-3 space-y-2.5">
+          {/* Contextual skill chips for the active tool */}
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
+            <span
+              className="text-xs font-bold uppercase tracking-[0.15em] shrink-0"
+              style={{ color: T.textMuted }}
+            >
+              {activeTool}
+            </span>
+            {activeSkills.map((s) => {
+              const Icon = s.icon;
+              return (
+                <button
+                  key={s.label}
+                  onClick={() => {
+                    onPromptChange(s.prompt);
+                    inputRef.current?.focus();
+                  }}
+                  className="shrink-0 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold transition-all hover:scale-[1.02] hover:bg-white/5"
+                  style={{
+                    backgroundColor: T.bgColor + "60",
+                    borderColor: T.borderColor + "22",
+                    color: T.textColor,
+                  }}
+                  title={s.prompt}
+                >
+                  <Icon size={12} style={{ color: T.accentColor }} />
+                  {s.label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* Input row */}
           <form
             onSubmit={(e) => {
@@ -123,26 +229,40 @@ export default function StudioCommandDock({
               onSubmit();
               setTimeout(() => setBusy(false), 800);
             }}
-            className="flex items-stretch gap-2"
+            className="flex items-stretch gap-2.5"
           >
             <div
-              className="flex-1 flex items-center gap-2 rounded-xl border px-3"
+              className="flex-1 flex items-center gap-2.5 rounded-xl border px-4"
               style={{
                 backgroundColor: T.bgColor + "70",
                 borderColor: T.borderColor + "25",
               }}
             >
-              <Sparkles size={12} style={{ color: T.accentColor }} />
+              <Sparkles size={14} style={{ color: T.accentColor }} />
               <input
                 ref={inputRef}
                 value={prompt}
                 onChange={(e) => onPromptChange(e.target.value)}
-                placeholder="Ask in plain English: generate, fix, search, deploy…  ⌘K"
-                className="flex-1 min-w-0 py-2 text-[12px] outline-none bg-transparent"
+                placeholder={
+                  activeTool === "image"
+                    ? "Describe an image to generate..."
+                    : activeTool === "audio"
+                    ? "Describe a sound or song to generate..."
+                    : activeTool === "video"
+                    ? "Describe a video scene..."
+                    : activeTool === "canvas" || activeTool === "builder"
+                    ? "Describe what to build..."
+                    : activeTool === "terminal"
+                    ? "Type /help, /image, or ask LiT..."
+                    : activeTool === "agents"
+                    ? "Describe an agent to create..."
+                    : "Ask in plain English: generate, fix, search, deploy…"
+                }
+                className="flex-1 min-w-0 py-2.5 text-sm outline-none bg-transparent"
                 style={{ color: T.textColor }}
               />
               <span
-                className="hidden md:inline text-[9px] font-mono opacity-40"
+                className="hidden md:inline text-xs font-mono opacity-40"
                 style={{ color: T.textMuted }}
               >
                 {prompt.length}/2000
@@ -151,7 +271,7 @@ export default function StudioCommandDock({
             <button
               type="submit"
               disabled={!prompt.trim() || busy}
-              className="rounded-xl px-3 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40"
+              className="rounded-xl px-4 flex items-center gap-1.5 text-xs font-black uppercase tracking-wider transition-all disabled:opacity-40"
               style={{
                 backgroundColor: T.accentColor,
                 color: "#fff",
@@ -159,18 +279,18 @@ export default function StudioCommandDock({
               }}
               title="Send"
             >
-              {busy ? <Square size={11} /> : <Send size={11} />}
+              {busy ? <Square size={13} /> : <Send size={13} />}
               <span className="hidden sm:inline">Run</span>
             </button>
           </form>
 
           {/* Shortcut row */}
-          <div className="flex items-center gap-1.5 overflow-x-auto pb-0.5">
+          <div className="flex items-center gap-2 overflow-x-auto pb-0.5">
             <span
-              className="text-[9px] font-bold uppercase tracking-[0.2em] shrink-0"
+              className="text-xs font-bold uppercase tracking-[0.2em] shrink-0"
               style={{ color: T.textMuted }}
             >
-              Route to
+              Jump to
             </span>
             {SHORTCUTS.map((s) => {
               const Icon = s.icon;
@@ -179,7 +299,7 @@ export default function StudioCommandDock({
                 <button
                   key={s.id}
                   onClick={() => onToolChange(s.tool)}
-                  className="shrink-0 flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider transition-all"
+                  className="shrink-0 flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-xs font-bold uppercase tracking-wider transition-all"
                   style={{
                     backgroundColor: active
                       ? T.accentColor + "22"
@@ -191,7 +311,7 @@ export default function StudioCommandDock({
                   }}
                   title={`Open ${s.label} tool`}
                 >
-                  <Icon size={10} />
+                  <Icon size={12} />
                   {s.label}
                 </button>
               );
@@ -210,7 +330,7 @@ export default function StudioCommandDock({
                     tool: r.tool,
                   })
                 }
-                className="shrink-0 max-w-[140px] truncate rounded-full border px-2.5 py-1 text-[10px] font-bold transition-colors hover:bg-white/5"
+                className="shrink-0 max-w-[160px] truncate rounded-full border px-3 py-1.5 text-xs font-bold transition-colors hover:bg-white/5"
                 style={{
                   backgroundColor: "transparent",
                   borderColor: T.borderColor + "22",

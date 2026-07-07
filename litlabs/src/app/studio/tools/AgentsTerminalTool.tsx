@@ -2,6 +2,9 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
+import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import {
   Send,
   Trash2,
@@ -13,6 +16,10 @@ import {
   Image as ImageIcon,
   Terminal,
   X,
+  Wallet,
+  Cpu,
+  Activity,
+  Zap,
 } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
 
@@ -67,6 +74,9 @@ function formatTime() {
 /* ─── Main Component ─────────────────────────────────────────────────── */
 export default function AgentsTerminalTool() {
   const { resolvedColors: T } = useTheme();
+  const { user } = useUser();
+  const { balance } = useWallet();
+  const router = useRouter();
   const [isMobile, setIsMobile] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const logRef = useRef<HTMLDivElement>(null);
@@ -200,11 +210,129 @@ export default function AgentsTerminalTool() {
     [appendLine],
   );
 
+  const providerConfig =
+    PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
+  const providerLabel =
+    provider === "gemini" ? "Gemini 2.5 Flash" : providerConfig.label;
+
+  const handleCommand = useCallback(
+    async (content: string) => {
+      const parts = content.slice(1).trim().split(/\s+/);
+      const cmd = parts[0].toLowerCase();
+      const args = parts.slice(1).join(" ");
+
+      switch (cmd) {
+        case "help": {
+          addSystemLine("Available commands:");
+          addSystemLine("/help — show this help");
+          addSystemLine("/clear — clear the terminal");
+          addSystemLine("/image <prompt> — generate an image in the background");
+          addSystemLine("/build <prompt> — open the builder with a prompt");
+          addSystemLine("/agent <name> — switch to an agent (e.g., forge, pulse, visionary)");
+          addSystemLine("/status — show system status");
+          return true;
+        }
+        case "clear": {
+          setLines([]);
+          return true;
+        }
+        case "image": {
+          if (!args) {
+            addSystemLine("Usage: /image <prompt>");
+            return true;
+          }
+          addSystemLine(`Generating image: ${args}`);
+          setIsLoading(true);
+          try {
+            const res = await fetch("/api/studio/generate", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                prompt: args,
+                provider: "pollinations",
+                aspectRatio: "1:1",
+                batchSize: 1,
+              }),
+            });
+            const data = await res.json();
+            if (data.images?.[0]?.url) {
+              appendLine({
+                id: crypto.randomUUID(),
+                ts: formatTime(),
+                agent: "IMG",
+                role: "ai",
+                content: "",
+                imageUrl: data.images[0].url,
+              });
+              addSystemLine("Image generated. Click the image to open it.");
+            } else {
+              addSystemLine("Image generation returned no result.");
+            }
+          } catch {
+            addSystemLine("Image generation failed.");
+          } finally {
+            setIsLoading(false);
+          }
+          return true;
+        }
+        case "build": {
+          if (!args) {
+            addSystemLine("Usage: /build <prompt>");
+            return true;
+          }
+          addSystemLine(`Opening Builder with prompt: ${args}`);
+          router.push(`/studio?tool=builder&prompt=${encodeURIComponent(args)}`);
+          return true;
+        }
+        case "agent": {
+          const target = args.toLowerCase();
+          const agent = AGENT_LIST.find(
+            (a) => a.id === target || a.name.toLowerCase() === target,
+          );
+          if (agent) {
+            setSelectedAgentId(agent.id);
+            addSystemLine(`Switched to ${agent.name}.`);
+          } else {
+            addSystemLine(
+              `Unknown agent: ${args}. Available: ${AGENT_LIST.map((a) => a.id).join(", ")}`,
+            );
+          }
+          return true;
+        }
+        case "status": {
+          addSystemLine(`User: ${user?.username || user?.firstName || "guest"}`);
+          addSystemLine(`Wallet: ${balance} LBC`);
+          addSystemLine(`Agent: ${selectedAgent.name}`);
+          addSystemLine(`Provider: ${providerConfig.label}`);
+          addSystemLine(`Lines: ${lines.length}`);
+          addSystemLine(`Status: online`);
+          return true;
+        }
+        default:
+          return false;
+      }
+    },
+    [addSystemLine, appendLine, balance, lines.length, providerConfig.label, router, selectedAgent.name, user],
+  );
+
   const sendMessage = useCallback(
     async (text?: string) => {
       const content = (text || input).trim();
       if (!content && !attachedImageUrl) return;
       if (isLoading) return;
+
+      // Handle slash commands first
+      if (content.startsWith("/")) {
+        const handled = await handleCommand(content);
+        if (handled) {
+          setInput("");
+          setTempInput("");
+          setAttachedImageUrl("");
+          setShowImageInput(false);
+          setImageUrlInput("");
+          return;
+        }
+      }
 
       const finalText =
         content + (attachedImageUrl ? `\n[Image: ${attachedImageUrl}]` : "");
@@ -329,6 +457,7 @@ export default function AgentsTerminalTool() {
       provider,
       appendLine,
       addSystemLine,
+      handleCommand,
     ],
   );
 
@@ -403,11 +532,6 @@ export default function AgentsTerminalTool() {
       l.message.toLowerCase().includes(logFilter.toLowerCase()) ||
       l.agent.toLowerCase().includes(logFilter.toLowerCase()),
   );
-
-  const providerConfig =
-    PROVIDERS.find((p) => p.id === provider) ?? PROVIDERS[0];
-  const providerLabel =
-    provider === "gemini" ? "Gemini 2.5 Flash" : providerConfig.label;
 
   const crtStyle = {
     background:
@@ -990,6 +1114,38 @@ export default function AgentsTerminalTool() {
         {rightTab === "info" ? (
           /* ── Agent Info ── */
           <div className="flex-1 overflow-y-auto p-3 space-y-4">
+            {/* System Status */}
+            <div
+              className="rounded-lg p-2.5 space-y-2"
+              style={{
+                background: "rgba(0,0,0,0.3)",
+                border: `1px solid ${T.borderColor}15`,
+              }}
+            >
+              <div className="flex items-center gap-2 mb-1">
+                <Activity size={11} style={{ color: T.accentColor }} />
+                <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: T.accentColor }}>
+                  System Status
+                </span>
+              </div>
+              <div className="flex justify-between text-[9px] font-mono">
+                <span style={{ color: T.textMuted }}><Wallet size={9} className="inline mr-1" />LBC</span>
+                <span style={{ color: T.accentColor }}>{balance}</span>
+              </div>
+              <div className="flex justify-between text-[9px] font-mono">
+                <span style={{ color: T.textMuted }}><Cpu size={9} className="inline mr-1" />Provider</span>
+                <span style={{ color: providerConfig.color }}>{providerConfig.label}</span>
+              </div>
+              <div className="flex justify-between text-[9px] font-mono">
+                <span style={{ color: T.textMuted }}><Zap size={9} className="inline mr-1" />Lines</span>
+                <span style={{ color: T.accentColor }}>{lines.length}</span>
+              </div>
+              <div className="flex justify-between text-[9px] font-mono">
+                <span style={{ color: T.textMuted }}>User</span>
+                <span style={{ color: T.textColor }}>{user?.username || user?.firstName || "guest"}</span>
+              </div>
+            </div>
+
             {/* Agent hero */}
             <div
               className="text-center py-2 rounded-lg"

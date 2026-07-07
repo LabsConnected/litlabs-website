@@ -11,8 +11,20 @@ export const AGENT_AVATAR_META: Record<string, AgentAvatarMeta> = {
   director: {
     emoji: "🎯",
     initials: "D",
-    color: "#00ffff",
-    bg: "rgba(0,255,255,0.12)",
+    color: "#22d3ee",
+    bg: "rgba(34,211,238,0.12)",
+  },
+  forge: {
+    emoji: "🔨",
+    initials: "F",
+    color: "#22d3ee",
+    bg: "rgba(34,211,238,0.12)",
+  },
+  pulse: {
+    emoji: "📈",
+    initials: "P",
+    color: "#f472b6",
+    bg: "rgba(244,114,182,0.12)",
   },
   champion: {
     emoji: "🏆",
@@ -79,6 +91,18 @@ export const AGENT_AVATAR_META: Record<string, AgentAvatarMeta> = {
     initials: "SG",
     color: "#ef4444",
     bg: "rgba(239,68,68,0.12)",
+  },
+  "security-chief": {
+    emoji: "🛡️",
+    initials: "SC",
+    color: "#ef4444",
+    bg: "rgba(239,68,68,0.12)",
+  },
+  "social-pilot": {
+    emoji: "🚀",
+    initials: "SP",
+    color: "#a855f7",
+    bg: "rgba(168,85,247,0.12)",
   },
   "ml-engineer": {
     emoji: "🧠",

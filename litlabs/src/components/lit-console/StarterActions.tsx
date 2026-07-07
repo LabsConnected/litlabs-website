@@ -1,6 +1,6 @@
 "use client";
 
-import { Rocket, Wrench, PenTool } from "lucide-react";
+import { Rocket, Wrench, PenTool, Code2, Image, Globe } from "lucide-react";
 import { LC } from "./lit-console-theme";
 
 interface StarterActionsProps {
@@ -8,52 +8,32 @@ interface StarterActionsProps {
 }
 
 const actions = [
-  {
-    label: "Build an app",
-    subtitle: "Create a new app from a prompt or template",
-    icon: Rocket,
-    color: LC.accentCyan,
-    hoverBorder: "hover:border-cyan-400",
-  },
-  {
-    label: "Fix my code",
-    subtitle: "Find bugs, refactor, and patch files",
-    icon: Wrench,
-    color: LC.accentOrange,
-    hoverBorder: "hover:border-orange-400",
-  },
-  {
-    label: "Create content",
-    subtitle: "Write docs, copy, posts, or scripts",
-    icon: PenTool,
-    color: LC.success,
-    hoverBorder: "hover:border-green-500",
-  },
+  { label: "Build an app", icon: Rocket, color: LC.accentCyan },
+  { label: "Fix my code", icon: Wrench, color: LC.accentOrange },
+  { label: "Write content", icon: PenTool, color: LC.success },
+  { label: "Generate image", icon: Image, color: "#e879f9" },
+  { label: "Create website", icon: Globe, color: "#f472b6" },
+  { label: "Review code", icon: Code2, color: "#a78bfa" },
 ];
 
 export default function StarterActions({ onSelect }: StarterActionsProps) {
   return (
-    <div className="grid grid-cols-1 gap-4 md:grid-cols-3">
+    <div className="flex flex-wrap items-center justify-center gap-2">
       {actions.map((a) => {
         const Icon = a.icon;
         return (
           <button
             key={a.label}
             onClick={() => onSelect(a.label)}
-            className={`group flex flex-col items-start gap-3 rounded-xl border p-5 text-left transition-all hover:-translate-y-0.5 ${a.hoverBorder}`}
-            style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+            className="flex items-center gap-2 rounded-full border px-4 py-2 text-sm font-medium transition-all hover:scale-[1.03]"
+            style={{
+              backgroundColor: LC.bgPanel,
+              borderColor: LC.border,
+              color: LC.text,
+            }}
           >
-            <div className="rounded-lg p-2" style={{ color: a.color, backgroundColor: `${a.color}15` }}>
-              <Icon size={22} />
-            </div>
-            <div>
-              <div className="text-sm font-semibold" style={{ color: LC.text }}>
-                {a.label}
-              </div>
-              <div className="mt-1 text-xs leading-relaxed" style={{ color: LC.textMuted }}>
-                {a.subtitle}
-              </div>
-            </div>
+            <Icon size={15} style={{ color: a.color }} />
+            {a.label}
           </button>
         );
       })}

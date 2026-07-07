@@ -7,6 +7,10 @@ const LitConsole = dynamic(
   { ssr: false },
 );
 
-export default function LitConsoleClient() {
-  return <div className="h-full flex flex-col"><LitConsole /></div>;
+export default function ChatTool() {
+  return (
+    <div className="h-full w-full">
+      <LitConsole />
+    </div>
+  );
 }

@@ -7,49 +7,61 @@ import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admi
 import type { TelemetryData } from "@/components/TelemetryPanel";
 import type { AdminEvent } from "@/components/EventStream";
 
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
+const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 function fallbackStats(): TelemetryData {
   return {
-    onlineUsers: 42,
-    totalUsers: 1337,
-    todaySignups: 9,
-    todaySales: 11,
-    todayRevenueLBC: 2450,
-    activeAgents: 6,
-    totalConversations: 4521,
+    onlineUsers: 0,
+    totalUsers: 0,
+    todaySignups: 0,
+    todaySales: 0,
+    todayRevenueLBC: 0,
+    activeAgents: 0,
+    totalConversations: 0,
     systemHealth: "healthy",
-    requestRate: 88,
-    responseTime: 245,
-    errorRate: 0.02,
+    requestRate: 0,
+    responseTime: 0,
+    errorRate: 0,
   };
 }
 
 async function fetchRealStats(): Promise<TelemetryData> {
   const sb = getAdminSupabase();
-  const [usersRes, postsRes, agentsRes, walletRes, logsRes, tasksRes] = await Promise.all([
+  const todayStart = new Date();
+  todayStart.setHours(0, 0, 0, 0);
+  const todayIso = todayStart.toISOString();
+
+  const [usersRes, todayUsersRes, agentsRes, activeTasksRes, walletRes, conversationsRes, logsRes, errorLogsRes, recentLogsRes] = await Promise.all([
     sb.from("users").select("id", { count: "exact", head: true }),
-    sb.from("posts").select("id", { count: "exact", head: true }),
+    sb.from("users").select("id", { count: "exact", head: true }).gte("created_at", todayIso),
     sb.from("agents").select("id", { count: "exact", head: true }),
+    sb.from("active_tasks").select("id", { count: "exact", head: true }).eq("status", "running"),
     sb.from("wallets").select("balance"),
-    sb.from("agent_logs").select("id", { count: "exact", head: true }),
-    sb.from("agent_tasks").select("id", { count: "exact", head: true }),
+    sb.from("conversations").select("id", { count: "exact", head: true }),
+    sb.from("agent_logs").select("id", { count: "exact", head: true }).gte("created_at", todayIso),
+    sb.from("agent_logs").select("id", { count: "exact", head: true }).eq("level", "error").gte("created_at", todayIso),
+    sb.from("agent_logs").select("id", { count: "exact", head: true }).gte("created_at", new Date(Date.now() - 60_000).toISOString()),
   ]);
 
   const totalCoins = walletRes.data?.reduce((sum, row) => sum + (row.balance || 0), 0) ?? 0;
+  const todayLogs = logsRes.count ?? 0;
+  const todayErrors = errorLogsRes.count ?? 0;
 
   return {
-    onlineUsers: Math.max(1, Math.min(999, (usersRes.count || 0) % 137)),
+    onlineUsers: 0,
     totalUsers: usersRes.count || 0,
-    todaySignups: Math.max(0, (postsRes.count || 0) % 31),
-    todaySales: Math.max(0, (walletRes.data?.length || 0) % 20),
+    todaySignups: todayUsersRes.count || 0,
+    todaySales: 0,
     todayRevenueLBC: totalCoins,
-    activeAgents: agentsRes.count || 0,
-    totalConversations: logsRes.count || 0,
-    systemHealth: tasksRes.count && tasksRes.count > 1000 ? "degraded" : "healthy",
-    requestRate: Math.max(12, Math.min(180, (logsRes.count || 0) % 180)),
-    responseTime: Math.max(120, 420 - ((agentsRes.count || 0) % 120)),
-    errorRate: tasksRes.count ? Math.min(0.15, (tasksRes.count % 12) / 200) : 0.02,
+    activeAgents: activeTasksRes.count ?? agentsRes.count ?? 0,
+    totalConversations: conversationsRes.count || 0,
+    systemHealth: todayErrors > 0 ? "degraded" : "healthy",
+    requestRate: recentLogsRes.count || 0,
+    responseTime: 0,
+    errorRate: todayLogs > 0 ? todayErrors / todayLogs : 0,
   };
 }
 
@@ -87,7 +99,7 @@ async function fetchRealEvents(): Promise<AdminEvent[]> {
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId || !ADMIN_IDS.includes(userId)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -120,15 +132,7 @@ export async function GET(req: NextRequest) {
 
       const eventsInterval = setInterval(async () => {
         if (closed) return clearInterval(eventsInterval);
-        if (!isAdminSupabaseConfigured()) {
-          const eventPool: AdminEvent[] = [
-            { id: crypto.randomUUID(), type: "sale", message: "User completed a purchase", timestamp: new Date().toISOString() },
-            { id: crypto.randomUUID(), type: "signup", message: "A new user joined", timestamp: new Date().toISOString() },
-            { id: crypto.randomUUID(), type: "chat", message: "An agent conversation started", timestamp: new Date().toISOString() },
-          ];
-          push({ type: "event", payload: eventPool[Math.floor(Math.random() * eventPool.length)] });
-          return;
-        }
+        if (!isAdminSupabaseConfigured()) return;
         const fresh = await fetchRealEvents().catch(() => []);
         if (fresh.length > 0) push({ type: "event", payload: fresh[0] });
       }, 7000);

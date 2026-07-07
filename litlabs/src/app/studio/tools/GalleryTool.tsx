@@ -25,7 +25,7 @@ function getYouTubeThumbnail(url: string): string | undefined {
       if (u.pathname.startsWith("/shorts/")) id = u.pathname.split("/")[2];
       else id = u.searchParams.get("v");
     }
-    return id ? `https://img.youtube.com/vi/${id}/hqdefault.jpg` : undefined;
+    return id ? `https://img.youtube.com/vi/${id}/maxresdefault.jpg` : undefined;
   } catch {
     return undefined;
   }
@@ -50,7 +50,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1515630278258-407f66498911?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1515630278258-407f66498911?w=1920&h=1440&fit=crop&q=90",
     likes: 234,
     createdAt: "2026-06-01",
   },
@@ -61,7 +61,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=1920&h=1440&fit=crop&q=90",
     likes: 189,
     createdAt: "2026-06-02",
   },
@@ -72,7 +72,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1920&h=1440&fit=crop&q=90",
     likes: 312,
     createdAt: "2026-05-28",
   },
@@ -83,7 +83,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=1920&h=1440&fit=crop&q=90",
     likes: 156,
     createdAt: "2026-06-03",
   },
@@ -94,7 +94,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1920&h=1440&fit=crop&q=90",
     likes: 278,
     createdAt: "2026-05-30",
   },
@@ -105,7 +105,7 @@ const DEMO_ITEMS: GalleryItem[] = [
     category: "image",
     source: "discover",
     imageUrl:
-      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1600&h=1200&fit=crop&q=80",
+      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1920&h=1440&fit=crop&q=90",
     likes: 421,
     createdAt: "2026-06-04",
   },
@@ -316,8 +316,9 @@ export default function GalleryTool() {
     const merged = [...myItems, ...apiItems, ...DEMO_ITEMS];
     const seen = new Set<string>();
     return merged.filter((item) => {
-      if (seen.has(item.id)) return false;
-      seen.add(item.id);
+      const key = `${item.title.trim().toLowerCase()}|${item.artist.trim().toLowerCase()}|${(item.imageUrl || item.videoUrl || "").toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
       return true;
     });
   }, [myItems, apiItems]);
@@ -591,7 +592,7 @@ export default function GalleryTool() {
                     <img
                       src={item.imageUrl}
                       alt={item.title}
-                      className="w-full h-full object-cover"
+                      className="w-full h-full object-cover transition-transform duration-500 hover:scale-110"
                       loading="lazy"
                     />
                   </>

@@ -6,7 +6,6 @@ import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
-import { GoogleTagManager } from "@next/third-parties/google";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -121,7 +120,6 @@ export default function RootLayout({
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <GoogleTagManager gtmId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#08080c" }}

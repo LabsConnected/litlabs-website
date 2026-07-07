@@ -16,9 +16,12 @@ import {
   Terminal,
   Network,
   Shell,
+  MessageSquare,
+  Code2,
 } from "lucide-react";
 
 export type StudioTool =
+  | "chat"
   | "image"
   | "video"
   | "audio"
@@ -29,7 +32,8 @@ export type StudioTool =
   | "space"
   | "clibridge"
   | "color"
-  | "canvas";
+  | "canvas"
+  | "builder";
 
 type ToolItem = {
   id: StudioTool;
@@ -47,11 +51,13 @@ const CREATE_TOOLS: ToolItem[] = [
 ];
 
 const AI_TOOLS: ToolItem[] = [
-  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "5" },
-  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "6" },
-  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "7" },
-  { id: "canvas",    label: "Canvas",    icon: Sparkles, shortcut: "9" },
-  { id: "clibridge", label: "CLI Bridge", icon: Shell,   shortcut: "0" },
+  { id: "chat",     label: "Chat",     icon: MessageSquare, shortcut: "5" },
+  { id: "builder",  label: "Builder",  icon: Code2,       shortcut: "6" },
+  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "7" },
+  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "8" },
+  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "9" },
+  { id: "canvas",    label: "Canvas",    icon: Sparkles, shortcut: "0" },
+  { id: "clibridge", label: "CLI Bridge", icon: Shell,   shortcut: "-" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
@@ -71,7 +77,7 @@ const ALL_TOOLS: ToolItem[] = [
 ];
 
 /* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = ["image", "color", "agents", "terminal", "gallery"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "builder", "image", "agents", "gallery"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
@@ -131,17 +137,17 @@ function ToolButton({
         />
       )}
       <Icon
-        size={collapsed ? 19 : 15}
+        size={collapsed ? 22 : 18}
         strokeWidth={active ? 2.5 : 1.8}
         className="shrink-0 transition-transform duration-200 group-hover:scale-110"
       />
       {!collapsed && (
         <>
-          <span className="flex-1 text-left text-[11px] font-bold tracking-wide">
+          <span className="flex-1 text-left text-[13px] font-bold tracking-wide">
             {tool.label}
           </span>
           <kbd
-            className="text-[9px] px-1 py-px rounded font-mono opacity-30"
+            className="text-[10px] px-1.5 py-0.5 rounded font-mono opacity-40"
             style={{ backgroundColor: T.bgColor + "60", color: T.textMuted }}
           >
             {tool.shortcut}
@@ -171,7 +177,7 @@ export default function StudioSidebar({
       <aside
         className="hidden md:flex flex-col h-full shrink-0 transition-all duration-300 ease-out"
         style={{
-          width: collapsed ? "60px" : "192px",
+          width: collapsed ? "64px" : "240px",
           backgroundColor: T.boxBg + "70",
           backdropFilter: "blur(20px) saturate(180%)",
           borderRight: `1px solid ${T.borderColor}18`,

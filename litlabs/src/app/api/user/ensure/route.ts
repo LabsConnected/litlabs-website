@@ -1,10 +1,11 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
-import { getOrCreateUser, getUserWallet } from "@/lib/user-db";
+import { getOrCreateUser, getUserWallet, type SignupAttributionInput } from "@/lib/user-db";
 
 export const dynamic = "force-dynamic";
 
-export async function POST() {
+export async function POST(req: NextRequest) {
   const { userId: clerkId } = await auth();
   if (!clerkId) {
     return NextResponse.json({ error: "Not authenticated" }, { status: 401 });
@@ -14,6 +15,7 @@ export async function POST() {
     // Fetch real Clerk user data
     let email = `${clerkId}@placeholder.local`;
     let name = "";
+    let clerkMetadata: Record<string, unknown> = {};
     try {
       const clerk = await clerkClient();
       const clerkUser = await clerk.users.getUser(clerkId);
@@ -21,13 +23,20 @@ export async function POST() {
       name =
         [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
         email.split("@")[0];
+      clerkMetadata = {
+        public: clerkUser.publicMetadata,
+        unsafe: clerkUser.unsafeMetadata,
+      };
     } catch {
       // Clerk API unavailable — proceed with placeholder
     }
 
     // getOrCreateUser uses admin client server-side (bypasses RLS)
     // and inserts wallet with 500 coins on first create
-    const { user, isNew } = await getOrCreateUser(clerkId, email, name);
+    const { user, isNew } = await getOrCreateUser(clerkId, email, name, {
+      ...parseAttributionHeader(req),
+      clerkMetadata,
+    });
 
     if (!user) {
       return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
@@ -44,6 +53,27 @@ export async function POST() {
     });
   } catch {
     return NextResponse.json({ error: "Server error" }, { status: 500 });
+  }
+}
+
+function parseAttributionHeader(req: NextRequest): SignupAttributionInput {
+  try {
+    const raw = req.headers.get("x-lit-signup-attribution");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as {
+      source?: string;
+      referrer?: string;
+      landingPath?: string;
+      utm?: Record<string, string>;
+    };
+    return {
+      source: parsed.source,
+      referrer: parsed.referrer,
+      landingPath: parsed.landingPath,
+      utm: parsed.utm,
+    };
+  } catch {
+    return {};
   }
 }
 

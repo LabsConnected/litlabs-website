@@ -23,7 +23,7 @@ const DEMO_STATS: Stats = {
 
 const STAT_CARDS = [
   { key: "activeNodes" as const, label: "Active Nodes", icon: Activity, color: LC.accentCyan },
-  { key: "agents" as const, label: "Agents", icon: Bot, color: LC.accentOrange },
+  { key: "agents" as const, label: "Agents", icon: Bot, color: LC.accentPurple },
   { key: "totalUsers" as const, label: "Users", icon: Users, color: LC.success },
   { key: "uptime" as const, label: "Uptime", icon: Clock, color: LC.accentCyan },
 ];

@@ -12,7 +12,7 @@ import {
   Play,
 } from "lucide-react";
 import StarterActions from "./StarterActions";
-import { LC, LC_SHADOW } from "./lit-console-theme";
+import { LC } from "./lit-console-theme";
 
 export interface Message {
   id: string;
@@ -205,47 +205,36 @@ export default function ChatPanel({
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden rounded-2xl border"
-      style={{
-        backgroundColor: LC.bgPanel,
-        borderColor: LC.border,
-        boxShadow: LC_SHADOW.panel,
-      }}
+      className="flex h-full w-full flex-col overflow-hidden"
+      style={{ backgroundColor: LC.bg }}
     >
-      <div
-        className="flex items-center gap-3 border-b px-5 py-4"
-        style={{ borderColor: LC.border }}
-      >
-        <div
-          className="flex h-8 w-8 items-center justify-center rounded-lg"
-          style={{ backgroundColor: LC.bgSecondary }}
-        >
-          <Terminal size={18} style={{ color: LC.accentCyan }} />
-        </div>
-        <div>
-          <h2 className="text-sm font-semibold" style={{ color: LC.text }}>
-            LiT Console
-          </h2>
-          <p className="text-xs" style={{ color: LC.textMuted }}>
-            Chat, terminal, agents, and project context in one workspace.
-          </p>
-        </div>
-      </div>
-
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-4 overflow-y-auto p-5"
+        className="flex-1 space-y-5 overflow-y-auto"
       >
+        <div className="mx-auto max-w-3xl px-4 py-6">
         {isEmpty ? (
-          <div className="flex h-full flex-col justify-center">
-            <StarterActions onSelect={onSend} />
-            <p
-              className="mt-4 text-center text-xs"
-              style={{ color: LC.textDim }}
+          <div className="flex h-full min-h-[60vh] flex-col items-center justify-center">
+            <div
+              className="mb-6 flex h-16 w-16 items-center justify-center rounded-2xl"
+              style={{
+                background: `linear-gradient(135deg, ${LC.accentCyan}30, ${LC.accentOrange}20)`,
+                border: `1px solid ${LC.border}`,
+              }}
             >
-              Or type a command, question, or build request.
+              <Terminal size={28} style={{ color: LC.accentCyan }} />
+            </div>
+            <h2
+              className="mb-2 text-2xl font-bold"
+              style={{ color: LC.text }}
+            >
+              What can I help you build?
+            </h2>
+            <p className="mb-8 text-sm" style={{ color: LC.textMuted }}>
+              Ask anything — code, deploy, generate, analyze.
             </p>
+            <StarterActions onSelect={onSend} />
           </div>
         ) : (
           messages.map((m) => (
@@ -519,6 +508,7 @@ export default function ChatPanel({
           </div>
         )}
         <div ref={bottomRef} />
+        </div>
       </div>
     </div>
   );

@@ -9,7 +9,7 @@ const QUICK_LINKS = [
   { href: "/studio?tool=agents", label: "Agent Chat", icon: Bot, desc: "Talk to any AI agent" },
   { href: "/studio?tool=image", label: "Imaging Lab", icon: ImageIcon, desc: "Generate images & art" },
   { href: "/studio?tool=audio", label: "Music Studio", icon: Music, desc: "Create AI music" },
-  { href: "/lit-console", label: "Terminal", icon: Terminal, desc: "Agent dev console" },
+  { href: "/studio?tool=chat", label: "Terminal", icon: Terminal, desc: "Agent dev console" },
   { href: "/marketplace", label: "Marketplace", icon: Wallet, desc: "Buy & sell agents" },
   { href: "/social", label: "Neural Social", icon: MessageSquare, desc: "Community feed" },
 ];

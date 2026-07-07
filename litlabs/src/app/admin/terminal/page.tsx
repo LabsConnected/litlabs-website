@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 // ─── Auth guard ────────────────────────────────────────────────────────────────
-const ADMIN_USER_ID = "user_litbit";
+// Admin check is now API-based via /api/usage/check
 
 // ─── Types ─────────────────────────────────────────────────────────────────────
 
@@ -131,8 +131,11 @@ function makeId() {
 
 export default function AdminTerminal() {
   const { resolvedColors: T } = useTheme();
-  const { userId, isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
+
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminChecked, setAdminChecked] = useState(false);
 
   const [output, setOutput] = useState<OutputLine[]>([
     {
@@ -162,10 +165,19 @@ export default function AdminTerminal() {
 
   // ── Auth guard ────────────────────────────────────────────────────────────
   useEffect(() => {
-    if (isLoaded && (!isSignedIn || userId !== ADMIN_USER_ID)) {
-      router.push("/");
-    }
-  }, [isLoaded, isSignedIn, userId, router]);
+    if (!isLoaded || !isSignedIn) return;
+    fetch("/api/usage/check")
+      .then((r) => r.json())
+      .then((data) => {
+        setIsAdmin(data?.role === "admin");
+        setAdminChecked(true);
+      })
+      .catch(() => setAdminChecked(true));
+  }, [isLoaded, isSignedIn]);
+
+  useEffect(() => {
+    if (adminChecked && (!isSignedIn || !isAdmin)) router.push("/");
+  }, [adminChecked, isSignedIn, isAdmin, router]);
 
   // ── Load command history from localStorage ────────────────────────────────
   useEffect(() => {
@@ -390,7 +402,7 @@ export default function AdminTerminal() {
     );
   }
 
-  if (!isSignedIn || userId !== ADMIN_USER_ID) {
+  if (!adminChecked || !isSignedIn || !isAdmin) {
     return (
       <div
         className="min-h-screen flex items-center justify-center"

@@ -48,14 +48,14 @@ export function LiTTreeFeaturedCard() {
 
       <div className="mt-5 flex flex-wrap gap-3">
         <Link
-          href="/littree"
+          href="/studio?tool=chat"
           className="flex items-center gap-2 rounded-xl bg-orange-600 px-5 py-3 font-bold text-white transition hover:bg-orange-500"
         >
           <Terminal className="h-4 w-4" />
           Open LiTTree Core
         </Link>
         <Link
-          href="/agents/littree"
+          href="/agents/director"
           className="flex items-center gap-2 rounded-xl border border-neutral-700 px-5 py-3 font-bold text-white transition hover:border-orange-500 hover:text-orange-400"
         >
           View LiTTree Profile

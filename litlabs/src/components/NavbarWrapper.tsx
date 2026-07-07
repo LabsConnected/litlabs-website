@@ -1,8 +1,9 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Menu, Bell, Search } from "lucide-react";
+import { Bell, Search, Settings, Home, Gamepad2, Store, Bot, Sparkles, User } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import Link from "next/link";
 import dynamic from "next/dynamic";
 
 const NavAuth = dynamic(
@@ -10,11 +11,12 @@ const NavAuth = dynamic(
   { ssr: false },
 );
 
-export default function NavbarWrapper({
-  onMenuClick,
-}: {
-  onMenuClick?: () => void;
-}) {
+const ClerkUserButton = dynamic(
+  () => import("@clerk/nextjs").then((m) => ({ default: m.UserButton })),
+  { ssr: false },
+);
+
+export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
   const [scrolled, setScrolled] = useState(false);
 
@@ -36,20 +38,45 @@ export default function NavbarWrapper({
       }}
     >
       <div className="flex items-center gap-3">
-        <button
-          onClick={onMenuClick}
-          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+        <Link
+          href="/dashboard"
+          className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
-          aria-label="Open navigation"
+          aria-label="Go home"
+          title="Dashboard"
         >
-          <Menu size={20} />
-        </button>
-        <span className="font-black text-sm" style={{ color: T.headerColor }}>
+          <Home size={20} />
+        </Link>
+        <Link href="/dashboard" className="font-black text-sm" style={{ color: T.headerColor }}>
           LiTTree OS
-        </span>
+        </Link>
       </div>
 
-      <div className="flex items-center gap-2">
+      {/* Desktop navigation links */}
+      <nav className="hidden lg:flex items-center gap-1">
+        {[
+          { href: "/studio", label: "Studio", icon: Sparkles },
+          { href: "/agents", label: "Agents", icon: Bot },
+          { href: "/marketplace", label: "Marketplace", icon: Store },
+          { href: "/games", label: "Games", icon: Gamepad2 },
+          { href: "/profile", label: "Profile", icon: User },
+        ].map((item) => {
+          const Icon = item.icon;
+          return (
+            <Link
+              key={item.href}
+              href={item.href}
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
+              style={{ color: T.textMuted }}
+            >
+              <Icon size={13} />
+              {item.label}
+            </Link>
+          );
+        })}
+      </nav>
+
+      <div className="flex items-center gap-1">
         <button
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
@@ -64,6 +91,26 @@ export default function NavbarWrapper({
         >
           <Bell size={18} />
         </button>
+        <Link
+          href="/settings"
+          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
+          style={{ color: T.textMuted }}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Settings size={18} />
+        </Link>
+        <div className="pl-1">
+          <ClerkUserButton
+            afterSignOutUrl="/"
+            appearance={{
+              elements: {
+                avatarBox: "w-7 h-7",
+                userButtonPopoverCard: { zIndex: 9999 },
+              },
+            }}
+          />
+        </div>
         <NavAuth linkColor={T.accentColor} />
       </div>
     </header>

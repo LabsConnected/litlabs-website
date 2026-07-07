@@ -1,0 +1,9 @@
+{
+  "experimentalServices": {
+    "terminal-server": {
+      "root": "litlabs/terminal-server",
+      "entrypoint": "server.ts",
+      "routePrefix": "/"
+    }
+  }
+}

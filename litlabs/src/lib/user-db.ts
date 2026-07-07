@@ -51,8 +51,26 @@ export type UserProfile = {
   bio: string | null;
   website: string | null;
   location: string | null;
+  mood: string | null;
+  interests: string[] | null;
+  social_links: Record<string, string> | null;
+  music_links: Record<string, string> | null;
+  signup_source: string | null;
+  signup_referrer: string | null;
+  signup_landing_path: string | null;
+  signup_utm: Record<string, string> | null;
+  clerk_metadata: Record<string, unknown> | null;
+  last_seen_at: string | null;
   created_at: string;
   updated_at: string;
+};
+
+export type SignupAttributionInput = {
+  source?: string | null;
+  referrer?: string | null;
+  landingPath?: string | null;
+  utm?: Record<string, string> | null;
+  clerkMetadata?: Record<string, unknown> | null;
 };
 
 export type UserPreferences = {
@@ -80,6 +98,7 @@ export async function getOrCreateUser(
   clerkId: string,
   email: string,
   name?: string | null,
+  attribution?: SignupAttributionInput,
 ) {
   const db = getDb();
   if (!db) {
@@ -92,7 +111,19 @@ export async function getOrCreateUser(
     .select("*")
     .eq("clerk_id", clerkId)
     .single();
-  if (existing) return { user: existing as UserProfile, isNew: false };
+  if (existing) {
+    const updates = userAttributionUpdates(attribution, false);
+    if (Object.keys(updates).length > 0) {
+      const { data: updated } = await db
+        .from("users")
+        .update(updates)
+        .eq("id", existing.id)
+        .select()
+        .single();
+      return { user: (updated ?? existing) as UserProfile, isNew: false };
+    }
+    return { user: existing as UserProfile, isNew: false };
+  }
 
   const { data: user, error: createError } = await db
     .from("users")
@@ -100,7 +131,10 @@ export async function getOrCreateUser(
       clerk_id: clerkId,
       email,
       name: name || email.split("@")[0],
+      display_name: name || email.split("@")[0],
       username: email.split("@")[0],
+      plan: "free",
+      ...userAttributionUpdates(attribution, true),
     })
     .select()
     .single();
@@ -114,6 +148,22 @@ export async function getOrCreateUser(
   await db.from("wallets").insert({ user_id: user.id, balance: 500 });
 
   return { user: user as UserProfile, isNew: true };
+}
+
+function userAttributionUpdates(attribution: SignupAttributionInput | undefined, isNew: boolean) {
+  const updates: Record<string, unknown> = {
+    last_seen_at: new Date().toISOString(),
+  };
+
+  if (!attribution) return updates;
+
+  if (isNew || attribution.source) updates.signup_source = attribution.source || "direct";
+  if (isNew || attribution.referrer) updates.signup_referrer = attribution.referrer || null;
+  if (isNew || attribution.landingPath) updates.signup_landing_path = attribution.landingPath || null;
+  if (isNew || attribution.utm) updates.signup_utm = attribution.utm || {};
+  if (attribution.clerkMetadata) updates.clerk_metadata = attribution.clerkMetadata;
+
+  return updates;
 }
 
 /** Get user profile by Clerk ID */

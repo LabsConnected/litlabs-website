@@ -9,6 +9,64 @@ import {
   getProvider,
   defaultProviderFor,
 } from "@/lib/media";
+import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
+
+/* ------------------------------------------------------------------ */
+/*  Supabase Storage helpers                                            */
+/* ------------------------------------------------------------------ */
+async function saveToSupabase(
+  userId: string,
+  result: MediaResult,
+  prompt: string,
+  providerId: string,
+): Promise<string | null> {
+  if (!isAdminSupabaseConfigured()) return null;
+  try {
+    const sb = getAdminSupabase();
+    const ext = result.format === "video" ? "mp4" : "png";
+    const path = `${userId}/${result.id}.${ext}`;
+
+    // Convert data URL or fetch external URL → Buffer
+    let buffer: Buffer;
+    let contentType: string;
+    if (result.downloadUrl.startsWith("data:")) {
+      const [header, b64] = result.downloadUrl.split(",");
+      contentType = header.split(":")[1].split(";")[0];
+      buffer = Buffer.from(b64, "base64");
+    } else {
+      const res = await fetch(result.downloadUrl);
+      if (!res.ok) return null;
+      contentType = res.headers.get("content-type") || "image/png";
+      buffer = Buffer.from(await res.arrayBuffer());
+    }
+
+    // Upload to storage
+    const { error: uploadErr } = await sb.storage
+      .from("studio-images")
+      .upload(path, buffer, { contentType, upsert: true });
+    if (uploadErr) return null;
+
+    const { data: urlData } = sb.storage
+      .from("studio-images")
+      .getPublicUrl(path);
+    const publicUrl = urlData?.publicUrl ?? null;
+
+    // Save metadata row
+    await sb.from("generated_images").insert({
+      user_id: userId,
+      storage_path: path,
+      public_url: publicUrl,
+      prompt: prompt.slice(0, 500),
+      provider: providerId,
+      format: result.format,
+      title: result.title,
+    });
+
+    return publicUrl;
+  } catch {
+    return null;
+  }
+}
 
 const HF_API_KEY = process.env.HUGGING_FACE_API_KEY;
 const HF_VIDEO_URL =
@@ -561,17 +619,21 @@ async function handler(req: NextRequest) {
     newBalance = currentWallet?.balance ?? null;
   }
 
+  // Persist to Supabase Storage (non-blocking — failure doesn't break generation)
+  const publicUrl = await saveToSupabase(userId, result, prompt, providerId);
+
   return NextResponse.json({
     success: true,
     providerId,
     format,
-    downloadUrl: result.downloadUrl,
+    downloadUrl: publicUrl ?? result.downloadUrl,
     thumbUrl: result.thumbUrl,
     title: result.title,
     id: result.id,
     cost,
     free: provider.free,
     balance: newBalance,
+    saved: !!publicUrl,
   });
 }
 

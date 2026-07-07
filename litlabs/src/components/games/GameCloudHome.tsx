@@ -4,7 +4,34 @@ import { useState, useMemo } from "react";
 import { GAME_LIBRARY, type Game } from "@/lib/games";
 import MobileGameNav from "./MobileGameNav";
 import { X, ExternalLink, Search, Star, Gamepad2, Zap, Trophy, Users, ChevronRight, Play } from "lucide-react";
-import Image from "next/image";
+
+const GAME_EMOJIS: Record<string, string> = {
+  "pong": "🏓", "2048": "🔢", "hextris": "🔷", "tetris": "🟦", "pac-man": "🕹",
+  "snake": "🐍", "minesweeper": "💣", "chess": "♟", "doom": "🔥", "asteroids": "🚀",
+  "breakout": "🧱", "space-invaders": "👾", "connect-4": "🔴", "frogger": "🐸",
+  "chrome-dino": "🦖", "wordle": "📝", "geometry-dash": "⚡", "cut-the-rope": "🍬",
+  "sudoku": "🔢", "1010": "🟩", "type-racer": "⌨️", "type-fast": "⌨️",
+};
+
+const CATEGORY_GRADIENTS: Record<string, string> = {
+  arcade: "linear-gradient(135deg, #1a0a2e 0%, #2d1b4e 50%, #0d0d1e 100%)",
+  puzzle: "linear-gradient(135deg, #0d1a2e 0%, #1b3a5e 50%, #0d0d1e 100%)",
+  retro: "linear-gradient(135deg, #2e1a0a 0%, #5e3b1b 50%, #1e0d0d 100%)",
+  action: "linear-gradient(135deg, #2e0a0a 0%, #5e1b1b 50%, #1e0d0d 100%)",
+  classic: "linear-gradient(135deg, #0a2e1a 0%, #1b5e3b 50%, #0d1e0d 100%)",
+  multiplayer: "linear-gradient(135deg, #1a0a2e 0%, #4e1b5e 50%, #0d0d1e 100%)",
+};
+
+function GameCover({ game, size }: { game: Game; size: "hero" | "tile" | "thumb" }) {
+  const emoji = GAME_EMOJIS[game.id] ?? "🎮";
+  const gradient = CATEGORY_GRADIENTS[game.category] ?? "linear-gradient(135deg, #1a0a2e, #0d0d1e)";
+  const fontSize = size === "hero" ? "5rem" : size === "tile" ? "2.5rem" : "1.2rem";
+  return (
+    <div className="absolute inset-0 flex items-center justify-center" style={{ background: gradient }}>
+      <span style={{ fontSize, filter: "drop-shadow(0 4px 8px rgba(0,0,0,0.4))" }}>{emoji}</span>
+    </div>
+  );
+}
 
 const CATEGORIES = [
   { key: "all", label: "🎮 All" },
@@ -22,7 +49,7 @@ const SPOTLIGHT = GAME_LIBRARY.filter((g) => g.featured).slice(0, 5);
 
 export default function GameCloudHome() {
   const [searchQuery, setSearchQuery] = useState("");
-  const [activeCategory, setActiveCategory] = useState("all");
+  const [activeCategory, setActiveCategory] = useState("retro");
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [heroIdx, setHeroIdx] = useState(0);
   const heroGame = SPOTLIGHT[heroIdx] ?? HERO_GAME;
@@ -39,6 +66,9 @@ export default function GameCloudHome() {
       );
     } else if (activeCategory === "featured") {
       list = list.filter((g) => g.featured);
+    } else if (activeCategory === "retro") {
+      // Retro Arcade shows the full library since every game is a browser classic
+      list = GAME_LIBRARY;
     } else if (activeCategory !== "all") {
       list = list.filter((g) => g.category === activeCategory || g.tags.includes(activeCategory));
     }
@@ -60,7 +90,7 @@ export default function GameCloudHome() {
           {/* Left: text */}
           <div className="flex-1 space-y-4">
             <div className="inline-flex items-center gap-2 rounded-full px-3 py-1 text-[11px] font-black uppercase tracking-widest" style={{ backgroundColor: "#ff6b0020", border: "1px solid #ff6b0040", color: "#ff6b00" }}>
-              <Zap size={10} className="fill-current" /> LiTTree Game Cloud
+              <Zap size={10} className="fill-current" /> Retro Arcade
             </div>
             <h1 className="text-4xl md:text-6xl font-black tracking-tight leading-none text-white">
               Play.<br /><span style={{ color: "#ff6b00" }}>Instantly.</span>
@@ -103,15 +133,8 @@ export default function GameCloudHome() {
           </div>
 
           {/* Right: hero game art */}
-          <div className="relative shrink-0 w-full md:w-[380px] h-[220px] md:h-[280px] rounded-2xl overflow-hidden border border-white/10" style={{ boxShadow: "0 0 60px rgba(255,107,0,0.2)" }}>
-            <Image
-              src={heroGame.coverUrl}
-              alt={heroGame.title}
-              fill
-              className="object-cover"
-              unoptimized
-              sizes="380px"
-            />
+          <div className="relative shrink-0 w-full md:w-[380px] h-[220px] md:h-[280px] rounded-2xl overflow-hidden border border-white/10" style={{ boxShadow: "0 0 60px rgba(255,107,0,0.2)", background: "linear-gradient(135deg, #1a0a2e 0%, #0d1a0d 100%)" }}>
+            <GameCover game={heroGame} size="hero" />
             <div className="absolute inset-0" style={{ background: "linear-gradient(to top, rgba(0,0,0,0.8) 0%, transparent 60%)" }} />
             <div className="absolute bottom-4 left-4 right-4">
               <div className="text-xs font-black uppercase tracking-widest text-orange-400 mb-1">{heroGame.category}</div>
@@ -257,8 +280,8 @@ export default function GameCloudHome() {
             {/* Header */}
             <div className="flex items-center justify-between px-5 py-3.5 border-b border-white/10 shrink-0">
               <div className="flex items-center gap-3">
-                <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0">
-                  <Image src={selectedGame.coverUrl} alt={selectedGame.title} fill className="object-cover" unoptimized sizes="40px" />
+                <div className="relative w-10 h-10 rounded-lg overflow-hidden shrink-0" style={{ background: "linear-gradient(135deg, #1a0a2e, #0d1a0d)" }}>
+                  <GameCover game={selectedGame} size="thumb" />
                 </div>
                 <div>
                   <h2 className="font-black text-sm text-white">{selectedGame.title}</h2>
@@ -368,15 +391,8 @@ function GameTile({ game, onPlay }: { game: Game; onPlay: (g: Game) => void }) {
       onClick={() => onPlay(game)}
     >
       {/* Cover art */}
-      <div className="relative aspect-[4/3] bg-[#0f0f1e]">
-        <Image
-          src={game.coverUrl}
-          alt={game.title}
-          fill
-          className="object-cover transition-transform duration-300 group-hover:scale-105"
-          unoptimized
-          sizes="(max-width: 640px) 50vw, (max-width: 1024px) 33vw, 200px"
-        />
+      <div className="relative aspect-4/3 bg-[#0f0f1e]" style={{ background: "linear-gradient(135deg, #1a0a2e 0%, #0d0d1e 100%)" }}>
+        <GameCover game={game} size="tile" />
         {/* Play overlay */}
         <div
           className="absolute inset-0 flex items-center justify-center transition-opacity duration-200"

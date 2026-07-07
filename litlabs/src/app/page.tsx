@@ -47,18 +47,18 @@ const MUTED = "#64748b";
 
 // ─── OS modules ───────────────────────────────────────────────────────────────
 const OS_MODULES = [
-  { icon: MessageSquareText, label: "Chat",        sub: "Always-on AI",       color: CYAN,    href: "/lit-console" },
+  { icon: MessageSquareText, label: "Chat",        sub: "Always-on AI",       color: CYAN,    href: "/studio?tool=chat" },
   { icon: Sparkles,          label: "Studio",      sub: "Create anything",    color: "#e879f9", href: "/studio" },
   { icon: Bot,               label: "Agents",      sub: "Your AI crew",       color: GREEN,   href: "/agents" },
   { icon: Gamepad2,          label: "Arcade",      sub: "25+ free games",     color: "#fb923c", href: "/games/cloud" },
   { icon: ShoppingBag,       label: "Marketplace", sub: "Buy & sell agents",  color: "#f472b6", href: "/marketplace" },
-  { icon: Code2,             label: "Terminal",    sub: "Real dev terminal",  color: "#4ade80", href: "/lit-console" },
+  { icon: Code2,             label: "Terminal",    sub: "Real dev terminal",  color: "#4ade80", href: "/studio?tool=chat" },
   { icon: Music,             label: "Music",       sub: "AI music studio",    color: "#a78bfa", href: "/studio" },
   { icon: Image,             label: "Gallery",     sub: "All your assets",    color: "#fbbf24", href: "/gallery" },
   { icon: Activity,          label: "Social",      sub: "Creator community",  color: "#f87171", href: "/social" },
-  { icon: Brain,             label: "Memory",      sub: "LiT remembers you",  color: "#34d399", href: "/lit-console" },
+  { icon: Brain,             label: "Memory",      sub: "LiT remembers you",  color: "#34d399", href: "/studio?tool=chat" },
   { icon: BarChart3,         label: "Analytics",   sub: "Track everything",   color: "#60a5fa", href: "/dashboard" },
-  { icon: Terminal,          label: "Console",     sub: "Mission control",    color: CYAN,    href: "/lit-console" },
+  { icon: Terminal,          label: "Console",     sub: "Mission control",    color: CYAN,    href: "/studio?tool=chat" },
 ];
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
@@ -102,7 +102,7 @@ const TIERS = [
     desc: "For builders shipping real work with AI every day.",
     features: [
       "5,000 credits / month",
-      "All 10 specialist agents",
+      "All 5 core agents",
       "Workflow Studio (Flow)",
       "Terminal access",
       "Marketplace buying",
@@ -218,7 +218,7 @@ function LandingPage() {
 
           {/* Stats row */}
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10 text-center">
-            {[["10+","Specialist Agents"],["25+","Free Games"],["∞","AI Conversations"],["500","Starter Credits"]].map(([v,l]) => (
+            {[["5","Core AI Agents"],["25+","Free Games"],["∞","AI Conversations"],["500","Starter Credits"]].map(([v,l]) => (
               <div key={l}>
                 <div className="text-2xl font-black" style={{ color: TEXT }}>{v}</div>
                 <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: MUTED }}>{l}</div>
@@ -260,7 +260,7 @@ function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Your AI Workforce</h2>
-            <p className="text-sm" style={{ color: MUTED }}>10 specialized agents, each with a real job and a distinct personality.</p>
+            <p className="text-sm" style={{ color: MUTED }}>5 core agents — each with a real job and a distinct personality.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {AGENTS.map((a) => (
@@ -286,7 +286,7 @@ function LandingPage() {
           </div>
           <div className="text-center mt-8">
             <Link href="/agents" className="inline-flex items-center gap-2 text-xs font-bold transition-all hover:opacity-100 opacity-60" style={{ color: CYAN }}>
-              View All 10 Agents <ChevronRight size={13} />
+              Meet the Agent Team <ChevronRight size={13} />
             </Link>
           </div>
         </div>
@@ -452,7 +452,7 @@ function LandingPage() {
             </div>
             <div className="space-y-2">
               <div className="font-black text-[10px] uppercase tracking-widest mb-3" style={{ color: TEXT }}>Resources</div>
-              {[["Docs","/docs"],["Flow","/flow"],["Social","/social"],["Console","/lit-console"]].map(([l,h]) => (
+              {[["Docs","/docs"],["Flow","/flow"],["Social","/social"],["Console","/studio?tool=chat"]].map(([l,h]) => (
                 <Link key={l} href={h} className="block hover:text-white transition-colors">{l}</Link>
               ))}
             </div>
@@ -481,7 +481,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (supabaseSignedIn || clerkSignedIn) {
-      router.replace("/lit-console");
+      router.replace("/studio?tool=chat");
     }
   }, [supabaseSignedIn, clerkSignedIn, router]);
 

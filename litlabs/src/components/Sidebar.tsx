@@ -315,10 +315,10 @@ function SidebarContent({
     },
   );
   const [pinned, setPinned] = useState<string[]>(() =>
-    loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]),
+    loadJson(PINNED_KEY, ["Home", "Agents", "Marketplace"]),
   );
   const [hidden, setHidden] = useState<string[]>(() =>
-    loadJson(HIDDEN_KEY, []),
+    loadJson(HIDDEN_KEY, ["Social", "Gaming", "Creator", "Library"]),
   );
   const [mode, setMode] = useState<string>(() => {
     if (typeof window === "undefined") return "creator";
@@ -526,7 +526,13 @@ function SidebarContent({
                 </div>
                 <span
                   className="px-1.5 py-0.5 rounded-md text-[8px] font-black uppercase tracking-wider shrink-0"
-                  style={{ backgroundColor: `#22d3ee18`, color: "#22d3ee" }}
+                  style={
+                    plan === "elite"
+                      ? { backgroundColor: "#fbbf2418", color: "#fbbf24" }
+                      : plan === "creator"
+                        ? { backgroundColor: "#22d3ee18", color: "#22d3ee" }
+                        : { backgroundColor: "#6b728018", color: "#9ca3af" }
+                  }
                 >
                   {plan === "elite" ? "Elite" : plan === "creator" ? "Creator" : "Free"}
                 </span>

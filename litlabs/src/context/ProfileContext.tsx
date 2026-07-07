@@ -112,6 +112,10 @@ function profileToApi(p: UserProfile) {
     location: p.location,
     website: p.website,
     avatar_url: p.avatarUrl,
+    mood: p.mood,
+    interests: p.interests,
+    social_links: p.socialLinks,
+    music_links: p.musicLinks,
   };
 }
 
@@ -153,6 +157,10 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
             location: api.location ?? prev.location,
             website: api.website ?? prev.website,
             avatarUrl: api.avatar_url ?? prev.avatarUrl,
+            mood: api.mood ?? prev.mood,
+            interests: api.interests ?? prev.interests,
+            socialLinks: api.social_links ?? prev.socialLinks,
+            musicLinks: api.music_links ?? prev.musicLinks,
           }));
         }
       })

@@ -5,8 +5,16 @@
 import { spawn, ChildProcess } from "child_process";
 import { auth } from "@clerk/nextjs/server";
 
-// Admin user ID - only this user can use CLI bridge
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "";
+// Admin user IDs - only these users can use CLI bridge
+const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || process.env.ADMIN_CLERK_ID || process.env.ADMIN_USER_ID || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
+
+function isAdmin(userId: string | null | undefined): boolean {
+  if (!userId || ADMIN_IDS.length === 0) return false;
+  return ADMIN_IDS.includes(userId);
+}
 
 // Active sessions storage
 const activeSessions = new Map<
@@ -32,7 +40,7 @@ interface BridgeMessage {
 export async function GET(req: Request) {
   const { userId } = await auth();
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isAdmin(userId)) {
     return new Response("Unauthorized", { status: 401 });
   }
 
@@ -209,7 +217,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   const { userId } = await auth();
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isAdmin(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -250,7 +258,7 @@ export async function POST(req: Request) {
 export async function DELETE(req: Request) {
   const { userId } = await auth();
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isAdmin(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -274,12 +282,12 @@ export async function DELETE(req: Request) {
 export async function PATCH() {
   const { userId } = await auth();
 
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!isAdmin(userId)) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   const sessions = Array.from(activeSessions.entries())
-    .filter(([id]) => id.startsWith(userId))
+    .filter(([id]) => id.startsWith(userId || ""))
     .map(([id, session]) => ({
       sessionId: id,
       toolName: session.toolName,

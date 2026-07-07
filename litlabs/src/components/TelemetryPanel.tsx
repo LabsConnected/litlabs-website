@@ -19,17 +19,17 @@ export type TelemetryData = {
 };
 
 const DEFAULT_DATA: TelemetryData = {
-  onlineUsers: 42,
-  totalUsers: 1337,
-  todaySignups: 9,
-  todaySales: 11,
-  todayRevenueLBC: 2450,
-  activeAgents: 6,
-  totalConversations: 4521,
+  onlineUsers: 0,
+  totalUsers: 0,
+  todaySignups: 0,
+  todaySales: 0,
+  todayRevenueLBC: 0,
+  activeAgents: 0,
+  totalConversations: 0,
   systemHealth: "healthy",
-  requestRate: 88,
-  responseTime: 245,
-  errorRate: 0.02,
+  requestRate: 0,
+  responseTime: 0,
+  errorRate: 0,
 };
 
 export default function TelemetryPanel({
@@ -100,7 +100,7 @@ export default function TelemetryPanel({
           <span className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Performance</span>
           <span className="text-[10px] font-mono" style={{ color: T.accentColor }}>{data.responseTime}ms avg</span>
         </div>
-        <Bar label="Response Time" value={Math.min(100, (500 / data.responseTime) * 100)} color={data.responseTime < 300 ? "#22c55e" : data.responseTime < 500 ? "#f59e0b" : "#ef4444"} />
+        <Bar label="Response Time" value={data.responseTime > 0 ? Math.min(100, (500 / data.responseTime) * 100) : 0} color={data.responseTime === 0 || data.responseTime < 300 ? "#22c55e" : data.responseTime < 500 ? "#f59e0b" : "#ef4444"} />
         <Bar label="Error Rate" value={Math.min(100, data.errorRate * 100)} color={data.errorRate < 0.05 ? "#22c55e" : "#ef4444"} />
       </div>
 
@@ -111,7 +111,7 @@ export default function TelemetryPanel({
         </div>
         <div className="mt-3 flex items-center gap-2">
           <Database size={14} style={{ color: "#22c55e" }} />
-          <span className="text-sm" style={{ color: T.textColor }}>Connected and receiving rows</span>
+          <span className="text-sm" style={{ color: T.textColor }}>{connected ? "Connected to live data" : "Waiting for live data"}</span>
         </div>
         <div className="mt-3 text-xs" style={{ color: T.textMuted }}>
           {data.totalUsers.toLocaleString()} users · {data.totalConversations.toLocaleString()} conversations
@@ -123,8 +123,8 @@ export default function TelemetryPanel({
           <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Uptime</div>
           <Clock size={14} style={{ color: T.accentColor }} />
         </div>
-        <div className="mt-3 text-3xl font-black" style={{ color: T.textColor }}>99.9%</div>
-        <div className="mt-2 text-xs" style={{ color: T.textMuted }}>Stable over the last 24 hours</div>
+        <div className="mt-3 text-3xl font-black" style={{ color: T.textColor }}>{connected ? "Live" : "Idle"}</div>
+        <div className="mt-2 text-xs" style={{ color: T.textMuted }}>{connected ? "Database stream is connected" : "No uptime probe configured"}</div>
         <div className="mt-3 h-2 rounded-full overflow-hidden" style={{ backgroundColor: T.borderColor + "24" }}>
           <div className="h-full rounded-full" style={{ width: `${90 + (pulse % 8)}%`, background: `linear-gradient(90deg, ${T.accentColor}, ${statusColor})` }} />
         </div>

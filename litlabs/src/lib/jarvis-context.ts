@@ -4,7 +4,8 @@ export type LiTActionType =
   | "create_file"
   | "edit_file"
   | "start_agent"
-  | "deploy";
+  | "deploy"
+  | "navigate";
 
 export type LiTAction = {
   type: LiTActionType;
@@ -13,6 +14,7 @@ export type LiTAction = {
   filePath?: string;
   content?: string;
   agentName?: string;
+  url?: string;
 };
 
 export type LiTAgentStatus = "online" | "idle" | "running" | "error";
@@ -39,12 +41,16 @@ export type LiTThinkResponse = {
   actions?: LiTAction[];
 };
 
-export function buildLitPrompt(message: string, context: LiTContext): string {
+export function buildLitPrompt(message: string, context: LiTContext, fileCount?: number): string {
+  const treePreview = context.fileTree.slice(0, 20);
+  const treeSummary = treePreview.length > 0
+    ? `${treePreview.join("\n")}${(fileCount || context.fileTree.length) > 20 ? `\n... (${fileCount || context.fileTree.length} total files)` : ""}`
+    : "No files loaded";
+
   return `
 You are LiT inside LiTTree OS.
 
-You are not a normal chatbot.
-You are an AI developer command center with access to the live project files below.
+You are an AI developer command center with access to the live project.
 
 User request:
 ${message}
@@ -59,42 +65,58 @@ ${context.terminalOutput || "No terminal output"}
 Command history:
 ${context.commandHistory.join("\n") || "No commands yet"}
 
-Logs:
-${context.logs.join("\n") || "No logs"}
-
 Selected file:
 ${context.selectedFile?.path || "None"}
 
-Selected file content:
-${context.selectedFile?.content || "None"}
-
-File tree:
-${context.fileTree.join("\n") || "No files loaded"}
+Project file tree (summary — ${fileCount || context.fileTree.length} files total):
+${treeSummary}
 
 Agents:
 ${context.agents.map((a) => `${a.name}: ${a.status}`).join("\n")}
 
-Rules:
-- Be direct.
-- Diagnose the issue using the project context above.
-- Give prioritized fixes.
-- Return useful commands.
-- Do not ask vague questions unless truly required.
-- For dangerous commands, require approval.
-- Prefer markdown formatting with code blocks.
+Instructions:
+- Be direct and concise (2-5 sentences).
+- When the user asks about the project, summarize what you see — don't dump file listings.
+- Only suggest bash commands when the user explicitly asks to build, deploy, fix, or run something.
+- For navigation, media generation, or general questions → answer conversationally. No code blocks.
+- NEVER put file trees or directory listings in code blocks.
+- Use markdown formatting for readability.
 `;
 }
 
 export function parseLitActions(answer: string): LiTAction[] {
   const actions: LiTAction[] = [];
 
-  // Extract bash commands from the first code block and offer to insert/run
-  const codeBlockMatch = answer.match(/```(?:bash|sh|shell)?\n([\s\S]*?)```/);
-  if (codeBlockMatch) {
-    const command = codeBlockMatch[1].trim();
-    if (command) {
-      actions.push({ type: "insert_command", label: "Insert into terminal", command });
-      actions.push({ type: "run_command", label: "Run command", command });
+  // Extract bash commands from code blocks and offer to insert/run
+  // But only if the content looks like an actual shell command, not a file tree
+  const codeBlockMatches = answer.matchAll(/```(?:bash|sh|shell)?\n([\s\S]*?)```/g);
+  for (const match of codeBlockMatches) {
+    const command = match[1].trim();
+    if (!command) continue;
+
+    // Skip if it looks like a file tree/listing, not a command
+    const lines = command.split("\n");
+    const looksLikeFileTree = lines.length > 5 &&
+      lines.every(l => l.trim().match(/^[\w\-./\\]+\/?$/) || l.trim() === "");
+    if (looksLikeFileTree) continue;
+
+    // Skip if it contains backslash-separated paths (Windows file tree)
+    if (lines.length > 3 && command.includes("\\") && !command.includes("#")) continue;
+
+    actions.push({ type: "insert_command", label: "Insert into terminal", command });
+    actions.push({ type: "run_command", label: "Run command", command });
+  }
+
+  // Extract navigation actions from links like [text](/path) or [text](https://litlabs.net/path)
+  const linkMatches = answer.matchAll(/\[([^\]]+)]\((\/(?:[^)\s]+|https?:\/\/litlabs\.net\/[^)\s]+))\)/g);
+  for (const match of linkMatches) {
+    const label = match[1];
+    let url = match[2];
+    if (url.startsWith("https://litlabs.net")) {
+      url = url.replace("https://litlabs.net", "");
+    }
+    if (url.startsWith("/") && !url.startsWith("//")) {
+      actions.push({ type: "navigate", label: `Go to ${label}`, url });
     }
   }
 

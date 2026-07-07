@@ -99,6 +99,185 @@ export default function CanvasTool() {
     return { cleanText, files };
   }, []);
 
+  const fallbackResponse = useCallback((text: string): { response: string; files: GeneratedFile[] } => {
+    const lower = text.toLowerCase();
+    const files: GeneratedFile[] = [];
+    let response = "I generated a fallback starter for you. Add your AI API key to get full custom code.\n\n";
+
+    let html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Generated App</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; padding: 24px; }
+    .container { max-width: 960px; margin: 0 auto; }
+    h1 { color: #38bdf8; margin-bottom: 16px; }
+    .card { background: #141414; border: 1px solid #222; border-radius: 12px; padding: 20px; margin: 12px 0; }
+    button { background: #38bdf8; color: #000; border: none; padding: 10px 18px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    button:hover { opacity: 0.9; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>Generated App</h1>
+    <div class="card">
+      <p>This is a fallback starter generated while the AI model is unavailable.</p>
+      <p>Prompt: ${text.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</p>
+      <button onclick="alert('Hello from LiTTree Canvas!')">Try me</button>
+    </div>
+  </div>
+</body>
+</html>`;
+
+    if (lower.includes("dashboard")) {
+      html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Dashboard</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    .sidebar { width: 240px; height: 100vh; background: #111; border-right: 1px solid #222; padding: 20px; position: fixed; }
+    .sidebar h2 { color: #38bdf8; margin-bottom: 24px; }
+    .sidebar a { display: block; color: #94a3b8; text-decoration: none; padding: 10px 0; }
+    .main { margin-left: 240px; padding: 24px; }
+    .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; margin-bottom: 24px; }
+    .stat { background: #141414; border: 1px solid #222; border-radius: 12px; padding: 20px; }
+    .stat h3 { font-size: 12px; color: #94a3b8; text-transform: uppercase; }
+    .stat p { font-size: 28px; font-weight: 800; color: #38bdf8; margin-top: 8px; }
+    .chart { background: #141414; border: 1px solid #222; border-radius: 12px; padding: 20px; height: 240px; display: flex; align-items: center; justify-content: center; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="sidebar">
+    <h2>LiTTree</h2>
+    <a href="#">Dashboard</a>
+    <a href="#">Analytics</a>
+    <a href="#">Projects</a>
+    <a href="#">Settings</a>
+  </div>
+  <div class="main">
+    <h1 style="margin-bottom: 20px;">Dashboard</h1>
+    <div class="stats">
+      <div class="stat"><h3>Users</h3><p>1,248</p></div>
+      <div class="stat"><h3>Revenue</h3><p>$12.4k</p></div>
+      <div class="stat"><h3>Tasks</h3><p>86</p></div>
+      <div class="stat"><h3>Uptime</h3><p>99.9%</p></div>
+    </div>
+    <div class="chart">Chart placeholder</div>
+  </div>
+</body>
+</html>`;
+      response = "Generated a fallback dashboard starter. Add your AI API key to get fully custom code.\n\n";
+    } else if (lower.includes("landing page") || lower.includes("landing")) {
+      html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Landing Page</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; }
+    header { display: flex; justify-content: space-between; align-items: center; padding: 20px 40px; border-bottom: 1px solid #222; }
+    .logo { font-weight: 800; color: #38bdf8; }
+    nav a { color: #94a3b8; margin-left: 24px; text-decoration: none; }
+    .hero { text-align: center; padding: 100px 20px; }
+    .hero h1 { font-size: 48px; margin-bottom: 16px; }
+    .hero p { color: #94a3b8; max-width: 500px; margin: 0 auto 28px; }
+    .cta { background: #38bdf8; color: #000; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; }
+    .features { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 20px; padding: 60px 40px; max-width: 1000px; margin: 0 auto; }
+    .feature { background: #141414; border: 1px solid #222; border-radius: 12px; padding: 24px; }
+  </style>
+</head>
+<body>
+  <header><div class="logo">LiTTree</div><nav><a href="#">Features</a><a href="#">Pricing</a><a href="#">About</a></nav></header>
+  <section class="hero">
+    <h1>Build faster.</h1>
+    <p>Create, deploy, and ship your ideas with AI-powered tools.</p>
+    <a href="#" class="cta">Get started</a>
+  </section>
+  <section class="features">
+    <div class="feature"><h3>Fast</h3><p>Ship in minutes, not weeks.</p></div>
+    <div class="feature"><h3>Smart</h3><p>AI handles the heavy lifting.</p></div>
+    <div class="feature"><h3>Free</h3><p>Start without a credit card.</p></div>
+  </section>
+</body>
+</html>`;
+      response = "Generated a fallback landing page starter. Add your AI API key to get fully custom code.\n\n";
+    } else if (lower.includes("todo")) {
+      html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Todo App</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .app { width: 360px; background: #141414; border: 1px solid #222; border-radius: 16px; padding: 24px; }
+    h1 { color: #38bdf8; margin-bottom: 16px; }
+    .input-row { display: flex; gap: 8px; margin-bottom: 16px; }
+    input { flex: 1; background: #0a0a0a; border: 1px solid #222; color: #fff; padding: 10px; border-radius: 8px; }
+    button { background: #38bdf8; color: #000; border: none; padding: 10px 16px; border-radius: 8px; cursor: pointer; font-weight: bold; }
+    ul { list-style: none; }
+    li { display: flex; justify-content: space-between; align-items: center; padding: 10px; border-bottom: 1px solid #222; }
+    li.done span { text-decoration: line-through; color: #475569; }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <h1>Todo</h1>
+    <div class="input-row"><input id="task" placeholder="Add a task" /><button onclick="add()">Add</button></div>
+    <ul id="list"></ul>
+  </div>
+  <script>
+    const list = document.getElementById('list');
+    const input = document.getElementById('task');
+    function add() { if (!input.value.trim()) return; const li = document.createElement('li'); li.innerHTML = '<span onclick="this.parentElement.classList.toggle(\'done\')">' + input.value + '</span><button onclick="this.parentElement.remove()">x</button>'; list.appendChild(li); input.value = ''; }
+    input.addEventListener('keypress', (e) => { if (e.key === 'Enter') add(); });
+  </script>
+</body>
+</html>`;
+      response = "Generated a fallback todo app starter. Add your AI API key to get fully custom code.\n\n";
+    } else if (lower.includes("counter")) {
+      html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Counter</title>
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0a0a; color: #e0e0e0; display: flex; justify-content: center; align-items: center; min-height: 100vh; }
+    .card { background: #141414; border: 1px solid #222; border-radius: 16px; padding: 40px; text-align: center; }
+    h1 { color: #38bdf8; margin-bottom: 16px; }
+    #count { font-size: 48px; font-weight: 800; margin: 16px 0; }
+    button { background: #38bdf8; color: #000; border: none; padding: 12px 20px; border-radius: 8px; margin: 0 6px; cursor: pointer; font-weight: bold; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Counter</h1>
+    <div id="count">0</div>
+    <button onclick="setCount(-1)">-</button>
+    <button onclick="setCount(0)">Reset</button>
+    <button onclick="setCount(1)">+</button>
+  </div>
+  <script>let c = 0; function setCount(n) { c = n === 0 ? 0 : c + n; document.getElementById('count').textContent = c; }</script>
+</body>
+</html>`;
+      response = "Generated a fallback counter starter. Add your AI API key to get fully custom code.\n\n";
+    }
+
+    files.push({ name: "index.html", content: html, language: "html" });
+    return { response, files };
+  }, []);
+
   const sendMessage = useCallback(async (text: string) => {
     if (!text.trim() || isLoading) return;
     setInput("");
@@ -117,33 +296,24 @@ export default function CanvasTool() {
         ? `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}`
         : "";
 
-      const res = await fetch("/api/ai-chat", {
+      const res = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          model,
-          messages: [
-            ...messages.slice(-10).map((m) => ({
-              role: m.role === "user" ? "user" : "assistant",
-              content: m.content,
-            })),
-            {
-              role: "user",
-              content: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${memoryContext}\n\nUser request: ${text}`,
-            },
-          ],
+          agentSlug: "forge",
+          message: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${memoryContext}\n\nUser request: ${text}`,
+          stream: false,
         }),
       });
 
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Request failed");
 
-      // Handle streaming or JSON response
       let responseText = "";
-      if (data.text) {
-        responseText = data.text;
-      } else if (data.response) {
+      if (data.response) {
         responseText = data.response;
+      } else if (data.text) {
+        responseText = data.text;
       } else if (typeof data === "string") {
         responseText = data;
       } else {
@@ -169,19 +339,24 @@ export default function CanvasTool() {
         setPreviewMode("code");
       }
     } catch (err) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: crypto.randomUUID(),
-          role: "system",
-          content: `Error: ${err instanceof Error ? err.message : "Failed to get response"}`,
-          ts: new Date().toLocaleTimeString(),
-        },
-      ]);
+      // Fallback: generate a local starter template so the tool never errors
+      const { response, files } = fallbackResponse(text);
+      const assistantMsg: Message = {
+        id: crypto.randomUUID(),
+        role: "assistant",
+        content: response + "[📄 index.html]",
+        code: files[0]?.content,
+        language: "html",
+        ts: new Date().toLocaleTimeString(),
+      };
+      setMessages((prev) => [...prev, assistantMsg]);
+      setGeneratedFiles(files);
+      setActiveFile(files[0]?.name || "");
+      setPreviewMode("code");
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, messages, extractCode, model, memories]);
+  }, [isLoading, messages, extractCode, model, memories, fallbackResponse]);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

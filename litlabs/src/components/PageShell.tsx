@@ -2,11 +2,14 @@
 
 import { ReactNode } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import Link from "next/link";
+import { ArrowLeft } from "lucide-react";
 
 interface PageShellProps {
   title?: string;
   subtitle?: string;
   icon?: ReactNode;
+  backHref?: string;
   className?: string;
   children: ReactNode;
 }
@@ -15,6 +18,7 @@ export default function PageShell({
   title,
   subtitle,
   icon,
+  backHref,
   className = "",
   children,
 }: PageShellProps) {
@@ -31,6 +35,17 @@ export default function PageShell({
           style={{ borderColor: T.borderColor + "20" }}
         >
           <div className="max-w-7xl mx-auto flex items-center gap-3">
+            {backHref && (
+              <Link
+                href={backHref}
+                className="flex items-center justify-center w-9 h-9 rounded-lg border transition-colors hover:bg-white/5"
+                style={{ borderColor: T.borderColor + "30", color: T.textMuted }}
+                aria-label="Go back"
+                title="Back"
+              >
+                <ArrowLeft size={18} />
+              </Link>
+            )}
             {icon && (
               <span
                 className="text-2xl flex items-center"

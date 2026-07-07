@@ -29,7 +29,7 @@ interface TopBarProps {
 
 const navLinks = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
-  { href: "/lit-console", label: "Console", icon: Terminal },
+  { href: "/studio?tool=chat", label: "Console", icon: Terminal },
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/gallery", label: "Gallery", icon: Image },

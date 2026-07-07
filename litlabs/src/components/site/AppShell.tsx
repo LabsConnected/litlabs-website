@@ -1,11 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
 import { usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { Menu } from "lucide-react";
+import Link from "next/link";
+import { Bell, Home, Settings, User } from "lucide-react";
 import NavbarWrapper from "@/components/NavbarWrapper";
-import Sidebar from "@/components/Sidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
@@ -13,52 +12,86 @@ import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const { resolvedColors: T } = useTheme();
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const isConsole = pathname === "/lit-console";
-
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileSidebarOpen(false);
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-        e.preventDefault();
-        if (window.innerWidth < 1024) setMobileSidebarOpen((v) => !v);
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  const PUBLIC_ROUTES = ["/", "/sign-in", "/sign-up", "/login", "/privacy", "/terms", "/cookies"];
+  const isPublic = PUBLIC_ROUTES.some((r) => pathname === r || pathname?.startsWith(r + "/"));
+  const isStudio = !isPublic && pathname?.startsWith("/studio");
+  const isAdmin = !isPublic && pathname?.startsWith("/admin");
+  const isConsole = isStudio || isAdmin;
+  const hideMobileBottomNav = isPublic || isConsole;
 
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className={`relative z-10 flex ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
-        <Sidebar
-          open={mobileSidebarOpen}
-          onClose={() => setMobileSidebarOpen(false)}
-        />
-        <div className={`flex-1 flex flex-col ${isConsole ? "h-screen overflow-hidden" : "min-h-screen"}`}>
-          {!isConsole && (
-            <button
-              onClick={() => setMobileSidebarOpen(true)}
-              className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-lg backdrop-blur-md border"
+      <div className={`relative z-10 flex ${isConsole ? "h-[100dvh] overflow-hidden md:h-screen" : "min-h-screen"}`}>
+        <div className={`min-w-0 flex-1 flex flex-col ${isConsole ? "h-[100dvh] overflow-hidden md:h-screen" : "min-h-screen"}`}>
+          {isConsole && pathname?.startsWith("/admin") && (
+            <header
+              className="md:hidden flex h-[52px] shrink-0 items-center justify-between border-b px-3"
               style={{
-                backgroundColor: `${T.bgColor}e0`,
+                backgroundColor: `${T.bgColor}f2`,
                 borderColor: `${T.borderColor}30`,
-                color: T.textMuted,
+                color: T.textColor,
               }}
-              aria-label="Open navigation"
             >
-              <Menu size={20} />
-            </button>
+              <Link
+                href="/admin"
+                className="flex h-10 w-10 items-center justify-center rounded-lg border"
+                style={{
+                  backgroundColor: `${T.boxBg}cc`,
+                  borderColor: `${T.borderColor}35`,
+                  color: T.accentColor,
+                }}
+                aria-label="Admin home"
+              >
+                <Home size={21} />
+              </Link>
+              <Link href={pathname?.startsWith("/admin") ? "/admin" : "/studio"} className="min-w-0 text-center">
+                <div className="truncate text-sm font-black tracking-tight">
+                  {pathname?.startsWith("/admin") ? "Admin" : "Studio"}
+                </div>
+                <div
+                  className="text-[9px] font-black uppercase tracking-[0.18em]"
+                  style={{ color: T.textMuted }}
+                >
+                  Online
+                </div>
+              </Link>
+              <div className="flex items-center gap-1">
+                <Link
+                  href="/social?tab=notifications"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg"
+                  style={{ color: T.textMuted }}
+                  aria-label="Notifications"
+                >
+                  <Bell size={18} />
+                </Link>
+                <Link
+                  href="/settings"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg"
+                  style={{ color: T.textMuted }}
+                  aria-label="Settings"
+                >
+                  <Settings size={18} />
+                </Link>
+                <Link
+                  href="/profile"
+                  className="flex h-10 w-10 items-center justify-center rounded-lg"
+                  style={{ color: T.textMuted }}
+                  aria-label="Profile"
+                >
+                  <User size={18} />
+                </Link>
+              </div>
+            </header>
           )}
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          {!isConsole && (
+          {!isConsole && !isPublic && (
             <NavbarWrapper />
           )}
-          <main className={isConsole ? "h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
+          <main className={isConsole ? "h-0 min-h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
             {children}
           </main>
-          <MobileBottomNav />
+          {!hideMobileBottomNav && <MobileBottomNav />}
         </div>
       </div>
     </>

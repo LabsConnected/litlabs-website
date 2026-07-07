@@ -1,21 +1,23 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { LayoutDashboard, Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
+import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock from "./CommandDock";
-import ConsoleDashboard from "./ConsoleDashboard";
 import DrawerPanel from "./DrawerPanel";
 import {
   LiTTreeTerminal,
   LiTTreeTerminalHandle,
 } from "@/components/terminal/LiTTreeTerminal";
-import { LC, LC_SHADOW } from "./lit-console-theme";
+import { LC } from "./lit-console-theme";
 import type { LiTContext } from "@/lib/jarvis-context";
+import type { LiTTipResult } from "@/lib/lit-tip";
+import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 
 const initialContext: LiTContext = {
-  route: "/lit-console",
+  route: "/studio?tool=chat",
   terminalOutput: "",
   commandHistory: [],
   logs: [],
@@ -28,14 +30,18 @@ type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory";
 type ConsoleView = "dashboard" | "chat";
 
 export default function LitConsole() {
+  const { user } = useUser();
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("terminal");
-  const [view, setView] = useState<ConsoleView>("dashboard");
+  const [view, setView] = useState<ConsoleView>("chat");
+  const [mobileAgentDrawer, setMobileAgentDrawer] = useState(false);
   const [activeAgent, setActiveAgent] = useState("director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
+  const [litTip, setLitTip] = useState<LiTTipResult | null>(null);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingRun, setPendingRun] = useState<{
     runId: string | null;
@@ -51,6 +57,28 @@ export default function LitConsole() {
     };
   } | null>(null);
   const termRef = useRef<LiTTreeTerminalHandle>(null);
+
+  // Debounced LiT-Tip scan as the user types
+  useEffect(() => {
+    const t = input.trim();
+    if (!t) {
+      setLitTip(null);
+      return;
+    }
+    const timer = setTimeout(() => {
+      fetch("/api/lit-tip/scan", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: t, agent: activeAgent, model: activeModel }),
+      })
+        .then((r) => r.json())
+        .then((data) => {
+          if (data.ok) setLitTip(data.result);
+        })
+        .catch(() => {});
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [input, activeAgent, activeModel]);
 
   const askLiT = useCallback(async (text: string) => {
     const toolId = Math.random().toString(36).slice(2);
@@ -71,6 +99,10 @@ export default function LitConsole() {
         body: JSON.stringify({
           message: text,
           context: initialContext,
+          userContext: {
+            username: user?.username || user?.firstName || undefined,
+            plan: (user as unknown as { publicMetadata?: { plan?: string } })?.publicMetadata?.plan || undefined,
+          },
         }),
       });
       const data = await res.json();
@@ -105,9 +137,18 @@ export default function LitConsole() {
           {
             id: Math.random().toString(36).slice(2),
             role: "system",
-            content: `Approve command: \`${runAction.command}\``,
+            content: `Command ready: \`${runAction.command}\``,
           },
         ]);
+      }
+
+      // Auto-navigate if the AI returned a navigate action
+      const navAction = data.actions?.find(
+        (a: { type: string; url?: string }) =>
+          a.type === "navigate" && a.url,
+      );
+      if (navAction?.url) {
+        setTimeout(() => router.push(navAction.url!), 600);
       }
     } catch (err) {
       setMessages((prev) =>
@@ -141,9 +182,41 @@ export default function LitConsole() {
       ]);
       setInput("");
       setLoading(true);
+
+      // Intent detection — auto-navigate if clear
+      const intent = detectIntent(t);
+      if (intent.route && !intent.isAmbiguous) {
+        const navMsg = buildNavigationMessage(intent);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            role: "lit",
+            content: navMsg,
+          },
+        ]);
+        setTimeout(() => router.push(intent.route!.path), 800);
+        setLoading(false);
+        return;
+      }
+
+      if (intent.isAmbiguous && intent.suggestions.length > 0) {
+        const navMsg = buildNavigationMessage(intent);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: Math.random().toString(36).slice(2),
+            role: "lit",
+            content: navMsg,
+          },
+        ]);
+        setLoading(false);
+        return;
+      }
+
       askLiT(t);
     },
-    [input, loading, askLiT],
+    [input, loading, askLiT, router],
   );
 
   const handleRun = useCallback(
@@ -277,70 +350,75 @@ export default function LitConsole() {
 
   return (
     <div className="flex h-full w-full flex-col" style={{ backgroundColor: LC.bg }}>
-      {/* Main content area */}
+      {/* Main content area — chat only, dashboard accessible via drawer */}
       <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {view === "chat" && (
-          <button
-            onClick={() => setView("dashboard")}
-            className="absolute right-4 top-4 z-20 flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-bold"
-            style={{
-              backgroundColor: LC.bgPanel,
-              borderColor: LC.border,
-              color: LC.accentCyan,
-              boxShadow: LC_SHADOW.glowCyan,
+        {/* Desktop: chat only */}
+        <div className="hidden md:flex flex-1 min-h-0 flex-col overflow-hidden">
+          <ChatPanel
+            messages={messages}
+            onSend={(text) => {
+              if (text === "/run") return handleRun();
+              handleSend(text);
             }}
-          >
-            <LayoutDashboard size={14} />
-            Dashboard
-          </button>
-        )}
-
-        {view === "dashboard" ? (
-          <ConsoleDashboard
-            activeAgent={activeAgent}
-            activeModel={activeModel}
-            onPrompt={(prompt) => handleSend(prompt)}
-            onRunPrompt={(prompt) => handleRun(prompt)}
-            onOpenChat={() => setView("chat")}
-            onOpenTerminal={() => {
-              setDrawerTab("terminal");
-              setDrawerOpen(true);
+            loading={loading}
+            plan={
+              pendingRun
+                ? {
+                    runId: pendingRun.runId,
+                    steps: pendingRun.plan.steps.map((s) => ({
+                      id: s.id,
+                      title: s.title,
+                      command: s.command ?? null,
+                      needs_approval: s.needs_approval,
+                      risk_level: s.risk_level,
+                    })),
+                  }
+                : undefined
+            }
+            onApprove={(cmd) => approveCommand(cmd)}
+            onApproveStep={async (_runId, command) => approveCommand(command)}
+            onApprovePlan={() => {
+              if (!pendingRun?.plan?.steps?.length) return;
+              const first = pendingRun.plan.steps[0];
+              if (first.command) approveCommand(first.command);
+              setPendingRun(null);
             }}
           />
-        ) : (
-          <div className="flex-1 overflow-hidden">
-            <ChatPanel
-              messages={messages}
-              onSend={(text) => {
-                if (text === "/run") return handleRun();
-                handleSend(text);
-              }}
-              loading={loading}
-              plan={
-                pendingRun
-                  ? {
-                      runId: pendingRun.runId,
-                      steps: pendingRun.plan.steps.map((s) => ({
-                        id: s.id,
-                        title: s.title,
-                        command: s.command ?? null,
-                        needs_approval: s.needs_approval,
-                        risk_level: s.risk_level,
-                      })),
-                    }
-                  : undefined
-              }
-              onApprove={(cmd) => approveCommand(cmd)}
-              onApproveStep={async (_runId, command) => approveCommand(command)}
-              onApprovePlan={() => {
-                if (!pendingRun?.plan?.steps?.length) return;
-                const first = pendingRun.plan.steps[0];
-                if (first.command) approveCommand(first.command);
-                setPendingRun(null);
-              }}
-            />
-          </div>
-        )}
+        </div>
+
+        {/* Mobile: always chat-first */}
+        <div className="md:hidden flex-1 min-h-0 overflow-hidden">
+          <ChatPanel
+            messages={messages}
+            onSend={(text) => {
+              if (text === "/run") return handleRun();
+              handleSend(text);
+            }}
+            loading={loading}
+            plan={
+              pendingRun
+                ? {
+                    runId: pendingRun.runId,
+                    steps: pendingRun.plan.steps.map((s) => ({
+                      id: s.id,
+                      title: s.title,
+                      command: s.command ?? null,
+                      needs_approval: s.needs_approval,
+                      risk_level: s.risk_level,
+                    })),
+                  }
+                : undefined
+            }
+            onApprove={(cmd) => approveCommand(cmd)}
+            onApproveStep={async (_runId, command) => approveCommand(command)}
+            onApprovePlan={() => {
+              if (!pendingRun?.plan?.steps?.length) return;
+              const first = pendingRun.plan.steps[0];
+              if (first.command) approveCommand(first.command);
+              setPendingRun(null);
+            }}
+          />
+        </div>
       </div>
 
       {/* Command dock always at bottom */}
@@ -349,6 +427,7 @@ export default function LitConsole() {
         onChange={setInput}
         onSend={() => handleSend()}
         onRun={!loading ? handleRun : undefined}
+        litTip={litTip}
         agent={activeAgent}
         model={activeModel}
         onAgentChange={handleAgentChange}
@@ -361,9 +440,9 @@ export default function LitConsole() {
         }}
         onCreateFile={() => handleSend("Create a new file")}
         onBuild={() => handleSend("Build the project")}
-        onGenerateMedia={() => handleSend("Generate media")}
-        onDeploy={() => handleSend("Deploy to production")}
-        onSaveWorkflow={() => handleSend("Save this workflow")}
+        onGenerateMedia={() => handleSend("Generate an image")}
+        onDeploy={() => handleSend("Run: npx vercel --prod to deploy the current project")}
+        onSaveWorkflow={() => handleSend("Save this workflow as a reusable automation")}
       />
 
       {/* Pending command approval toast */}

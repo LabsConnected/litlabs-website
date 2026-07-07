@@ -43,7 +43,7 @@ async function getHandler(req: NextRequest) {
 
     if (postIds.length > 0) {
       const { data: comments } = await sb
-        .from("comments")
+        .from("post_comments")
         .select(
           `
           id,

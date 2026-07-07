@@ -3,7 +3,7 @@
 import { usePathname } from "next/navigation";
 import Footer from "@/components/Footer";
 
-const HIDE_PATHS = ["/dashboard", "/lit-console"];
+const HIDE_PATHS = ["/dashboard", "/studio", "/admin"];
 
 export default function FooterWrapper() {
   const pathname = usePathname();

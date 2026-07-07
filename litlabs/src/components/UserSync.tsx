@@ -2,6 +2,7 @@
 
 import { useEffect } from "react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { getSignupAttribution } from "@/components/SignupAttributionTracker";
 
 // Make this component resilient when Clerk isn't configured or the hook errors
 
@@ -21,7 +22,12 @@ export default function UserSync() {
       return; // hook threw, bail out
     }
 
-    fetch("/api/account", { method: "GET" })
+    const attribution = getSignupAttribution();
+    const headers: HeadersInit = attribution
+      ? { "x-lit-signup-attribution": JSON.stringify(attribution) }
+      : {};
+
+    fetch("/api/account", { method: "GET", headers })
       .then(async (res) => {
         const data = res.ok ? await res.json().catch(() => null) : null;
         if (data?.isNew) {
@@ -29,12 +35,12 @@ export default function UserSync() {
         }
         // If account sync failed or returned not-synced, fire ensure as backup
         if (!res.ok || !data?.synced) {
-          fetch("/api/user/ensure", { method: "POST" }).catch(() => {});
+          fetch("/api/user/ensure", { method: "POST", headers }).catch(() => {});
         }
       })
       .catch(() => {
         // Primary failed — try ensure as fallback
-        fetch("/api/user/ensure", { method: "POST" }).catch(() => {});
+        fetch("/api/user/ensure", { method: "POST", headers }).catch(() => {});
       });
   }, [isSignedIn, userId]);
 

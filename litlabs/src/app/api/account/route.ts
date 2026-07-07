@@ -1,14 +1,15 @@
 import { NextResponse } from "next/server";
+import type { NextRequest } from "next/server";
 import { auth, clerkClient } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { getOrCreateUser } from "@/lib/user-db";
+import { getOrCreateUser, type SignupAttributionInput } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 /**
  * GET /api/account
  * Ensures the user exists in our database. Called on every page load via UserSync.
  */
-async function getHandler() {
+async function getHandler(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth();
     if (!clerkId) {
@@ -18,6 +19,7 @@ async function getHandler() {
     // Fetch real user info from Clerk so we don't insert blank email/name
     let email = `${clerkId}@placeholder.local`;
     let name = "";
+    let clerkMetadata: Record<string, unknown> = {};
     try {
       const clerk = await clerkClient();
       const clerkUser = await clerk.users.getUser(clerkId);
@@ -25,11 +27,18 @@ async function getHandler() {
       name =
         [clerkUser.firstName, clerkUser.lastName].filter(Boolean).join(" ") ||
         email.split("@")[0];
+      clerkMetadata = {
+        public: clerkUser.publicMetadata,
+        unsafe: clerkUser.unsafeMetadata,
+      };
     } catch {
       // Clerk API unavailable — proceed with placeholder so sync still runs
     }
 
-    const result = await getOrCreateUser(clerkId, email, name);
+    const result = await getOrCreateUser(clerkId, email, name, {
+      ...parseAttributionHeader(req),
+      clerkMetadata,
+    });
 
     return NextResponse.json({
       synced: true,
@@ -96,3 +105,24 @@ async function deleteHandler() {
 
 export const GET = withRateLimit(getHandler, 100, 60);
 export const DELETE = withRateLimit(deleteHandler, 10, 60);
+
+function parseAttributionHeader(req: NextRequest): SignupAttributionInput {
+  try {
+    const raw = req.headers.get("x-lit-signup-attribution");
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as {
+      source?: string;
+      referrer?: string;
+      landingPath?: string;
+      utm?: Record<string, string>;
+    };
+    return {
+      source: parsed.source,
+      referrer: parsed.referrer,
+      landingPath: parsed.landingPath,
+      utm: parsed.utm,
+    };
+  } catch {
+    return {};
+  }
+}

@@ -62,21 +62,34 @@ async function postHandler(req: NextRequest) {
     }
 
     const body = await req.json();
-    const { agentId } = body;
+    const { agentId, slug } = body;
 
-    if (!agentId) {
-      return NextResponse.json({ error: "Missing agentId" }, { status: 400 });
+    if (!agentId && !slug) {
+      return NextResponse.json({ error: "Missing agentId or slug" }, { status: 400 });
     }
 
-    // Check if agent exists and is public
-    const { data: agent, error: agentError } = await supabaseAdmin
-      .from("agents")
-      .select("*")
-      .eq("id", agentId)
-      .eq("is_public", true)
-      .single();
+    // Try lookup by ID first, then by slug
+    let agent = null;
+    if (agentId) {
+      const { data, error } = await supabaseAdmin
+        .from("agents")
+        .select("*")
+        .eq("id", agentId)
+        .eq("is_public", true)
+        .single();
+      if (!error && data) agent = data;
+    }
+    if (!agent && slug) {
+      const { data, error } = await supabaseAdmin
+        .from("agents")
+        .select("*")
+        .eq("slug", slug)
+        .eq("is_public", true)
+        .single();
+      if (!error && data) agent = data;
+    }
 
-    if (agentError || !agent) {
+    if (!agent) {
       return NextResponse.json(
         { error: "Agent not found or not available" },
         { status: 404 },
@@ -88,7 +101,7 @@ async function postHandler(req: NextRequest) {
       .from("user_agents")
       .select("*")
       .eq("user_id", dbUserId)
-      .eq("agent_id", agentId)
+      .eq("agent_id", agent.id)
       .single();
 
     if (existing) {
@@ -103,7 +116,7 @@ async function postHandler(req: NextRequest) {
       .from("user_agents")
       .insert({
         user_id: dbUserId,
-        agent_id: agentId,
+        agent_id: agent.id,
         is_active: true,
       })
       .select("*, agent:agent_id (*)")

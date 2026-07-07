@@ -55,7 +55,7 @@ export default function StudioInspector({
       className={
         isSheet
           ? "flex flex-col w-full max-h-[80vh]"
-          : "hidden xl:flex flex-col w-[300px] shrink-0 border-l h-full"
+          : "hidden lg:flex flex-col w-[340px] shrink-0 border-l h-full"
       }
       style={
         isSheet
@@ -69,13 +69,13 @@ export default function StudioInspector({
     >
       {/* Header */}
       <div
-        className="flex items-center justify-between gap-2 px-3 h-11 shrink-0"
+        className="flex items-center justify-between gap-2 px-4 h-12 shrink-0"
         style={{ borderBottom: `1px solid ${T.borderColor}18` }}
       >
         <div className="flex items-center gap-2 min-w-0">
-          <Settings2 size={13} style={{ color: T.accentColor }} />
+          <Settings2 size={15} style={{ color: T.accentColor }} />
           <span
-            className="text-[11px] font-black uppercase tracking-[0.18em] truncate"
+            className="text-xs font-black uppercase tracking-[0.18em] truncate"
             style={{ color: T.headerColor }}
           >
             Inspector
@@ -105,7 +105,7 @@ export default function StudioInspector({
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="flex-1 flex items-center justify-center gap-1.5 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+              className="flex-1 flex items-center justify-center gap-1.5 py-3 text-xs font-bold uppercase tracking-wider transition-all"
               style={{
                 color: active ? T.accentColor : T.textMuted,
                 backgroundColor: active ? T.accentColor + "12" : "transparent",
@@ -114,7 +114,7 @@ export default function StudioInspector({
                   : "2px solid transparent",
               }}
             >
-              <Icon size={11} />
+              <Icon size={13} />
               <span className="hidden md:inline">{t.label}</span>
             </button>
           );
@@ -122,7 +122,7 @@ export default function StudioInspector({
       </div>
 
       {/* Tab content */}
-      <div className="flex-1 overflow-y-auto p-3 space-y-3">
+      <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {tab === "health" && <HealthTab T={T} />}
         {tab === "credits" && <CreditsTab T={T} />}
         {tab === "logs" && <LogsTab T={T} />}

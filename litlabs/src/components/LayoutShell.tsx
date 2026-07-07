@@ -5,6 +5,10 @@ import CreateFAB from "@/components/CreateFAB";
 import FooterWrapper from "@/components/FooterWrapper";
 import CookieConsent from "@/components/CookieConsent";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import SignupAttributionTracker from "@/components/SignupAttributionTracker";
+import LiTDock from "@/components/lit-dock/LiTDock";
+import GlobalLiTAssistant from "@/components/GlobalLiTAssistant";
+import { LiTAssistantProvider } from "@/context/LiTAssistantContext";
 
 export default function LayoutShell({
   children,
@@ -12,12 +16,17 @@ export default function LayoutShell({
   children: React.ReactNode;
 }) {
   return (
-    <AppShell>
-      {children}
-      <CreateFAB />
-      <FooterWrapper />
-      <CookieConsent />
-      <ServiceWorkerRegistration />
-    </AppShell>
+    <LiTAssistantProvider>
+      <AppShell>
+        <SignupAttributionTracker />
+        {children}
+        <CreateFAB />
+        <FooterWrapper />
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+        <LiTDock />
+        <GlobalLiTAssistant />
+      </AppShell>
+    </LiTAssistantProvider>
   );
 }

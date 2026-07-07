@@ -20,8 +20,8 @@ import {
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "LiTTree Core", icon: Terminal, href: "/littree" },
-  { label: "Files", icon: FolderOpen, href: "/littree?tab=files" },
+  { label: "LiTTree Core", icon: Terminal, href: "/studio?tool=chat" },
+  { label: "Files", icon: FolderOpen, href: "/studio" },
   { label: "Agents", icon: Bot, href: "/agents" },
   { label: "Deployments", icon: Rocket, href: "/deployments" },
   { label: "API Keys", icon: Key, href: "/settings?tab=cli" },

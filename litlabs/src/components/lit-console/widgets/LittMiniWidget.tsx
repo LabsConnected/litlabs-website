@@ -67,7 +67,7 @@ export function LittMiniWidget() {
       accent="#a3f546"
       action={
         <Link
-          href="/litt"
+          href="/studio?tool=chat"
           className="text-[10px] font-bold uppercase tracking-wider transition hover:opacity-70"
           style={{ color: "#a3f546" }}
         >

@@ -114,10 +114,10 @@ export default function StudioModeSwitcher({
  */
 export function defaultToolForMode(
   mode: StudioMode,
-): "image" | "agents" | "pipeline" | "gallery" {
+): "chat" | "image" | "agents" | "pipeline" | "gallery" {
   switch (mode) {
     case "command":
-      return "image";
+      return "chat";
     case "media":
       return "image";
     case "research":

@@ -204,38 +204,38 @@ export default function VideoTool() {
   };
 
   return (
-    <div className="p-4 space-y-4 w-full">
+    <div className="p-2 sm:p-4 space-y-4 w-full max-w-6xl mx-auto">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Film size={14} style={{ color: T.accentColor }} />
+          <Film size={18} style={{ color: T.accentColor }} />
           <span
-            className="text-xs font-bold uppercase tracking-widest"
+            className="text-sm font-bold uppercase tracking-widest"
             style={{ color: T.textMuted }}
           >
             Video Generator
           </span>
         </div>
         <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded text-[10px] font-bold border"
+          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold border"
           style={{
             borderColor: T.borderColor,
             color: T.accentColor,
             backgroundColor: T.boxBg,
           }}
         >
-          <Sparkles size={10} /> {coinBalance ?? "—"} LiTBit
+          <Sparkles size={12} /> {coinBalance ?? "—"} LiTBit
         </div>
       </div>
 
-      <div className="grid lg:grid-cols-5 gap-4">
+      <div className="grid lg:grid-cols-5 gap-5">
         {/* LEFT: Controls */}
-        <div className="lg:col-span-2 space-y-3">
+        <div className="lg:col-span-2 space-y-4">
           <div
-            className="border rounded-lg p-3"
+            className="border rounded-xl p-4"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
+              className="block text-xs uppercase tracking-widest mb-2"
               style={{ color: T.textMuted }}
             >
               Scene Description
@@ -249,9 +249,9 @@ export default function VideoTool() {
               aria-label="Video scene description"
               title="Video scene description"
               placeholder="A dramatic sunset over a cyberpunk city..."
-              rows={4}
+              rows={5}
               disabled={isGenerating}
-              className="w-full px-3 py-2 text-sm rounded outline-none resize-none disabled:opacity-50"
+              className="w-full px-3 py-2.5 text-sm rounded-lg outline-none resize-none disabled:opacity-50"
               style={{
                 backgroundColor: T.bgColor,
                 border: `1px solid ${T.borderColor}`,
@@ -259,7 +259,7 @@ export default function VideoTool() {
               }}
             />
             <div
-              className="text-right text-[10px] mt-1"
+              className="text-right text-xs mt-1.5"
               style={{ color: T.textMuted }}
             >
               {prompt.length} chars
@@ -267,22 +267,22 @@ export default function VideoTool() {
           </div>
 
           <div
-            className="border rounded-lg p-3"
+            className="border rounded-xl p-4"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <label
-              className="block text-[10px] uppercase tracking-widest mb-2"
+              className="block text-xs uppercase tracking-widest mb-2.5"
               style={{ color: T.textMuted }}
             >
               Model
             </label>
-            <div className="space-y-1.5">
+            <div className="space-y-2">
               {VIDEO_MODELS.map((m) => (
                 <button
                   key={m.id}
                   onClick={() => setModel(m.id)}
                   disabled={isGenerating}
-                  className="w-full p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50"
+                  className="w-full p-3 text-left text-sm rounded-lg border transition-all hover:scale-[1.01] disabled:opacity-50"
                   style={{
                     backgroundColor:
                       model === m.id ? T.accentColor + "20" : T.bgColor,
@@ -291,10 +291,10 @@ export default function VideoTool() {
                   }}
                 >
                   <div className="font-bold flex items-center justify-between">
-                    <span>{m.label}</span>
-                    <span className="text-[9px] opacity-60">{m.provider}</span>
+                    <span className="text-sm">{m.label}</span>
+                    <span className="text-xs opacity-60">{m.provider}</span>
                   </div>
-                  <div className="text-[9px] opacity-60 mt-0.5">
+                  <div className="text-xs opacity-60 mt-1">
                     {m.desc} · {m.cost} 🪙
                   </div>
                 </button>
@@ -303,11 +303,11 @@ export default function VideoTool() {
           </div>
 
           <div
-            className="border rounded-lg p-3"
+            className="border rounded-xl p-4"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
+              className="block text-xs uppercase tracking-widest mb-2"
               style={{ color: T.textMuted }}
             >
               Duration
@@ -325,14 +325,14 @@ export default function VideoTool() {
               aria-valuemin={2}
               aria-valuemax={8}
               aria-valuenow={duration}
-              className="w-full"
+              className="w-full h-2"
             />
             <div
-              className="flex items-center justify-between text-[10px] mt-1"
+              className="flex items-center justify-between text-xs mt-2"
               style={{ color: T.textMuted }}
             >
               <span>
-                <Clock size={10} className="inline mr-1" />
+                <Clock size={12} className="inline mr-1" />
                 {duration}s
               </span>
               <span>2s — 8s</span>
@@ -340,16 +340,16 @@ export default function VideoTool() {
           </div>
 
           <div
-            className="border rounded-lg p-3"
+            className="border rounded-xl p-4"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <label
-              className="block text-[10px] uppercase tracking-widest mb-1.5"
+              className="block text-xs uppercase tracking-widest mb-2"
               style={{ color: T.textMuted }}
             >
               Quick Starters
             </label>
-            <div className="space-y-1 max-h-32 overflow-y-auto pr-1">
+            <div className="space-y-1.5 max-h-40 overflow-y-auto pr-1">
               {PROMPT_PRESETS.map((p, i) => (
                 <button
                   key={i}
@@ -358,7 +358,7 @@ export default function VideoTool() {
                     setError(null);
                   }}
                   disabled={isGenerating}
-                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:opacity-80 disabled:opacity-50 line-clamp-2"
+                  className="w-full text-left text-xs px-3 py-2 rounded-lg border hover:opacity-80 disabled:opacity-50 line-clamp-2"
                   style={{
                     backgroundColor: T.bgColor,
                     borderColor: T.borderColor,
@@ -374,7 +374,7 @@ export default function VideoTool() {
           <button
             onClick={handleGenerate}
             disabled={!prompt.trim() || !canAfford || isGenerating}
-            className="w-full py-3 rounded-lg font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-40 transition-all hover:scale-[1.01]"
+            className="w-full py-3.5 rounded-xl font-black text-sm uppercase tracking-wider flex items-center justify-center gap-2 disabled:opacity-40 transition-all hover:scale-[1.01]"
             style={{
               background: `linear-gradient(135deg, ${T.accentColor} 0%, ${T.headerColor} 100%)`,
               color: T.bgColor,
@@ -383,57 +383,57 @@ export default function VideoTool() {
           >
             {isGenerating ? (
               <>
-                <Loader2 size={16} className="animate-spin" /> Generating...
+                <Loader2 size={18} className="animate-spin" /> Generating...
               </>
             ) : (
               <>
-                <Wand2 size={16} /> Generate ({cost} 🪙)
+                <Wand2 size={18} /> Generate ({cost} 🪙)
               </>
             )}
           </button>
 
           {error && (
             <div
-              className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border"
+              className="text-sm flex items-center gap-2 px-3 py-2.5 rounded-lg border"
               style={{
                 borderColor: "#f85149",
                 color: "#f85149",
                 backgroundColor: "#f8514910",
               }}
             >
-              <AlertTriangle size={12} />
+              <AlertTriangle size={14} />
               <span>{error}</span>
             </div>
           )}
         </div>
 
         {/* RIGHT: Preview + History */}
-        <div className="lg:col-span-3 space-y-3">
+        <div className="lg:col-span-3 space-y-4">
           <div
-            className="border-2 rounded-lg overflow-hidden"
+            className="border-2 rounded-xl overflow-hidden"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <div
-              className="px-3 py-1.5 border-b flex items-center justify-between"
+              className="px-4 py-2.5 border-b flex items-center justify-between"
               style={{ borderColor: T.borderColor, backgroundColor: T.bgColor }}
             >
               <span
-                className="text-[10px] uppercase tracking-widest"
+                className="text-xs uppercase tracking-widest"
                 style={{ color: T.textMuted }}
               >
                 Preview
               </span>
               {current?.status === "succeeded" && (
-                <span className="text-[10px]" style={{ color: "#56d364" }}>
+                <span className="text-xs" style={{ color: "#56d364" }}>
                   ● Ready
                 </span>
               )}
               {isGenerating && (
                 <span
-                  className="text-[10px] flex items-center gap-1"
+                  className="text-xs flex items-center gap-1"
                   style={{ color: T.accentColor }}
                 >
-                  <Loader2 size={10} className="animate-spin" /> Working...
+                  <Loader2 size={12} className="animate-spin" /> Working...
                 </span>
               )}
             </div>
@@ -446,28 +446,28 @@ export default function VideoTool() {
                   src={current.videoUrl}
                   controls
                   className="w-full h-full object-cover"
-                  style={{ maxHeight: "360px" }}
+                  style={{ maxHeight: "420px" }}
                 />
               ) : isGenerating ? (
                 <div className="text-center">
-                  <div className="relative w-20 h-20 mx-auto mb-3">
+                  <div className="relative w-24 h-24 mx-auto mb-3">
                     <div
                       className="absolute inset-0 rounded-full border-2 animate-ping"
                       style={{ borderColor: T.accentColor, opacity: 0.4 }}
                     />
-                    <div className="absolute inset-0 flex items-center justify-center text-2xl">
+                    <div className="absolute inset-0 flex items-center justify-center text-3xl">
                       🎬
                     </div>
                   </div>
-                  <p className="text-sm opacity-70">Generating video...</p>
-                  <p className="text-[10px] opacity-50 mt-1">
+                  <p className="text-base opacity-70">Generating video...</p>
+                  <p className="text-xs opacity-50 mt-1">
                     This can take 30-120 seconds
                   </p>
                 </div>
               ) : (
                 <div className="text-center px-6">
-                  <div className="text-4xl mb-2 opacity-30">🎬</div>
-                  <p className="text-sm opacity-60">
+                  <div className="text-5xl mb-3 opacity-30">🎬</div>
+                  <p className="text-base opacity-60">
                     Your video will appear here
                   </p>
                 </div>
@@ -475,7 +475,7 @@ export default function VideoTool() {
             </div>
             {current?.videoUrl && (
               <div
-                className="px-3 py-2 border-t flex items-center gap-2"
+                className="px-4 py-2.5 border-t flex items-center gap-2"
                 style={{
                   borderColor: T.borderColor,
                   backgroundColor: T.bgColor,
@@ -483,51 +483,51 @@ export default function VideoTool() {
               >
                 <button
                   onClick={() => handleDownload(current.videoUrl!)}
-                  className="px-2.5 py-1 text-[10px] font-bold rounded border flex items-center gap-1"
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5"
                   style={{ borderColor: T.borderColor, color: T.textColor }}
                 >
-                  <Download size={10} /> Download
+                  <Download size={12} /> Download
                 </button>
                 <button
                   onClick={handleGenerate}
-                  className="px-2.5 py-1 text-[10px] font-bold rounded border flex items-center gap-1"
+                  className="px-3 py-1.5 text-xs font-bold rounded-lg border flex items-center gap-1.5"
                   style={{ borderColor: T.borderColor, color: T.textColor }}
                 >
-                  <RefreshCw size={10} /> Regen
+                  <RefreshCw size={12} /> Regen
                 </button>
               </div>
             )}
           </div>
 
           <div
-            className="border rounded-lg"
+            className="border rounded-xl"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
             <div
-              className="px-3 py-2 border-b flex items-center justify-between"
+              className="px-4 py-2.5 border-b flex items-center justify-between"
               style={{ borderColor: T.borderColor }}
             >
               <div
-                className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest"
+                className="flex items-center gap-1.5 text-xs uppercase tracking-widest"
                 style={{ color: T.textMuted }}
               >
-                <History size={10} /> Recent ({history.length})
+                <History size={12} /> Recent ({history.length})
               </div>
               {history.length > 0 && (
                 <button
                   onClick={handleClear}
-                  className="text-[9px] opacity-60 hover:opacity-100"
+                  className="text-xs opacity-60 hover:opacity-100"
                 >
                   Clear
                 </button>
               )}
             </div>
             {history.length === 0 ? (
-              <div className="p-6 text-center text-xs opacity-50">
+              <div className="p-8 text-center text-sm opacity-50">
                 No videos yet.
               </div>
             ) : (
-              <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5 p-2">
+              <div className="grid grid-cols-3 sm:grid-cols-4 gap-2 p-3">
                 {history.map((g) => (
                   <button
                     key={g.id}
@@ -557,7 +557,7 @@ export default function VideoTool() {
                       </div>
                     )}
                     <div
-                      className="absolute inset-x-0 bottom-0 px-1.5 py-0.5 text-[8px] truncate"
+                      className="absolute inset-x-0 bottom-0 px-2 py-1 text-[10px] truncate"
                       style={{
                         backgroundColor: "rgba(0,0,0,0.7)",
                         color: "white",

@@ -49,7 +49,8 @@
     "socket.io-client": "^4.8.3",
     "stripe": "^18.0.0",
     "supermemory": "^4.24.12",
-    "svix": "^1.95.1"
+    "svix": "^1.95.1",
+    "zustand": "^5.0.14"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

@@ -91,7 +91,7 @@ export function JarvisTerminalPage() {
   }, [loadFileTree]);
 
   const context: LiTContext = {
-    route: "/littree",
+    route: "/studio?tool=chat",
     terminalOutput,
     commandHistory: commands,
     logs,

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getOrCreateUser } from "@/lib/user-db";
+import { getOrCreateUser, type SignupAttributionInput } from "@/lib/user-db";
 import { Webhook } from "svix";
 
 /**
@@ -67,6 +67,8 @@ export async function POST(req: NextRequest) {
         (data.email_addresses as Array<{ email_address: string }>) || [];
       const first_name = (data.first_name as string) || "";
       const last_name = (data.last_name as string) || "";
+      const unsafeMetadata = asRecord(data.unsafe_metadata);
+      const publicMetadata = asRecord(data.public_metadata);
 
       const email = email_addresses[0]?.email_address || "";
       const name =
@@ -74,7 +76,13 @@ export async function POST(req: NextRequest) {
           ? `${first_name} ${last_name}`
           : first_name || email.split("@")[0];
 
-      await getOrCreateUser(id, email, name);
+      await getOrCreateUser(id, email, name, {
+        source: stringFrom(unsafeMetadata.source) || stringFrom(unsafeMetadata.ref) || stringFrom(publicMetadata.source),
+        referrer: stringFrom(unsafeMetadata.referrer),
+        landingPath: stringFrom(unsafeMetadata.landingPath),
+        utm: recordOfStrings(unsafeMetadata.utm),
+        clerkMetadata: { public: publicMetadata, unsafe: unsafeMetadata },
+      });
       // User event processed
     }
 
@@ -95,3 +103,22 @@ export async function POST(req: NextRequest) {
 
 // Ensure route is dynamic (no static optimization)
 export const dynamic = "force-dynamic";
+
+function asRecord(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+function stringFrom(value: unknown): string | null {
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function recordOfStrings(value: unknown): SignupAttributionInput["utm"] {
+  const record = asRecord(value);
+  const output: Record<string, string> = {};
+  for (const [key, item] of Object.entries(record)) {
+    if (typeof item === "string" && item.trim()) output[key] = item.trim();
+  }
+  return Object.keys(output).length ? output : null;
+}

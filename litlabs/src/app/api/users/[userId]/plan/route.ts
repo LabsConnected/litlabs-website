@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth, clerkClient } from "@clerk/nextjs/server";
 import { isAdmin } from "@/lib/roles";
 import {
   getAdminSupabase,
@@ -20,14 +20,26 @@ export async function GET(
   const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
     .split(",")
     .filter(Boolean);
-  const isOwnerOrAdmin =
-    clerkId === userId &&
-    (ADMIN_CLERK_IDS.includes(clerkId) || (await isAdmin()));
-  if (clerkId !== userId && !ADMIN_CLERK_IDS.includes(clerkId) && !(await isAdmin())) {
+  const ADMIN_EMAIL = (process.env.ADMIN_EMAIL || "").trim().toLowerCase();
+
+  let userEmail = "";
+  try {
+    const client = await clerkClient();
+    const user = await client.users.getUser(clerkId);
+    userEmail = (user.emailAddresses?.[0]?.emailAddress || "").trim().toLowerCase();
+  } catch {}
+
+  const isAdminByEmail = ADMIN_EMAIL && userEmail === ADMIN_EMAIL;
+  const isAdminUser =
+    ADMIN_CLERK_IDS.includes(clerkId) ||
+    (await isAdmin()) ||
+    !!isAdminByEmail;
+
+  if (clerkId !== userId && !isAdminUser) {
     return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
-  if (isOwnerOrAdmin) {
+  if (isAdminUser) {
     return NextResponse.json({
       plan: "elite",
       status: "active",

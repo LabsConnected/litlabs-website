@@ -1,22 +1,29 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, usePathname } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { Plus, X, Image as ImageIcon, Music, Video, Bot, Workflow } from "lucide-react";
+import { Plus, X, Image as ImageIcon, Music, Video, Bot, Workflow, Globe, Terminal } from "lucide-react";
 
 const CREATE_OPTIONS = [
-  { label: "Create Image", icon: ImageIcon, href: "/studio?tool=image", color: "#ff00a0" },
-  { label: "Create Music", icon: Music, href: "/studio?tool=audio", color: "#8b5cf6" },
-  { label: "Create Video", icon: Video, href: "/studio?tool=video", color: "#00f0ff" },
-  { label: "New Agent", icon: Bot, href: "/agents", color: "#ff9ff3" },
-  { label: "Run Workflow", icon: Workflow, href: "/studio?tool=pipeline", color: "#22c55e" },
+  { label: "Build App", icon: Workflow, href: "/studio?tool=builder", color: "#22d3ee" },
+  { label: "Create Agent", icon: Bot, href: "/studio?tool=agents", color: "#a3f546" },
+  { label: "Generate Image", icon: ImageIcon, href: "/studio?tool=image", color: "#e879f9" },
+  { label: "Music", icon: Music, href: "/studio?tool=audio", color: "#fb923c" },
+  { label: "Website", icon: Globe, href: "/studio?tool=canvas", color: "#f472b6" },
+  { label: "AI Chat", icon: Terminal, href: "/studio?tool=chat", color: "#4ade80" },
+  { label: "Create Video", icon: Video, href: "/studio?tool=video", color: "#38bdf8" },
 ];
+
+const HIDE_ON = ["/studio", "/admin"];
 
 export default function CreateFAB() {
   const router = useRouter();
+  const pathname = usePathname();
   const { resolvedColors: T } = useTheme();
   const [open, setOpen] = useState(false);
+
+  if (HIDE_ON.some((p) => pathname?.startsWith(p))) return null;
 
   return (
     <>
@@ -43,7 +50,7 @@ export default function CreateFAB() {
 
       {/* Menu */}
       {open && (
-        <div className="md:hidden fixed bottom-36 right-4 z-40 w-56 rounded-xl border shadow-2xl overflow-hidden"
+        <div className="md:hidden fixed bottom-36 right-4 z-40 w-60 rounded-xl border shadow-2xl overflow-hidden"
           style={{
             backgroundColor: T.boxBg,
             borderColor: T.borderColor + "30",

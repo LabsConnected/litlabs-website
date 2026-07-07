@@ -44,8 +44,8 @@ const QUICK_ACTIONS = [
   { label: "Code", icon: Code2, prompt: "Help me write code", color: "#22d3ee" },
   { label: "Image", icon: Image, prompt: "Generate an image", color: "#e879f9" },
   { label: "Website", icon: Globe, prompt: "Build a website", color: "#f472b6" },
-  { label: "Music", icon: Music, prompt: "Create music", color: "#fb923c" },
-  { label: "Terminal", icon: Terminal, prompt: "Open terminal", color: "#4ade80", href: "/lit-console" },
+  { label: "Music", icon: Music, prompt: "", color: "#fb923c", href: "/studio?tool=audio" },
+  { label: "Terminal", icon: Terminal, prompt: "Open terminal", color: "#4ade80", href: "/studio?tool=chat" },
   { label: "Games", icon: Gamepad2, prompt: "", color: "#a78bfa", href: "/games/cloud" },
 ];
 
@@ -78,24 +78,14 @@ function MobileConsoleDashboard({
   const greeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening";
 
   return (
-    <div className="flex flex-col h-full overflow-y-auto pb-4" style={{ backgroundColor: LC.bg }}>
+    <div className="flex h-full min-h-0 flex-col overflow-y-auto overscroll-contain pb-6" style={{ backgroundColor: LC.bg }}>
       {/* ── GREETING + INPUT ── */}
-      <div className="px-4 pt-6 pb-4 space-y-5">
-        {/* Status pill */}
-        <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
-          <span className="text-[11px] font-black uppercase tracking-widest" style={{ color: LC.accentCyan }}>
-            LiT Online
-          </span>
-        </div>
-
+      <div className="px-4 pt-4 pb-4 space-y-4">
         {/* Greeting */}
         <div>
-          <p className="text-xs font-bold" style={{ color: LC.textMuted }}>{greeting}</p>
-          <h1 className="text-2xl font-black mt-0.5 leading-tight" style={{ color: LC.text }}>
-            What are we<br />
-            <span style={{ color: LC.accentCyan }}>building?</span>
-          </h1>
+          <p className="text-sm font-bold" style={{ color: LC.textMuted }}>
+            {greeting} — what are we building today?
+          </p>
         </div>
 
         {/* Chat input */}
@@ -118,6 +108,13 @@ function MobileConsoleDashboard({
           >
             <SendHorizonal size={16} />
           </button>
+        </div>
+
+        <div className="flex items-center gap-2">
+          <Sparkles size={13} style={{ color: LC.accentOrange }} />
+          <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: LC.textMuted }}>
+            Quick Actions
+          </span>
         </div>
 
         {/* Quick action chips */}
@@ -146,7 +143,7 @@ function MobileConsoleDashboard({
       <div className="px-4 mb-4">
         <div className="flex items-center justify-between mb-2">
           <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: LC.textMuted }}>Agents</span>
-          <Link href="/littree" className="flex items-center gap-1 text-[10px] font-bold" style={{ color: LC.accentCyan }}>
+          <Link href="/agents" className="flex items-center gap-1 text-[10px] font-bold" style={{ color: LC.accentCyan }}>
             All <ChevronRight size={10} />
           </Link>
         </div>
@@ -242,7 +239,7 @@ function MobileConsoleDashboard({
             <span className="text-xs font-bold" style={{ color: LC.text }}>All Systems Online</span>
           </div>
           <div className="flex items-center gap-3 text-[10px]" style={{ color: LC.textMuted }}>
-            <span>10 Agents</span>
+            <span>5 Agents</span>
             <span>·</span>
             <span>25 Games</span>
           </div>
@@ -269,9 +266,9 @@ export default function ConsoleDashboard({
   ];
 
   return (
-    <>
+    <div className="h-full w-full flex flex-col">
       {/* ── MOBILE: chat-first layout ── */}
-      <div className="md:hidden h-full">
+      <div className="md:hidden flex-1 min-h-0">
         <MobileConsoleDashboard
           onPrompt={onPrompt}
           onOpenChat={onOpenChat}
@@ -280,7 +277,7 @@ export default function ConsoleDashboard({
       </div>
 
       {/* ── DESKTOP: existing grid ── */}
-      <div className="hidden md:flex h-full w-full flex-col gap-3 overflow-y-auto px-3 pb-3 pt-2">
+      <div className="hidden md:flex flex-1 min-h-0 w-full flex-col gap-3 overflow-y-auto px-3 pb-3 pt-2">
       {/* Hero header — status bar only */}
       <section
         className="relative overflow-hidden rounded-2xl border px-4 py-2.5"
@@ -304,7 +301,7 @@ export default function ConsoleDashboard({
             </h1>
           </div>
           <StatusChip label={`${activeAgent} online`} tone="cyan" />
-          <StatusChip label={activeModel} tone="orange" />
+          <StatusChip label={activeModel} tone="purple" />
           <StatusChip label="litlabs active" tone="green" />
         </div>
       </section>
@@ -453,12 +450,12 @@ export default function ConsoleDashboard({
       {/* TAB: Profile */}
       {tab === "profile" && <ProfilePanel />}
       </div>
-    </>
+    </div>
   );
 }
 
-function StatusChip({ label, tone }: { label: string; tone: "cyan" | "orange" | "green" }) {
-  const color = tone === "cyan" ? LC.accentCyan : tone === "orange" ? LC.accentOrange : LC.success;
+function StatusChip({ label, tone }: { label: string; tone: "cyan" | "orange" | "green" | "purple" }) {
+  const color = tone === "cyan" ? LC.accentCyan : tone === "orange" ? LC.accentOrange : tone === "purple" ? LC.accentPurple : LC.success;
 
   return (
     <div

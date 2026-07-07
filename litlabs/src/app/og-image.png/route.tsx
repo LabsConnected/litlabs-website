@@ -1,7 +1,7 @@
 import { ImageResponse } from "next/og";
 import { SITE_URL } from "@/lib/siteConfig";
 
-export const runtime = "edge";
+export const runtime = "nodejs";
 const size = { width: 1200, height: 630 };
 
 export function GET() {

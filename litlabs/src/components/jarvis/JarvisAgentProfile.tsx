@@ -62,7 +62,7 @@ export function JarvisAgentProfile() {
 
           <div className="flex flex-wrap gap-2">
             <Link
-              href="/littree"
+              href="/studio?tool=chat"
               className="flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition"
               style={{ backgroundColor: T.accentColor, color: T.bgColor }}
             >
@@ -120,7 +120,7 @@ export function JarvisAgentProfile() {
             <JarvisActionPanel loading={loading} result={result} error={error} onClear={clear} />
 
             <Link
-              href="/littree"
+              href="/studio?tool=chat"
               className="flex items-center justify-between rounded-2xl border p-5 transition"
               style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "20" }}
             >
@@ -148,7 +148,7 @@ export function JarvisAgentProfile() {
               </h3>
               <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
                 <Link
-                  href="/littree"
+                  href="/studio?tool=chat"
                   className="flex flex-col items-center gap-2 rounded-xl border p-4 text-xs font-bold transition"
                   style={{ borderColor: T.borderColor + "25", color: T.textMuted }}
                 >

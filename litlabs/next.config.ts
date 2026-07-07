@@ -11,9 +11,8 @@ const nextConfig: NextConfig = {
   // Avoid Windows EPERM errors during .next cleanup
   cleanDistDir: false,
 
-  // Turbopack workspace root (fixes lockfile detection warning)
   turbopack: {
-    root: __dirname,
+    root: process.cwd(),
   },
 
   experimental: {
@@ -172,16 +171,8 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Cache Next.js static chunks for 1 year
-      {
-        source: "/_next/static/(.*)",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "public, max-age=31536000, immutable",
-          },
-        ],
-      },
+      // Note: /_next/static caching is handled natively by Vercel/Next.js
+      // Setting a custom Cache-Control here triggers a build warning, so it is intentionally omitted.
     ];
   },
 
@@ -191,7 +182,7 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
-      { source: "/builder", destination: "/studio", permanent: true },
+      { source: "/builder", destination: "/studio?tool=builder", permanent: true },
       {
         source: "/generate",
         destination: "/studio?tool=image",
@@ -200,9 +191,16 @@ const nextConfig: NextConfig = {
       { source: "/flow", destination: "/studio?tool=flow", permanent: false },
       {
         source: "/agent-chat",
-        destination: "/agent",
+        destination: "/studio?tool=chat",
         permanent: false,
       },
+      // Consolidate legacy product aliases into one canonical route
+      { source: "/lit", destination: "/studio?tool=chat", permanent: true },
+      { source: "/litt", destination: "/studio?tool=chat", permanent: true },
+      { source: "/littree", destination: "/studio?tool=chat", permanent: true },
+      { source: "/jarvis", destination: "/studio?tool=chat", permanent: true },
+      { source: "/lit-console", destination: "/studio?tool=chat", permanent: true },
+      { source: "/jarvis-terminal", destination: "/studio?tool=chat", permanent: true },
     ];
   },
 

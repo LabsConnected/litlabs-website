@@ -71,6 +71,11 @@ export default function SettingsPage() {
   const [website, setWebsite] = useState(profile.website || "");
   const [location, setLocation] = useState(profile.location || "");
   const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl || "");
+  const [mood, setMood] = useState(profile.mood || "");
+  const [interests, setInterests] = useState<string[]>(profile.interests || []);
+  const [newInterest, setNewInterest] = useState("");
+  const [socialLinks, setSocialLinks] = useState(profile.socialLinks || {});
+  const [musicLinks, setMusicLinks] = useState(profile.musicLinks || {});
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
@@ -145,6 +150,10 @@ export default function SettingsPage() {
         setWebsite(u.website || "");
         setLocation(u.location || "");
         setAvatarUrl(u.avatar_url || "");
+        setMood(u.mood || "");
+        setInterests(u.interests || []);
+        setSocialLinks(u.social_links || {});
+        setMusicLinks(u.music_links || {});
       })
       .catch(() => {});
   }, [isSignedIn]);
@@ -164,6 +173,10 @@ export default function SettingsPage() {
           website: website.trim(),
           location: location.trim(),
           avatar_url: avatarUrl.trim(),
+          mood: mood.trim(),
+          interests,
+          social_links: socialLinks,
+          music_links: musicLinks,
         }),
       });
       const data = await res.json().catch(() => ({}));
@@ -175,6 +188,10 @@ export default function SettingsPage() {
         website: website.trim(),
         location: location.trim(),
         avatarUrl: avatarUrl.trim(),
+        mood: mood.trim(),
+        interests,
+        socialLinks,
+        musicLinks,
       });
       setProfileSaved(true);
       setTimeout(() => setProfileSaved(false), 2000);
@@ -183,7 +200,7 @@ export default function SettingsPage() {
     } finally {
       setProfileLoading(false);
     }
-  }, [name, username, bio, website, location, avatarUrl, updateProfile]);
+  }, [name, username, bio, website, location, avatarUrl, mood, interests, socialLinks, musicLinks, updateProfile]);
 
   const saveKeys = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -227,7 +244,7 @@ export default function SettingsPage() {
 
   if (!isLoaded) {
     return (
-      <PageShell title="Settings" subtitle="Loading your preferences..." icon="⚙️">
+      <PageShell title="Settings" subtitle="Loading your preferences..." icon="⚙️" backHref="/dashboard">
         <div className="p-8 flex items-center justify-center">
           <Loader2 className="animate-spin" style={{ color: T.accentColor }} />
         </div>
@@ -237,7 +254,7 @@ export default function SettingsPage() {
 
   if (!isSignedIn) {
     return (
-      <PageShell title="Settings" subtitle="Sign in to manage your account" icon="⚙️">
+      <PageShell title="Settings" subtitle="Sign in to manage your account" icon="⚙️" backHref="/dashboard">
         <div className="p-8 max-w-md mx-auto text-center">
           <p className="mb-4 opacity-70" style={{ color: T.textMuted }}>
             You need to be signed in to view settings.
@@ -259,6 +276,7 @@ export default function SettingsPage() {
       title="Settings"
       subtitle="Profile, appearance, keys, and notifications — all in one place."
       icon="⚙️"
+      backHref="/dashboard"
     >
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Wallet strip */}
@@ -311,16 +329,29 @@ export default function SettingsPage() {
               className="rounded-2xl border p-4 sm:p-6"
               style={cardStyle}
             >
-              <h2
-                className="text-lg font-black mb-1"
-                style={{ color: T.headerColor }}
-              >
-                Public Profile
-              </h2>
-              <p className="text-xs mb-5 opacity-70" style={{ color: T.textMuted }}>
-                This is what other creators see across the platform.
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="flex items-start justify-between mb-1">
+                <div>
+                  <h2
+                    className="text-lg font-black"
+                    style={{ color: T.headerColor }}
+                  >
+                    Public Profile
+                  </h2>
+                  <p className="text-xs mt-1 opacity-70" style={{ color: T.textMuted }}>
+                    This is what other creators see across the platform.
+                  </p>
+                </div>
+                <Link
+                  href="/profile"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all hover:opacity-80 whitespace-nowrap"
+                  style={{ backgroundColor: `${T.accentColor}15`, border: `1px solid ${T.accentColor}30`, color: T.accentColor }}
+                >
+                  <ExternalLink size={12} /> View Full Profile
+                </Link>
+              </div>
+
+              {/* Basic fields */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mt-5">
                 {[
                   { label: "Display Name", value: name, set: setName, placeholder: "Your name" },
                   { label: "Username", value: username, set: setUsername, placeholder: "username" },
@@ -369,12 +400,148 @@ export default function SettingsPage() {
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     placeholder="Tell the community who you are..."
-                    rows={4}
+                    rows={3}
                     className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all resize-none"
                     style={inputStyle}
                   />
                 </div>
               </div>
+
+              {/* Mood */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Mood
+                </label>
+                <div className="flex flex-wrap gap-1.5">
+                  {["😀 Happy", "😎 Cool", "💡 Creative", "🔥 Hot", "🎯 Focused", "🌟 Stellar", "💪 Strong", "🎵 Chill", "🚀 Launching", "😴 Tired", "🤔 Thinking", "💭 Dreaming"].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setMood(m)}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all"
+                      style={{
+                        backgroundColor: mood === m ? `${T.accentColor}20` : `${T.boxBg}40`,
+                        border: `1px solid ${mood === m ? `${T.accentColor}50` : `${T.borderColor}30`}`,
+                        color: mood === m ? T.accentColor : T.textMuted,
+                      }}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Interests */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Interests
+                </label>
+                <div className="flex gap-2 mb-2">
+                  <input
+                    type="text"
+                    value={newInterest}
+                    onChange={(e) => setNewInterest(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newInterest.trim() && interests.length < 10) {
+                        setInterests([...interests, newInterest.trim()]);
+                        setNewInterest("");
+                      }
+                    }}
+                    placeholder="Add interest..."
+                    className="flex-1 px-3 py-1.5 rounded-lg border text-sm outline-none"
+                    style={inputStyle}
+                  />
+                  <button
+                    onClick={() => {
+                      if (newInterest.trim() && interests.length < 10) {
+                        setInterests([...interests, newInterest.trim()]);
+                        setNewInterest("");
+                      }
+                    }}
+                    className="px-3 py-1.5 rounded-lg text-xs font-bold"
+                    style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                  >
+                    Add
+                  </button>
+                </div>
+                <div className="flex flex-wrap gap-1.5">
+                  {interests.map((interest, i) => (
+                    <span
+                      key={i}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1"
+                      style={{ backgroundColor: `${T.boxBg}60`, border: `1px solid ${T.borderColor}30`, color: T.textColor }}
+                    >
+                      {interest}
+                      <button
+                        onClick={() => setInterests(interests.filter((_, idx) => idx !== i))}
+                        className="opacity-50 hover:opacity-100"
+                        style={{ color: "#ef4444" }}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              {/* Social Links */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Social Links
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { key: "github", label: "GitHub" },
+                    { key: "twitter", label: "Twitter / X" },
+                    { key: "instagram", label: "Instagram" },
+                    { key: "linkedin", label: "LinkedIn" },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="space-y-1">
+                      <label className="text-[9px] font-mono uppercase opacity-50" style={{ color: T.textMuted }}>
+                        {label}
+                      </label>
+                      <input
+                        type="url"
+                        value={(socialLinks as Record<string, string>)?.[key] || ""}
+                        onChange={(e) => setSocialLinks({ ...socialLinks, [key]: e.target.value })}
+                        placeholder={`https://${key}.com/...`}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                        style={inputStyle}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Music Links */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  🎵 Music Links
+                </label>
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {[
+                    { key: "spotify", label: "Spotify" },
+                    { key: "youtube", label: "YouTube" },
+                    { key: "soundcloud", label: "SoundCloud" },
+                    { key: "appleMusic", label: "Apple Music" },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="space-y-1">
+                      <label className="text-[9px] font-mono uppercase opacity-50" style={{ color: T.textMuted }}>
+                        {label}
+                      </label>
+                      <input
+                        type="url"
+                        value={(musicLinks as Record<string, string>)?.[key] || ""}
+                        onChange={(e) => setMusicLinks({ ...musicLinks, [key]: e.target.value })}
+                        placeholder={`https://${label.toLowerCase()}.com/...`}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                        style={inputStyle}
+                      />
+                    </div>
+                  ))}
+                </div>
+              </div>
+
+              {/* Save button */}
               <div className="mt-5 flex flex-wrap items-center gap-3">
                 <button
                   onClick={saveProfile}

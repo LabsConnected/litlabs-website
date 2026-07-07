@@ -19,8 +19,6 @@ const SHOW_BACKGROUND_PATHS = [
 ];
 
 const HIDE_BACKGROUND_PATHS = [
-  "/lit",
-  "/lit-console",
   "/admin/terminal",
   "/code",
   "/games",

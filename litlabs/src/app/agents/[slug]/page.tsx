@@ -15,7 +15,7 @@ export default function AgentPage() {
 
   useEffect(() => {
     if (!slug || LEGACY_SLUGS.has(slug)) {
-      router.replace("/littree");
+      router.replace("/studio?tool=chat");
     }
   }, [slug, router]);
 
@@ -62,7 +62,7 @@ export default function AgentPage() {
             Go back
           </button>
           <button
-            onClick={() => router.push("/littree")}
+            onClick={() => router.push("/agents")}
             className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition"
             style={{ backgroundColor: T.accentColor, color: T.bgColor }}
           >

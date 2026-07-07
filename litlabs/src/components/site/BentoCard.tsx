@@ -1,7 +1,15 @@
 "use client";
 
-import { useTheme } from "@/context/ThemeContext";
 import { ReactNode } from "react";
+
+// Neon LiT OS theme constants (matches lit-console-theme.ts)
+const B = {
+  bg: "#101018",
+  border: "#252538",
+  accent: "#00f5ff",
+  headerColor: "#94a3b8",
+  textMuted: "#64748b",
+};
 
 interface BentoCardProps {
   title?: string;
@@ -22,28 +30,27 @@ export function BentoCard({
   action,
   footer,
 }: BentoCardProps) {
-  const { resolvedColors: T } = useTheme();
-  const accentColor = accent || T.accentColor;
+  const accentColor = accent || B.accent;
 
   return (
     <div
       className={`relative flex flex-col overflow-hidden rounded-2xl border ${className}`}
       style={{
-        backgroundColor: `${T.boxBg}80`,
-        borderColor: `${T.borderColor}30`,
-        boxShadow: `0 0 0 1px ${T.borderColor}18, 0 12px 48px rgba(0,0,0,0.25)`,
+        backgroundColor: B.bg,
+        borderColor: `${B.border}80`,
+        boxShadow: `0 0 0 1px ${B.border}40, 0 12px 48px rgba(0,0,0,0.25)`,
       }}
     >
       {title && (
         <div
           className="flex items-center justify-between px-4 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}20` }}
+          style={{ borderColor: `${B.border}60` }}
         >
           <div className="flex items-center gap-2">
             {icon && <span style={{ color: accentColor }}>{icon}</span>}
             <h3
               className="text-xs font-black uppercase tracking-[0.15em]"
-              style={{ color: T.headerColor }}
+              style={{ color: B.headerColor }}
             >
               {title}
             </h3>
@@ -55,7 +62,7 @@ export function BentoCard({
       {footer && (
         <div
           className="px-4 py-3 border-t text-xs"
-          style={{ borderColor: `${T.borderColor}20`, color: T.textMuted }}
+          style={{ borderColor: `${B.border}40`, color: B.textMuted }}
         >
           {footer}
         </div>

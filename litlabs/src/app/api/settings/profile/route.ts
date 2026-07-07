@@ -60,6 +60,10 @@ async function getHandler() {
         bio: user.bio,
         website: user.website,
         location: user.location,
+        mood: (user as { mood?: string | null }).mood ?? null,
+        interests: (user as { interests?: string[] | null }).interests ?? null,
+        social_links: (user as { social_links?: Record<string, string> | null }).social_links ?? null,
+        music_links: (user as { music_links?: Record<string, string> | null }).music_links ?? null,
         created_at: user.created_at,
       },
     });
@@ -103,6 +107,10 @@ async function postHandler(req: NextRequest) {
       ...(typeof body.cover_url === "string" && {
         cover_url: body.cover_url,
       }),
+      ...(typeof body.mood === "string" && { mood: body.mood }),
+      ...(Array.isArray(body.interests) && { interests: body.interests }),
+      ...(body.social_links && typeof body.social_links === "object" && { social_links: body.social_links }),
+      ...(body.music_links && typeof body.music_links === "object" && { music_links: body.music_links }),
     };
 
     if (Object.keys(allowedUpdates).length === 0) {
@@ -127,6 +135,10 @@ async function postHandler(req: NextRequest) {
         bio: updatedUser.bio,
         website: updatedUser.website,
         location: updatedUser.location,
+        mood: (updatedUser as { mood?: string | null }).mood ?? null,
+        interests: (updatedUser as { interests?: string[] | null }).interests ?? null,
+        social_links: (updatedUser as { social_links?: Record<string, string> | null }).social_links ?? null,
+        music_links: (updatedUser as { music_links?: Record<string, string> | null }).music_links ?? null,
       },
     });
   } catch {

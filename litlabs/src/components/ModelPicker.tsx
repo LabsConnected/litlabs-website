@@ -57,27 +57,27 @@ export default function ModelPicker({
     <div className="relative">
       <button
         onClick={() => setOpen((v) => !v)}
-        className="flex w-full items-center gap-2 rounded-2xl border px-4 py-3 text-left"
+        className="flex w-full items-center gap-2 rounded-xl border px-3 py-2 text-left transition-colors hover:bg-white/5"
         style={{
           backgroundColor: T.boxBg + "70",
           borderColor: T.borderColor + "24",
           color: T.textColor,
         }}
       >
-        <span className="text-lg">{selected.icon}</span>
+        <span className="text-base">{selected.icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold">{selected.name}</span>
-          <span className="block text-[10px] uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>
+          <span className="block truncate text-xs font-bold">{selected.name}</span>
+          <span className="block text-[9px] uppercase tracking-wider" style={{ color: T.textMuted }}>
             {relatedRoom?.label ?? selected.provider}
           </span>
         </span>
         <span
-          className="rounded-full px-2 py-1 text-[10px] font-black uppercase"
+          className="rounded-full px-1.5 py-0.5 text-[9px] font-black uppercase"
           style={{ backgroundColor: badgeColor + "18", color: badgeColor }}
         >
           {selected.cost}
         </span>
-        <ChevronDown size={14} style={{ color: T.textMuted }} />
+        <ChevronDown size={12} style={{ color: T.textMuted }} />
       </button>
 
       {open && (

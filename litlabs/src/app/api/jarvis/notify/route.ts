@@ -5,15 +5,18 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { lit, NotificationPayload } from "@/lib/jarvis";
 
-// Admin user ID
-const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
+// Admin user IDs
+const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || process.env.ADMIN_CLERK_ID || "")
+  .split(",")
+  .map((s) => s.trim())
+  .filter(Boolean);
 
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
 
     // Only admin or server can trigger notifications
-    if (!userId || userId !== ADMIN_USER_ID) {
+    if (!userId || !ADMIN_IDS.includes(userId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
@@ -57,7 +60,7 @@ export async function PUT(req: NextRequest) {
   try {
     const { userId } = await auth();
 
-    if (!userId || userId !== ADMIN_USER_ID) {
+    if (!userId || !ADMIN_IDS.includes(userId)) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
