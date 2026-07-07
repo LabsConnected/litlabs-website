@@ -46,6 +46,19 @@ async function getHandler() {
 
       const result = await getOrCreateUser(clerkId, email, name);
       user = result.user;
+      if (!user) {
+        return NextResponse.json(
+          { error: "Failed to create user", detail: result.error },
+          { status: 500 },
+        );
+      }
+    }
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "User not found" },
+        { status: 404 },
+      );
     }
 
     return NextResponse.json({
