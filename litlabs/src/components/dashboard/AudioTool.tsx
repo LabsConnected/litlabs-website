@@ -44,7 +44,7 @@ function formatTime(s: number) {
   return `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 }
 
-function AudioResultPlayer({ result, accent, onDelete }: { result: GeneratedResult; accent: string; onDelete: () => void }) {
+function AudioResultPlayer({ result, accent: _accent, onDelete }: { result: GeneratedResult; accent: string; onDelete: () => void }) {
   const { resolvedColors: T } = useTheme();
   const audioRef = useRef<HTMLAudioElement>(null);
   const [state, setState] = useState<AudioPlayerState>({ playing: false, progress: 0, duration: 0, muted: false, volume: 80 });

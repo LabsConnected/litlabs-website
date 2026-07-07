@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Search, Terminal, Zap, Package, GitBranch, FolderOpen, Home, Info, Trash2, User, Tag } from "lucide-react";
+import { Search, Terminal, Zap, Package, GitBranch, FolderOpen, Info, Trash2, User, Tag } from "lucide-react";
 import { CommandPaletteProps } from "./terminal-types";
 import { TERMINAL_THEME } from "./terminal-theme";
 

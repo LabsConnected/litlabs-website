@@ -1,7 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { CheckCircle2, Copy, Eye, EyeOff, Plus, ShieldCheck, TestTube2, Trash2 } from "lucide-react";
+import { Copy, Eye, EyeOff, Plus, ShieldCheck, TestTube2, Trash2 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
 type ProviderKey = {

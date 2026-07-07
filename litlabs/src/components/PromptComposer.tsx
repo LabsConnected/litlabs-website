@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { History, RotateCcw, Sparkles, Copy, Trash2, Save, Wand2 } from "lucide-react";
+import { History, Sparkles, Copy, Trash2, Save, Wand2 } from "lucide-react";
 
 interface PromptHistory {
   id: string;

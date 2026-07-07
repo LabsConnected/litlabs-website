@@ -8,6 +8,7 @@ import {
   useEffect,
   ReactNode,
 } from "react";
+import { routeFromText } from "@/lib/lit-router";
 
 export type LiTMessage = {
   id: string;
@@ -25,6 +26,8 @@ export type LiTTask = {
   timestamp: number;
 };
 
+type OnNavigate = (href: string) => void;
+
 type LiTAssistantContextValue = {
   open: boolean;
   setOpen: (v: boolean) => void;
@@ -35,6 +38,10 @@ type LiTAssistantContextValue = {
   updateTask: (id: string, patch: Partial<LiTTask>) => void;
   clearChat: () => void;
   clearTasks: () => void;
+  onNavigate?: OnNavigate;
+  setOnNavigate: (fn: OnNavigate | undefined) => void;
+  voiceMode: boolean;
+  setVoiceMode: (v: boolean) => void;
 };
 
 const LiTAssistantContext = createContext<LiTAssistantContextValue | null>(null);
@@ -50,6 +57,8 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
   const [messages, setMessages] = useState<LiTMessage[]>([]);
   const [tasks, setTasks] = useState<LiTTask[]>([]);
   const [loaded, setLoaded] = useState(false);
+  const [onNavigate, setOnNavigate] = useState<OnNavigate | undefined>(undefined);
+  const [voiceMode, setVoiceMode] = useState(false);
 
   useEffect(() => {
     try {
@@ -107,6 +116,28 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
       addMessage("user", text);
       setOpen(true);
 
+      // Local navigation routing
+      const routed = routeFromText(text);
+      if (routed && routed.type === "navigate") {
+        const taskId = addTask({
+          title: `Opening ${routed.label}...`,
+          status: "running",
+          progress: 50,
+        });
+        await new Promise((r) => setTimeout(r, 300));
+        onNavigate?.(routed.href);
+        updateTask(taskId, {
+          title: `Opened ${routed.label}`,
+          status: "done",
+          progress: 100,
+        });
+        addMessage(
+          "assistant",
+          `Got you — opening ${routed.label}.`,
+        );
+        return;
+      }
+
       const taskId = addTask({
         title: "Thinking...",
         status: "running",
@@ -152,25 +183,6 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
             "I'm LiT. I can help you build, create, chat, and navigate. What do you want to work on?",
           );
         }
-
-        // Route common intents locally
-        const lower = text.toLowerCase();
-        if (lower.includes("build") || lower.includes("app")) {
-          addMessage(
-            "progress",
-            "🛠️ Suggestion: Open Builder with /studio?tool=builder",
-          );
-        } else if (lower.includes("image") || lower.includes("generate")) {
-          addMessage(
-            "progress",
-            "🎨 Suggestion: Open Studio Image with /studio?tool=image",
-          );
-        } else if (lower.includes("agent") || lower.includes("agents")) {
-          addMessage(
-            "progress",
-            "🤖 Suggestion: Browse agents at /agents",
-          );
-        }
       } catch (e) {
         updateTask(taskId, {
           title: "Failed to reach LiT",
@@ -183,7 +195,7 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [addMessage, addTask, updateTask],
+    [addMessage, addTask, updateTask, onNavigate],
   );
 
   return (
@@ -198,6 +210,10 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
         updateTask,
         clearChat,
         clearTasks,
+        onNavigate,
+        setOnNavigate,
+        voiceMode,
+        setVoiceMode,
       }}
     >
       {children}

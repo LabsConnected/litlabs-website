@@ -26,13 +26,10 @@ import {
   Film,
   Music,
   Palette,
-  MessageSquare,
   Code2,
   Terminal,
-  Network,
   LayoutGrid,
   Rocket,
-  Shell,
   Wand2,
   Zap,
   Command,
@@ -58,17 +55,11 @@ type CmdItem = {
 };
 
 const TOOL_ITEMS: CmdItem[] = [
-  { id: "chat", label: "Chat", type: "tool", icon: MessageSquare, href: "/studio?tool=chat", shortcut: "5", keywords: "chat talk ask ai lit assistant" },
+  { id: "chat", label: "LiTTree Agent", type: "tool", icon: Bot, href: "/studio?tool=chat", shortcut: "1", keywords: "chat talk ask ai lit assistant builder terminal agents code" },
   { id: "image", label: "Generate Image", type: "tool", icon: Image, href: "/studio?tool=image", shortcut: "1", keywords: "image picture photo generate art wallpaper logo" },
   { id: "video", label: "Video", type: "tool", icon: Film, href: "/studio?tool=video", shortcut: "2", keywords: "video film clip animation movie" },
   { id: "audio", label: "Audio", type: "tool", icon: Music, href: "/studio?tool=audio", shortcut: "3", keywords: "audio music song sound beat track voice" },
-  { id: "color", label: "Color by Number", type: "tool", icon: Palette, href: "/color", shortcut: "4", keywords: "color coloring paint number book" },
-  { id: "builder", label: "Builder", type: "tool", icon: Code2, href: "/studio?tool=builder", shortcut: "6", keywords: "builder code app website component react" },
-  { id: "agents", label: "Agents", type: "tool", icon: Bot, href: "/studio?tool=agents", shortcut: "7", keywords: "agents ai agent forge pulse visionary" },
-  { id: "terminal", label: "Terminal", type: "tool", icon: Terminal, href: "/studio?tool=terminal", shortcut: "8", keywords: "terminal console command shell cli" },
-  { id: "pipeline", label: "Pipeline", type: "tool", icon: Network, href: "/studio?tool=pipeline", shortcut: "9", keywords: "pipeline workflow node graph" },
-  { id: "canvas", label: "Canvas", type: "tool", icon: Sparkles, href: "/studio?tool=canvas", shortcut: "0", keywords: "canvas code generate scratch build" },
-  { id: "clibridge", label: "CLI Bridge", type: "tool", icon: Shell, href: "/studio?tool=clibridge", shortcut: "-", keywords: "cli bridge shell bash ssh" },
+  { id: "color", label: "Color by Number", type: "tool", icon: Palette, href: "/studio?tool=color", shortcut: "4", keywords: "color coloring paint number book" },
   { id: "gallery", label: "Gallery", type: "tool", icon: LayoutGrid, href: "/studio?tool=gallery", shortcut: "8", keywords: "gallery assets library images" },
   { id: "space", label: "Space", type: "tool", icon: Rocket, href: "/studio?tool=space", shortcut: "9", keywords: "space skybox 3d world" },
 ];
@@ -78,7 +69,7 @@ const AGENT_ITEMS: CmdItem[] = Object.values(AGENTS).map((agent) => ({
   label: agent.name,
   type: "agent",
   icon: Bot,
-  href: `/studio?tool=agents&agent=${agent.id}`,
+  href: `/studio?tool=chat&agent=${agent.id}`,
   keywords: `${agent.id} ${agent.name} ${agent.role} ${agent.domains?.join(" ") || ""} ${agent.tag || ""}`.toLowerCase(),
 }));
 
@@ -86,8 +77,8 @@ const ACTION_ITEMS: CmdItem[] = [
   { id: "gen-wallpaper", label: "Generate a wallpaper", type: "action", icon: Wand2, href: "/studio?tool=image&prompt=cyberpunk+wallpaper", keywords: "generate wallpaper background desktop" },
   { id: "gen-logo", label: "Generate a logo", type: "action", icon: Zap, href: "/studio?tool=image&prompt=minimal+logo", keywords: "generate logo brand icon" },
   { id: "gen-beat", label: "Generate a beat", type: "action", icon: Music, href: "/studio?tool=audio&prompt=hip+hop+beat", keywords: "generate beat music song" },
-  { id: "build-landing", label: "Build a landing page", type: "action", icon: Code2, href: "/studio?tool=builder&prompt=landing+page", keywords: "build landing page website" },
-  { id: "open-terminal", label: "Open Terminal", type: "action", icon: Terminal, href: "/studio?tool=terminal", keywords: "open terminal console" },
+  { id: "build-landing", label: "Ask LiTTree to build a page", type: "action", icon: Code2, href: "/studio?tool=chat&prompt=build+landing+page", keywords: "build landing page website app code" },
+  { id: "open-terminal", label: "Ask LiTTree to run a command", type: "action", icon: Terminal, href: "/studio?tool=chat&prompt=run+a+terminal+command", keywords: "open terminal console command shell cli" },
   { id: "play-games", label: "Play games", type: "route", icon: Command, href: "/games", keywords: "play games arcade retro" },
   { id: "admin", label: "Admin Dashboard", type: "route", icon: ShieldCheck, href: "/admin", keywords: "admin dashboard stats" },
 ];
@@ -99,8 +90,8 @@ const GHOSTS: Record<string, string> = {
   "image": "generate a wallpaper",
   "build": "build a landing page...",
   "code": "build a dashboard",
-  "agent": "open the agent builder",
-  "term": "open terminal",
+  "agent": "ask LiTTree Agent...",
+  "term": "ask LiTTree to run...",
   "game": "play retro games",
   "help": "show all commands",
 };
@@ -494,9 +485,9 @@ function HealthPulse({
       }}
     >
       <HeartPulse size={11} style={{ color: T.success }} />
-      <span style={{ color: T.success }}>99.9%</span>
+      <span style={{ color: T.success }}>Live</span>
       <span className="opacity-50 text-[9px] uppercase tracking-wider">
-        UPTIME
+        Studio
       </span>
     </div>
   );

@@ -2,7 +2,7 @@
 
 import { useState, type ComponentType } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { Search, Download, Sparkles, Filter, Star, Users, TrendingUp, Code, Palette, Music, Pencil, BarChart3, Globe, Shield, Zap } from "lucide-react";
+import { Search, Download, Sparkles, Filter, Star, TrendingUp, Code, Palette, Music, Pencil, BarChart3, Globe, Shield, Zap } from "lucide-react";
 
 interface StockAgent {
   id: string;

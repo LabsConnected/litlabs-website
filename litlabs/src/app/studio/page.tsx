@@ -15,10 +15,7 @@ import StudioInspector from "./components/StudioInspector";
 import StudioCommandDock, {
   type DockAction,
 } from "./components/StudioCommandDock";
-import StudioModeSwitcher, {
-  defaultToolForMode,
-  type StudioMode,
-} from "./components/StudioModeSwitcher";
+import type { StudioMode } from "./components/StudioModeSwitcher";
 import { Sparkles, X, Image as ImageIcon, Film, Music, Zap, Coins, Settings } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 
@@ -96,6 +93,17 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
       return <ImageTool />;
   }
 });
+
+const CANONICAL_TOOL: Partial<Record<StudioTool, StudioTool>> = {
+  agents: "chat",
+  builder: "chat",
+  terminal: "chat",
+  clibridge: "chat",
+  pipeline: "chat",
+  canvas: "chat",
+};
+
+const FOCUSED_TOOLS: StudioTool[] = ["chat"];
 
 const MODE_HEADLINE: Record<StudioMode, { title: string; subtitle: string }> = {
   command: {
@@ -179,7 +187,7 @@ function StudioCommandCenter() {
   const { isLoaded, isSignedIn } = useClerkAuth();
 
   // Top-level state
-  const [mode, setMode] = useState<StudioMode>("command");
+  const mode: StudioMode = "command";
   const [activeTool, setActiveTool] = useState<StudioTool>("chat");
   const [selectedModel, setSelectedModel] = useState("adaptive");
   const [search, setSearch] = useState("");
@@ -201,7 +209,8 @@ function StudioCommandCenter() {
   useEffect(() => {
     const toolParam = searchParams.get("tool") as StudioTool | null;
     if (toolParam) {
-      setActiveTool((prev) => (prev === toolParam ? prev : toolParam));
+      const next = CANONICAL_TOOL[toolParam] ?? toolParam;
+      setActiveTool((prev) => (prev === next ? prev : next));
     }
   }, [searchParams]);
 
@@ -210,28 +219,23 @@ function StudioCommandCenter() {
     if (isLoaded && !isSignedIn) router.push("/sign-in?redirect_url=/studio");
   }, [isLoaded, isSignedIn, router]);
 
-  const handleModeChange = (m: StudioMode) => {
-    const tool = defaultToolForMode(m);
-    setMode(m);
-    setActiveTool(tool);
-    router.push(`/studio?tool=${tool}`, { scroll: false });
-  };
-
   const handleToolChange = (t: StudioTool) => {
-    setActiveTool(t);
-    router.push(`/studio?tool=${t}`, { scroll: false });
+    const next = CANONICAL_TOOL[t] ?? t;
+    setActiveTool(next);
+    router.push(`/studio?tool=${next}`, { scroll: false });
   };
 
   const routePromptToTool = (text: string): StudioTool => {
     const t = text.toLowerCase();
+    if (/\b(build|website|web app|app|component|dashboard|landing page|fix code|code|react|nextjs|tailwind)\b/.test(t)) return "chat";
     if (/\b(video|film|clip|movie|reel|animate)\b/.test(t)) return "video";
     if (/\b(audio|music|song|sound|beat|track|voice)\b/.test(t)) return "audio";
     if (/\b(color|colour|colou?ring|palette|sketch)\b/.test(t)) return "color";
-    if (/\b(agent|chat|ask|talk|help|assist)\b/.test(t)) return "agents";
-    if (/\b(terminal|run|bash|shell|command|exec|npm|git)\b/.test(t)) return "terminal";
-    if (/\b(pipeline|flow|automat|workflow|chain)\b/.test(t)) return "pipeline";
+    if (/\b(terminal|run|bash|shell|command|exec|npm|git|cli)\b/.test(t)) return "chat";
+    if (/\b(pipeline|flow|automat|workflow|chain)\b/.test(t)) return "chat";
     if (/\b(gallery|saved|history|past|my images)\b/.test(t)) return "gallery";
-    if (/\b(canvas|draw|paint|sketch|doodle)\b/.test(t)) return "canvas";
+    if (/\b(agent|agents|forge|worker|assistant team)\b/.test(t)) return "chat";
+    if (/\b(chat|ask|talk|help|assist|question)\b/.test(t)) return "chat";
     if (/\b(space|sky|skybox|3d|environment)\b/.test(t)) return "space";
     if (/\b(image|photo|picture|generate|create|make|draw|render|art)\b/.test(t)) return "image";
     return activeTool;
@@ -255,6 +259,7 @@ function StudioCommandCenter() {
 
   const headline = useMemo(() => MODE_HEADLINE[mode], [mode]);
   const quickstart = useMemo(() => MODE_QUICKSTART[mode], [mode]);
+  const focusedTool = FOCUSED_TOOLS.includes(activeTool);
 
   if (!isLoaded) {
     return (
@@ -343,9 +348,9 @@ function StudioCommandCenter() {
         />
 
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* Mode header + switcher — hidden on mobile when chat is active */}
+          {/* Workspace header — hidden for focused tools with their own command surface */}
           <div
-            className={`items-center justify-between gap-3 px-4 sm:px-6 h-14 shrink-0 ${activeTool === "chat" || activeTool === "builder" ? "hidden md:flex" : "flex"}`}
+            className={`items-center justify-between gap-3 px-4 sm:px-6 h-14 shrink-0 ${focusedTool ? "hidden" : "flex"}`}
             style={{
               backgroundColor: T.boxBg + "60",
               borderBottom: `1px solid ${T.borderColor}18`,
@@ -366,29 +371,19 @@ function StudioCommandCenter() {
               </div>
             </div>
             <div className="hidden md:block shrink-0">
-              <StudioModeSwitcher
-                active={mode}
-                onChange={handleModeChange}
-                T={T}
-              />
+              <button
+                onClick={() => handleToolChange("chat")}
+                className="rounded-lg border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em]"
+                style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.accentColor }}
+              >
+                Ask Studio
+              </button>
             </div>
           </div>
 
-          {/* Mobile mode switcher — hidden when chat is active */}
+          {/* Quick starts — hidden for focused tools with their own command surface */}
           <div
-            className={`md:hidden px-3 py-2 items-center gap-2 overflow-x-auto ${activeTool === "chat" || activeTool === "builder" ? "hidden" : "flex"}`}
-            style={{ borderBottom: `1px solid ${T.borderColor}10` }}
-          >
-            <StudioModeSwitcher
-              active={mode}
-              onChange={handleModeChange}
-              T={T}
-            />
-          </div>
-
-          {/* Activity strip — hidden on mobile when chat is active */}
-          <div
-            className={`px-4 sm:px-6 py-2.5 shrink-0 items-center gap-2.5 overflow-x-auto ${activeTool === "chat" || activeTool === "builder" ? "hidden md:flex" : "flex"}`}
+            className={`px-4 sm:px-6 py-2.5 shrink-0 items-center gap-2.5 overflow-x-auto ${focusedTool ? "hidden" : "flex"}`}
             style={{ borderBottom: `1px solid ${T.borderColor}10` }}
           >
             {recentActions.length > 0 ? (
@@ -426,14 +421,14 @@ function StudioCommandCenter() {
 
           {/* Active tool */}
           <div
-            className={activeTool === "chat" || activeTool === "builder" ? "flex-1 min-h-0 overflow-hidden md:pb-0 pb-14" : "flex-1 min-h-0 overflow-auto p-4 sm:p-6 pb-[calc(0.75rem+56px)] md:pb-6"}
+            className={focusedTool ? "flex-1 min-h-0 overflow-hidden md:pb-0 pb-14" : "flex-1 min-h-0 overflow-auto p-4 sm:p-6 pb-[calc(0.75rem+56px)] md:pb-6"}
             style={{ color: T.textColor }}
           >
             <ToolRouter tool={activeTool} />
           </div>
 
-          {/* Bottom command dock — desktop only; hidden when chat/builder is active (they have their own) */}
-          {activeTool !== "chat" && activeTool !== "builder" && (
+          {/* Bottom command dock — only for tools without their own primary input */}
+          {!focusedTool && (
           <div className="hidden md:block">
           <StudioCommandDock
             prompt={prompt}

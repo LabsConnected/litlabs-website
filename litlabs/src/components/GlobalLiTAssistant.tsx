@@ -4,6 +4,7 @@ import { useState, useRef, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useLiTAssistant } from "@/context/LiTAssistantContext";
+import { useLiTVoice } from "@/hooks/useLiTVoice";
 import {
   Bot,
   X,
@@ -15,6 +16,9 @@ import {
   Wand2,
   Loader2,
   ChevronRight,
+  Mic,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 
 export default function GlobalLiTAssistant() {
@@ -27,12 +31,31 @@ export default function GlobalLiTAssistant() {
     sendMessage,
     clearChat,
     clearTasks,
+    setOnNavigate,
+    voiceMode,
+    setVoiceMode,
   } = useLiTAssistant();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    setOnNavigate((href: string) => {
+      router.push(href);
+      setOpen(false);
+    });
+  }, [router, setOnNavigate, setOpen]);
+
+  const onVoiceTranscript = async (text: string) => {
+    setInput(text);
+    await sendMessage(text);
+  };
+
+  const { state: voiceState, isSupported, startListening, stopListening, speak, stopSpeaking } = useLiTVoice({
+    onTranscript: onVoiceTranscript,
+  });
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -43,6 +66,13 @@ export default function GlobalLiTAssistant() {
   useEffect(() => {
     if (open) inputRef.current?.focus();
   }, [open]);
+
+  // Speak the latest assistant reply when voice mode is on
+  useEffect(() => {
+    if (!voiceMode) return;
+    const last = [...messages].reverse().find((m) => m.role === "assistant");
+    if (last) speak(last.content);
+  }, [messages, voiceMode, speak]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -57,6 +87,15 @@ export default function GlobalLiTAssistant() {
   const handleQuickAction = (href: string) => {
     router.push(href);
     setOpen(false);
+  };
+
+  const toggleVoice = () => {
+    if (voiceState === "listening") {
+      stopListening();
+    } else {
+      setVoiceMode(true);
+      startListening();
+    }
   };
 
   const activeTasks = tasks.filter((t) => t.status === "running" || t.status === "pending");
@@ -110,6 +149,29 @@ export default function GlobalLiTAssistant() {
               </div>
             </div>
             <div className="flex items-center gap-1">
+              {isSupported && (
+                <button
+                  onClick={toggleVoice}
+                  className={`p-1.5 rounded-lg transition hover:bg-white/10 ${voiceState === "listening" ? "animate-pulse" : ""}`}
+                  style={{
+                    color: voiceState === "listening" ? "#ff4444" : T.textMuted,
+                  }}
+                  title={voiceState === "listening" ? "Stop listening" : "Voice mode"}
+                >
+                  <Mic size={16} />
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  if (voiceMode) stopSpeaking();
+                  setVoiceMode(!voiceMode);
+                }}
+                className="p-1.5 rounded-lg transition hover:bg-white/10"
+                style={{ color: voiceMode ? T.accentColor : T.textMuted }}
+                title={voiceMode ? "Mute voice replies" : "Speak replies"}
+              >
+                {voiceMode ? <Volume2 size={16} /> : <VolumeX size={16} />}
+              </button>
               <button
                 onClick={() => {
                   clearChat();

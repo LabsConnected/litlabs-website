@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { Layout, Search, Star, TrendingUp, Clock, Sparkles } from "lucide-react";
+import { Layout, Search, TrendingUp, Clock, Sparkles } from "lucide-react";
 
 interface Template {
   id: string;

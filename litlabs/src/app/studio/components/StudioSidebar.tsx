@@ -6,18 +6,11 @@ import {
   Image,
   Film,
   Music,
-  Palette,
   LayoutGrid,
   Bot,
-  Rocket,
   ChevronLeft,
   ChevronRight,
   Sparkles,
-  Terminal,
-  Network,
-  Shell,
-  MessageSquare,
-  Code2,
 } from "lucide-react";
 
 export type StudioTool =
@@ -43,48 +36,35 @@ type ToolItem = {
 };
 
 /* ── Tool groups ─────────────────────────────────────────────────── */
+const CORE_TOOLS: ToolItem[] = [
+  { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1" },
+];
+
 const CREATE_TOOLS: ToolItem[] = [
   { id: "image",  label: "Image",   icon: Image,   shortcut: "1" },
   { id: "video",  label: "Video",   icon: Film,    shortcut: "2" },
   { id: "audio",  label: "Audio",   icon: Music,   shortcut: "3" },
-  { id: "color",  label: "Color",   icon: Palette, shortcut: "4" },
-];
-
-const AI_TOOLS: ToolItem[] = [
-  { id: "chat",     label: "Chat",     icon: MessageSquare, shortcut: "5" },
-  { id: "builder",  label: "Builder",  icon: Code2,       shortcut: "6" },
-  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "7" },
-  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "8" },
-  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "9" },
-  { id: "canvas",    label: "Canvas",    icon: Sparkles, shortcut: "0" },
-  { id: "clibridge", label: "CLI Bridge", icon: Shell,   shortcut: "-" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
   { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "8" },
 ];
 
-const EXTERNAL_TOOLS: ToolItem[] = [
-  { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
-];
-
 /* All tools flat — used for mobile bottom bar */
 const ALL_TOOLS: ToolItem[] = [
+  ...CORE_TOOLS,
   ...CREATE_TOOLS,
-  ...AI_TOOLS,
   ...ORGANIZE_TOOLS,
-  ...EXTERNAL_TOOLS,
 ];
 
 /* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "builder", "image", "agents", "gallery"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "video", "audio", "gallery"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
-  { title: "Create",   tools: CREATE_TOOLS },
-  { title: "AI",       tools: AI_TOOLS },
-  { title: "Organize", tools: ORGANIZE_TOOLS },
-  { title: "External", tools: EXTERNAL_TOOLS },
+  { title: "Agent", tools: CORE_TOOLS },
+  { title: "Media", tools: CREATE_TOOLS },
+  { title: "Library", tools: ORGANIZE_TOOLS },
 ];
 
 /* ── Desktop tool button ─────────────────────────────────────────── */
@@ -314,11 +294,12 @@ function MobileTabBar({
   const primaryTools = ALL_TOOLS.filter((t) => MOBILE_PRIMARY.includes(t.id));
   const secondaryTools = ALL_TOOLS.filter((t) => !MOBILE_PRIMARY.includes(t.id));
   const activeIsSecondary = secondaryTools.some((t) => t.id === activeTool);
+  const hasSecondaryTools = secondaryTools.length > 0;
 
   return (
     <>
       {/* Scrim for secondary drawer */}
-      {drawerOpen && (
+      {drawerOpen && hasSecondaryTools && (
         <div
           className="fixed inset-0 z-40 md:hidden"
           style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
@@ -327,7 +308,7 @@ function MobileTabBar({
       )}
 
       {/* Secondary tools drawer — slides up above tab bar */}
-      {drawerOpen && (
+      {drawerOpen && hasSecondaryTools && (
         <div
           className="fixed bottom-[56px] left-0 right-0 z-50 md:hidden rounded-t-2xl border-t px-3 pt-3 pb-2"
           style={{
@@ -409,28 +390,29 @@ function MobileTabBar({
           );
         })}
 
-        {/* More button */}
-        <button
-          onClick={() => setDrawerOpen((v) => !v)}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-          style={{ color: activeIsSecondary ? T.accentColor : T.textMuted + "80" }}
-        >
-          {activeIsSecondary && (
-            <span
-              className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[2px] rounded-b-full"
-              style={{
-                backgroundColor: T.accentColor,
-                boxShadow: `0 0 8px ${T.accentColor}`,
-              }}
-            />
-          )}
-          <div className="flex gap-[3px] items-center">
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
-          </div>
-          <span className="text-[9px] font-bold">More</span>
-        </button>
+        {hasSecondaryTools && (
+          <button
+            onClick={() => setDrawerOpen((v) => !v)}
+            className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
+            style={{ color: activeIsSecondary ? T.accentColor : T.textMuted + "80" }}
+          >
+            {activeIsSecondary && (
+              <span
+                className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[2px] rounded-b-full"
+                style={{
+                  backgroundColor: T.accentColor,
+                  boxShadow: `0 0 8px ${T.accentColor}`,
+                }}
+              />
+            )}
+            <div className="flex gap-[3px] items-center">
+              <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
+              <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
+              <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
+            </div>
+            <span className="text-[9px] font-bold">More</span>
+          </button>
+        )}
       </div>
     </>
   );
