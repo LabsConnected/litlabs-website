@@ -287,7 +287,7 @@ function StudioCommandCenter() {
 
   return (
     <div
-      className="flex h-dvh min-h-0 flex-col overflow-hidden"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
       style={{
         background: `radial-gradient(circle at top, ${T.accentColor}14, transparent 30%), linear-gradient(180deg, ${T.bgColor} 0%, ${T.boxBg} 100%)`,
         color: T.textColor,

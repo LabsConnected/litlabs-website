@@ -85,7 +85,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             </header>
           )}
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          {!isConsole && !isPublic && (
+          {!isPublic && !isAdmin && (
             <NavbarWrapper />
           )}
           <main className={isConsole ? "h-0 min-h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
