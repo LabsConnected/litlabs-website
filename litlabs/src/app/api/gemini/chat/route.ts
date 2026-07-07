@@ -1,9 +1,10 @@
-import { NextRequest, NextResponse } from "next/server";
+﻿import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
-import { auth } from "@/lib/auth";
+import { auth } from "@clerk/nextjs/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { buildIdentityBlock, extractStructuredFacts, getBrainFacts, getProjectContextForUser, getUserProfile } from "@/lib/brain";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -124,7 +125,21 @@ async function handler(req: NextRequest) {
 
     const uid = userId || "anonymous";
     const memoryContext = await fetchMemories(message, uid);
-    const prompt = buildPrompt(agent, message, history, memoryContext);
+
+    // ── Brain warmup: inject identity + project context + brain facts ──
+    let identityBlock = "";
+    if (uid !== "anonymous") {
+      const [profile, project, brainFacts] = await Promise.all([
+        getUserProfile(uid),
+        getProjectContextForUser(uid),
+        getBrainFacts(uid),
+      ]);
+      identityBlock = buildIdentityBlock(profile, project, brainFacts);
+    }
+
+    const prompt = identityBlock
+      ? `${identityBlock}\n\n${buildPrompt(agent, message, history, memoryContext)}`
+      : buildPrompt(agent, message, history, memoryContext);
 
     if (!stream) {
       const r = await generateText(
@@ -134,6 +149,18 @@ async function handler(req: NextRequest) {
       );
       await logConversation(agent, userId, message, r.text);
       await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
+      // Structured fact extraction (fire-and-forget)
+      if (uid !== "anonymous") {
+        try {
+          const facts = await extractStructuredFacts(message, r.text);
+          for (const f of facts) {
+            const { addBrainFact } = await import("@/lib/brain");
+            await addBrainFact(uid, f.key, f.value, f.category);
+          }
+        } catch {
+          // non-fatal
+        }
+      }
       return NextResponse.json({
         response: r.text,
         provider: r.provider,
@@ -173,6 +200,16 @@ async function handler(req: NextRequest) {
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
             await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
+            // Structured fact extraction (fire-and-forget)
+            try {
+              const facts = await extractStructuredFacts(message, assistantText);
+              const { addBrainFact } = await import("@/lib/brain");
+              for (const f of facts) {
+                await addBrainFact(uid, f.key, f.value, f.category);
+              }
+            } catch {
+              // non-fatal
+            }
           }
         }
       },
@@ -196,3 +233,5 @@ async function handler(req: NextRequest) {
 }
 
 export const POST = withRateLimit(handler, 60, 60);
+
+

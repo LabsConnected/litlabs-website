@@ -5,8 +5,8 @@ export default function SignInPage() {
   return (
     <AuthShell
       mode="sign-in"
-      headline="Welcome back to your AI workspace"
-      subcopy="Continue building agents, workflows, media, and marketplace listings."
+      headline="Welcome back"
+      subcopy="Sign in to continue building inside LiTTree OS."
     >
       <SignIn
         fallbackRedirectUrl="/dashboard"

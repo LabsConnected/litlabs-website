@@ -1,8 +1,9 @@
+﻿import { NextRequest, NextResponse } from "next/server";
 import { Supermemory } from "supermemory";
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText } from "ai";
-import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { addBrainFact, buildIdentityBlock, extractStructuredFacts, getBrainFacts, getProjectContextForUser, getUserProfile } from "@/lib/brain";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -32,21 +33,34 @@ export async function POST(req: NextRequest) {
     const { messages, model = "gemini-flash" } = await req.json();
     const lastMessage = messages[messages.length - 1]?.content || "";
 
-    const memoryResults = await getSupermemory().search.memories({
-      q: lastMessage,
-      containerTag: uid,
-      limit: 8,
-    });
+    // ── Brain warmup: identity + project + facts ──
+    const [profile, project, brainFacts] = uid !== "anonymous"
+      ? await Promise.all([
+          getUserProfile(uid),
+          getProjectContextForUser(uid),
+          getBrainFacts(uid),
+        ])
+      : [null, null, null];
+    const identityBlock = buildIdentityBlock(profile, project, brainFacts);
 
-    const memoryContext = memoryResults.results
+    // ── Semantic memory from Supermemory ──
+    const memoryResults =
+      uid !== "anonymous"
+        ? await getSupermemory().search.memories({ q: lastMessage, containerTag: uid, limit: 8 })
+        : { results: [] };
+
+    const memoryContext = (memoryResults.results || [])
       .map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk)
       .filter(Boolean)
       .join("\n");
 
-    const systemPrompt = `You are a helpful assistant with long-term memory about this user.
-Use the following memories to personalize your responses when relevant.
+    const systemPrompt = `${identityBlock}
 
-${memoryContext ? `Relevant memories:\n${memoryContext}` : "No relevant memories yet."}
+You are a helpful assistant with long-term memory about this user.
+Use the following memories to personalize your responses when relevant.
+${memoryContext ? `
+RELEVANT MEMORIES:
+${memoryContext}` : "\nNo relevant memories yet."}
 
 Be concise, helpful, and natural.`;
 
@@ -60,11 +74,19 @@ Be concise, helpful, and natural.`;
       maxOutputTokens: 2048,
       onFinish: async ({ text }) => {
         try {
-          await getSupermemory().add({
+          const sm = getSupermemory();
+          await sm.add({
             content: `User: ${lastMessage}\nAssistant: ${text}`,
             containerTag: uid,
             metadata: { type: "chat", model },
           });
+          // Async structured fact extraction (fire-and-forget)
+          if (uid !== "anonymous") {
+            const facts = await extractStructuredFacts(lastMessage, text);
+            for (const f of facts) {
+              await addBrainFact(uid, f.key, f.value, f.category);
+            }
+          }
         } catch {
           // non-fatal
         }

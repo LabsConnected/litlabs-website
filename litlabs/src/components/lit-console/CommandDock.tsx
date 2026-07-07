@@ -154,10 +154,14 @@ export default function CommandDock(props: CommandDockProps) {
 
   const MODES = [
     { id: "ask", label: "Ask", placeholder: "Ask LiTTree anything...", color: LC.textMuted },
-    { id: "image", label: "Image", placeholder: "Describe the image you want...", color: "#e879f9" },
-    { id: "build", label: "Build", placeholder: "What do you want to build?", color: LC.accentCyan },
+    { id: "image", label: "Images", placeholder: "Describe the image you want...", color: "#e879f9" },
+    { id: "website", label: "Website", placeholder: "Describe the website you want...", color: "#f472b6" },
     { id: "code", label: "Code", placeholder: "Paste code or describe the bug...", color: LC.accentOrange },
-    { id: "agent", label: "Agent", placeholder: "Describe the agent you want...", color: "#a78bfa" },
+    { id: "audio", label: "Audio", placeholder: "Describe the audio or music you want...", color: "#38bdf8" },
+    { id: "video", label: "Video", placeholder: "Describe the video you want...", color: "#a78bfa" },
+    { id: "flow", label: "Flow", placeholder: "Describe the workflow or automation...", color: "#4ade80" },
+    { id: "research", label: "Research", placeholder: "What do you want to research?", color: "#fbbf24" },
+    { id: "terminal", label: "Terminal", placeholder: "Run a command or ask about the terminal...", color: "#94a3b8" },
     { id: "deploy", label: "Deploy", placeholder: "What should I deploy or run?", color: "#22c55e" },
   ] as const;
   type ModeId = typeof MODES[number]["id"];

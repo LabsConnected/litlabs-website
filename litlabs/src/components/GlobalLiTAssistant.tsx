@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useLiTAssistant } from "@/context/LiTAssistantContext";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
+import LiTVoiceOverlay from "@/components/LiTVoiceOverlay";
 import {
   Bot,
   X,
@@ -17,7 +18,6 @@ import {
   Loader2,
   ChevronRight,
   Mic,
-  MicOff,
   Volume2,
   VolumeX,
 } from "lucide-react";
@@ -403,86 +403,14 @@ export default function GlobalLiTAssistant() {
         </div>
       )}
 
-      {/* Immersive voice mode */}
+      {/* Immersive push-to-talk voice mode */}
       {voiceView && (
-        <div
-          className="fixed inset-0 z-[100] flex flex-col items-center justify-center"
-          style={{ backgroundColor: "rgba(8,8,12,0.98)", backdropFilter: "blur(20px)" }}
-        >
-          <button
-            onClick={closeVoiceView}
-            className="absolute right-5 top-5 rounded-full p-2 transition hover:bg-white/10"
-            style={{ color: T.textMuted }}
-            aria-label="Close voice mode"
-          >
-            <X size={20} />
-          </button>
-
-          <div className="flex flex-col items-center gap-8 px-6 text-center">
-            <div className="relative flex h-40 w-40 items-center justify-center">
-              {/* Animated halo rings */}
-              <span
-                className="absolute inset-0 rounded-full animate-ping opacity-20"
-                style={{ background: `radial-gradient(circle, ${T.accentColor}, transparent 70%)`, animationDuration: "2s" }}
-              />
-              <span
-                className="absolute inset-4 rounded-full animate-pulse opacity-30"
-                style={{ background: `radial-gradient(circle, ${T.accentColor}, transparent 70%)`, animationDuration: "1.5s" }}
-              />
-              <span
-                className="absolute inset-8 rounded-full opacity-40"
-                style={{ background: `radial-gradient(circle, ${T.headerColor}, transparent 70%)` }}
-              />
-              <div
-                className="relative flex h-24 w-24 items-center justify-center rounded-full border shadow-2xl"
-                style={{
-                  background: `linear-gradient(135deg, ${T.accentColor}30, ${T.headerColor}20)`,
-                  borderColor: `${T.accentColor}50`,
-                  boxShadow: `0 0 60px ${T.accentColor}30`,
-                }}
-              >
-                {voiceState === "listening" ? (
-                  <Mic size={36} style={{ color: "#ff4444" }} />
-                ) : voiceState === "speaking" ? (
-                  <Volume2 size={36} style={{ color: T.accentColor }} />
-                ) : (
-                  <Bot size={36} style={{ color: T.accentColor }} />
-                )}
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <div className="text-lg font-black" style={{ color: T.textColor }}>
-                {voiceState === "listening"
-                  ? "Listening…"
-                  : voiceState === "speaking"
-                    ? "LiT is speaking"
-                    : "LiT Voice"}
-              </div>
-              <div className="max-w-xs text-sm" style={{ color: T.textMuted }}>
-                {voiceState === "listening"
-                  ? voiceTranscript || "Speak now."
-                  : voiceState === "speaking"
-                    ? "Ask another question or close to type."
-                    : "Tap the mic and start talking."}
-              </div>
-            </div>
-
-            <div className="flex items-center gap-4">
-              <button
-                onClick={toggleVoice}
-                className="flex h-14 w-14 items-center justify-center rounded-full transition hover:scale-105 active:scale-95"
-                style={{
-                  backgroundColor: voiceState === "listening" ? "#ff4444" : T.accentColor,
-                  color: "#000",
-                  boxShadow: voiceState === "listening" ? "0 0 30px #ff444460" : `0 0 30px ${T.accentColor}50`,
-                }}
-              >
-                {voiceState === "listening" ? <MicOff size={24} /> : <Mic size={24} />}
-              </button>
-            </div>
-          </div>
-        </div>
+        <LiTVoiceOverlay
+          onClose={closeVoiceView}
+          onSend={async (text) => {
+            await sendMessage(text);
+          }}
+        />
       )}
     </>
   );

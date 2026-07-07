@@ -1,10 +1,5 @@
-/**
- * project-context.ts
- * Persistent per-user project context that agents read from.
- * Stored in localStorage (client) and optionally in Supabase (server).
- */
-
-import type { ProjectContext } from "@/lib/agents";
+﻿import type { ProjectContext } from "@/lib/agents";
+import { saveProjectContextForUser, getProjectContextForUser } from "@/lib/brain";
 
 const STORAGE_KEY = "litlabs-project-context";
 
@@ -16,10 +11,6 @@ export const EMPTY_CONTEXT: ProjectContext = {
   repoUrl: "",
   customInstructions: "",
 };
-
-/* ------------------------------------------------------------------ */
-/*  localStorage helpers                                               */
-/* ------------------------------------------------------------------ */
 
 export function loadProjectContext(): ProjectContext {
   if (typeof window === "undefined") return { ...EMPTY_CONTEXT };
@@ -46,12 +37,10 @@ export function clearProjectContext(): void {
   } catch {}
 }
 
-/** Returns true if at least one field is populated */
 export function hasProjectContext(ctx: ProjectContext): boolean {
   return Object.values(ctx).some((v) => typeof v === "string" && v.trim().length > 0);
 }
 
-/** Build a one-line summary for display in the terminal header */
 export function projectContextSummary(ctx: ProjectContext): string {
   if (!hasProjectContext(ctx)) return "No project context set";
   const parts: string[] = [];

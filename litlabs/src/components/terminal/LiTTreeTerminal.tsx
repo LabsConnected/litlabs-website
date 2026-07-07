@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import {
   forwardRef,
@@ -24,14 +24,14 @@ import type {
 
 const AgentSidebar = lazy(() => import("./AgentSidebar"));
 
-/* ─── Types ─────────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Types â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export type LiTTreeTerminalHandle = {
   insertCommand: (cmd: string) => void;
   runCommand: (cmd: string) => void;
 };
 
-/* ─── ANSI → React spans ─────────────────────────────────────────────────── */
+/* â”€â”€â”€ ANSI â†’ React spans â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 const ANSI_COLOR_MAP: Record<string, string> = {
   "30": "#1a1a2e",
@@ -102,9 +102,9 @@ function ansiToSpans(text: string): React.ReactNode[] {
   return parts.length > 0 ? parts : [<span key={0}>{text}</span>];
 }
 
-/* ─── Demo command handlers ──────────────────────────────────────────────── */
+/* â”€â”€â”€ Demo command handlers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
-/* ─── Demo Terminal ──────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Demo Terminal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 interface DemoTerminalProps {
   outputLines: Array<{ id: number; content: string; isInput?: boolean }>;
@@ -205,7 +205,7 @@ function DemoTerminal({
   );
 }
 
-/* ─── Real xterm Terminal ────────────────────────────────────────────────── */
+/* â”€â”€â”€ Real xterm Terminal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 interface RealTerminalProps {
   containerRef: React.RefObject<HTMLDivElement | null>;
@@ -251,7 +251,7 @@ function RealTerminal({
           style={{ backgroundColor: TERMINAL_THEME.ui.bg + "aa" }}
         >
           <p className="text-sm" style={{ color: TERMINAL_THEME.ui.textMuted }}>
-            Connecting to terminal…
+            Connecting to terminalâ€¦
           </p>
         </div>
       ) : null}
@@ -259,7 +259,7 @@ function RealTerminal({
   );
 }
 
-/* ─── Tab helpers ─────────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Tab helpers â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 let tabCounter = 1;
 function makeTab(type = "demo"): TerminalTab {
@@ -272,7 +272,7 @@ function makeTab(type = "demo"): TerminalTab {
   };
 }
 
-/* ─── Main Component ─────────────────────────────────────────────────────── */
+/* â”€â”€â”€ Main Component â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
 
 export const LiTTreeTerminal = forwardRef<
   LiTTreeTerminalHandle,
@@ -289,7 +289,7 @@ export const LiTTreeTerminal = forwardRef<
   },
   ref,
 ) {
-  /* ── Tabs ─────────────────────────────────────────────────────────────── */
+  /* â”€â”€ Tabs â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const [tabs, setTabs] = useState<TerminalTab[]>([
     {
       id: "tab-1",
@@ -318,7 +318,7 @@ export const LiTTreeTerminal = forwardRef<
     [activeTab],
   );
 
-  /* ── Fullscreen ───────────────────────────────────────────────────────── */
+  /* â”€â”€ Fullscreen â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const [isFullscreen, setIsFullscreen] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -338,7 +338,7 @@ export const LiTTreeTerminal = forwardRef<
     return () => document.removeEventListener("fullscreenchange", handler);
   }, []);
 
-  /* ── Agent Sidebar ────────────────────────────────────────────────────── */
+  /* â”€â”€ Agent Sidebar â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
   const handleAgentAction = useCallback(
@@ -353,7 +353,7 @@ export const LiTTreeTerminal = forwardRef<
     handleRunCommand(msg);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Demo mode state ──────────────────────────────────────────────────── */
+  /* â”€â”€ Demo mode state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const [outputLines, setOutputLines] = useState<
     Array<{ id: number; content: string; isInput?: boolean }>
   >(() => [
@@ -437,7 +437,7 @@ export const LiTTreeTerminal = forwardRef<
     [inputValue, history, handleRunCommand],
   );
 
-  /* ── Real mode state ──────────────────────────────────────────────────── */
+  /* â”€â”€ Real mode state â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
     mode === "real" ? "connecting" : "connected",
   );
@@ -445,6 +445,29 @@ export const LiTTreeTerminal = forwardRef<
   const xtermRef = useRef<import("@xterm/xterm").Terminal | null>(null);
   const socketRef = useRef<import("socket.io-client").Socket | null>(null);
   const { user } = useUser();
+
+  // ── Brain warmup on session start ──
+  const [brainGreeting, setBrainGreeting] = useState<string>("");
+
+  useEffect(() => {
+    if (!user?.id || mode !== "demo") return;
+    let cancelled = false;
+    fetch("/api/brain/warmup")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (cancelled || !data?.greeting) return;
+        setBrainGreeting(data.greeting);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, [user?.id, mode]);
+
+  useEffect(() => {
+    if (!brainGreeting || mode !== "demo") return;
+    addLine(`${ANSI.cyan}${ANSI.bold}${brainGreeting}${ANSI.reset}`);
+  }, [brainGreeting, addLine, mode]);
 
   const updateStatus = useCallback(
     (s: ConnectionStatus) => {
@@ -535,7 +558,7 @@ export const LiTTreeTerminal = forwardRef<
     };
   }, [mode]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Initial commands (demo) ─────────────────────────────────────────── */
+  /* â”€â”€ Initial commands (demo) â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useEffect(() => {
     if (mode !== "demo" || !initialCommands?.length) return;
     const timer = setTimeout(() => {
@@ -544,7 +567,7 @@ export const LiTTreeTerminal = forwardRef<
     return () => clearTimeout(timer);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  /* ── Imperative handle ───────────────────────────────────────────────── */
+  /* â”€â”€ Imperative handle â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   useImperativeHandle(ref, () => ({
     insertCommand: (cmd: string) => {
       if (mode === "demo") {
@@ -565,7 +588,7 @@ export const LiTTreeTerminal = forwardRef<
     },
   }));
 
-  /* ── Copy / Clear ────────────────────────────────────────────────────── */
+  /* â”€â”€ Copy / Clear â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   const handleClear = useCallback(() => {
     if (mode === "demo") {
       setOutputLines([]);
@@ -595,7 +618,7 @@ export const LiTTreeTerminal = forwardRef<
     updateStatus("connecting");
   }, [updateStatus]);
 
-  /* ── Render ──────────────────────────────────────────────────────────── */
+  /* â”€â”€ Render â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€ */
   return (
     <div
       ref={containerRef}
@@ -661,3 +684,4 @@ export const LiTTreeTerminal = forwardRef<
     </div>
   );
 });
+
