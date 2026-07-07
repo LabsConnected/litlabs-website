@@ -13,6 +13,7 @@ import {
 } from "@/lib/avatars";
 import {
   Check,
+  X,
   ArrowRight,
   Sparkles,
   ShieldCheck,
@@ -56,6 +57,8 @@ const TIER_PACKAGES: {
   tier: string;
   popular: boolean;
   features: string[];
+  included: string[];
+  notIncluded: string[];
 }[] = [
   {
     id: "tier-free",
@@ -66,6 +69,8 @@ const TIER_PACKAGES: {
     tier: "free",
     popular: false,
     features: ["500 credits/mo", "3 agent slots", "All games", "LiT Chat"],
+    included: ["500 LBC/mo", "3 agent slots", "All games", "LiT Chat", "Community support"],
+    notIncluded: ["Priority support", "Flow Studio", "Terminal", "Daily bonus", "Sell agents", "API access", "Early access"],
   },
   {
     id: "tier-basic",
@@ -77,6 +82,8 @@ const TIER_PACKAGES: {
     tier: "basic",
     popular: false,
     features: ["1,500 credits/mo", "5 agent slots", "All games", "LiT Chat", "Priority support"],
+    included: ["1,500 LBC/mo", "5 agent slots", "All games", "LiT Chat", "Priority email support"],
+    notIncluded: ["Flow Studio", "Terminal", "Daily bonus", "Sell agents", "API access", "Early access"],
   },
   {
     id: "tier-creator",
@@ -87,6 +94,8 @@ const TIER_PACKAGES: {
     tier: "creator",
     popular: true,
     features: ["5K credits/mo", "10 agent slots", "Flow Studio", "Terminal", "Daily bonus +500"],
+    included: ["5,000 LBC/mo", "10 agent slots", "All games", "LiT Chat", "Flow Studio", "Terminal", "Daily bonus +500"],
+    notIncluded: ["Sell agents", "API access", "Early access"],
   },
   {
     id: "tier-elite",
@@ -98,6 +107,8 @@ const TIER_PACKAGES: {
     tier: "elite",
     popular: false,
     features: ["Unlimited credits", "Unlimited agents", "Sell agents", "API access", "Daily bonus +2000", "Early access"],
+    included: ["Unlimited LBC/mo", "Unlimited agent slots", "All games", "LiT Chat", "Flow Studio", "Terminal", "Daily bonus +2000", "Sell agents", "API access", "Early access"],
+    notIncluded: [],
   },
 ];
 
@@ -863,15 +874,16 @@ function MarketplaceInner() {
               </button>
             </div>
 
-            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(3,1fr)" }}>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
               {TIER_PACKAGES.map(tier => {
                 const isCurrent = currentPlan === tier.tier;
                 const tc = tier.tier === "elite" ? { accent: "#a3f546", glow: "#a3f54640", bg: "#a3f5460a" }
                          : tier.tier === "creator" ? { accent: "#a78bfa", glow: "#a78bfa40", bg: "#a78bfa0a" }
+                         : tier.tier === "basic" ? { accent: "#fbbf24", glow: "#fbbf2440", bg: "#fbbf240a" }
                          : { accent: "#22d3ee", glow: "#22d3ee30", bg: "#22d3ee08" };
                 const missingPrice = !tier.priceId && tier.price > 0;
                 return (
-                  <div key={tier.id} className="relative flex flex-col p-6 rounded-2xl transition-all"
+                  <div key={tier.id} className="relative flex flex-col p-5 rounded-2xl transition-all"
                     style={{
                       background: isCurrent ? tc.bg : "#101018",
                       border: `2px solid ${isCurrent ? tc.accent : tier.popular ? tc.accent + "60" : "#1e1e2e"}`,
@@ -885,21 +897,21 @@ function MarketplaceInner() {
                     )}
                     {tier.popular && !isCurrent && (
                       <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black" style={{ background: tc.accent, color: "#08080c" }}>
-                        ⭐ Most Popular
+                        ⭐ Best Value
                       </div>
                     )}
 
-                    <div className="text-[11px] font-black uppercase tracking-[0.15em] mb-3" style={{ color: tc.accent }}>{tier.label}</div>
+                    <div className="text-[11px] font-black uppercase tracking-[0.15em] mb-2" style={{ color: tc.accent }}>{tier.label}</div>
                     <div className="mb-1" style={{ color: "#f0f0f6" }}>
                       {tier.price === 0
-                        ? <span className="text-4xl font-black">Free</span>
-                        : <><span className="text-4xl font-black">${tier.price}</span><span className="text-sm opacity-60">/mo</span></>}
+                        ? <span className="text-3xl font-black">Free</span>
+                        : <><span className="text-3xl font-black">${tier.price}</span><span className="text-sm opacity-60">/mo</span></>}
                     </div>
-                    <div className="text-xs mb-5" style={{ color: "#6b7280" }}>{tier.coins.toLocaleString()} LBC included/mo</div>
+                    <div className="text-xs mb-4" style={{ color: "#6b7280" }}>{tier.coins.toLocaleString()} LBC included/mo</div>
 
-                    <ul className="flex-1 space-y-2 mb-6">
-                      {tier.features.map(f => (
-                        <li key={f} className="flex items-center gap-2 text-xs" style={{ color: "#9ca3af" }}>
+                    <ul className="flex-1 space-y-1.5 mb-4">
+                      {tier.included.map(f => (
+                        <li key={f} className="flex items-center gap-2 text-[11px]" style={{ color: "#9ca3af" }}>
                           <Check size={12} style={{ color: tc.accent }} />{f}
                         </li>
                       ))}
@@ -921,6 +933,66 @@ function MarketplaceInner() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* ── COMPARISON TABLE ── */}
+          <div className="mb-10 rounded-2xl overflow-hidden" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
+            <div className="px-5 py-4 border-b" style={{ borderColor: "#1e1e2e", background: "#0c0c14" }}>
+              <div className="text-xs font-black uppercase tracking-[0.15em]" style={{ color: "#22d3ee" }}>What is included in every pack</div>
+              <p className="text-[11px] mt-1" style={{ color: "#6b7280" }}>Compare every feature across all tiers.</p>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-[11px]">
+                <thead>
+                  <tr style={{ borderBottom: "1px solid #1e1e2e" }}>
+                    <th className="px-4 py-3 text-left font-black" style={{ color: "#9ca3af", width: "40%" }}>Feature</th>
+                    {TIER_PACKAGES.map(tier => {
+                      const tc = tier.tier === "elite" ? { accent: "#a3f546" }
+                               : tier.tier === "creator" ? { accent: "#a78bfa" }
+                               : tier.tier === "basic" ? { accent: "#fbbf24" }
+                               : { accent: "#22d3ee" };
+                      return (
+                        <th key={tier.id} className="px-3 py-3 text-center font-black" style={{ color: tc.accent }}>
+                          {tier.label}
+                        </th>
+                      );
+                    })}
+                  </tr>
+                </thead>
+                <tbody>
+                  {[
+                    { label: "Monthly LBC credits", value: (t: typeof TIER_PACKAGES[0]) => t.coins.toLocaleString() + (t.tier === "elite" ? "+" : "") },
+                    { label: "Agent slots", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" ? "Unlimited" : t.tier === "creator" ? "10" : t.tier === "basic" ? "5" : "3" },
+                    { label: "All games", value: (t: typeof TIER_PACKAGES[0]) => true },
+                    { label: "LiT Chat", value: (t: typeof TIER_PACKAGES[0]) => true },
+                    { label: "Priority support", value: (t: typeof TIER_PACKAGES[0]) => t.tier !== "free" },
+                    { label: "Flow Studio", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" || t.tier === "elite" },
+                    { label: "Terminal", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" || t.tier === "elite" },
+                    { label: "Daily bonus", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" ? "+500" : t.tier === "elite" ? "+2000" : "—" },
+                    { label: "Sell agents", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
+                    { label: "API access", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
+                    { label: "Early access", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
+                  ].map((row, idx) => (
+                    <tr key={row.label} style={{ borderBottom: idx === 10 ? "none" : "1px solid #1e1e2e", background: idx % 2 === 0 ? "transparent" : "#0c0c14" }}>
+                      <td className="px-4 py-3 font-bold" style={{ color: "#e5e7eb" }}>{row.label}</td>
+                      {TIER_PACKAGES.map(tier => {
+                        const val = row.value(tier);
+                        const has = typeof val === "boolean" ? val : val !== "—";
+                        const tc = tier.tier === "elite" ? { accent: "#a3f546" }
+                                 : tier.tier === "creator" ? { accent: "#a78bfa" }
+                                 : tier.tier === "basic" ? { accent: "#fbbf24" }
+                                 : { accent: "#22d3ee" };
+                        return (
+                          <td key={tier.id} className="px-3 py-3 text-center font-bold" style={{ color: has ? tc.accent : "#4b5563" }}>
+                            {typeof val === "string" ? val : has ? <Check size={12} className="inline" /> : <span>—</span>}
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </div>
 
