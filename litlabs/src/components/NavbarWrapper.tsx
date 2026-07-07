@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Bell, Search, Settings, Home, Gamepad2, Store, Bot, Sparkles, User, Images } from "lucide-react";
+import { Bell, Search, Settings, Home, Gamepad2, Store, Bot, User, Images } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -56,7 +56,6 @@ export default function NavbarWrapper() {
       <nav className="hidden lg:flex items-center gap-1">
         {[
           { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Bot },
-          { href: "/studio?tool=image", label: "Create", icon: Sparkles },
           { href: "/gallery", label: "Gallery", icon: Images },
           { href: "/marketplace", label: "Marketplace", icon: Store },
           { href: "/games/cloud", label: "Games", icon: Gamepad2 },

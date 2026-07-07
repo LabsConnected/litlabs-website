@@ -197,6 +197,8 @@ function StudioCommandCenter() {
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
 
   // Top-level state
   const mode: StudioMode = "command";
@@ -271,7 +273,7 @@ function StudioCommandCenter() {
   const quickstart = useMemo(() => MODE_QUICKSTART[mode], [mode]);
   const focusedTool = FOCUSED_TOOLS.includes(activeTool);
 
-  if (!isLoaded) {
+  if (!mounted || !isLoaded) {
     return (
       <div
         className="min-h-screen grid place-items-center"
