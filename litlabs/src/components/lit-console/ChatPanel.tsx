@@ -10,9 +10,16 @@ import {
   Copy,
   Check,
   Play,
+  Image,
+  Globe,
+  Wrench,
+  Cpu,
+  Sparkles,
+  ArrowRight,
+  Clock,
 } from "lucide-react";
 import StarterActions from "./StarterActions";
-import { LC } from "./lit-console-theme";
+import { LC, LC_SHADOW } from "./lit-console-theme";
 
 export interface Message {
   id: string;
@@ -219,35 +226,142 @@ export default function ChatPanel({
       >
         <div className="mx-auto max-w-3xl px-4 py-6">
         {isEmpty ? (
-          <div className="flex h-full min-h-[60vh] flex-col items-center justify-center">
-            <div className="flex w-full max-w-3xl flex-col items-start gap-3 px-4">
-              <div className="flex w-full gap-3">
-                <div
-                  className="mt-1 shrink-0 rounded-full p-1.5"
-                  style={{
-                    backgroundColor: LC.bgSecondary,
-                    color: LC.accentCyan,
-                  }}
-                >
-                  <Bot size={14} />
+          <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
+            <div className="w-full max-w-4xl space-y-8">
+              {/* Agent status header */}
+              <div className="text-center space-y-3">
+                <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
+                  <div
+                    className="absolute inset-0 rounded-full blur-2xl"
+                    style={{ background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)` }}
+                  />
+                  <div
+                    className="relative flex h-16 w-16 items-center justify-center rounded-2xl border"
+                    style={{ backgroundColor: LC.bgPanel, borderColor: LC.border, boxShadow: LC_SHADOW.glowCyan }}
+                  >
+                    <Bot size={32} style={{ color: LC.accentCyan }} />
+                  </div>
                 </div>
-                <div
-                  className="rounded-2xl rounded-tl-none px-4 py-3 text-sm"
-                  style={{
-                    backgroundColor: LC.bgSecondary,
-                    border: `1px solid ${LC.border}`,
-                    color: LC.text,
-                  }}
-                >
-                  Hi, I&apos;m LiTTree. What are we making today?
+                <div>
+                  <h2 className="text-2xl font-black tracking-tight" style={{ color: LC.text }}>
+                    LiTTree Agent
+                  </h2>
+                  <p className="text-sm font-medium" style={{ color: LC.textMuted }}>
+                    Creative Director + Builder + Operator
+                  </p>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>
+                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.success}40`, color: LC.success }}>
+                    <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: LC.success }} />
+                    Online
+                  </span>
+                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.accentCyan}30`, color: LC.accentCyan }}>
+                    Image generation ready
+                  </span>
+                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.accentOrange}30`, color: LC.accentOrange }}>
+                    Code tools ready
+                  </span>
                 </div>
               </div>
+
+              {/* Mission cards */}
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                {[
+                  {
+                    id: "image",
+                    title: "Image Studio",
+                    desc: "Create product shots, brand art, covers, thumbnails.",
+                    prompt: "Generate a cyberpunk album cover with neon skyline and rain",
+                    icon: Image,
+                    color: "#e879f9",
+                  },
+                  {
+                    id: "build",
+                    title: "App Builder",
+                    desc: "Build websites, dashboards, components, and flows.",
+                    prompt: "Build a landing page for my AI agent workspace",
+                    icon: Globe,
+                    color: LC.accentCyan,
+                  },
+                  {
+                    id: "code",
+                    title: "Code Fixer",
+                    desc: "Debug, review, refactor, and ship production code.",
+                    prompt: "Fix my React component that is not re-rendering",
+                    icon: Wrench,
+                    color: LC.accentOrange,
+                  },
+                  {
+                    id: "agent",
+                    title: "Agent Forge",
+                    desc: "Create custom agents, run workflows, and orchestrate tasks.",
+                    prompt: "Create an agent that reviews my code",
+                    icon: Cpu,
+                    color: "#a78bfa",
+                  },
+                ].map((m) => {
+                  const Icon = m.icon;
+                  return (
+                    <button
+                      key={m.id}
+                      onClick={() => onSend(m.prompt)}
+                      className="group relative flex flex-col items-start gap-3 rounded-2xl border p-5 text-left transition-all hover:scale-[1.02]"
+                      style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+                    >
+                      <div
+                        className="flex h-10 w-10 items-center justify-center rounded-xl border transition-colors"
+                        style={{ backgroundColor: `${m.color}10`, borderColor: `${m.color}30`, color: m.color }}
+                      >
+                        <Icon size={20} />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="text-sm font-black" style={{ color: LC.text }}>{m.title}</div>
+                        <div className="text-[11px] leading-relaxed" style={{ color: LC.textMuted }}>{m.desc}</div>
+                      </div>
+                      <div className="mt-auto flex w-full items-center justify-between pt-3">
+                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>
+                          Try it
+                        </span>
+                        <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" style={{ color: m.color }} />
+                      </div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Recent work strip */}
+              <div className="rounded-2xl border p-5" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
+                <div className="mb-4 flex items-center justify-between">
+                  <div className="text-xs font-black uppercase tracking-wider" style={{ color: LC.text }}>Recent work</div>
+                  <div className="text-[10px] font-bold" style={{ color: LC.textDim }}>3 categories</div>
+                </div>
+                <div className="grid gap-3 sm:grid-cols-3">
+                  {[
+                    { label: "Images", status: "No recent images yet", icon: Image, color: "#e879f9" },
+                    { label: "Builds", status: "No builds yet", icon: Globe, color: LC.accentCyan },
+                    { label: "Workflows", status: "No saved workflows yet", icon: Sparkles, color: "#a78bfa" },
+                  ].map((item) => {
+                    const Icon = item.icon;
+                    return (
+                      <div key={item.label} className="flex items-center gap-3 rounded-xl border p-3" style={{ backgroundColor: LC.bgSecondary, borderColor: LC.borderSubtle }}>
+                        <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: `${item.color}10`, color: item.color }}>
+                          <Icon size={14} />
+                        </div>
+                        <div>
+                          <div className="text-[11px] font-bold" style={{ color: LC.text }}>{item.label}</div>
+                          <div className="text-[10px]" style={{ color: LC.textDim }}>{item.status}</div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Quick prompt chips */}
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                <StarterActions onSelect={onSend} />
+              </div>
             </div>
-            <p className="mt-6 mb-4 max-w-xl text-center text-sm leading-relaxed" style={{ color: LC.textMuted }}>
-              One command box for images, apps, code, content, agents, and deploys.
-              Ask me directly, or start with a quick action.
-            </p>
-            <StarterActions onSelect={onSend} />
           </div>
         ) : (
           messages.map((m) => (

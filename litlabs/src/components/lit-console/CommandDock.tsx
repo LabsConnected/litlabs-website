@@ -149,6 +149,17 @@ export default function CommandDock(props: CommandDockProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
 
+  const MODES = [
+    { id: "ask", label: "Ask", placeholder: "Ask LiTTree anything...", color: LC.textMuted },
+    { id: "image", label: "Image", placeholder: "Describe the image you want...", color: "#e879f9" },
+    { id: "build", label: "Build", placeholder: "What do you want to build?", color: LC.accentCyan },
+    { id: "code", label: "Code", placeholder: "Paste code or describe the bug...", color: LC.accentOrange },
+    { id: "agent", label: "Agent", placeholder: "Describe the agent you want...", color: "#a78bfa" },
+    { id: "deploy", label: "Deploy", placeholder: "What should I deploy or run?", color: "#22c55e" },
+  ] as const;
+  type ModeId = typeof MODES[number]["id"];
+  const [mode, setMode] = useState<ModeId>("ask");
+
   useEffect(() => {
     const el = textareaRef.current;
     if (!el) return;
@@ -205,6 +216,27 @@ export default function CommandDock(props: CommandDockProps) {
       style={{ backgroundColor: LC.bg }}
     >
       <div className="mx-auto max-w-3xl">
+        {/* Mode chips */}
+        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+          {MODES.map((m) => {
+            const active = m.id === mode;
+            return (
+              <button
+                key={m.id}
+                onClick={() => setMode(m.id)}
+                className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-all"
+                style={{
+                  backgroundColor: active ? `${m.color}20` : "transparent",
+                  color: active ? m.color : LC.textDim,
+                  border: `1px solid ${active ? `${m.color}40` : LC.border}`,
+                }}
+              >
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+
         {/* Input row */}
         <div
           className="flex min-h-[56px] items-end gap-2 rounded-2xl border px-4 py-3"
@@ -215,7 +247,7 @@ export default function CommandDock(props: CommandDockProps) {
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Message LiT..."
+            placeholder={MODES.find((m) => m.id === mode)?.placeholder || "Message LiT..."}
             className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-0.5 text-sm outline-none"
             style={{ color: LC.text }}
             rows={1}

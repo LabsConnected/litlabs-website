@@ -8,6 +8,10 @@ import {
   ChevronLeft,
   ChevronRight,
   Sparkles,
+  Image,
+  Globe,
+  Code,
+  Music,
 } from "lucide-react";
 
 export type StudioTool =
@@ -37,17 +41,25 @@ const CORE_TOOLS: ToolItem[] = [
   { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1" },
 ];
 
-const ORGANIZE_TOOLS: ToolItem[] = [
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "2" },
+const CREATE_TOOLS: ToolItem[] = [
+  { id: "image", label: "Image", icon: Image, shortcut: "2" },
+  { id: "builder", label: "Website", icon: Globe, shortcut: "3" },
+  { id: "terminal", label: "Code", icon: Code, shortcut: "4" },
+  { id: "audio", label: "Audio", icon: Music, shortcut: "5" },
 ];
 
-const ALL_TOOLS: ToolItem[] = [...CORE_TOOLS, ...ORGANIZE_TOOLS];
+const ORGANIZE_TOOLS: ToolItem[] = [
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "6" },
+];
 
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "gallery"];
+const ALL_TOOLS: ToolItem[] = [...CORE_TOOLS, ...CREATE_TOOLS, ...ORGANIZE_TOOLS];
+
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "builder", "audio", "gallery"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
   { title: "Agent", tools: CORE_TOOLS },
+  { title: "Create", tools: CREATE_TOOLS },
   { title: "Library", tools: ORGANIZE_TOOLS },
 ];
 
