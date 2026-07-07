@@ -3,9 +3,6 @@
 import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import {
-  Image,
-  Film,
-  Music,
   LayoutGrid,
   Bot,
   ChevronLeft,
@@ -31,7 +28,7 @@ export type StudioTool =
 type ToolItem = {
   id: StudioTool;
   label: string;
-  icon: typeof Image;
+  icon: typeof Bot;
   shortcut: string;
 };
 
@@ -40,30 +37,17 @@ const CORE_TOOLS: ToolItem[] = [
   { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1" },
 ];
 
-const CREATE_TOOLS: ToolItem[] = [
-  { id: "image",  label: "Image",   icon: Image,   shortcut: "1" },
-  { id: "video",  label: "Video",   icon: Film,    shortcut: "2" },
-  { id: "audio",  label: "Audio",   icon: Music,   shortcut: "3" },
-];
-
 const ORGANIZE_TOOLS: ToolItem[] = [
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "8" },
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "2" },
 ];
 
-/* All tools flat — used for mobile bottom bar */
-const ALL_TOOLS: ToolItem[] = [
-  ...CORE_TOOLS,
-  ...CREATE_TOOLS,
-  ...ORGANIZE_TOOLS,
-];
+const ALL_TOOLS: ToolItem[] = [...CORE_TOOLS, ...ORGANIZE_TOOLS];
 
-/* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "video", "audio", "gallery"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "gallery"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
   { title: "Agent", tools: CORE_TOOLS },
-  { title: "Media", tools: CREATE_TOOLS },
   { title: "Library", tools: ORGANIZE_TOOLS },
 ];
 
