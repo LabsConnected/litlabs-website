@@ -63,7 +63,7 @@ export const APPS = [
     label: "Games",
     icon: Gamepad2,
     color: "#8b5cf6",
-    href: "/games",
+    href: "/games/cloud",
   },
   {
     id: "watch",

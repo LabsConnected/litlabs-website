@@ -329,7 +329,7 @@ export function CenterStage({
                   label: "Code Agent",
                   icon: Zap,
                   color: "#ff9ff3",
-                  href: "/studio?tool=agents",
+                  href: "/studio?tool=chat",
                 },
               ]}
             />
@@ -345,7 +345,7 @@ export function CenterStage({
             <div className="space-y-2">
               {[
                 { label: "Image #42", href: "/gallery" },
-                { label: "Agent Forge", href: "/studio?tool=agents" },
+                { label: "LiTTree Agent", href: "/studio?tool=chat" },
                 { label: "Music Project", href: "/dashboard?app=music" },
               ].map((item) => (
                 <Link
@@ -541,9 +541,9 @@ export function CenterStage({
       );
     case "tools": {
       const TOOL_ROUTES: Record<string, string> = {
-        "Prompt Vault": "/studio?tool=agents",
+        "Prompt Vault": "/studio?tool=chat",
         "Asset Locker": "/studio?tool=gallery",
-        "Quick Notes": "/studio?tool=agents",
+        "Quick Notes": "/studio?tool=chat",
         "Batch Gen": "/studio?tool=image",
       };
       return (

@@ -379,8 +379,8 @@ export default function DashboardContent() {
 
   const quickLinks = [
     {
-      href: "/studio?tool=agents",
-      label: "Agent Chat",
+      href: "/studio?tool=chat",
+      label: "LiTTree Agent",
       icon: Bot,
       desc: "Talk to any AI agent",
     },
@@ -397,8 +397,8 @@ export default function DashboardContent() {
       desc: "Create AI music",
     },
     {
-      href: "/studio?tool=terminal",
-      label: "Terminal",
+      href: "/studio?tool=chat",
+      label: "Command Tools",
       icon: Terminal,
       desc: "Agent dev console",
     },

@@ -214,10 +214,14 @@ export default function CLIBridgeTool() {
       addLine("output", "  /build <prompt>    Build an app or component");
       addLine("output", "  /fix <prompt>      Fix or improve code");
       addLine("output", "  /agent <name>      Run a specialist agent");
+      addLine("output", "  /marketplace       Browse the marketplace");
+      addLine("output", "  /games             Play games");
+      addLine("output", "  /gallery           View your gallery");
       addLine("output", "  /status            Show system status");
       addLine("output", "  /deploy            Deploy the latest site");
       addLine("output", "  /clear             Clear terminal");
       addLine("output", "  /disconnect        End session");
+      addLine("output", "  <anything else>    Ask LiT in plain English");
       return;
     }
 
@@ -240,6 +244,24 @@ export default function CLIBridgeTool() {
       return;
     }
 
+    if (lower === "/marketplace" || lower === "marketplace") {
+      addLine("system", "🛒 Opening Marketplace...");
+      router.push("/marketplace", { scroll: false });
+      return;
+    }
+
+    if (lower === "/games" || lower === "games") {
+      addLine("system", "🎮 Opening Games...");
+      router.push("/games/cloud", { scroll: false });
+      return;
+    }
+
+    if (lower === "/gallery" || lower === "gallery") {
+      addLine("system", "🖼️ Opening Gallery...");
+      router.push("/gallery", { scroll: false });
+      return;
+    }
+
     if (lower.startsWith("/deploy") || lower.startsWith("deploy")) {
       addLine("system", "🚀 Starting production deployment...");
       setTimeout(() => addLine("output", "Build cache ready."), 600);
@@ -254,13 +276,13 @@ export default function CLIBridgeTool() {
         return;
       }
       addLine("system", `🔨 Opening Builder: ${args}`);
-      router.push(`/studio?tool=builder&prompt=${encodeURIComponent(args)}`, { scroll: false });
+      router.push(`/studio?tool=chat&prompt=${encodeURIComponent(args)}`, { scroll: false });
       return;
     }
 
     if (lower.startsWith("/fix") || lower.startsWith("fix")) {
       addLine("system", `🛠️ Opening Canvas to fix: ${args || "current page"}`);
-      router.push(`/studio?tool=canvas&prompt=${encodeURIComponent(args || "fix and improve the current page")}`, { scroll: false });
+      router.push(`/studio?tool=chat&prompt=${encodeURIComponent(args || "fix and improve the current page")}`, { scroll: false });
       return;
     }
 
@@ -342,8 +364,26 @@ export default function CLIBridgeTool() {
       return;
     }
 
-    addLine("error", `Unknown command: ${command.split(" ")[0]}`);
-    addLine("output", "Type /help for available commands.");
+    // Fallback: treat unknown input as a natural-language request to LiT
+    addLine("system", `🤖 Asking LiT about "${command}"...`);
+    try {
+      const res = await fetch("/api/gemini/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          message: command,
+          model: selectedTool.id === "hermes" ? "claude-3.5-sonnet" : "adaptive",
+          stream: false,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Request failed");
+      const reply = data.response || data.text || data.message || "No response";
+      addLine("output", reply);
+    } catch (e) {
+      addLine("error", `Unknown command: ${command.split(" ")[0]}`);
+      addLine("output", "Type /help for available commands, or just ask LiT in plain English.");
+    }
   }, [addLine, disconnect, router, selectedTool.id]);
 
   const sendInput = useCallback(async () => {

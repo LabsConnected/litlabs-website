@@ -280,8 +280,8 @@ export default function AgentsTerminalTool() {
             addSystemLine("Usage: /build <prompt>");
             return true;
           }
-          addSystemLine(`Opening Builder with prompt: ${args}`);
-          router.push(`/studio?tool=builder&prompt=${encodeURIComponent(args)}`);
+          addSystemLine(`Opening LiTTree Agent with prompt: ${args}`);
+          router.push(`/studio?tool=chat&prompt=${encodeURIComponent(args)}`);
           return true;
         }
         case "agent": {

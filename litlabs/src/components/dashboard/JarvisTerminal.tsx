@@ -679,7 +679,7 @@ export default function JarvisTerminal() {
         case "code":
           addLog({ type: "system", text: "Opening Code Agent..." });
           window.open(
-            `/studio?tool=agents${arg ? "&prompt=" + encodeURIComponent(arg) : ""}`,
+            `/studio?tool=chat${arg ? "&prompt=" + encodeURIComponent(arg) : ""}`,
             "_blank",
           );
           addLog({ type: "success", text: "Code Agent opened in new tab." });

@@ -238,7 +238,7 @@ export default function GlobalLiTAssistant() {
                 </p>
                 <div className="flex flex-wrap justify-center gap-2">
                   {[
-                    { label: "Build app", icon: Wand2, href: "/studio?tool=builder" },
+                    { label: "Build app", icon: Wand2, href: "/studio?tool=chat" },
                     { label: "Generate image", icon: ImageIcon, href: "/studio?tool=image" },
                     { label: "Open chat", icon: Terminal, href: "/studio?tool=chat" },
                   ].map((a) => (

@@ -127,7 +127,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Video", href: "/studio?tool=video", icon: Video },
       { label: "Music", href: "/studio?tool=audio", icon: Music },
       { label: "Build with LiTTree", href: "/studio?tool=chat", icon: Code2 },
-      { label: "Color by Number", href: "/color", icon: Paintbrush },
+      { label: "Color by Number", href: "/studio?tool=color", icon: Paintbrush },
       { label: "Agent Skills", href: "/studio?tool=chat", icon: Bot },
       { label: "Gallery", href: "/gallery", icon: Library },
     ],
