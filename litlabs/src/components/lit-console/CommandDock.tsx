@@ -113,7 +113,7 @@ function Dropdown({
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 mb-2 max-h-60 w-52 overflow-y-auto rounded-lg border py-1 shadow-xl"
+      className="absolute bottom-full left-0 z-50 mb-2 max-h-60 w-56 overflow-y-auto rounded-lg border py-1 shadow-2xl"
       style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -210,10 +210,10 @@ export default function CommandDock(props: CommandDockProps) {
 
   return (
     <div
-      className="w-full shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-3"
+      className="relative z-30 w-full shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-3"
       style={{ backgroundColor: LC.bg }}
     >
-      <div className="mx-auto max-w-3xl">
+      <div className="relative mx-auto max-w-3xl">
         {/* Mode chips */}
         <div className="mb-2 flex flex-wrap items-center gap-1.5">
           {MODES.map((m) => {
