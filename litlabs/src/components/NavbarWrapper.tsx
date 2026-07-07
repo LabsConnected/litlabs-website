@@ -11,11 +11,6 @@ const NavAuth = dynamic(
   { ssr: false },
 );
 
-const ClerkUserButton = dynamic(
-  () => import("@clerk/nextjs").then((m) => ({ default: m.UserButton })),
-  { ssr: false },
-);
-
 export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
   const [scrolled, setScrolled] = useState(false);
@@ -100,17 +95,6 @@ export default function NavbarWrapper() {
         >
           <Settings size={18} />
         </Link>
-        <div className="pl-1">
-          <ClerkUserButton
-            afterSignOutUrl="/"
-            appearance={{
-              elements: {
-                avatarBox: "w-7 h-7",
-                userButtonPopoverCard: { zIndex: 9999 },
-              },
-            }}
-          />
-        </div>
         <NavAuth linkColor={T.accentColor} />
       </div>
     </header>
