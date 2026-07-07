@@ -329,31 +329,33 @@ export default function ChatPanel({
                 })}
               </div>
 
-              {/* Recent work strip */}
+              {/* Mission Queue */}
               <div className="rounded-2xl border p-5" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
                 <div className="mb-4 flex items-center justify-between">
-                  <div className="text-xs font-black uppercase tracking-wider" style={{ color: LC.text }}>Recent work</div>
-                  <div className="text-[10px] font-bold" style={{ color: LC.textDim }}>3 categories</div>
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-2 w-2 rounded-full" style={{ backgroundColor: LC.success }} />
+                    <div className="text-xs font-black uppercase tracking-wider" style={{ color: LC.text }}>Mission Queue</div>
+                  </div>
+                  <div className="text-[10px] font-bold" style={{ color: LC.textDim }}>0 active</div>
                 </div>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  {[
-                    { label: "Images", status: "No recent images yet", icon: Image, color: "#e879f9" },
-                    { label: "Builds", status: "No builds yet", icon: Globe, color: LC.accentCyan },
-                    { label: "Workflows", status: "No saved workflows yet", icon: Sparkles, color: "#a78bfa" },
-                  ].map((item) => {
-                    const Icon = item.icon;
-                    return (
-                      <div key={item.label} className="flex items-center gap-3 rounded-xl border p-3" style={{ backgroundColor: LC.bgSecondary, borderColor: LC.borderSubtle }}>
-                        <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ backgroundColor: `${item.color}10`, color: item.color }}>
-                          <Icon size={14} />
-                        </div>
-                        <div>
-                          <div className="text-[11px] font-bold" style={{ color: LC.text }}>{item.label}</div>
-                          <div className="text-[10px]" style={{ color: LC.textDim }}>{item.status}</div>
-                        </div>
+                <div className="rounded-xl border p-4 text-center" style={{ backgroundColor: LC.bgSecondary, borderColor: LC.borderSubtle }}>
+                  <div className="text-sm font-bold" style={{ color: LC.text }}>LiTTree Agent is ready</div>
+                  <div className="mx-auto mt-2 max-w-md text-[11px]" style={{ color: LC.textMuted }}>
+                    No active missions. Start one from a card above or type a command below.
+                  </div>
+                </div>
+                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+                  {["Inspect", "Plan", "Execute", "Review", "Save"].map((step, i) => (
+                    <div key={step} className="flex items-center gap-1.5">
+                      <div
+                        className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black"
+                        style={{ backgroundColor: LC.borderSubtle, color: LC.textDim }}
+                      >
+                        {i + 1}
                       </div>
-                    );
-                  })}
+                      <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>{step}</div>
+                    </div>
+                  ))}
                 </div>
               </div>
 
