@@ -28,6 +28,7 @@ import {
   ExternalLink,
   Terminal,
   ShieldCheck,
+  Bot,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -47,6 +48,7 @@ const BYOK_KEYS = [
 
 const TABS = [
   { id: "profile", label: "Profile", icon: User },
+  { id: "agent", label: "Agent", icon: Bot },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workspace", label: "Workspace", icon: LayoutGrid },
   { id: "cli", label: "CLI Tools", icon: Terminal },
@@ -90,6 +92,24 @@ export default function SettingsPage() {
     return loaded;
   });
   const [keysSaved, setKeysSaved] = useState(false);
+
+  /* Agent customization state — seeded from localStorage */
+  const [agentTone, setAgentTone] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-agent-tone") : null) || "direct",
+  );
+  const [agentLength, setAgentLength] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-agent-length") : null) || "medium",
+  );
+  const [agentAutoSpeak, setAgentAutoSpeak] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem("litlabs-agent-autospeak") === "true",
+  );
+  const [agentDefaultMode, setAgentDefaultMode] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-agent-default-mode") : null) || "ask",
+  );
+  const [agentInstructions, setAgentInstructions] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-agent-instructions") : null) || "",
+  );
+  const [agentSaved, setAgentSaved] = useState(false);
 
   /* Notifications state — seeded from localStorage */
   const [discordWebhook, setDiscordWebhook] = useState(() =>
@@ -219,6 +239,17 @@ export default function SettingsPage() {
     setNotifSaved(true);
     setTimeout(() => setNotifSaved(false), 2000);
   }, [discordWebhook, alexaEnabled, emailDigest]);
+
+  const saveAgent = useCallback(() => {
+    if (typeof window === "undefined") return;
+    localStorage.setItem("litlabs-agent-tone", agentTone);
+    localStorage.setItem("litlabs-agent-length", agentLength);
+    localStorage.setItem("litlabs-agent-autospeak", String(agentAutoSpeak));
+    localStorage.setItem("litlabs-agent-default-mode", agentDefaultMode);
+    localStorage.setItem("litlabs-agent-instructions", agentInstructions);
+    setAgentSaved(true);
+    setTimeout(() => setAgentSaved(false), 2000);
+  }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions]);
 
   const saveWorkspace = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -563,6 +594,149 @@ export default function SettingsPage() {
                     {profileError}
                   </span>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Agent Tab */}
+        {activeTab === "agent" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="mb-5">
+                <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
+                  Agent Configuration
+                </h2>
+                <p className="text-xs mt-1 opacity-70" style={{ color: T.textMuted }}>
+                  Customize how LiTTree talks, thinks, and behaves in Studio and the floating assistant.
+                </p>
+              </div>
+
+              {/* Tone */}
+              <div className="space-y-2">
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                  Tone & Personality
+                </label>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { id: "direct", label: "Direct / Dev", desc: "Sharp, technical, no fluff" },
+                    { id: "friendly", label: "Friendly", desc: "Warm but still useful" },
+                    { id: "creative", label: "Creative", desc: "Idea-forward and visual" },
+                    { id: "concise", label: "Concise", desc: "Shortest possible answers" },
+                  ].map((t) => (
+                    <button
+                      key={t.id}
+                      onClick={() => setAgentTone(t.id)}
+                      className="rounded-xl border p-3 text-left transition-all"
+                      style={{
+                        backgroundColor: agentTone === t.id ? `${T.accentColor}15` : `${T.boxBg}40`,
+                        borderColor: agentTone === t.id ? `${T.accentColor}50` : `${T.borderColor}30`,
+                      }}
+                    >
+                      <div className="text-sm font-bold" style={{ color: agentTone === t.id ? T.accentColor : T.textColor }}>
+                        {t.label}
+                      </div>
+                      <div className="text-[10px] mt-0.5" style={{ color: T.textMuted }}>
+                        {t.desc}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Response length */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Response Length
+                </label>
+                <div className="flex gap-2">
+                  {["short", "medium", "long"].map((len) => (
+                    <button
+                      key={len}
+                      onClick={() => setAgentLength(len)}
+                      className="flex-1 rounded-lg border py-2 text-xs font-bold transition-all capitalize"
+                      style={{
+                        backgroundColor: agentLength === len ? `${T.accentColor}20` : `${T.boxBg}40`,
+                        borderColor: agentLength === len ? `${T.accentColor}50` : `${T.borderColor}30`,
+                        color: agentLength === len ? T.accentColor : T.textColor,
+                      }}
+                    >
+                      {len}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Default mode */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Default Studio Mode
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {["ask", "image", "build", "code", "agent", "deploy"].map((m) => (
+                    <button
+                      key={m}
+                      onClick={() => setAgentDefaultMode(m)}
+                      className="rounded-full px-3 py-1 text-[10px] font-bold uppercase transition-all"
+                      style={{
+                        backgroundColor: agentDefaultMode === m ? `${T.accentColor}20` : `${T.boxBg}40`,
+                        border: `1px solid ${agentDefaultMode === m ? `${T.accentColor}50` : `${T.borderColor}30`}`,
+                        color: agentDefaultMode === m ? T.accentColor : T.textColor,
+                      }}
+                    >
+                      {m}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Auto-speak */}
+              <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: `${T.borderColor}20` }}>
+                <div>
+                  <label className="text-sm font-bold block" style={{ color: T.textColor }}>
+                    Auto-speak replies
+                  </label>
+                  <span className="text-[10px]" style={{ color: T.textMuted }}>
+                    LiT reads assistant messages aloud in voice mode.
+                  </span>
+                </div>
+                <button
+                  onClick={() => setAgentAutoSpeak((v) => !v)}
+                  className="relative h-6 w-11 rounded-full transition-colors"
+                  style={{ backgroundColor: agentAutoSpeak ? T.accentColor : `${T.borderColor}50` }}
+                >
+                  <span
+                    className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+                    style={{ left: agentAutoSpeak ? "calc(100% - 1.375rem)" : "0.125rem" }}
+                  />
+                </button>
+              </div>
+
+              {/* Custom instructions */}
+              <div className="mt-5 pt-5 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                  Custom System Instructions
+                </label>
+                <textarea
+                  value={agentInstructions}
+                  onChange={(e) => setAgentInstructions(e.target.value)}
+                  placeholder="e.g. Always include code examples. Never use emojis. Prefer Next.js patterns."
+                  rows={4}
+                  className="w-full px-3 py-2 rounded-lg border text-sm outline-none resize-none"
+                  style={inputStyle}
+                />
+              </div>
+
+              {/* Save */}
+              <div className="mt-5 flex flex-wrap items-center gap-3">
+                <button
+                  onClick={saveAgent}
+                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all hover:opacity-90"
+                  style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                >
+                  {agentSaved ? <Check size={14} /> : <Save size={14} />}
+                  {agentSaved ? "Saved" : "Save Agent Config"}
+                </button>
               </div>
             </div>
           </div>

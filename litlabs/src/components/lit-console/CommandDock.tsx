@@ -5,7 +5,7 @@ import {
   Send,
   Paperclip,
   Wrench,
-  Play,
+  Mic,
   ChevronUp,
   Cpu,
   Terminal,
@@ -30,7 +30,6 @@ interface CommandDockProps {
   value: string;
   onChange: (v: string) => void;
   onSend: () => void;
-  onRun?: () => void;
   litTip?: LiTTipResult | null;
   agent: string;
   model: string;
@@ -44,6 +43,7 @@ interface CommandDockProps {
   onGenerateMedia?: () => void;
   onDeploy?: () => void;
   onSaveWorkflow?: () => void;
+  onVoice?: () => void;
 }
 
 const AGENTS = [
@@ -67,7 +67,6 @@ const MODELS = [
 ];
 
 const TOOLS = [
-  { id: "run", label: "Run", icon: Play, onClick: "onRun" },
   {
     id: "terminal",
     label: "Terminal",
@@ -128,7 +127,6 @@ export default function CommandDock(props: CommandDockProps) {
     value,
     onChange,
     onSend,
-    onRun,
     litTip,
     agent,
     model,
@@ -142,6 +140,7 @@ export default function CommandDock(props: CommandDockProps) {
     onGenerateMedia,
     onDeploy,
     onSaveWorkflow,
+    onVoice,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -179,7 +178,6 @@ export default function CommandDock(props: CommandDockProps) {
 
   const handleTool = (id: string) => {
     setToolsOpen(false);
-    if (id === "run") onRun?.();
     if (id === "terminal") onToggleTerminal?.();
     if (id === "file") onCreateFile?.();
     if (id === "build") onBuild?.();
@@ -269,14 +267,14 @@ export default function CommandDock(props: CommandDockProps) {
             >
               <Wrench size={18} />
             </button>
-            {onRun && (
+            {onVoice && (
               <button
-                onClick={onRun}
-                className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors"
-                style={{ backgroundColor: `${LC.accentOrange}20`, color: LC.accentOrange }}
-                title="Run plan"
+                onClick={onVoice}
+                className="flex items-center gap-1 rounded-lg px-2.5 py-2 text-xs font-semibold transition-colors hover:bg-white/5"
+                style={{ color: LC.accentCyan }}
+                title="Live voice conversation"
               >
-                <Play size={15} fill="currentColor" />
+                <Mic size={18} />
               </button>
             )}
             <button
@@ -395,7 +393,7 @@ export default function CommandDock(props: CommandDockProps) {
         )}
 
         {/* Bottom row: subtle agent/model pickers + tools */}
-        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-0.5">
+        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
           <div className="relative">
             <button
               onClick={() => setAgentOpen((v) => !v)}

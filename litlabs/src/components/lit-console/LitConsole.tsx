@@ -14,6 +14,7 @@ import {
 import { LC } from "./lit-console-theme";
 import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
+import { useLiTVoice } from "@/hooks/useLiTVoice";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 
@@ -58,6 +59,14 @@ export default function LitConsole() {
     };
   } | null>(null);
   const termRef = useRef<LiTTreeTerminalHandle>(null);
+
+  const { startListening, stopListening, isSupported: voiceSupported } = useLiTVoice({
+    onTranscript: (text: string) => {
+      if (!text.trim()) return;
+      setInput(text);
+      handleSend(text);
+    },
+  });
 
   // Debounced LiT-Tip scan as the user types
   useEffect(() => {
@@ -483,7 +492,6 @@ export default function LitConsole() {
         value={input}
         onChange={setInput}
         onSend={() => handleSend()}
-        onRun={!loading ? handleRun : undefined}
         litTip={litTip}
         agent={activeAgent}
         model={activeModel}
@@ -500,6 +508,7 @@ export default function LitConsole() {
         onGenerateMedia={() => handleSend("Generate an image")}
         onDeploy={() => handleSend("Run: npx vercel --prod to deploy the current project")}
         onSaveWorkflow={() => handleSend("Save this workflow as a reusable automation")}
+        onVoice={voiceSupported ? () => startListening() : undefined}
       />
 
       {/* Pending command approval toast */}
