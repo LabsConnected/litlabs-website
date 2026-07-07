@@ -3,12 +3,9 @@
 import React, { useState, useMemo, useRef, useEffect } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useProfile } from "@/context/ProfileContext";
 import ModelPicker from "@/components/ModelPicker";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import dynamic from "next/dynamic";
 import { AGENTS } from "@/lib/agents";
 import {
   Activity,
@@ -35,13 +32,6 @@ import {
   Command,
   ArrowRight,
 } from "lucide-react";
-
-import type { UserProfile } from "@/context/ProfileContext";
-
-const ClerkUserButton = dynamic(
-  () => import("@clerk/nextjs").then((m) => ({ default: m.UserButton })),
-  { ssr: false },
-);
 
 type CmdItem = {
   id: string;
@@ -138,8 +128,6 @@ export default function StudioTopBar({
   const inputRef = useRef<HTMLInputElement>(null);
   const wrapperRef = useRef<HTMLDivElement>(null);
   const { balance, isLoading: walletLoading } = useWallet();
-  const { isSignedIn } = useClerkAuth();
-  const { profile } = useProfile();
   const [notifOpen, setNotifOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [highlighted, setHighlighted] = useState(0);
@@ -429,19 +417,6 @@ export default function StudioTopBar({
       >
         <Settings size={14} />
       </Link>
-      <div className="pl-0.5">
-        <ClerkUserButton
-          afterSignOutUrl="/"
-          appearance={{
-            elements: {
-              avatarBox: "w-6 h-6",
-              userButtonPopoverCard: { zIndex: 9999 },
-            },
-          }}
-        />
-      </div>
-      {!isSignedIn && <ProfileChip isSignedIn={isSignedIn} profile={profile} T={T} />}
-
       {onInspectorToggle && (
         <button
           onClick={onInspectorToggle}
@@ -489,64 +464,6 @@ function HealthPulse({
       <span className="opacity-50 text-[9px] uppercase tracking-wider">
         Studio
       </span>
-    </div>
-  );
-}
-
-/* ── Profile chip ─────────────────────────────────────────────── */
-function ProfileChip({
-  isSignedIn,
-  profile,
-  T,
-}: {
-  isSignedIn: boolean;
-  profile: UserProfile | null;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const name = profile?.displayName || profile?.username || "User";
-  const initial = name.slice(0, 1).toUpperCase();
-  return (
-    <div
-      className="flex items-center gap-2 rounded-lg border pl-1 pr-2.5 py-0.5"
-      style={{
-        backgroundColor: T.bgColor + "60",
-        borderColor: T.borderColor + "20",
-      }}
-    >
-      {profile?.avatarUrl ? (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={profile.avatarUrl}
-          alt={name}
-          className="w-5 h-5 rounded-md object-cover"
-        />
-      ) : (
-        <div
-          className="w-5 h-5 rounded-md flex items-center justify-center text-[9px] font-black"
-          style={{
-            background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`,
-            color: "#fff",
-          }}
-        >
-          {initial}
-        </div>
-      )}
-      <div className="hidden sm:flex flex-col leading-none">
-        <span className="text-[10px] font-bold" style={{ color: T.textColor }}>
-          {isSignedIn ? name : "Guest"}
-        </span>
-        <span
-          className="text-[8px] uppercase tracking-wider mt-0.5"
-          style={{ color: T.textMuted }}
-        >
-          {isSignedIn ? "Pro" : "Sign in"}
-        </span>
-      </div>
-      <ShieldCheck
-        size={10}
-        className="hidden sm:block"
-        style={{ color: T.success, opacity: 0.7 }}
-      />
     </div>
   );
 }
