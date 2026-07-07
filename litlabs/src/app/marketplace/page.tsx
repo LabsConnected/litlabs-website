@@ -51,6 +51,7 @@ const TIER_PACKAGES: {
   coins: number;
   price: number;
   priceId: string;
+  productId?: string;
   label: string;
   tier: string;
   popular: boolean;
@@ -81,6 +82,7 @@ const TIER_PACKAGES: {
     coins: 15000,
     price: 39,
     priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
+    productId: "prod_UoIJ3gU5CzKIWn",
     label: "Elite",
     tier: "elite",
     popular: false,

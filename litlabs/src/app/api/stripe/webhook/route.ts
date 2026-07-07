@@ -6,6 +6,25 @@ import {
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
 
+// Map Stripe product IDs to plan tiers. Add more as you create them.
+const PRODUCT_TO_PLAN: Record<string, string> = {
+  prod_UoIJ3gU5CzKIWn: "elite",
+};
+
+function planFromSubscription(sub: Stripe.Subscription): string {
+  const item = sub.items?.data?.[0];
+  const productId =
+    typeof item?.price?.product === "string"
+      ? item.price.product
+      : item?.price?.product?.id;
+  if (productId && PRODUCT_TO_PLAN[productId]) {
+    return PRODUCT_TO_PLAN[productId];
+  }
+  const nickname = item?.price?.nickname;
+  if (nickname) return nickname.toLowerCase();
+  return "pro";
+}
+
 async function creditCoinPack(
   clerkId: string,
   coinAmount: number,
@@ -123,7 +142,7 @@ export async function POST(req: NextRequest) {
                   ? sub.customer
                   : sub.customer?.id,
               stripe_subscription_id: sub.id,
-              plan: sub.items?.data?.[0]?.price?.nickname || "pro",
+              plan: planFromSubscription(sub),
               status: sub.status,
               current_period_start: sub.items?.data?.[0]?.current_period_start
                 ? new Date(sub.items.data[0].current_period_start * 1000).toISOString()

@@ -921,7 +921,7 @@ export default function SettingsPage() {
                   {[
                     { href: "/studio", label: "Open Studio", desc: "Build agents, media, and workflows." },
                     { href: "/marketplace", label: "Open Marketplace", desc: "Discover installs, templates, and assets." },
-                    { href: "/games", label: "Open Games", desc: "Browse entertainment and relax tools." },
+                    { href: "/games/cloud", label: "Open Games", desc: "Browse entertainment and relax tools." },
                     { href: "/gallery", label: "Open Gallery", desc: "Review recent creations and saved work." },
                     { href: "/admin", label: "Open Admin", desc: "Inspect live telemetry and site health." },
                   ].map((item) => (

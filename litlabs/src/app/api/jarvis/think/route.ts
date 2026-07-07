@@ -50,17 +50,17 @@ export async function POST(req: NextRequest) {
           "- /studio?tool=chat — Main AI chat console (current page / canonical product route)\n" +
           "- /studio — Create: generate images, music, video, audio, and 3D skyboxes\n" +
           "- /marketplace — Browse and install AI agents, subscribe to tiers (Starter/Creator/Elite)\n" +
-          "- /agents — Agent hub: see all installed agents and their status\n" +
+          "- /agents — Redirects to LiTTree Agent in Studio\n" +
           "- /dashboard — Analytics dashboard with stats and social agent\n" +
           "- /gallery — Community showcase of generated images and content\n" +
           "- /social — Social feed: posts, follows, community interaction\n" +
-          "- /games — Cloud gaming hub\n" +
+          "- /games/cloud — Cloud gaming hub\n" +
           "- /wallet — Manage LiTBit Coins (LBC) balance and transactions\n" +
           "- /settings — Profile and account settings\n" +
           "- /profile — User profile page\n" +
           "- /onboarding — New user setup wizard\n" +
           "- /docs — Documentation and guides\n" +
-          "- /builder — AI builder for creating custom agents (redirects to /studio?tool=builder)\n" +
+          "- /builder — Redirects to LiTTree Agent in Studio\n" +
           "- /code — Code editor and development workspace\n" +
           "- /flow — Workflow builder for multi-agent orchestration (redirects to /studio?tool=flow)\n" +
           "\n" +

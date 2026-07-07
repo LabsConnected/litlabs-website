@@ -79,7 +79,7 @@ const ACTION_ITEMS: CmdItem[] = [
   { id: "gen-beat", label: "Generate a beat", type: "action", icon: Music, href: "/studio?tool=audio&prompt=hip+hop+beat", keywords: "generate beat music song" },
   { id: "build-landing", label: "Ask LiTTree to build a page", type: "action", icon: Code2, href: "/studio?tool=chat&prompt=build+landing+page", keywords: "build landing page website app code" },
   { id: "open-terminal", label: "Ask LiTTree to run a command", type: "action", icon: Terminal, href: "/studio?tool=chat&prompt=run+a+terminal+command", keywords: "open terminal console command shell cli" },
-  { id: "play-games", label: "Play games", type: "route", icon: Command, href: "/games", keywords: "play games arcade retro" },
+  { id: "play-games", label: "Play games", type: "route", icon: Command, href: "/games/cloud", keywords: "play games arcade retro" },
   { id: "admin", label: "Admin Dashboard", type: "route", icon: ShieldCheck, href: "/admin", keywords: "admin dashboard stats" },
 ];
 

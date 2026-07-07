@@ -46,20 +46,14 @@ export function actionFromIntent(
     }
   }
 
-  // Builder
-  if (intent.route.path.startsWith("/studio?tool=builder")) {
-    const buildKeywords = ["build", "create", "make", "app", "website", "landing page", "component"];
-    if (buildKeywords.some((k) => lower.includes(k))) {
-      return { type: "build_app", prompt: text };
-    }
+  const agentKeywords = ["create agent", "make agent", "agent dna", "custom agent"];
+  if (intent.route.path.startsWith("/studio?tool=chat") && agentKeywords.some((k) => lower.includes(k))) {
+    return { type: "create_agent", prompt: text };
   }
 
-  // Agent
-  if (intent.route.path.startsWith("/studio?tool=agents")) {
-    const agentKeywords = ["create", "make", "agent"];
-    if (agentKeywords.some((k) => lower.includes(k))) {
-      return { type: "create_agent", prompt: text };
-    }
+  const buildKeywords = ["build", "create", "make", "app", "website", "landing page", "component"];
+  if (intent.route.path.startsWith("/studio?tool=chat") && buildKeywords.some((k) => lower.includes(k))) {
+    return { type: "build_app", prompt: text };
   }
 
   return { type: "navigate", path: intent.route.path };
@@ -115,7 +109,7 @@ export async function executeAction(action: LiTAction): Promise<LiTActionResult>
     case "build_app": {
       return {
         ok: true,
-        message: "Opening Builder to start your app.",
+        message: "Opening LiTTree Agent to start your app.",
         action,
       };
     }
@@ -123,7 +117,7 @@ export async function executeAction(action: LiTAction): Promise<LiTActionResult>
     case "create_agent": {
       return {
         ok: true,
-        message: "Opening the Agent builder.",
+        message: "Opening LiTTree Agent to create your agent.",
         action,
       };
     }
@@ -140,9 +134,9 @@ export function actionMessage(action: LiTAction): string {
     case "generate_audio":
       return "Opening the Audio Studio...";
     case "build_app":
-      return "Opening Builder...";
+      return "Opening LiTTree Agent...";
     case "create_agent":
-      return "Opening Agent builder...";
+      return "Opening LiTTree Agent...";
     case "navigate":
       return "Opening...";
     default:

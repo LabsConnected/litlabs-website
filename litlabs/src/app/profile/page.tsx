@@ -39,7 +39,7 @@ const PLATFORM_LINKS = [
   { href: "/marketplace", icon: Store, label: "Marketplace", desc: "Browse & install agents", color: "#f472b6" },
   { href: "/gallery", icon: ImageIcon, label: "Gallery", desc: "Community showcase", color: "#fb923c" },
   { href: "/social", icon: Users, label: "Social", desc: "Posts & community", color: "#34d399" },
-  { href: "/games", icon: Gamepad2, label: "Games", desc: "Cloud gaming hub", color: "#fbbf24" },
+  { href: "/games/cloud", icon: Gamepad2, label: "Games", desc: "Cloud gaming hub", color: "#fbbf24" },
   { href: "/dashboard", icon: TrendingUp, label: "Dashboard", desc: "Analytics & stats", color: "#60a5fa" },
   { href: "/settings", icon: Settings, label: "Settings", desc: "Profile & preferences", color: "#9ca3af" },
 ];
