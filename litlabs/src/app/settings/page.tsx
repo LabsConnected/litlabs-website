@@ -112,6 +112,21 @@ export default function SettingsPage() {
   );
   const [agentSaved, setAgentSaved] = useState(false);
 
+  /* Voice state — seeded from localStorage and browser API */
+  const [voiceName, setVoiceName] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-voice-name") : null) || "",
+  );
+  const [voiceRate, setVoiceRate] = useState(
+    () => (typeof window !== "undefined" ? parseFloat(localStorage.getItem("litlabs-voice-rate") || "1.05") : 1.05),
+  );
+  const [voicePitch, setVoicePitch] = useState(
+    () => (typeof window !== "undefined" ? parseFloat(localStorage.getItem("litlabs-voice-pitch") || "1.0") : 1.0),
+  );
+  const [voiceContinuous, setVoiceContinuous] = useState(
+    () => typeof window !== "undefined" && localStorage.getItem("litlabs-voice-continuous") === "true",
+  );
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+
   /* Notifications state — seeded from localStorage */
   const [discordWebhook, setDiscordWebhook] = useState(() =>
     typeof window === "undefined"
@@ -178,6 +193,17 @@ export default function SettingsPage() {
       })
       .catch(() => {});
   }, [isSignedIn]);
+
+  /* Load available speech synthesis voices */
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const loadVoices = () => setVoices(window.speechSynthesis.getVoices());
+    loadVoices();
+    window.speechSynthesis.onvoiceschanged = loadVoices;
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
 
   const saveProfile = useCallback(async () => {
     setProfileSaved(false);
@@ -248,9 +274,13 @@ export default function SettingsPage() {
     localStorage.setItem("litlabs-agent-autospeak", String(agentAutoSpeak));
     localStorage.setItem("litlabs-agent-default-mode", agentDefaultMode);
     localStorage.setItem("litlabs-agent-instructions", agentInstructions);
+    localStorage.setItem("litlabs-voice-name", voiceName);
+    localStorage.setItem("litlabs-voice-rate", String(voiceRate));
+    localStorage.setItem("litlabs-voice-pitch", String(voicePitch));
+    localStorage.setItem("litlabs-voice-continuous", String(voiceContinuous));
     setAgentSaved(true);
     setTimeout(() => setAgentSaved(false), 2000);
-  }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions]);
+  }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions, voiceName, voiceRate, voicePitch, voiceContinuous]);
 
   const saveWorkspace = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -700,26 +730,115 @@ export default function SettingsPage() {
                 </div>
               </div>
 
-              {/* Auto-speak */}
-              <div className="mt-5 pt-5 border-t flex items-center justify-between" style={{ borderColor: `${T.borderColor}20` }}>
-                <div>
-                  <label className="text-sm font-bold block" style={{ color: T.textColor }}>
-                    Auto-speak replies
-                  </label>
-                  <span className="text-[10px]" style={{ color: T.textMuted }}>
-                    LiT reads assistant messages aloud in voice mode.
-                  </span>
+              {/* Voice */}
+              <div className="mt-5 pt-5 border-t space-y-4" style={{ borderColor: `${T.borderColor}20` }}>
+                <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block" style={{ color: T.textMuted }}>
+                  Voice
+                </label>
+
+                {/* Auto-speak */}
+                <div className="flex items-center justify-between p-3 rounded-lg border" style={inputStyle}>
+                  <div>
+                    <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                      Auto-speak replies
+                    </div>
+                    <div className="text-[10px] opacity-70" style={{ color: T.textMuted }}>
+                      LiT reads assistant messages aloud in voice mode.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setAgentAutoSpeak((v) => !v)}
+                    className="relative h-6 w-11 rounded-full transition-colors"
+                    style={{ backgroundColor: agentAutoSpeak ? T.accentColor : `${T.borderColor}50` }}
+                  >
+                    <span
+                      className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+                      style={{ left: agentAutoSpeak ? "calc(100% - 1.375rem)" : "0.125rem" }}
+                    />
+                  </button>
                 </div>
-                <button
-                  onClick={() => setAgentAutoSpeak((v) => !v)}
-                  className="relative h-6 w-11 rounded-full transition-colors"
-                  style={{ backgroundColor: agentAutoSpeak ? T.accentColor : `${T.borderColor}50` }}
-                >
-                  <span
-                    className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
-                    style={{ left: agentAutoSpeak ? "calc(100% - 1.375rem)" : "0.125rem" }}
+
+                {/* Voice selection */}
+                <div>
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                    Synthesis voice
+                  </label>
+                  <select
+                    value={voiceName}
+                    onChange={(e) => setVoiceName(e.target.value)}
+                    className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
+                    style={inputStyle}
+                  >
+                    <option value="">System default</option>
+                    {voices.map((v) => (
+                      <option key={v.name} value={v.name}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Rate */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                      Rate
+                    </label>
+                    <span className="text-xs font-mono" style={{ color: T.textColor }}>{voiceRate.toFixed(2)}x</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={voiceRate}
+                    onChange={(e) => setVoiceRate(parseFloat(e.target.value))}
+                    className="w-full accent-current"
+                    style={{ accentColor: T.accentColor }}
                   />
-                </button>
+                </div>
+
+                {/* Pitch */}
+                <div>
+                  <div className="flex items-center justify-between mb-2">
+                    <label className="text-[10px] font-mono uppercase tracking-wider opacity-70" style={{ color: T.textMuted }}>
+                      Pitch
+                    </label>
+                    <span className="text-xs font-mono" style={{ color: T.textColor }}>{voicePitch.toFixed(2)}</span>
+                  </div>
+                  <input
+                    type="range"
+                    min={0.5}
+                    max={2}
+                    step={0.05}
+                    value={voicePitch}
+                    onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
+                    className="w-full accent-current"
+                    style={{ accentColor: T.accentColor }}
+                  />
+                </div>
+
+                {/* Continuous listening */}
+                <div className="flex items-center justify-between p-3 rounded-lg border" style={inputStyle}>
+                  <div>
+                    <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                      Continuous listening
+                    </div>
+                    <div className="text-[10px] opacity-70" style={{ color: T.textMuted }}>
+                      Keep the microphone open between voice commands.
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setVoiceContinuous((v) => !v)}
+                    className="relative h-6 w-11 rounded-full transition-colors"
+                    style={{ backgroundColor: voiceContinuous ? T.accentColor : `${T.borderColor}50` }}
+                  >
+                    <span
+                      className="absolute top-0.5 h-5 w-5 rounded-full bg-white transition-all"
+                      style={{ left: voiceContinuous ? "calc(100% - 1.375rem)" : "0.125rem" }}
+                    />
+                  </button>
+                </div>
               </div>
 
               {/* Custom instructions */}

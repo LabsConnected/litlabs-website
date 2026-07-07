@@ -2,12 +2,7 @@
 
 import { useState, useCallback, useEffect, useRef } from "react";
 
-type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
-
-type VoiceInfo = {
-  name: string;
-  lang: string;
-};
+export type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "error";
 
 interface LiTSpeechRecognitionErrorEvent extends Event {
   error: string;
@@ -56,6 +51,24 @@ interface BrowserWindow extends Window {
   webkitSpeechRecognition?: new () => LiTSpeechRecognition;
 }
 
+const LS_VOICE_NAME = "litlabs-voice-name";
+const LS_VOICE_RATE = "litlabs-voice-rate";
+const LS_VOICE_PITCH = "litlabs-voice-pitch";
+const LS_VOICE_CONTINUOUS = "litlabs-voice-continuous";
+
+function getLSNumber(key: string, fallback: number) {
+  if (typeof window === "undefined") return fallback;
+  const raw = window.localStorage.getItem(key);
+  if (!raw) return fallback;
+  const n = parseFloat(raw);
+  return isNaN(n) ? fallback : n;
+}
+
+function getLSBool(key: string) {
+  if (typeof window === "undefined") return false;
+  return window.localStorage.getItem(key) === "true";
+}
+
 export function useLiTVoice({
   onTranscript,
   onStateChange,
@@ -66,17 +79,24 @@ export function useLiTVoice({
   const [state, setState] = useState<VoiceState>("idle");
   const [isSupported, setIsSupported] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
+  const [rate, setRateState] = useState<number>(() => getLSNumber(LS_VOICE_RATE, 1.05));
+  const [pitch, setPitchState] = useState<number>(() => getLSNumber(LS_VOICE_PITCH, 1.0));
+  const [continuous, setContinuousState] = useState<boolean>(() => getLSBool(LS_VOICE_CONTINUOUS));
   const recognitionRef = useRef<LiTSpeechRecognition | null>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
+  const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const pickBestVoice = useCallback((voices: SpeechSynthesisVoice[]) => {
-    const preferred = voices.find((v) =>
+  const pickBestVoice = useCallback((loaded: SpeechSynthesisVoice[]) => {
+    const savedName = typeof window !== "undefined" ? window.localStorage.getItem(LS_VOICE_NAME) : null;
+    const saved = savedName ? loaded.find((v) => v.name === savedName) : null;
+    const preferred = loaded.find((v) =>
       v.lang.startsWith("en") &&
       (/Google US English/i.test(v.name) || /Samantha/i.test(v.name) || /Daniel/i.test(v.name))
     );
-    const fallback = voices.find((v) => v.lang.startsWith("en") && v.default);
-    return preferred || fallback || voices[0] || null;
+    const fallback = loaded.find((v) => v.lang.startsWith("en") && v.default);
+    return saved || preferred || fallback || loaded[0] || null;
   }, []);
 
   useEffect(() => {
@@ -121,8 +141,9 @@ export function useLiTVoice({
     synthRef.current = synth;
 
     const loadVoices = () => {
-      const voices = synth.getVoices();
-      if (voices.length) setSelectedVoice(pickBestVoice(voices));
+      const loaded = synth.getVoices();
+      setVoices(loaded);
+      if (loaded.length) setSelectedVoice(pickBestVoice(loaded));
     };
     loadVoices();
     if (synth.onvoiceschanged !== undefined) {
@@ -130,11 +151,13 @@ export function useLiTVoice({
     }
 
     return () => {
+      if (restartTimerRef.current) clearTimeout(restartTimerRef.current);
       try {
         recognitionRef.current?.abort();
       } catch {
-        // ignore
+        void 0;
       }
+      synthRef.current?.cancel();
       if (synth.onvoiceschanged !== undefined) {
         synth.onvoiceschanged = null;
       }
@@ -145,7 +168,38 @@ export function useLiTVoice({
     onStateChange?.(state);
   }, [state, onStateChange]);
 
+  const setRate = useCallback((v: number) => {
+    setRateState(v);
+    if (typeof window !== "undefined") window.localStorage.setItem(LS_VOICE_RATE, String(v));
+  }, []);
+
+  const setPitch = useCallback((v: number) => {
+    setPitchState(v);
+    if (typeof window !== "undefined") window.localStorage.setItem(LS_VOICE_PITCH, String(v));
+  }, []);
+
+  const setContinuous = useCallback((v: boolean) => {
+    setContinuousState(v);
+    if (typeof window !== "undefined") window.localStorage.setItem(LS_VOICE_CONTINUOUS, String(v));
+  }, []);
+
+  const setVoice = useCallback((voice: SpeechSynthesisVoice | null) => {
+    setSelectedVoice(voice);
+    if (typeof window !== "undefined") {
+      if (voice) window.localStorage.setItem(LS_VOICE_NAME, voice.name);
+      else window.localStorage.removeItem(LS_VOICE_NAME);
+    }
+  }, []);
+
+  const clearRestart = useCallback(() => {
+    if (restartTimerRef.current) {
+      clearTimeout(restartTimerRef.current);
+      restartTimerRef.current = null;
+    }
+  }, []);
+
   const startListening = useCallback(() => {
+    clearRestart();
     if (!recognitionRef.current) {
       setState("error");
       return;
@@ -153,44 +207,62 @@ export function useLiTVoice({
     try {
       synthRef.current?.cancel();
       setTranscript("");
+      setState("listening");
       recognitionRef.current.start();
     } catch {
-      // already started or not allowed
+      void 0;
     }
-  }, []);
+  }, [clearRestart]);
 
   const stopListening = useCallback(() => {
+    clearRestart();
     try {
       recognitionRef.current?.abort();
     } catch {
-      // ignore
+      void 0;
     }
     setState("idle");
     setTranscript("");
-  }, []);
+  }, [clearRestart]);
 
   const speak = useCallback((text: string) => {
     if (!synthRef.current || typeof window === "undefined") return;
     const utter = new SpeechSynthesisUtterance(text);
-    utter.rate = 1.05;
-    utter.pitch = 1.0;
+    utter.rate = rate;
+    utter.pitch = pitch;
     if (selectedVoice) utter.voice = selectedVoice;
     utter.onstart = () => setState("speaking");
-    utter.onend = () => setState("idle");
+    utter.onend = () => {
+      setState("idle");
+      if (continuous) {
+        restartTimerRef.current = setTimeout(() => startListening(), 400);
+      }
+    };
     utter.onerror = () => setState("idle");
+    clearRestart();
     synthRef.current.cancel();
     synthRef.current.speak(utter);
-  }, [selectedVoice]);
+  }, [selectedVoice, rate, pitch, continuous, startListening, clearRestart]);
 
   const stopSpeaking = useCallback(() => {
+    clearRestart();
     synthRef.current?.cancel();
     setState("idle");
-  }, []);
+  }, [clearRestart]);
 
   return {
     state,
     transcript,
     isSupported,
+    voices,
+    selectedVoice,
+    rate,
+    pitch,
+    continuous,
+    setVoice,
+    setRate,
+    setPitch,
+    setContinuous,
     startListening,
     stopListening,
     speak,

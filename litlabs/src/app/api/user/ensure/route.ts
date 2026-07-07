@@ -33,13 +33,17 @@ export async function POST(req: NextRequest) {
 
     // getOrCreateUser uses admin client server-side (bypasses RLS)
     // and inserts wallet with 500 coins on first create
-    const { user, isNew } = await getOrCreateUser(clerkId, email, name, {
+    const result = await getOrCreateUser(clerkId, email, name, {
       ...parseAttributionHeader(req),
       clerkMetadata,
     });
 
-    if (!user) {
-      return NextResponse.json({ error: "Failed to create user" }, { status: 500 });
+    if (!result.user) {
+      const detail = result.error || "Unknown error (Supabase may not be configured in this environment)";
+      return NextResponse.json(
+        { error: "Failed to create user", detail },
+        { status: 500 },
+      );
     }
 
     // Also ensure wallet exists (idempotent — getUserWallet auto-creates if missing)
@@ -47,8 +51,8 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      isNew,
-      user: { id: user.id, email: user.email, name: user.name },
+      isNew: result.isNew,
+      user: { id: result.user.id, email: result.user.email, name: result.user.name },
       balance: wallet.balance,
     });
   } catch {

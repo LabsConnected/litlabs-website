@@ -93,13 +93,19 @@ export type Wallet = {
   updated_at: string;
 };
 
+export type GetOrCreateUserResult = {
+  user: UserProfile | null;
+  isNew: boolean;
+  error?: string;
+};
+
 /** Get or create user by Clerk ID */
 export async function getOrCreateUser(
   clerkId: string,
   email: string,
   name?: string | null,
   attribution?: SignupAttributionInput,
-) {
+): Promise<GetOrCreateUserResult> {
   const db = getDb();
   if (!db) {
     // Supabase not configured — returning mock user
@@ -140,8 +146,9 @@ export async function getOrCreateUser(
     .single();
 
   if (createError || !user) {
+    const msg = createError?.message || "Unknown database error";
     // Failed to create user:
-    return { user: null as unknown as UserProfile, isNew: false };
+    return { user: null as unknown as UserProfile, isNew: false, error: msg };
   }
 
   await db.from("user_preferences").insert({ user_id: user.id });

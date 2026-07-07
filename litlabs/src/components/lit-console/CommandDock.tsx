@@ -23,7 +23,7 @@ import {
   Split,
   Zap,
 } from "lucide-react";
-import { LC } from "./lit-console-theme";
+import { useLitConsoleTheme } from "./useLitConsoleTheme";
 import type { LiTTipResult } from "@/lib/lit-tip";
 
 interface CommandDockProps {
@@ -101,6 +101,7 @@ function Dropdown({
   onClose: () => void;
   children: React.ReactNode;
 }) {
+  const LC = useLitConsoleTheme();
   const ref = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (!open) return;
@@ -125,6 +126,7 @@ function Dropdown({
 }
 
 export default function CommandDock(props: CommandDockProps) {
+  const LC = useLitConsoleTheme();
   const {
     value,
     onChange,
@@ -151,6 +153,7 @@ export default function CommandDock(props: CommandDockProps) {
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
+  const [focused, setFocused] = useState(false);
 
   const MODES = [
     { id: "ask", label: "Ask", placeholder: "Ask LiTTree anything...", color: LC.textMuted },
@@ -216,25 +219,26 @@ export default function CommandDock(props: CommandDockProps) {
     }
   };
 
+  const listening = voiceState === "listening";
+
   return (
     <div
       className="relative z-30 w-full shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-3"
       style={{ backgroundColor: LC.bg }}
     >
       <div className="relative mx-auto max-w-3xl">
-        {/* Mode chips */}
-        <div className="mb-2 flex flex-wrap items-center gap-1.5">
+        <div className="mb-1.5 flex flex-wrap items-center gap-1">
           {MODES.map((m) => {
             const active = m.id === mode;
             return (
               <button
                 key={m.id}
                 onClick={() => setMode(m.id)}
-                className="rounded-full px-2.5 py-1 text-[11px] font-bold transition-all"
+                className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-all"
                 style={{
-                  backgroundColor: active ? `${m.color}20` : "transparent",
+                  backgroundColor: active ? `${m.color}18` : "transparent",
                   color: active ? m.color : LC.textDim,
-                  border: `1px solid ${active ? `${m.color}40` : LC.border}`,
+                  border: `1px solid ${LC.borderSubtle}`,
                 }}
               >
                 {m.label}
@@ -243,18 +247,23 @@ export default function CommandDock(props: CommandDockProps) {
           })}
         </div>
 
-        {/* Input row */}
         <div
-          className="flex min-h-[56px] items-end gap-2 rounded-2xl border px-4 py-3"
-          style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+          className="flex min-h-[52px] items-end gap-2 rounded-2xl border px-3 py-2 transition-all"
+          style={{
+            backgroundColor: LC.bgPanel,
+            borderColor: focused ? LC.accentCyan : LC.borderSubtle,
+            boxShadow: focused ? `0 0 0 1px ${LC.accentCyan}40` : undefined,
+          }}
         >
           <textarea
             ref={textareaRef}
             value={value}
             onChange={(e) => onChange(e.target.value)}
             onKeyDown={handleKeyDown}
+            onFocus={() => setFocused(true)}
+            onBlur={() => setFocused(false)}
             placeholder={MODES.find((m) => m.id === mode)?.placeholder || "Message LiT..."}
-            className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-0.5 text-sm outline-none"
+            className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-sm outline-none"
             style={{ color: LC.text }}
             rows={1}
           />
@@ -278,19 +287,22 @@ export default function CommandDock(props: CommandDockProps) {
             {onVoice && (
               <button
                 type="button"
-                onClick={voiceState === "listening" ? onVoiceStop : onVoice}
-                className={`flex items-center gap-1 rounded-lg px-3 py-2 text-xs font-semibold transition-all ${
-                  voiceState === "listening" ? "animate-pulse" : "hover:bg-white/5"
-                }`}
+                onClick={listening ? onVoiceStop : onVoice}
+                className="relative flex h-9 w-9 items-center justify-center rounded-full transition-all"
                 style={{
-                  color: voiceState === "listening" ? "#000" : LC.accentCyan,
-                  backgroundColor: voiceState === "listening" ? LC.accentCyan : "transparent",
+                  color: listening ? "#000" : LC.accentCyan,
+                  backgroundColor: listening ? LC.accentCyan : "transparent",
                   border: `1px solid ${LC.accentCyan}`,
                 }}
-                title={voiceState === "listening" ? "Stop listening" : "Tap to speak (Android / Chrome)"}
+                title={listening ? "Stop listening" : "Tap to speak"}
               >
-                <Mic size={18} fill={voiceState === "listening" ? "currentColor" : "none"} />
-                {voiceState === "listening" && <span className="hidden sm:inline">Listening</span>}
+                {listening && (
+                  <span
+                    className="absolute inset-0 rounded-full animate-ping"
+                    style={{ backgroundColor: `${LC.accentCyan}40` }}
+                  />
+                )}
+                <Mic size={18} fill={listening ? "currentColor" : "none"} />
               </button>
             )}
             <button
@@ -304,21 +316,20 @@ export default function CommandDock(props: CommandDockProps) {
           </div>
         </div>
 
-        {/* LiT-Tip panel — real-time prompt coaching */}
         {litTip && value.trim() && (
           <div
-            className="mt-2 rounded-xl border px-3 py-2 sm:px-4 sm:py-2.5"
-            style={{ backgroundColor: `${LC.bgPanel}80`, borderColor: `${LC.border}60` }}
+            className="mt-2 rounded-xl border px-3 py-1.5"
+            style={{ backgroundColor: LC.bgPanel, borderColor: LC.borderSubtle }}
           >
-            <div className="flex items-center gap-2 overflow-x-auto pb-1.5">
-              <div className="flex items-center gap-1.5 text-xs font-bold" style={{ color: LC.accentCyan }}>
-                <Lightbulb size={14} />
+            <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="flex items-center gap-1.5 text-[11px] font-semibold" style={{ color: LC.textMuted }}>
+                <Lightbulb size={13} />
                 LiT-Tip
               </div>
               <div
-                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold"
+                className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium"
                 style={{
-                  backgroundColor: litTip.score >= 80 ? "#22c55e20" : litTip.score >= 50 ? "#f59e0b20" : "#ef444420",
+                  backgroundColor: litTip.score >= 80 ? "#22c55e18" : litTip.score >= 50 ? "#f59e0b18" : "#ef444418",
                   color: litTip.score >= 80 ? "#4ade80" : litTip.score >= 50 ? "#fbbf24" : "#f87171",
                 }}
               >
@@ -326,22 +337,22 @@ export default function CommandDock(props: CommandDockProps) {
                 Score {litTip.score}
               </div>
               <div
-                className="rounded-full px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider"
+                className="rounded-full px-2 py-0.5 text-[10px] font-medium"
                 style={{
-                  backgroundColor: litTip.risk === "low" ? "#22c55e20" : litTip.risk === "medium" ? "#f59e0b20" : "#ef444420",
+                  backgroundColor: litTip.risk === "low" ? "#22c55e18" : litTip.risk === "medium" ? "#f59e0b18" : "#ef444418",
                   color: litTip.risk === "low" ? "#4ade80" : litTip.risk === "medium" ? "#fbbf24" : "#f87171",
                 }}
               >
                 {litTip.risk} risk
               </div>
-              <div className="text-[10px] font-medium" style={{ color: LC.textMuted }}>
+              <div className="text-[10px] font-medium" style={{ color: LC.textDim }}>
                 ~{litTip.estimatedCredits.min}-{litTip.estimatedCredits.max} credits
               </div>
               {litTip.cheaperPath && (
                 <button
                   onClick={useCheaperModel}
-                  className="ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-colors hover:bg-white/10"
-                  style={{ backgroundColor: `${LC.accentCyan}20`, color: LC.accentCyan }}
+                  className="ml-auto flex shrink-0 items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-medium transition-colors hover:bg-white/10"
+                  style={{ backgroundColor: `${LC.accentCyan}18`, color: LC.accentCyan }}
                 >
                   <Zap size={10} />
                   Cheaper route
@@ -363,11 +374,11 @@ export default function CommandDock(props: CommandDockProps) {
               </div>
             )}
 
-            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+            <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
               {litTip.rewrite && litTip.rewrite !== value && (
                 <button
                   onClick={applyRewrite}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors hover:bg-white/10"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/10"
                   style={{ backgroundColor: `${LC.accentCyan}18`, color: LC.accentCyan }}
                 >
                   <Wand2 size={11} />
@@ -377,7 +388,7 @@ export default function CommandDock(props: CommandDockProps) {
               {!litTip.metadata.hasStopCondition && (
                 <button
                   onClick={addStopRule}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors hover:bg-white/10"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/10"
                   style={{ backgroundColor: `${LC.accentOrange}18`, color: LC.accentOrange }}
                 >
                   <ShieldCheck size={11} />
@@ -387,7 +398,7 @@ export default function CommandDock(props: CommandDockProps) {
               {(litTip.metadata.agentCount > 2 || litTip.metadata.wordCount > 200) && (
                 <button
                   onClick={splitTask}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors hover:bg-white/10"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/10"
                   style={{ backgroundColor: `${LC.linkColor}18`, color: LC.linkColor }}
                 >
                   <Split size={11} />
@@ -397,7 +408,7 @@ export default function CommandDock(props: CommandDockProps) {
               {litTip.recommendedModel && litTip.recommendedModel !== model && (
                 <button
                   onClick={useCheaperModel}
-                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-bold transition-colors hover:bg-white/10"
+                  className="flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-medium transition-colors hover:bg-white/10"
                   style={{ backgroundColor: "#22c55e18", color: "#4ade80" }}
                 >
                   <Zap size={11} />
@@ -408,17 +419,16 @@ export default function CommandDock(props: CommandDockProps) {
           </div>
         )}
 
-        {/* Bottom row: subtle agent/model pickers + tools */}
-        <div className="mt-2 flex items-center gap-2 overflow-x-auto pb-0.5 scrollbar-hide">
+        <div className="mt-1.5 flex items-center gap-1 overflow-x-auto pb-0.5 scrollbar-hide">
           <div className="relative">
             <button
               onClick={() => setAgentOpen((v) => !v)}
-              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-              style={{ color: LC.textMuted }}
+              className="flex items-center gap-1 rounded-full bg-transparent px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-white/5"
+              style={{ color: LC.textDim }}
             >
-              <span className="h-2 w-2 rounded-full" style={{ backgroundColor: activeAgent.color }} />
-              {activeAgent.label}
-              <ChevronUp size={11} style={{ transform: agentOpen ? "rotate(180deg)" : undefined }} />
+              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: activeAgent.color }} />
+              <span style={{ color: LC.textMuted }}>{activeAgent.label}</span>
+              <ChevronUp size={10} style={{ transform: agentOpen ? "rotate(180deg)" : undefined }} />
             </button>
             <Dropdown open={agentOpen} onClose={() => setAgentOpen(false)}>
               {AGENTS.map((a) => (
@@ -441,12 +451,12 @@ export default function CommandDock(props: CommandDockProps) {
           <div className="relative">
             <button
               onClick={() => setModelOpen((v) => !v)}
-              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-              style={{ color: LC.textMuted }}
+              className="flex items-center gap-1 rounded-full bg-transparent px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-white/5"
+              style={{ color: LC.textDim }}
             >
-              <Cpu size={12} />
-              {activeModel.label}
-              <ChevronUp size={11} style={{ transform: modelOpen ? "rotate(180deg)" : undefined }} />
+              <Cpu size={11} />
+              <span style={{ color: LC.textMuted }}>{activeModel.label}</span>
+              <ChevronUp size={10} style={{ transform: modelOpen ? "rotate(180deg)" : undefined }} />
             </button>
             <Dropdown open={modelOpen} onClose={() => setModelOpen(false)}>
               {MODELS.map((m) => (
@@ -467,12 +477,12 @@ export default function CommandDock(props: CommandDockProps) {
           <div className="relative hidden sm:block">
             <button
               onClick={() => setToolsOpen((v) => !v)}
-              className="flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition-colors hover:bg-white/5"
-              style={{ color: LC.textMuted }}
+              className="flex items-center gap-1 rounded-full bg-transparent px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-white/5"
+              style={{ color: LC.textDim }}
             >
-              <Wrench size={12} />
-              Tools
-              <ChevronUp size={11} style={{ transform: toolsOpen ? "rotate(180deg)" : undefined }} />
+              <Wrench size={11} />
+              <span style={{ color: LC.textMuted }}>Tools</span>
+              <ChevronUp size={10} style={{ transform: toolsOpen ? "rotate(180deg)" : undefined }} />
             </button>
             <Dropdown open={toolsOpen} onClose={() => setToolsOpen(false)}>
               {TOOLS.map((t) => {

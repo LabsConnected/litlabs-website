@@ -11,10 +11,11 @@ import {
   LiTTreeTerminal,
   LiTTreeTerminalHandle,
 } from "@/components/terminal/LiTTreeTerminal";
-import { LC } from "./lit-console-theme";
+import { useLitConsoleTheme } from "./useLitConsoleTheme";
 import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
+import LiveVoicePanel from "./LiveVoicePanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 
@@ -29,7 +30,6 @@ const initialContext: LiTContext = {
 };
 
 type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory";
-type ConsoleView = "dashboard" | "chat";
 
 export default function LitConsole() {
   const { user } = useUser();
@@ -39,8 +39,6 @@ export default function LitConsole() {
   const [loading, setLoading] = useState(false);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState<DrawerTab>("terminal");
-  const [view, setView] = useState<ConsoleView>("chat");
-  const [mobileAgentDrawer, setMobileAgentDrawer] = useState(false);
   const [activeAgent, setActiveAgent] = useState("director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
   const [litTip, setLitTip] = useState<LiTTipResult | null>(null);
@@ -58,33 +56,10 @@ export default function LitConsole() {
       }>;
     };
   } | null>(null);
+  const [voiceOpen, setVoiceOpen] = useState(false);
+  const LC = useLitConsoleTheme();
   const termRef = useRef<LiTTreeTerminalHandle>(null);
 
-  const {
-    startListening,
-    stopListening,
-    isSupported: voiceSupported,
-    state: voiceState,
-    speak,
-  } = useLiTVoice({
-    onTranscript: (text: string) => {
-      if (!text.trim()) return;
-      setInput(text);
-      handleSend(text);
-    },
-  });
-
-  const lastSpokenIdRef = useRef<string | null>(null);
-
-  useEffect(() => {
-    if (!speak) return;
-    const lastLit = [...messages].reverse().find((m) => m.role === "lit");
-    if (!lastLit || lastLit.id === lastSpokenIdRef.current) return;
-    lastSpokenIdRef.current = lastLit.id;
-    speak(lastLit.content.replace(/\n/g, " ").slice(0, 250));
-  }, [messages, speak]);
-
-  // Debounced LiT-Tip scan as the user types
   useEffect(() => {
     const t = input.trim();
     if (!t) {
@@ -168,7 +143,6 @@ export default function LitConsole() {
         ]);
       }
 
-      // Auto-navigate if the AI returned a navigate action
       const navAction = data.actions?.find(
         (a: { type: string; url?: string }) =>
           a.type === "navigate" && a.url,
@@ -195,13 +169,12 @@ export default function LitConsole() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [router, user]);
 
   const handleSend = useCallback(
     (text?: string) => {
       const t = text || input;
       if (!t.trim() || loading) return;
-      setView("chat");
       setMessages((prev) => [
         ...prev,
         { id: Math.random().toString(36).slice(2), role: "user", content: t },
@@ -209,7 +182,6 @@ export default function LitConsole() {
       setInput("");
       setLoading(true);
 
-      // Intent detection — auto-navigate if clear
       const intent = detectIntent(t);
       if (intent.route && !intent.isAmbiguous) {
         const action = actionFromIntent(t, {
@@ -301,11 +273,45 @@ export default function LitConsole() {
     [input, loading, askLiT, router],
   );
 
+  const handleSendRef = useRef(handleSend);
+  handleSendRef.current = handleSend;
+  const onVoiceTranscript = useCallback((text: string) => handleSendRef.current(text), []);
+
+  const {
+    state: voiceState,
+    transcript: voiceTranscript,
+    isSupported: voiceSupported,
+    voices,
+    selectedVoice,
+    rate,
+    pitch,
+    continuous,
+    setVoice,
+    setRate,
+    setPitch,
+    setContinuous,
+    startListening,
+    stopListening,
+    stopSpeaking,
+    speak,
+  } = useLiTVoice({
+    onTranscript: onVoiceTranscript,
+  });
+
+  const lastSpokenIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (!speak) return;
+    const lastLit = [...messages].reverse().find((m) => m.role === "lit");
+    if (!lastLit || lastLit.id === lastSpokenIdRef.current) return;
+    lastSpokenIdRef.current = lastLit.id;
+    speak(lastLit.content.replace(/\n/g, " ").slice(0, 250));
+  }, [messages, speak]);
+
   const handleRun = useCallback(
     async (overrideText?: string) => {
       const text = (overrideText ?? input).trim();
       if (!text || loading) return;
-      setView("chat");
       setMessages((prev) => [
         ...prev,
         {
@@ -524,15 +530,43 @@ export default function LitConsole() {
         onGenerateMedia={() => handleSend("Generate an image")}
         onDeploy={() => handleSend("Run: npx vercel --prod to deploy the current project")}
         onSaveWorkflow={() => handleSend("Save this workflow as a reusable automation")}
-        onVoice={voiceSupported ? () => startListening() : undefined}
-        onVoiceStop={stopListening}
+        onVoice={() => setVoiceOpen(true)}
+        onVoiceStop={() => {
+          stopListening();
+          stopSpeaking();
+          setVoiceOpen(false);
+        }}
         voiceState={voiceState}
       />
 
-      {/* Pending command approval toast */}
+      {voiceOpen && (
+        <LiveVoicePanel
+          onClose={() => {
+            stopListening();
+            stopSpeaking();
+            setVoiceOpen(false);
+          }}
+          state={voiceState}
+          transcript={voiceTranscript}
+          isSupported={voiceSupported}
+          voices={voices}
+          selectedVoice={selectedVoice}
+          rate={rate}
+          pitch={pitch}
+          continuous={continuous}
+          setVoice={setVoice}
+          setRate={setRate}
+          setPitch={setPitch}
+          setContinuous={setContinuous}
+          startListening={startListening}
+          stopListening={stopListening}
+          stopSpeaking={stopSpeaking}
+        />
+      )}
+
       {pendingCommand && (
         <div
-          className="fixed bottom-28 left-1/2 z-40 flex -translate-x-1/2 items-center gap-3 rounded-full border px-4 py-2 text-xs font-semibold shadow-lg"
+          className="fixed bottom-36 left-1/2 z-50 flex -translate-x-1/2 items-center gap-3 rounded-full border px-4 py-2 text-xs font-semibold shadow-lg"
           style={{
             backgroundColor: LC.bgPanel,
             borderColor: LC.accentOrange,
@@ -568,8 +602,6 @@ export default function LitConsole() {
   );
 }
 
-// ─── Drawer Panel Components ──────────────────────────────────────────────────
-
 const STUDIO_TOOLS = [
   { id: "image", label: "Image Agent", href: "/studio?tool=chat", icon: "🎨" },
   { id: "video", label: "Video Studio", href: "/studio?tool=video", icon: "🎬" },
@@ -580,6 +612,7 @@ const STUDIO_TOOLS = [
 ];
 
 function FilesPanel({ onPrompt }: { onPrompt: (t: string) => void }) {
+  const LC = useLitConsoleTheme();
   const [files, setFiles] = useState<{ name: string; type: string; time: string }[]>([]);
   useEffect(() => {
     const keys = Object.keys(localStorage).filter((k) => k.startsWith("litlabs-"));
@@ -626,6 +659,7 @@ function FilesPanel({ onPrompt }: { onPrompt: (t: string) => void }) {
 }
 
 function PreviewPanel() {
+  const LC = useLitConsoleTheme();
   const [url, setUrl] = useState("https://litlabs.net");
   const [input, setInput] = useState("https://litlabs.net");
   return (
@@ -674,6 +708,7 @@ const AGENT_LIST = [
 ];
 
 function AgentsPanel({ activeAgent, onSelect, onPrompt }: { activeAgent: string; onSelect: (a: string) => void; onPrompt: (t: string) => void }) {
+  const LC = useLitConsoleTheme();
   return (
     <div className="flex flex-col gap-2 h-full overflow-y-auto">
       <div className="text-[10px] uppercase tracking-widest mb-1" style={{ color: LC.textMuted }}>
@@ -716,6 +751,7 @@ function AgentsPanel({ activeAgent, onSelect, onPrompt }: { activeAgent: string;
 }
 
 function MemoryPanel() {
+  const LC = useLitConsoleTheme();
   const { user } = useUser();
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<{ id?: string; content: string }[]>([]);

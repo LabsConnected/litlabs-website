@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   User,
   Bot,
@@ -14,12 +14,11 @@ import {
   Globe,
   Wrench,
   Cpu,
-  Sparkles,
   ArrowRight,
-  Clock,
+  Plus,
 } from "lucide-react";
 import StarterActions from "./StarterActions";
-import { LC, LC_SHADOW } from "./lit-console-theme";
+import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
 export interface Message {
   id: string;
@@ -51,7 +50,17 @@ interface ChatPanelProps {
   onApprovePlan?: () => void;
 }
 
-function CodeBlock({ lang, code }: { lang: string; code: string }) {
+type Theme = ReturnType<typeof useLitConsoleTheme>;
+
+function CodeBlock({
+  lang,
+  code,
+  theme,
+}: {
+  lang: string;
+  code: string;
+  theme: Theme;
+}) {
   const [copied, setCopied] = useState(false);
   const handleCopy = useCallback(() => {
     navigator.clipboard.writeText(code).then(() => {
@@ -63,21 +72,21 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   return (
     <div
       className="group relative my-2 overflow-hidden rounded-lg border"
-      style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+      style={{ backgroundColor: theme.bgSecondary, borderColor: theme.border }}
     >
       <div
         className="flex items-center justify-between px-3 py-1.5 text-[10px] uppercase tracking-wider"
-        style={{ backgroundColor: LC.bgPanelHover, color: LC.textDim }}
+        style={{ backgroundColor: theme.bgPanelHover, color: theme.textDim }}
       >
         <span>{lang || "code"}</span>
         <button
           onClick={handleCopy}
           className="rounded p-1 opacity-0 transition-opacity group-hover:opacity-100"
-          style={{ color: LC.textMuted }}
+          style={{ color: theme.textMuted }}
           title="Copy"
         >
           {copied ? (
-            <Check size={12} style={{ color: LC.success }} />
+            <Check size={12} style={{ color: theme.success }} />
           ) : (
             <Copy size={12} />
           )}
@@ -85,7 +94,7 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
       </div>
       <pre
         className="overflow-x-auto p-3 text-xs"
-        style={{ color: LC.textDim, fontFamily: LC.fontMono }}
+        style={{ color: theme.textDim, fontFamily: theme.fontMono }}
       >
         <code>{code}</code>
       </pre>
@@ -93,20 +102,20 @@ function CodeBlock({ lang, code }: { lang: string; code: string }) {
   );
 }
 
-function formatContent(text: string) {
+function formatContent(text: string, theme: Theme) {
   const parts = text.split(/(```[\s\S]*?```)/g);
   return parts.map((part, i) => {
     if (part.startsWith("```")) {
       const fence = part.match(/^```(\w+)?\n?/);
       const lang = fence?.[1] || "";
       const code = part.replace(/^```(\w+)?\n?/, "").replace(/```$/, "");
-      return <CodeBlock key={i} lang={lang} code={code} />;
+      return <CodeBlock key={i} lang={lang} code={code} theme={theme} />;
     }
     return (
       <div
         key={i}
         className="whitespace-pre-wrap text-sm leading-relaxed"
-        style={{ color: LC.text }}
+        style={{ color: theme.text }}
       >
         {part}
       </div>
@@ -123,6 +132,7 @@ export default function ChatPanel({
   onApproveStep,
   onApprovePlan,
 }: ChatPanelProps) {
+  const LC = useLitConsoleTheme();
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isScrolledRef = useRef(false);
@@ -156,13 +166,17 @@ export default function ChatPanel({
     });
   }, [messages, activeLitId]);
 
+  const activeContent = useMemo(
+    () => messages.find((m) => m.id === activeLitId)?.content || "",
+    [messages, activeLitId],
+  );
+
   useEffect(() => {
     if (!activeLitId || isScrolledRef.current) return;
-    const content = messages.find((m) => m.id === activeLitId)?.content || "";
     const timer = setInterval(() => {
       setRevealed((prev) => {
         const c = prev[activeLitId] || 0;
-        if (c >= content.length) {
+        if (c >= activeContent.length) {
           clearInterval(timer);
           return prev;
         }
@@ -170,7 +184,7 @@ export default function ChatPanel({
       });
     }, 10);
     return () => clearInterval(timer);
-  }, [activeLitId]);
+  }, [activeLitId, activeContent]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -211,7 +225,7 @@ export default function ChatPanel({
         </div>
       );
     }
-    return <div className="text-sm">{formatContent(m.content)}</div>;
+    return <div className="text-sm">{formatContent(m.content, LC)}</div>;
   };
 
   return (
@@ -225,452 +239,555 @@ export default function ChatPanel({
         className="flex-1 space-y-5 overflow-y-auto"
       >
         <div className="mx-auto max-w-3xl px-4 py-6">
-        {isEmpty ? (
-          <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
-            <div className="w-full max-w-4xl space-y-8">
-              {/* Agent status header */}
-              <div className="text-center space-y-3">
-                <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
-                  <div
-                    className="absolute inset-0 rounded-full blur-2xl"
-                    style={{ background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)` }}
-                  />
-                  <div
-                    className="relative flex h-16 w-16 items-center justify-center rounded-2xl border"
-                    style={{ backgroundColor: LC.bgPanel, borderColor: LC.border, boxShadow: LC_SHADOW.glowCyan }}
-                  >
-                    <Bot size={32} style={{ color: LC.accentCyan }} />
-                  </div>
-                </div>
-                <div>
-                  <h2 className="text-2xl font-black tracking-tight" style={{ color: LC.text }}>
-                    LiTTree Agent
-                  </h2>
-                  <p className="text-sm font-medium" style={{ color: LC.textMuted }}>
-                    Creative Director + Builder + Operator
-                  </p>
-                </div>
-                <div className="flex flex-wrap items-center justify-center gap-2 text-[11px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>
-                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.success}40`, color: LC.success }}>
-                    <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: LC.success }} />
-                    Online
-                  </span>
-                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.accentCyan}30`, color: LC.accentCyan }}>
-                    Image generation ready
-                  </span>
-                  <span className="flex items-center gap-1.5 rounded-full border px-2.5 py-1" style={{ borderColor: `${LC.accentOrange}30`, color: LC.accentOrange }}>
-                    Code tools ready
-                  </span>
-                </div>
-              </div>
-
-              {/* Mission cards */}
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                {[
-                  {
-                    id: "image",
-                    title: "Image Studio",
-                    desc: "Create product shots, brand art, covers, thumbnails.",
-                    prompt: "Generate a cyberpunk album cover with neon skyline and rain",
-                    icon: Image,
-                    color: "#e879f9",
-                  },
-                  {
-                    id: "build",
-                    title: "App Builder",
-                    desc: "Build websites, dashboards, components, and flows.",
-                    prompt: "Build a landing page for my AI agent workspace",
-                    icon: Globe,
-                    color: LC.accentCyan,
-                  },
-                  {
-                    id: "code",
-                    title: "Code Fixer",
-                    desc: "Debug, review, refactor, and ship production code.",
-                    prompt: "Fix my React component that is not re-rendering",
-                    icon: Wrench,
-                    color: LC.accentOrange,
-                  },
-                  {
-                    id: "agent",
-                    title: "Agent Forge",
-                    desc: "Create custom agents, run workflows, and orchestrate tasks.",
-                    prompt: "Create an agent that reviews my code",
-                    icon: Cpu,
-                    color: "#a78bfa",
-                  },
-                ].map((m) => {
-                  const Icon = m.icon;
-                  return (
-                    <button
-                      key={m.id}
-                      onClick={() => onSend(m.prompt)}
-                      className="group relative flex flex-col items-start gap-3 rounded-2xl border p-5 text-left transition-all hover:scale-[1.02]"
-                      style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
-                    >
-                      <div
-                        className="flex h-10 w-10 items-center justify-center rounded-xl border transition-colors"
-                        style={{ backgroundColor: `${m.color}10`, borderColor: `${m.color}30`, color: m.color }}
-                      >
-                        <Icon size={20} />
-                      </div>
-                      <div className="space-y-1">
-                        <div className="text-sm font-black" style={{ color: LC.text }}>{m.title}</div>
-                        <div className="text-[11px] leading-relaxed" style={{ color: LC.textMuted }}>{m.desc}</div>
-                      </div>
-                      <div className="mt-auto flex w-full items-center justify-between pt-3">
-                        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>
-                          Try it
-                        </span>
-                        <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" style={{ color: m.color }} />
-                      </div>
-                    </button>
-                  );
-                })}
-              </div>
-
-              {/* Mission Queue */}
-              <div className="rounded-2xl border p-5" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
-                <div className="mb-4 flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <div className="flex h-2 w-2 rounded-full" style={{ backgroundColor: LC.success }} />
-                    <div className="text-xs font-black uppercase tracking-wider" style={{ color: LC.text }}>Mission Queue</div>
-                  </div>
-                  <div className="text-[10px] font-bold" style={{ color: LC.textDim }}>0 active</div>
-                </div>
-                <div className="rounded-xl border p-4 text-center" style={{ backgroundColor: LC.bgSecondary, borderColor: LC.borderSubtle }}>
-                  <div className="text-sm font-bold" style={{ color: LC.text }}>LiTTree Agent is ready</div>
-                  <div className="mx-auto mt-2 max-w-md text-[11px]" style={{ color: LC.textMuted }}>
-                    No active missions. Start one from a card above or type a command below.
-                  </div>
-                </div>
-                <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
-                  {["Inspect", "Plan", "Execute", "Review", "Save"].map((step, i) => (
-                    <div key={step} className="flex items-center gap-1.5">
-                      <div
-                        className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black"
-                        style={{ backgroundColor: LC.borderSubtle, color: LC.textDim }}
-                      >
-                        {i + 1}
-                      </div>
-                      <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: LC.textDim }}>{step}</div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Quick prompt chips */}
-              <div className="flex flex-wrap items-center justify-center gap-2">
-                <StarterActions onSelect={onSend} />
-              </div>
-            </div>
-          </div>
-        ) : (
-          messages.map((m) => (
-            <div
-              key={m.id}
-              className={
-                m.role === "user" ? "flex justify-end" : "flex justify-start"
-              }
-            >
-              {m.role === "user" && (
-                <div className="flex max-w-[80%] items-end gap-2">
-                  <div
-                    className="rounded-2xl rounded-br-md px-4 py-2.5 text-sm"
-                    style={{
-                      backgroundColor: LC.bgPanelHover,
-                      borderRight: `3px solid ${LC.accentCyan}`,
-                      color: LC.text,
-                    }}
-                  >
-                    {m.content}
-                  </div>
-                  <div
-                    className="rounded-full p-1.5"
-                    style={{
-                      backgroundColor: LC.bgSecondary,
-                      color: LC.accentCyan,
-                    }}
-                  >
-                    <User size={14} />
-                  </div>
-                </div>
-              )}
-
-              {m.role === "lit" && (
-                <div className="flex w-full gap-3">
-                  <div
-                    className="mt-1 shrink-0 rounded-full p-1.5"
-                    style={{
-                      backgroundColor: LC.bgSecondary,
-                      color: LC.accentCyan,
-                    }}
-                  >
-                    <Bot size={14} />
-                  </div>
-                  <div className="min-w-0 flex-1">{renderLitContent(m)}</div>
-                </div>
-              )}
-
-              {m.role === "tool" && (
-                <div className="flex w-full gap-3">
-                  <div
-                    className="mt-1 shrink-0 rounded-full p-1.5"
-                    style={{
-                      backgroundColor: `${LC.accentOrange}15`,
-                      color: LC.accentOrange,
-                    }}
-                  >
-                    <FileCode size={14} />
-                  </div>
-                  <div
-                    className="flex-1 rounded-lg border p-3"
-                    style={{
-                      backgroundColor: LC.bgSecondary,
-                      borderColor: LC.border,
-                      borderLeft: `3px solid ${LC.accentOrange}`,
-                    }}
-                  >
+          {isEmpty ? (
+            <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
+              <div className="w-full max-w-4xl space-y-8">
+                <div className="text-center space-y-4">
+                  <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
                     <div
-                      className="flex items-center gap-2 text-xs font-medium"
+                      className="absolute inset-0 rounded-full blur-2xl"
+                      style={{
+                        background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)`,
+                      }}
+                    />
+                    <div
+                      className="relative flex h-16 w-16 items-center justify-center rounded-2xl border"
+                      style={{
+                        backgroundColor: LC.bgPanel,
+                        borderColor: LC.border,
+                        boxShadow: LC.shadows.glowCyan,
+                      }}
+                    >
+                      <Bot size={32} style={{ color: LC.accentCyan }} />
+                    </div>
+                  </div>
+                  <div>
+                    <h2
+                      className="text-2xl font-black tracking-tight"
                       style={{ color: LC.text }}
                     >
-                      {m.meta?.status === "running" && (
-                        <Loader2
-                          size={14}
-                          className="animate-spin"
-                          style={{ color: LC.accentOrange }}
+                      LiTTree Agent
+                    </h2>
+                    <p
+                      className="text-sm font-medium"
+                      style={{ color: LC.textMuted }}
+                    >
+                      Creative Director + Builder + Operator
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-center gap-2">
+                    <span
+                      className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold"
+                      style={{ borderColor: `${LC.success}40`, color: LC.success }}
+                    >
+                      <span
+                        className="h-1.5 w-1.5 rounded-full"
+                        style={{ backgroundColor: LC.success }}
+                      />
+                      Online
+                    </span>
+                    <span
+                      className="rounded-full border px-2.5 py-1 text-[11px] font-bold"
+                      style={{ borderColor: LC.borderSubtle, color: LC.textDim }}
+                    >
+                      Ready to build
+                    </span>
+                  </div>
+                </div>
+
+                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                  {[
+                    {
+                      id: "image",
+                      title: "Image Studio",
+                      desc: "Create product shots, brand art, covers, thumbnails.",
+                      prompt: "Generate a cyberpunk album cover with neon skyline and rain",
+                      icon: Image,
+                      color: "#e879f9",
+                    },
+                    {
+                      id: "build",
+                      title: "App Builder",
+                      desc: "Build websites, dashboards, components, and flows.",
+                      prompt: "Build a landing page for my AI agent workspace",
+                      icon: Globe,
+                      color: LC.accentCyan,
+                    },
+                    {
+                      id: "code",
+                      title: "Code Fixer",
+                      desc: "Debug, review, refactor, and ship production code.",
+                      prompt: "Fix my React component that is not re-rendering",
+                      icon: Wrench,
+                      color: LC.accentOrange,
+                    },
+                    {
+                      id: "agent",
+                      title: "Agent Forge",
+                      desc: "Create custom agents, run workflows, and orchestrate tasks.",
+                      prompt: "Create an agent that reviews my code",
+                      icon: Cpu,
+                      color: "#a78bfa",
+                    },
+                  ].map((m) => {
+                    const Icon = m.icon;
+                    return (
+                      <button
+                        key={m.id}
+                        onClick={() => onSend(m.prompt)}
+                        className="group relative flex flex-col items-start gap-3 overflow-hidden rounded-2xl border p-5 text-left transition hover:scale-[1.01]"
+                        style={{
+                          backgroundColor: LC.bgPanel,
+                          borderColor: LC.border,
+                        }}
+                      >
+                        <div
+                          className="absolute inset-x-0 top-0 h-0.5 rounded-t-2xl"
+                          style={{
+                            background: `linear-gradient(90deg, ${m.color}, transparent 85%)`,
+                          }}
                         />
-                      )}
-                      {m.meta?.status === "done" && (
-                        <span
-                          className="rounded px-1 py-0.5 text-[10px]"
-                          style={{
-                            backgroundColor: `${LC.success}20`,
-                            color: LC.success,
-                          }}
-                        >
-                          done
-                        </span>
-                      )}
-                      {m.meta?.status === "error" && (
-                        <span
-                          className="rounded px-1 py-0.5 text-[10px]"
-                          style={{
-                            backgroundColor: `${LC.danger}20`,
-                            color: LC.danger,
-                          }}
-                        >
-                          error
-                        </span>
-                      )}
-                      {m.meta?.tool || "Tool"}
+                        <div className="flex w-full items-start justify-between">
+                          <div
+                            className="flex h-10 w-10 items-center justify-center rounded-xl border"
+                            style={{
+                              backgroundColor: `${m.color}10`,
+                              borderColor: `${m.color}30`,
+                              color: m.color,
+                            }}
+                          >
+                            <Icon size={20} />
+                          </div>
+                          <ArrowRight
+                            size={16}
+                            className="transition-transform group-hover:translate-x-0.5"
+                            style={{ color: m.color }}
+                          />
+                        </div>
+                        <div className="space-y-1">
+                          <div
+                            className="text-sm font-black"
+                            style={{ color: LC.text }}
+                          >
+                            {m.title}
+                          </div>
+                          <div
+                            className="text-[11px] leading-relaxed"
+                            style={{ color: LC.textMuted }}
+                          >
+                            {m.desc}
+                          </div>
+                        </div>
+                      </button>
+                    );
+                  })}
+                </div>
+
+                <div
+                  className="rounded-2xl border p-5"
+                  style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+                >
+                  <div className="mb-4 flex items-center justify-between">
+                    <div
+                      className="text-xs font-black"
+                      style={{ color: LC.text }}
+                    >
+                      Mission Queue
+                    </div>
+                    <button
+                      className="flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold"
+                      style={{
+                        backgroundColor: LC.bgSecondary,
+                        color: LC.textMuted,
+                        borderColor: LC.border,
+                      }}
+                    >
+                      <Plus size={12} />
+                      Add
+                    </button>
+                  </div>
+                  <div
+                    className="rounded-xl border p-4 text-center"
+                    style={{
+                      backgroundColor: LC.bgSecondary,
+                      borderColor: LC.borderSubtle,
+                    }}
+                  >
+                    <div
+                      className="text-sm font-bold"
+                      style={{ color: LC.text }}
+                    >
+                      LiTTree Agent is ready
                     </div>
                     <div
-                      className="mt-1 text-xs"
+                      className="mx-auto mt-1 max-w-md text-[11px]"
                       style={{ color: LC.textMuted }}
+                    >
+                      No active missions. Pick a capability above or type a
+                      command below.
+                    </div>
+                  </div>
+                  <div className="mt-4 flex flex-wrap items-center justify-center gap-1">
+                    {["Inspect", "Plan", "Execute", "Review", "Save"].map(
+                      (step, i, arr) => (
+                        <div key={step} className="flex items-center gap-1">
+                          <div
+                            className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black"
+                            style={{
+                              backgroundColor: LC.borderSubtle,
+                              color: LC.textDim,
+                            }}
+                          >
+                            {i + 1}
+                          </div>
+                          <div
+                            className="text-[10px] font-bold"
+                            style={{ color: LC.textDim }}
+                          >
+                            {step}
+                          </div>
+                          {i < arr.length - 1 && (
+                            <div
+                              className="mx-1 h-px w-3"
+                              style={{ backgroundColor: LC.borderSubtle }}
+                            />
+                          )}
+                        </div>
+                      ),
+                    )}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap items-center justify-center gap-2">
+                  <StarterActions onSelect={onSend} />
+                </div>
+              </div>
+            </div>
+          ) : (
+            messages.map((m) => (
+              <div
+                key={m.id}
+                className={
+                  m.role === "user" ? "flex justify-end" : "flex justify-start"
+                }
+              >
+                {m.role === "user" && (
+                  <div className="flex max-w-[80%] items-end gap-2">
+                    <div
+                      className="rounded-2xl rounded-br-sm px-4 py-2.5 text-sm"
+                      style={{
+                        backgroundColor: `${LC.accentCyan}10`,
+                        border: `1px solid ${LC.accentCyan}30`,
+                        color: LC.text,
+                      }}
                     >
                       {m.content}
                     </div>
-                    {m.meta?.images?.length ? (
-                      <div className="mt-3 grid gap-3 sm:grid-cols-2">
-                        {m.meta.images.map((image, index) => (
-                          <a
-                            key={`${image.url}-${index}`}
-                            href={image.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="group overflow-hidden rounded-xl border"
-                            style={{
-                              backgroundColor: LC.bgPanel,
-                              borderColor: LC.border,
-                              boxShadow: "0 14px 40px rgba(0,0,0,0.25)",
-                            }}
-                          >
-                            {/* eslint-disable-next-line @next/next/no-img-element */}
-                            <img
-                              src={image.url}
-                              alt={image.prompt}
-                              className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.02]"
-                            />
-                            <div
-                              className="flex items-center justify-between gap-2 px-3 py-2 text-[10px]"
-                              style={{ color: LC.textMuted }}
-                            >
-                              <span className="truncate font-semibold" style={{ color: LC.text }}>
-                                {image.provider}
-                              </span>
-                              <span style={{ color: LC.accentCyan }}>Open image</span>
-                            </div>
-                          </a>
-                        ))}
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              )}
-
-              {m.role === "system" && (
-                <div
-                  className="flex w-full flex-col gap-2 rounded-md px-3 py-2 text-xs"
-                  style={{ backgroundColor: LC.bgSecondary, color: LC.textDim }}
-                >
-                  <div className="flex items-center gap-2">
-                    <Terminal size={14} />
-                    {m.content}
-                  </div>
-                  {(() => {
-                    const cmd = (m.content.match(/`([^`]+)`/) || [])[1];
-                    if (
-                      !cmd ||
-                      !onApprove ||
-                      !m.content.toLowerCase().includes("approve")
-                    )
-                      return null;
-                    return (
-                      <button
-                        onClick={() => onApprove(cmd)}
-                        className="flex w-fit items-center gap-1 rounded px-2 py-1 text-xs font-semibold"
-                        style={{
-                          backgroundColor: LC.accentOrange,
-                          color: "#000",
-                        }}
-                      >
-                        <Play size={12} /> Approve
-                      </button>
-                    );
-                  })()}
-                </div>
-              )}
-            </div>
-          ))
-        )}
-
-        {plan && (
-          <div
-            className="flex flex-col gap-2 rounded-xl border p-4"
-            style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
-          >
-            <div className="flex items-center justify-between">
-              <div className="text-xs font-semibold" style={{ color: LC.text }}>
-                Run Plan
-              </div>
-              <div className="flex items-center gap-2">
-                <div
-                  className="mr-2 text-[10px]"
-                  style={{ color: LC.textMuted }}
-                >
-                  {plan.runId
-                    ? `Run #${plan.runId.slice(0, 8)}`
-                    : "Unsaved preview"}
-                </div>
-                {onApprovePlan && plan.steps.some((s) => s.needs_approval) ? (
-                  <button
-                    onClick={onApprovePlan}
-                    className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
-                    style={{ backgroundColor: LC.accentOrange, color: "#000" }}
-                  >
-                    <Play size={12} /> Approve Plan
-                  </button>
-                ) : !plan.steps.some((s) => s.needs_approval) &&
-                  onApprovePlan ? (
-                  <button
-                    onClick={onApprovePlan}
-                    className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
-                    style={{ backgroundColor: LC.accentCyan, color: "#000" }}
-                  >
-                    Execute Plan
-                  </button>
-                ) : null}
-              </div>
-            </div>
-            <div className="text-xs" style={{ color: LC.textDim }}>
-              {plan.steps[0]?.title || "No steps."}
-            </div>
-            <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto pr-1">
-              {plan.steps.map((step, idx) => (
-                <div
-                  key={step.id}
-                  className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs"
-                  style={{
-                    backgroundColor: LC.bgPanel,
-                    borderColor: LC.border,
-                  }}
-                >
-                  <div className="min-w-0">
-                    <div className="font-medium" style={{ color: LC.text }}>
-                      {idx + 1}. {step.title}
-                    </div>
-                    {step.command ? (
-                      <div
-                        className="mt-1 truncate font-mono"
-                        style={{ color: LC.accentOrange }}
-                      >
-                        {step.command}
-                      </div>
-                    ) : null}
-                  </div>
-                  <div className="flex shrink-0 items-center gap-2">
-                    <span
+                    <div
+                      className="rounded-full p-1.5"
                       style={{
-                        backgroundColor:
-                          step.risk_level === "critical" ||
-                          step.risk_level === "high"
-                            ? `${LC.danger}25`
-                            : `${LC.success}15`,
-                        color:
-                          step.risk_level === "critical" ||
-                          step.risk_level === "high"
-                            ? LC.danger
-                            : LC.success,
+                        backgroundColor: LC.bgSecondary,
+                        color: LC.accentCyan,
                       }}
                     >
-                      {step.risk_level || "low"}
-                    </span>
-                    {step.needs_approval ? (
-                      <span
-                        style={{
-                          backgroundColor: `${LC.accentOrange}20`,
-                          color: LC.accentOrange,
-                        }}
-                      >
-                        approve
-                      </span>
-                    ) : null}
-                    {step.command ? (
-                      <button
-                        onClick={() => {
-                          if (!plan.runId || !onApproveStep) return;
-                          onApproveStep(plan.runId, step.command as string);
-                        }}
-                        className="rounded-full px-2 py-1 font-semibold"
-                        style={{
-                          backgroundColor: LC.accentOrange,
-                          color: "#000",
-                        }}
-                      >
-                        Run
-                      </button>
-                    ) : null}
+                      <User size={14} />
+                    </div>
                   </div>
+                )}
+
+                {m.role === "lit" && (
+                  <div className="flex w-full gap-3">
+                    <div
+                      className="mt-1 shrink-0 rounded-full p-1.5"
+                      style={{
+                        backgroundColor: LC.bgSecondary,
+                        color: LC.accentCyan,
+                      }}
+                    >
+                      <Bot size={14} />
+                    </div>
+                    <div
+                      className="min-w-0 flex-1 rounded-2xl border p-3"
+                      style={{
+                        backgroundColor: LC.bgPanel,
+                        borderColor: LC.border,
+                      }}
+                    >
+                      {renderLitContent(m)}
+                    </div>
+                  </div>
+                )}
+
+                {m.role === "tool" && (
+                  <div className="flex w-full gap-3">
+                    <div
+                      className="mt-1 shrink-0 rounded-full p-1.5"
+                      style={{
+                        backgroundColor: `${LC.accentOrange}15`,
+                        color: LC.accentOrange,
+                      }}
+                    >
+                      <FileCode size={14} />
+                    </div>
+                    <div
+                      className="flex-1 rounded-xl border p-3"
+                      style={{
+                        backgroundColor: LC.bgSecondary,
+                        borderColor: LC.border,
+                        borderLeft: `3px solid ${LC.accentOrange}`,
+                      }}
+                    >
+                      <div
+                        className="flex items-center gap-2 text-xs font-medium"
+                        style={{ color: LC.text }}
+                      >
+                        {m.meta?.status === "running" && (
+                          <Loader2
+                            size={14}
+                            className="animate-spin"
+                            style={{ color: LC.accentOrange }}
+                          />
+                        )}
+                        {m.meta?.status === "done" && (
+                          <span
+                            className="rounded px-1 py-0.5 text-[10px]"
+                            style={{
+                              backgroundColor: `${LC.success}20`,
+                              color: LC.success,
+                            }}
+                          >
+                            done
+                          </span>
+                        )}
+                        {m.meta?.status === "error" && (
+                          <span
+                            className="rounded px-1 py-0.5 text-[10px]"
+                            style={{
+                              backgroundColor: `${LC.danger}20`,
+                              color: LC.danger,
+                            }}
+                          >
+                            error
+                          </span>
+                        )}
+                        {m.meta?.tool || "Tool"}
+                      </div>
+                      <div
+                        className="mt-1 text-xs"
+                        style={{ color: LC.textMuted }}
+                      >
+                        {m.content}
+                      </div>
+                      {m.meta?.images?.length ? (
+                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                          {m.meta.images.map((image, index) => (
+                            <a
+                              key={`${image.url}-${index}`}
+                              href={image.url}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="group overflow-hidden rounded-xl border"
+                              style={{
+                                backgroundColor: LC.bgPanel,
+                                borderColor: LC.border,
+                                boxShadow: "0 14px 40px rgba(0,0,0,0.25)",
+                              }}
+                            >
+                              {/* eslint-disable-next-line @next/next/no-img-element */}
+                              <img
+                                src={image.url}
+                                alt={image.prompt}
+                                className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.02]"
+                              />
+                              <div
+                                className="flex items-center justify-between gap-2 px-3 py-2 text-[10px]"
+                                style={{ color: LC.textMuted }}
+                              >
+                                <span
+                                  className="truncate font-semibold"
+                                  style={{ color: LC.text }}
+                                >
+                                  {image.provider}
+                                </span>
+                                <span style={{ color: LC.accentCyan }}>
+                                  Open image
+                                </span>
+                              </div>
+                            </a>
+                          ))}
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
+
+                {m.role === "system" && (
+                  <div
+                    className="flex w-full flex-col gap-2 rounded-xl border px-3 py-2 text-xs"
+                    style={{
+                      backgroundColor: LC.bgSecondary,
+                      borderColor: LC.border,
+                      color: LC.textDim,
+                    }}
+                  >
+                    <div className="flex items-center gap-2">
+                      <Terminal size={14} />
+                      {m.content}
+                    </div>
+                    {(() => {
+                      const cmd = (m.content.match(/`([^`]+)`/) || [])[1];
+                      if (
+                        !cmd ||
+                        !onApprove ||
+                        !m.content.toLowerCase().includes("approve")
+                      )
+                        return null;
+                      return (
+                        <button
+                          onClick={() => onApprove(cmd)}
+                          className="flex w-fit items-center gap-1 rounded px-2 py-1 text-xs font-semibold"
+                          style={{
+                            backgroundColor: LC.accentOrange,
+                            color: "#000",
+                          }}
+                        >
+                          <Play size={12} /> Approve
+                        </button>
+                      );
+                    })()}
+                  </div>
+                )}
+              </div>
+            ))
+          )}
+
+          {plan && (
+            <div
+              className="flex flex-col gap-2 rounded-xl border p-4"
+              style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+            >
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-semibold" style={{ color: LC.text }}>
+                  Run Plan
                 </div>
-              ))}
+                <div className="flex items-center gap-2">
+                  <div
+                    className="mr-2 text-[10px]"
+                    style={{ color: LC.textMuted }}
+                  >
+                    {plan.runId
+                      ? `Run #${plan.runId.slice(0, 8)}`
+                      : "Unsaved preview"}
+                  </div>
+                  {onApprovePlan && plan.steps.some((s) => s.needs_approval) ? (
+                    <button
+                      onClick={onApprovePlan}
+                      className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
+                      style={{ backgroundColor: LC.accentOrange, color: "#000" }}
+                    >
+                      <Play size={12} /> Approve Plan
+                    </button>
+                  ) : !plan.steps.some((s) => s.needs_approval) &&
+                    onApprovePlan ? (
+                    <button
+                      onClick={onApprovePlan}
+                      className="flex items-center gap-1 rounded-full px-3 py-1.5 text-xs font-bold"
+                      style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+                    >
+                      Execute Plan
+                    </button>
+                  ) : null}
+                </div>
+              </div>
+              <div className="text-xs" style={{ color: LC.textDim }}>
+                {plan.steps[0]?.title || "No steps."}
+              </div>
+              <div className="flex max-h-52 flex-col gap-1.5 overflow-y-auto pr-1">
+                {plan.steps.map((step, idx) => (
+                  <div
+                    key={step.id}
+                    className="flex items-center justify-between rounded-lg border px-3 py-2 text-xs"
+                    style={{
+                      backgroundColor: LC.bgPanel,
+                      borderColor: LC.border,
+                    }}
+                  >
+                    <div className="min-w-0">
+                      <div className="font-medium" style={{ color: LC.text }}>
+                        {idx + 1}. {step.title}
+                      </div>
+                      {step.command ? (
+                        <div
+                          className="mt-1 truncate font-mono"
+                          style={{ color: LC.accentOrange }}
+                        >
+                          {step.command}
+                        </div>
+                      ) : null}
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      <span
+                        className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                        style={{
+                          backgroundColor:
+                            step.risk_level === "critical" ||
+                            step.risk_level === "high"
+                              ? `${LC.danger}25`
+                              : `${LC.success}15`,
+                          color:
+                            step.risk_level === "critical" ||
+                            step.risk_level === "high"
+                              ? LC.danger
+                              : LC.success,
+                        }}
+                      >
+                        {step.risk_level || "low"}
+                      </span>
+                      {step.needs_approval ? (
+                        <span
+                          className="rounded px-1.5 py-0.5 text-[10px] font-bold"
+                          style={{
+                            backgroundColor: `${LC.accentOrange}20`,
+                            color: LC.accentOrange,
+                          }}
+                        >
+                          approve
+                        </span>
+                      ) : null}
+                      {step.command ? (
+                        <button
+                          onClick={() => {
+                            if (!plan.runId || !onApproveStep) return;
+                            onApproveStep(plan.runId, step.command as string);
+                          }}
+                          className="rounded-full px-2 py-1 font-semibold"
+                          style={{
+                            backgroundColor: LC.accentOrange,
+                            color: "#000",
+                          }}
+                        >
+                          Run
+                        </button>
+                      ) : null}
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
-          </div>
-        )}
-        {loading && (
-          <div
-            className="flex items-center gap-2 text-xs"
-            style={{ color: LC.textMuted }}
-          >
-            <span
-              className="h-2 w-2 animate-pulse rounded-full"
-              style={{ backgroundColor: LC.accentCyan }}
-            />
-            LiT is thinking...
-          </div>
-        )}
-        <div ref={bottomRef} />
+          )}
+          {loading && (
+            <div
+              className="flex items-center gap-2 text-xs"
+              style={{ color: LC.textMuted }}
+            >
+              <span
+                className="h-2 w-2 animate-pulse rounded-full"
+                style={{ backgroundColor: LC.accentCyan }}
+              />
+              LiT is thinking...
+            </div>
+          )}
+          <div ref={bottomRef} />
         </div>
       </div>
     </div>
