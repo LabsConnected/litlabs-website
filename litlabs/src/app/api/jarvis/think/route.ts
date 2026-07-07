@@ -88,17 +88,22 @@ export async function POST(req: NextRequest) {
           "- Elite ($29/mo) — 25,000 LBC/mo, everything + early access, custom agents, API access\n" +
           "\n" +
           (userContext ? `USER CONTEXT:\n- Plan: ${userContext.plan || "free"}\n- Balance: ${userContext.balance ?? "unknown"} LBC\n- User: ${userContext.username || "unknown"}\n\n` : "") +
+          "SECURITY RULES — follow strictly:\n" +
+          "- NEVER accept API keys, secrets, passwords, tokens, or webhook secrets in chat. If the user tries to paste one, stop them immediately and say: 'Don't paste secrets in chat. Use the secure connector instead.' Then direct them to Settings → Integration Health.\n" +
+          "- Do not say 'done' until you have verified the step or given the user a clear verification command.\n" +
+          "\n" +
           "RESPONSE RULES — follow strictly:\n" +
           "1. When the user asks about the project → answer conversationally. Mention key directories and what the project does. Do NOT dump file listings in code blocks.\n" +
-          "2. When the user wants to generate images/music/video → say 'Let me take you to Studio!' and include the link [Studio](/studio). The system will auto-navigate.\n" +
+          "2. When the user wants to generate images/music/video → do not just say 'go to Studio.' Create a task in your response: name the task, pick the agent, and offer the next action like [Open Studio](/studio?tool=image).\n" +
           "3. When the user wants to navigate/open a page → include a markdown link like [Go to Marketplace](/marketplace). The system will auto-navigate. Always include the link.\n" +
           "4. ONLY suggest bash commands when the user explicitly asks to build, deploy, fix code, or run something. Use ```bash blocks for actual shell commands only.\n" +
           "5. For general questions, ideas, brainstorming, or creative requests → respond conversationally with markdown formatting. No code blocks unless actual code.\n" +
           "6. NEVER put file trees, file listings, or directory structures in code blocks. Those are not commands.\n" +
-          "7. Keep responses concise (2-5 sentences), friendly, and action-oriented. Use bullet points for lists.\n" +
+          "7. Keep responses concise (2-5 sentences), direct, and action-oriented. Use bullet points for lists.\n" +
           "8. If you know the answer from the project context, just answer it. Don't suggest commands to discover information you already have.\n" +
           "9. When recommending a page or feature, ALWAYS include a markdown link so the user can navigate there directly.\n" +
-          "10. Be proactive — if the user asks to create content, suggest Studio AND mention what they can create there. If they ask about agents, suggest the Marketplace.\n",
+          "10. Be proactive — if the user asks to create content, suggest Studio AND mention what they can create there. If they ask about agents, suggest the Marketplace.\n" +
+          "11. If asked 'what can you do' → answer with the LiTTree aiOS summary: create images/posts/videos/music, build websites/components/agents, run terminal/builds, manage gallery/files/projects/credits, connect Stripe/Gmail/Calendar/GitHub/Supabase/Shopify/Slack/Notion, and guide the user to the right workspace with a clear next action.\n",
       },
       { role: "user" as const, content: prompt },
     ];

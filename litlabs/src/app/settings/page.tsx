@@ -29,6 +29,7 @@ import {
   Terminal,
   ShieldCheck,
   Bot,
+  Plug,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -312,18 +313,27 @@ export default function SettingsPage() {
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6">
         {/* Wallet strip */}
         <div
-          className="mb-6 flex flex-wrap items-center gap-3 p-3 rounded-xl border text-sm"
+          className="mb-6 flex flex-wrap items-center justify-between gap-3 p-3 rounded-xl border text-sm"
           style={cardStyle}
         >
-          <div
-            className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold"
-            style={{ backgroundColor: `${T.accentColor}15`, color: T.accentColor }}
-          >
-            <Coins size={14} /> {balance.toLocaleString()} LiTBits
+          <div className="flex flex-wrap items-center gap-3">
+            <div
+              className="flex items-center gap-2 px-3 py-1.5 rounded-lg font-bold"
+              style={{ backgroundColor: `${T.accentColor}15`, color: T.accentColor }}
+            >
+              <Coins size={14} /> {balance.toLocaleString()} LiTBits
+            </div>
+            <span className="opacity-60" style={{ color: T.textMuted }}>
+              Your balance is synced across every page.
+            </span>
           </div>
-          <span className="opacity-60" style={{ color: T.textMuted }}>
-            Your balance is synced across every page.
-          </span>
+          <Link
+            href="/settings/integrations"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition hover:bg-white/5"
+            style={{ color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
+          >
+            <Plug size={14} /> Integration Health
+          </Link>
         </div>
 
         {/* Tabs */}
