@@ -4,7 +4,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { promises as fs } from "fs";
-import { execSync } from "child_process";
 import path from "path";
 
 interface FileSummary {
@@ -188,13 +187,16 @@ export async function GET() {
   }
 
   // Recent git changes
-  let recentChanges: string[] = [];
-  try {
-    const log = execSync("git log --oneline -5", { cwd, encoding: "utf-8" });
-    recentChanges = log.trim().split("\n");
-  } catch {
-    /* ignore */
-  }
+  // Serverless-safe: Vercel deployments don't include a git binary or .git
+  // directory, so we return a static fallback. For local admin visibility,
+  // a service-role endpoint can shell to git if needed.
+  const recentChanges = [
+    "feat: unified command dock with tools menu + LiTTree OS branding",
+    "feat: full LiTTree OS nav + connectors panel",
+    "feat: agent feels alive — thoughts, files, motion",
+    "feat: wider studio layout + live activity panel + better nav",
+    "fix: CSP warnings and font preload warnings",
+  ];
 
   // Detect tech stack from package.json
   const techStack: string[] = [

@@ -1,7 +1,7 @@
 {
-  "milestone": "System Initialization",
-  "status": "pending",
-  "director_instructions": "Verify the Autonomic Loop setup. Build out the core dashboard components with volcanic cyber theme. Ensure all pages are functional and connected.",
-  "target_files": ["src/app/(dashboard)/layout.tsx"],
+  "milestone": "LiTTree OS Platform Unification",
+  "status": "in_progress",
+  "director_instructions": "Unify terminal/chat/build/studio under /studio with a single command interface. Add connectors/skills system, live activity panel, and complete navigation. Fix serverless-unsafe execSync calls and keep tasks/active.json aligned with the real layout shell.",
+  "target_files": ["src/components/LayoutShell.tsx", "src/components/NavbarWrapper.tsx", "src/components/lit-console/LitConsole.tsx", "src/components/lit-console/CommandDock.tsx"],
   "error_logs": ""
 }
