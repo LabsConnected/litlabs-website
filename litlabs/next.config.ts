@@ -182,7 +182,11 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
+      // Core workspace: every creation/terminal/chat path routes into Studio
       { source: "/builder", destination: "/studio?tool=builder", permanent: true },
+      { source: "/chat", destination: "/studio?tool=chat", permanent: true },
+      { source: "/code", destination: "/studio?tool=chat", permanent: false },
+      { source: "/terminal", destination: "/studio?tool=chat", permanent: false },
       {
         source: "/generate",
         destination: "/studio?tool=image",
@@ -194,6 +198,8 @@ const nextConfig: NextConfig = {
         destination: "/studio?tool=chat",
         permanent: false,
       },
+      { source: "/agents", destination: "/studio?tool=agents", permanent: false },
+      { source: "/ai-builder", destination: "/studio?tool=chat", permanent: true },
       // Consolidate legacy product aliases into one canonical route
       { source: "/lit", destination: "/studio?tool=chat", permanent: true },
       { source: "/litt", destination: "/studio?tool=chat", permanent: true },

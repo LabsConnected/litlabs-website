@@ -205,7 +205,7 @@ export const NAV_GROUPS: NavGroup[] = [
     items: [
       { label: "Profile", href: "/profile", icon: User },
       { label: "Admin Dashboard", href: "/admin", icon: Shield, badge: 1 },
-      { label: "Terminal", href: "/admin/terminal", icon: Terminal },
+      { label: "Terminal", href: "/studio?tool=chat", icon: Terminal },
     ],
   },
 ];
@@ -214,7 +214,7 @@ export const MOBILE_BOTTOM_ITEMS = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "LiT", href: "/studio?tool=chat", icon: Bot },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Agents", href: "/agents", icon: Users },
+  { label: "Agents", href: "/studio?tool=agents", icon: Users },
   { label: "Me", href: "/profile", icon: User },
 ];
 
