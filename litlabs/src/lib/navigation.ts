@@ -20,7 +20,6 @@ import {
   Music,
   Image,
   Bot,
-  PenTool,
   Search,
   Shield,
   Star,
@@ -209,15 +208,18 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const MOBILE_BOTTOM_ITEMS = [
   { label: "LiT", href: "/studio?tool=chat", icon: Bot },
+  { label: "Dash", href: "/dashboard", icon: BarChart3 },
   { label: "Studio", href: "/studio", icon: Sparkles },
   { label: "Agents", href: "/studio?tool=agents", icon: Users },
   { label: "Me", href: "/profile", icon: User },
 ];
 
 export const MOBILE_MORE_ITEMS = [
+  { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
+  { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Bot },
   { label: "Profile", href: "/profile", icon: User },
   { label: "Studio", href: "/studio", icon: Paintbrush },
-  { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Bot },
+  { label: "Agents", href: "/studio?tool=agents", icon: Users },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games/cloud", icon: Gamepad2 },

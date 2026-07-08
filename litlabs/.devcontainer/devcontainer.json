@@ -2,12 +2,16 @@
   "name": "LiTTLabStudio OS",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22",
   "workspaceFolder": "/workspaces/litlabs-website",
-  "postCreateCommand": "npm install -g pnpm@9.15.0 && pnpm install",
-  "forwardPorts": [3000],
+  "postCreateCommand": "npm install",
+  "forwardPorts": [3000, 4001],
   "portsAttributes": {
     "3000": {
       "label": "LiTTree Labs",
       "onAutoForward": "openPreview"
+    },
+    "4001": {
+      "label": "LiTTree Terminal Server",
+      "onAutoForward": "silent"
     }
   },
   "customizations": {

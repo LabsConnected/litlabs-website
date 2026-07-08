@@ -11,6 +11,11 @@ const nextConfig: NextConfig = {
   // Avoid Windows EPERM errors during .next cleanup
   cleanDistDir: false,
 
+  // Keep Next from selecting a parent workspace when building from phone/Codespaces.
+  turbopack: {
+    root: process.cwd(),
+  },
+
   experimental: {
     optimizePackageImports: [
       "@supabase/supabase-js",
@@ -92,7 +97,7 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value:
-              "geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()",
+              "geolocation=(), microphone=(self), camera=(), payment=(), usb=(), interest-cohort=()",
           },
           {
             key: "Cross-Origin-Opener-Policy",

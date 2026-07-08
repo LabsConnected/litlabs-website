@@ -23,7 +23,7 @@ Docker sandbox (optional, recommended for production)
 Frontend + backend dependencies are already added to the main `package.json`.
 
 ```bash
-pnpm install
+npm install
 ```
 
 ## Run locally
@@ -31,7 +31,7 @@ pnpm install
 ### 1. Start the terminal server
 
 ```bash
-pnpm terminal:dev
+npm run terminal:dev
 ```
 
 This starts the WebSocket server on `http://localhost:4001`.
@@ -39,19 +39,19 @@ This starts the WebSocket server on `http://localhost:4001`.
 ### 2. Build the Docker sandbox image (optional)
 
 ```bash
-pnpm terminal:build-image
+npm run terminal:build-image
 ```
 
 ### 3. Start the Next.js app
 
 ```bash
-pnpm dev
+npm run dev
 ```
 
 ### 4. Run both together
 
 ```bash
-pnpm dev:all
+npm run dev:all
 ```
 
 ## Environment variables
@@ -89,7 +89,7 @@ TERMINAL_USE_DOCKER=true
 
 1. Create a new Node.js service.
 2. Set environment variables.
-3. Start command: `node terminal-server/dist/server.js` or `pnpm terminal:start`.
+3. Start command: `node terminal-server/dist/server.js` or `npm run terminal:start`.
 4. Expose port `4001` (or whatever `TERMINAL_SERVER_PORT` is).
 
 ### Option B: Docker Compose
@@ -142,12 +142,12 @@ services:
 
 ## Next steps
 
-1. Run `pnpm dev:all` locally and test the terminal.
+1. Run `npm run dev:all` locally and test the terminal.
 2. Apply the Supabase migrations in `supabase/migrations/`.
 3. Deploy the terminal server using Railway, Render, or Docker.
 4. Set `NEXT_PUBLIC_TERMINAL_WS_URL` in Vercel to the deployed terminal server URL.
 5. Set `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` for the Deploy button.
-6. Build the sandbox image (`pnpm terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.
+6. Build the sandbox image (`npm run terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.
 
 ## Phase roadmap
 

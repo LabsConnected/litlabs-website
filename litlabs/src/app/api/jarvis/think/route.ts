@@ -6,6 +6,7 @@ import {
   collectLitContext,
   LiTContext,
   LiTAction,
+  LiTChatHistoryMessage,
   parseLitActions,
 } from "@/lib/jarvis-context";
 import { getProjectFiles } from "@/lib/project-scan";
@@ -21,6 +22,15 @@ export async function POST(req: NextRequest) {
     const message = body.message as string;
     const contextRaw = body.context as Partial<LiTContext> & { route: string };
     const userContext = body.userContext as { plan?: string; balance?: number; username?: string } | undefined;
+    const recentMessages = Array.isArray(body.recentMessages)
+      ? (body.recentMessages as LiTChatHistoryMessage[])
+          .filter((m) =>
+            (m.role === "user" || m.role === "assistant") &&
+            typeof m.content === "string" &&
+            m.content.trim().length > 0,
+          )
+          .slice(-8)
+      : [];
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
@@ -37,7 +47,7 @@ export async function POST(req: NextRequest) {
       fileTree: topFiles,
       selectedFile,
     });
-    const prompt = buildLitPrompt(message, context, fileCount);
+    const prompt = buildLitPrompt(message, context, fileCount, recentMessages);
 
     const messages = [
       {
@@ -48,9 +58,17 @@ export async function POST(req: NextRequest) {
           "\n" +
           "TONE RULES:\n" +
           "- Direct, technical, and action-oriented. No filler.\n" +
+          "- Respond as a product copilot that can see the current chat and project context, not as a generic help bot.\n" +
           "- Never use nature, plant, tree, seed, growth, or blooming metaphors.\n" +
           "- Never use spiritual, mystical, or overly reverent language like 'honored to serve'.\n" +
           "- Treat the user like a capable builder or dev.\n" +
+          "- If the recent conversation already contains a generic capability list, do not repeat it.\n" +
+          "- If the user gives product positioning, convert it into concrete product, UX, agent, or copy recommendations.\n" +
+          "\n" +
+          "CURRENT PRODUCT DIRECTION:\n" +
+          "- LiTTree/LiT Labs helps people work with AI and enjoy useful AI tools without setup hassle.\n" +
+          "- The agent should stay visible, learn from the user in real time, and improve responses using recent chat, saved memory, project context, and visible activity.\n" +
+          "- The Studio should feel like a live AI command center: create, build, fix, save, inspect, and continue from previous context.\n" +
           "\n" +
           "PLATFORM KNOWLEDGE — LiTTree LabStudios routes:\n" +
           "- /studio?tool=chat — Main AI chat console (current page / canonical product route)\n" +

@@ -143,7 +143,7 @@ function Dropdown({
   return (
     <div
       ref={ref}
-      className="absolute bottom-full left-0 z-50 mb-2 max-h-60 w-56 overflow-y-auto rounded-lg border py-1 shadow-2xl"
+      className="absolute bottom-full left-0 z-50 mb-2 hidden max-h-60 w-56 overflow-y-auto rounded-lg border py-1 shadow-2xl md:block"
       style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
       onClick={(e) => e.stopPropagation()}
     >
@@ -279,14 +279,29 @@ export default function CommandDock(props: CommandDockProps) {
     { id: "tools", label: "Tools", icon: Plus },
   ] as const;
 
+  const toolsMenu = TOOLS.map((t) => {
+    const Icon = t.icon;
+    return (
+      <button
+        key={t.id}
+        onClick={() => handleTool(t.id)}
+        className="flex items-center gap-2 rounded-xl px-3 py-3 text-left text-xs font-bold transition-colors hover:bg-white/5 md:rounded-none md:py-2 md:font-normal"
+        style={{ color: LC.text }}
+      >
+        <Icon size={15} style={{ color: LC.textMuted }} />
+        {t.label}
+      </button>
+    );
+  });
+
   return (
     <div
-      className="relative z-30 w-full shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-3"
+      className="relative z-30 w-full shrink-0 px-2 pb-[max(0.55rem,env(safe-area-inset-bottom))] pt-1.5 sm:px-4 sm:pb-3 sm:pt-2"
       style={{ backgroundColor: LC.bg }}
     >
       <div className="relative mx-auto max-w-3xl">
         {/* Composer mode tabs */}
-        <div className="mb-1.5 flex items-center gap-1 overflow-x-auto sm:gap-2">
+        <div className="mb-1.5 flex items-center gap-1 overflow-x-auto px-0.5 sm:gap-2 sm:px-0">
           {modeTabs.map((m) => {
             const Icon = m.icon;
             const isActive = activeMode === m.id;
@@ -294,7 +309,7 @@ export default function CommandDock(props: CommandDockProps) {
               <button
                 key={m.id}
                 onClick={() => handleModeClick(m.id)}
-                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold transition-all whitespace-nowrap"
+                className="flex items-center gap-1.5 rounded-full px-2.5 py-1.5 text-[10px] font-bold transition-all whitespace-nowrap sm:py-1"
                 style={{
                   color: isActive ? LC.accentCyan : LC.textDim,
                   backgroundColor: isActive ? `${LC.accentCyan}12` : "transparent",
@@ -310,7 +325,7 @@ export default function CommandDock(props: CommandDockProps) {
         </div>
 
         <div
-          className="flex min-h-[56px] items-end gap-2 rounded-2xl border px-3 py-2.5 transition-all"
+          className="flex min-h-[52px] items-end gap-1.5 rounded-2xl border px-2 py-2 transition-all sm:min-h-[56px] sm:gap-2 sm:px-3 sm:py-2.5"
           style={{
             backgroundColor: LC.bgPanel,
             borderColor: focused ? LC.accentCyan : LC.borderSubtle,
@@ -321,7 +336,7 @@ export default function CommandDock(props: CommandDockProps) {
           <div className="relative shrink-0">
             <button
               onClick={() => setToolsOpen((v) => !v)}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/5"
+              className="flex h-10 w-10 items-center justify-center rounded-full transition-all hover:bg-white/5 sm:h-9 sm:w-9"
               style={{
                 color: LC.textMuted,
                 backgroundColor: toolsOpen ? `${LC.accentCyan}15` : "transparent",
@@ -332,20 +347,7 @@ export default function CommandDock(props: CommandDockProps) {
               <Plus size={18} style={{ color: toolsOpen ? LC.accentCyan : LC.textMuted }} />
             </button>
             <Dropdown open={toolsOpen} onClose={() => setToolsOpen(false)}>
-              {TOOLS.map((t) => {
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => handleTool(t.id)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                    style={{ color: LC.text }}
-                  >
-                    <Icon size={14} style={{ color: LC.textMuted }} />
-                    {t.label}
-                  </button>
-                );
-              })}
+              {toolsMenu}
             </Dropdown>
           </div>
 
@@ -357,11 +359,11 @@ export default function CommandDock(props: CommandDockProps) {
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
             placeholder={MODES.find((m) => m.id === mode)?.placeholder || "Ask LiTTree anything..."}
-            className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-sm outline-none"
+            className="max-h-32 min-h-[24px] flex-1 resize-none bg-transparent py-2 text-base outline-none sm:max-h-40 sm:py-1.5 sm:text-sm"
             style={{ color: LC.text }}
             rows={1}
           />
-          <div className="flex items-center gap-1 shrink-0">
+          <div className="flex items-center gap-0.5 shrink-0 sm:gap-1">
             <input
               ref={fileInputRef}
               type="file"
@@ -376,7 +378,7 @@ export default function CommandDock(props: CommandDockProps) {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="rounded-lg p-2 transition-colors hover:bg-white/5"
+              className="hidden rounded-lg p-2 transition-colors hover:bg-white/5 min-[390px]:block"
               style={{ color: LC.textMuted }}
               title="Attach"
             >
@@ -386,7 +388,7 @@ export default function CommandDock(props: CommandDockProps) {
               <button
                 type="button"
                 onClick={listening ? onVoiceStop : onVoice}
-                className="relative flex h-9 w-9 items-center justify-center rounded-full transition-all"
+                className="relative flex h-10 w-10 items-center justify-center rounded-full transition-all sm:h-9 sm:w-9"
                 style={{
                   color: listening ? "#000" : LC.accentCyan,
                   backgroundColor: listening ? LC.accentCyan : "transparent",
@@ -405,7 +407,7 @@ export default function CommandDock(props: CommandDockProps) {
             )}
             <button
               onClick={onSend}
-              className="flex h-9 w-9 items-center justify-center rounded-full transition-all"
+              className="flex h-10 w-10 items-center justify-center rounded-full transition-all sm:h-9 sm:w-9"
               style={{ backgroundColor: LC.accentCyan, color: "#000" }}
               title="Send"
             >
@@ -415,7 +417,7 @@ export default function CommandDock(props: CommandDockProps) {
         </div>
 
         {/* Active mode hint */}
-        <div className="mt-1.5 flex items-center justify-center gap-1 text-[10px]" style={{ color: LC.textDim }}>
+        <div className="mt-1 hidden items-center justify-center gap-1 text-[10px] sm:flex" style={{ color: LC.textDim }}>
           <span style={{ color: MODES.find((m) => m.id === mode)?.color || LC.textDim }}>
             {MODES.find((m) => m.id === mode)?.label || "Ask"}
           </span>
@@ -590,6 +592,39 @@ export default function CommandDock(props: CommandDockProps) {
 
         </div>
       </div>
+
+      {toolsOpen && (
+        <div className="fixed inset-0 z-50 md:hidden">
+          <button
+            type="button"
+            aria-label="Close tools"
+            className="absolute inset-0 w-full bg-black/60"
+            onClick={() => setToolsOpen(false)}
+          />
+          <div
+            className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t px-3 pb-[max(1rem,env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+            style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ backgroundColor: LC.border }} />
+            <div className="mb-2 flex items-center justify-between px-1">
+              <div className="text-xs font-black uppercase tracking-[0.18em]" style={{ color: LC.textMuted }}>
+                Tools
+              </div>
+              <button
+                type="button"
+                onClick={() => setToolsOpen(false)}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold"
+                style={{ color: LC.accentCyan, backgroundColor: `${LC.accentCyan}12` }}
+              >
+                Close
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              {toolsMenu}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

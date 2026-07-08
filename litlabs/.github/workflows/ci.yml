@@ -20,23 +20,18 @@ jobs:
         with:
           node-version: '22'
 
-      - name: Install pnpm
-        uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile
+        run: npm ci --legacy-peer-deps
         env:
           CI: true
 
       - name: Lint
-        run: pnpm lint
+        run: npm run lint
 
       - name: Typecheck
-        run: pnpm typecheck
+        run: npm run typecheck
 
       - name: Build
-        run: pnpm build
+        run: npm run build
         env:
           NEXT_TELEMETRY_DISABLED: 1

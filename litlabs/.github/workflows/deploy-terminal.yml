@@ -6,7 +6,8 @@ on:
     paths:
       - "terminal-server/**"
       - "docker/Dockerfile.terminal"
-      - "pnpm-workspace.yaml"
+      - "package-lock.json"
+      - "package.json"
       - ".github/workflows/deploy-terminal.yml"
   workflow_dispatch:
 

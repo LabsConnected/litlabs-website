@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function AgentRedirect() {
-  redirect("/agents");
+  redirect("/studio?tool=agents");
 }

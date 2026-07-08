@@ -11,7 +11,7 @@ export default function AgentsPage() {
   const router = useRouter();
 
   useEffect(() => {
-    router.replace("/studio?tool=chat");
+    router.replace("/studio?tool=agents");
   }, [router]);
 
   return (
@@ -23,12 +23,12 @@ export default function AgentsPage() {
         <Bot className="mx-auto h-8 w-8" style={{ color: T.accentColor }} />
         <div className="text-lg font-black">Agents now route through LiTTree</div>
         <Link
-          href="/studio?tool=chat"
+          href="/studio?tool=agents"
           className="inline-flex items-center gap-2 rounded-xl px-4 py-2.5 text-sm font-bold transition"
           style={{ backgroundColor: T.accentColor, color: T.bgColor }}
         >
           <Bot className="h-4 w-4" />
-          Open LiTTree Agent
+          Open Agents
         </Link>
       </div>
     </main>

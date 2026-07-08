@@ -31,7 +31,7 @@ const navLinks = [
   { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/studio?tool=chat", label: "Console", icon: Terminal },
   { href: "/studio", label: "Studio", icon: Wand2 },
-  { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/studio?tool=agents", label: "Agents", icon: Bot },
   { href: "/gallery", label: "Gallery", icon: Image },
   { href: "/marketplace", label: "Market", icon: ShoppingBag },
   { href: "/settings", label: "Settings", icon: Settings },
@@ -116,33 +116,61 @@ export default function TopBar({
           })}
         </nav>
 
-        {/* Mobile dropdown nav */}
+        {/* Mobile navigation panel */}
         {menuOpen && (
-          <div
-            className="absolute left-3 right-3 top-12 z-50 rounded-lg border p-2 shadow-xl md:hidden"
-            style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
-          >
-            {navLinks.map((link) => {
-              const active = isActive(link.href);
-              const Icon = link.icon;
-              return (
-                <Link
-                  key={link.href}
-                  href={link.href}
-                  onClick={() => setMenuOpen(false)}
-                  className="flex items-center gap-2 rounded-md px-2.5 py-2 text-xs font-semibold transition-colors"
-                  style={{
-                    color: active ? LC.accentCyan : LC.text,
-                    backgroundColor: active
-                      ? `${LC.accentCyan}15`
-                      : "transparent",
-                  }}
+          <div className="fixed inset-0 z-50 flex md:hidden">
+            <button
+              type="button"
+              aria-label="Close navigation"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setMenuOpen(false)}
+            />
+            <div
+              className="relative flex h-full w-[82vw] max-w-[320px] flex-col border-r shadow-2xl"
+              style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+            >
+              <div
+                className="flex h-12 items-center justify-between border-b px-4"
+                style={{ borderColor: LC.border }}
+              >
+                <span
+                  className="text-[11px] font-black uppercase tracking-[0.18em]"
+                  style={{ color: LC.accentCyan }}
                 >
-                  <Icon size={14} />
-                  {link.label}
-                </Link>
-              );
-            })}
+                  Navigation
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(false)}
+                  className="rounded-md p-1.5 transition-colors hover:bg-white/5"
+                  style={{ color: LC.textMuted }}
+                  aria-label="Hide navigation"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <nav className="flex-1 overflow-y-auto p-2">
+                {navLinks.map((link) => {
+                  const active = isActive(link.href);
+                  const Icon = link.icon;
+                  return (
+                    <Link
+                      key={link.href}
+                      href={link.href}
+                      onClick={() => setMenuOpen(false)}
+                      className="flex min-h-11 items-center gap-3 rounded-lg px-3 text-sm font-bold transition-colors"
+                      style={{
+                        color: active ? LC.accentCyan : LC.text,
+                        backgroundColor: active ? `${LC.accentCyan}15` : "transparent",
+                      }}
+                    >
+                      <Icon size={17} />
+                      {link.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
           </div>
         )}
       </div>

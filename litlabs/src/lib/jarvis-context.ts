@@ -36,16 +36,32 @@ export type LiTContext = {
   websocketStatus: "connected" | "offline" | "connecting";
 };
 
+export type LiTChatHistoryMessage = {
+  role: "user" | "assistant";
+  content: string;
+};
+
 export type LiTThinkResponse = {
   answer: string;
   actions?: LiTAction[];
 };
 
-export function buildLitPrompt(message: string, context: LiTContext, fileCount?: number): string {
+export function buildLitPrompt(
+  message: string,
+  context: LiTContext,
+  fileCount?: number,
+  recentMessages: LiTChatHistoryMessage[] = [],
+): string {
   const treePreview = context.fileTree.slice(0, 20);
   const treeSummary = treePreview.length > 0
     ? `${treePreview.join("\n")}${(fileCount || context.fileTree.length) > 20 ? `\n... (${fileCount || context.fileTree.length} total files)` : ""}`
     : "No files loaded";
+  const recentSummary = recentMessages.length > 0
+    ? recentMessages
+        .slice(-8)
+        .map((m) => `${m.role === "user" ? "User" : "LiT"}: ${m.content.slice(0, 700)}`)
+        .join("\n\n")
+    : "No recent chat history";
 
   return `
 You are LiT inside LiTTree OS.
@@ -54,6 +70,9 @@ You are an AI developer command center with access to the live project.
 
 User request:
 ${message}
+
+Recent conversation:
+${recentSummary}
 
 Current app context:
 Route: ${context.route}
@@ -80,6 +99,8 @@ Instructions:
 - Only suggest bash commands when the user explicitly asks to build, deploy, fix, or run something.
 - For navigation, media generation, or general questions → answer conversationally. No code blocks.
 - NEVER put file trees or directory listings in code blocks.
+- Do not repeat the same capability list or the same "what can I do" answer if it appears in recent conversation.
+- If the user is clarifying product direction, incorporate their latest product statement as context and move the idea forward.
 - Use markdown formatting for readability.
 `;
 }

@@ -289,7 +289,7 @@ function StudioCommandCenter() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-hidden pb-[68px] md:pb-0"
+      className="flex h-full min-h-0 flex-col overflow-hidden"
       style={{
         background: `radial-gradient(circle at top, ${T.accentColor}14, transparent 30%), linear-gradient(180deg, ${T.bgColor} 0%, ${T.boxBg} 100%)`,
         color: T.textColor,
@@ -378,15 +378,15 @@ function StudioCommandCenter() {
             </div>
             <nav className="flex-1 py-2 overflow-y-auto">
               {[
+                { label: "Dashboard", href: "/dashboard", icon: Gauge },
                 { label: "Profile", href: "/profile", icon: User },
                 { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
-                { label: "Agents", href: "/agents", icon: Bot },
+                { label: "Agents", href: "/studio?tool=agents", icon: Bot },
                 { label: "Console", href: "/studio?tool=terminal", icon: TerminalSquare },
                 { label: "Gallery", href: "/gallery", icon: LayoutGrid },
                 { label: "Marketplace", href: "/marketplace", icon: Store },
                 { label: "Games", href: "/games/cloud", icon: Gamepad2 },
                 { label: "Social", href: "/social", icon: Users },
-                { label: "Dashboard", href: "/dashboard", icon: Gauge },
                 { label: "Settings", href: "/settings", icon: Settings },
               ].map((item) => {
                 const Icon = item.icon;

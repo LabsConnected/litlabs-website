@@ -79,6 +79,7 @@ export function useLiTVoice({
   const [state, setState] = useState<VoiceState>("idle");
   const [isSupported, setIsSupported] = useState(false);
   const [transcript, setTranscript] = useState("");
+  const [errorMessage, setErrorMessage] = useState("");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [selectedVoice, setSelectedVoice] = useState<SpeechSynthesisVoice | null>(null);
   const [rate, setRateState] = useState<number>(() => getLSNumber(LS_VOICE_RATE, 1.05));
@@ -121,23 +122,33 @@ export function useLiTVoice({
       rec.lang = "en-US";
       rec.onstart = () => {
         setTranscript("");
+        setErrorMessage("");
         setState("listening");
       };
       rec.onend = () => {
         setState((prev) => (prev === "listening" ? "idle" : prev));
       };
       rec.onerror = (e: LiTSpeechRecognitionErrorEvent) => {
-        if (e.error !== "aborted" && e.error !== "no-speech") {
-          setState("error");
-        } else {
+        if (e.error === "aborted") {
           setState("idle");
+          return;
         }
+        const messages: Record<string, string> = {
+          "not-allowed": "Microphone permission is blocked for this site.",
+          "service-not-allowed": "Speech recognition is blocked by this browser.",
+          "audio-capture": "No microphone input was found.",
+          "no-speech": "No speech was detected. Move closer, speak clearly, or check the phone mic.",
+          network: "Speech recognition network service failed.",
+        };
+        setErrorMessage(messages[e.error] || `Voice error: ${e.error}`);
+        setState("error");
       };
       rec.onresult = (e: LiTSpeechRecognitionEvent) => {
         const results = e.results;
         if (!results.length) return;
         const last = results[results.length - 1];
-        const text = last[0].transcript;
+        const text = last[0].transcript.trim();
+        if (!text) return;
         setTranscript(text);
         if (last.isFinal) {
           setState("thinking");
@@ -208,19 +219,37 @@ export function useLiTVoice({
     }
   }, []);
 
-  const startListening = useCallback(() => {
+  const startListening = useCallback(async () => {
     clearRestart();
     if (!recognitionRef.current) {
+      setErrorMessage("Voice input needs Chrome or Samsung Internet with speech recognition enabled.");
       setState("error");
       return;
     }
     try {
+      if (navigator.mediaDevices?.getUserMedia) {
+        const stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+          },
+        });
+        stream.getTracks().forEach((track) => track.stop());
+      }
       synthRef.current?.cancel();
       setTranscript("");
+      setErrorMessage("");
       setState("listening");
       recognitionRef.current.start();
-    } catch {
-      void 0;
+    } catch (err) {
+      const name = err instanceof DOMException ? err.name : "";
+      setErrorMessage(
+        name === "NotAllowedError" || name === "SecurityError"
+          ? "Microphone permission is blocked. Allow mic access for litlabs.net, then retry."
+          : "Could not start microphone input on this browser.",
+      );
+      setState("error");
     }
   }, [clearRestart]);
 
@@ -233,6 +262,7 @@ export function useLiTVoice({
     }
     setState("idle");
     setTranscript("");
+    setErrorMessage("");
   }, [clearRestart]);
 
   const audioRef = useRef<HTMLAudioElement | null>(null);
@@ -306,6 +336,7 @@ export function useLiTVoice({
   return {
     state,
     transcript,
+    errorMessage,
     isSupported,
     voices,
     selectedVoice,

@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { CSSProperties } from "react";
 import {
   User,
   Bot,
@@ -20,7 +21,6 @@ import {
   Image,
   Wand2,
   Plus,
-  RefreshCw,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
@@ -42,16 +42,81 @@ export interface Message {
   };
 }
 
-const WALLPAPERS = [
+const WALLPAPERS: Array<{ id: string; label: string; style?: CSSProperties }> = [
   { id: "none", label: "Default", style: undefined },
-  { id: "grid", label: "Grid", style: { backgroundImage: "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)", backgroundSize: "40px 40px" } },
-  { id: "dots", label: "Dots", style: { backgroundImage: "radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)", backgroundSize: "24px 24px" } },
-  { id: "cyan-glow", label: "Cyan Glow", style: { background: "radial-gradient(ellipse at top, rgba(34,211,238,0.08) 0%, transparent 60%)" } },
-  { id: "purple-glow", label: "Purple Glow", style: { background: "radial-gradient(ellipse at top, rgba(168,85,247,0.1) 0%, transparent 60%)" } },
-  { id: "stars", label: "Stars", style: { backgroundImage: "radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px)", backgroundSize: "50px 50px, 30px 30px", backgroundPosition: "0 0, 25px 25px" } },
-  { id: "aurora", label: "Aurora", style: { background: "linear-gradient(120deg, rgba(34,211,238,0.06), rgba(168,85,247,0.08), rgba(34,211,238,0.06))", backgroundSize: "200% 200%", animation: "litAurora 12s ease infinite" } },
-  { id: "pulse-grid", label: "Pulse Grid", style: { backgroundImage: "linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)", backgroundSize: "40px 40px", animation: "litPulseGrid 6s ease-in-out infinite" } },
-  { id: "holo-scan", label: "Holo Scan", style: { background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.04) 3px, transparent 4px)", animation: "litScan 8s linear infinite" } },
+  {
+    id: "grid",
+    label: "Grid",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 8%, rgba(34,211,238,0.16), transparent 34%), linear-gradient(rgba(34,211,238,0.13) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.10) 1px, transparent 1px)",
+      backgroundSize: "100% 100%, 32px 32px, 32px 32px",
+    },
+  },
+  {
+    id: "dots",
+    label: "Dots",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 18% 22%, rgba(251,146,60,0.20), transparent 26%), radial-gradient(circle at 78% 16%, rgba(34,211,238,0.18), transparent 28%), radial-gradient(rgba(255,255,255,0.22) 1px, transparent 1px)",
+      backgroundSize: "100% 100%, 100% 100%, 18px 18px",
+    },
+  },
+  {
+    id: "cyan-glow",
+    label: "Cyan Glow",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 12%, rgba(0,245,255,0.34), transparent 34%), radial-gradient(circle at 22% 70%, rgba(59,130,246,0.18), transparent 30%)",
+    },
+  },
+  {
+    id: "purple-glow",
+    label: "Purple Glow",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 15%, rgba(217,70,239,0.30), transparent 34%), radial-gradient(circle at 82% 74%, rgba(124,58,237,0.24), transparent 32%)",
+    },
+  },
+  {
+    id: "stars",
+    label: "Stars",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 20%, rgba(255,255,255,0.12), transparent 34%), radial-gradient(rgba(255,255,255,0.35) 1px, transparent 1px), radial-gradient(rgba(34,211,238,0.28) 1px, transparent 1px)",
+      backgroundSize: "100% 100%, 46px 46px, 27px 27px",
+      backgroundPosition: "0 0, 0 0, 13px 11px",
+    },
+  },
+  {
+    id: "aurora",
+    label: "Aurora",
+    style: {
+      backgroundImage:
+        "linear-gradient(125deg, rgba(34,211,238,0.18), rgba(217,70,239,0.22), rgba(251,146,60,0.16), rgba(34,211,238,0.18))",
+      backgroundSize: "220% 220%",
+      animation: "litAurora 10s ease infinite",
+    },
+  },
+  {
+    id: "pulse-grid",
+    label: "Pulse Grid",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 12%, rgba(251,146,60,0.18), transparent 32%), linear-gradient(rgba(251,146,60,0.13) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.10) 1px, transparent 1px)",
+      backgroundSize: "100% 100%, 36px 36px, 36px 36px",
+      animation: "litPulseGrid 5s ease-in-out infinite",
+    },
+  },
+  {
+    id: "holo-scan",
+    label: "Holo Scan",
+    style: {
+      backgroundImage:
+        "radial-gradient(circle at 50% 18%, rgba(34,211,238,0.24), transparent 34%), repeating-linear-gradient(0deg, rgba(34,211,238,0.08), rgba(34,211,238,0.08) 1px, transparent 2px, transparent 5px)",
+      animation: "litScan 7s linear infinite",
+    },
+  },
 ];
 
 const WALLPAPER_KEY = "lit-chat-wallpaper";
@@ -67,23 +132,25 @@ const PARTICLES = Array.from({ length: 18 }).map((_, i) => ({
 
 function suggestedActions(text: string): string[] {
   const lower = text.toLowerCase();
-  const base = ["Tell me more", "Start over"];
   if (lower.includes("landing page") || lower.includes("website")) {
-    return ["Build the hero section", "Add a features grid", "Make it responsive", ...base];
+    return ["Build the hero section", "Add a features grid", "Make it responsive", "Create copy"];
   }
   if (lower.includes("image") || lower.includes("generate")) {
-    return ["Generate another", "Change style", "Use as wallpaper", ...base];
+    return ["Generate another", "Create variations", "Save to gallery", "Turn into brand system"];
   }
   if (lower.includes("code") || lower.includes("component") || lower.includes("tsx")) {
-    return ["Explain the code", "Copy code", "Fix issues", ...base];
+    return ["Fix issues", "Explain the code", "Add tests", "Refactor this"];
   }
   if (lower.includes("deploy") || lower.includes("build")) {
-    return ["Run build", "Deploy now", "Check logs", ...base];
+    return ["Run build", "Check logs", "Deploy now", "Summarize risk"];
   }
   if (lower.includes("agent") || lower.includes("create an agent")) {
-    return ["Name it", "Set personality", "Publish to marketplace", ...base];
+    return ["Name it", "Set personality", "Define tools", "Publish to marketplace"];
   }
-  return ["Show me options", "Do it", "Refine this", ...base];
+  if (lower.includes("purpose") || lower.includes("concept") || lower.includes("users") || lower.includes("ai")) {
+    return ["Shape the product pitch", "Design onboarding", "Define agent memory", "Map the user flow"];
+  }
+  return ["Make this actionable", "Suggest UI changes", "Create a plan", "Save this direction"];
 }
 
 const PROMPT_SUGGESTIONS = [
@@ -392,7 +459,7 @@ export default function ChatPanel({
   const [wallpaper, setWallpaper] = useState<string>("none");
   const [wallpaperOpen, setWallpaperOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
-  const [promptSeed, setPromptSeed] = useState(0);
+  const promptSeed = 0;
   const [revealed, setRevealed] = useState<Record<string, number>>(() => {
     const latest = [...messages].reverse().find((m) => m.role === "lit");
     const init: Record<string, number> = {};
@@ -517,7 +584,7 @@ export default function ChatPanel({
   return (
     <div
       className="relative flex h-full w-full flex-col overflow-hidden"
-      style={{ backgroundColor: LC.bg, ...activeWallpaper }}
+      style={{ backgroundColor: LC.bg }}
     >
       <style>{`
         @keyframes litAurora {
@@ -543,8 +610,16 @@ export default function ChatPanel({
         }
       `}</style>
 
+      {activeWallpaper && (
+        <div
+          key={wallpaper}
+          className="pointer-events-none absolute inset-0 z-0 opacity-100 transition-opacity duration-300"
+          style={activeWallpaper}
+        />
+      )}
+
       {/* Floating particles overlay (subtle, always on) */}
-      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden opacity-60">
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden opacity-70">
         {PARTICLES.map((p) => (
           <span
             key={p.id}
@@ -579,15 +654,15 @@ export default function ChatPanel({
         }}
       />
 
-      {/* Chat header with wallpaper picker */}
-      <div className="relative z-10 flex items-center justify-between border-b px-4 py-2" style={{ borderColor: LC.border, backgroundColor: `${LC.bg}cc`, backdropFilter: "blur(8px)" }}>
+      {/* Chat header with backdrop control */}
+      <div className="relative z-10 flex items-center justify-between border-b px-3 py-2 sm:px-4" style={{ borderColor: LC.border, backgroundColor: `${LC.bg}cc`, backdropFilter: "blur(8px)" }}>
         <div className="flex items-center gap-2 text-xs font-black" style={{ color: LC.text }}>
           <span className="relative flex h-2 w-2">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: LC.accentCyan }} />
             <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: LC.accentCyan }} />
           </span>
           <Bot size={14} style={{ color: LC.accentCyan }} /> LiTTree Agent
-          <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: LC.accentCyan }}>Live</span>
+          <span className="hidden text-[9px] font-black uppercase tracking-widest min-[380px]:inline" style={{ color: LC.accentCyan }}>Live</span>
           {demoMode && (
             <span className="rounded-full px-2 py-0.5 text-[9px] font-black" style={{ backgroundColor: `${LC.warning}20`, color: LC.warning }}>
               Demo
@@ -598,52 +673,98 @@ export default function ChatPanel({
           {onNewChat && (
             <button
               onClick={onNewChat}
-              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/5"
+              className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-bold transition-colors hover:bg-white/5 sm:px-2.5"
               style={{ color: LC.textMuted, border: `1px solid ${LC.border}` }}
               title="Start a new chat"
             >
-              <Plus size={13} /> New
+              <Plus size={13} /> <span className="hidden min-[390px]:inline">New</span>
             </button>
           )}
           <button
             onClick={() => setWallpaperOpen((v) => !v)}
-            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/5"
+            className="flex h-8 items-center gap-1.5 rounded-lg px-2 text-[11px] font-bold transition-colors hover:bg-white/5 sm:px-2.5"
             style={{ color: LC.textMuted, border: `1px solid ${LC.border}` }}
-            title="Chat wallpaper"
+            title="Open chat backdrop panel"
           >
-            <Palette size={13} /> Theme
+            <Palette size={13} /> <span className="hidden min-[390px]:inline">Backdrop</span>
           </button>
-          {wallpaperOpen && (
-            <div
-              ref={wallpaperRef}
-              className="absolute right-0 top-full z-20 mt-1 w-40 rounded-xl border p-2 shadow-xl"
-              style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
-            >
+        </div>
+      </div>
+      {wallpaperOpen && (
+        <div className="fixed inset-0 z-50 md:absolute md:inset-auto md:right-4 md:top-14">
+          <button
+            type="button"
+            aria-label="Close backdrop panel"
+            className="absolute inset-0 bg-black/60 md:hidden"
+            onClick={() => setWallpaperOpen(false)}
+          />
+          <div
+            ref={wallpaperRef}
+            className="absolute inset-x-0 bottom-0 rounded-t-2xl border-t p-3 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-2xl md:relative md:inset-auto md:w-80 md:rounded-2xl md:border md:pb-3"
+            style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+          >
+            <div className="mx-auto mb-3 h-1 w-10 rounded-full md:hidden" style={{ backgroundColor: LC.border }} />
+            <div className="mb-3 flex items-center justify-between gap-2">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.18em]" style={{ color: LC.textMuted }}>
+                  Backdrop
+                </div>
+                <div className="text-[10px]" style={{ color: LC.textDim }}>
+                  Changes only the chat canvas.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setWallpaperOpen(false)}
+                className="rounded-lg px-3 py-1.5 text-xs font-bold"
+                style={{ color: LC.accentCyan, backgroundColor: `${LC.accentCyan}12` }}
+              >
+                Hide
+              </button>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
               {WALLPAPERS.map((w) => (
                 <button
                   key={w.id}
-                  onClick={() => { setWallpaper(w.id); setWallpaperOpen(false); }}
-                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/5"
-                  style={{ color: wallpaper === w.id ? LC.accentCyan : LC.text }}
+                  type="button"
+                  onPointerDown={(e) => {
+                    e.preventDefault();
+                    setWallpaper(w.id);
+                    setWallpaperOpen(false);
+                  }}
+                  className="flex min-h-14 items-center gap-2 rounded-xl border px-2 text-left text-[11px] font-bold transition active:scale-95"
+                  style={{
+                    color: wallpaper === w.id ? LC.accentCyan : LC.text,
+                    backgroundColor: wallpaper === w.id ? `${LC.accentCyan}12` : LC.bgSecondary,
+                    borderColor: wallpaper === w.id ? LC.accentCyan : LC.borderSubtle,
+                  }}
                 >
-                  {w.label}
-                  {wallpaper === w.id && <Check size={12} style={{ color: LC.accentCyan }} />}
+                  <span
+                    className="h-8 w-10 shrink-0 rounded-lg border"
+                    style={{
+                      backgroundColor: LC.bg,
+                      borderColor: wallpaper === w.id ? LC.accentCyan : LC.borderSubtle,
+                      ...(w.style || {}),
+                    }}
+                  />
+                  <span className="min-w-0 flex-1 truncate">{w.label}</span>
+                  {wallpaper === w.id && <Check size={13} style={{ color: LC.accentCyan }} />}
                 </button>
               ))}
             </div>
-          )}
+          </div>
         </div>
-      </div>
+      )}
       <div
         ref={scrollRef}
         onScroll={handleScroll}
         className="flex-1 space-y-5 overflow-y-auto"
       >
-        <div className="mx-auto w-full max-w-5xl px-4 py-6 lg:px-8">
+        <div className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4 sm:py-6 lg:px-8">
           {isEmpty ? (
-            <div className="relative z-10 flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
-              <div className="mx-auto w-full max-w-3xl space-y-6 text-center px-4 lg:px-6">
-                <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
+            <div className="relative z-10 flex h-full min-h-[calc(100svh-250px)] flex-col items-center justify-center px-0 py-3 sm:min-h-[60vh] sm:px-4 sm:py-8">
+              <div className="mx-auto w-full max-w-3xl space-y-4 text-center sm:space-y-6 sm:px-4 lg:px-6">
+                <div className="relative mx-auto flex h-16 w-16 items-center justify-center sm:h-20 sm:w-20">
                   {/* Holographic ring */}
                   <div
                     className="absolute inset-0 rounded-full animate-pulse"
@@ -663,44 +784,44 @@ export default function ChatPanel({
                     }}
                   />
                   <div
-                    className="relative flex h-14 w-14 items-center justify-center rounded-2xl border"
+                    className="relative flex h-12 w-12 items-center justify-center rounded-2xl border sm:h-14 sm:w-14"
                     style={{
                       backgroundColor: `${LC.bgPanel}cc`,
                       borderColor: LC.accentCyan,
                       boxShadow: `0 0 32px ${LC.accentCyan}30, inset 0 0 16px ${LC.accentCyan}10`,
                     }}
                   >
-                    <Bot size={28} style={{ color: LC.accentCyan }} />
+                    <Bot size={24} className="sm:h-7 sm:w-7" style={{ color: LC.accentCyan }} />
                   </div>
                 </div>
                 <div>
                   <h2
-                    className="text-xl font-black tracking-tight"
+                    className="text-lg font-black tracking-tight sm:text-xl"
                     style={{ color: LC.text }}
                   >
                     LiTTree Agent
                   </h2>
                   <p
-                    className="text-xs font-medium"
+                    className="text-[11px] font-medium sm:text-xs"
                     style={{ color: LC.textMuted }}
                   >
                     Creative Director + Builder + Operator
                   </p>
-                  <p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: LC.accentCyan }}>
+                  <p className="mt-1 text-[9px] font-black uppercase tracking-[0.18em] sm:text-[10px] sm:tracking-[0.2em]" style={{ color: LC.accentCyan }}>
                     ● Live Holographic Link
                   </p>
                 </div>
 
-                <div className="flex flex-wrap items-center justify-center gap-2">
+                <div className="-mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
                   {PROMPT_SUGGESTIONS
                     .slice(promptSeed % PROMPT_SUGGESTIONS.length)
                     .concat(PROMPT_SUGGESTIONS.slice(0, promptSeed % PROMPT_SUGGESTIONS.length))
-                    .slice(0, 4)
+                    .slice(0, 6)
                     .map((prompt) => (
                       <button
                         key={prompt}
                         onClick={() => onSend(prompt)}
-                        className="rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                        className="snap-start whitespace-nowrap rounded-full border px-3 py-2 text-[11px] font-bold transition-all hover:scale-[1.02] sm:py-1.5"
                         style={{
                           backgroundColor: LC.bgPanel,
                           borderColor: LC.border,
@@ -710,19 +831,6 @@ export default function ChatPanel({
                         {prompt}
                       </button>
                     ))}
-                  <button
-                    onClick={() => setPromptSeed((s) => (s + 1) % PROMPT_SUGGESTIONS.length)}
-                    className="flex items-center gap-1 rounded-full border px-2 py-1.5 text-[10px] font-bold transition-all hover:scale-[1.02]"
-                    style={{
-                      backgroundColor: `${LC.accentCyan}12`,
-                      borderColor: LC.accentCyan,
-                      color: LC.accentCyan,
-                    }}
-                    title="More ideas"
-                  >
-                    <RefreshCw size={11} />
-                    More
-                  </button>
                 </div>
               </div>
             </div>

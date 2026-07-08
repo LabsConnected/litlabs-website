@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
@@ -19,6 +20,14 @@ import {
   TrendingUp,
   Clock,
   CheckCircle2,
+  LayoutDashboard,
+  Store,
+  User,
+  Menu,
+  X,
+  Settings,
+  Gamepad2,
+  Images,
 } from "lucide-react";
 
 const QUICK_ACTIONS = [
@@ -27,6 +36,26 @@ const QUICK_ACTIONS = [
   { label: "Create Post", href: "/dashboard/social-agent", icon: Zap, color: "#fb923c" },
   { label: "Install Agent", href: "/marketplace", icon: Bot, color: "#a3f546" },
   { label: "Open Terminal", href: "/studio?tool=terminal", icon: Terminal, color: "#4ade80" },
+];
+
+const MOBILE_NAV_ACTIONS = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, color: "#22d3ee" },
+  { label: "Studio", href: "/studio?tool=chat", icon: Sparkles, color: "#fb923c" },
+  { label: "Agents", href: "/studio?tool=agents", icon: Bot, color: "#a3f546" },
+  { label: "Market", href: "/marketplace", icon: Store, color: "#e879f9" },
+  { label: "Profile", href: "/profile", icon: User, color: "#94a3b8" },
+];
+
+const MOBILE_MENU_ITEMS = [
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "LiTTree", href: "/studio?tool=chat", icon: Bot },
+  { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Agents", href: "/studio?tool=agents", icon: Bot },
+  { label: "Gallery", href: "/gallery", icon: Images },
+  { label: "Marketplace", href: "/marketplace", icon: Store },
+  { label: "Games", href: "/games/cloud", icon: Gamepad2 },
+  { label: "Profile", href: "/profile", icon: User },
+  { label: "Settings", href: "/settings", icon: Settings },
 ];
 
 const RECENT_ACTIVITY = [
@@ -46,26 +75,121 @@ const USAGE_STATS = [
 export default function DashboardPage() {
   const { resolvedColors: T } = useTheme();
   const { balance, isLoading: walletLoading } = useWallet();
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const currentPlan = "Free";
   const activeAgents = CORE_AGENTS.slice(0, 3);
 
   return (
-    <main className="min-h-screen pb-20" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
-      <div className="max-w-6xl mx-auto px-4 py-8 md:py-10">
+    <main className="min-h-screen pb-24" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+      <div className="max-w-6xl mx-auto px-3 py-5 sm:px-4 md:py-10">
         {/* Header */}
-        <div className="mb-8">
-          <div className="flex items-center gap-2 mb-1">
-            <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: T.accentColor, boxShadow: `0 0 8px ${T.accentColor}` }} />
-            <span className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>LiT OS Dashboard</span>
+        <div className="mb-5 md:mb-8">
+          <div className="mb-1 flex items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-2">
+              <div className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: T.accentColor, boxShadow: `0 0 8px ${T.accentColor}` }} />
+              <span className="truncate text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>LiT OS Dashboard</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => setMenuOpen(true)}
+              className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition active:scale-95 md:hidden"
+              style={{
+                backgroundColor: T.boxBg,
+                borderColor: `${T.borderColor}35`,
+                color: T.accentColor,
+              }}
+              aria-label="Open navigation"
+            >
+              <Menu className="h-5 w-5" />
+            </button>
           </div>
           <h1 className="text-2xl md:text-3xl font-black" style={{ color: T.textColor }}>Welcome back</h1>
           <p className="text-sm mt-1" style={{ color: T.textMuted }}>Your creator command center.</p>
         </div>
 
+        {menuOpen && (
+          <div className="fixed inset-0 z-50 flex md:hidden">
+            <button
+              type="button"
+              aria-label="Close navigation"
+              className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+              onClick={() => setMenuOpen(false)}
+            />
+            <div
+              className="relative flex h-full w-[82vw] max-w-[320px] flex-col border-r shadow-2xl"
+              style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}35` }}
+            >
+              <div
+                className="flex h-12 items-center justify-between border-b px-4"
+                style={{ borderColor: `${T.borderColor}30` }}
+              >
+                <span
+                  className="text-[11px] font-black uppercase tracking-[0.18em]"
+                  style={{ color: T.accentColor }}
+                >
+                  Navigation
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setMenuOpen(false)}
+                  className="rounded-lg p-1.5 transition-colors hover:bg-white/5"
+                  style={{ color: T.textMuted }}
+                  aria-label="Hide navigation"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+              <nav className="flex-1 overflow-y-auto p-2">
+                {MOBILE_MENU_ITEMS.map((item) => {
+                  const Icon = item.icon;
+                  return (
+                    <Link
+                      key={item.href}
+                      href={item.href}
+                      onClick={() => setMenuOpen(false)}
+                      className="flex min-h-11 items-center gap-3 rounded-xl px-3 text-sm font-bold transition-colors hover:bg-white/5"
+                      style={{ color: T.textColor }}
+                    >
+                      <Icon className="h-4 w-4" style={{ color: T.accentColor }} />
+                      {item.label}
+                    </Link>
+                  );
+                })}
+              </nav>
+            </div>
+          </div>
+        )}
+
+        <div className="mb-6 md:hidden">
+          <div className="mb-3 text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: T.accentColor }}>
+            Navigation
+          </div>
+          <div className="grid grid-cols-5 gap-2">
+            {MOBILE_NAV_ACTIONS.map((item) => {
+              const Icon = item.icon;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className="flex min-h-[62px] flex-col items-center justify-center gap-1 rounded-xl border px-1 text-center transition active:scale-95"
+                  style={{
+                    backgroundColor: `${item.color}10`,
+                    borderColor: `${item.color}25`,
+                    color: item.color,
+                  }}
+                >
+                  <Icon className="h-4 w-4" />
+                  <span className="max-w-full truncate text-[9px] font-black">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
         {/* Top cards */}
-        <div className="grid sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-8">
-          <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 md:gap-4 mb-6 md:mb-8">
+          <div className="rounded-2xl border p-4 md:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
             <div className="flex items-center gap-2 mb-3">
               <Wallet className="h-4 w-4" style={{ color: "#fbbf24" }} />
               <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>Balance</span>
@@ -76,7 +200,7 @@ export default function DashboardPage() {
             <div className="text-[10px]" style={{ color: T.textMuted }}>LBC available</div>
           </div>
 
-          <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
+          <div className="rounded-2xl border p-4 md:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
             <div className="flex items-center gap-2 mb-3">
               <Crown className="h-4 w-4" style={{ color: "#a3f546" }} />
               <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>Current Plan</span>
@@ -85,7 +209,7 @@ export default function DashboardPage() {
             <div className="text-[10px]" style={{ color: T.textMuted }}>500 LBC included</div>
           </div>
 
-          <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
+          <div className="rounded-2xl border p-4 md:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
             <div className="flex items-center gap-2 mb-3">
               <Bot className="h-4 w-4" style={{ color: "#22d3ee" }} />
               <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>Active Agents</span>
@@ -94,7 +218,7 @@ export default function DashboardPage() {
             <div className="text-[10px]" style={{ color: T.textMuted }}>of 6 core agents</div>
           </div>
 
-          <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
+          <div className="rounded-2xl border p-4 md:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
             <div className="flex items-center gap-2 mb-3">
               <Activity className="h-4 w-4" style={{ color: "#f472b6" }} />
               <span className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>Usage</span>
@@ -105,16 +229,16 @@ export default function DashboardPage() {
         </div>
 
         {/* Quick actions */}
-        <div className="mb-8">
+        <div className="mb-6 md:mb-8">
           <div className="text-xs font-black uppercase tracking-[0.15em] mb-4" style={{ color: T.accentColor }}>Quick Actions</div>
-          <div className="flex flex-wrap gap-3">
+          <div className="grid grid-cols-2 gap-2 min-[430px]:grid-cols-3 md:flex md:flex-wrap md:gap-3">
             {QUICK_ACTIONS.map((action) => {
               const Icon = action.icon;
               return (
                 <Link
                   key={action.label}
                   href={action.href}
-                  className="flex items-center gap-2 rounded-xl px-4 py-3 text-sm font-bold transition hover:scale-[1.02]"
+                  className="flex items-center justify-center gap-2 rounded-xl px-3 py-3 text-xs font-bold transition hover:scale-[1.02] md:px-4 md:text-sm"
                   style={{ backgroundColor: `${action.color}12`, color: action.color, border: `1px solid ${action.color}30` }}
                 >
                   <Icon className="h-4 w-4" />

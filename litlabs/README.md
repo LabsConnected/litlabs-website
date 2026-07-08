@@ -15,8 +15,8 @@ The creator operating system for AI agents, studios, marketplaces, and community
 
 ```bash
 cd litlabs
-pnpm install
-pnpm dev
+npm install
+npm run dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000).
@@ -37,12 +37,12 @@ Copy `.env.example` to `.env.local` and fill in:
 
 ## Scripts
 
-- `pnpm dev` — start the Next.js dev server
-- `pnpm lint` — run ESLint
-- `pnpm typecheck` — run TypeScript without emitting
-- `pnpm check` — lint + typecheck + build (CI gate)
-- `pnpm build` — production build
-- `pnpm terminal:dev` — start the terminal-server companion
+- `npm run dev` — start the Next.js dev server
+- `npm run lint` — run ESLint
+- `npm run typecheck` — run TypeScript without emitting
+- `npm run check` — lint + typecheck + build (CI gate)
+- `npm run build` — production build
+- `npm run terminal:dev` — start the terminal-server companion
 
 ## Project structure
 
@@ -58,11 +58,11 @@ Copy `.env.example` to `.env.local` and fill in:
 ## Contributing
 
 1. Branch from `main`.
-2. Run `pnpm check` before opening a PR.
+2. Run `npm run check` before opening a PR.
 3. Keep the terminal server and main app changes in separate commits when possible.
 4. Do not commit `.env.local` or secrets.
 
 ## Deployment
 
-- Main app: Vercel (`pnpm build`)
+- Main app: Vercel (`npm run build`)
 - Terminal server: Railway (`terminal-server/railway.json`)

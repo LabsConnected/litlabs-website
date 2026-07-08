@@ -10,14 +10,15 @@ export default function MobileBottomNav() {
   const { resolvedColors: T } = useTheme();
 
   const isActive = (href: string) => {
+    const path = href.split("?")[0];
     if (href === "/") return pathname === "/";
-    return pathname?.startsWith(href);
+    return pathname === path || pathname?.startsWith(path + "/");
   };
 
   return (
     <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-lg">
       <div
-        className="flex min-h-[68px] items-center justify-around px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2"
+        className="grid min-h-[68px] grid-cols-5 items-center px-1 pb-[max(0.5rem,env(safe-area-inset-bottom))] pt-2"
         style={{
           backgroundColor: `${T.bgColor}f0`,
           borderColor: `${T.borderColor}30`,
@@ -31,7 +32,7 @@ export default function MobileBottomNav() {
             <Link
               key={item.label}
               href={item.href}
-              className="flex min-w-[56px] flex-col items-center gap-0.5 rounded-xl px-2 py-1.5 transition-all"
+              className="flex min-w-0 flex-col items-center gap-0.5 rounded-xl px-1 py-1.5 transition-all"
               style={{
                 color: active ? T.accentColor : T.textMuted,
                 backgroundColor: isLiT && active ? `${T.accentColor}15` : undefined,
@@ -43,7 +44,7 @@ export default function MobileBottomNav() {
               >
                 <Icon size={isLiT ? 22 : 20} style={isLiT ? { color: T.accentColor } : undefined} />
               </div>
-              <span className="text-[9px] font-bold">{item.label}</span>
+              <span className="max-w-full truncate text-[9px] font-bold">{item.label}</span>
             </Link>
           );
         })}

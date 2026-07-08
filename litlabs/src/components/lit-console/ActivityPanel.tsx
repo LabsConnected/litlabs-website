@@ -8,6 +8,8 @@ interface ActivityPanelProps {
   loading?: boolean;
   activeAgent?: string;
   activeModel?: string;
+  memoryCount?: number;
+  lastUserIntent?: string;
 }
 
 interface LogItem {
@@ -21,6 +23,8 @@ export default function ActivityPanel({
   loading,
   activeAgent = "LiTTree",
   activeModel = "Gemini 2.5 Flash",
+  memoryCount = 0,
+  lastUserIntent,
 }: ActivityPanelProps) {
   const LC = useLitConsoleTheme();
   const [logs, setLogs] = useState<LogItem[]>([]);
@@ -92,6 +96,29 @@ export default function ActivityPanel({
               <div className="text-xs font-bold" style={{ color: LC.text }}>{activeAgent}</div>
               <div className="text-[9px]" style={{ color: LC.textMuted }}>{activeModel}</div>
             </div>
+          </div>
+        </div>
+
+        <div
+          className="rounded-xl border p-3"
+          style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+        >
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-wider" style={{ color: LC.textMuted }}>
+            <Brain size={11} /> Working Context
+          </div>
+          <div className="space-y-2 text-[11px]" style={{ color: LC.textDim }}>
+            <div className="rounded-lg px-2 py-1.5" style={{ backgroundColor: LC.bgSecondary }}>
+              Mission: make AI easy to use, useful, and fun without setup hassle.
+            </div>
+            <div className="flex items-center justify-between gap-2">
+              <span>Recent turns in view</span>
+              <span className="font-bold" style={{ color: LC.accentCyan }}>{memoryCount}</span>
+            </div>
+            {lastUserIntent && (
+              <div className="line-clamp-3 rounded-lg px-2 py-1.5" style={{ backgroundColor: LC.bgSecondary, color: LC.textMuted }}>
+                {lastUserIntent}
+              </div>
+            )}
           </div>
         </div>
 

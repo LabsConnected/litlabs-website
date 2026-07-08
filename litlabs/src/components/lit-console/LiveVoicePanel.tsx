@@ -9,6 +9,7 @@ type LiveVoicePanelProps = {
   onClose: () => void;
   state: VoiceState;
   transcript: string;
+  errorMessage?: string;
   isSupported: boolean;
   voices: SpeechSynthesisVoice[];
   selectedVoice: SpeechSynthesisVoice | null;
@@ -28,6 +29,7 @@ export default function LiveVoicePanel({
   onClose,
   state,
   transcript,
+  errorMessage,
   isSupported,
   voices,
   selectedVoice,
@@ -59,7 +61,9 @@ export default function LiveVoicePanel({
     listening: "Listening…",
     thinking: "LiT is thinking…",
     speaking: "LiT is speaking…",
-    error: isSupported ? "Microphone permission denied or unavailable." : "Voice not supported in this browser.",
+    error: errorMessage || (isSupported
+      ? "Microphone permission denied or unavailable. Allow mic access for litlabs.net, then retry."
+      : "Voice input needs a browser with speech recognition, like Chrome on Android."),
   };
 
   const handleMic = () => {
@@ -94,7 +98,7 @@ export default function LiveVoicePanel({
         </button>
       </div>
 
-      <div className="flex items-center gap-4 px-4 py-3">
+      <div className="flex items-center gap-4 px-4 pb-4 pt-2">
         <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
           {isListening && (
             <>
@@ -141,16 +145,25 @@ export default function LiveVoicePanel({
               Continuous {continuous ? "on" : "off"}
             </button>
           </div>
-          <p className="text-[11px]" style={{ color: LC.textMuted }}>
+          <p className="text-[11px] leading-snug" style={{ color: state === "error" ? LC.danger : LC.textMuted }}>
             {statusText[state]}
           </p>
+          {!isSupported && (
+            <p className="mt-1 text-[10px] leading-snug" style={{ color: LC.textDim }}>
+              On phone, use Chrome or Samsung Internet and make sure the site is opened over HTTPS.
+            </p>
+          )}
           <div
-            className="mt-1 min-h-6 rounded-lg border px-2 py-1 text-xs"
+            className="mt-2 min-h-9 rounded-xl border px-3 py-2 text-xs leading-snug"
             style={{ backgroundColor: `${LC.bgPanel}80`, borderColor: LC.borderSubtle, color: LC.text }}
           >
             {transcript || (
               <span style={{ color: LC.textDim }}>
-                {isSupported ? "Your words will appear here…" : "Voice not supported in this browser."}
+                {state === "listening"
+                  ? "Listening for words now..."
+                  : isSupported
+                    ? "Tap the mic and speak. Your words will appear here."
+                    : "Voice not supported in this browser."}
               </span>
             )}
           </div>

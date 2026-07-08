@@ -153,6 +153,13 @@ export default function LitConsole() {
           message: text,
           model: activeModel,
           context: initialContext,
+          recentMessages: messages
+            .filter((m) => m.role === "user" || m.role === "lit")
+            .slice(-8)
+            .map((m) => ({
+              role: m.role === "user" ? "user" : "assistant",
+              content: m.content,
+            })),
           userContext: {
             username: user?.username || user?.firstName || undefined,
             plan: (user as unknown as { publicMetadata?: { plan?: string } })?.publicMetadata?.plan || undefined,
@@ -232,7 +239,7 @@ export default function LitConsole() {
     } finally {
       setLoading(false);
     }
-  }, [user, activeModel, router]);
+  }, [user, activeModel, router, messages]);
 
   const handleSend = useCallback(
     (text?: string) => {
@@ -363,6 +370,7 @@ export default function LitConsole() {
   const {
     state: voiceState,
     transcript: voiceTranscript,
+    errorMessage: voiceErrorMessage,
     isSupported: voiceSupported,
     voices,
     selectedVoice,
@@ -593,6 +601,8 @@ export default function LitConsole() {
               loading={loading}
               activeAgent={activeAgent}
               activeModel={MODELS.find((m) => m.id === activeModel)?.label || activeModel}
+              memoryCount={messages.filter((m) => m.role === "user" || m.role === "lit").slice(-8).length}
+              lastUserIntent={[...messages].reverse().find((m) => m.role === "user")?.content}
             />
           </div>
         </div>
@@ -744,10 +754,14 @@ export default function LitConsole() {
           setVoiceOpen(false);
         }}
         onHolo={() => {
-          setHoloUrl("https://litlabs.net");
-          setHoloTitle("LiTTree Holo");
-          setDrawerTab("holo");
-          setDrawerOpen(true);
+          if (drawerOpen && drawerTab === "holo") {
+            setDrawerOpen(false);
+          } else {
+            setHoloUrl("https://litlabs.net");
+            setHoloTitle("LiTTree Holo");
+            setDrawerTab("holo");
+            setDrawerOpen(true);
+          }
         }}
         voiceState={voiceState}
       />
@@ -761,6 +775,7 @@ export default function LitConsole() {
           }}
           state={voiceState}
           transcript={voiceTranscript}
+          errorMessage={voiceErrorMessage}
           isSupported={voiceSupported}
           voices={voices}
           selectedVoice={selectedVoice}
