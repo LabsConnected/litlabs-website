@@ -131,50 +131,164 @@ const PARTICLES = Array.from({ length: 18 }).map((_, i) => ({
   delay: (i * 7) % 5,
 }));
 
-function suggestedActions(text: string): string[] {
+type SuggestedAction = {
+  label: string;
+  prompt: string;
+};
+
+function suggestedActions(text: string): SuggestedAction[] {
   const lower = text.toLowerCase();
   if (lower.includes("landing page") || lower.includes("website")) {
-    return ["Build the hero section", "Add a features grid", "Make it responsive", "Create copy"];
+    return [
+      {
+        label: "Build next section",
+        prompt: "Use the current website context and write the next concrete landing-page section with headline, copy, layout notes, and mobile behavior.",
+      },
+      {
+        label: "Improve mobile UX",
+        prompt: "Audit this website response for mobile UX and give exact layout, spacing, and navigation changes to make it feel premium.",
+      },
+      {
+        label: "Create launch copy",
+        prompt: "Turn this into launch-ready website copy with concise headings, CTAs, and LiTTree's cyan/orange living OS voice.",
+      },
+      {
+        label: "Make build plan",
+        prompt: "Convert this into a build checklist with files/components likely involved, risks, and verification steps.",
+      },
+    ];
   }
   if (lower.includes("image") || lower.includes("generate")) {
-    return ["Generate another", "Create variations", "Save to gallery", "Turn into brand system"];
+    return [
+      {
+        label: "Improve prompt",
+        prompt: "Rewrite the image prompt into a production-grade LiTTree brand prompt using void black, electric cyan, solar orange, emerald glow, LiTT visible, and a futuristic AI operating system scene.",
+      },
+      {
+        label: "Create variations",
+        prompt: "Create 4 focused visual variations from this result: hero background, mascot portrait, mobile app backdrop, and marketplace card art.",
+      },
+      {
+        label: "Brand system",
+        prompt: "Turn this visual direction into a reusable LiTTree brand system with palette, mascot rules, UI surfaces, motion cues, and image prompt templates.",
+      },
+      {
+        label: "Save context",
+        prompt: "Remember this visual direction as LiTTree's active brand direction and summarize exactly what future images should preserve.",
+      },
+    ];
   }
   if (lower.includes("code") || lower.includes("component") || lower.includes("tsx")) {
-    return ["Fix issues", "Explain the code", "Add tests", "Refactor this"];
+    return [
+      {
+        label: "Find root cause",
+        prompt: "Use recent chat and project context to identify the likely root cause, exact files to inspect, and the smallest safe fix.",
+      },
+      {
+        label: "Patch plan",
+        prompt: "Give me an implementation plan with target files, expected code changes, tests, and deployment verification.",
+      },
+      {
+        label: "Mobile regression check",
+        prompt: "Check this change for mobile regressions: nav overlap, fixed panels, scrollbars, keyboard behavior, and touch target sizing.",
+      },
+      {
+        label: "Test checklist",
+        prompt: "Create a focused verification checklist for this code path, including build, TypeScript, health check, and live mobile checks.",
+      },
+    ];
   }
   if (lower.includes("deploy") || lower.includes("build")) {
-    return ["Run build", "Check logs", "Deploy now", "Summarize risk"];
+    return [
+      {
+        label: "Check deploy health",
+        prompt: "Verify the production deployment path: build status, Vercel alias, health endpoint, and anything risky before calling it done.",
+      },
+      {
+        label: "Summarize changes",
+        prompt: "Summarize what changed for my agent with commit, deployment id, files touched, tests run, and remaining unrelated dirty files.",
+      },
+      {
+        label: "Find deploy risk",
+        prompt: "Review the latest deploy for risks: root directory config, env assumptions, build warnings, and mobile-visible regressions.",
+      },
+      {
+        label: "Next release plan",
+        prompt: "Create the next release checklist for LiTTree Studio based on the current conversation and live mobile issues.",
+      },
+    ];
   }
   if (lower.includes("agent") || lower.includes("create an agent")) {
-    return ["Name it", "Set personality", "Define tools", "Publish to marketplace"];
+    return [
+      {
+        label: "Make LiTT smarter",
+        prompt: "Design the next intelligence upgrade for LiTT: memory rules, anti-repeat behavior, prompt prediction, tool routing, and real-time user adaptation.",
+      },
+      {
+        label: "Define tools",
+        prompt: "List the tools this agent should actually have, when each tool should be used, and what UI states should show while it works.",
+      },
+      {
+        label: "Agent personality",
+        prompt: "Define LiTT's personality, voice options, reactions, idle states, success/error behavior, and how it stays visible without blocking chat.",
+      },
+      {
+        label: "Marketplace package",
+        prompt: "Turn this agent idea into a marketplace-ready package: name, role, skills, prompt, tools, pricing tier, and screenshots needed.",
+      },
+    ];
   }
   if (lower.includes("purpose") || lower.includes("concept") || lower.includes("users") || lower.includes("ai")) {
-    return ["Shape the product pitch", "Design onboarding", "Define agent memory", "Map the user flow"];
+    return [
+      {
+        label: "Shape product pitch",
+        prompt: "Turn this into a sharp LiTTree product pitch for people who want useful AI tools without setup hassle.",
+      },
+      {
+        label: "Design onboarding",
+        prompt: "Design the first-run onboarding so a new user lands in their own LiTTree universe, sees LiTT, and knows the next best action.",
+      },
+      {
+        label: "Define memory",
+        prompt: "Define what LiTT should remember, what it should never repeat, and how memory should affect the next response.",
+      },
+      {
+        label: "Map user flow",
+        prompt: "Map the ideal mobile user flow from dashboard to Studio to voice chat to generated output without popups or blocked screens.",
+      },
+    ];
   }
-  return ["Make this actionable", "Suggest UI changes", "Create a plan", "Save this direction"];
+  return [
+    {
+      label: "Next best action",
+      prompt: "Use the current chat, saved memory, and page context to give the single best next action. Do not repeat any intro or capability list.",
+    },
+    {
+      label: "Improve this screen",
+      prompt: "Audit this screen like a mobile product designer and list the highest-impact visual and interaction fixes.",
+    },
+    {
+      label: "Make it smarter",
+      prompt: "Explain how to make this feature adapt to the user with memory, context, prediction, and better tool routing.",
+    },
+    {
+      label: "Save direction",
+      prompt: "Summarize this direction as a memory for future LiTTree work, including what to preserve and what to avoid.",
+    },
+  ];
 }
 
 const PROMPT_SUGGESTIONS = [
-  "Generate a hero image",
-  "Build a landing page",
-  "Fix my code",
-  "Create an agent",
-  "Write a blog post",
-  "Design a logo concept",
-  "Build a todo app",
-  "Create a dashboard",
-  "Explain React hooks",
-  "Make a pricing card",
-  "Generate a music loop",
-  "Create a login form",
-  "Build a portfolio site",
-  "Write a product description",
-  "Create a chat component",
-  "Generate a video script",
-  "Build a navigation bar",
-  "Create a settings panel",
-  "Write a Twitter thread",
-  "Make a 3D skybox prompt",
+  "Audit this mobile Studio screen and give the next exact fix",
+  "Make LiTT smarter without repeating old replies",
+  "Design inline voice settings that do not block chat",
+  "Create LiTTree brand image prompts with LiTT visible",
+  "Turn this idea into a LiTTree OS feature plan",
+  "Improve the prompt predictions for this conversation",
+  "Check what needs to be saved to memory from this chat",
+  "Map the next user flow from Dashboard to Studio",
+  "Create a mobile QA checklist for this screen",
+  "Plan the next deploy and verification steps",
 ];
 
 const COMPANION_PROMPTS = [
@@ -1029,16 +1143,17 @@ export default function ChatPanel({
                         <div className="mt-3 flex flex-wrap items-center gap-1.5">
                           {suggestedActions(m.content).slice(0, 4).map((action) => (
                             <button
-                              key={action}
-                              onClick={() => onSend(action)}
+                              key={action.label}
+                              onClick={() => onSend(action.prompt)}
                               className="rounded-full border px-2 py-1 text-[10px] font-bold transition-all hover:scale-[1.02]"
                               style={{
                                 backgroundColor: `${LC.accentCyan}10`,
                                 borderColor: `${LC.accentCyan}40`,
                                 color: LC.accentCyan,
                               }}
+                              title={action.prompt}
                             >
-                              {action}
+                              {action.label}
                             </button>
                           ))}
                         </div>
