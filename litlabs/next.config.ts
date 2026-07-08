@@ -11,10 +11,6 @@ const nextConfig: NextConfig = {
   // Avoid Windows EPERM errors during .next cleanup
   cleanDistDir: false,
 
-  turbopack: {
-    root: process.cwd(),
-  },
-
   experimental: {
     optimizePackageImports: [
       "@supabase/supabase-js",
