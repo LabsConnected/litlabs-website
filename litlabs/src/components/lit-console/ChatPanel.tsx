@@ -10,6 +10,12 @@ import {
   Copy,
   Check,
   Play,
+  Brain,
+  FileText,
+  ChevronDown,
+  ChevronUp,
+  Sparkles,
+  Activity,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
@@ -21,6 +27,8 @@ export interface Message {
     tool?: string;
     status?: "running" | "done" | "error";
     images?: Array<{ url: string; prompt: string; provider: string }>;
+    thoughts?: string[];
+    readFiles?: string[];
   };
 }
 
@@ -95,6 +103,75 @@ function CodeBlock({
   );
 }
 
+function ThinkingIndicator({ theme }: { theme: Theme }) {
+  const [step, setStep] = useState(0);
+  const steps = [
+    { label: "Reading context", icon: FileText },
+    { label: "Checking memory", icon: Brain },
+    { label: "Planning next step", icon: Sparkles },
+    { label: "Generating response", icon: Bot },
+  ];
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setStep((s) => (s + 1) % steps.length);
+    }, 1800);
+    return () => clearInterval(interval);
+  }, [steps.length]);
+
+  const ActiveIcon = steps[step].icon;
+
+  return (
+    <div
+      className="flex w-full gap-3 rounded-2xl border p-3 animate-in fade-in slide-in-from-bottom-2 duration-500"
+      style={{ backgroundColor: theme.bgPanel, borderColor: theme.border }}
+    >
+      <div
+        className="mt-0.5 shrink-0 rounded-full p-1.5"
+        style={{ backgroundColor: theme.bgSecondary, color: theme.accentCyan }}
+      >
+        <ActiveIcon size={14} className="animate-pulse" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex items-center gap-2 text-xs font-bold" style={{ color: theme.text }}>
+          <span style={{ color: theme.accentCyan }}>LiT is thinking</span>
+          <span className="flex gap-0.5">
+            <span className="h-1.5 w-1.5 rounded-full animate-bounce" style={{ backgroundColor: theme.accentCyan, animationDelay: "0ms" }} />
+            <span className="h-1.5 w-1.5 rounded-full animate-bounce" style={{ backgroundColor: theme.accentCyan, animationDelay: "150ms" }} />
+            <span className="h-1.5 w-1.5 rounded-full animate-bounce" style={{ backgroundColor: theme.accentCyan, animationDelay: "300ms" }} />
+          </span>
+        </div>
+        <div className="mt-2 space-y-1.5">
+          {steps.map((s, i) => {
+            const Icon = s.icon;
+            const active = i === step;
+            const past = i < step;
+            return (
+              <div
+                key={s.label}
+                className="flex items-center gap-2 text-[10px] transition-all duration-500"
+                style={{ color: active ? theme.accentCyan : past ? theme.textMuted : theme.textDim }}
+              >
+                <div
+                  className="flex h-4 w-4 items-center justify-center rounded-full transition-colors duration-500"
+                  style={{
+                    backgroundColor: active ? `${theme.accentCyan}25` : past ? `${theme.success}15` : theme.bgSecondary,
+                    border: `1px solid ${active ? theme.accentCyan : past ? theme.success : theme.border}`,
+                  }}
+                >
+                  {past ? <Check size={8} style={{ color: theme.success }} /> : <Icon size={8} />}
+                </div>
+                <span className={active ? "font-semibold" : ""}>{s.label}</span>
+                {active && <Activity size={10} className="animate-pulse ml-auto" style={{ color: theme.accentCyan }} />}
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function formatContent(text: string, theme: Theme) {
   const parts = text.split(/(```[\s\S]*?```)/g);
   return parts.map((part, i) => {
@@ -132,6 +209,7 @@ export default function ChatPanel({
   const [activeLitId, setActiveLitId] = useState<string | null>(
     () => [...messages].reverse().find((m) => m.role === "lit")?.id || null,
   );
+  const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
   const [revealed, setRevealed] = useState<Record<string, number>>(() => {
     const latest = [...messages].reverse().find((m) => m.role === "lit");
     const init: Record<string, number> = {};
@@ -324,12 +402,13 @@ export default function ChatPanel({
                 )}
 
                 {m.role === "lit" && (
-                  <div className="flex w-full gap-3">
+                  <div className="flex w-full gap-3 animate-in fade-in slide-in-from-left-2 duration-300">
                     <div
                       className="mt-1 shrink-0 rounded-full p-1.5"
                       style={{
                         backgroundColor: LC.bgSecondary,
                         color: LC.accentCyan,
+                        boxShadow: m.id === activeLitId ? `0 0 12px ${LC.accentCyan}40` : "none",
                       }}
                     >
                       <Bot size={14} />
@@ -342,6 +421,51 @@ export default function ChatPanel({
                       }}
                     >
                       {renderLitContent(m)}
+
+                      {/* Read files chips */}
+                      {m.meta?.readFiles && m.meta.readFiles.length > 0 && (
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          <span className="text-[9px] font-bold uppercase tracking-wider" style={{ color: LC.textMuted }}>Read</span>
+                          {m.meta.readFiles.map((file) => (
+                            <span
+                              key={file}
+                              className="flex items-center gap-1 rounded-md border px-1.5 py-0.5 text-[10px] font-mono"
+                              style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border, color: LC.textDim }}
+                            >
+                              <FileText size={10} />
+                              {file}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+
+                      {/* Expandable thoughts */}
+                      {m.meta?.thoughts && m.meta.thoughts.length > 0 && (
+                        <div className="mt-2">
+                          <button
+                            onClick={() => setExpandedThoughts((prev) => ({ ...prev, [m.id]: !prev[m.id] }))}
+                            className="flex items-center gap-1 text-[10px] font-bold uppercase tracking-wider transition-colors hover:text-cyan-300"
+                            style={{ color: LC.textMuted }}
+                          >
+                            <Brain size={11} />
+                            Thoughts
+                            {expandedThoughts[m.id] ? <ChevronUp size={11} /> : <ChevronDown size={11} />}
+                          </button>
+                          {expandedThoughts[m.id] && (
+                            <div
+                              className="mt-2 space-y-1.5 rounded-lg border p-2 animate-in fade-in duration-200"
+                              style={{ backgroundColor: LC.bgSecondary, borderColor: LC.border }}
+                            >
+                              {m.meta.thoughts.map((thought, i) => (
+                                <div key={i} className="flex items-start gap-2 text-[10px]" style={{ color: LC.textDim }}>
+                                  <span className="mt-0.5 text-[9px]" style={{ color: LC.accentCyan }}>#{i + 1}</span>
+                                  <span>{thought}</span>
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
                 )}
@@ -603,18 +727,7 @@ export default function ChatPanel({
               </div>
             </div>
           )}
-          {loading && (
-            <div
-              className="flex items-center gap-2 text-xs"
-              style={{ color: LC.textMuted }}
-            >
-              <span
-                className="h-2 w-2 animate-pulse rounded-full"
-                style={{ backgroundColor: LC.accentCyan }}
-              />
-              LiT is thinking...
-            </div>
-          )}
+          {loading && <ThinkingIndicator theme={LC} />}
           <div ref={bottomRef} />
         </div>
       </div>
