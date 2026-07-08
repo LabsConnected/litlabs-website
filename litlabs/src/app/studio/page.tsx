@@ -21,8 +21,19 @@ import ErrorBoundary from "@/components/ErrorBoundary";
 
 function StudioLoadingScreen({ label = "Loading Studio..." }: { label?: string }) {
   return (
-    <div className="grid h-full min-h-[320px] place-items-center px-4">
-      <div className="rounded-xl border border-cyan-400/20 bg-black/35 px-5 py-4 text-sm font-bold text-cyan-100 shadow-[0_0_32px_rgba(0,245,255,0.08)]">
+    <div className="relative grid h-full min-h-[320px] place-items-center overflow-hidden px-4">
+      <div
+        className="absolute inset-0 opacity-35"
+        style={{
+          backgroundImage: "url('/brand/littree-os-world-v1.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+          filter: "saturate(1.15)",
+        }}
+      />
+      <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_20%,rgba(45,246,255,0.18),transparent_34%),linear-gradient(180deg,rgba(5,5,7,0.55),rgba(5,5,7,0.92))]" />
+      <div className="relative rounded-2xl border border-cyan-300/25 bg-[#050507]/60 px-5 py-4 text-sm font-black text-cyan-100 shadow-[0_0_42px_rgba(45,246,255,0.16)] backdrop-blur-md">
+        <span className="mr-2 text-orange-300">LiTTree OS</span>
         {label}
       </div>
     </div>
@@ -289,14 +300,25 @@ function StudioCommandCenter() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="relative flex h-full min-h-0 flex-col overflow-hidden"
       style={{
-        background: `radial-gradient(circle at top, ${T.accentColor}14, transparent 30%), linear-gradient(180deg, ${T.bgColor} 0%, ${T.boxBg} 100%)`,
+        background: `linear-gradient(180deg, #050507 0%, ${T.bgColor} 100%)`,
         color: T.textColor,
       }}
     >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-[0.18]"
+        style={{
+          backgroundImage: "url('/brand/littree-os-world-v1.png')",
+          backgroundSize: "cover",
+          backgroundPosition: "center",
+        }}
+      />
+      <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_8%,rgba(45,246,255,0.16),transparent_34%),radial-gradient(circle_at_85%_18%,rgba(255,138,28,0.12),transparent_26%),linear-gradient(180deg,rgba(5,5,7,0.18),rgba(5,5,7,0.78))]" />
+      <div className="pointer-events-none absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(45,246,255,0.06)_1px,transparent_1px),linear-gradient(90deg,rgba(73,255,158,0.04)_1px,transparent_1px)] [background-size:44px_44px]" />
+
       {/* Desktop top bar */}
-      <div className="hidden md:block shrink-0">
+      <div className="relative hidden shrink-0 md:block">
         <StudioTopRuntimeBar
           selectedModel={selectedModel}
           onModelChange={setSelectedModel}
@@ -306,7 +328,7 @@ function StudioCommandCenter() {
 
       {/* Mobile compact top bar */}
       <div
-        className="md:hidden flex items-center gap-2 px-3 h-11 shrink-0"
+        className="relative flex h-11 shrink-0 items-center gap-2 px-3 md:hidden"
         style={{
           backgroundColor: T.boxBg + "d0",
           borderBottom: `1px solid ${T.borderColor}20`,
@@ -408,7 +430,7 @@ function StudioCommandCenter() {
         </div>
       )}
 
-      <div className="flex-1 min-h-0 flex">
+      <div className="relative flex min-h-0 flex-1">
         <StudioIconRail
           activeTool={activeTool as string}
           onToolChange={(tool) => handleToolChange(tool as StudioTool)}

@@ -22,6 +22,7 @@ import {
   Wand2,
   Plus,
 } from "lucide-react";
+import { LiTTFace } from "@/components/litt/LiTTFace";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
 export interface Message {
@@ -791,48 +792,39 @@ export default function ChatPanel({
           {isEmpty ? (
             <div className="relative z-10 flex h-full min-h-[calc(100svh-250px)] flex-col items-center justify-center px-0 py-3 sm:min-h-[60vh] sm:px-4 sm:py-8">
               <div className="mx-auto w-full max-w-3xl space-y-4 text-center sm:space-y-6 sm:px-4 lg:px-6">
-                <div className="relative mx-auto flex h-16 w-16 items-center justify-center sm:h-20 sm:w-20">
-                  {/* Holographic ring */}
+                <div className="relative mx-auto flex h-32 w-32 items-center justify-center sm:h-40 sm:w-40">
                   <div
                     className="absolute inset-0 rounded-full animate-pulse"
                     style={{
-                      background: `conic-gradient(from 0deg, transparent, ${LC.accentCyan}40, transparent, ${LC.accentCyan}20, transparent)`,
-                      filter: "blur(4px)",
+                      background: `radial-gradient(circle, ${LC.accentCyan}24, transparent 65%)`,
+                      filter: "blur(10px)",
                     }}
                   />
                   <div
-                    className="absolute inset-[-6px] rounded-full border border-dashed animate-[spin_8s_linear_infinite]"
-                    style={{ borderColor: `${LC.accentCyan}40` }}
+                    className="absolute bottom-1 left-1/2 h-16 w-24 -translate-x-1/2 rounded-full blur-2xl"
+                    style={{ background: `radial-gradient(circle, ${LC.accentOrange}28, transparent 70%)` }}
                   />
                   <div
-                    className="absolute inset-0 rounded-full blur-2xl"
+                    className="absolute inset-x-6 bottom-2 h-px"
                     style={{
-                      background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)`,
+                      background: `linear-gradient(90deg, transparent, ${LC.accentCyan}, ${LC.accentOrange}, transparent)`,
+                      boxShadow: `0 0 22px ${LC.accentCyan}55`,
                     }}
                   />
-                  <div
-                    className="relative flex h-12 w-12 items-center justify-center rounded-2xl border sm:h-14 sm:w-14"
-                    style={{
-                      backgroundColor: `${LC.bgPanel}cc`,
-                      borderColor: LC.accentCyan,
-                      boxShadow: `0 0 32px ${LC.accentCyan}30, inset 0 0 16px ${LC.accentCyan}10`,
-                    }}
-                  >
-                    <Bot size={24} className="sm:h-7 sm:w-7" style={{ color: LC.accentCyan }} />
-                  </div>
+                  <LiTTFace mood="happy" size={112} showBadge={false} />
                 </div>
                 <div>
                   <h2
                     className="text-lg font-black tracking-tight sm:text-xl"
                     style={{ color: LC.text }}
                   >
-                    LiTTree Agent
+                    LiTT at the LiTTree
                   </h2>
                   <p
                     className="text-[11px] font-medium sm:text-xs"
                     style={{ color: LC.textMuted }}
                   >
-                    Creative Director + Builder + Operator
+                    Your visible AI companion for building, memory, agents, and deploys.
                   </p>
                   <p className="mt-1 text-[9px] font-black uppercase tracking-[0.18em] sm:text-[10px] sm:tracking-[0.2em]" style={{ color: LC.accentCyan }}>
                     ● Companions Ready

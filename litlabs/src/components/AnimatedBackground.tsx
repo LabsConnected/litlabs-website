@@ -463,6 +463,42 @@ export default function AnimatedBackground() {
           opacity: 0.25,
         }}
       />
+      <div className="pointer-events-none fixed inset-x-0 bottom-0 z-1 h-[46svh] overflow-hidden opacity-45">
+        <div
+          className="absolute bottom-[-14%] left-1/2 h-[82%] w-px -translate-x-1/2"
+          style={{
+            background:
+              "linear-gradient(180deg, transparent, rgba(45,246,255,0.55), rgba(73,255,158,0.25), transparent)",
+            boxShadow: "0 0 28px rgba(45,246,255,0.45)",
+          }}
+        />
+        {[...Array(8)].map((_, i) => {
+          const leftSide = i % 2 === 0;
+          const y = 16 + i * 8;
+          const width = 18 + (i % 4) * 9;
+          return (
+            <div
+              key={i}
+              className="absolute left-1/2 h-px origin-left"
+              style={{
+                bottom: `${y}%`,
+                width: `${width}vw`,
+                transform: `rotate(${leftSide ? -22 - i * 2 : 202 + i * 2}deg)`,
+                background:
+                  "linear-gradient(90deg, rgba(45,246,255,0.52), rgba(255,138,28,0.22), transparent)",
+                boxShadow: "0 0 18px rgba(45,246,255,0.24)",
+              }}
+            />
+          );
+        })}
+        <div
+          className="absolute bottom-[-10%] left-1/2 h-[36%] w-[74%] -translate-x-1/2 rounded-[50%] blur-3xl"
+          style={{
+            background:
+              "radial-gradient(circle, rgba(73,255,158,0.14), rgba(45,246,255,0.08), transparent 70%)",
+          }}
+        />
+      </div>
     </>
   );
 }
