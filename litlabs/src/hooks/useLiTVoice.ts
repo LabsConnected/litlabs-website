@@ -87,6 +87,16 @@ export function useLiTVoice({
   const recognitionRef = useRef<LiTSpeechRecognition | null>(null);
   const synthRef = useRef<SpeechSynthesis | null>(null);
   const restartTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const onTranscriptRef = useRef(onTranscript);
+  const onStateChangeRef = useRef(onStateChange);
+
+  useEffect(() => {
+    onTranscriptRef.current = onTranscript;
+  }, [onTranscript]);
+
+  useEffect(() => {
+    onStateChangeRef.current = onStateChange;
+  }, [onStateChange]);
 
   const pickBestVoice = useCallback((loaded: SpeechSynthesisVoice[]) => {
     const savedName = typeof window !== "undefined" ? window.localStorage.getItem(LS_VOICE_NAME) : null;
@@ -131,7 +141,7 @@ export function useLiTVoice({
         setTranscript(text);
         if (last.isFinal) {
           setState("thinking");
-          onTranscript(text);
+          onTranscriptRef.current(text);
         }
       };
       recognitionRef.current = rec;
@@ -162,11 +172,11 @@ export function useLiTVoice({
         synth.onvoiceschanged = null;
       }
     };
-  }, [onTranscript, pickBestVoice]);
+  }, [pickBestVoice]);
 
   useEffect(() => {
-    onStateChange?.(state);
-  }, [state, onStateChange]);
+    onStateChangeRef.current?.(state);
+  }, [state]);
 
   const setRate = useCallback((v: number) => {
     setRateState(v);
