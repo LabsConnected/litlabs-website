@@ -65,6 +65,27 @@ const PARTICLES = Array.from({ length: 18 }).map((_, i) => ({
   delay: (i * 7) % 5,
 }));
 
+function suggestedActions(text: string): string[] {
+  const lower = text.toLowerCase();
+  const base = ["Tell me more", "Start over"];
+  if (lower.includes("landing page") || lower.includes("website")) {
+    return ["Build the hero section", "Add a features grid", "Make it responsive", ...base];
+  }
+  if (lower.includes("image") || lower.includes("generate")) {
+    return ["Generate another", "Change style", "Use as wallpaper", ...base];
+  }
+  if (lower.includes("code") || lower.includes("component") || lower.includes("tsx")) {
+    return ["Explain the code", "Copy code", "Fix issues", ...base];
+  }
+  if (lower.includes("deploy") || lower.includes("build")) {
+    return ["Run build", "Deploy now", "Check logs", ...base];
+  }
+  if (lower.includes("agent") || lower.includes("create an agent")) {
+    return ["Name it", "Set personality", "Publish to marketplace", ...base];
+  }
+  return ["Show me options", "Do it", "Refine this", ...base];
+}
+
 const PROMPT_SUGGESTIONS = [
   "Generate a hero image",
   "Build a landing page",
@@ -831,6 +852,26 @@ export default function ChatPanel({
                               ))}
                             </div>
                           )}
+                        </div>
+                      )}
+
+                      {/* Suggested next actions */}
+                      {m.content && (
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                          {suggestedActions(m.content).slice(0, 4).map((action) => (
+                            <button
+                              key={action}
+                              onClick={() => onSend(action)}
+                              className="rounded-full border px-2 py-1 text-[10px] font-bold transition-all hover:scale-[1.02]"
+                              style={{
+                                backgroundColor: `${LC.accentCyan}10`,
+                                borderColor: `${LC.accentCyan}40`,
+                                color: LC.accentCyan,
+                              }}
+                            >
+                              {action}
+                            </button>
+                          ))}
                         </div>
                       )}
                     </div>
