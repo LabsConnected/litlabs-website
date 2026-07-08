@@ -15,6 +15,7 @@ import {
   Check,
   Crown,
   Star,
+  Gem,
   Code2,
   Music,
   Image,
@@ -65,8 +66,8 @@ const AGENTS = [
 const TIERS = [
   {
     name: "Starter",
-    price: "Free",
-    period: "forever",
+    price: "$5",
+    period: "per month",
     badge: null,
     color: MUTED,
     desc: "Everything you need to get started with AI creation.",
@@ -79,30 +80,51 @@ const TIERS = [
       "Community feed",
       "500MB gallery storage",
     ],
-    cta: "Start Free",
-    href: "/sign-up",
+    cta: "Start Starter",
+    href: "/sign-up?plan=starter",
     highlight: false,
   },
   {
-    name: "Creator",
-    price: "$12",
+    name: "Basic",
+    price: "$9.99",
     period: "per month",
     badge: "Most Popular",
     color: CYAN,
-    desc: "For builders shipping real work with AI every day.",
+    desc: "For creators ready to build and ship with more power.",
     features: [
-      "5,000 credits / month",
+      "2,500 credits / month",
       "All 5 core agents",
       "Workflow Studio (Flow)",
       "Terminal access",
       "Marketplace buying",
-      "5GB gallery storage",
+      "2GB gallery storage",
       "Priority AI responses",
       "Social & community tools",
     ],
-    cta: "Start Creator",
-    href: "/sign-up?plan=creator",
+    cta: "Start Basic",
+    href: "/sign-up?plan=basic",
     highlight: true,
+  },
+  {
+    name: "Pro",
+    price: "$19.99",
+    period: "per month",
+    badge: "Pro Tier",
+    color: INDIGO,
+    desc: "For builders shipping real work with AI every day.",
+    features: [
+      "5,000 credits / month",
+      "All 10 specialist agents",
+      "Advanced Studio tools",
+      "SSH Terminal",
+      "Marketplace buying + selling",
+      "10GB gallery storage",
+      "API access",
+      "Priority AI responses",
+    ],
+    cta: "Start Pro",
+    href: "/sign-up?plan=pro",
+    highlight: false,
   },
   {
     name: "Elite",
@@ -312,7 +334,7 @@ export default function HomePage() {
         style={{ borderColor: `${BORDER}50` }}
         id="pricing"
       >
-        <div className="max-w-6xl mx-auto">
+        <div className="max-w-7xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>
               Plans for Every Creator
@@ -322,7 +344,7 @@ export default function HomePage() {
             </p>
           </div>
 
-          <div className="grid md:grid-cols-3 gap-5 items-start">
+          <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-5 items-start">
             {TIERS.map((tier) => (
               <div key={tier.name}
                 className="relative rounded-2xl border p-6 flex flex-col transition-transform duration-300 hover:scale-[1.01]"
@@ -341,7 +363,8 @@ export default function HomePage() {
                 <div className="mb-5">
                   <div className="flex items-center gap-2 mb-2">
                     {tier.name === "Starter" && <Zap size={16} style={{ color: MUTED }} />}
-                    {tier.name === "Creator" && <Star size={16} style={{ color: CYAN }} />}
+                    {tier.name === "Basic" && <Star size={16} style={{ color: CYAN }} />}
+                    {tier.name === "Pro" && <Gem size={16} style={{ color: INDIGO }} />}
                     {tier.name === "Elite" && <Crown size={16} style={{ color: GREEN }} />}
                     <span className="font-black text-lg" style={{ color: TEXT }}>{tier.name}</span>
                   </div>
@@ -360,6 +383,8 @@ export default function HomePage() {
                       ? `linear-gradient(135deg, ${INDIGO}, ${CYAN})`
                       : tier.name === "Elite"
                       ? `linear-gradient(135deg, ${GREEN}80, ${GREEN})`
+                      : tier.name === "Pro"
+                      ? `linear-gradient(135deg, ${INDIGO}80, ${INDIGO})`
                       : `${BORDER}`,
                     color: tier.name === "Starter" ? MUTED : "#000",
                     boxShadow: tier.highlight ? `0 0 24px ${CYAN}30` : "none",
