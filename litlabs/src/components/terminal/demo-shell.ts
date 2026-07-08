@@ -190,6 +190,7 @@ function isProjectPath(path: string) {
 
 export class DemoShell {
   cwd = "/home/creator/litlabs";
+  branch = "main";
   history: string[] = [];
   env: Record<string, string> = {
     NEXT_PUBLIC_TERMINAL_WS_URL: "",
@@ -199,6 +200,14 @@ export class DemoShell {
   };
 
   username = "creator";
+
+  prs: Record<number, { branch: string; title: string; state: string }> = {
+    7: {
+      branch: "devin/1783544563-unit-tests-least-coverage",
+      title: "test: add Vitest setup and unit tests for zero-coverage lib modules",
+      state: "OPEN",
+    },
+  };
 
   prompt() {
     const short = this.cwd.replace("/home/creator", "~");
@@ -253,6 +262,8 @@ export class DemoShell {
         return this.pkg(lower, args);
       case "git":
         return this.git(args);
+      case "gh":
+        return this.gh(args);
       case "node":
         return this.node(args);
       case "npx":
@@ -285,7 +296,7 @@ export class DemoShell {
       `  ${ANSI.cyan}cat <file>${ANSI.reset}    — show file contents`,
       `  ${ANSI.cyan}find, grep${ANSI.reset}     — search project`,
       `  ${ANSI.cyan}tree${ANSI.reset}          — directory tree`,
-      `  ${ANSI.cyan}pnpm, npm, git${ANSI.reset} — package & version control`,
+      `  ${ANSI.cyan}pnpm, npm, git, gh${ANSI.reset} — package & version control`,
       `  ${ANSI.cyan}env, echo${ANSI.reset}     — environment helpers`,
       `  ${ANSI.cyan}agents, status${ANSI.reset}— platform info`,
       `  ${ANSI.cyan}clear${ANSI.reset}         — clear terminal`,
@@ -468,16 +479,108 @@ export class DemoShell {
     const sub = args[0] || "status";
     if (sub === "status") {
       return [
-        `${ANSI.bold}${ANSI.cyan}On branch main${ANSI.reset}`,
-        `${ANSI.dim}Your branch is up to date with 'origin/main'.${ANSI.reset}`,
+        `${ANSI.bold}${ANSI.cyan}On branch ${this.branch}${ANSI.reset}`,
+        `${ANSI.dim}Your branch is up to date with 'origin/${this.branch}'.${ANSI.reset}`,
         "",
         "nothing to commit, working tree clean",
       ].join("\n");
     }
     if (sub === "log") {
-      return `${ANSI.dim}commit 962599cc — fix: blend console navigation with main site nav${ANSI.reset}`;
+      const msg =
+        this.branch === "main"
+          ? "962599cc — fix: blend console navigation with main site nav"
+          : "93d6256 — fix: block 'format c:' in checkPromptSafety";
+      return `${ANSI.dim}commit ${msg}${ANSI.reset}`;
+    }
+    if (sub === "branch") {
+      const branches = new Set(["main", ...Object.values(this.prs).map((p) => p.branch)]);
+      const list = Array.from(branches).map(
+        (b) => `${b === this.branch ? "* " : "  "}${ANSI.cyan}${b}${ANSI.reset}`,
+      );
+      return list.join("\n");
+    }
+    if (sub === "checkout") {
+      const target = args[1] || "";
+      if (!target) return `${ANSI.red}git checkout: missing branch${ANSI.reset}`;
+      const allBranches = new Set(["main", ...Object.values(this.prs).map((p) => p.branch)]);
+      if (target.startsWith("pr-") || allBranches.has(target)) {
+        this.branch = target;
+        return `${ANSI.green}✓${ANSI.reset} Switched to branch '${target}'`;
+      }
+      return `${ANSI.red}git checkout: branch '${target}' not found${ANSI.reset}`;
+    }
+    if (sub === "clone" || sub === "pull") {
+      return `${ANSI.dim}git ${args.join(" ")} simulated in demo mode.${ANSI.reset}`;
     }
     return `${ANSI.dim}git ${args.join(" ")} simulated in demo mode.${ANSI.reset}`;
+  }
+
+  gh(args: string[]) {
+    const [sub, action, ...rest] = args;
+    const subc = (sub || "").toLowerCase();
+    const actionc = (action || "").toLowerCase();
+
+    if (subc === "pr") {
+      if (actionc === "checkout") {
+        const num = Number(rest[0] || action);
+        const pr = this.prs[num];
+        if (pr) {
+          this.branch = pr.branch;
+          return [
+            `${ANSI.green}✓${ANSI.reset} Checked out PR #${num} (${pr.title})`,
+            `Switched to branch '${pr.branch}'`,
+          ].join("\n");
+        }
+        if (!Number.isNaN(num)) {
+          this.branch = `pr-${num}`;
+          return `${ANSI.yellow}⚠${ANSI.reset} PR #${num} not found; created local branch 'pr-${num}'`;
+        }
+        return `${ANSI.red}gh pr checkout: missing PR number${ANSI.reset}`;
+      }
+      if (actionc === "list") {
+        const lines = Object.entries(this.prs).map(([n, p]) => {
+          return `  #${n} ${ANSI.cyan}[${p.state}]${ANSI.reset} ${p.title} ${ANSI.dim}→ ${p.branch}${ANSI.reset}`;
+        });
+        return [hr, `${ANSI.bold}Open Pull Requests${ANSI.reset}`, hr, ...lines, hr].join("\n");
+      }
+      if (actionc === "view") {
+        const num = Number(rest[0] || action);
+        const pr = this.prs[num];
+        if (!pr) return `${ANSI.red}gh pr view: PR #${num} not found${ANSI.reset}`;
+        return [
+          `${ANSI.bold}PR #${num}${ANSI.reset} ${pr.title}`,
+          `State: ${pr.state}`,
+          `Branch: ${pr.branch}`,
+          `URL: ${ANSI.cyan}https://github.com/Litree-Ceo/litlabs-website/pull/${num}${ANSI.reset}`,
+        ].join("\n");
+      }
+      if (actionc === "status") {
+        return `${ANSI.green}✓${ANSI.reset} Current branch ${ANSI.cyan}${this.branch}${ANSI.reset} is up to date.`;
+      }
+      return `${ANSI.red}gh pr: unknown command '${action}'${ANSI.reset}`;
+    }
+
+    if (subc === "repo") {
+      if (actionc === "view" || !action) {
+        return [
+          `${ANSI.bold}Litree-Ceo/litlabs-website${ANSI.reset}`,
+          "Visibility: private",
+          `URL: ${ANSI.cyan}https://github.com/Litree-Ceo/litlabs-website${ANSI.reset}`,
+        ].join("\n");
+      }
+    }
+
+    if (subc === "auth") {
+      if (actionc === "status" || actionc === "login") {
+        return `${ANSI.green}✓${ANSI.reset} Logged in to GitHub as ${ANSI.cyan}${this.username}${ANSI.reset} (demo mode)`;
+      }
+    }
+
+    if (subc === "--version" || subc === "-v") {
+      return "gh version 2.96.0 (demo mode)";
+    }
+
+    return `${ANSI.dim}gh ${args.join(" ")} simulated in demo mode.${ANSI.reset}\n${ANSI.dim}Usage: gh pr checkout/list/view/status, gh repo view, gh auth status${ANSI.reset}`;
   }
 
   node(args: string[]) {

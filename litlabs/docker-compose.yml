@@ -60,6 +60,9 @@ services:
       - TERMINAL_ALLOWED_ORIGIN=http://localhost:3000
       - TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
       - TERMINAL_USE_DOCKER=false
+      - TERMINAL_REPO_URL=${TERMINAL_REPO_URL}
+      - TERMINAL_REPO_DIR=${TERMINAL_REPO_DIR}
+      - GH_TOKEN=${GH_TOKEN}
       - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
       - OLLAMA_BASE_URL=${OLLAMA_BASE_URL}
     volumes:

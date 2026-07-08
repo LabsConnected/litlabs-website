@@ -6,14 +6,18 @@ interface DockerSessionOptions {
   userId: string;
   sessionId: string;
   workspace: string;
+  cwd?: string;
+  env?: Record<string, string>;
   onData: (data: string) => void;
 }
 
-export function createDockerSession({ userId, sessionId, workspace, onData }: DockerSessionOptions) {
+export function createDockerSession({ userId, sessionId, workspace, cwd, env, onData }: DockerSessionOptions) {
   const image = process.env.DOCKER_TERMINAL_IMAGE || "littree-terminal:latest";
   const containerName = `littree-${userId.slice(0, 12)}-${sessionId.slice(0, 8)}`;
 
   mkdirSync(workspace, { recursive: true });
+
+  const workDir = cwd || "/workspace";
 
   const args = [
     "run",
@@ -35,21 +39,28 @@ export function createDockerSession({ userId, sessionId, workspace, onData }: Do
     "-v",
     `${workspace}:/workspace:rw`,
     "-w",
-    "/workspace",
+    workDir,
     "-e",
     `LITTREE_USER_ID=${userId}`,
     "-e",
     `LITTREE_SESSION_ID=${sessionId}`,
     "-e",
-    "HOME=/workspace",
-    image,
-    "/bin/bash",
+    `HOME=${workDir}`,
   ];
+
+  if (env) {
+    for (const [key, value] of Object.entries(env)) {
+      args.push("-e", `${key}=${value}`);
+    }
+  }
+
+  args.push(image, "/bin/bash");
 
   const proc = spawn("docker", args, {
     stdio: ["pipe", "pipe", "pipe"],
     env: {
       ...process.env,
+      ...env,
       TERM: "xterm-256color",
     },
   });

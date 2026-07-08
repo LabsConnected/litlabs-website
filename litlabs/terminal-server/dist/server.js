@@ -44,6 +44,7 @@ const socket_io_1 = require("socket.io");
 const pty = __importStar(require("node-pty"));
 const crypto_1 = require("crypto");
 const path_1 = require("path");
+const child_process_1 = require("child_process");
 const fs_1 = require("fs");
 const backend_1 = require("@clerk/backend");
 const supabase_js_1 = require("@supabase/supabase-js");
@@ -60,6 +61,9 @@ const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const REPO_URL = process.env.TERMINAL_REPO_URL;
+const REPO_DIR = process.env.TERMINAL_REPO_DIR || (REPO_URL ? "litlabs" : "");
+const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 const clerk = CLERK_SECRET ? (0, backend_1.createClerkClient)({ secretKey: CLERK_SECRET }) : null;
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY ? (0, supabase_js_1.createClient)(SUPABASE_URL, SUPABASE_SERVICE_KEY) : null;
 (0, fs_1.mkdirSync)(WORKSPACE_ROOT, { recursive: true });
@@ -142,6 +146,31 @@ function getUserWorkspace(userId) {
     const workspace = (0, path_1.resolve)(WORKSPACE_ROOT, userId);
     (0, fs_1.mkdirSync)(workspace, { recursive: true });
     return workspace;
+}
+function getRepoPath(userId) {
+    const workspace = getUserWorkspace(userId);
+    return REPO_DIR ? (0, path_1.resolve)(workspace, REPO_DIR) : workspace;
+}
+function ensureRepoCloned(userId) {
+    const repoPath = getRepoPath(userId);
+    if (REPO_URL && !(0, fs_1.existsSync)((0, path_1.resolve)(repoPath, ".git"))) {
+        const workspace = getUserWorkspace(userId);
+        console.log(`[Terminal] Cloning repo for ${userId} from ${REPO_URL} into ${repoPath}`);
+        const env = { ...process.env, GH_TOKEN, GITHUB_TOKEN: GH_TOKEN };
+        let result = (0, child_process_1.spawnSync)("git", ["clone", REPO_URL, repoPath], { cwd: workspace, env, stdio: "pipe" });
+        if (result.status !== 0) {
+            const stderr = result.stderr?.toString() || "";
+            console.error("[Terminal] git clone failed:", stderr);
+            // Fall back to gh repo clone so GH_TOKEN is used for private repos
+            if (GH_TOKEN) {
+                result = (0, child_process_1.spawnSync)("gh", ["repo", "clone", REPO_URL, repoPath], { cwd: workspace, env, stdio: "pipe" });
+                if (result.status !== 0) {
+                    console.error("[Terminal] gh repo clone failed:", result.stderr?.toString() || "");
+                }
+            }
+        }
+    }
+    return repoPath;
 }
 function safePath(userId, filePath) {
     const workspace = getUserWorkspace(userId);
@@ -329,8 +358,8 @@ io.on("connection", (socket) => {
     const userId = String(socket.data.userId || socket.handshake.auth?.userId || "dev-user");
     const sessionId = String(socket.handshake.auth?.sessionId || (0, crypto_1.randomUUID)());
     console.log("[Terminal] Connected:", { userId, sessionId });
-    const workspace = (0, path_1.resolve)(WORKSPACE_ROOT, userId);
-    (0, fs_1.mkdirSync)(workspace, { recursive: true });
+    const workspace = getUserWorkspace(userId);
+    const cwd = ensureRepoCloned(userId);
     let ptyProcess;
     try {
         if (USE_DOCKER) {
@@ -338,6 +367,8 @@ io.on("connection", (socket) => {
                 userId,
                 sessionId,
                 workspace,
+                cwd: REPO_DIR ? `/workspace/${REPO_DIR}` : "/workspace",
+                env: GH_TOKEN ? { GH_TOKEN, GITHUB_TOKEN: GH_TOKEN } : undefined,
                 onData: (data) => socket.emit("terminal:output", data),
             });
         }
@@ -347,13 +378,14 @@ io.on("connection", (socket) => {
                 name: "xterm-256color",
                 cols: 120,
                 rows: 32,
-                cwd: workspace,
+                cwd,
                 env: {
                     ...process.env,
                     TERM: "xterm-256color",
                     LITTREE_USER_ID: userId,
                     LITTREE_SESSION_ID: sessionId,
                     HOME: workspace,
+                    ...(GH_TOKEN ? { GH_TOKEN, GITHUB_TOKEN: GH_TOKEN } : {}),
                 },
             });
         }
@@ -370,7 +402,7 @@ io.on("connection", (socket) => {
         createdAt: new Date(),
         userId,
         sessionId,
-        cwd: workspace,
+        cwd,
     };
     sessions.set(sessionId, session);
     socket.emit("session:ready", { sessionId });

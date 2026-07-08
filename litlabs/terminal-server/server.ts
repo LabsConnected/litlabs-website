@@ -6,7 +6,8 @@ import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { resolve, normalize } from "path";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { spawnSync } from "child_process";
+import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from "fs";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { createClient } from "@supabase/supabase-js";
 import { isBlockedCommand } from "./security";
@@ -23,6 +24,9 @@ const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY;
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const REPO_URL = process.env.TERMINAL_REPO_URL;
+const REPO_DIR = process.env.TERMINAL_REPO_DIR || (REPO_URL ? "litlabs" : "");
+const GH_TOKEN = process.env.GH_TOKEN || process.env.GITHUB_TOKEN;
 
 const clerk = CLERK_SECRET ? createClerkClient({ secretKey: CLERK_SECRET }) : null;
 const supabase = SUPABASE_URL && SUPABASE_SERVICE_KEY ? createClient(SUPABASE_URL, SUPABASE_SERVICE_KEY) : null;
@@ -119,6 +123,33 @@ function getUserWorkspace(userId: string) {
   const workspace = resolve(WORKSPACE_ROOT, userId);
   mkdirSync(workspace, { recursive: true });
   return workspace;
+}
+
+function getRepoPath(userId: string) {
+  const workspace = getUserWorkspace(userId);
+  return REPO_DIR ? resolve(workspace, REPO_DIR) : workspace;
+}
+
+function ensureRepoCloned(userId: string) {
+  const repoPath = getRepoPath(userId);
+  if (REPO_URL && !existsSync(resolve(repoPath, ".git"))) {
+    const workspace = getUserWorkspace(userId);
+    console.log(`[Terminal] Cloning repo for ${userId} from ${REPO_URL} into ${repoPath}`);
+    const env = { ...process.env, GH_TOKEN, GITHUB_TOKEN: GH_TOKEN };
+    let result = spawnSync("git", ["clone", REPO_URL, repoPath], { cwd: workspace, env, stdio: "pipe" });
+    if (result.status !== 0) {
+      const stderr = result.stderr?.toString() || "";
+      console.error("[Terminal] git clone failed:", stderr);
+      // Fall back to gh repo clone so GH_TOKEN is used for private repos
+      if (GH_TOKEN) {
+        result = spawnSync("gh", ["repo", "clone", REPO_URL, repoPath], { cwd: workspace, env, stdio: "pipe" });
+        if (result.status !== 0) {
+          console.error("[Terminal] gh repo clone failed:", result.stderr?.toString() || "");
+        }
+      }
+    }
+  }
+  return repoPath;
 }
 
 function safePath(userId: string, filePath: string) {
@@ -311,8 +342,8 @@ io.on("connection", (socket) => {
 
   console.log("[Terminal] Connected:", { userId, sessionId });
 
-  const workspace = resolve(WORKSPACE_ROOT, userId);
-  mkdirSync(workspace, { recursive: true });
+  const workspace = getUserWorkspace(userId);
+  const cwd = ensureRepoCloned(userId);
 
   let ptyProcess: pty.IPty;
 
@@ -322,6 +353,8 @@ io.on("connection", (socket) => {
         userId,
         sessionId,
         workspace,
+        cwd: REPO_DIR ? `/workspace/${REPO_DIR}` : "/workspace",
+        env: GH_TOKEN ? { GH_TOKEN, GITHUB_TOKEN: GH_TOKEN } : undefined,
         onData: (data: string) => socket.emit("terminal:output", data),
       });
     } else {
@@ -330,13 +363,14 @@ io.on("connection", (socket) => {
         name: "xterm-256color",
         cols: 120,
         rows: 32,
-        cwd: workspace,
+        cwd,
         env: {
           ...process.env,
           TERM: "xterm-256color",
           LITTREE_USER_ID: userId,
           LITTREE_SESSION_ID: sessionId,
           HOME: workspace,
+          ...(GH_TOKEN ? { GH_TOKEN, GITHUB_TOKEN: GH_TOKEN } : {}),
         },
       });
     }
@@ -353,7 +387,7 @@ io.on("connection", (socket) => {
     createdAt: new Date(),
     userId,
     sessionId,
-    cwd: workspace,
+    cwd,
   };
 
   sessions.set(sessionId, session);
