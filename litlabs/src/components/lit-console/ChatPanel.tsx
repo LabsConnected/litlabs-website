@@ -447,13 +447,34 @@ export default function ChatPanel({
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden"
+      className="relative flex h-full w-full flex-col overflow-hidden"
       style={{ backgroundColor: LC.bg, ...activeWallpaper }}
     >
+      {/* Holographic scanline overlay */}
+      <div
+        className="pointer-events-none absolute inset-0 z-0 opacity-[0.04]"
+        style={{
+          background: `repeating-linear-gradient(0deg, transparent, transparent 2px, ${LC.accentCyan} 3px, transparent 4px)`,
+          mixBlendMode: "screen",
+        }}
+      />
+      {/* Holographic vignette glow */}
+      <div
+        className="pointer-events-none absolute inset-0 z-0"
+        style={{
+          background: `radial-gradient(circle at 50% 40%, ${LC.accentCyan}08 0%, transparent 55%)`,
+        }}
+      />
+
       {/* Chat header with wallpaper picker */}
-      <div className="flex items-center justify-between border-b px-4 py-2" style={{ borderColor: LC.border, backgroundColor: `${LC.bg}cc`, backdropFilter: "blur(8px)" }}>
+      <div className="relative z-10 flex items-center justify-between border-b px-4 py-2" style={{ borderColor: LC.border, backgroundColor: `${LC.bg}cc`, backdropFilter: "blur(8px)" }}>
         <div className="flex items-center gap-2 text-xs font-black" style={{ color: LC.text }}>
+          <span className="relative flex h-2 w-2">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: LC.accentCyan }} />
+            <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: LC.accentCyan }} />
+          </span>
           <Bot size={14} style={{ color: LC.accentCyan }} /> LiTTree Agent
+          <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: LC.accentCyan }}>Live</span>
         </div>
         <div className="relative">
           <button
@@ -492,24 +513,36 @@ export default function ChatPanel({
       >
         <div className="mx-auto w-full max-w-5xl px-4 py-6 lg:px-8">
           {isEmpty ? (
-            <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
+            <div className="relative z-10 flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
               <div className="w-full max-w-2xl space-y-6 text-center">
-                <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
+                <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
+                  {/* Holographic ring */}
                   <div
-                    className="absolute inset-0 rounded-full blur-2xl"
+                    className="absolute inset-0 rounded-full animate-pulse"
                     style={{
-                      background: `radial-gradient(circle, ${LC.accentCyan}25, transparent 70%)`,
+                      background: `conic-gradient(from 0deg, transparent, ${LC.accentCyan}40, transparent, ${LC.accentCyan}20, transparent)`,
+                      filter: "blur(4px)",
                     }}
                   />
                   <div
-                    className="relative flex h-12 w-12 items-center justify-center rounded-xl border"
+                    className="absolute inset-[-6px] rounded-full border border-dashed animate-[spin_8s_linear_infinite]"
+                    style={{ borderColor: `${LC.accentCyan}40` }}
+                  />
+                  <div
+                    className="absolute inset-0 rounded-full blur-2xl"
                     style={{
-                      backgroundColor: LC.bgPanel,
-                      borderColor: LC.border,
-                      boxShadow: LC.shadows.glowCyan,
+                      background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)`,
+                    }}
+                  />
+                  <div
+                    className="relative flex h-14 w-14 items-center justify-center rounded-2xl border"
+                    style={{
+                      backgroundColor: `${LC.bgPanel}cc`,
+                      borderColor: LC.accentCyan,
+                      boxShadow: `0 0 32px ${LC.accentCyan}30, inset 0 0 16px ${LC.accentCyan}10`,
                     }}
                   >
-                    <Bot size={24} style={{ color: LC.accentCyan }} />
+                    <Bot size={28} style={{ color: LC.accentCyan }} />
                   </div>
                 </div>
                 <div>
@@ -524,6 +557,9 @@ export default function ChatPanel({
                     style={{ color: LC.textMuted }}
                   >
                     Creative Director + Builder + Operator
+                  </p>
+                  <p className="mt-1 text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: LC.accentCyan }}>
+                    ● Live Holographic Link
                   </p>
                 </div>
 
@@ -551,7 +587,9 @@ export default function ChatPanel({
               </div>
             </div>
           ) : (
-            messages.map((m) => (
+            <div className="relative z-10 mx-auto w-full max-w-3xl rounded-3xl border p-4 lg:p-6" style={{ borderColor: `${LC.accentCyan}20`, background: `linear-gradient(180deg, ${LC.bgPanel}40 0%, transparent 100%)`, boxShadow: `0 0 40px ${LC.accentCyan}08` }}>
+              <div className="absolute left-1/2 top-0 h-px w-24 -translate-x-1/2 -translate-y-px" style={{ background: `linear-gradient(90deg, transparent, ${LC.accentCyan}, transparent)` }} />
+            {messages.map((m) => (
               <div
                 key={m.id}
                 className={
@@ -824,7 +862,8 @@ export default function ChatPanel({
                   </div>
                 )}
               </div>
-            ))
+            ))}
+            </div>
           )}
 
           {plan && (
