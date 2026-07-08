@@ -38,18 +38,18 @@ const MUTED = "#64748b";
 
 // ─── OS modules ───────────────────────────────────────────────────────────────
 const OS_MODULES = [
-  { icon: MessageSquareText, label: "Chat",        sub: "Always-on AI",       color: CYAN,    href: "/studio?tool=chat" },
+  { icon: MessageSquareText, label: "Chat",        sub: "Ask LiTT",           color: CYAN,    href: "/studio?tool=chat" },
   { icon: Sparkles,          label: "Studio",      sub: "Create anything",    color: "#e879f9", href: "/studio" },
-  { icon: Bot,               label: "Agents",      sub: "Your AI crew",       color: GREEN,   href: "/agents" },
+  { icon: Bot,               label: "Agents",      sub: "6 core agents",      color: GREEN,   href: "/agents" },
   { icon: Gamepad2,          label: "Arcade",      sub: "25+ free games",     color: "#fb923c", href: "/games/cloud" },
-  { icon: ShoppingBag,       label: "Marketplace", sub: "Buy & sell agents",  color: "#f472b6", href: "/marketplace" },
-  { icon: Code2,             label: "Terminal",    sub: "Real dev terminal",  color: "#4ade80", href: "/studio?tool=chat" },
-  { icon: Music,             label: "Music",       sub: "AI music studio",    color: "#a78bfa", href: "/studio" },
+  { icon: ShoppingBag,       label: "Marketplace", sub: "Free agent templates", color: "#f472b6", href: "/marketplace" },
+  { icon: Code2,             label: "Terminal",    sub: "Pro workspace tools",  color: "#4ade80", href: "/studio?tool=chat" },
+  { icon: Music,             label: "Music",       sub: "Lab — coming soon",    color: "#a78bfa", href: "/studio" },
   { icon: Image,             label: "Gallery",     sub: "All your assets",    color: "#fbbf24", href: "/gallery" },
-  { icon: Activity,          label: "Social",      sub: "Creator community",  color: "#f87171", href: "/social" },
-  { icon: Brain,             label: "Memory",      sub: "LiT remembers you",  color: "#34d399", href: "/studio?tool=chat" },
-  { icon: BarChart3,         label: "Analytics",   sub: "Track everything",   color: "#60a5fa", href: "/dashboard" },
-  { icon: Terminal,          label: "Console",     sub: "Mission control",    color: CYAN,    href: "/studio?tool=chat" },
+  { icon: Activity,          label: "Social",      sub: "Creator feed",       color: "#f87171", href: "/social" },
+  { icon: Brain,             label: "Memory",      sub: "Project recall",     color: "#34d399", href: "/studio?tool=chat" },
+  { icon: BarChart3,         label: "Dashboard",   sub: "Mission control",    color: "#60a5fa", href: "/dashboard" },
+  { icon: Terminal,          label: "Console",     sub: "Live workspace",     color: CYAN,    href: "/studio?tool=chat" },
 ];
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
@@ -93,7 +93,7 @@ const TIERS = [
     desc: "Everything you need to get started with AI creation.",
     features: [
       "500 LBC / month",
-      "LiT Chat (unlimited)",
+      "LiT Chat",
       "3 active agents",
       "Studio access (basic)",
       "Game Arcade (all games)",
@@ -152,14 +152,14 @@ const TIERS = [
     period: "per month",
     badge: "Owner Tier",
     color: GREEN,
-    desc: "Full LiT OS power. Sell agents, run workflows, unlimited everything.",
+    desc: "Full LiT OS power for teams and power creators.",
     features: [
-      "Unlimited credits",
+      "10,000 credits / month",
       "All agents + custom agents",
       "Marketplace selling",
       "Agent Builder Studio",
       "SSH Terminal",
-      "Unlimited gallery storage",
+      "100GB gallery storage",
       "API access",
       "White-label workspace",
       "Early feature access",
@@ -226,38 +226,38 @@ export default function HomePage() {
         <div className="relative max-w-5xl mx-auto">
           <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold mb-8 border"
             style={{ borderColor: `${CYAN}40`, backgroundColor: `${CYAN}08`, color: CYAN }}>
-            <Sparkles size={11} /> The AI Operating System for Creators
+            <Sparkles size={11} /> AI Workspace for Creators
           </div>
 
           <h1 className="text-5xl md:text-8xl font-black tracking-tight mb-6 leading-[0.95]" style={{ color: TEXT }}>
-            Build with AI.<br />
+            Build with AI agents<br />
             <span className="bg-clip-text text-transparent"
               style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${INDIGO}, ${GREEN}, ${CYAN})` }}>
-              Ship everything.
+              from one workspace.
             </span>
           </h1>
 
           <p className="text-lg md:text-xl mb-10 max-w-2xl mx-auto leading-relaxed" style={{ color: MUTED }}>
-            LiT OS is the one workspace where you chat, code, create, deploy agents,
-            play, sell, and collaborate — all without leaving.
+            LiTTree OS helps creators plan, generate, save, and launch projects with AI chat,
+            specialized agents, Studio tools, and a personal command center.
           </p>
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14">
-            <Link href="/sign-up"
+            <Link href="/studio"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-black transition-transform hover:scale-105 hover:brightness-110"
               style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 40px ${INDIGO}40` }}>
-              Start Free — 500 LBC <ArrowRight size={16} />
+              Start Building Free <ArrowRight size={16} />
             </Link>
-            <Link href="/sign-in"
+            <Link href="/studio"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold border transition-colors hover:bg-white/5"
               style={{ borderColor: BORDER, color: MUTED }}>
-              <LogIn size={15} /> Sign In
+              <Sparkles size={15} /> Open Studio
             </Link>
           </div>
 
           {/* Stats row */}
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10 text-center">
-            {[["6","Core AI Agents"],["25+","Free Games"],["∞","AI Conversations"],["500","Free LBC"]].map(([v,l]) => (
+            {[["6","Core AI Agents"],["25+","Free Games"],["1","AI Workspace"],["500","Free LBC"]].map(([v,l]) => (
               <div key={l}>
                 <div className="text-2xl font-black" style={{ color: TEXT }}>{v}</div>
                 <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: MUTED }}>{l}</div>
@@ -275,8 +275,8 @@ export default function HomePage() {
       >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-10">
-            <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>One OS. Every Tool.</h2>
-            <p className="text-sm" style={{ color: MUTED }}>Everything opens from LiT — nothing lives on a separate site.</p>
+            <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Your AI workspace, simplified.</h2>
+            <p className="text-sm" style={{ color: MUTED }}>Chat with LiTT, launch agents, create in Studio, save outputs to Gallery, and track your work from the Console.</p>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
             {OS_MODULES.map((m, i) => {
@@ -311,8 +311,8 @@ export default function HomePage() {
       >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
-            <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Your AI Workforce</h2>
-            <p className="text-sm" style={{ color: MUTED }}>6 core agents — each with a real job and a distinct personality. More specialists coming soon.</p>
+            <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>6 Core Agents</h2>
+            <p className="text-sm" style={{ color: MUTED }}>Each agent has a focused job. Pick one, chat, and get a real output.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {AGENTS.map((a, i) => (
@@ -360,7 +360,7 @@ export default function HomePage() {
               Plans for Every Creator
             </h2>
             <p className="text-sm" style={{ color: MUTED }}>
-              Start free. Scale when you&apos;re ready. Owner gets everything.
+              Start free. Upgrade when you need more agents, storage, credits, and advanced tools.
             </p>
           </div>
 
@@ -437,12 +437,12 @@ export default function HomePage() {
       >
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Up in Minutes</h2>
-          <p className="text-sm mb-12" style={{ color: MUTED }}>Three steps from zero to shipping.</p>
+          <p className="text-sm mb-12" style={{ color: MUTED }}>Sign up → create → save.</p>
           <div className="grid md:grid-cols-3 gap-8">
             {[
-              { n: "01", t: "Boot Into LiT OS", d: "Sign up free, meet LiTT your AI assistant, and boot into your personal operating system.", icon: Rocket },
-              { n: "02", t: "Pick Your Agents", d: "Choose from 10 specialists or let Director route your work automatically across the crew.", icon: Bot },
-              { n: "03", t: "Ship the Result", d: "Post it, sell it in the Marketplace, deploy it, or wire it into an automated workflow.", icon: Globe },
+              { n: "01", t: "Sign Up Free", d: "Create your account and boot into your personal workspace. No credit card required.", icon: Rocket },
+              { n: "02", t: "Chat with LiTT", d: "Ask for help, pick an agent, or describe what you want to build in Studio.", icon: Bot },
+              { n: "03", t: "Save Your Output", d: "Every image, code block, and project lands in your Gallery so your work is always there.", icon: Globe },
             ].map((s, i) => {
               const Icon = s.icon;
               return (
@@ -479,13 +479,13 @@ export default function HomePage() {
               </span>
             </h2>
             <p className="mb-10 leading-relaxed" style={{ color: MUTED }}>
-              The AI OS where creators build, ship, and live. Start free — no credit card.
+              Start free — no credit card. Build something with LiTT today.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/sign-up"
+              <Link href="/studio"
                 className="inline-flex items-center gap-2 px-10 py-4 rounded-2xl font-black text-sm transition-transform hover:scale-105"
                 style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 50px ${INDIGO}40` }}>
-                <UserPlus size={16} /> Create Free Account
+                <Sparkles size={16} /> Start Building Free
               </Link>
               <Link href="/sign-in"
                 className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-sm border transition-colors hover:bg-white/5"
@@ -506,7 +506,7 @@ export default function HomePage() {
                 style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff" }}>L</div>
               <span className="font-black text-sm" style={{ color: TEXT }}>LiTTree OS</span>
             </div>
-            <p className="text-xs" style={{ color: MUTED }}>The AI Operating System for Creators.</p>
+            <p className="text-xs" style={{ color: MUTED }}>AI workspace for creators.</p>
             <div className="flex items-center gap-1.5 mt-3">
               <span className="w-1.5 h-1.5 rounded-full bg-green-400" />
               <span className="text-[10px]" style={{ color: MUTED }}>All Systems Operational</span>
@@ -515,7 +515,7 @@ export default function HomePage() {
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-8 text-xs" style={{ color: MUTED }}>
             <div className="space-y-2">
               <div className="font-black text-[10px] uppercase tracking-widest mb-3" style={{ color: TEXT }}>Product</div>
-              {[["Agents","/agents"],["Studio","/studio"],["Gallery","/gallery"],["Marketplace","/marketplace"],["Games","/games/cloud"]].map(([l,h]) => (
+              {[["Dashboard","/dashboard"],["Agents","/agents"],["Studio","/studio"],["Gallery","/gallery"],["Marketplace","/marketplace"],["Games","/games/cloud"]].map(([l,h]) => (
                 <Link key={l} href={h} className="block hover:text-white transition-colors">{l}</Link>
               ))}
             </div>
