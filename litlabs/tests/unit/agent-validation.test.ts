@@ -69,17 +69,17 @@ describe("checkPromptSafety", () => {
     "DROP TABLE users",
     "run sudo rm everything",
     "mkfs the disk",
+    "format c: drive",
+    "FORMAT C:",
   ])("blocks dangerous prompt: %s", (prompt) => {
     const result = checkPromptSafety(prompt);
     expect(result.ok).toBe(false);
     expect(result.reason).toBe("Prompt contains blocked instruction pattern");
   });
 
-  // Known gap: the BLOCKED_PATTERNS regex ends "format c:" with a `\b`, but ":"
-  // is a non-word char so the word boundary never matches — "format c:" slips
-  // through. This documents current behavior; see PR notes.
-  it("does not currently block 'format c:' (documented regex limitation)", () => {
-    expect(checkPromptSafety("format c: drive").ok).toBe(true);
+  it("does not block benign uses of the same words", () => {
+    expect(checkPromptSafety("format the output as json").ok).toBe(true);
+    expect(checkPromptSafety("format my resume").ok).toBe(true);
   });
 });
 

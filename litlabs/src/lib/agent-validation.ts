@@ -46,8 +46,13 @@ export function validateAgentTaskInput(
 }
 
 export const BLOCKED_PATTERNS = [
-  /\b(rm\s+-rf|delete\s+database|drop\s+table)\b/i,
-  /\b(sudo\s+rm|mkfs|format\s+c:)\b/i,
+  /\brm\s+-rf\b/i,
+  /\bdelete\s+database\b/i,
+  /\bdrop\s+table\b/i,
+  /\bsudo\s+rm\b/i,
+  /\bmkfs\b/i,
+  // "c:" ends in a non-word char, so no trailing \b here.
+  /\bformat\s+c:/i,
 ] as const;
 
 export function checkPromptSafety(prompt: string): {
