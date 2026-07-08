@@ -47,9 +47,21 @@ const WALLPAPERS = [
   { id: "cyan-glow", label: "Cyan Glow", style: { background: "radial-gradient(ellipse at top, rgba(34,211,238,0.08) 0%, transparent 60%)" } },
   { id: "purple-glow", label: "Purple Glow", style: { background: "radial-gradient(ellipse at top, rgba(168,85,247,0.1) 0%, transparent 60%)" } },
   { id: "stars", label: "Stars", style: { backgroundImage: "radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px)", backgroundSize: "50px 50px, 30px 30px", backgroundPosition: "0 0, 25px 25px" } },
+  { id: "aurora", label: "Aurora", style: { background: "linear-gradient(120deg, rgba(34,211,238,0.06), rgba(168,85,247,0.08), rgba(34,211,238,0.06))", backgroundSize: "200% 200%", animation: "litAurora 12s ease infinite" } },
+  { id: "pulse-grid", label: "Pulse Grid", style: { backgroundImage: "linear-gradient(rgba(255,255,255,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.04) 1px, transparent 1px)", backgroundSize: "40px 40px", animation: "litPulseGrid 6s ease-in-out infinite" } },
+  { id: "holo-scan", label: "Holo Scan", style: { background: "repeating-linear-gradient(0deg, transparent, transparent 2px, rgba(34,211,238,0.04) 3px, transparent 4px)", animation: "litScan 8s linear infinite" } },
 ];
 
 const WALLPAPER_KEY = "lit-chat-wallpaper";
+
+const PARTICLES = Array.from({ length: 18 }).map((_, i) => ({
+  id: i,
+  size: i % 2 === 0 ? 2 : 3,
+  left: ((i * 37) % 100),
+  top: ((i * 53) % 100),
+  duration: 6 + ((i * 17) % 8),
+  delay: (i * 7) % 5,
+}));
 
 interface ChatPanelProps {
   messages: Message[];
@@ -450,6 +462,50 @@ export default function ChatPanel({
       className="relative flex h-full w-full flex-col overflow-hidden"
       style={{ backgroundColor: LC.bg, ...activeWallpaper }}
     >
+      <style>{`
+        @keyframes litAurora {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        @keyframes litPulseGrid {
+          0%, 100% { opacity: 0.6; }
+          50% { opacity: 1; }
+        }
+        @keyframes litScan {
+          0% { background-position: 0 0; }
+          100% { background-position: 0 200px; }
+        }
+        @keyframes litFloat {
+          0%, 100% { transform: translateY(0) translateX(0); opacity: 0.3; }
+          50% { transform: translateY(-20px) translateX(10px); opacity: 0.6; }
+        }
+        @keyframes litOrbit {
+          0% { transform: rotate(0deg); }
+          100% { transform: rotate(360deg); }
+        }
+      `}</style>
+
+      {/* Floating particles overlay (subtle, always on) */}
+      <div className="pointer-events-none absolute inset-0 z-0 overflow-hidden opacity-60">
+        {PARTICLES.map((p) => (
+          <span
+            key={p.id}
+            className="absolute rounded-full"
+            style={{
+              width: p.size,
+              height: p.size,
+              left: `${p.left}%`,
+              top: `${p.top}%`,
+              backgroundColor: LC.accentCyan,
+              boxShadow: `0 0 6px ${LC.accentCyan}`,
+              animation: `litFloat ${p.duration}s ease-in-out infinite`,
+              animationDelay: `${p.delay}s`,
+            }}
+          />
+        ))}
+      </div>
+
       {/* Holographic scanline overlay */}
       <div
         className="pointer-events-none absolute inset-0 z-0 opacity-[0.04]"
