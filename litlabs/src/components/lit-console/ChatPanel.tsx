@@ -786,13 +786,20 @@ export default function ChatPanel({
       <div
         ref={scrollRef}
         onScroll={handleScroll}
-        className="flex-1 space-y-5 overflow-y-auto"
+        className="scrollbar-none flex-1 space-y-5 overflow-y-auto overscroll-contain"
       >
         <div className="mx-auto w-full max-w-5xl px-3 py-4 sm:px-4 sm:py-6 lg:px-8">
           {isEmpty ? (
-            <div className="relative z-10 flex h-full min-h-[calc(100svh-250px)] flex-col items-center justify-center px-0 py-3 sm:min-h-[60vh] sm:px-4 sm:py-8">
-              <div className="mx-auto w-full max-w-3xl space-y-4 text-center sm:space-y-6 sm:px-4 lg:px-6">
-                <div className="relative mx-auto flex h-32 w-32 items-center justify-center sm:h-40 sm:w-40">
+            <div className="relative z-10 flex h-full min-h-[calc(100svh-250px)] flex-col items-center justify-center overflow-hidden rounded-[28px] border px-0 py-3 sm:min-h-[60vh] sm:px-4 sm:py-8"
+              style={{
+                borderColor: `${LC.accentCyan}12`,
+                background: `radial-gradient(circle at 50% 24%, ${LC.accentCyan}14, transparent 36%), radial-gradient(circle at 68% 42%, ${LC.accentOrange}10, transparent 30%), linear-gradient(180deg, ${LC.bgPanel}38, transparent)`,
+              }}
+            >
+              <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(45,246,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(73,255,158,0.08)_1px,transparent_1px)] [background-size:34px_34px]" />
+              <div className="pointer-events-none absolute left-1/2 top-[8%] h-[46%] w-px -translate-x-1/2" style={{ background: `linear-gradient(180deg, transparent, ${LC.accentCyan}88, ${LC.accentOrange}44, transparent)`, boxShadow: `0 0 28px ${LC.accentCyan}44` }} />
+              <div className="mx-auto w-full max-w-3xl space-y-3 text-center sm:space-y-6 sm:px-4 lg:px-6">
+                <div className="relative mx-auto flex h-24 w-24 items-center justify-center sm:h-40 sm:w-40">
                   <div
                     className="absolute inset-0 rounded-full animate-pulse"
                     style={{
@@ -811,7 +818,7 @@ export default function ChatPanel({
                       boxShadow: `0 0 22px ${LC.accentCyan}55`,
                     }}
                   />
-                  <LiTTFace mood="happy" size={112} showBadge={false} />
+                  <LiTTFace mood="happy" size={84} showBadge={false} />
                 </div>
                 <div>
                   <h2
@@ -831,7 +838,7 @@ export default function ChatPanel({
                   </p>
                 </div>
 
-                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+                <div className="grid w-full grid-cols-2 gap-2 px-1 sm:grid-cols-4 sm:px-0">
                   {COMPANION_PROMPTS.map((companion) => {
                     const Icon = companion.icon;
                     return (
@@ -866,7 +873,7 @@ export default function ChatPanel({
                   })}
                 </div>
 
-                <div className="-mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
+                <div className="scrollbar-none -mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
                   {PROMPT_SUGGESTIONS
                     .slice(promptSeed % PROMPT_SUGGESTIONS.length)
                     .concat(PROMPT_SUGGESTIONS.slice(0, promptSeed % PROMPT_SUGGESTIONS.length))

@@ -137,6 +137,21 @@ a:hover {
   color: var(--header-color);
 }
 
+.scrollbar-none,
+.scrollbar-hide,
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.scrollbar-none::-webkit-scrollbar,
+.scrollbar-hide::-webkit-scrollbar,
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+}
+
 /* ============================================================
    CARDS / GLASS
    ============================================================ */
