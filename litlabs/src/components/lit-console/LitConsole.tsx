@@ -706,6 +706,12 @@ export default function LitConsole() {
           stopSpeaking();
           setVoiceOpen(false);
         }}
+        onHolo={() => {
+          setHoloUrl("https://litlabs.net");
+          setHoloTitle("LiTTree Holo");
+          setDrawerTab("holo");
+          setDrawerOpen(true);
+        }}
         voiceState={voiceState}
       />
 

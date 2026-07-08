@@ -30,6 +30,8 @@ import {
   Wand2,
   Split,
   Zap,
+  MessageSquare,
+  AppWindow,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 import type { LiTTipResult } from "@/lib/lit-tip";
@@ -56,6 +58,7 @@ interface CommandDockProps {
   onVoice?: () => void;
   onVoiceStop?: () => void;
   voiceState?: "idle" | "listening" | "thinking" | "speaking" | "error";
+  onHolo?: () => void;
   /* Run Execution Loop support */
   onRun?: (text: string) => void;
   isRunning?: boolean;
@@ -247,18 +250,61 @@ export default function CommandDock(props: CommandDockProps) {
 
   const listening = voiceState === "listening";
 
+  const [activeMode, setActiveMode] = useState<"text" | "voice" | "holo" | "files" | "tools">("text");
+
+  const handleModeClick = (id: typeof activeMode) => {
+    setActiveMode(id);
+    if (id === "text") textareaRef.current?.focus();
+    if (id === "voice") onVoice?.();
+    if (id === "holo") onHolo?.();
+    if (id === "files") fileInputRef.current?.click();
+    if (id === "tools") setToolsOpen((v) => !v);
+  };
+
+  const modeTabs = [
+    { id: "text", label: "Text", icon: MessageSquare },
+    { id: "voice", label: "Voice", icon: Mic },
+    { id: "holo", label: "Holo", icon: AppWindow },
+    { id: "files", label: "Files", icon: Paperclip },
+    { id: "tools", label: "Tools", icon: Plus },
+  ] as const;
+
   return (
     <div
       className="relative z-30 w-full shrink-0 px-3 pb-[max(0.75rem,env(safe-area-inset-bottom))] pt-2 sm:px-4 sm:pb-3"
       style={{ backgroundColor: LC.bg }}
     >
       <div className="relative mx-auto max-w-3xl">
+        {/* Composer mode tabs */}
+        <div className="mb-1.5 flex items-center gap-1 overflow-x-auto sm:gap-2">
+          {modeTabs.map((m) => {
+            const Icon = m.icon;
+            const isActive = activeMode === m.id;
+            return (
+              <button
+                key={m.id}
+                onClick={() => handleModeClick(m.id)}
+                className="flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10px] font-bold transition-all whitespace-nowrap"
+                style={{
+                  color: isActive ? LC.accentCyan : LC.textDim,
+                  backgroundColor: isActive ? `${LC.accentCyan}12` : "transparent",
+                  border: `1px solid ${isActive ? LC.accentCyan : LC.borderSubtle}`,
+                  boxShadow: isActive ? `0 0 12px ${LC.accentCyan}20` : undefined,
+                }}
+              >
+                <Icon size={12} />
+                {m.label}
+              </button>
+            );
+          })}
+        </div>
+
         <div
           className="flex min-h-[56px] items-end gap-2 rounded-2xl border px-3 py-2.5 transition-all"
           style={{
             backgroundColor: LC.bgPanel,
             borderColor: focused ? LC.accentCyan : LC.borderSubtle,
-            boxShadow: focused ? `0 0 0 1px ${LC.accentCyan}40` : undefined,
+            boxShadow: focused ? `0 0 0 1px ${LC.accentCyan}40, 0 0 24px ${LC.accentCyan}25, 0 0 48px ${LC.linkColor}15` : undefined,
           }}
         >
           {/* Tools menu */}

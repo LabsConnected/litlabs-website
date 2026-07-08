@@ -17,7 +17,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const isStudio = !isPublic && pathname?.startsWith("/studio");
   const isAdmin = !isPublic && pathname?.startsWith("/admin");
   const isConsole = isStudio || isAdmin;
-  const hideMobileBottomNav = isPublic || isConsole;
+  const hideMobileBottomNav = isPublic || isAdmin;
 
   return (
     <>

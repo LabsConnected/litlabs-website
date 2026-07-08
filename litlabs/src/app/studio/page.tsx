@@ -15,7 +15,7 @@ import StudioIconRail from "./components/StudioIconRail";
 import StudioInspectorPanel from "./components/StudioInspectorPanel";
 import StudioInspector from "./components/StudioInspector";
 
-import { Sparkles, X, Coins, Settings, Bot, ArrowRight } from "lucide-react";
+import { Sparkles, X, Coins, Settings, Bot, ArrowRight, Menu, User, LayoutGrid, Store, Gamepad2, Users, Gauge, TerminalSquare } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 import ErrorBoundary from "@/components/ErrorBoundary";
 
@@ -173,6 +173,7 @@ function StudioCommandCenter() {
 
   // Mobile inspector sheet
   const [mobileInspector, setMobileInspector] = useState(false);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   const { balance, isLoading: walletLoading } = useWallet();
 
@@ -288,7 +289,7 @@ function StudioCommandCenter() {
 
   return (
     <div
-      className="flex h-full min-h-0 flex-col overflow-hidden"
+      className="flex h-full min-h-0 flex-col overflow-hidden pb-[68px] md:pb-0"
       style={{
         background: `radial-gradient(circle at top, ${T.accentColor}14, transparent 30%), linear-gradient(180deg, ${T.bgColor} 0%, ${T.boxBg} 100%)`,
         color: T.textColor,
@@ -312,6 +313,14 @@ function StudioCommandCenter() {
           backdropFilter: "blur(14px) saturate(180%)",
         }}
       >
+        <button
+          onClick={() => setMenuOpen(true)}
+          className="rounded-lg p-1.5 hover:bg-white/10"
+          style={{ color: T.textMuted }}
+          aria-label="Open menu"
+        >
+          <Menu size={18} />
+        </button>
         <div className="flex items-center gap-1.5">
           <div
             className="w-5 h-5 rounded-md flex items-center justify-center"
@@ -336,6 +345,68 @@ function StudioCommandCenter() {
           <Settings size={14} />
         </Link>
       </div>
+
+      {/* Mobile full navigation drawer */}
+      {menuOpen && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col">
+          <div
+            className="absolute inset-0 bg-black/70 backdrop-blur-sm"
+            onClick={() => setMenuOpen(false)}
+          />
+          <div
+            className="relative flex flex-col h-full w-[80%] max-w-[300px] shadow-2xl"
+            style={{
+              backgroundColor: T.bgColor,
+              borderRight: `1px solid ${T.borderColor}30`,
+            }}
+          >
+            <div
+              className="flex items-center justify-between px-4 h-11 border-b"
+              style={{ borderColor: T.borderColor + "30" }}
+            >
+              <span className="text-[11px] font-black uppercase tracking-[0.15em]" style={{ color: T.headerColor }}>
+                Menu
+              </span>
+              <button
+                onClick={() => setMenuOpen(false)}
+                className="rounded-lg p-1.5 hover:bg-white/10"
+                style={{ color: T.textMuted }}
+                aria-label="Close menu"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <nav className="flex-1 py-2 overflow-y-auto">
+              {[
+                { label: "Profile", href: "/profile", icon: User },
+                { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
+                { label: "Agents", href: "/agents", icon: Bot },
+                { label: "Console", href: "/studio?tool=terminal", icon: TerminalSquare },
+                { label: "Gallery", href: "/gallery", icon: LayoutGrid },
+                { label: "Marketplace", href: "/marketplace", icon: Store },
+                { label: "Games", href: "/games/cloud", icon: Gamepad2 },
+                { label: "Social", href: "/social", icon: Users },
+                { label: "Dashboard", href: "/dashboard", icon: Gauge },
+                { label: "Settings", href: "/settings", icon: Settings },
+              ].map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.label}
+                    href={item.href}
+                    onClick={() => setMenuOpen(false)}
+                    className="flex items-center gap-3 px-4 py-3 text-sm font-bold transition-colors hover:bg-white/5"
+                    style={{ color: T.textColor }}
+                  >
+                    <Icon size={18} style={{ color: T.accentColor }} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </nav>
+          </div>
+        </div>
+      )}
 
       <div className="flex-1 min-h-0 flex">
         <StudioIconRail
