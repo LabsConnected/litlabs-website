@@ -156,13 +156,7 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
 });
 
 const CANONICAL_TOOL: Partial<Record<StudioTool, StudioTool>> = {
-  image: "chat",
-  agents: "chat",
-  builder: "chat",
-  terminal: "chat",
-  clibridge: "chat",
-  pipeline: "chat",
-  canvas: "chat",
+  // Keep only genuine redirects; most tools now have their own views
 };
 
 function StudioCommandCenter() {
@@ -187,6 +181,10 @@ function StudioCommandCenter() {
 
   useEffect(() => {
     const toolParam = searchParams.get("tool") as StudioTool | null;
+    if (toolParam === "settings") {
+      router.replace("/settings");
+      return;
+    }
     if (toolParam) {
       const next = CANONICAL_TOOL[toolParam] ?? toolParam;
       setActiveTool((prev) => (prev === next ? prev : next));
@@ -197,6 +195,10 @@ function StudioCommandCenter() {
   }, [router, searchParams]);
 
   const handleToolChange = (t: StudioTool) => {
+    if (t === "settings") {
+      router.push("/settings");
+      return;
+    }
     const next = CANONICAL_TOOL[t] ?? t;
     setActiveTool(next);
     router.push(`/studio?tool=${next}`, { scroll: false });

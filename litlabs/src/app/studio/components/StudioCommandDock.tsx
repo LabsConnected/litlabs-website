@@ -154,6 +154,14 @@ export default function StudioCommandDock({
       { label: "Connect", prompt: "Connect to default CLI bridge", icon: TerminalSquare },
       { label: "Run", prompt: "Run ls -la on the bridge", icon: TerminalSquare },
     ],
+    missions: [
+      { label: "Daily", prompt: "Show my daily missions and streak", icon: Sparkles },
+      { label: "Earn LBC", prompt: "How can I earn more LiTBit Coins?", icon: Sparkles },
+    ],
+    settings: [
+      { label: "Voice", prompt: "Open voice settings", icon: Sparkles },
+      { label: "Profile", prompt: "Open my profile settings", icon: Sparkles },
+    ],
   };
 
   const activeSkills: Skill[] = SKILLS[activeTool] ?? SKILLS.chat;

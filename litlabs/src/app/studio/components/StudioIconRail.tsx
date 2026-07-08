@@ -12,12 +12,12 @@ import {
   Sparkles,
   ChevronLeft,
   ChevronRight,
-  Home,
   Zap,
-  Terminal,
-  Rocket,
   Puzzle,
   Settings,
+  Film,
+  Palette,
+  PenTool,
 } from "lucide-react";
 
 type ToolItem = {
@@ -29,24 +29,24 @@ type ToolItem = {
 };
 
 const TOOL_ITEMS: ToolItem[] = [
-  // Command
-  { id: "home", label: "LiT Home", icon: Home, shortcut: "H", group: "COMMAND" },
-  { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1", group: "COMMAND" },
-  { id: "missions", label: "Missions", icon: Zap, shortcut: "M", group: "COMMAND" },
+  // Agent
+  { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1", group: "AGENT" },
+  { id: "missions", label: "Missions", icon: Zap, shortcut: "M", group: "AGENT" },
 
   // Create
   { id: "image", label: "Image Studio", icon: Image, shortcut: "2", group: "CREATE" },
-  { id: "builder", label: "Website Builder", icon: Globe, shortcut: "3", group: "CREATE" },
-  { id: "terminal", label: "Code Lab", icon: Code, shortcut: "4", group: "CREATE" },
-  { id: "audio", label: "Audio Lab", icon: Music, shortcut: "5", group: "CREATE" },
+  { id: "video", label: "Video Studio", icon: Film, shortcut: "3", group: "CREATE" },
+  { id: "audio", label: "Audio Lab", icon: Music, shortcut: "4", group: "CREATE" },
+  { id: "color", label: "Color Studio", icon: Palette, shortcut: "5", group: "CREATE" },
 
   // Build
-  { id: "app-builder", label: "App Builder", icon: Puzzle, shortcut: "6", group: "BUILD" },
-  { id: "deploy", label: "Deployments", icon: Rocket, shortcut: "7", group: "BUILD" },
+  { id: "builder", label: "Website Builder", icon: Globe, shortcut: "6", group: "BUILD" },
+  { id: "terminal", label: "Code Lab", icon: Code, shortcut: "7", group: "BUILD" },
+  { id: "canvas", label: "Canvas", icon: PenTool, shortcut: "8", group: "BUILD" },
 
   // Library
-  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "8", group: "LIBRARY" },
-  { id: "projects", label: "Projects", icon: Terminal, shortcut: "9", group: "LIBRARY" },
+  { id: "gallery", label: "Gallery", icon: LayoutGrid, shortcut: "9", group: "LIBRARY" },
+  { id: "agents", label: "Agents", icon: Puzzle, shortcut: "A", group: "LIBRARY" },
 
   // System
   { id: "settings", label: "Settings", icon: Settings, shortcut: "0", group: "SYSTEM" },
@@ -63,7 +63,7 @@ export default function StudioIconRail({
   const [collapsed, setCollapsed] = useState(true);
 
   const groups = [
-    "COMMAND",
+    "AGENT",
     "CREATE",
     "BUILD",
     "LIBRARY",

@@ -27,7 +27,9 @@ export type StudioTool =
   | "clibridge"
   | "color"
   | "canvas"
-  | "builder";
+  | "builder"
+  | "missions"
+  | "settings";
 
 type ToolItem = {
   id: StudioTool;
