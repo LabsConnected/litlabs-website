@@ -87,7 +87,7 @@ export default function ApprovalQueue({
           Approval Queue
         </h2>
         <Link
-          href="/social-agent/new"
+          href="/dashboard/social-agent"
           className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-bold transition-opacity hover:opacity-90"
           style={{ backgroundColor: T.accentColor, color: T.bgColor }}
         >
