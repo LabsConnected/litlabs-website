@@ -1,26 +1,16 @@
 // API Route: User's installed agents (Dock)
-import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
-
-async function getUserId() {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) return null;
-  const { data: user } = await supabaseAdmin
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .single();
-  return user?.id ?? null;
-}
+import { getDbUserId } from "@/lib/api/auth";
+import { unauthorized } from "@/lib/api/response";
 
 // GET: List user's installed agents
 async function getHandler() {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getDbUserId();
     if (!dbUserId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
     const { data: userAgents, error } = await supabaseAdmin
@@ -56,9 +46,9 @@ async function getHandler() {
 // POST: Install an agent (add to dock)
 async function postHandler(req: NextRequest) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getDbUserId();
     if (!dbUserId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
     const body = await req.json();
@@ -144,9 +134,9 @@ async function postHandler(req: NextRequest) {
 // DELETE: Remove agent from dock
 async function deleteHandler(req: NextRequest) {
   try {
-    const dbUserId = await getUserId();
+    const dbUserId = await getDbUserId();
     if (!dbUserId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
     const { searchParams } = new URL(req.url);

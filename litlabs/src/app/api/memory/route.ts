@@ -1,13 +1,6 @@
-import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
-
-function getSupermemory() {
-  const key = process.env.SUPERMEMORY_API_KEY;
-  if (!key) {
-    throw new Error("SUPERMEMORY_API_KEY is not configured");
-  }
-  return new Supermemory({ apiKey: key });
-}
+import { getSupermemory } from "@/lib/api/supermemory";
+import { errorMessage } from "@/lib/api/response";
 
 export async function POST(req: NextRequest) {
   try {
@@ -25,7 +18,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to add memory";
+    const message = errorMessage(error, "Failed to add memory");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -45,7 +38,7 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json(results);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to search memories";
+    const message = errorMessage(error, "Failed to search memories");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -66,7 +59,7 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to forget memory";
+    const message = errorMessage(error, "Failed to forget memory");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
@@ -91,7 +84,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json(result);
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to update memory";
+    const message = errorMessage(error, "Failed to update memory");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }

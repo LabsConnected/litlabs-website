@@ -1,24 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { supabaseAdmin } from "@/lib/supabase";
-
-async function getUserId() {
-  const { userId: clerkId } = await auth();
-  if (!clerkId) return null;
-  const { data: user } = await supabaseAdmin
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .single();
-  return user?.id ?? null;
-}
+import { getDbUserId } from "@/lib/api/auth";
+import { unauthorized } from "@/lib/api/response";
 
 async function handler(_req: NextRequest) {
-  const dbUserId = await getUserId();
+  const dbUserId = await getDbUserId();
   if (!dbUserId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    return unauthorized();
   }
 
   if (!isAdminSupabaseConfigured()) {

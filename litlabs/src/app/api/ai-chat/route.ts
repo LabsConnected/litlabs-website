@@ -1,15 +1,10 @@
 ﻿import { NextRequest, NextResponse } from "next/server";
-import { Supermemory } from "supermemory";
 import { createOpenAI } from "@ai-sdk/openai";
 import { streamText } from "ai";
 import { auth } from "@clerk/nextjs/server";
 import { addBrainFact, buildIdentityBlock, extractStructuredFacts, getBrainFacts, getProjectContextForUser, getUserProfile } from "@/lib/brain";
-
-function getSupermemory() {
-  const key = process.env.SUPERMEMORY_API_KEY;
-  if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
-  return new Supermemory({ apiKey: key });
-}
+import { getSupermemory } from "@/lib/api/supermemory";
+import { errorMessage } from "@/lib/api/response";
 
 function getOpenRouter() {
   const key = process.env.OPENROUTER_API_KEY;
@@ -95,7 +90,7 @@ Be concise, helpful, and natural.`;
 
     return result.toTextStreamResponse();
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Chat failed";
+    const message = errorMessage(error, "Chat failed");
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
