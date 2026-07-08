@@ -17,6 +17,8 @@ import {
   Sparkles,
   Activity,
   Palette,
+  Image,
+  Wand2,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
@@ -208,6 +210,103 @@ function formatContent(text: string, theme: Theme) {
       </div>
     );
   });
+}
+
+function GenerateImageTool({ m, theme }: { m: Message; theme: Theme }) {
+  const status = m.meta?.status || "done";
+  const provider = m.meta?.images?.[0]?.provider || "AI";
+  const steps = [
+    { label: "Understanding prompt", icon: Sparkles, done: status !== "running" || true },
+    { label: `Calling ${provider}`, icon: Wand2, done: status !== "running" },
+    { label: "Rendering image", icon: Image, done: status !== "running" },
+  ];
+  return (
+    <div className="flex w-full gap-3">
+      <div
+        className="mt-1 shrink-0 rounded-full p-1.5"
+        style={{
+          backgroundColor: `${theme.accentCyan}15`,
+          color: theme.accentCyan,
+        }}
+      >
+        {status === "running" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+      </div>
+      <div
+        className="min-w-0 flex-1 rounded-2xl border p-3"
+        style={{
+          backgroundColor: theme.bgPanel,
+          borderColor: theme.border,
+          borderLeft: `3px solid ${theme.accentCyan}`,
+        }}
+      >
+        <div className="flex items-center gap-2 text-xs font-bold" style={{ color: theme.text }}>
+          <span style={{ color: theme.accentCyan }}>Generate Image</span>
+          {status === "done" && (
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: `${theme.success}20`, color: theme.success }}>
+              <Check size={10} className="inline mr-1" />Done
+            </span>
+          )}
+          {status === "error" && (
+            <span className="rounded-full px-2 py-0.5 text-[10px] font-bold" style={{ backgroundColor: `${theme.danger}20`, color: theme.danger }}>
+              Failed
+            </span>
+          )}
+        </div>
+
+        <div className="mt-3 space-y-2">
+          {steps.map((s, i) => {
+            const Icon = s.icon;
+            const done = status === "done" ? true : status === "error" ? i === 0 : i === 0;
+            const active = status === "running" && i === 1;
+            return (
+              <div key={s.label} className="flex items-center gap-2 text-[11px]" style={{ color: done ? theme.accentCyan : theme.textDim }}>
+                <div className="flex h-4 w-4 items-center justify-center rounded-full" style={{ backgroundColor: done ? `${theme.accentCyan}20` : theme.bgSecondary, border: `1px solid ${done ? theme.accentCyan : theme.border}` }}>
+                  {done ? <Check size={8} style={{ color: theme.accentCyan }} /> : <Icon size={8} />}
+                </div>
+                <span className={active ? "font-semibold" : ""}>{s.label}</span>
+                {active && <Loader2 size={10} className="ml-auto animate-spin" style={{ color: theme.accentCyan }} />}
+              </div>
+            );
+          })}
+        </div>
+
+        {m.meta?.images?.length ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-2">
+            {m.meta.images.map((image, index) => (
+              <a
+                key={`${image.url}-${index}`}
+                href={image.url}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="group overflow-hidden rounded-xl border"
+                style={{
+                  backgroundColor: theme.bgPanel,
+                  borderColor: theme.border,
+                  boxShadow: "0 14px 40px rgba(0,0,0,0.25)",
+                }}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={image.url}
+                  alt={image.prompt}
+                  className="aspect-square w-full object-cover transition-transform group-hover:scale-[1.02]"
+                />
+                <div
+                  className="flex items-center justify-between gap-2 px-3 py-2 text-[10px]"
+                  style={{ color: theme.textMuted }}
+                >
+                  <span className="truncate font-semibold" style={{ color: theme.text }}>
+                    {image.provider}
+                  </span>
+                  <span style={{ color: theme.accentCyan }}>Open image</span>
+                </div>
+              </a>
+            ))}
+          </div>
+        ) : null}
+      </div>
+    </div>
+  );
 }
 
 export default function ChatPanel({
@@ -578,7 +677,11 @@ export default function ChatPanel({
                   </div>
                 )}
 
-                {m.role === "tool" && (
+                {m.role === "tool" && m.meta?.tool === "generate_image" && (
+                  <GenerateImageTool m={m} theme={LC} />
+                )}
+
+                {m.role === "tool" && m.meta?.tool !== "generate_image" && (
                   <div className="flex w-full gap-3">
                     <div
                       className="mt-1 shrink-0 rounded-full p-1.5"
