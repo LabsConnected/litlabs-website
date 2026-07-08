@@ -8,9 +8,9 @@ import {
   getConnectorsByCategory,
   type Connector,
 } from "@/lib/connectors";
-import { Check, Plug } from "lucide-react";
+import { Check, Plug, X } from "lucide-react";
 
-export default function ConnectorsPanel() {
+export default function ConnectorsPanel({ onClose }: { onClose?: () => void }) {
   const LC = useLitConsoleTheme();
   const [connectors, setConnectors] = useState<Connector[]>(DEFAULT_CONNECTORS);
   const grouped = getConnectorsByCategory(connectors);
@@ -24,19 +24,29 @@ export default function ConnectorsPanel() {
   const enabledCount = connectors.filter((c) => c.enabled).length;
 
   return (
-    <div className="flex h-full flex-col gap-3 overflow-y-auto p-3" style={{ color: LC.text }}>
-      <div className="rounded-xl border p-3" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
-        <div className="flex items-center gap-2 mb-1">
+    <div className="flex h-full flex-col gap-4 overflow-y-auto p-4" style={{ color: LC.text }}>
+      <div className="rounded-xl border p-4" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
+        <div className="flex items-center gap-2 mb-2">
           <Plug size={16} style={{ color: LC.accentCyan }} />
           <span className="text-xs font-black" style={{ color: LC.text }}>Connectors</span>
           <span
-            className="ml-auto rounded-full px-2 py-0.5 text-[10px] font-bold"
+            className="ml-auto rounded-full px-2.5 py-1 text-[10px] font-bold"
             style={{ backgroundColor: LC.accentCyan + "20", color: LC.accentCyan }}
           >
             {enabledCount} active
           </span>
+          {onClose && (
+            <button
+              onClick={onClose}
+              className="rounded-md p-1.5 transition-colors hover:bg-white/10"
+              style={{ color: LC.textMuted }}
+              title="Close"
+            >
+              <X size={16} />
+            </button>
+          )}
         </div>
-        <p className="text-[10px] leading-relaxed" style={{ color: LC.textMuted }}>
+        <p className="text-[11px] leading-relaxed" style={{ color: LC.textMuted }}>
           Enable services so LiTTree can read, write, and deploy on your behalf.
         </p>
       </div>
@@ -46,12 +56,12 @@ export default function ConnectorsPanel() {
           <div className="mb-2 text-[10px] font-black uppercase tracking-widest" style={{ color: LC.textMuted }}>
             {CONNECTOR_CATEGORIES[category]}
           </div>
-          <div className="space-y-1.5">
+          <div className="space-y-2">
             {grouped[category].map((c) => (
               <button
                 key={c.id}
                 onClick={() => toggle(c.id)}
-                className="flex w-full items-start gap-2 rounded-lg border p-2.5 text-left transition-all hover:scale-[1.01]"
+                className="flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all hover:scale-[1.01]"
                 style={{
                   backgroundColor: c.enabled ? `${c.color}10` : LC.bgPanel,
                   borderColor: c.enabled ? `${c.color}40` : LC.border,

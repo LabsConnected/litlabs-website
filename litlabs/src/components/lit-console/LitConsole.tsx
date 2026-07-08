@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot, Sparkles, Check, X } from "lucide-react";
+import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
-import { useRouter } from "next/navigation";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock from "./CommandDock";
 import DrawerPanel from "./DrawerPanel";
@@ -39,7 +38,6 @@ type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "conne
 
 export default function LitConsole() {
   const { user } = useUser();
-  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -192,7 +190,7 @@ export default function LitConsole() {
     } finally {
       setLoading(false);
     }
-  }, [router, user]);
+  }, [user]);
 
   const handleSend = useCallback(
     (text?: string) => {
@@ -297,7 +295,7 @@ export default function LitConsole() {
 
       askLiT(t);
     },
-    [input, loading, askLiT, router],
+    [input, loading, askLiT],
   );
 
   const handleSendRef = useRef(handleSend);
@@ -485,7 +483,7 @@ export default function LitConsole() {
     if (drawerTab === "files") return <FilesPanel onPrompt={handleSend} />;
     if (drawerTab === "preview") return <PreviewPanel />;
     if (drawerTab === "agents") return <AgentsPanel activeAgent={activeAgent} onSelect={handleAgentChange} onPrompt={handleSend} />;
-    if (drawerTab === "connectors") return <ConnectorsPanel />;
+    if (drawerTab === "connectors") return <ConnectorsPanel onClose={() => setDrawerOpen(false)} />;
     return <MemoryPanel />;
   })();
 
@@ -495,7 +493,7 @@ export default function LitConsole() {
       <div className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
         {/* Desktop: chat + side panel */}
         <div className="hidden md:flex flex-1 min-h-0 flex-row overflow-hidden">
-          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden lg:p-5">
             <ChatPanel
               messages={messages}
               onSend={(text) => {
@@ -528,7 +526,7 @@ export default function LitConsole() {
             />
           </div>
           <div
-            className="hidden lg:block w-[300px] shrink-0 border-l overflow-hidden"
+            className="hidden lg:block w-[340px] shrink-0 border-l overflow-hidden"
             style={{ borderColor: LC.border }}
           >
             <ActivityPanel
@@ -614,8 +612,12 @@ export default function LitConsole() {
         onAttach={() => handleSend("Attach a file...")}
         onTools={() => setDrawerOpen((v) => !v)}
         onConnectors={() => {
-          setDrawerTab("connectors");
-          setDrawerOpen(true);
+          if (drawerOpen && drawerTab === "connectors") {
+            setDrawerOpen(false);
+          } else {
+            setDrawerTab("connectors");
+            setDrawerOpen(true);
+          }
         }}
         onToggleTerminal={() => {
           setDrawerTab("terminal");
