@@ -2,7 +2,7 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, memo, useEffect, useMemo, useState } from "react";
+import { Suspense, memo, useEffect, useState } from "react";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
@@ -14,22 +14,8 @@ import StudioTopRuntimeBar from "./components/StudioTopRuntimeBar";
 import StudioIconRail from "./components/StudioIconRail";
 import StudioInspectorPanel from "./components/StudioInspectorPanel";
 import StudioInspector from "./components/StudioInspector";
-import StudioCommandDock, {
-  type DockAction,
-} from "./components/StudioCommandDock";
-import type { StudioMode } from "./components/StudioModeSwitcher";
-import {
-  ArrowRight,
-  Bot,
-  Image as ImageIcon,
-  Film,
-  Music,
-  Sparkles,
-  X,
-  Zap,
-  Coins,
-  Settings,
-} from "lucide-react";
+
+import { Sparkles, X, Coins, Settings, Bot, ArrowRight } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
 
 const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
@@ -117,83 +103,6 @@ const CANONICAL_TOOL: Partial<Record<StudioTool, StudioTool>> = {
   canvas: "chat",
 };
 
-const FOCUSED_TOOLS: StudioTool[] = ["chat"];
-
-const MODE_HEADLINE: Record<StudioMode, { title: string; subtitle: string }> = {
-  command: {
-    title: "Start Creating",
-    subtitle:
-      "Chat, code, generate, and ship — every tool is one click away.",
-  },
-  media: {
-    title: "Media Studio",
-    subtitle: "Image, video, audio, color, and exports for creators.",
-  },
-  research: {
-    title: "Research Desk",
-    subtitle: "Sources, citations, notes, and answers you can trust.",
-  },
-  agent: {
-    title: "Agent Ops",
-    subtitle: "Agents, queues, runs, cost, health, and logs.",
-  },
-  minimal: {
-    title: "Minimal Pro",
-    subtitle: "Less chrome, more work. Ship fast.",
-  },
-};
-
-const MODE_QUICKSTART: Record<StudioMode, DockAction[]> = {
-  command: [
-    {
-      id: "qs-chat",
-      label: "Open AI chat",
-      icon: Sparkles,
-      tool: "chat",
-    },
-    {
-      id: "qs-gen",
-      label: "Generate an image",
-      icon: Sparkles,
-      tool: "image",
-      prompt: "Generate an image of ",
-    },
-    {
-      id: "qs-build",
-      label: "Build an app",
-      icon: Sparkles,
-      tool: "builder",
-      prompt: "Build a ",
-    },
-    {
-      id: "qs-scan",
-      label: "Scan code for issues",
-      icon: Sparkles,
-      tool: "terminal",
-    },
-  ],
-  media: [
-    { id: "qs-img", label: "New image", icon: Sparkles, tool: "image" },
-    { id: "qs-vid", label: "New video", icon: Sparkles, tool: "video" },
-    { id: "qs-aud", label: "New audio", icon: Sparkles, tool: "audio" },
-    { id: "qs-color", label: "Color by number", icon: Sparkles, tool: "color" },
-  ],
-  research: [
-    { id: "qs-gal", label: "Browse gallery", icon: Sparkles, tool: "gallery" },
-    { id: "qs-space", label: "Generate skybox", icon: Sparkles, tool: "space" },
-    { id: "qs-chat", label: "Ask a question", icon: Sparkles, tool: "agents" },
-  ],
-  agent: [
-    { id: "qs-agents", label: "List agents", icon: Sparkles, tool: "agents" },
-    { id: "qs-term", label: "Open terminal", icon: Sparkles, tool: "terminal" },
-    { id: "qs-pipe", label: "Open pipeline", icon: Sparkles, tool: "pipeline" },
-  ],
-  minimal: [
-    { id: "qs-min-img", label: "Quick image", icon: Sparkles, tool: "image" },
-    { id: "qs-min-chat", label: "Quick chat", icon: Sparkles, tool: "agents" },
-  ],
-};
-
 function StudioCommandCenter() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -203,13 +112,8 @@ function StudioCommandCenter() {
   useEffect(() => setMounted(true), []);
 
   // Top-level state
-  const mode: StudioMode = "command";
   const [activeTool, setActiveTool] = useState<StudioTool>("chat");
   const [selectedModel, setSelectedModel] = useState("adaptive");
-  const [prompt, setPrompt] = useState("");
-  const [recentActions, setRecentActions] = useState<
-    { tool: StudioTool; label: string }[]
-  >([]);
 
   // Mobile inspector sheet
   const [mobileInspector, setMobileInspector] = useState(false);
@@ -235,42 +139,6 @@ function StudioCommandCenter() {
     setActiveTool(next);
     router.push(`/studio?tool=${next}`, { scroll: false });
   };
-
-  const routePromptToTool = (text: string): StudioTool => {
-    const t = text.toLowerCase();
-    if (/\b(build|website|web app|app|component|dashboard|landing page|fix code|code|react|nextjs|tailwind)\b/.test(t)) return "chat";
-    if (/\b(video|film|clip|movie|reel|animate)\b/.test(t)) return "video";
-    if (/\b(audio|music|song|sound|beat|track|voice)\b/.test(t)) return "audio";
-    if (/\b(color|colour|colou?ring|palette|sketch)\b/.test(t)) return "color";
-    if (/\b(terminal|run|bash|shell|command|exec|npm|git|cli)\b/.test(t)) return "chat";
-    if (/\b(pipeline|flow|automat|workflow|chain)\b/.test(t)) return "chat";
-    if (/\b(gallery|saved|history|past|my images)\b/.test(t)) return "gallery";
-    if (/\b(agent|agents|forge|worker|assistant team)\b/.test(t)) return "chat";
-    if (/\b(chat|ask|talk|help|assist|question)\b/.test(t)) return "chat";
-    if (/\b(space|sky|skybox|3d|environment)\b/.test(t)) return "space";
-    if (/\b(image|photo|picture|generate|create|make|draw|render|art)\b/.test(t)) return "image";
-    return activeTool;
-  };
-
-  const handlePromptSubmit = () => {
-    const text = prompt.trim();
-    if (!text) return;
-    const routed = routePromptToTool(text);
-    if (routed !== activeTool) handleToolChange(routed);
-    setRecentActions((prev) =>
-      [{ tool: routed, label: text.slice(0, 24) }, ...prev].slice(0, 5),
-    );
-    setPrompt("");
-  };
-
-  const handleAction = (a: DockAction) => {
-    if (a.tool) handleToolChange(a.tool);
-    if (a.prompt) setPrompt(a.prompt);
-  };
-
-  const headline = useMemo(() => MODE_HEADLINE[mode], [mode]);
-  const quickstart = useMemo(() => MODE_QUICKSTART[mode], [mode]);
-  const focusedTool = FOCUSED_TOOLS.includes(activeTool);
 
   if (!mounted || !isLoaded) {
     return (
