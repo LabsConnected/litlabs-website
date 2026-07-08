@@ -161,6 +161,7 @@ export default function CommandDock(props: CommandDockProps) {
     onVoice,
     onVoiceStop,
     voiceState,
+    onHolo,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
