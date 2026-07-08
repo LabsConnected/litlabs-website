@@ -161,7 +161,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="mb-6 md:hidden">
+        <div className="mb-6 hidden">
           <div className="mb-3 text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: T.accentColor }}>
             Navigation
           </div>

@@ -279,7 +279,7 @@ export default function ProfilePage() {
   return (
     <PageShell title="Profile" className="text-xs relative">
       {/* Cover Image */}
-      <div className="relative overflow-hidden group" style={{ height: 200 }}>
+      <div className="relative h-32 overflow-hidden group md:h-[200px]">
         {coverPreview || profile.coverUrl ? (
           <Image src={coverPreview || profile.coverUrl!} alt="Cover" fill className="object-cover" unoptimized sizes="100vw" />
         ) : (
@@ -311,44 +311,44 @@ export default function ProfilePage() {
       </div>
 
       {/* Stats Bar */}
-      <div className="w-full px-4 py-3 flex flex-wrap items-center gap-3" style={{ background: "#0d0d14", borderBottom: "1px solid #1e1e2e" }}>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
+      <div className="scrollbar-none flex w-full items-center gap-2 overflow-x-auto px-3 py-3 md:flex-wrap md:gap-3 md:px-4" style={{ background: "#0d0d14", borderBottom: "1px solid #1e1e2e" }}>
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
           <Coins size={16} style={{ color: "#fbbf24" }} />
           <div>
             <div className="text-sm font-black" style={{ color: "#fbbf24" }}>{balance.toLocaleString()}</div>
-            <div className="text-[8px] uppercase tracking-wider" style={{ color: "#6b7280" }}>LBC Balance</div>
+            <div className="text-[9px] uppercase tracking-wider" style={{ color: "#6b7280" }}>LBC Balance</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
           <Crown size={16} style={{ color: planColor }} />
           <div>
             <div className="text-sm font-black" style={{ color: planColor }}>{planLabel}</div>
-            <div className="text-[8px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Plan</div>
+            <div className="text-[9px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Plan</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
           <Bot size={16} style={{ color: "#22d3ee" }} />
           <div>
             <div className="text-sm font-black" style={{ color: "#22d3ee" }}>{installedAgents.length}</div>
-            <div className="text-[8px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Agents</div>
+            <div className="text-[9px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Agents</div>
           </div>
         </div>
-        <div className="flex items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
+        <div className="flex shrink-0 items-center gap-2 px-3 py-2 rounded-xl" style={{ background: "#101018", border: "1px solid #1e1e2e" }}>
           <Activity size={16} style={{ color: "#4ade80" }} />
           <div>
             <div className="text-sm font-black" style={{ color: "#4ade80" }}>{profile.mood}</div>
-            <div className="text-[8px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Mood</div>
+            <div className="text-[9px] uppercase tracking-wider" style={{ color: "#6b7280" }}>Mood</div>
           </div>
         </div>
-        <Link href="/wallet" className="ml-auto px-3 py-2 rounded-xl text-[10px] font-black transition-all hover:scale-[1.02] flex items-center gap-1"
+        <Link href="/wallet" className="flex shrink-0 items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-black transition-all hover:scale-[1.02] md:ml-auto"
           style={{ background: "linear-gradient(135deg,#fbbf2415,#fbbf2405)", border: "1px solid #fbbf2430", color: "#fbbf24" }}>
           <Zap size={12} /> Claim Daily Bonus
         </Link>
-        <Link href="/marketplace" className="px-3 py-2 rounded-xl text-[10px] font-black transition-all hover:scale-[1.02] flex items-center gap-1"
+        <Link href="/marketplace" className="flex shrink-0 items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-black transition-all hover:scale-[1.02]"
           style={{ background: "linear-gradient(135deg,#6366f115,#6366f105)", border: "1px solid #6366f130", color: "#a78bfa" }}>
           <Crown size={12} /> Upgrade Plan
         </Link>
-        <Link href="/settings" className="px-3 py-2 rounded-xl text-[10px] font-black transition-all hover:scale-[1.02] flex items-center gap-1"
+        <Link href="/settings" className="flex shrink-0 items-center gap-1 rounded-xl px-3 py-2 text-[10px] font-black transition-all hover:scale-[1.02]"
           style={{ background: "#1e1e2e", border: "1px solid #2a2a3e", color: "#9ca3af" }}>
           <Settings size={12} /> Settings
         </Link>
