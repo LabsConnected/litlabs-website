@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import {
@@ -58,10 +58,10 @@ const OS_MODULES = [
 
 // ─── Agents ───────────────────────────────────────────────────────────────────
 const AGENTS = [
-  { emoji: "🤖", name: "Director",       role: "Orchestrator",  desc: "Routes tasks across your entire agent workforce.",          color: CYAN,    href: "/agents/director" },
-  { emoji: "⚡", name: "Forge",          role: "Engineer",      desc: "Writes, debugs, and ships full-stack code.",                color: GREEN,   href: "/agents/code-champion" },
+  { emoji: "🤖", name: "LiTTree",        role: "Orchestrator",  desc: "Routes tasks across your entire agent workforce.",          color: CYAN,    href: "/agents/director" },
+  { emoji: "⚡", name: "Forge",          role: "Engineer",      desc: "Writes, debugs, and ships full-stack code.",                color: GREEN,   href: "/agents/forge" },
   { emoji: "🎨", name: "Visionary",      role: "Creative",      desc: "Generates images, UI direction, and brand visuals.",        color: "#e879f9", href: "/agents/pixel-forge" },
-  { emoji: "📱", name: "SocialPilot",    role: "Growth",        desc: "Plans content and grows your audience across platforms.",   color: "#fb923c", href: "/agents/social-dominator" },
+  { emoji: "📱", name: "SocialPilot",    role: "Growth",        desc: "Plans content and grows your audience across platforms.",   color: "#fb923c", href: "/agents/social-pilot" },
   { emoji: "📊", name: "Data Slayer",    role: "Analytics",     desc: "Turns raw numbers into actionable insights.",               color: "#fbbf24", href: "/agents/data-slayer" },
   { emoji: "🎵", name: "Music Producer", role: "Audio",         desc: "Composition, mixing, and sound design on demand.",         color: "#a78bfa", href: "/agents/music-producer" },
 ];
@@ -134,9 +134,61 @@ const TIERS = [
   },
 ];
 
+function useInView<T extends HTMLElement>(threshold = 0.15) {
+  const ref = useRef<T>(null);
+  const [inView, setInView] = useState(false);
+
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry.isIntersecting) {
+          setInView(true);
+          observer.disconnect();
+        }
+      },
+      { threshold },
+    );
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [threshold]);
+
+  return { ref, inView };
+}
+
 function LandingPage() {
+  const heroRef = useInView<HTMLDivElement>();
+  const modulesRef = useInView<HTMLDivElement>();
+  const agentsRef = useInView<HTMLDivElement>();
+  const pricingRef = useInView<HTMLDivElement>();
+  const stepsRef = useInView<HTMLDivElement>();
+  const ctaRef = useInView<HTMLDivElement>();
+
   return (
     <div className="min-h-screen" style={{ backgroundColor: BG, color: TEXT }}>
+      <style>{`
+        @keyframes float {
+          0%, 100% { transform: translateY(0) translateX(0); }
+          33% { transform: translateY(-20px) translateX(10px); }
+          66% { transform: translateY(10px) translateX(-10px); }
+        }
+        @keyframes pulse-glow {
+          0%, 100% { opacity: 0.15; }
+          50% { opacity: 0.25; }
+        }
+        @keyframes gradient-shift {
+          0% { background-position: 0% 50%; }
+          50% { background-position: 100% 50%; }
+          100% { background-position: 0% 50%; }
+        }
+        .animate-float { animation: float 8s ease-in-out infinite; }
+        .animate-float-delayed { animation: float 10s ease-in-out infinite reverse; }
+        .animate-pulse-glow { animation: pulse-glow 4s ease-in-out infinite; }
+        .animate-gradient { background-size: 200% 200%; animation: gradient-shift 6s ease infinite; }
+        .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
+        .reveal.in-view { opacity: 1; transform: translateY(0); }
+      `}</style>
 
       {/* ── HEADER ── */}
       <header
@@ -165,15 +217,20 @@ function LandingPage() {
       </header>
 
       {/* ── HERO ── */}
-      <section className="relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden">
+      <section
+        ref={heroRef.ref}
+        className={`relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden reveal ${heroRef.inView ? "in-view" : ""}`}
+      >
         {/* Background glows */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full opacity-15"
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full animate-pulse-glow"
             style={{ background: `radial-gradient(ellipse, ${INDIGO}60 0%, transparent 70%)`, filter: "blur(60px)" }} />
-          <div className="absolute top-20 left-1/4 w-64 h-64 rounded-full opacity-10"
-            style={{ background: `radial-gradient(circle, ${CYAN}50 0%, transparent 70%)`, filter: "blur(50px)" }} />
-          <div className="absolute top-10 right-1/4 w-64 h-64 rounded-full opacity-10"
-            style={{ background: `radial-gradient(circle, ${GREEN}50 0%, transparent 70%)`, filter: "blur(50px)" }} />
+          <div className="absolute top-20 left-1/4 w-64 h-64 rounded-full animate-float opacity-15"
+            style={{ background: `radial-gradient(circle, ${CYAN}60 0%, transparent 70%)`, filter: "blur(50px)" }} />
+          <div className="absolute top-10 right-1/4 w-64 h-64 rounded-full animate-float-delayed opacity-15"
+            style={{ background: `radial-gradient(circle, ${GREEN}60 0%, transparent 70%)`, filter: "blur(50px)" }} />
+          <div className="absolute bottom-0 left-1/3 w-96 h-96 rounded-full animate-float opacity-10"
+            style={{ background: `radial-gradient(circle, ${INDIGO}50 0%, transparent 70%)`, filter: "blur(60px)" }} />
           {/* Top border glow line */}
           <div className="absolute inset-x-0 top-0 h-px"
             style={{ background: `linear-gradient(90deg, transparent, ${INDIGO}80, ${CYAN}60, transparent)` }} />
@@ -187,8 +244,8 @@ function LandingPage() {
 
           <h1 className="text-5xl md:text-8xl font-black tracking-tight mb-6 leading-[0.95]" style={{ color: TEXT }}>
             Build with AI.<br />
-            <span className="bg-clip-text text-transparent"
-              style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${INDIGO}, ${GREEN})` }}>
+            <span className="bg-clip-text text-transparent animate-gradient"
+              style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${INDIGO}, ${GREEN}, ${CYAN})` }}>
               Ship everything.
             </span>
           </h1>
@@ -224,21 +281,31 @@ function LandingPage() {
       </section>
 
       {/* ── OS MODULES GRID ── */}
-      <section className="px-4 py-16 border-t" style={{ borderColor: `${BORDER}50` }} id="features">
+      <section
+        ref={modulesRef.ref}
+        className={`px-4 py-16 border-t reveal ${modulesRef.inView ? "in-view" : ""}`}
+        style={{ borderColor: `${BORDER}50` }}
+        id="features"
+      >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-10">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>One OS. Every Tool.</h2>
             <p className="text-sm" style={{ color: MUTED }}>Everything opens from LiT — nothing lives on a separate site.</p>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 lg:grid-cols-6 gap-3">
-            {OS_MODULES.map((m) => {
+            {OS_MODULES.map((m, i) => {
               const Icon = m.icon;
               return (
                 <Link key={m.label} href={m.href}
-                  className="group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all hover:scale-[1.03] hover:border-opacity-60 text-center"
-                  style={{ backgroundColor: PANEL, borderColor: BORDER }}>
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all group-hover:scale-110"
-                    style={{ backgroundColor: `${m.color}15`, color: m.color }}>
+                  className="group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all duration-300 hover:scale-[1.05] hover:-translate-y-1 text-center"
+                  style={{
+                    backgroundColor: PANEL,
+                    borderColor: BORDER,
+                    transitionDelay: `${i * 30}ms`,
+                  }}
+                >
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg"
+                    style={{ backgroundColor: `${m.color}15`, color: m.color, boxShadow: `0 0 0 ${m.color}00`, }}>
                     <Icon size={18} />
                   </div>
                   <div className="text-xs font-black" style={{ color: TEXT }}>{m.label}</div>
@@ -251,18 +318,28 @@ function LandingPage() {
       </section>
 
       {/* ── AGENTS ── */}
-      <section className="px-4 py-20 border-t" style={{ borderColor: `${BORDER}50` }} id="agents">
+      <section
+        ref={agentsRef.ref}
+        className={`px-4 py-20 border-t reveal ${agentsRef.inView ? "in-view" : ""}`}
+        style={{ borderColor: `${BORDER}50` }}
+        id="agents"
+      >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Your AI Workforce</h2>
             <p className="text-sm" style={{ color: MUTED }}>5 core agents — each with a real job and a distinct personality.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
-            {AGENTS.map((a) => (
+            {AGENTS.map((a, i) => (
               <Link key={a.name} href={a.href}
-                className="group flex items-start gap-4 p-5 rounded-2xl border transition-all hover:scale-[1.02] hover:border-opacity-50"
-                style={{ backgroundColor: PANEL, borderColor: BORDER }}>
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-all group-hover:scale-110"
+                className="group flex items-start gap-4 p-5 rounded-2xl border transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 hover:shadow-xl"
+                style={{
+                  backgroundColor: PANEL,
+                  borderColor: BORDER,
+                  boxShadow: `0 0 0 ${a.color}00`,
+                  transitionDelay: `${i * 50}ms`,
+                }}>
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-all duration-300 group-hover:scale-110"
                   style={{ backgroundColor: `${a.color}15`, border: `1px solid ${a.color}30` }}>
                   {a.emoji}
                 </div>
@@ -271,7 +348,7 @@ function LandingPage() {
                     <span className="font-black text-sm" style={{ color: TEXT }}>{a.name}</span>
                     <span className="text-[9px] font-black uppercase tracking-widest px-1.5 py-0.5 rounded-full"
                       style={{ backgroundColor: `${a.color}18`, color: a.color }}>{a.role}</span>
-                    <span className="ml-auto w-2 h-2 rounded-full shrink-0"
+                    <span className="ml-auto w-2 h-2 rounded-full shrink-0 animate-pulse"
                       style={{ backgroundColor: a.color, boxShadow: `0 0 6px ${a.color}` }} />
                   </div>
                   <p className="text-xs leading-relaxed" style={{ color: MUTED }}>{a.desc}</p>
@@ -288,7 +365,12 @@ function LandingPage() {
       </section>
 
       {/* ── PRICING ── */}
-      <section className="px-4 py-20 border-t" style={{ borderColor: `${BORDER}50` }} id="pricing">
+      <section
+        ref={pricingRef.ref}
+        className={`px-4 py-20 border-t reveal ${pricingRef.inView ? "in-view" : ""}`}
+        style={{ borderColor: `${BORDER}50` }}
+        id="pricing"
+      >
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>
@@ -363,7 +445,11 @@ function LandingPage() {
       </section>
 
       {/* ── HOW IT WORKS ── */}
-      <section className="px-4 py-20 border-t" style={{ borderColor: `${BORDER}50` }}>
+      <section
+        ref={stepsRef.ref}
+        className={`px-4 py-20 border-t reveal ${stepsRef.inView ? "in-view" : ""}`}
+        style={{ borderColor: `${BORDER}50` }}
+      >
         <div className="max-w-4xl mx-auto text-center">
           <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Up in Minutes</h2>
           <p className="text-sm mb-12" style={{ color: MUTED }}>Three steps from zero to shipping.</p>
@@ -372,11 +458,11 @@ function LandingPage() {
               { n: "01", t: "Boot Into LiT OS", d: "Sign up free, meet LiTT your AI assistant, and boot into your personal operating system.", icon: Rocket },
               { n: "02", t: "Pick Your Agents", d: "Choose from 10 specialists or let Director route your work automatically across the crew.", icon: Bot },
               { n: "03", t: "Ship the Result", d: "Post it, sell it in the Marketplace, deploy it, or wire it into an automated workflow.", icon: Globe },
-            ].map((s) => {
+            ].map((s, i) => {
               const Icon = s.icon;
               return (
-                <div key={s.n} className="flex flex-col items-center gap-4">
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center"
+                <div key={s.n} className="flex flex-col items-center gap-4" style={{ transitionDelay: `${i * 80}ms` }}>
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 hover:scale-110"
                     style={{ background: `linear-gradient(135deg, ${INDIGO}30, ${CYAN}20)`, border: `1px solid ${INDIGO}40` }}>
                     <Icon size={22} style={{ color: CYAN }} />
                   </div>
@@ -391,7 +477,11 @@ function LandingPage() {
       </section>
 
       {/* ── FINAL CTA ── */}
-      <section className="px-4 py-24 border-t" style={{ borderColor: `${BORDER}50` }}>
+      <section
+        ref={ctaRef.ref}
+        className={`px-4 py-24 border-t reveal ${ctaRef.inView ? "in-view" : ""}`}
+        style={{ borderColor: `${BORDER}50` }}
+      >
         <div className="max-w-3xl mx-auto text-center relative">
           <div className="absolute inset-0 pointer-events-none"
             style={{ background: `radial-gradient(ellipse at center, ${INDIGO}18 0%, transparent 70%)` }} />
@@ -399,8 +489,8 @@ function LandingPage() {
             <div className="text-5xl mb-6">🤖</div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 leading-tight" style={{ color: TEXT }}>
               LiTT is waiting.<br />
-              <span className="bg-clip-text text-transparent"
-                style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${GREEN})` }}>
+              <span className="bg-clip-text text-transparent animate-gradient"
+                style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${GREEN}, ${CYAN})` }}>
                 What are we building?
               </span>
             </h2>
