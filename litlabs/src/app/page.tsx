@@ -158,12 +158,12 @@ function useInView<T extends HTMLElement>(threshold = 0.15) {
 }
 
 function LandingPage() {
-  const heroRef = useInView<HTMLDivElement>();
-  const modulesRef = useInView<HTMLDivElement>();
-  const agentsRef = useInView<HTMLDivElement>();
-  const pricingRef = useInView<HTMLDivElement>();
-  const stepsRef = useInView<HTMLDivElement>();
-  const ctaRef = useInView<HTMLDivElement>();
+  const { ref: heroRef, inView: heroInView } = useInView<HTMLDivElement>();
+  const { ref: modulesRef, inView: modulesInView } = useInView<HTMLDivElement>();
+  const { ref: agentsRef, inView: agentsInView } = useInView<HTMLDivElement>();
+  const { ref: pricingRef, inView: pricingInView } = useInView<HTMLDivElement>();
+  const { ref: stepsRef, inView: stepsInView } = useInView<HTMLDivElement>();
+  const { ref: ctaRef, inView: ctaInView } = useInView<HTMLDivElement>();
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: BG, color: TEXT }}>
@@ -218,8 +218,8 @@ function LandingPage() {
 
       {/* ── HERO ── */}
       <section
-        ref={heroRef.ref}
-        className={`relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden reveal ${heroRef.inView ? "in-view" : ""}`}
+        ref={heroRef}
+        className={`relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden reveal ${heroInView ? "in-view" : ""}`}
       >
         {/* Background glows */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
@@ -282,8 +282,8 @@ function LandingPage() {
 
       {/* ── OS MODULES GRID ── */}
       <section
-        ref={modulesRef.ref}
-        className={`px-4 py-16 border-t reveal ${modulesRef.inView ? "in-view" : ""}`}
+        ref={modulesRef}
+        className={`px-4 py-16 border-t reveal ${modulesInView ? "in-view" : ""}`}
         style={{ borderColor: `${BORDER}50` }}
         id="features"
       >
@@ -319,8 +319,8 @@ function LandingPage() {
 
       {/* ── AGENTS ── */}
       <section
-        ref={agentsRef.ref}
-        className={`px-4 py-20 border-t reveal ${agentsRef.inView ? "in-view" : ""}`}
+        ref={agentsRef}
+        className={`px-4 py-20 border-t reveal ${agentsInView ? "in-view" : ""}`}
         style={{ borderColor: `${BORDER}50` }}
         id="agents"
       >
@@ -366,8 +366,8 @@ function LandingPage() {
 
       {/* ── PRICING ── */}
       <section
-        ref={pricingRef.ref}
-        className={`px-4 py-20 border-t reveal ${pricingRef.inView ? "in-view" : ""}`}
+        ref={pricingRef}
+        className={`px-4 py-20 border-t reveal ${pricingInView ? "in-view" : ""}`}
         style={{ borderColor: `${BORDER}50` }}
         id="pricing"
       >
@@ -446,8 +446,8 @@ function LandingPage() {
 
       {/* ── HOW IT WORKS ── */}
       <section
-        ref={stepsRef.ref}
-        className={`px-4 py-20 border-t reveal ${stepsRef.inView ? "in-view" : ""}`}
+        ref={stepsRef}
+        className={`px-4 py-20 border-t reveal ${stepsInView ? "in-view" : ""}`}
         style={{ borderColor: `${BORDER}50` }}
       >
         <div className="max-w-4xl mx-auto text-center">
@@ -478,8 +478,8 @@ function LandingPage() {
 
       {/* ── FINAL CTA ── */}
       <section
-        ref={ctaRef.ref}
-        className={`px-4 py-24 border-t reveal ${ctaRef.inView ? "in-view" : ""}`}
+        ref={ctaRef}
+        className={`px-4 py-24 border-t reveal ${ctaInView ? "in-view" : ""}`}
         style={{ borderColor: `${BORDER}50` }}
       >
         <div className="max-w-3xl mx-auto text-center relative">
