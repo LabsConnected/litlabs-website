@@ -136,7 +136,6 @@ services:
 - `docker/Dockerfile.terminal` — sandbox image
 - `terminal-server/Dockerfile` — production terminal server image
 - `terminal-server/railway.json` — Railway deployment config
-- `terminal-server/fly.toml` — Fly.io deployment config
 - `render.yaml` — Render deployment config
 - `docker-compose.yml` — local frontend + terminal server
 - `SETUP.md` — this file
@@ -145,7 +144,7 @@ services:
 
 1. Run `pnpm dev:all` locally and test the terminal.
 2. Apply the Supabase migrations in `supabase/migrations/`.
-3. Deploy the terminal server using Railway, Render, Fly.io, or Docker.
+3. Deploy the terminal server using Railway, Render, or Docker.
 4. Set `NEXT_PUBLIC_TERMINAL_WS_URL` in Vercel to the deployed terminal server URL.
 5. Set `VERCEL_TOKEN` and `VERCEL_PROJECT_ID` for the Deploy button.
 6. Build the sandbox image (`pnpm terminal:build-image`) and enable `TERMINAL_USE_DOCKER=true` in production.

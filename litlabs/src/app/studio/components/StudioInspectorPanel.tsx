@@ -5,13 +5,11 @@ import { useTheme } from "@/context/ThemeContext";
 import {
   ChevronLeft,
   ChevronRight,
-  FileText,
   FolderTree,
   Activity,
   Layers,
   Cpu,
   Settings,
-  X,
 } from "lucide-react";
 
 type InspectorTab = "artifacts" | "files" | "logs" | "skills" | "models";
@@ -21,7 +19,7 @@ export default function StudioInspectorPanel() {
   const [collapsed, setCollapsed] = useState(false);
   const [activeTab, setActiveTab] = useState<InspectorTab>("artifacts");
 
-  const tabs: { id: InspectorTab; label: string; icon: typeof FileText }[] = [
+  const tabs: { id: InspectorTab; label: string; icon: typeof Settings }[] = [
     { id: "artifacts", label: "Artifacts", icon: Layers },
     { id: "files", label: "Files", icon: FolderTree },
     { id: "logs", label: "Logs", icon: Activity },

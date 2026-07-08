@@ -37,6 +37,7 @@
   "exclude": [
     "node_modules",
     "litlabs",
-    "litlabs-website"
+    "litlabs-website",
+    "terminal-server"
   ]
 }
