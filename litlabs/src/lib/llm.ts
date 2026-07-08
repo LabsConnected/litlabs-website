@@ -106,6 +106,43 @@ function getGenAI(): GoogleGenerativeAI | null {
   return _genAI;
 }
 
+function hasAnyProviderKey(): boolean {
+  return Boolean(GEMINI_KEY || OPENROUTER_KEY);
+}
+
+function demoResponse(prompt: string): string {
+  const topic = prompt.slice(0, 40).replace(/\n/g, " ");
+  return `I’m running in **demo mode** right now because no AI API key is configured on the server.
+
+I can’t generate a real answer for “${topic}…” yet, but the chat UI is fully functional.
+
+**To make me work for free:**
+1. Get a free Gemini key at [ai.google.dev](https://ai.google.dev) (Google AI Studio — generous free tier)
+2. Or get a free OpenRouter key at [openrouter.ai](https://openrouter.ai) and use free models
+3. Add it to your environment: 
+   \`GEMINI_API_KEY=your_key\` or \`OPENROUTER_API_KEY=your_key\`
+4. Redeploy, then I’ll answer for real.
+
+Until then, you can still browse the marketplace, dashboard, and agents pages.`;
+}
+
+function streamDemoResponse(prompt: string, onChunk: (text: string) => void): Promise<{ provider: LLMProvider; model: string; latencyMs: number; failover: LLMProvider[] }> {
+  const text = demoResponse(prompt);
+  const chunks = text.split(/(?=\s)/g); // split before spaces for natural typing
+  return new Promise((resolve) => {
+    let i = 0;
+    const interval = setInterval(() => {
+      if (i >= chunks.length) {
+        clearInterval(interval);
+        resolve({ provider: "gemini", model: "demo-mode", latencyMs: 0, failover: [] });
+        return;
+      }
+      onChunk(chunks[i]);
+      i++;
+    }, 12);
+  });
+}
+
 /* ------------------------------------------------------------------ */
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
@@ -309,6 +346,15 @@ export async function generateText(
   options: LLMOptions = {},
   systemPrompt?: string,
 ): Promise<LLMResult> {
+  if (!hasAnyProviderKey()) {
+    return {
+      text: demoResponse(prompt),
+      provider: "gemini",
+      model: "demo-mode",
+      latencyMs: 0,
+      failover: [],
+    };
+  }
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 30_000;
   const chain = defaultChain(task, options);
@@ -405,6 +451,9 @@ export async function streamText(
   latencyMs: number;
   failover: LLMProvider[];
 }> {
+  if (!hasAnyProviderKey()) {
+    return streamDemoResponse(prompt, onChunk);
+  }
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 60_000;
   const chain = defaultChain(task, options);

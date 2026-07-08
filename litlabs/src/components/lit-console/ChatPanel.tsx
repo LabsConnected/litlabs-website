@@ -343,6 +343,7 @@ export default function ChatPanel({
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
   const [wallpaper, setWallpaper] = useState<string>("none");
   const [wallpaperOpen, setWallpaperOpen] = useState(false);
+  const [demoMode, setDemoMode] = useState(false);
   const [revealed, setRevealed] = useState<Record<string, number>>(() => {
     const latest = [...messages].reverse().find((m) => m.role === "lit");
     const init: Record<string, number> = {};
@@ -382,6 +383,13 @@ export default function ChatPanel({
       localStorage.setItem(WALLPAPER_KEY, wallpaper);
     } catch {}
   }, [wallpaper]);
+
+  useEffect(() => {
+    fetch("/api/llm/status")
+      .then((res) => res.json())
+      .then((data) => setDemoMode(Boolean(data.demoMode)))
+      .catch(() => setDemoMode(false));
+  }, []);
 
   const wallpaperRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -531,6 +539,11 @@ export default function ChatPanel({
           </span>
           <Bot size={14} style={{ color: LC.accentCyan }} /> LiTTree Agent
           <span className="text-[9px] font-black uppercase tracking-widest" style={{ color: LC.accentCyan }}>Live</span>
+          {demoMode && (
+            <span className="rounded-full px-2 py-0.5 text-[9px] font-black" style={{ backgroundColor: `${LC.warning}20`, color: LC.warning }}>
+              Demo
+            </span>
+          )}
         </div>
         <div className="relative">
           <button
