@@ -43,6 +43,7 @@ interface CommandDockProps {
   onAgentChange: (agent: string) => void;
   onModelChange: (model: string) => void;
   onAttach?: () => void;
+  onFileSelect?: (file: File) => void;
   onTools?: () => void;
   onConnectors?: () => void;
   onToggleTerminal?: () => void;
@@ -139,6 +140,7 @@ export default function CommandDock(props: CommandDockProps) {
     onAgentChange,
     onModelChange,
     onAttach,
+    onFileSelect,
     onTools,
     onConnectors,
     onToggleTerminal,
@@ -153,6 +155,7 @@ export default function CommandDock(props: CommandDockProps) {
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [agentOpen, setAgentOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
@@ -297,8 +300,20 @@ export default function CommandDock(props: CommandDockProps) {
             rows={1}
           />
           <div className="flex items-center gap-1 shrink-0">
+            <input
+              ref={fileInputRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                if (file && onFileSelect) {
+                  onFileSelect(file);
+                }
+                if (fileInputRef.current) fileInputRef.current.value = "";
+              }}
+            />
             <button
-              onClick={onAttach}
+              onClick={() => fileInputRef.current?.click()}
               className="rounded-lg p-2 transition-colors hover:bg-white/5"
               style={{ color: LC.textMuted }}
               title="Attach"

@@ -609,7 +609,45 @@ export default function LitConsole() {
         model={activeModel}
         onAgentChange={handleAgentChange}
         onModelChange={handleModelChange}
-        onAttach={() => handleSend("Attach a file...")}
+        onFileSelect={async (file) => {
+          const id = Math.random().toString(36).slice(2);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id,
+              role: "user",
+              content: `Attached: ${file.name}`,
+              attachment: { name: file.name, url: URL.createObjectURL(file), type: file.type },
+            },
+          ]);
+          try {
+            const form = new FormData();
+            form.append("file", file);
+            const res = await fetch("/api/upload", { method: "POST", body: form });
+            const data = await res.json();
+            if (data.url) {
+              setMessages((prev) =>
+                prev.map((m) =>
+                  m.id === id
+                    ? { ...m, attachment: { name: file.name, url: data.url, type: file.type } }
+                    : m,
+                ),
+              );
+              askLiT(`I uploaded ${file.name}. URL: ${data.url}`);
+            } else {
+              throw new Error(data.error || "Upload failed");
+            }
+          } catch (err) {
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Math.random().toString(36).slice(2),
+                role: "system",
+                content: err instanceof Error ? err.message : "Upload failed.",
+              },
+            ]);
+          }
+        }}
         onTools={() => setDrawerOpen((v) => !v)}
         onConnectors={() => {
           if (drawerOpen && drawerTab === "connectors") {

@@ -23,6 +23,11 @@ export interface Message {
   id: string;
   role: "user" | "lit" | "tool" | "system";
   content: string;
+  attachment?: {
+    name: string;
+    url: string;
+    type: string;
+  };
   meta?: {
     tool?: string;
     status?: "running" | "done" | "error";
@@ -388,6 +393,18 @@ export default function ChatPanel({
                       }}
                     >
                       {m.content}
+                      {m.attachment && (
+                        <a
+                          href={m.attachment.url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="mt-2 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/5"
+                          style={{ borderColor: `${LC.accentCyan}40`, color: LC.accentCyan }}
+                        >
+                          <FileText size={12} />
+                          {m.attachment.name}
+                        </a>
+                      )}
                     </div>
                     <div
                       className="rounded-full p-1.5"
