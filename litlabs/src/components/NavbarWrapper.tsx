@@ -1,7 +1,24 @@
 "use client";
 
-import { useState, useEffect } from "react";
-import { Bell, Search, Settings, Home, Gamepad2, Store, Bot, User, Images } from "lucide-react";
+import { useState, useEffect, useRef } from "react";
+import {
+  Bell,
+  Search,
+  Settings,
+  Home,
+  Gamepad2,
+  Store,
+  Bot,
+  User,
+  Images,
+  Wand2,
+  Wallet,
+  Users,
+  LayoutGrid,
+  BookOpen,
+  Code2,
+  ChevronDown,
+} from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import Link from "next/link";
 import dynamic from "next/dynamic";
@@ -14,12 +31,42 @@ const NavAuth = dynamic(
 export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
   const [scrolled, setScrolled] = useState(false);
+  const [moreOpen, setMoreOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     const handleScroll = () => setScrolled(window.scrollY > 8);
     window.addEventListener("scroll", handleScroll);
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
+
+  useEffect(() => {
+    const handleClick = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) {
+        setMoreOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
+  const mainLinks = [
+    { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Bot },
+    { href: "/agents", label: "Agents", icon: Wand2 },
+    { href: "/gallery", label: "Gallery", icon: Images },
+    { href: "/marketplace", label: "Marketplace", icon: Store },
+    { href: "/games/cloud", label: "Games", icon: Gamepad2 },
+    { href: "/social", label: "Social", icon: Users },
+    { href: "/wallet", label: "Wallet", icon: Wallet },
+  ];
+
+  const moreLinks = [
+    { href: "/library/files", label: "Library", icon: LayoutGrid },
+    { href: "/memories", label: "Memories", icon: BookOpen },
+    { href: "/code", label: "Code", icon: Code2 },
+    { href: "/docs", label: "Docs", icon: BookOpen },
+    { href: "/showcase", label: "Showcase", icon: Images },
+  ];
 
   return (
     <header
@@ -49,13 +96,7 @@ export default function NavbarWrapper() {
 
       {/* Desktop navigation links */}
       <nav className="hidden lg:flex items-center gap-1">
-        {[
-          { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Bot },
-          { href: "/gallery", label: "Gallery", icon: Images },
-          { href: "/marketplace", label: "Marketplace", icon: Store },
-          { href: "/games/cloud", label: "Games", icon: Gamepad2 },
-          { href: "/profile", label: "Profile", icon: User },
-        ].map((item) => {
+        {mainLinks.map((item) => {
           const Icon = item.icon;
           return (
             <Link
@@ -69,6 +110,40 @@ export default function NavbarWrapper() {
             </Link>
           );
         })}
+
+        {/* More dropdown */}
+        <div className="relative" ref={moreRef}>
+          <button
+            onClick={() => setMoreOpen((v) => !v)}
+            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
+            style={{ color: T.textMuted }}
+          >
+            More
+            <ChevronDown size={12} style={{ transform: moreOpen ? "rotate(180deg)" : undefined, transition: "transform 0.2s" }} />
+          </button>
+          {moreOpen && (
+            <div
+              className="absolute right-0 top-full mt-2 w-48 overflow-hidden rounded-xl border shadow-2xl z-50"
+              style={{ backgroundColor: T.boxBg, borderColor: T.borderColor + "28" }}
+            >
+              {moreLinks.map((item) => {
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={() => setMoreOpen(false)}
+                    className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:bg-white/5"
+                    style={{ color: T.textMuted }}
+                  >
+                    <Icon size={13} />
+                    {item.label}
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+        </div>
       </nav>
 
       <div className="flex items-center gap-1">

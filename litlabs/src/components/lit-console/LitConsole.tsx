@@ -19,6 +19,7 @@ import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
 import HoloPanel from "./HoloPanel";
+import ConnectorsPanel from "./ConnectorsPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 import type { DirectorStep, DirectorRunStatus, DirectorRunResponse, ExecuteStepResponse } from "@/lib/director/types";
@@ -33,7 +34,7 @@ const initialContext: LiTContext = {
   websocketStatus: "connected",
 };
 
-type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory";
+type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors";
 
 export default function LitConsole() {
   const { user } = useUser();
@@ -483,6 +484,7 @@ export default function LitConsole() {
     if (drawerTab === "files") return <FilesPanel onPrompt={handleSend} />;
     if (drawerTab === "preview") return <PreviewPanel />;
     if (drawerTab === "agents") return <AgentsPanel activeAgent={activeAgent} onSelect={handleAgentChange} onPrompt={handleSend} />;
+    if (drawerTab === "connectors") return <ConnectorsPanel />;
     return <MemoryPanel />;
   })();
 
@@ -598,6 +600,10 @@ export default function LitConsole() {
         onModelChange={handleModelChange}
         onAttach={() => handleSend("Attach a file...")}
         onTools={() => setDrawerOpen((v) => !v)}
+        onConnectors={() => {
+          setDrawerTab("connectors");
+          setDrawerOpen(true);
+        }}
         onToggleTerminal={() => {
           setDrawerTab("terminal");
           setDrawerOpen((v) => !v);

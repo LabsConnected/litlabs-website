@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import {
   Send,
   Plus,
+  Plug,
   Paperclip,
   Upload,
   Search,
@@ -43,6 +44,7 @@ interface CommandDockProps {
   onModelChange: (model: string) => void;
   onAttach?: () => void;
   onTools?: () => void;
+  onConnectors?: () => void;
   onToggleTerminal?: () => void;
   onCreateFile?: () => void;
   onBuild?: () => void;
@@ -78,6 +80,7 @@ const MODELS = [
 ];
 
 const TOOLS = [
+  { id: "connectors", label: "Connectors", icon: Plug },
   { id: "attach", label: "Upload attachment", icon: Upload },
   { id: "research", label: "Deep Research", icon: Search },
   { id: "image", label: "Create Image", icon: Image },
@@ -137,6 +140,7 @@ export default function CommandDock(props: CommandDockProps) {
     onModelChange,
     onAttach,
     onTools,
+    onConnectors,
     onToggleTerminal,
     onCreateFile,
     onBuild,
@@ -188,6 +192,7 @@ export default function CommandDock(props: CommandDockProps) {
 
   const handleTool = (id: string) => {
     setToolsOpen(false);
+    if (id === "connectors") { onConnectors?.(); return; }
     if (id === "attach") { onAttach?.(); return; }
     if (id === "terminal") { onToggleTerminal?.(); return; }
     if (id === "file") { onCreateFile?.(); return; }
