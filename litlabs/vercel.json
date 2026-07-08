@@ -1,8 +1,8 @@
 {
-  "buildCommand": "pnpm build",
+  "buildCommand": "npm run build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "npm install --legacy-peer-deps",
+  "installCommand": "npm install",
   "crons": [
     {
       "path": "/api/deployments/digest",

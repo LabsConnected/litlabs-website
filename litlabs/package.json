@@ -3,7 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "engines": {
-    "node": ">=22"
+    "node": "22.x"
   },
   "scripts": {
     "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "check": "pnpm lint && pnpm typecheck && pnpm build",
+    "check": "npm run lint && npm run typecheck && npm run build",
     "pages:build": "npx @cloudflare/next-on-pages@1",
     "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
     "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat",
@@ -20,7 +20,7 @@
     "terminal:build": "tsc -p terminal-server/tsconfig.json",
     "terminal:start": "node terminal-server/dist/server.js",
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
-    "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\""
+    "dev:all": "concurrently \"npm run dev\" \"npm run terminal:dev\""
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.7",
