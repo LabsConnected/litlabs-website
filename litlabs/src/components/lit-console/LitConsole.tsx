@@ -20,6 +20,7 @@ import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
 import HoloPanel from "./HoloPanel";
 import ConnectorsPanel from "./ConnectorsPanel";
+import ActivityPanel from "./ActivityPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
 import type { DirectorStep, DirectorRunStatus, DirectorRunResponse, ExecuteStepResponse } from "@/lib/director/types";
@@ -490,40 +491,52 @@ export default function LitConsole() {
 
   return (
     <div className="flex h-full w-full flex-col" style={{ backgroundColor: LC.bg }}>
-      {/* Main content area — chat only, dashboard accessible via drawer */}
-      <div className="relative flex min-h-0 flex-1 flex-col overflow-hidden">
-        {/* Desktop: chat only */}
-        <div className="hidden md:flex flex-1 min-h-0 flex-col overflow-hidden">
-          <ChatPanel
-            messages={messages}
-            onSend={(text) => {
-              if (text === "/run") return handleRun();
-              handleSend(text);
-            }}
-            loading={loading}
-            plan={
-              pendingRun
-                ? {
-                    runId: pendingRun.runId,
-                    steps: pendingRun.plan.steps.map((s) => ({
-                      id: s.id,
-                      title: s.title,
-                      command: s.command ?? null,
-                      needs_approval: s.needs_approval,
-                      risk_level: s.risk_level,
-                    })),
-                  }
-                : undefined
-            }
-            onApprove={(cmd) => approveCommand(cmd)}
-            onApproveStep={async (_runId, command) => approveCommand(command)}
-            onApprovePlan={() => {
-              if (!pendingRun?.plan?.steps?.length) return;
-              const first = pendingRun.plan.steps[0];
-              if (first.command) approveCommand(first.command);
-              setPendingRun(null);
-            }}
-          />
+      {/* Main content area — chat + live activity panel */}
+      <div className="relative flex min-h-0 flex-1 flex-row overflow-hidden">
+        {/* Desktop: chat + side panel */}
+        <div className="hidden md:flex flex-1 min-h-0 flex-row overflow-hidden">
+          <div className="flex-1 min-w-0 flex flex-col overflow-hidden">
+            <ChatPanel
+              messages={messages}
+              onSend={(text) => {
+                if (text === "/run") return handleRun();
+                handleSend(text);
+              }}
+              loading={loading}
+              plan={
+                pendingRun
+                  ? {
+                      runId: pendingRun.runId,
+                      steps: pendingRun.plan.steps.map((s) => ({
+                        id: s.id,
+                        title: s.title,
+                        command: s.command ?? null,
+                        needs_approval: s.needs_approval,
+                        risk_level: s.risk_level,
+                      })),
+                    }
+                  : undefined
+              }
+              onApprove={(cmd) => approveCommand(cmd)}
+              onApproveStep={async (_runId, command) => approveCommand(command)}
+              onApprovePlan={() => {
+                if (!pendingRun?.plan?.steps?.length) return;
+                const first = pendingRun.plan.steps[0];
+                if (first.command) approveCommand(first.command);
+                setPendingRun(null);
+              }}
+            />
+          </div>
+          <div
+            className="hidden lg:block w-[300px] shrink-0 border-l overflow-hidden"
+            style={{ borderColor: LC.border }}
+          >
+            <ActivityPanel
+              loading={loading}
+              activeAgent={activeAgent}
+              activeModel={activeModel}
+            />
+          </div>
         </div>
 
         {/* Mobile: always chat-first */}

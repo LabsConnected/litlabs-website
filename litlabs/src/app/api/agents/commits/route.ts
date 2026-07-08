@@ -1,5 +1,4 @@
 import { NextResponse } from "next/server";
-import { execSync } from "child_process";
 
 const FALLBACK_COMMITS = [
   "d85ae75 feat: upgrade AgentTool (boardroom, markdown, rich cards)",
@@ -15,10 +14,9 @@ const FALLBACK_COMMITS = [
 ];
 
 export async function GET() {
-  try {
-    const commits = execSync("git log --oneline -10 2>/dev/null", { timeout: 3000 })
-      .toString().trim().split("\n").filter(Boolean);
-    if (commits.length > 0) return NextResponse.json(commits);
-  } catch { /* fall through */ }
+  // Serverless-safe: no execSync, no git binary dependency.
+  // In a Vercel/deployed environment we cannot shell out to `git`.
+  // For local self-hosted environments, an admin can wire a real git
+  // log query through a service-role endpoint if needed.
   return NextResponse.json(FALLBACK_COMMITS);
 }

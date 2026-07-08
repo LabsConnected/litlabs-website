@@ -309,7 +309,7 @@ export default function ChatPanel({
         onScroll={handleScroll}
         className="flex-1 space-y-5 overflow-y-auto"
       >
-        <div className="mx-auto max-w-3xl px-4 py-6">
+        <div className="mx-auto w-full max-w-5xl px-4 py-6 lg:px-8">
           {isEmpty ? (
             <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
               <div className="w-full max-w-2xl space-y-6 text-center">

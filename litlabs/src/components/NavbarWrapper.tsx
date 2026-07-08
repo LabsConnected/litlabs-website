@@ -12,6 +12,7 @@ import {
   User,
   Images,
   Wand2,
+  Sparkles,
   Wallet,
   Users,
   LayoutGrid,
@@ -51,21 +52,23 @@ export default function NavbarWrapper() {
   }, []);
 
   const mainLinks = [
-    { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Bot },
-    { href: "/agents", label: "Agents", icon: Wand2 },
+    { href: "/dashboard", label: "Dashboard", icon: Bot },
+    { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Wand2 },
+    { href: "/agents", label: "Agents", icon: Sparkles },
     { href: "/gallery", label: "Gallery", icon: Images },
     { href: "/marketplace", label: "Marketplace", icon: Store },
     { href: "/games/cloud", label: "Games", icon: Gamepad2 },
-    { href: "/social", label: "Social", icon: Users },
-    { href: "/wallet", label: "Wallet", icon: Wallet },
   ];
 
   const moreLinks = [
+    { href: "/social", label: "Social", icon: Users },
+    { href: "/wallet", label: "Wallet", icon: Wallet },
     { href: "/library/files", label: "Library", icon: LayoutGrid },
     { href: "/memories", label: "Memories", icon: BookOpen },
     { href: "/code", label: "Code", icon: Code2 },
     { href: "/docs", label: "Docs", icon: BookOpen },
     { href: "/showcase", label: "Showcase", icon: Images },
+    { href: "/profile", label: "Profile", icon: User },
   ];
 
   return (
@@ -95,17 +98,17 @@ export default function NavbarWrapper() {
       </div>
 
       {/* Desktop navigation links */}
-      <nav className="hidden lg:flex items-center gap-1">
+      <nav className="hidden lg:flex items-center gap-2">
         {mainLinks.map((item) => {
           const Icon = item.icon;
           return (
             <Link
               key={item.href}
               href={item.href}
-              className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
+              className="flex items-center gap-1.5 px-4 py-2 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
               style={{ color: T.textMuted }}
             >
-              <Icon size={13} />
+              <Icon size={14} />
               {item.label}
             </Link>
           );
@@ -115,7 +118,7 @@ export default function NavbarWrapper() {
         <div className="relative" ref={moreRef}>
           <button
             onClick={() => setMoreOpen((v) => !v)}
-            className="flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
+            className="flex items-center gap-1 px-4 py-2 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
             style={{ color: T.textMuted }}
           >
             More
@@ -146,7 +149,7 @@ export default function NavbarWrapper() {
         </div>
       </nav>
 
-      <div className="flex items-center gap-1">
+      <div className="flex items-center gap-2">
         <button
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
