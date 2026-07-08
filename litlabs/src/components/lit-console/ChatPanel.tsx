@@ -514,7 +514,7 @@ export default function ChatPanel({
         <div className="mx-auto w-full max-w-5xl px-4 py-6 lg:px-8">
           {isEmpty ? (
             <div className="relative z-10 flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
-              <div className="w-full max-w-2xl space-y-6 text-center">
+              <div className="mx-auto w-full max-w-3xl space-y-6 text-center px-4 lg:px-6">
                 <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
                   {/* Holographic ring */}
                   <div
