@@ -61,14 +61,26 @@ const TIER_PACKAGES: {
   notIncluded: string[];
 }[] = [
   {
-    id: "tier-starter",
+    id: "tier-free",
     coins: 500,
     price: 0,
+    priceId: "",
+    label: "Free",
+    tier: "free",
+    popular: false,
+    features: ["500 LBC credits", "3 agent slots", "All games", "LiT Chat"],
+    included: ["500 LBC credits", "3 agent slots", "All games", "LiT Chat", "Community support"],
+    notIncluded: ["Priority support", "Flow Studio", "Terminal", "Daily bonus", "Sell agents", "API access", "Early access"],
+  },
+  {
+    id: "tier-starter",
+    coins: 500,
+    price: 5,
     priceId: "",
     label: "Starter",
     tier: "starter",
     popular: false,
-    features: ["500 credits/mo", "3 agent slots", "All games", "LiT Chat"],
+    features: ["500 LBC/mo", "3 agent slots", "All games", "LiT Chat"],
     included: ["500 LBC/mo", "3 agent slots", "All games", "LiT Chat", "Community support"],
     notIncluded: ["Priority support", "Flow Studio", "Terminal", "Daily bonus", "Sell agents", "API access", "Early access"],
   },
@@ -126,13 +138,14 @@ const COIN_PACKS: {
   { id: "pack-elite", coins: 15000, cents: 3999, label: "Elite Pack", popular: false },
 ];
 
-// SPEND COINS — interactive features with real coin deduction
+// SPEND COINS — interactive features (currently preview-only; no real coin deduction until backend wired)
 const SPEND_FEATURES: {
   id: string;
   title: string;
   desc: string;
   cost: number;
   action: string;
+  comingSoon: boolean;
 }[] = [
   {
     id: "generate",
@@ -140,6 +153,7 @@ const SPEND_FEATURES: {
     desc: "Generate an image, music track, or video with AI",
     cost: 50,
     action: "Generate",
+    comingSoon: true,
   },
   {
     id: "slot",
@@ -147,6 +161,7 @@ const SPEND_FEATURES: {
     desc: "Expand your dock to run +1 agent simultaneously",
     cost: 200,
     action: "Unlock",
+    comingSoon: true,
   },
   {
     id: "boost",
@@ -154,6 +169,7 @@ const SPEND_FEATURES: {
     desc: "Feature your post at the top of the social feed for 24h",
     cost: 100,
     action: "Boost",
+    comingSoon: true,
   },
   {
     id: "priority",
@@ -161,6 +177,7 @@ const SPEND_FEATURES: {
     desc: "Get faster agent responses and higher rate limits",
     cost: 150,
     action: "Activate",
+    comingSoon: true,
   },
   {
     id: "theme",
@@ -168,6 +185,7 @@ const SPEND_FEATURES: {
     desc: "Unlock an exclusive limited-edition UI skin",
     cost: 300,
     action: "Unlock",
+    comingSoon: true,
   },
   {
     id: "workflow",
@@ -175,6 +193,7 @@ const SPEND_FEATURES: {
     desc: "Execute a multi-agent orchestrated workflow",
     cost: 75,
     action: "Run",
+    comingSoon: true,
   },
 ];
 
@@ -280,7 +299,7 @@ const DEMO_AGENTS: Agent[] = [
     description:
       "Social media growth agent. Platform-native content for Instagram, X, TikTok, LinkedIn, Reddit, and Bluesky.",
     category: "marketing",
-    avatar_url: AGENT_AVATARS["social-dominator"],
+    avatar_url: AGENT_AVATARS["social-pilot"],
     price_cents: 250,
     features: ["Platform content", "Growth tactics", "Scheduling"],
     is_featured: true,
@@ -910,7 +929,10 @@ function MarketplaceInner() {
             <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.15em] mb-1" style={{ color: "#22d3ee" }}>Choose Your Tier</div>
-                <p className="text-sm" style={{ color: "#6b7280" }}>Start free with 500 LBC/mo. Upgrade anytime to unlock more.</p>
+                <p className="text-sm" style={{ color: "#6b7280" }}>Start free with 500 LBC. Upgrade anytime to unlock more.</p>
+                <p className="text-[11px] mt-1" style={{ color: "#6b7280" }}>
+                  LBC are LiTTree Credits used to run agents, generate content, and unlock workflows. <span style={{ color: "#fbbf24" }}>100 LBC ≈ $1 platform credit.</span> LBC are not cash, crypto, or redeemable currency.
+                </p>
               </div>
               <button onClick={earnCoins} disabled={claimLoading}
                 className="px-4 py-2 rounded-xl text-xs font-black transition-all hover:scale-[1.02] disabled:opacity-50"
@@ -919,13 +941,14 @@ function MarketplaceInner() {
               </button>
             </div>
 
-            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(5,1fr)" }}>
               {TIER_PACKAGES.map(tier => {
                 const isCurrent = currentPlan === tier.tier;
                 const tc = tier.tier === "elite" ? { accent: "#a3f546", glow: "#a3f54640", bg: "#a3f5460a" }
                          : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa", glow: "#a78bfa40", bg: "#a78bfa0a" }
                          : tier.tier === "basic" ? { accent: "#fbbf24", glow: "#fbbf2440", bg: "#fbbf240a" }
-                         : { accent: "#22d3ee", glow: "#22d3ee30", bg: "#22d3ee08" };
+                         : tier.tier === "starter" ? { accent: "#22d3ee", glow: "#22d3ee30", bg: "#22d3ee08" }
+                         : { accent: "#6b7280", glow: "#6b728030", bg: "#6b728008" };
                 const missingPrice = !tier.priceId && tier.price > 0;
                 return (
                   <div key={tier.id} className="relative flex flex-col p-5 rounded-2xl transition-all"
@@ -952,7 +975,9 @@ function MarketplaceInner() {
                         ? <span className="text-3xl font-black">Free</span>
                         : <><span className="text-3xl font-black">${tier.price}</span><span className="text-sm opacity-60">/mo</span></>}
                     </div>
-                    <div className="text-xs mb-4" style={{ color: "#6b7280" }}>{tier.coins.toLocaleString()} LBC included/mo</div>
+                    <div className="text-xs mb-4" style={{ color: "#6b7280" }}>
+                      {tier.tier === "free" ? `${tier.coins.toLocaleString()} LBC included` : `${tier.coins.toLocaleString()} LBC included/mo`}
+                    </div>
 
                     <ul className="flex-1 space-y-1.5 mb-4">
                       {tier.included.map(f => (
@@ -962,18 +987,29 @@ function MarketplaceInner() {
                       ))}
                     </ul>
 
-                    {missingPrice && <div className="text-[10px] mb-2" style={{ color: "#f87171" }}>⚠ Stripe ID not configured</div>}
+                    {missingPrice && (
+                      <div className="text-[10px] mb-2 text-center" style={{ color: "#fbbf24" }}>
+                        Checkout temporarily unavailable
+                      </div>
+                    )}
                     <button
-                      onClick={() => !isCurrent && !missingPrice && tier.price > 0 && buyPack(tier)}
-                      disabled={isCurrent || missingPrice || tier.price === 0}
+                      onClick={() => {
+                        if (isCurrent) return;
+                        if (tier.price === 0) {
+                          showToast("Free tier active — 500 LBC included", "success");
+                          return;
+                        }
+                        if (!missingPrice) buyPack(tier);
+                      }}
+                      disabled={isCurrent || (missingPrice && tier.price > 0)}
                       className="w-full py-2.5 rounded-xl text-sm font-black transition-all disabled:opacity-60"
                       style={{
                         background: isCurrent ? tc.accent + "20" : tier.price === 0 ? "#1e1e2e" : tc.accent,
-                        color: isCurrent || tier.price === 0 ? tc.accent : "#08080c",
-                        border: isCurrent || tier.price === 0 ? `1px solid ${tc.accent}40` : "none",
-                        cursor: isCurrent || tier.price === 0 || missingPrice ? "default" : "pointer",
+                        color: isCurrent || tier.price === 0 || missingPrice ? tc.accent : "#08080c",
+                        border: isCurrent || tier.price === 0 || missingPrice ? `1px solid ${tc.accent}40` : "none",
+                        cursor: isCurrent || (missingPrice && tier.price > 0) ? "default" : "pointer",
                       }}>
-                      {isCurrent ? "Current Plan" : tier.price === 0 ? "Your Base Tier" : missingPrice ? "Not Configured" : `Upgrade to ${tier.label}`}
+                      {isCurrent ? "Current Plan" : tier.price === 0 ? "Start Free" : missingPrice ? "Unavailable" : `Upgrade to ${tier.label}`}
                     </button>
                   </div>
                 );
@@ -996,7 +1032,8 @@ function MarketplaceInner() {
                       const tc = tier.tier === "elite" ? { accent: "#a3f546" }
                                : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa" }
                                : tier.tier === "basic" ? { accent: "#fbbf24" }
-                               : { accent: "#22d3ee" };
+                               : tier.tier === "starter" ? { accent: "#22d3ee" }
+                               : { accent: "#6b7280" };
                       return (
                         <th key={tier.id} className="px-3 py-3 text-center font-black" style={{ color: tc.accent }}>
                           {tier.label}
@@ -1007,7 +1044,7 @@ function MarketplaceInner() {
                 </thead>
                 <tbody>
                   {[
-                    { label: "Monthly LBC credits", value: (t: typeof TIER_PACKAGES[0]) => t.coins.toLocaleString() + (t.tier === "elite" ? "+" : "") },
+                    { label: "Monthly LBC credits", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" ? "Unlimited" : t.coins.toLocaleString() },
                     { label: "Agent slots", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" ? "Unlimited" : t.tier === "pro" || t.tier === "creator" ? "10" : t.tier === "basic" ? "5" : "3" },
                     { label: "All games", value: (t: typeof TIER_PACKAGES[0]) => true },
                     { label: "LiT Chat", value: (t: typeof TIER_PACKAGES[0]) => true },
@@ -1027,7 +1064,8 @@ function MarketplaceInner() {
                         const tc = tier.tier === "elite" ? { accent: "#a3f546" }
                                  : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa" }
                                  : tier.tier === "basic" ? { accent: "#fbbf24" }
-                                 : { accent: "#22d3ee" };
+                                 : tier.tier === "starter" ? { accent: "#22d3ee" }
+                                 : { accent: "#6b7280" };
                         return (
                           <td key={tier.id} className="px-3 py-3 text-center font-bold" style={{ color: has ? tc.accent : "#4b5563" }}>
                             {typeof val === "string" ? val : has ? <Check size={12} className="inline" /> : <span>—</span>}
@@ -1102,15 +1140,18 @@ function MarketplaceInner() {
                   <div className="text-[11px] leading-relaxed flex-1 mb-3" style={{ color: "#6b7280" }}>{feat.desc}</div>
                   <div className="flex items-center justify-between pt-3 border-t" style={{ borderColor: "#1e1e2e" }}>
                     <span className="text-sm font-black" style={{ color: "#fbbf24" }}>{feat.cost} LBC</span>
-                    <button onClick={async () => {
+                    <button
+                      disabled={feat.comingSoon}
+                      onClick={async () => {
+                        if (feat.comingSoon) return;
                         if (litBitCoins < feat.cost) { showToast(`Need ${feat.cost} LBC. You have ${litBitCoins}`, "error"); return; }
                         const nb = await syncWallet(-feat.cost);
                         if (nb === null) { showToast("Transaction failed.", "error"); return; }
                         showToast(`${feat.action}: ${feat.title}. −${feat.cost} LBC`, "success");
                       }}
-                      className="px-3 py-1.5 rounded-lg text-xs font-black transition-all hover:scale-[1.02]"
-                      style={{ background: "#6366f120", border: "1px solid #6366f140", color: "#a78bfa" }}>
-                      {feat.action}
+                      className="px-3 py-1.5 rounded-lg text-xs font-black transition-all disabled:opacity-50"
+                      style={{ background: feat.comingSoon ? "#1e1e2e" : "#6366f120", border: `1px solid ${feat.comingSoon ? "#4b5563" : "#6366f140"}`, color: feat.comingSoon ? "#6b7280" : "#a78bfa" }}>
+                      {feat.comingSoon ? "Coming soon" : feat.action}
                     </button>
                   </div>
                 </div>

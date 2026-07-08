@@ -122,7 +122,7 @@ function CodeBlock({
   );
 }
 
-function ThinkingIndicator({ theme }: { theme: Theme }) {
+function ThinkingIndicator({ theme, stage }: { theme: Theme; stage?: number }) {
   const [step, setStep] = useState(0);
   const steps = [
     { label: "Reading context", icon: FileText },
@@ -131,14 +131,17 @@ function ThinkingIndicator({ theme }: { theme: Theme }) {
     { label: "Generating response", icon: Bot },
   ];
 
+  const activeStep = typeof stage === "number" ? Math.max(0, Math.min(steps.length - 1, stage)) : step;
+
   useEffect(() => {
+    if (typeof stage === "number") return;
     const interval = setInterval(() => {
       setStep((s) => (s + 1) % steps.length);
-    }, 1800);
+    }, 1400);
     return () => clearInterval(interval);
-  }, [steps.length]);
+  }, [steps.length, stage]);
 
-  const ActiveIcon = steps[step].icon;
+  const ActiveIcon = steps[activeStep].icon;
 
   return (
     <div
@@ -163,8 +166,8 @@ function ThinkingIndicator({ theme }: { theme: Theme }) {
         <div className="mt-2 space-y-1.5">
           {steps.map((s, i) => {
             const Icon = s.icon;
-            const active = i === step;
-            const past = i < step;
+            const active = i === activeStep;
+            const past = i < activeStep;
             return (
               <div
                 key={s.label}
@@ -216,7 +219,7 @@ function GenerateImageTool({ m, theme }: { m: Message; theme: Theme }) {
   const status = m.meta?.status || "done";
   const provider = m.meta?.images?.[0]?.provider || "AI";
   const steps = [
-    { label: "Understanding prompt", icon: Sparkles, done: status !== "running" || true },
+    { label: "Understanding prompt", icon: Sparkles, done: status !== "running" },
     { label: `Calling ${provider}`, icon: Wand2, done: status !== "running" },
     { label: "Rendering image", icon: Image, done: status !== "running" },
   ];
@@ -256,7 +259,7 @@ function GenerateImageTool({ m, theme }: { m: Message; theme: Theme }) {
         <div className="mt-3 space-y-2">
           {steps.map((s, i) => {
             const Icon = s.icon;
-            const done = status === "done" ? true : status === "error" ? i === 0 : i === 0;
+            const done = status === "done" ? i < 3 : status === "error" ? i < 1 : i === 0;
             const active = status === "running" && i === 1;
             return (
               <div key={s.label} className="flex items-center gap-2 text-[11px]" style={{ color: done ? theme.accentCyan : theme.textDim }}>

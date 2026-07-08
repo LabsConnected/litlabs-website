@@ -75,6 +75,16 @@ export default function SettingsPage() {
   const { crtEnabled, toggleCrt } = useCrtToggle();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [isDirty, setIsDirty] = useState(false);
+  const [saveState, setSaveState] = useState<"saved" | "saving" | "unsaved" | "error">("saved");
+
+  const switchTab = useCallback((next: TabId) => {
+    if (isDirty) {
+      const ok = window.confirm("You have unsaved changes. Leave without saving?");
+      if (!ok) return;
+    }
+    setActiveTab(next);
+  }, [isDirty]);
 
   /* Profile state */
   const [name, setName] = useState(profile.displayName || "");
@@ -225,6 +235,7 @@ export default function SettingsPage() {
     setProfileSaved(false);
     setProfileError(null);
     setProfileLoading(true);
+    setSaveState("saving");
     try {
       const res = await fetch("/api/settings/profile", {
         method: "POST",
@@ -257,29 +268,39 @@ export default function SettingsPage() {
         musicLinks,
       });
       setProfileSaved(true);
+      setIsDirty(false);
+      setSaveState("saved");
       setTimeout(() => setProfileSaved(false), 2000);
     } catch (e) {
+      setSaveState("error");
       setProfileError(e instanceof Error ? e.message : "Failed to save");
     } finally {
       setProfileLoading(false);
+      if (saveState === "saving") setSaveState("error");
     }
-  }, [name, username, bio, website, location, avatarUrl, mood, interests, socialLinks, musicLinks, updateProfile]);
+  }, [name, username, bio, website, location, avatarUrl, mood, interests, socialLinks, musicLinks, updateProfile, saveState]);
 
   const saveKeys = useCallback(() => {
     if (typeof window === "undefined") return;
+    setSaveState("saving");
     BYOK_KEYS.forEach((k) => {
       localStorage.setItem(`litlabs-byok-${k.id}`, keys[k.id] || "");
     });
     setKeysSaved(true);
+    setIsDirty(false);
+    setSaveState("saved");
     setTimeout(() => setKeysSaved(false), 2000);
   }, [keys]);
 
   const saveNotifications = useCallback(() => {
     if (typeof window === "undefined") return;
+    setSaveState("saving");
     localStorage.setItem("litlabs-notify-discord", discordWebhook);
     localStorage.setItem("litlabs-notify-alexa", String(alexaEnabled));
     localStorage.setItem("litlabs-notify-email", String(emailDigest));
     setNotifSaved(true);
+    setIsDirty(false);
+    setSaveState("saved");
     setTimeout(() => setNotifSaved(false), 2000);
   }, [discordWebhook, alexaEnabled, emailDigest]);
 
@@ -297,8 +318,66 @@ export default function SettingsPage() {
     localStorage.setItem("litlabs-voice-provider", voiceProvider);
     localStorage.setItem("litlabs-gemini-voice", geminiVoice);
     setAgentSaved(true);
+    setIsDirty(false);
+    setSaveState("saved");
     setTimeout(() => setAgentSaved(false), 2000);
   }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions, voiceName, voiceRate, voicePitch, voiceContinuous, voiceProvider, geminiVoice]);
+
+  /* Detect unsaved changes across all tabs */
+  useEffect(() => {
+    const profileClean =
+      name === (profile.displayName || "") &&
+      username === (profile.username || "") &&
+      bio === (profile.bio || "") &&
+      website === (profile.website || "") &&
+      location === (profile.location || "") &&
+      avatarUrl === (profile.avatarUrl || "") &&
+      mood === (profile.mood || "") &&
+      JSON.stringify(interests) === JSON.stringify(profile.interests || []) &&
+      JSON.stringify(socialLinks) === JSON.stringify(profile.socialLinks || {}) &&
+      JSON.stringify(musicLinks) === JSON.stringify(profile.musicLinks || {});
+
+    const keysClean =
+      typeof window !== "undefined" &&
+      BYOK_KEYS.every((k) => keys[k.id] === (localStorage.getItem(`litlabs-byok-${k.id}`) || ""));
+
+    const agentClean =
+      typeof window !== "undefined" &&
+      agentTone === (localStorage.getItem("litlabs-agent-tone") || "direct") &&
+      agentLength === (localStorage.getItem("litlabs-agent-length") || "medium") &&
+      agentAutoSpeak === (localStorage.getItem("litlabs-agent-autospeak") === "true") &&
+      agentDefaultMode === (localStorage.getItem("litlabs-agent-default-mode") || "ask") &&
+      agentInstructions === (localStorage.getItem("litlabs-agent-instructions") || "") &&
+      voiceName === (localStorage.getItem("litlabs-voice-name") || "") &&
+      voiceRate === parseFloat(localStorage.getItem("litlabs-voice-rate") || "1.05") &&
+      voicePitch === parseFloat(localStorage.getItem("litlabs-voice-pitch") || "1.0") &&
+      voiceContinuous === (localStorage.getItem("litlabs-voice-continuous") === "true") &&
+      voiceProvider === ((localStorage.getItem("litlabs-voice-provider") as "system" | "gemini") || "system") &&
+      geminiVoice === (localStorage.getItem("litlabs-gemini-voice") || "Kore");
+
+    const notifClean =
+      typeof window !== "undefined" &&
+      discordWebhook === (localStorage.getItem("litlabs-notify-discord") || "") &&
+      alexaEnabled === (localStorage.getItem("litlabs-notify-alexa") === "true") &&
+      emailDigest === (localStorage.getItem("litlabs-notify-email") === "true");
+
+    const workspaceClean =
+      typeof window !== "undefined" &&
+      autoSaveDrafts === (localStorage.getItem("litlabs-workspace-autosave") !== "false") &&
+      compactMode === (localStorage.getItem("litlabs-workspace-compact") === "true") &&
+      livePreview === (localStorage.getItem("litlabs-workspace-live-preview") !== "false") &&
+      showTelemetry === (localStorage.getItem("litlabs-workspace-telemetry") !== "false") &&
+      defaultWorkspace === (localStorage.getItem("litlabs-workspace-default") || "studio");
+
+    const allClean = profileClean && keysClean && agentClean && notifClean && workspaceClean;
+    setIsDirty(!allClean);
+  }, [
+    name, username, bio, website, location, avatarUrl, mood, interests, socialLinks, musicLinks, profile,
+    keys, agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions,
+    voiceName, voiceRate, voicePitch, voiceContinuous, voiceProvider, geminiVoice,
+    discordWebhook, alexaEnabled, emailDigest,
+    autoSaveDrafts, compactMode, livePreview, showTelemetry, defaultWorkspace,
+  ]);
 
   const playPreview = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -335,12 +414,15 @@ export default function SettingsPage() {
 
   const saveWorkspace = useCallback(() => {
     if (typeof window === "undefined") return;
+    setSaveState("saving");
     localStorage.setItem("litlabs-workspace-autosave", String(autoSaveDrafts));
     localStorage.setItem("litlabs-workspace-compact", String(compactMode));
     localStorage.setItem("litlabs-workspace-live-preview", String(livePreview));
     localStorage.setItem("litlabs-workspace-telemetry", String(showTelemetry));
     localStorage.setItem("litlabs-workspace-default", defaultWorkspace);
     setWorkspaceSaved(true);
+    setIsDirty(false);
+    setSaveState("saved");
     setTimeout(() => setWorkspaceSaved(false), 2000);
   }, [autoSaveDrafts, compactMode, livePreview, showTelemetry, defaultWorkspace]);
 
@@ -387,7 +469,15 @@ export default function SettingsPage() {
   return (
     <PageShell
       title="Settings"
-      subtitle="Profile, appearance, keys, and notifications — all in one place."
+      subtitle={
+        <span className="flex items-center gap-2">
+          Profile, appearance, keys, and notifications — all in one place.
+          {saveState === "unsaved" && <span className="text-[10px] font-bold" style={{ color: "#fbbf24" }}>● Unsaved changes</span>}
+          {saveState === "saving" && <span className="text-[10px] font-bold" style={{ color: "#22d3ee" }}>● Saving...</span>}
+          {saveState === "saved" && <span className="text-[10px] font-bold" style={{ color: "#4ade80" }}>● Saved</span>}
+          {saveState === "error" && <span className="text-[10px] font-bold" style={{ color: "#f87171" }}>● Error saving</span>}
+        </span>
+      }
       icon="⚙️"
       backHref="/dashboard"
     >
@@ -425,7 +515,7 @@ export default function SettingsPage() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => switchTab(tab.id)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-all"
                 style={{
                   backgroundColor: active

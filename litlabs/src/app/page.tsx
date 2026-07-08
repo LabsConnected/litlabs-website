@@ -65,6 +65,26 @@ const AGENTS = [
 // ─── Pricing tiers ────────────────────────────────────────────────────────────
 const TIERS = [
   {
+    name: "Free",
+    price: "$0",
+    period: "forever",
+    badge: null,
+    color: MUTED,
+    desc: "Try LiT OS with no credit card required.",
+    features: [
+      "500 LBC credits",
+      "LiT Chat",
+      "3 active agents",
+      "Studio access (basic)",
+      "Game Arcade (all games)",
+      "Community feed",
+      "500MB gallery storage",
+    ],
+    cta: "Start Free",
+    href: "/sign-up?plan=free",
+    highlight: false,
+  },
+  {
     name: "Starter",
     price: "$5",
     period: "per month",
@@ -72,7 +92,7 @@ const TIERS = [
     color: MUTED,
     desc: "Everything you need to get started with AI creation.",
     features: [
-      "500 starter credits",
+      "500 LBC / month",
       "LiT Chat (unlimited)",
       "3 active agents",
       "Studio access (basic)",
@@ -93,7 +113,7 @@ const TIERS = [
     desc: "For creators ready to build and ship with more power.",
     features: [
       "2,500 credits / month",
-      "All 5 core agents",
+      "All 6 core agents",
       "Workflow Studio (Flow)",
       "Terminal access",
       "Marketplace buying",
@@ -114,7 +134,7 @@ const TIERS = [
     desc: "For builders shipping real work with AI every day.",
     features: [
       "5,000 credits / month",
-      "All 10 specialist agents",
+      "All 6 core agents + specialists coming soon",
       "Advanced Studio tools",
       "SSH Terminal",
       "Marketplace buying + selling",
@@ -226,7 +246,7 @@ export default function HomePage() {
             <Link href="/sign-up"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-black transition-transform hover:scale-105 hover:brightness-110"
               style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 40px ${INDIGO}40` }}>
-              Start Free — 500 Credits <ArrowRight size={16} />
+              Start Free — 500 LBC <ArrowRight size={16} />
             </Link>
             <Link href="/sign-in"
               className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold border transition-colors hover:bg-white/5"
@@ -237,7 +257,7 @@ export default function HomePage() {
 
           {/* Stats row */}
           <div className="flex flex-wrap items-center justify-center gap-6 md:gap-10 text-center">
-            {[["5","Core AI Agents"],["25+","Free Games"],["∞","AI Conversations"],["500","Starter Credits"]].map(([v,l]) => (
+            {[["6","Core AI Agents"],["25+","Free Games"],["∞","AI Conversations"],["500","Free LBC"]].map(([v,l]) => (
               <div key={l}>
                 <div className="text-2xl font-black" style={{ color: TEXT }}>{v}</div>
                 <div className="text-[10px] uppercase tracking-widest mt-0.5" style={{ color: MUTED }}>{l}</div>
@@ -292,7 +312,7 @@ export default function HomePage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-12">
             <h2 className="text-3xl md:text-5xl font-black mb-3" style={{ color: TEXT }}>Your AI Workforce</h2>
-            <p className="text-sm" style={{ color: MUTED }}>5 core agents — each with a real job and a distinct personality.</p>
+            <p className="text-sm" style={{ color: MUTED }}>6 core agents — each with a real job and a distinct personality. More specialists coming soon.</p>
           </div>
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {AGENTS.map((a, i) => (

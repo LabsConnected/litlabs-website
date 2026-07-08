@@ -7,7 +7,7 @@ import { ArrowLeft } from "lucide-react";
 
 interface PageShellProps {
   title?: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   icon?: ReactNode;
   backHref?: string;
   className?: string;
