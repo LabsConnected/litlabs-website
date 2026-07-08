@@ -13,6 +13,9 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "check": "npm run lint && npm run typecheck && npm run build",
     "pages:build": "npx @cloudflare/next-on-pages@1",
     "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
@@ -60,6 +63,7 @@
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
+    "@vitest/coverage-v8": "4.1.9",
     "concurrently": "^10.0.3",
     "cors": "^2.8.6",
     "cross-env": "^10.1.0",
@@ -72,6 +76,7 @@
     "tailwindcss": "^4",
     "tsx": "^4.23.0",
     "typescript": "^5",
-    "uuid": "^14.0.1"
+    "uuid": "^14.0.1",
+    "vitest": "4.1.9"
   }
 }
