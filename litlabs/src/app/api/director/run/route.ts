@@ -76,7 +76,7 @@ export async function POST(req: NextRequest) {
 
   // ── Determine status ──
   const needsApproval = planSteps.some((s) => s.requiresApproval);
-  let runStatus: DirectorRunStatus = mode === "plan"
+  const runStatus: DirectorRunStatus = mode === "plan"
     ? "planned"
     : needsApproval && !autoApprove ? "waiting_approval" : "running";
 

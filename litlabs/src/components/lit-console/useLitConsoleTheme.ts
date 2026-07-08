@@ -63,6 +63,7 @@ export function useLitConsoleTheme() {
       accentPurple: "#a855f7",
       success: "#22c55e",
       danger: "#ef4444",
+      warning: "#f59e0b",
       text: textColor,
       textMuted: withAlpha(textColor, 0.65),
       textDim: withAlpha(textColor, 0.45),
