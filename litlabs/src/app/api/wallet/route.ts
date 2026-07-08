@@ -24,7 +24,8 @@ async function getHandler() {
       last_claim_date: wallet.last_claim_date,
       updated_at: wallet.updated_at,
     });
-  } catch {
+  } catch (err) {
+    console.error("[api/wallet] GET failed:", err);
     return NextResponse.json(
       { error: "Failed to fetch wallet" },
       { status: 500 },
@@ -106,6 +107,7 @@ async function postHandler(req: NextRequest) {
         { status: 400 },
       );
     }
+    console.error("[api/wallet] POST failed:", error);
     return NextResponse.json(
       { error: "Failed to claim bonus" },
       { status: 500 },
@@ -160,8 +162,8 @@ async function putHandler(req: NextRequest) {
       previousBalance: currentWallet.balance,
       change: body.amount,
     });
-  } catch {
-    // Error updating wallet:
+  } catch (err) {
+    console.error("[api/wallet] PUT failed:", err);
     return NextResponse.json(
       { error: "Failed to update wallet" },
       { status: 500 },

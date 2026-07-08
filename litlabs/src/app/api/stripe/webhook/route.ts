@@ -34,37 +34,55 @@ async function creditCoinPack(
   if (!isAdminSupabaseConfigured()) {
     return;
   }
-  try {
-    const sb = getAdminSupabase();
-    const { data: user } = await sb
-      .from("users")
-      .select("id")
-      .eq("clerk_id", clerkId)
-      .single();
-    if (!user) {
-      return;
-    }
-    const { data: wallet } = await sb
-      .from("wallets")
-      .select("balance")
-      .eq("user_id", user.id)
-      .single();
-    const currentBalance = wallet?.balance || 0;
-    const newBalance = currentBalance + coinAmount;
-    await sb
-      .from("wallets")
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-    await sb.from("transactions").insert({
+  const sb = getAdminSupabase();
+  const { data: user, error: userError } = await sb
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  if (userError || !user) {
+    // Throw so the webhook returns non-2xx and Stripe retries — the user
+    // record may not exist yet due to a race with Clerk sync, and silently
+    // returning would drop the purchased coins for good.
+    throw new Error(
+      `Cannot credit coins: user ${clerkId} not found (${userError?.message ?? "no row"})`,
+    );
+  }
+  const { data: wallet, error: walletError } = await sb
+    .from("wallets")
+    .select("balance")
+    .eq("user_id", user.id)
+    .maybeSingle();
+  // A read failure must not be treated as a zero balance — that would wipe
+  // the user's existing coins on the subsequent update.
+  if (walletError) {
+    throw new Error(`Failed to read wallet balance: ${walletError.message}`);
+  }
+  const currentBalance = wallet?.balance || 0;
+  const newBalance = currentBalance + coinAmount;
+  // Upsert so a missing wallet row is created rather than silently updating
+  // zero rows (which would drop the credited coins).
+  const { error: updateError } = await sb.from("wallets").upsert(
+    {
       user_id: user.id,
-      type: "purchase",
-      amount: coinAmount,
-      balance_after: newBalance,
-      description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
-      metadata: { stripe_session_id: sessionId },
-    });
-  } catch (err) {
-    console.error("[stripe/webhook] creditCoinPack failed:", err);
+      balance: newBalance,
+      updated_at: new Date().toISOString(),
+    },
+    { onConflict: "user_id" },
+  );
+  if (updateError) {
+    throw new Error(`Failed to credit wallet: ${updateError.message}`);
+  }
+  const { error: txError } = await sb.from("transactions").insert({
+    user_id: user.id,
+    type: "purchase",
+    amount: coinAmount,
+    balance_after: newBalance,
+    description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
+    metadata: { stripe_session_id: sessionId },
+  });
+  if (txError) {
+    throw new Error(`Failed to record purchase transaction: ${txError.message}`);
   }
 }
 
@@ -135,7 +153,7 @@ export async function POST(req: NextRequest) {
           subUserId = subMatch?.user_id ?? null;
         }
         if (subUserId) {
-          await sb.from("subscriptions").upsert(
+          const { error: upsertError } = await sb.from("subscriptions").upsert(
             {
               user_id: subUserId,
               stripe_customer_id:
@@ -155,6 +173,11 @@ export async function POST(req: NextRequest) {
             },
             { onConflict: "user_id", ignoreDuplicates: false },
           );
+          if (upsertError) {
+            throw new Error(
+              `Failed to upsert subscription: ${upsertError.message}`,
+            );
+          }
         }
         break;
       }
@@ -168,13 +191,18 @@ export async function POST(req: NextRequest) {
           .eq("stripe_subscription_id", delSub.id)
           .single();
         if (delMatch) {
-          await sb
+          const { error: delError } = await sb
             .from("subscriptions")
             .update({
               status: "canceled",
               updated_at: new Date().toISOString(),
             })
             .eq("user_id", delMatch.user_id);
+          if (delError) {
+            throw new Error(
+              `Failed to mark subscription canceled: ${delError.message}`,
+            );
+          }
         }
         break;
       }
@@ -190,13 +218,18 @@ export async function POST(req: NextRequest) {
             .eq("stripe_subscription_id", invSubId)
             .single();
           if (invMatch) {
-            await sb
+            const { error: invError } = await sb
               .from("subscriptions")
               .update({
                 status: "active",
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", invMatch.user_id);
+            if (invError) {
+              throw new Error(
+                `Failed to mark subscription active: ${invError.message}`,
+              );
+            }
           }
         }
         break;
@@ -213,13 +246,18 @@ export async function POST(req: NextRequest) {
             .eq("stripe_subscription_id", failSubId)
             .single();
           if (failMatch) {
-            await sb
+            const { error: failError } = await sb
               .from("subscriptions")
               .update({
                 status: "past_due",
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", failMatch.user_id);
+            if (failError) {
+              throw new Error(
+                `Failed to mark subscription past_due: ${failError.message}`,
+              );
+            }
           }
         }
         break;
@@ -227,6 +265,13 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
+    // Return a non-2xx so Stripe retries delivery. Previously this returned
+    // 200 and the failed side effect (e.g. coin credit) was lost silently.
+    const message = err instanceof Error ? err.message : "Unknown error";
+    return NextResponse.json(
+      { error: `Failed to process ${event.type}: ${message}` },
+      { status: 500 },
+    );
   }
 
   return NextResponse.json({ received: true });

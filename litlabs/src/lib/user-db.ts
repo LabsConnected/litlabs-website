@@ -151,8 +151,24 @@ export async function getOrCreateUser(
     return { user: null as unknown as UserProfile, isNew: false, error: msg };
   }
 
-  await db.from("user_preferences").insert({ user_id: user.id });
-  await db.from("wallets").insert({ user_id: user.id, balance: 500 });
+  const { error: prefsError } = await db
+    .from("user_preferences")
+    .insert({ user_id: user.id });
+  if (prefsError) {
+    console.error(
+      `[user-db] Failed to create preferences for user ${user.id}:`,
+      prefsError.message,
+    );
+  }
+  const { error: walletError } = await db
+    .from("wallets")
+    .insert({ user_id: user.id, balance: 500 });
+  if (walletError) {
+    console.error(
+      `[user-db] Failed to create wallet for user ${user.id}:`,
+      walletError.message,
+    );
+  }
 
   return { user: user as UserProfile, isNew: true };
 }
@@ -264,15 +280,25 @@ export async function getUserWallet(clerkId: string): Promise<Wallet> {
           .single();
         if (data) return data as Wallet;
         // Wallet missing — create with default 500 coins
-        const { data: created } = await db
+        const { data: created, error: createError } = await db
           .from("wallets")
           .insert({ user_id: user.id, balance: 500 })
           .select()
           .single();
+        if (createError) {
+          console.error(
+            `[user-db] Failed to create wallet for user ${user.id}:`,
+            createError.message,
+          );
+        }
         if (created) return created as Wallet;
       }
-    } catch {
-      // DB query failed — fall through to synthetic wallet
+    } catch (err) {
+      // DB query failed — log and fall through to synthetic wallet
+      console.error(
+        `[user-db] getUserWallet DB query failed for ${clerkId}, using fallback wallet:`,
+        err instanceof Error ? err.message : String(err),
+      );
     }
   }
 
