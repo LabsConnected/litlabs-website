@@ -92,6 +92,7 @@ async function getHandler() {
 /**
  * POST /api/settings/profile
  * Updates the user's profile in the database.
+ * Auto-creates the user record if it doesn't exist yet.
  */
 async function postHandler(req: NextRequest) {
   try {
@@ -106,31 +107,63 @@ async function postHandler(req: NextRequest) {
     }
 
     // Only allow updating certain fields
-    const allowedUpdates = {
-      ...(typeof body.name === "string" &&
-        body.name.trim() && { name: body.name.trim() }),
-      ...(typeof body.username === "string" &&
-        body.username.trim() && { username: body.username.trim() }),
-      ...(typeof body.bio === "string" && { bio: body.bio }),
-      ...(typeof body.website === "string" && { website: body.website }),
-      ...(typeof body.location === "string" && { location: body.location }),
-      ...(typeof body.avatar_url === "string" && {
-        avatar_url: body.avatar_url,
-      }),
-      ...(typeof body.cover_url === "string" && {
-        cover_url: body.cover_url,
-      }),
-      ...(typeof body.mood === "string" && { mood: body.mood }),
-      ...(Array.isArray(body.interests) && { interests: body.interests }),
-      ...(body.social_links && typeof body.social_links === "object" && { social_links: body.social_links }),
-      ...(body.music_links && typeof body.music_links === "object" && { music_links: body.music_links }),
-    };
+    const allowedUpdates: Record<string, unknown> = {};
+    if (typeof body.name === "string" && body.name.trim()) {
+      allowedUpdates.name = body.name.trim();
+    }
+    if (typeof body.username === "string" && body.username.trim()) {
+      allowedUpdates.username = body.username.trim();
+    }
+    if (typeof body.bio === "string") allowedUpdates.bio = body.bio;
+    if (typeof body.website === "string") allowedUpdates.website = body.website;
+    if (typeof body.location === "string") allowedUpdates.location = body.location;
+    if (typeof body.avatar_url === "string") allowedUpdates.avatar_url = body.avatar_url;
+    if (typeof body.cover_url === "string") allowedUpdates.cover_url = body.cover_url;
+    if (typeof body.mood === "string") allowedUpdates.mood = body.mood;
+    if (Array.isArray(body.interests)) allowedUpdates.interests = body.interests;
+    if (body.social_links && typeof body.social_links === "object") {
+      allowedUpdates.social_links = body.social_links;
+    }
+    if (body.music_links && typeof body.music_links === "object") {
+      allowedUpdates.music_links = body.music_links;
+    }
 
     if (Object.keys(allowedUpdates).length === 0) {
       return NextResponse.json(
         { error: "No valid fields to update" },
         { status: 400 },
       );
+    }
+
+    // Ensure the user exists before updating. If not, fetch from Clerk and create.
+    let user = await getUserByClerkId(clerkId);
+    if (!user) {
+      const clerkRes = await fetch(
+        `https://api.clerk.dev/v1/users/${clerkId}`,
+        {
+          headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
+        },
+      );
+      if (!clerkRes.ok) {
+        return NextResponse.json(
+          { error: "Failed to fetch user from Clerk" },
+          { status: 500 },
+        );
+      }
+      const clerkUser = await clerkRes.json();
+      const email = clerkUser.email_addresses?.[0]?.email_address || "";
+      const name =
+        clerkUser.first_name && clerkUser.last_name
+          ? `${clerkUser.first_name} ${clerkUser.last_name}`
+          : clerkUser.first_name || email.split("@")[0];
+      const result = await getOrCreateUser(clerkId, email, name);
+      user = result.user;
+      if (!user) {
+        return NextResponse.json(
+          { error: "Failed to create user", detail: result.error },
+          { status: 500 },
+        );
+      }
     }
 
     const updatedUser = await updateUserProfile(clerkId, allowedUpdates);
@@ -154,10 +187,10 @@ async function postHandler(req: NextRequest) {
         music_links: (updatedUser as { music_links?: Record<string, string> | null }).music_links ?? null,
       },
     });
-  } catch {
-    // Error updating profile:
+  } catch (err) {
+    const message = err instanceof Error ? err.message : "Unknown error";
     return NextResponse.json(
-      { error: "Failed to update profile" },
+      { error: "Failed to update profile", detail: message },
       { status: 500 },
     );
   }

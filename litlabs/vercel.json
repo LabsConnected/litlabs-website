@@ -2,7 +2,7 @@
   "buildCommand": "pnpm build",
   "outputDirectory": ".next",
   "framework": "nextjs",
-  "installCommand": "pnpm install",
+  "installCommand": "npm install --legacy-peer-deps",
   "crons": [
     {
       "path": "/api/deployments/digest",
