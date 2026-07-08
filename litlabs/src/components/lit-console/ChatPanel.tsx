@@ -394,16 +394,33 @@ export default function ChatPanel({
                     >
                       {m.content}
                       {m.attachment && (
-                        <a
-                          href={m.attachment.url}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="mt-2 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/5"
-                          style={{ borderColor: `${LC.accentCyan}40`, color: LC.accentCyan }}
-                        >
-                          <FileText size={12} />
-                          {m.attachment.name}
-                        </a>
+                        m.attachment.type.startsWith("image") ? (
+                          <a
+                            href={m.attachment.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 block overflow-hidden rounded-lg border transition-opacity hover:opacity-90"
+                            style={{ borderColor: `${LC.accentCyan}40` }}
+                          >
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img
+                              src={m.attachment.url}
+                              alt={m.attachment.name}
+                              className="max-h-64 w-auto object-contain"
+                            />
+                          </a>
+                        ) : (
+                          <a
+                            href={m.attachment.url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="mt-2 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/5"
+                            style={{ borderColor: `${LC.accentCyan}40`, color: LC.accentCyan }}
+                          >
+                            <FileText size={12} />
+                            {m.attachment.name}
+                          </a>
+                        )
                       )}
                     </div>
                     <div

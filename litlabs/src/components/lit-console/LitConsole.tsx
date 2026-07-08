@@ -633,6 +633,16 @@ export default function LitConsole() {
                     : m,
                 ),
               );
+              // Save uploaded asset to Supermemory so LiT can recall it later
+              fetch("/api/memory", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  content: `User uploaded ${file.name}: ${data.url}`,
+                  userId: user?.id || "default",
+                  metadata: { type: "attachment", name: file.name, url: data.url, mimeType: file.type },
+                }),
+              }).catch(() => {});
               askLiT(`I uploaded ${file.name}. URL: ${data.url}`);
             } else {
               throw new Error(data.error || "Upload failed");
@@ -967,18 +977,29 @@ function MemoryPanel() {
       {/* Results */}
       {results.length > 0 && (
         <div className="flex flex-col gap-1.5">
-          {results.map((r, i) => (
-            <div key={r.id || i}
-              className="flex items-start justify-between gap-2 rounded-lg border p-2.5 text-xs"
-              style={{ borderColor: LC.border, backgroundColor: LC.bgSecondary }}
-            >
-              <p className="flex-1 leading-relaxed" style={{ color: LC.text }}>{r.content}</p>
-              <button onClick={() => forget(r.id, r.content)}
-                className="shrink-0 rounded p-1 opacity-40 hover:opacity-100 transition-opacity"
-                style={{ color: "#ff4444" }}
-              ><Trash2 size={10} /></button>
-            </div>
-          ))}
+          {results.map((r, i) => {
+            const imageUrl = r.content.match(/https?:\/\/[^\s]+\.(png|jpe?g|gif|webp|svg)/i)?.[0];
+            return (
+              <div key={r.id || i}
+                className="flex flex-col gap-2 rounded-lg border p-2.5 text-xs"
+                style={{ borderColor: LC.border, backgroundColor: LC.bgSecondary }}
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <p className="flex-1 leading-relaxed" style={{ color: LC.text }}>{r.content}</p>
+                  <button onClick={() => forget(r.id, r.content)}
+                    className="shrink-0 rounded p-1 opacity-40 hover:opacity-100 transition-opacity"
+                    style={{ color: "#ff4444" }}
+                  ><Trash2 size={10} /></button>
+                </div>
+                {imageUrl && (
+                  <a href={imageUrl} target="_blank" rel="noopener noreferrer" className="block overflow-hidden rounded-lg border" style={{ borderColor: LC.border }}>
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img src={imageUrl} alt="Memory attachment" className="max-h-40 w-auto object-contain" />
+                  </a>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
       {results.length === 0 && query && !loading && (
