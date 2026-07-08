@@ -411,101 +411,11 @@ function StudioCommandCenter() {
           onToolChange={(tool) => handleToolChange(tool as StudioTool)}
         />
 
-        <main className="flex-1 min-w-0 flex flex-col">
-          {/* Workspace header — hidden for focused tools with their own command surface */}
-          <div
-            className={`items-center justify-between gap-3 px-4 sm:px-6 h-14 shrink-0 ${focusedTool ? "hidden" : "flex"}`}
-            style={{
-              backgroundColor: T.boxBg + "60",
-              borderBottom: `1px solid ${T.borderColor}18`,
-            }}
-          >
-            <div className="min-w-0">
-              <div
-                className="text-[10px] uppercase tracking-[0.25em]"
-                style={{ color: T.textMuted }}
-              >
-                {mode === "command" ? "Default" : "Mode"} · {activeTool}
-              </div>
-              <div
-                className="text-[14px] font-black truncate"
-                style={{ color: T.headerColor }}
-              >
-                {headline.title}
-              </div>
-            </div>
-            <div className="hidden md:block shrink-0">
-              <button
-                onClick={() => handleToolChange("chat")}
-                className="rounded-lg border px-3 py-1.5 text-[11px] font-black uppercase tracking-[0.18em]"
-                style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.accentColor }}
-              >
-                Ask Studio
-              </button>
-            </div>
-          </div>
-
-          {/* Quick starts — hidden for focused tools with their own command surface */}
-          <div
-            className={`px-4 sm:px-6 py-2.5 shrink-0 items-center gap-2.5 overflow-x-auto ${focusedTool ? "hidden" : "flex"}`}
-            style={{ borderBottom: `1px solid ${T.borderColor}10` }}
-          >
-            {recentActions.length > 0 ? (
-              <>
-                <span className="text-[10px] uppercase tracking-[0.2em] shrink-0" style={{ color: T.textMuted }}>Recent</span>
-                {recentActions.map((a, i) => (
-                  <button
-                    key={i}
-                    onClick={() => handleToolChange(a.tool)}
-                    className="shrink-0 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
-                    style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.textColor }}
-                  >
-                    {a.tool === "image" ? <ImageIcon size={11} style={{ color: T.accentColor }} /> :
-                     a.tool === "video" ? <Film size={11} style={{ color: "#ff6b6b" }} /> :
-                     a.tool === "audio" ? <Music size={11} style={{ color: "#9b59b6" }} /> :
-                     <Zap size={11} style={{ color: T.accentColor }} />}
-                    {a.label}
-                  </button>
-                ))}
-                <div className="w-px h-5 shrink-0" style={{ backgroundColor: T.borderColor + "30" }} />
-              </>
-            ) : null}
-            {quickstart.map((q) => (
-              <button
-                key={q.id}
-                onClick={() => handleAction(q)}
-                className="shrink-0 flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
-                style={{ backgroundColor: T.bgColor + "65", borderColor: T.borderColor + "25", color: T.textColor }}
-              >
-                <Sparkles size={11} style={{ color: T.accentColor }} />
-                {q.label}
-              </button>
-            ))}
-          </div>
-
-          {/* Active tool */}
-          <div
-            className={focusedTool ? "flex-1 min-h-0 overflow-hidden md:pb-0 pb-14" : "flex-1 min-h-0 overflow-auto p-4 sm:p-6 pb-[calc(0.75rem+56px)] md:pb-6"}
-            style={{ color: T.textColor }}
-          >
+        <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
+          {/* Active tool fills center canvas */}
+          <div className="flex-1 min-h-0 overflow-hidden">
             <ToolRouter tool={activeTool} />
           </div>
-
-          {/* Bottom command dock — only for tools without their own primary input */}
-          {!focusedTool && (
-          <div className="hidden md:block">
-          <StudioCommandDock
-            prompt={prompt}
-            onPromptChange={setPrompt}
-            onSubmit={handlePromptSubmit}
-            activeTool={activeTool}
-            onToolChange={handleToolChange}
-            recentActions={recentActions}
-            onAction={handleAction}
-            T={T}
-          />
-          </div>
-          )}
         </main>
 
         {/* Desktop inspector — hidden on mobile and collapsible */}

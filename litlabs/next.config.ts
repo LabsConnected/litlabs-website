@@ -14,7 +14,6 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: process.cwd(),
   },
-  outputFileTracingRoot: process.cwd(),
 
   experimental: {
     optimizePackageImports: [

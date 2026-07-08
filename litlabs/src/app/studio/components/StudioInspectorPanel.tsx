@@ -16,7 +16,7 @@ type InspectorTab = "artifacts" | "files" | "logs" | "skills" | "models";
 
 export default function StudioInspectorPanel() {
   const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [activeTab, setActiveTab] = useState<InspectorTab>("artifacts");
 
   const tabs: { id: InspectorTab; label: string; icon: typeof Settings }[] = [

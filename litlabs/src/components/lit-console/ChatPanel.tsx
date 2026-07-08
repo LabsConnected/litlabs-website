@@ -10,14 +10,7 @@ import {
   Copy,
   Check,
   Play,
-  Image,
-  Globe,
-  Wrench,
-  Cpu,
-  ArrowRight,
-  Plus,
 } from "lucide-react";
-import StarterActions from "./StarterActions";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
 export interface Message {
@@ -241,225 +234,60 @@ export default function ChatPanel({
         <div className="mx-auto max-w-3xl px-4 py-6">
           {isEmpty ? (
             <div className="flex h-full min-h-[60vh] flex-col items-center justify-center px-4 py-8">
-              <div className="w-full max-w-4xl space-y-8">
-                <div className="text-center space-y-4">
-                  <div className="relative mx-auto flex h-20 w-20 items-center justify-center">
-                    <div
-                      className="absolute inset-0 rounded-full blur-2xl"
-                      style={{
-                        background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)`,
-                      }}
-                    />
-                    <div
-                      className="relative flex h-16 w-16 items-center justify-center rounded-2xl border"
-                      style={{
-                        backgroundColor: LC.bgPanel,
-                        borderColor: LC.border,
-                        boxShadow: LC.shadows.glowCyan,
-                      }}
-                    >
-                      <Bot size={32} style={{ color: LC.accentCyan }} />
-                    </div>
-                  </div>
-                  <div>
-                    <h2
-                      className="text-2xl font-black tracking-tight"
-                      style={{ color: LC.text }}
-                    >
-                      LiTTree Agent
-                    </h2>
-                    <p
-                      className="text-sm font-medium"
-                      style={{ color: LC.textMuted }}
-                    >
-                      Creative Director + Builder + Operator
-                    </p>
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-2">
-                    <span
-                      className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[11px] font-bold"
-                      style={{ borderColor: `${LC.success}40`, color: LC.success }}
-                    >
-                      <span
-                        className="h-1.5 w-1.5 rounded-full"
-                        style={{ backgroundColor: LC.success }}
-                      />
-                      Online
-                    </span>
-                    <span
-                      className="rounded-full border px-2.5 py-1 text-[11px] font-bold"
-                      style={{ borderColor: LC.borderSubtle, color: LC.textDim }}
-                    >
-                      Ready to build
-                    </span>
-                  </div>
-                </div>
-
-                <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                  {[
-                    {
-                      id: "image",
-                      title: "Image Studio",
-                      desc: "Create product shots, brand art, covers, thumbnails.",
-                      prompt: "Generate a cyberpunk album cover with neon skyline and rain",
-                      icon: Image,
-                      color: "#e879f9",
-                    },
-                    {
-                      id: "build",
-                      title: "App Builder",
-                      desc: "Build websites, dashboards, components, and flows.",
-                      prompt: "Build a landing page for my AI agent workspace",
-                      icon: Globe,
-                      color: LC.accentCyan,
-                    },
-                    {
-                      id: "code",
-                      title: "Code Fixer",
-                      desc: "Debug, review, refactor, and ship production code.",
-                      prompt: "Fix my React component that is not re-rendering",
-                      icon: Wrench,
-                      color: LC.accentOrange,
-                    },
-                    {
-                      id: "agent",
-                      title: "Agent Forge",
-                      desc: "Create custom agents, run workflows, and orchestrate tasks.",
-                      prompt: "Create an agent that reviews my code",
-                      icon: Cpu,
-                      color: "#a78bfa",
-                    },
-                  ].map((m) => {
-                    const Icon = m.icon;
-                    return (
-                      <button
-                        key={m.id}
-                        onClick={() => onSend(m.prompt)}
-                        className="group relative flex flex-col items-start gap-3 overflow-hidden rounded-2xl border p-5 text-left transition hover:scale-[1.01]"
-                        style={{
-                          backgroundColor: LC.bgPanel,
-                          borderColor: LC.border,
-                        }}
-                      >
-                        <div
-                          className="absolute inset-x-0 top-0 h-0.5 rounded-t-2xl"
-                          style={{
-                            background: `linear-gradient(90deg, ${m.color}, transparent 85%)`,
-                          }}
-                        />
-                        <div className="flex w-full items-start justify-between">
-                          <div
-                            className="flex h-10 w-10 items-center justify-center rounded-xl border"
-                            style={{
-                              backgroundColor: `${m.color}10`,
-                              borderColor: `${m.color}30`,
-                              color: m.color,
-                            }}
-                          >
-                            <Icon size={20} />
-                          </div>
-                          <ArrowRight
-                            size={16}
-                            className="transition-transform group-hover:translate-x-0.5"
-                            style={{ color: m.color }}
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <div
-                            className="text-sm font-black"
-                            style={{ color: LC.text }}
-                          >
-                            {m.title}
-                          </div>
-                          <div
-                            className="text-[11px] leading-relaxed"
-                            style={{ color: LC.textMuted }}
-                          >
-                            {m.desc}
-                          </div>
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-
-                <div
-                  className="rounded-2xl border p-5"
-                  style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
-                >
-                  <div className="mb-4 flex items-center justify-between">
-                    <div
-                      className="text-xs font-black"
-                      style={{ color: LC.text }}
-                    >
-                      Mission Queue
-                    </div>
-                    <button
-                      className="flex items-center gap-1 rounded-full border px-2.5 py-1 text-[11px] font-bold"
-                      style={{
-                        backgroundColor: LC.bgSecondary,
-                        color: LC.textMuted,
-                        borderColor: LC.border,
-                      }}
-                    >
-                      <Plus size={12} />
-                      Add
-                    </button>
-                  </div>
+              <div className="w-full max-w-2xl space-y-6 text-center">
+                <div className="relative mx-auto flex h-16 w-16 items-center justify-center">
                   <div
-                    className="rounded-xl border p-4 text-center"
+                    className="absolute inset-0 rounded-full blur-2xl"
                     style={{
-                      backgroundColor: LC.bgSecondary,
-                      borderColor: LC.borderSubtle,
+                      background: `radial-gradient(circle, ${LC.accentCyan}25, transparent 70%)`,
+                    }}
+                  />
+                  <div
+                    className="relative flex h-12 w-12 items-center justify-center rounded-xl border"
+                    style={{
+                      backgroundColor: LC.bgPanel,
+                      borderColor: LC.border,
+                      boxShadow: LC.shadows.glowCyan,
                     }}
                   >
-                    <div
-                      className="text-sm font-bold"
-                      style={{ color: LC.text }}
-                    >
-                      LiTTree Agent is ready
-                    </div>
-                    <div
-                      className="mx-auto mt-1 max-w-md text-[11px]"
-                      style={{ color: LC.textMuted }}
-                    >
-                      No active missions. Pick a capability above or type a
-                      command below.
-                    </div>
+                    <Bot size={24} style={{ color: LC.accentCyan }} />
                   </div>
-                  <div className="mt-4 flex flex-wrap items-center justify-center gap-1">
-                    {["Inspect", "Plan", "Execute", "Review", "Save"].map(
-                      (step, i, arr) => (
-                        <div key={step} className="flex items-center gap-1">
-                          <div
-                            className="flex h-5 w-5 items-center justify-center rounded-full text-[9px] font-black"
-                            style={{
-                              backgroundColor: LC.borderSubtle,
-                              color: LC.textDim,
-                            }}
-                          >
-                            {i + 1}
-                          </div>
-                          <div
-                            className="text-[10px] font-bold"
-                            style={{ color: LC.textDim }}
-                          >
-                            {step}
-                          </div>
-                          {i < arr.length - 1 && (
-                            <div
-                              className="mx-1 h-px w-3"
-                              style={{ backgroundColor: LC.borderSubtle }}
-                            />
-                          )}
-                        </div>
-                      ),
-                    )}
-                  </div>
+                </div>
+                <div>
+                  <h2
+                    className="text-xl font-black tracking-tight"
+                    style={{ color: LC.text }}
+                  >
+                    LiTTree Agent
+                  </h2>
+                  <p
+                    className="text-xs font-medium"
+                    style={{ color: LC.textMuted }}
+                  >
+                    Creative Director + Builder + Operator
+                  </p>
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  <StarterActions onSelect={onSend} />
+                  {[
+                    "Generate a hero image",
+                    "Build a landing page",
+                    "Fix my code",
+                    "Create an agent",
+                  ].map((prompt) => (
+                    <button
+                      key={prompt}
+                      onClick={() => onSend(prompt)}
+                      className="rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                      style={{
+                        backgroundColor: LC.bgPanel,
+                        borderColor: LC.border,
+                        color: LC.textMuted,
+                      }}
+                    >
+                      {prompt}
+                    </button>
+                  ))}
                 </div>
               </div>
             </div>
