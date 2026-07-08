@@ -1055,6 +1055,15 @@ function MemoryPanel() {
 function HoloView({ url, title }: { url: string; title: string }) {
   const LC = useLitConsoleTheme();
   const isExternal = url.startsWith("http://") || url.startsWith("https://");
+  const isSelfHosted = typeof window !== "undefined" && (url === window.location.origin || url === "https://litlabs.net" || url === window.location.origin + "/");
+  const [loadError, setLoadError] = useState(false);
+
+  useEffect(() => {
+    setLoadError(false);
+    const t = setTimeout(() => setLoadError(true), 4000);
+    return () => clearTimeout(t);
+  }, [url]);
+
   return (
     <div className="flex h-full w-full flex-col gap-2">
       <div className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
@@ -1062,19 +1071,44 @@ function HoloView({ url, title }: { url: string; title: string }) {
           <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: LC.accentCyan, boxShadow: `0 0 8px ${LC.accentCyan}` }} />
           HOLO · {title}
         </div>
-        {isExternal && (
-          <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold" style={{ color: LC.textMuted }}>
-            Open ↗
-          </a>
-        )}
+        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold" style={{ color: LC.textMuted }}>
+          Open ↗
+        </a>
       </div>
-      <div className="flex-1 overflow-hidden rounded-xl border" style={{ borderColor: `${LC.accentCyan}30`, boxShadow: `0 0 20px ${LC.accentCyan}08` }}>
-        {isExternal ? (
-          <iframe src={url} className="h-full w-full border-0" style={{ backgroundColor: "#fff" }} title={title} />
+      <div className="relative flex-1 overflow-hidden rounded-xl border" style={{ borderColor: `${LC.accentCyan}30`, boxShadow: `0 0 20px ${LC.accentCyan}08` }}>
+        {isExternal && !isSelfHosted && !loadError ? (
+          <iframe
+            src={url}
+            className="h-full w-full border-0"
+            style={{ backgroundColor: "#fff" }}
+            title={title}
+            onLoad={() => setLoadError(false)}
+            sandbox="allow-scripts allow-same-origin allow-popups"
+          />
         ) : (
           <div className="flex h-full flex-col items-center justify-center p-8 text-center" style={{ color: LC.textMuted }}>
-            <p>Internal content view</p>
-            <p className="mt-2 text-xs opacity-50">{url}</p>
+            <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center">
+              <div className="absolute inset-0 rounded-full blur-xl" style={{ background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)` }} />
+              <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border" style={{ backgroundColor: `${LC.bgPanel}cc`, borderColor: LC.accentCyan, boxShadow: `0 0 24px ${LC.accentCyan}30` }}>
+                <ExternalLink size={24} style={{ color: LC.accentCyan }} />
+              </div>
+            </div>
+            <p className="text-sm font-bold" style={{ color: LC.text }}>Holo view</p>
+            <p className="mt-1 max-w-xs text-xs" style={{ color: LC.textMuted }}>
+              {isSelfHosted
+                ? "This site can't be embedded inside itself. Open it in a new tab to view it through the Holo lens."
+                : "Some sites block embedding for security. If the page doesn't appear, open it in a new tab."}
+            </p>
+            <a
+              href={url}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="mt-4 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-black"
+              style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+            >
+              Open {title} <ExternalLink size={12} />
+            </a>
+            <p className="mt-3 break-all text-[10px] opacity-50" style={{ color: LC.textMuted }}>{url}</p>
           </div>
         )}
       </div>
