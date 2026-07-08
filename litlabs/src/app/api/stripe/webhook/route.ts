@@ -48,41 +48,18 @@ async function creditCoinPack(
       `Cannot credit coins: user ${clerkId} not found (${userError?.message ?? "no row"})`,
     );
   }
-  const { data: wallet, error: walletError } = await sb
-    .from("wallets")
-    .select("balance")
-    .eq("user_id", user.id)
-    .maybeSingle();
-  // A read failure must not be treated as a zero balance — that would wipe
-  // the user's existing coins on the subsequent update.
-  if (walletError) {
-    throw new Error(`Failed to read wallet balance: ${walletError.message}`);
-  }
-  const currentBalance = wallet?.balance || 0;
-  const newBalance = currentBalance + coinAmount;
-  // Upsert so a missing wallet row is created rather than silently updating
-  // zero rows (which would drop the credited coins).
-  const { error: updateError } = await sb.from("wallets").upsert(
-    {
-      user_id: user.id,
-      balance: newBalance,
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: "user_id" },
-  );
-  if (updateError) {
-    throw new Error(`Failed to credit wallet: ${updateError.message}`);
-  }
-  const { error: txError } = await sb.from("transactions").insert({
-    user_id: user.id,
-    type: "purchase",
-    amount: coinAmount,
-    balance_after: newBalance,
-    description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
-    metadata: { stripe_session_id: sessionId },
+
+  // Credit atomically and idempotently in a single DB transaction. This guards
+  // against duplicate credits when Stripe retries a webhook after a partial
+  // failure: a read-then-write in application code would re-read the
+  // already-incremented balance on retry and credit the coins twice.
+  const { error: creditError } = await sb.rpc("credit_coin_pack", {
+    p_user_id: user.id,
+    p_coin_amount: coinAmount,
+    p_stripe_session_id: sessionId,
   });
-  if (txError) {
-    throw new Error(`Failed to record purchase transaction: ${txError.message}`);
+  if (creditError) {
+    throw new Error(`Failed to credit coin pack: ${creditError.message}`);
   }
 }
 

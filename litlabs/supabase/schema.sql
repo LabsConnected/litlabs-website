@@ -158,6 +158,9 @@ create index if not exists idx_user_preferences_user_id on public.user_preferenc
 create index if not exists idx_subscriptions_user_id on public.subscriptions(user_id);
 create index if not exists idx_wallets_user_id on public.wallets(user_id);
 create index if not exists idx_transactions_user_id on public.transactions(user_id);
+create unique index if not exists uniq_transactions_stripe_session
+  on public.transactions ((metadata->>'stripe_session_id'))
+  where type = 'purchase' and metadata->>'stripe_session_id' is not null;
 create index if not exists idx_posts_user_id on public.posts(user_id);
 create index if not exists idx_posts_created_at on public.posts(created_at desc);
 create index if not exists idx_post_likes_post_id on public.post_likes(post_id);
@@ -192,6 +195,56 @@ begin
   where id = post_id;
 end;
 $$ language plpgsql;
+-- Idempotent, atomic Stripe coin-pack crediting (see migration
+-- 20260708210000_credit_coin_pack_idempotent.sql). Safe to call repeatedly for
+-- the same p_stripe_session_id.
+create or replace function public.credit_coin_pack(
+  p_user_id uuid,
+  p_coin_amount integer,
+  p_stripe_session_id text
+)
+returns integer
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_new_balance integer;
+begin
+  select w.balance into v_new_balance
+  from public.wallets w
+  where w.user_id = p_user_id;
+
+  if exists (
+    select 1
+    from public.transactions t
+    where t.type = 'purchase'
+      and t.metadata->>'stripe_session_id' = p_stripe_session_id
+  ) then
+    return coalesce(v_new_balance, 0);
+  end if;
+
+  insert into public.wallets (user_id, balance, updated_at)
+  values (p_user_id, 500 + p_coin_amount, now())
+  on conflict (user_id)
+  do update set balance = public.wallets.balance + p_coin_amount,
+                updated_at = now()
+  returning balance into v_new_balance;
+
+  insert into public.transactions (user_id, type, amount, balance_after, description, metadata)
+  values (
+    p_user_id,
+    'purchase',
+    p_coin_amount,
+    v_new_balance,
+    'Purchased ' || p_coin_amount || ' LiTBit Coins via Stripe',
+    jsonb_build_object('stripe_session_id', p_stripe_session_id)
+  );
+
+  return v_new_balance;
+end;
+$$;
+grant execute on function public.credit_coin_pack(uuid, integer, text) to service_role;
 -- ============================================
 -- Deployments table (for LiTBiT deploy pipeline tracking)
 -- ============================================
