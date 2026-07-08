@@ -28,6 +28,9 @@ import {
   Settings,
   Gamepad2,
   Images,
+  Database,
+  Radio,
+  Rocket,
 } from "lucide-react";
 
 const QUICK_ACTIONS = [
@@ -71,6 +74,117 @@ const USAGE_STATS = [
   { label: "Chat messages", value: "47", change: "+9", color: "#22d3ee" },
   { label: "Social posts", value: "3", change: "+1", color: "#fb923c" },
 ];
+
+function LiveCommandCore({ colors: T }: { colors: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  const signals = [
+    { label: "Memory roots", value: "syncing", icon: Database, color: "#49FF9E" },
+    { label: "Agent runtime", value: "3 online", icon: Bot, color: "#2DF6FF" },
+    { label: "Deploy orbit", value: "ready", icon: Rocket, color: "#FF8A1C" },
+  ];
+
+  return (
+    <section
+      className="relative mb-6 overflow-hidden rounded-3xl border p-4 md:mb-8 md:p-5"
+      style={{
+        background:
+          "linear-gradient(135deg, rgba(10,14,18,0.94), rgba(5,5,7,0.86)), radial-gradient(circle at 50% 35%, rgba(45,246,255,0.18), transparent 42%)",
+        borderColor: `${T.borderColor}35`,
+        boxShadow: "0 24px 80px rgba(0,0,0,0.28)",
+      }}
+    >
+      <div
+        className="pointer-events-none absolute inset-0 opacity-40"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(45,246,255,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(45,246,255,0.06) 1px, transparent 1px)",
+          backgroundSize: "28px 28px",
+        }}
+      />
+      <div
+        className="pointer-events-none absolute left-1/2 top-0 h-full w-px -translate-x-1/2"
+        style={{ background: "linear-gradient(180deg, transparent, rgba(45,246,255,0.7), rgba(255,138,28,0.55), transparent)" }}
+      />
+
+      <div className="relative grid gap-4 md:grid-cols-[1.1fr_0.9fr] md:items-center">
+        <div className="min-w-0">
+          <div className="mb-2 flex items-center gap-2 text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: "#FF8A1C" }}>
+            <Radio className="h-3.5 w-3.5 animate-pulse" />
+            Live Command Core
+          </div>
+          <h2 className="text-xl font-black leading-tight md:text-2xl" style={{ color: T.textColor }}>
+            LiTTree system is online
+          </h2>
+          <p className="mt-1 max-w-xl text-xs leading-relaxed md:text-sm" style={{ color: T.textMuted }}>
+            Memory, agents, builds, and deployments should read as one living operating system.
+          </p>
+
+          <div className="mt-4 grid gap-2 min-[430px]:grid-cols-3">
+            {signals.map((signal) => {
+              const Icon = signal.icon;
+              return (
+                <div
+                  key={signal.label}
+                  className="rounded-2xl border p-3"
+                  style={{
+                    backgroundColor: "rgba(10,16,22,0.72)",
+                    borderColor: `${signal.color}30`,
+                    boxShadow: `inset 0 0 18px ${signal.color}10`,
+                  }}
+                >
+                  <div className="mb-2 flex items-center justify-between gap-2">
+                    <Icon className="h-4 w-4" style={{ color: signal.color }} />
+                    <span className="h-1.5 w-1.5 rounded-full animate-pulse" style={{ backgroundColor: signal.color, boxShadow: `0 0 10px ${signal.color}` }} />
+                  </div>
+                  <div className="text-[10px] font-black uppercase tracking-[0.12em]" style={{ color: T.textMuted }}>
+                    {signal.label}
+                  </div>
+                  <div className="mt-0.5 text-sm font-black" style={{ color: signal.color }}>
+                    {signal.value}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="relative mx-auto flex aspect-square w-full max-w-[260px] items-center justify-center">
+          <div className="absolute inset-2 rounded-full border border-cyan-300/15" />
+          <div className="absolute inset-8 rounded-full border border-orange-400/15" />
+          <div className="absolute left-1/2 top-4 h-[72%] w-1 -translate-x-1/2 rounded-full bg-gradient-to-b from-cyan-300 via-emerald-300 to-orange-400 opacity-80 shadow-[0_0_28px_rgba(45,246,255,0.45)]" />
+          <div className="absolute left-[27%] top-[30%] h-px w-[46%] rotate-[-24deg] bg-cyan-300/50" />
+          <div className="absolute left-[27%] top-[42%] h-px w-[46%] rotate-[24deg] bg-orange-400/50" />
+          <div className="absolute bottom-[20%] left-[20%] h-px w-[60%] rotate-[8deg] bg-emerald-300/45" />
+          <div
+            className="relative flex h-24 w-24 items-center justify-center rounded-full border text-3xl font-black"
+            style={{
+              background: "radial-gradient(circle, rgba(45,246,255,0.22), rgba(10,16,22,0.9) 62%)",
+              borderColor: "rgba(45,246,255,0.45)",
+              color: "#2DF6FF",
+              boxShadow: "0 0 34px rgba(45,246,255,0.28), inset 0 0 26px rgba(255,138,28,0.16)",
+            }}
+          >
+            LiT
+          </div>
+          {["AI", "Build", "Ship"].map((label, index) => (
+            <div
+              key={label}
+              className="absolute rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-wider"
+              style={{
+                top: index === 0 ? "6%" : index === 1 ? "50%" : "76%",
+                left: index === 0 ? "8%" : index === 1 ? "76%" : "16%",
+                color: index === 1 ? "#FF8A1C" : "#2DF6FF",
+                backgroundColor: "rgba(5,5,7,0.8)",
+                borderColor: index === 1 ? "rgba(255,138,28,0.35)" : "rgba(45,246,255,0.35)",
+              }}
+            >
+              {label}
+            </div>
+          ))}
+        </div>
+      </div>
+    </section>
+  );
+}
 
 export default function DashboardPage() {
   const { resolvedColors: T } = useTheme();
@@ -186,6 +300,8 @@ export default function DashboardPage() {
             })}
           </div>
         </div>
+
+        <LiveCommandCore colors={T} />
 
         {/* Top cards */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 md:gap-4 mb-6 md:mb-8">
