@@ -72,6 +72,16 @@ export default function LitConsole() {
     const state = { messages, activeAgent, activeModel, input };
     localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
   }, [messages, activeAgent, activeModel, input]);
+
+  const handleNewChat = useCallback(() => {
+    setMessages([]);
+    setInput("");
+    if (typeof window !== "undefined") {
+      try {
+        localStorage.removeItem(CHAT_STATE_KEY);
+      } catch {}
+    }
+  }, []);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingRun, setPendingRun] = useState<{
     runId: string | null;
@@ -549,6 +559,7 @@ export default function LitConsole() {
                 if (text === "/run") return handleRun();
                 handleSend(text);
               }}
+              onNewChat={handleNewChat}
               loading={loading}
               plan={
                 pendingRun
@@ -594,6 +605,7 @@ export default function LitConsole() {
               if (text === "/run") return handleRun();
               handleSend(text);
             }}
+            onNewChat={handleNewChat}
             loading={loading}
             plan={
               pendingRun

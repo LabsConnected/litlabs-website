@@ -19,6 +19,8 @@ import {
   Palette,
   Image,
   Wand2,
+  Plus,
+  RefreshCw,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
@@ -63,9 +65,33 @@ const PARTICLES = Array.from({ length: 18 }).map((_, i) => ({
   delay: (i * 7) % 5,
 }));
 
+const PROMPT_SUGGESTIONS = [
+  "Generate a hero image",
+  "Build a landing page",
+  "Fix my code",
+  "Create an agent",
+  "Write a blog post",
+  "Design a logo concept",
+  "Build a todo app",
+  "Create a dashboard",
+  "Explain React hooks",
+  "Make a pricing card",
+  "Generate a music loop",
+  "Create a login form",
+  "Build a portfolio site",
+  "Write a product description",
+  "Create a chat component",
+  "Generate a video script",
+  "Build a navigation bar",
+  "Create a settings panel",
+  "Write a Twitter thread",
+  "Make a 3D skybox prompt",
+];
+
 interface ChatPanelProps {
   messages: Message[];
   onSend: (text: string) => void;
+  onNewChat?: () => void;
   loading?: boolean;
   onApprove?: (command: string) => void;
   plan?: {
@@ -327,6 +353,7 @@ function GenerateImageTool({ m, theme }: { m: Message; theme: Theme }) {
 export default function ChatPanel({
   messages,
   onSend,
+  onNewChat,
   loading,
   onApprove,
   plan,
@@ -344,6 +371,7 @@ export default function ChatPanel({
   const [wallpaper, setWallpaper] = useState<string>("none");
   const [wallpaperOpen, setWallpaperOpen] = useState(false);
   const [demoMode, setDemoMode] = useState(false);
+  const [promptSeed, setPromptSeed] = useState(0);
   const [revealed, setRevealed] = useState<Record<string, number>>(() => {
     const latest = [...messages].reverse().find((m) => m.role === "lit");
     const init: Record<string, number> = {};
@@ -545,7 +573,17 @@ export default function ChatPanel({
             </span>
           )}
         </div>
-        <div className="relative">
+        <div className="relative flex items-center gap-2">
+          {onNewChat && (
+            <button
+              onClick={onNewChat}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/5"
+              style={{ color: LC.textMuted, border: `1px solid ${LC.border}` }}
+              title="Start a new chat"
+            >
+              <Plus size={13} /> New
+            </button>
+          )}
           <button
             onClick={() => setWallpaperOpen((v) => !v)}
             className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/5"
@@ -633,25 +671,37 @@ export default function ChatPanel({
                 </div>
 
                 <div className="flex flex-wrap items-center justify-center gap-2">
-                  {[
-                    "Generate a hero image",
-                    "Build a landing page",
-                    "Fix my code",
-                    "Create an agent",
-                  ].map((prompt) => (
-                    <button
-                      key={prompt}
-                      onClick={() => onSend(prompt)}
-                      className="rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
-                      style={{
-                        backgroundColor: LC.bgPanel,
-                        borderColor: LC.border,
-                        color: LC.textMuted,
-                      }}
-                    >
-                      {prompt}
-                    </button>
-                  ))}
+                  {PROMPT_SUGGESTIONS
+                    .slice(promptSeed % PROMPT_SUGGESTIONS.length)
+                    .concat(PROMPT_SUGGESTIONS.slice(0, promptSeed % PROMPT_SUGGESTIONS.length))
+                    .slice(0, 4)
+                    .map((prompt) => (
+                      <button
+                        key={prompt}
+                        onClick={() => onSend(prompt)}
+                        className="rounded-full border px-3 py-1.5 text-[11px] font-bold transition-all hover:scale-[1.02]"
+                        style={{
+                          backgroundColor: LC.bgPanel,
+                          borderColor: LC.border,
+                          color: LC.textMuted,
+                        }}
+                      >
+                        {prompt}
+                      </button>
+                    ))}
+                  <button
+                    onClick={() => setPromptSeed((s) => (s + 1) % PROMPT_SUGGESTIONS.length)}
+                    className="flex items-center gap-1 rounded-full border px-2 py-1.5 text-[10px] font-bold transition-all hover:scale-[1.02]"
+                    style={{
+                      backgroundColor: `${LC.accentCyan}12`,
+                      borderColor: LC.accentCyan,
+                      color: LC.accentCyan,
+                    }}
+                    title="More ideas"
+                  >
+                    <RefreshCw size={11} />
+                    More
+                  </button>
                 </div>
               </div>
             </div>
