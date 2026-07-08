@@ -46,6 +46,9 @@ interface CommandDockProps {
   onVoice?: () => void;
   onVoiceStop?: () => void;
   voiceState?: "idle" | "listening" | "thinking" | "speaking" | "error";
+  /* Run Execution Loop support */
+  onRun?: (text: string) => void;
+  isRunning?: boolean;
 }
 
 const AGENTS = [

@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useCallback, useRef, useEffect } from "react";
-import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
+import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot, Sparkles, Check, X } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock from "./CommandDock";
 import DrawerPanel from "./DrawerPanel";
+import ApprovalCard from "./ApprovalCard";
+import RunTimeline from "./RunTimeline";
 import {
   LiTTreeTerminal,
   LiTTreeTerminalHandle,
@@ -16,8 +18,10 @@ import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
+import HoloPanel from "./HoloPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
 import { actionFromIntent, actionMessage, executeAction } from "@/lib/lit-actions";
+import type { DirectorStep, DirectorRunStatus, DirectorRunResponse, ExecuteStepResponse } from "@/lib/director/types";
 
 const initialContext: LiTContext = {
   route: "/studio?tool=chat",
@@ -56,7 +60,20 @@ export default function LitConsole() {
       }>;
     };
   } | null>(null);
+  // Director Run Execution Loop state
+  const [activeRun, setActiveRun] = useState<{
+    runId: string;
+    goal: string;
+    steps: DirectorStep[];
+    status: DirectorRunStatus;
+    currentStepId?: string;
+  } | null>(null);
+  const [approvalStep, setApprovalStep] = useState<DirectorStep | null>(null);
+  const [isRunning, setIsRunning] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
+  const [holoOpen, setHoloOpen] = useState(false);
+  const [holoUrl, setHoloUrl] = useState("");
+  const [holoTitle, setHoloTitle] = useState("");
   const LC = useLitConsoleTheme();
   const termRef = useRef<LiTTreeTerminalHandle>(null);
 
@@ -148,7 +165,11 @@ export default function LitConsole() {
           a.type === "navigate" && a.url,
       );
       if (navAction?.url) {
-        setTimeout(() => router.push(navAction.url!), 600);
+        setTimeout(() => {
+          setHoloUrl(navAction.url!);
+          setHoloTitle(navAction.url!.split("/").pop() || "Holo View");
+          setHoloOpen(true);
+        }, 600);
       }
     } catch (err) {
       setMessages((prev) =>
@@ -249,7 +270,11 @@ export default function LitConsole() {
             content: navMsg,
           },
         ]);
-        setTimeout(() => router.push(intent.route!.path), 800);
+        setTimeout(() => {
+          setHoloUrl(intent.route!.path);
+          setHoloTitle(intent.route!.label || "Holo View");
+          setHoloOpen(true);
+        }, 800);
         setLoading(false);
         return;
       }
@@ -308,82 +333,98 @@ export default function LitConsole() {
     speak(lastLit.content.replace(/\n/g, " ").slice(0, 250));
   }, [messages, speak]);
 
-  const handleRun = useCallback(
-    async (overrideText?: string) => {
-      const text = (overrideText ?? input).trim();
-      if (!text || loading) return;
-      setMessages((prev) => [
-        ...prev,
-        {
-          id: Math.random().toString(36).slice(2),
-          role: "user",
-          content: `${text} /run`,
-        },
-      ]);
-      setLoading(true);
-      setInput("");
-      try {
-        const res = await fetch("/api/plan", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ intent: text }),
-        });
-        const payload = await res.json();
-        if (!payload.ok) throw new Error(payload.error || "Planning failed");
-        setPendingRun(payload);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(36).slice(2),
-            role: "system",
-            content: `Planned: ${payload.plan.goal}`,
-          },
-        ]);
-        if (
-          payload.plan.steps.some(
-            (s: { needs_approval?: boolean }) => s.needs_approval,
-          )
-        ) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              id: Math.random().toString(36).slice(2),
-              role: "system",
-              content: "Plan includes steps requiring approval.",
-            },
-          ]);
-        }
-      } catch (err) {
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(36).slice(2),
-            role: "lit",
-            content: err instanceof Error ? err.message : "Planning failed.",
-          },
-        ]);
-      } finally {
-        setLoading(false);
+  // ── Director Run Execution Loop ──────────────────────────────────
+  const executeDirectorStep = useCallback(async (runId: string, stepId: string) => {
+    setActiveRun((prev) => prev ? { ...prev, currentStepId: stepId, status: "running" } : prev);
+    setApprovalStep(null);
+    setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "tool", content: "Executing step...", meta: { tool: "think", status: "running" } }]);
+    try {
+      const res = await fetch("/api/director/execute-step", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ runId, stepId }),
+      });
+      const data: ExecuteStepResponse & { ok: boolean } = await res.json();
+      if (!data.ok) throw new Error(data.step?.error || "Step execution failed");
+      setActiveRun((prev) => {
+        if (!prev) return prev;
+        return {
+          ...prev, status: data.runStatus, currentStepId: data.nextAction?.id || undefined,
+          steps: prev.steps.map((s) => s.id === stepId ? { ...s, status: data.step.status, result: data.step.result, error: data.step.error } : s),
+        };
+      });
+      setMessages((prev) => prev.map((m) => m.meta?.tool === "think" ? { ...m, meta: { ...m.meta, status: "done" } } : m));
+      const stepResult = data.step.result ? data.step.result.slice(0, 500) : "No output";
+      setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `✅ ${data.step.title}: ${stepResult}` }]);
+      if (data.nextAction?.requiresApproval) {
+        setApprovalStep(data.nextAction);
+        setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `Step "${data.nextAction!.title}" requires approval.` }]);
+      } else if (data.nextAction) {
+        executeDirectorStep(runId, data.nextAction.id);
+      } else if (data.runStatus === "completed") {
+        setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "lit", content: "Run completed successfully. All steps finished." }]);
+      } else if (data.runStatus === "failed") {
+        setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "lit", content: "Run failed. Check step details for errors." }]);
       }
-    },
-    [input, loading],
-  );
+    } catch (err) {
+      setMessages((prev) => prev.map((m) => m.meta?.tool === "think" ? { ...m, meta: { ...m.meta, status: "error" } } : m));
+      setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "lit", content: err instanceof Error ? err.message : "Step execution failed." }]);
+      setActiveRun((prev) => prev ? { ...prev, status: "failed" } : prev);
+    }
+  }, []);
 
+  const handleDirectorRun = useCallback(async (text: string) => {
+    if (!text.trim() || isRunning) return;
+    setIsRunning(true); setActiveRun(null); setApprovalStep(null);
+    setMessages((prev) => [...prev,
+      { id: Math.random().toString(36).slice(2), role: "user", content: text },
+      { id: Math.random().toString(36).slice(2), role: "tool", content: "Director is planning...", meta: { tool: "think", status: "running" } },
+    ]);
+    setInput("");
+    try {
+      const res = await fetch("/api/director/run", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: text, mode: "act", autoApprove: false }),
+      });
+      const data = await res.json();
+      if (!data.ok) throw new Error(data.error || "Director planning failed");
+      const run: DirectorRunResponse = data;
+      setActiveRun({ runId: run.runId, goal: run.plan.goal, steps: run.plan.steps, status: run.status });
+      setMessages((prev) => prev.map((m) => m.meta?.tool === "think" ? { ...m, meta: { ...m.meta, status: "done" } } : m));
+      if (run.nextAction?.requiresApproval) {
+        setApprovalStep(run.nextAction);
+        setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `Step "${run.nextAction!.title}" requires approval.` }]);
+      } else if (run.nextAction) {
+        executeDirectorStep(run.runId, run.nextAction.id);
+      }
+    } catch (err) {
+      setMessages((prev) => prev.map((m) => m.meta?.tool === "think" ? { ...m, meta: { ...m.meta, status: "error" } } : m));
+      setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "lit", content: err instanceof Error ? err.message : "Director run failed." }]);
+    } finally { setIsRunning(false); }
+  }, [isRunning, executeDirectorStep]);
+
+  const handleApproveStep = useCallback((stepId: string) => {
+    if (!activeRun) return;
+    setActiveRun((prev) => prev ? { ...prev, steps: prev.steps.map((s) => s.id === stepId ? { ...s, status: "approved" } : s) } : prev);
+    setApprovalStep(null);
+    executeDirectorStep(activeRun.runId, stepId);
+  }, [activeRun, executeDirectorStep]);
+
+  const handleRejectStep = useCallback((stepId: string) => {
+    if (!activeRun) return;
+    setActiveRun((prev) => prev ? { ...prev, steps: prev.steps.map((s) => s.id === stepId ? { ...s, status: "skipped" } : s) } : prev);
+    setApprovalStep(null);
+    setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `Skipped step.` }]);
+    const nextStep = activeRun.steps.find((s) => s.status === "pending" && s.id !== stepId);
+    if (nextStep) executeDirectorStep(activeRun.runId, nextStep.id);
+  }, [activeRun, executeDirectorStep]);
+
+  // Legacy pending command approval (used by /api/jarvis/think responses)
   const approveCommand = useCallback((command: string) => {
     if (!command) return;
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: Math.random().toString(36).slice(2),
-        role: "system",
-        content: `Running: \`${command}\``,
-      },
-    ]);
+    setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `Running: \`${command}\`` }]);
     setDrawerOpen(true);
     setDrawerTab("terminal");
-    setTimeout(() => {
-      termRef.current?.runCommand(command);
-    }, 300);
+    setTimeout(() => termRef.current?.runCommand(command), 300);
     setPendingCommand(null);
   }, []);
 
@@ -391,6 +432,15 @@ export default function LitConsole() {
     if (!pendingCommand) return;
     approveCommand(pendingCommand);
   }, [approveCommand, pendingCommand]);
+
+  const handleRun = useCallback(
+    async (overrideText?: string) => {
+      const text = (overrideText ?? input).trim();
+      if (!text || loading) return;
+      handleDirectorRun(text);
+    },
+    [input, loading, handleDirectorRun],
+  );
 
   const handleAgentChange = useCallback((agent: string) => {
     setActiveAgent(agent);
@@ -509,11 +559,38 @@ export default function LitConsole() {
         </div>
       </div>
 
+      {/* ── Director Run Timeline ── */}
+      {activeRun && (
+        <div className="mx-4 mb-2 mt-2">
+          <RunTimeline
+            goal={activeRun.goal}
+            steps={activeRun.steps}
+            runStatus={activeRun.status}
+            currentStepId={activeRun.currentStepId}
+            theme={LC}
+          />
+        </div>
+      )}
+
+      {/* ── Approval Card ── */}
+      {approvalStep && (
+        <div className="mx-4 mb-2">
+          <ApprovalCard
+            step={approvalStep}
+            onApprove={handleApproveStep}
+            onReject={handleRejectStep}
+            theme={LC}
+          />
+        </div>
+      )}
+
       {/* Command dock always at bottom */}
       <CommandDock
         value={input}
         onChange={setInput}
         onSend={() => handleSend()}
+        onRun={(text) => handleDirectorRun(text)}
+        isRunning={isRunning}
         litTip={litTip}
         agent={activeAgent}
         model={activeModel}
@@ -561,6 +638,14 @@ export default function LitConsole() {
           startListening={startListening}
           stopListening={stopListening}
           stopSpeaking={stopSpeaking}
+        />
+      )}
+
+      {holoOpen && (
+        <HoloPanel
+          onClose={() => setHoloOpen(false)}
+          url={holoUrl}
+          title={holoTitle}
         />
       )}
 

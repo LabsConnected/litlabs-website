@@ -1849,3 +1849,15 @@ main {
   word-break: break-word;
   max-width: 100%;
 }
+
+/* ============================================================
+   HOLOGRAPHIC SCANLINE ANIMATION
+   ============================================================ */
+@keyframes scanline {
+  0% {
+    transform: translateY(-100%);
+  }
+  100% {
+    transform: translateY(100%);
+  }
+}

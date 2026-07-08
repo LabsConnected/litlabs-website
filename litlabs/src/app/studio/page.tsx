@@ -9,8 +9,10 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
-import StudioSidebar, { type StudioTool } from "./components/StudioSidebar";
-import StudioTopBar from "./components/StudioTopBar";
+import { type StudioTool } from "./components/StudioSidebar";
+import StudioTopRuntimeBar from "./components/StudioTopRuntimeBar";
+import StudioIconRail from "./components/StudioIconRail";
+import StudioInspectorPanel from "./components/StudioInspectorPanel";
 import StudioInspector from "./components/StudioInspector";
 import StudioCommandDock, {
   type DockAction,
@@ -204,7 +206,6 @@ function StudioCommandCenter() {
   const mode: StudioMode = "command";
   const [activeTool, setActiveTool] = useState<StudioTool>("chat");
   const [selectedModel, setSelectedModel] = useState("adaptive");
-  const [search, setSearch] = useState("");
   const [prompt, setPrompt] = useState("");
   const [recentActions, setRecentActions] = useState<
     { tool: StudioTool; label: string }[]
@@ -212,8 +213,6 @@ function StudioCommandCenter() {
 
   // Mobile inspector sheet
   const [mobileInspector, setMobileInspector] = useState(false);
-  // Desktop inspector visibility
-  const [desktopInspectorOpen, setDesktopInspectorOpen] = useState(true);
 
   const { balance, isLoading: walletLoading } = useWallet();
 
@@ -365,15 +364,10 @@ function StudioCommandCenter() {
     >
       {/* Desktop top bar */}
       <div className="hidden md:block shrink-0">
-        <StudioTopBar
-          search={search}
-          onSearchChange={setSearch}
+        <StudioTopRuntimeBar
           selectedModel={selectedModel}
           onModelChange={setSelectedModel}
-          onInspectorToggle={() => setMobileInspector(true)}
-          onDesktopInspectorToggle={() => setDesktopInspectorOpen((v) => !v)}
-          desktopInspectorOpen={desktopInspectorOpen}
-          T={T}
+          onMenuToggle={() => {}}
         />
       </div>
 
@@ -412,9 +406,9 @@ function StudioCommandCenter() {
       </div>
 
       <div className="flex-1 min-h-0 flex">
-        <StudioSidebar
-          activeTool={activeTool}
-          onToolChange={handleToolChange}
+        <StudioIconRail
+          activeTool={activeTool as string}
+          onToolChange={(tool) => handleToolChange(tool as StudioTool)}
         />
 
         <main className="flex-1 min-w-0 flex flex-col">
@@ -515,11 +509,9 @@ function StudioCommandCenter() {
         </main>
 
         {/* Desktop inspector — hidden on mobile and collapsible */}
-        {desktopInspectorOpen && (
-          <div className="hidden lg:block">
-            <StudioInspector T={T} />
-          </div>
-        )}
+        <div className="hidden lg:block">
+          <StudioInspectorPanel />
+        </div>
       </div>
 
       {/* Mobile inspector sheet */}
