@@ -30,7 +30,7 @@ export default function CreateFAB() {
       {/* FAB Button */}
       <button
         onClick={() => setOpen(!open)}
-        className="md:hidden fixed bottom-20 right-4 z-40 flex items-center justify-center w-14 h-14 rounded-full shadow-lg transition-all active:scale-95"
+        className="hidden fixed bottom-20 right-4 z-40 items-center justify-center w-14 h-14 rounded-full shadow-lg transition-all active:scale-95"
         style={{
           backgroundColor: T.accentColor,
           color: T.bgColor,
@@ -43,14 +43,14 @@ export default function CreateFAB() {
       {/* Menu Overlay */}
       {open && (
         <div
-          className="md:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
+          className="hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         />
       )}
 
       {/* Menu */}
       {open && (
-        <div className="md:hidden fixed bottom-36 right-4 z-40 w-60 rounded-xl border shadow-2xl overflow-hidden"
+        <div className="hidden fixed bottom-36 right-4 z-40 w-60 rounded-xl border shadow-2xl overflow-hidden"
           style={{
             backgroundColor: T.boxBg,
             borderColor: T.borderColor + "30",

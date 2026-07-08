@@ -88,7 +88,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
           {!isPublic && !isAdmin && (
             <NavbarWrapper />
           )}
-          <main className={isConsole ? "h-0 min-h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0"}>
+          <main className={isConsole ? "h-0 min-h-0 flex-1 w-full max-w-full overflow-hidden flex flex-col" : "flex-1 w-full max-w-full overflow-x-hidden pb-[calc(5.75rem+env(safe-area-inset-bottom))] md:pb-0"}>
             {children}
           </main>
           {!hideMobileBottomNav && <MobileBottomNav />}

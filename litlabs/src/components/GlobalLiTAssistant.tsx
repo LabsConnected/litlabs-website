@@ -123,7 +123,7 @@ export default function GlobalLiTAssistant() {
       {/* Floating LiT Button */}
       <button
         onClick={() => setOpen(!open)}
-        className="fixed bottom-6 right-6 z-50 flex items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-bold shadow-2xl transition-all hover:scale-105 active:scale-95"
+        className="fixed bottom-6 right-6 z-50 hidden items-center justify-center gap-2 rounded-full px-4 py-3 text-sm font-bold shadow-2xl transition-all hover:scale-105 active:scale-95 md:flex"
         style={{
           background: `linear-gradient(135deg, ${T.accentColor}, ${T.headerColor})`,
           color: T.bgColor,
@@ -137,7 +137,7 @@ export default function GlobalLiTAssistant() {
       {/* Chat Panel */}
       {open && (
         <div
-          className="fixed bottom-24 right-3 z-50 flex max-h-[72vh] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border shadow-2xl sm:right-6 sm:w-[420px]"
+          className="fixed bottom-24 right-3 z-50 hidden max-h-[72vh] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border shadow-2xl md:flex sm:right-6 sm:w-[420px]"
           style={{
             backgroundColor: T.boxBg,
             borderColor: T.borderColor + "40",

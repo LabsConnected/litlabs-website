@@ -1,5 +1,6 @@
 import type { LucideIcon } from "lucide-react";
 import {
+  Plus,
   Users,
   Sparkles,
   ShoppingBag,
@@ -207,11 +208,11 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 export const MOBILE_BOTTOM_ITEMS = [
-  { label: "LiT", href: "/studio?tool=chat", icon: Bot },
-  { label: "Dash", href: "/dashboard", icon: BarChart3 },
+  { label: "Home", href: "/dashboard", icon: BarChart3 },
   { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Create", href: "/studio?tool=image", icon: Plus },
   { label: "Agents", href: "/studio?tool=agents", icon: Users },
-  { label: "Me", href: "/profile", icon: User },
+  { label: "LiTT", href: "/studio?tool=chat", icon: Bot },
 ];
 
 export const MOBILE_MORE_ITEMS = [
