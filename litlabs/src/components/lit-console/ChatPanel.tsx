@@ -16,6 +16,7 @@ import {
   ChevronUp,
   Sparkles,
   Activity,
+  Palette,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 
@@ -36,6 +37,17 @@ export interface Message {
     readFiles?: string[];
   };
 }
+
+const WALLPAPERS = [
+  { id: "none", label: "Default", style: undefined },
+  { id: "grid", label: "Grid", style: { backgroundImage: "linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px)", backgroundSize: "40px 40px" } },
+  { id: "dots", label: "Dots", style: { backgroundImage: "radial-gradient(rgba(255,255,255,0.08) 1px, transparent 1px)", backgroundSize: "24px 24px" } },
+  { id: "cyan-glow", label: "Cyan Glow", style: { background: "radial-gradient(ellipse at top, rgba(34,211,238,0.08) 0%, transparent 60%)" } },
+  { id: "purple-glow", label: "Purple Glow", style: { background: "radial-gradient(ellipse at top, rgba(168,85,247,0.1) 0%, transparent 60%)" } },
+  { id: "stars", label: "Stars", style: { backgroundImage: "radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px), radial-gradient(rgba(255,255,255,0.15) 1px, transparent 1px)", backgroundSize: "50px 50px, 30px 30px", backgroundPosition: "0 0, 25px 25px" } },
+];
+
+const WALLPAPER_KEY = "lit-chat-wallpaper";
 
 interface ChatPanelProps {
   messages: Message[];
@@ -215,6 +227,8 @@ export default function ChatPanel({
     () => [...messages].reverse().find((m) => m.role === "lit")?.id || null,
   );
   const [expandedThoughts, setExpandedThoughts] = useState<Record<string, boolean>>({});
+  const [wallpaper, setWallpaper] = useState<string>("none");
+  const [wallpaperOpen, setWallpaperOpen] = useState(false);
   const [revealed, setRevealed] = useState<Record<string, number>>(() => {
     const latest = [...messages].reverse().find((m) => m.role === "lit");
     const init: Record<string, number> = {};
@@ -241,6 +255,29 @@ export default function ChatPanel({
       return next;
     });
   }, [messages, activeLitId]);
+
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(WALLPAPER_KEY);
+      if (saved && WALLPAPERS.find((w) => w.id === saved)) setWallpaper(saved);
+    } catch {}
+  }, []);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem(WALLPAPER_KEY, wallpaper);
+    } catch {}
+  }, [wallpaper]);
+
+  const wallpaperRef = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (!wallpaperOpen) return;
+    const handle = (e: MouseEvent) => {
+      if (!wallpaperRef.current?.contains(e.target as Node)) setWallpaperOpen(false);
+    };
+    document.addEventListener("mousedown", handle);
+    return () => document.removeEventListener("mousedown", handle);
+  }, [wallpaperOpen]);
 
   const activeContent = useMemo(
     () => messages.find((m) => m.id === activeLitId)?.content || "",
@@ -304,11 +341,48 @@ export default function ChatPanel({
     return <div className="text-sm">{formatContent(m.content, LC)}</div>;
   };
 
+  const activeWallpaper = WALLPAPERS.find((w) => w.id === wallpaper)?.style;
+
   return (
     <div
       className="flex h-full w-full flex-col overflow-hidden"
-      style={{ backgroundColor: LC.bg }}
+      style={{ backgroundColor: LC.bg, ...activeWallpaper }}
     >
+      {/* Chat header with wallpaper picker */}
+      <div className="flex items-center justify-between border-b px-4 py-2" style={{ borderColor: LC.border, backgroundColor: `${LC.bg}cc`, backdropFilter: "blur(8px)" }}>
+        <div className="flex items-center gap-2 text-xs font-black" style={{ color: LC.text }}>
+          <Bot size={14} style={{ color: LC.accentCyan }} /> LiTTree Agent
+        </div>
+        <div className="relative">
+          <button
+            onClick={() => setWallpaperOpen((v) => !v)}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[11px] font-bold transition-colors hover:bg-white/5"
+            style={{ color: LC.textMuted, border: `1px solid ${LC.border}` }}
+            title="Chat wallpaper"
+          >
+            <Palette size={13} /> Theme
+          </button>
+          {wallpaperOpen && (
+            <div
+              ref={wallpaperRef}
+              className="absolute right-0 top-full z-20 mt-1 w-40 rounded-xl border p-2 shadow-xl"
+              style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}
+            >
+              {WALLPAPERS.map((w) => (
+                <button
+                  key={w.id}
+                  onClick={() => { setWallpaper(w.id); setWallpaperOpen(false); }}
+                  className="flex w-full items-center justify-between rounded-lg px-2 py-1.5 text-[11px] font-semibold transition-colors hover:bg-white/5"
+                  style={{ color: wallpaper === w.id ? LC.accentCyan : LC.text }}
+                >
+                  {w.label}
+                  {wallpaper === w.id && <Check size={12} style={{ color: LC.accentCyan }} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
       <div
         ref={scrollRef}
         onScroll={handleScroll}
