@@ -109,8 +109,8 @@ const WALLPAPERS: Array<{ id: string; label: string; style?: CSSProperties }> = 
     },
   },
   {
-    id: "holo-scan",
-    label: "Holo Scan",
+    id: "signal-scan",
+    label: "Signal Scan",
     style: {
       backgroundImage:
         "radial-gradient(circle at 50% 18%, rgba(34,211,238,0.24), transparent 34%), repeating-linear-gradient(0deg, rgba(34,211,238,0.08), rgba(34,211,238,0.08) 1px, transparent 2px, transparent 5px)",
@@ -174,6 +174,33 @@ const PROMPT_SUGGESTIONS = [
   "Create a settings panel",
   "Write a Twitter thread",
   "Make a 3D skybox prompt",
+];
+
+const COMPANION_PROMPTS = [
+  {
+    name: "LiT",
+    role: "guide",
+    icon: Bot,
+    prompt: "Stay with me in this chat, remember what we already covered, and give the next best action without repeating yourself.",
+  },
+  {
+    name: "Forge",
+    role: "build",
+    icon: Terminal,
+    prompt: "Act as Forge and inspect what needs to be built or fixed next in this project.",
+  },
+  {
+    name: "Visionary",
+    role: "design",
+    icon: Sparkles,
+    prompt: "Act as Visionary and improve the mobile look and feel of this screen.",
+  },
+  {
+    name: "Memory",
+    role: "recall",
+    icon: Brain,
+    prompt: "Use memory, recent chat, and project context before answering so you do not repeat old replies.",
+  },
 ];
 
 interface ChatPanelProps {
@@ -808,8 +835,43 @@ export default function ChatPanel({
                     Creative Director + Builder + Operator
                   </p>
                   <p className="mt-1 text-[9px] font-black uppercase tracking-[0.18em] sm:text-[10px] sm:tracking-[0.2em]" style={{ color: LC.accentCyan }}>
-                    ● Live Holographic Link
+                    ● Companions Ready
                   </p>
+                </div>
+
+                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4">
+                  {COMPANION_PROMPTS.map((companion) => {
+                    const Icon = companion.icon;
+                    return (
+                      <button
+                        key={companion.name}
+                        onClick={() => onSend(companion.prompt)}
+                        className="flex min-h-14 items-center gap-2 rounded-2xl border px-3 py-2 text-left transition active:scale-[0.98]"
+                        style={{
+                          backgroundColor: `${LC.bgPanel}cc`,
+                          borderColor: LC.border,
+                          color: LC.text,
+                        }}
+                      >
+                        <span
+                          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl border"
+                          style={{
+                            borderColor: `${LC.accentCyan}40`,
+                            color: LC.accentCyan,
+                            backgroundColor: `${LC.accentCyan}10`,
+                          }}
+                        >
+                          <Icon size={16} />
+                        </span>
+                        <span className="min-w-0">
+                          <span className="block truncate text-[11px] font-black">{companion.name}</span>
+                          <span className="block truncate text-[10px]" style={{ color: LC.textMuted }}>
+                            {companion.role}
+                          </span>
+                        </span>
+                      </button>
+                    );
+                  })}
                 </div>
 
                 <div className="-mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">

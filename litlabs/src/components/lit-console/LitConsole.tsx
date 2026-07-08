@@ -18,7 +18,6 @@ import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
-import HoloPanel from "./HoloPanel";
 import ConnectorsPanel from "./ConnectorsPanel";
 import ActivityPanel from "./ActivityPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
@@ -108,7 +107,6 @@ export default function LitConsole() {
   const [approvalStep, setApprovalStep] = useState<DirectorStep | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [holoOpen, setHoloOpen] = useState(false);
   const LC = useLitConsoleTheme();
   const termRef = useRef<LiTTreeTerminalHandle>(null);
 
@@ -218,7 +216,7 @@ export default function LitConsole() {
               {
                 id: Math.random().toString(36).slice(2),
                 role: "lit",
-                content: `I can use this as context here in chat instead of opening a Holo window: ${url}`,
+                content: `I can use this as context here in chat instead of opening another window: ${url}`,
               },
             ]);
           }, 600);
@@ -340,7 +338,7 @@ export default function LitConsole() {
                 {
                   id: Math.random().toString(36).slice(2),
                   role: "lit",
-                  content: `I can keep this route in the conversation instead of opening another Holo view: ${routePath}`,
+                  content: `I can keep this route in the conversation instead of opening another view: ${routePath}`,
                 },
               ]);
             }, 800);
@@ -760,23 +758,8 @@ export default function LitConsole() {
           stopSpeaking();
           setVoiceOpen(false);
         }}
-        onHolo={() => {
-          setDrawerOpen(false);
-          setVoiceOpen(false);
-          setHoloOpen((v) => !v);
-        }}
         voiceState={voiceState}
       />
-
-      {holoOpen && (
-        <HoloPanel
-          onClose={() => setHoloOpen(false)}
-          onPrompt={(prompt) => {
-            setHoloOpen(false);
-            handleSend(prompt);
-          }}
-        />
-      )}
 
       {voiceOpen && (
         <LiveVoicePanel

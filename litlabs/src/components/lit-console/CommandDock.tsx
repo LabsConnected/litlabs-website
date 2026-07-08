@@ -30,7 +30,6 @@ import {
   Split,
   Zap,
   MessageSquare,
-  AppWindow,
 } from "lucide-react";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
 import type { LiTTipResult } from "@/lib/lit-tip";
@@ -57,7 +56,6 @@ interface CommandDockProps {
   onVoice?: () => void;
   onVoiceStop?: () => void;
   voiceState?: "idle" | "listening" | "thinking" | "speaking" | "error";
-  onHolo?: () => void;
   mode?: ModeId;
   onModeChange?: (mode: ModeId) => void;
   /* Run Execution Loop support */
@@ -174,7 +172,6 @@ export default function CommandDock(props: CommandDockProps) {
     onVoice,
     onVoiceStop,
     voiceState,
-    onHolo,
     mode: modeProp,
     onModeChange,
   } = props;
@@ -257,7 +254,7 @@ export default function CommandDock(props: CommandDockProps) {
 
   const listening = voiceState === "listening";
 
-  const [activeMode, setActiveMode] = useState<"text" | "voice" | "holo" | "files" | "tools">("text");
+  const [activeMode, setActiveMode] = useState<"text" | "voice" | "files" | "tools">("text");
 
   const handleModeClick = (id: typeof activeMode) => {
     setActiveMode(id);
@@ -266,7 +263,6 @@ export default function CommandDock(props: CommandDockProps) {
       if (listening) onVoiceStop?.();
       else onVoice?.();
     }
-    if (id === "holo") onHolo?.();
     if (id === "files") fileInputRef.current?.click();
     if (id === "tools") setToolsOpen((v) => !v);
   };
@@ -274,7 +270,6 @@ export default function CommandDock(props: CommandDockProps) {
   const modeTabs = [
     { id: "text", label: "Text", icon: MessageSquare },
     { id: "voice", label: "Voice", icon: Mic },
-    { id: "holo", label: "Holo", icon: AppWindow },
     { id: "files", label: "Files", icon: Paperclip },
     { id: "tools", label: "Tools", icon: Plus },
   ] as const;
