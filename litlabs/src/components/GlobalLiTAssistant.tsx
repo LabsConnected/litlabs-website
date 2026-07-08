@@ -5,7 +5,6 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useLiTAssistant } from "@/context/LiTAssistantContext";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
-import LiTVoiceOverlay from "@/components/LiTVoiceOverlay";
 import {
   Bot,
   X,
@@ -20,6 +19,7 @@ import {
   Mic,
   Volume2,
   VolumeX,
+  AlertCircle,
 } from "lucide-react";
 
 export default function GlobalLiTAssistant() {
@@ -39,7 +39,6 @@ export default function GlobalLiTAssistant() {
   const router = useRouter();
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
-  const [voiceView, setVoiceView] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const lastSpokenIdRef = useRef<string | null>(null);
@@ -49,7 +48,6 @@ export default function GlobalLiTAssistant() {
       if (!href) return;
       router.push(href);
       setOpen(false);
-      setVoiceView(false);
     });
   }, [router, setOnNavigate, setOpen]);
 
@@ -58,7 +56,16 @@ export default function GlobalLiTAssistant() {
     await sendMessage(text);
   };
 
-  const { state: voiceState, transcript: voiceTranscript, isSupported, startListening, stopListening, speak, stopSpeaking } = useLiTVoice({
+  const {
+    state: voiceState,
+    transcript: voiceTranscript,
+    errorMessage: voiceErrorMessage,
+    isSupported,
+    startListening,
+    stopListening,
+    speak,
+    stopSpeaking,
+  } = useLiTVoice({
     onTranscript: onVoiceTranscript,
   });
 
@@ -74,13 +81,13 @@ export default function GlobalLiTAssistant() {
 
   // Speak only the newest assistant reply once; never repeat old messages
   useEffect(() => {
-    if (!voiceMode && !voiceView) return;
+    if (!voiceMode) return;
     const last = [...messages].reverse().find((m) => m.role === "assistant");
     if (last && last.id !== lastSpokenIdRef.current) {
       lastSpokenIdRef.current = last.id;
       speak(last.content);
     }
-  }, [messages, voiceMode, voiceView, speak]);
+  }, [messages, voiceMode, speak]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -103,15 +110,9 @@ export default function GlobalLiTAssistant() {
       return;
     }
     setVoiceMode(true);
-    setVoiceView(true);
+    setOpen(true);
     stopSpeaking();
     startListening();
-  };
-
-  const closeVoiceView = () => {
-    stopListening();
-    stopSpeaking();
-    setVoiceView(false);
   };
 
   const activeTasks = tasks.filter((t) => t.status === "running" || t.status === "pending");
@@ -136,7 +137,7 @@ export default function GlobalLiTAssistant() {
       {/* Chat Panel */}
       {open && (
         <div
-          className="fixed bottom-24 right-6 z-50 flex flex-col w-[calc(100vw-48px)] sm:w-[420px] max-h-[70vh] rounded-2xl border shadow-2xl overflow-hidden"
+          className="fixed bottom-24 right-3 z-50 flex max-h-[72vh] w-[calc(100vw-24px)] flex-col overflow-hidden rounded-2xl border shadow-2xl sm:right-6 sm:w-[420px]"
           style={{
             backgroundColor: T.boxBg,
             borderColor: T.borderColor + "40",
@@ -329,37 +330,36 @@ export default function GlobalLiTAssistant() {
               </div>
             )}
 
-            {/* Voice listening indicator */}
-            {voiceState === "listening" && (
-              <div className="flex flex-col items-center justify-center gap-2 py-4 text-center">
-                <div className="flex items-end gap-1 h-6">
-                  {[...Array(5)].map((_, i) => (
-                    <span
-                      key={i}
-                      className="w-1 rounded-full animate-pulse"
-                      style={{
-                        backgroundColor: "#ff4444",
-                        height: `${12 + (i % 3) * 8}px`,
-                        animationDelay: `${i * 0.1}s`,
-                      }}
-                    />
-                  ))}
-                </div>
-                <div className="text-xs font-bold" style={{ color: "#ff4444" }}>
-                  Listening…
-                </div>
-                {voiceTranscript && (
-                  <div className="max-w-[90%] text-[11px] italic" style={{ color: T.textMuted }}>
-                    “{voiceTranscript}”
+            {(voiceState === "listening" || voiceState === "error" || voiceState === "speaking") && (
+              <div
+                className="rounded-2xl border p-3"
+                style={{
+                  backgroundColor: voiceState === "error" ? "#ff444410" : `${T.accentColor}10`,
+                  borderColor: voiceState === "error" ? "#ff444450" : `${T.accentColor}35`,
+                }}
+              >
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={voiceState === "listening" ? stopListening : toggleVoice}
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full"
+                    style={{
+                      backgroundColor: voiceState === "error" ? "#ff444420" : `${T.accentColor}22`,
+                      color: voiceState === "error" ? "#ff4444" : T.accentColor,
+                    }}
+                    aria-label={voiceState === "listening" ? "Stop listening" : "Start listening"}
+                  >
+                    {voiceState === "error" ? <AlertCircle size={18} /> : <Mic size={18} />}
+                  </button>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[11px] font-black" style={{ color: voiceState === "error" ? "#ff4444" : T.textColor }}>
+                      {voiceState === "listening" ? "Listening while chat stays open" : voiceState === "speaking" ? "Speaking" : "Voice needs attention"}
+                    </div>
+                    <div className="mt-1 text-[11px] leading-snug" style={{ color: T.textMuted }}>
+                      {voiceTranscript || voiceErrorMessage || "Speak naturally. Your words will appear here before LiT replies."}
+                    </div>
                   </div>
-                )}
-              </div>
-            )}
-
-            {voiceState === "speaking" && (
-              <div className="flex items-center justify-center gap-2 py-3 text-[11px] font-bold" style={{ color: T.accentColor }}>
-                <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: T.accentColor }} />
-                LiT is speaking…
+                </div>
               </div>
             )}
           </div>
@@ -403,15 +403,6 @@ export default function GlobalLiTAssistant() {
         </div>
       )}
 
-      {/* Immersive push-to-talk voice mode */}
-      {voiceView && (
-        <LiTVoiceOverlay
-          onClose={closeVoiceView}
-          onSend={async (text) => {
-            await sendMessage(text);
-          }}
-        />
-      )}
     </>
   );
 }

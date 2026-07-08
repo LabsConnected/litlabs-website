@@ -47,6 +47,8 @@ type LiTAssistantContextValue = {
 const LiTAssistantContext = createContext<LiTAssistantContextValue | null>(null);
 
 const STORAGE_KEY = "lit-assistant-state";
+const GENERIC_REPLY =
+  "I’m connected. Tell me the next concrete thing you want changed, and I’ll use the current page, recent chat, and saved memory to move it forward.";
 
 function generateId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -110,9 +112,32 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
   const clearChat = useCallback(() => setMessages([]), []);
   const clearTasks = useCallback(() => setTasks([]), []);
 
+  const normalizeReply = useCallback((reply: string, priorMessages: LiTMessage[]) => {
+    const trimmed = reply.trim();
+    if (!trimmed) return GENERIC_REPLY;
+    const genericPatterns = [
+      /i('|’)m lit/i,
+      /i am lit/i,
+      /i can help you/i,
+      /what do you want to work on/i,
+      /what would you like to achieve/i,
+    ];
+    const assistantHistory = priorMessages
+      .filter((m) => m.role === "assistant")
+      .map((m) => m.content.toLowerCase());
+    const alreadyUsedGeneric = assistantHistory.some((content) =>
+      genericPatterns.some((pattern) => pattern.test(content)),
+    );
+    const isGeneric = genericPatterns.some((pattern) => pattern.test(trimmed));
+    const repeatedExact = assistantHistory.some((content) => content === trimmed.toLowerCase());
+    if ((alreadyUsedGeneric && isGeneric) || repeatedExact) return GENERIC_REPLY;
+    return trimmed;
+  }, []);
+
   const sendMessage = useCallback(
     async (text: string) => {
       if (!text.trim()) return;
+      const historySnapshot = messages;
       addMessage("user", text);
       setOpen(true);
 
@@ -148,7 +173,17 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
         const res = await fetch("/api/gemini/chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ message: text, stream: false }),
+          body: JSON.stringify({
+            message: text,
+            stream: false,
+            history: historySnapshot
+              .filter((m) => m.role === "user" || m.role === "assistant")
+              .slice(-12)
+              .map((m) => ({
+                role: m.role === "user" ? "user" : "assistant",
+                content: m.content,
+              })),
+          }),
         });
         const data = await res.json();
 
@@ -175,14 +210,7 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
         const reply =
           data.response || data.text || data.reply || data.message || "";
 
-        if (reply) {
-          addMessage("assistant", reply);
-        } else {
-          addMessage(
-            "assistant",
-            "I'm LiT. I can help you build, create, chat, and navigate. What do you want to work on?",
-          );
-        }
+        addMessage("assistant", normalizeReply(reply, historySnapshot));
       } catch (e) {
         updateTask(taskId, {
           title: "Failed to reach LiT",
@@ -195,7 +223,7 @@ export function LiTAssistantProvider({ children }: { children: ReactNode }) {
         );
       }
     },
-    [addMessage, addTask, updateTask, onNavigate],
+    [addMessage, addTask, updateTask, onNavigate, messages, normalizeReply],
   );
 
   return (
