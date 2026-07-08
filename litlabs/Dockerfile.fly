@@ -1,0 +1,52 @@
+# Fly.io Dockerfile for the LiTTree Terminal Server.
+# Build context = repo root. This file lives at the repo root (alongside the
+# Next.js Dockerfile) but is named "Dockerfile.fly" so:
+#   1. The Next.js Dockerfile is preserved untouched (for Vercel/Cloudflare
+#      and any self-hosted Docker setup).
+#   2. Fly's [build] section in fly.toml explicitly references this file,
+#      so the auto-detector never picks the wrong one.
+#
+# Why not "Dockerfile"? The Next.js Dockerfile is the canonical "Dockerfile"
+# in this repo; renaming it would risk breaking Vercel/Cloudflare Pages.
+
+FROM node:22-slim
+
+# Build deps for node-pty (native module) + basic shell tools.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3 make g++ bash git curl ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Copy ONLY the terminal-server subtree for a clean, minimal image.
+COPY terminal-server/package.json ./package.json
+COPY terminal-server/tsconfig.json ./tsconfig.json
+
+# If a lockfile exists alongside package.json, use it for reproducible builds.
+COPY terminal-server/package-lock.json* ./
+
+RUN npm install
+
+# Now copy the rest of the terminal-server source.
+COPY terminal-server/ ./
+
+# Compile TypeScript -> dist/
+RUN npm run build
+
+# Runtime defaults (overridable via fly secrets/env).
+ENV NODE_ENV=production
+ENV TERMINAL_WORKSPACE_ROOT=/tmp/littree-workspaces
+ENV TERMINAL_SERVER_PORT=4001
+ENV TERMINAL_USE_DOCKER=false
+
+EXPOSE 4001
+
+# node-pty is a native module; rebuild it explicitly in case the base image
+# arch differs from the build host. Safe no-op if already correct.
+RUN npm rebuild node-pty || true
+
+# Health check for Fly.
+HEALTHCHECK --interval=30s --timeout=10s --start-period=20s --retries=3 \
+  CMD node -e "require('http').get('http://127.0.0.1:'+(process.env.TERMINAL_SERVER_PORT||4001)+'/health',r=>process.exit(r.statusCode===200?0:1)).on('error',()=>process.exit(1))"
+
+CMD ["node", "dist/server.js"]

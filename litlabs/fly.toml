@@ -1,0 +1,50 @@
+# Fly.io app config for the LiTTree Terminal Server.
+# Deploy context = repo root. Build uses ./Dockerfile.terminal.
+# This replaces the Render "standard" plan ($25/mo) with a Fly shared-cpu-1x
+# machine (~$4-6/mo for a single-machine always-on deploy).
+
+app = "litlabs-terminal-server"
+primary_region = "iad"
+kill_signal = "SIGINT"
+kill_timeout = "30s"
+
+[build]
+  dockerfile = "Dockerfile.fly"
+
+[env]
+  NODE_ENV = "production"
+  TERMINAL_SERVER_PORT = "4001"
+  TERMINAL_ALLOWED_ORIGIN = "https://litlabs.net"
+  TERMINAL_WORKSPACE_ROOT = "/tmp/littree-workspaces"
+  TERMINAL_USE_DOCKER = "false"
+  # PORT is set by Fly automatically; server.ts reads it as a fallback.
+
+[http_service]
+  internal_port = 4001
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = true
+  min_machines_running = 1
+  processes = ["app"]
+
+  [http_service.checks]
+    interval = "30s"
+    timeout = "10s"
+    grace_period = "20s"
+    method = "GET"
+    path = "/health"
+
+# Persistent volume for /tmp/littree-workspaces.
+# Create with:  flyctl volumes create littree_workspaces --size 1 --region iad
+[[mounts]]
+  source = "littree_workspaces"
+  destination = "/tmp/littree-workspaces"
+
+# shared-cpu-1x = 1 vCPU / 2 GB RAM. node-pty + Socket.IO shells need >= 1 GB.
+# Downgrade to "shared-cpu-1x" with 1 GB by setting memory = "1gb" if needed.
+[vm]
+  cpu_kind = "shared"
+  cpus = 1
+  memory_mb = 2048
+
+
