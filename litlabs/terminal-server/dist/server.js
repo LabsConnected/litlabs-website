@@ -226,14 +226,14 @@ app.post("/api/terminal/session", requireAuth, (req, res) => {
 const activeAgents = new Map();
 app.post("/api/agents/run", requireAuth, async (req, res) => {
     const userId = getUserId(req, req.body);
-    const agentId = String(req.body.agentId || "jarvis");
+    const agentId = String(req.body.agentId || "lit");
     const task = String(req.body.task || "execute");
     activeAgents.set(agentId, { running: true, startedAt: new Date().toISOString() });
     await logEvent(userId, "agent:run", `Agent ${agentId} started: ${task}`);
     res.json({ ok: true, agentId, status: "running" });
 });
 app.post("/api/agents/stop", requireAuth, (req, res) => {
-    const agentId = String(req.body.agentId || "jarvis");
+    const agentId = String(req.body.agentId || "lit");
     activeAgents.set(agentId, { running: false, startedAt: new Date().toISOString() });
     res.json({ ok: true, agentId, status: "stopped" });
 });
@@ -396,17 +396,17 @@ io.on("connection", (socket) => {
         }
         ptyProcess.write(data);
     });
-    socket.on("jarvis:command", async (input) => {
+    socket.on("lit:command", async (input) => {
         if (typeof input !== "string")
             return;
-        socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis is thinking...\x1b[0m\r\n");
+        socket.emit("terminal:output", "\r\n\x1b[36m🤖 LiT is thinking...\x1b[0m\r\n");
         try {
-            const reply = await (0, jarvis_ai_1.handleJarvisCommand)(input);
-            socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis:\x1b[0m\r\n");
+            const reply = await (0, jarvis_ai_1.handleLiTCommand)(input);
+            socket.emit("terminal:output", "\r\n\x1b[36m🤖 LiT:\x1b[0m\r\n");
             socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
         }
         catch (err) {
-            const message = err instanceof Error ? err.message : "Jarvis failed";
+            const message = err instanceof Error ? err.message : "LiT failed";
             socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
         }
     });

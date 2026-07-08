@@ -23,8 +23,8 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  // Externalize jose from middleware bundling (fixes NFT build error)
-  serverExternalPackages: ["jose"],
+  // Externalize jose and fs from middleware bundling (fixes NFT build warning)
+  serverExternalPackages: ["jose", "fs"],
 
   // Image optimization
   images: {

@@ -1,7 +1,7 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.askJarvis = askJarvis;
-exports.handleJarvisCommand = handleJarvisCommand;
+exports.askLiT = askLiT;
+exports.handleLiTCommand = handleLiTCommand;
 async function chatWithOllama(messages, model = "llama3.2:3b") {
     const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
     const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
@@ -32,11 +32,11 @@ async function chatWithOpenRouter(messages, model = "google/gemini-2.5-flash") {
     const data = await res.json();
     return data.choices?.[0]?.message?.content ?? "";
 }
-async function askJarvis(prompt) {
+async function askLiT(prompt) {
     const messages = [
         {
             role: "system",
-            content: "You are Jarvis, the AI operating layer for LiTTree LabStudios. You help users build software. " +
+            content: "You are LiT, the AI builder agent for LiTTree LabStudios. You help users build software. " +
                 "When asked for commands, prefer safe, explainable commands. " +
                 "Warn about destructive operations. Keep responses concise and actionable.",
         },
@@ -49,11 +49,11 @@ async function askJarvis(prompt) {
         return await chatWithOpenRouter(messages);
     }
 }
-async function handleJarvisCommand(input) {
+async function handleLiTCommand(input) {
     const args = input.trim().split(/\s+/).slice(1);
     const command = args[0]?.toLowerCase();
     const rest = args.slice(1).join(" ");
-    const systemContext = `You are the Jarvis agent inside LiTTree OS Terminal.
+    const systemContext = `You are the LiT agent inside LiTTree OS Terminal.
 The user typed: ${input}
 
 Available commands:
@@ -69,5 +69,5 @@ Available commands:
 Be concise. If the command is unclear, list the available commands.
 `;
     const prompt = `${systemContext}\n\nCommand: ${command || "help"}\nArguments: ${rest || "none"}`;
-    return await askJarvis(prompt);
+    return await askLiT(prompt);
 }

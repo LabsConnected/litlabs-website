@@ -13,11 +13,11 @@ import * as fs from "fs";
 import * as path from "path";
 
 export const dynamic = "force-dynamic";
-const PROJECT_ROOT = process.env.PROJECT_ROOT || process.cwd();
+const PROJECT_ROOT = process.env.PROJECT_ROOT || (/*turbopackIgnore: true*/ process.cwd());
 
 async function readFileAction(target: string): Promise<{ ok: boolean; content: string; error?: string }> {
   try {
-    const resolved = path.normalize(path.join(PROJECT_ROOT, target));
+    const resolved = path.normalize(path.join(/*turbopackIgnore: true*/ PROJECT_ROOT, target));
     if (!resolved.startsWith(PROJECT_ROOT)) return { ok: false, content: "", error: "Path traversal denied" };
     if (!fs.existsSync(resolved)) return { ok: false, content: "", error: `Not found: ${target}` };
     const c = fs.readFileSync(resolved, "utf-8");
@@ -30,14 +30,14 @@ async function searchCodeAction(query: string): Promise<{ ok: boolean; content: 
     const results: string[] = [];
     function walk(dir: string) {
       for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
-        const fp = path.join(dir, e.name);
+        const fp = path.join(/*turbopackIgnore: true*/ dir, e.name);
         if (e.isDirectory() && !e.name.startsWith(".") && e.name !== "node_modules") walk(fp);
         else if (e.isFile() && /\.(ts|tsx|js|jsx|css|json)$/.test(e.name)) {
           try { if (fs.readFileSync(fp, "utf-8").toLowerCase().includes(query.toLowerCase())) results.push(path.relative(PROJECT_ROOT, fp)); } catch { /* skip */ }
         }
       }
     }
-    walk(path.join(PROJECT_ROOT, "src"));
+    walk(path.join(/*turbopackIgnore: true*/ PROJECT_ROOT, "src"));
     return { ok: true, content: results.slice(0, 30).join("\n") || `No matches for "${query}"` };
   } catch (err) { return { ok: false, content: "", error: String(err) }; }
 }
