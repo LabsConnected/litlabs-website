@@ -18,6 +18,7 @@ import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
+import HoloPanel from "./HoloPanel";
 import ConnectorsPanel from "./ConnectorsPanel";
 import ActivityPanel from "./ActivityPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
@@ -34,7 +35,7 @@ const initialContext: LiTContext = {
   websocketStatus: "connected",
 };
 
-type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors" | "holo";
+type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors";
 
 const CHAT_STATE_KEY = "lit-console-state";
 
@@ -107,8 +108,7 @@ export default function LitConsole() {
   const [approvalStep, setApprovalStep] = useState<DirectorStep | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [holoUrl, setHoloUrl] = useState("");
-  const [holoTitle, setHoloTitle] = useState("");
+  const [holoOpen, setHoloOpen] = useState(false);
   const LC = useLitConsoleTheme();
   const termRef = useRef<LiTTreeTerminalHandle>(null);
 
@@ -213,10 +213,14 @@ export default function LitConsole() {
           setTimeout(() => router.push(url), 600);
         } else {
           setTimeout(() => {
-            setHoloUrl(url);
-            setHoloTitle(url.split("/").pop() || "Holo View");
-            setDrawerTab("holo");
-            setDrawerOpen(true);
+            setMessages((prev) => [
+              ...prev,
+              {
+                id: Math.random().toString(36).slice(2),
+                role: "lit",
+                content: `I can use this as context here in chat instead of opening a Holo window: ${url}`,
+              },
+            ]);
           }, 600);
         }
       }
@@ -331,10 +335,14 @@ export default function LitConsole() {
             setTimeout(() => router.push(routePath), 800);
           } else {
             setTimeout(() => {
-              setHoloUrl(routePath);
-              setHoloTitle(intent.route!.label || "Holo View");
-              setDrawerTab("holo");
-              setDrawerOpen(true);
+              setMessages((prev) => [
+                ...prev,
+                {
+                  id: Math.random().toString(36).slice(2),
+                  role: "lit",
+                  content: `I can keep this route in the conversation instead of opening another Holo view: ${routePath}`,
+                },
+              ]);
             }, 800);
           }
           setLoading(false);
@@ -550,7 +558,6 @@ export default function LitConsole() {
     if (drawerTab === "preview") return <PreviewPanel />;
     if (drawerTab === "agents") return <AgentsPanel activeAgent={activeAgent} onSelect={handleAgentChange} onPrompt={handleSend} />;
     if (drawerTab === "connectors") return <ConnectorsPanel onClose={() => setDrawerOpen(false)} />;
-    if (drawerTab === "holo") return <HoloView url={holoUrl} title={holoTitle} />;
     return <MemoryPanel />;
   })();
 
@@ -754,17 +761,22 @@ export default function LitConsole() {
           setVoiceOpen(false);
         }}
         onHolo={() => {
-          if (drawerOpen && drawerTab === "holo") {
-            setDrawerOpen(false);
-          } else {
-            setHoloUrl("https://litlabs.net");
-            setHoloTitle("LiTTree Holo");
-            setDrawerTab("holo");
-            setDrawerOpen(true);
-          }
+          setDrawerOpen(false);
+          setVoiceOpen(false);
+          setHoloOpen((v) => !v);
         }}
         voiceState={voiceState}
       />
+
+      {holoOpen && (
+        <HoloPanel
+          onClose={() => setHoloOpen(false)}
+          onPrompt={(prompt) => {
+            setHoloOpen(false);
+            handleSend(prompt);
+          }}
+        />
+      )}
 
       {voiceOpen && (
         <LiveVoicePanel
@@ -1098,70 +1110,6 @@ function MemoryPanel() {
         >
           {saving ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />} Save to Memory
         </button>
-      </div>
-    </div>
-  );
-}
-
-function HoloView({ url, title }: { url: string; title: string }) {
-  const LC = useLitConsoleTheme();
-  const isExternal = url.startsWith("http://") || url.startsWith("https://");
-  const isSelfHosted = typeof window !== "undefined" && (url === window.location.origin || url === "https://litlabs.net" || url === window.location.origin + "/");
-  const [loadError, setLoadError] = useState(false);
-
-  useEffect(() => {
-    setLoadError(false);
-    const t = setTimeout(() => setLoadError(true), 4000);
-    return () => clearTimeout(t);
-  }, [url]);
-
-  return (
-    <div className="flex h-full w-full flex-col gap-2">
-      <div className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
-        <div className="flex items-center gap-2 text-xs font-black" style={{ color: LC.accentCyan }}>
-          <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: LC.accentCyan, boxShadow: `0 0 8px ${LC.accentCyan}` }} />
-          HOLO · {title}
-        </div>
-        <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold" style={{ color: LC.textMuted }}>
-          Open ↗
-        </a>
-      </div>
-      <div className="relative flex-1 overflow-hidden rounded-xl border" style={{ borderColor: `${LC.accentCyan}30`, boxShadow: `0 0 20px ${LC.accentCyan}08` }}>
-        {isExternal && !isSelfHosted && !loadError ? (
-          <iframe
-            src={url}
-            className="h-full w-full border-0"
-            style={{ backgroundColor: "#fff" }}
-            title={title}
-            onLoad={() => setLoadError(false)}
-            sandbox="allow-scripts allow-same-origin allow-popups"
-          />
-        ) : (
-          <div className="flex h-full flex-col items-center justify-center p-8 text-center" style={{ color: LC.textMuted }}>
-            <div className="relative mx-auto mb-4 flex h-16 w-16 items-center justify-center">
-              <div className="absolute inset-0 rounded-full blur-xl" style={{ background: `radial-gradient(circle, ${LC.accentCyan}30, transparent 70%)` }} />
-              <div className="relative flex h-12 w-12 items-center justify-center rounded-2xl border" style={{ backgroundColor: `${LC.bgPanel}cc`, borderColor: LC.accentCyan, boxShadow: `0 0 24px ${LC.accentCyan}30` }}>
-                <ExternalLink size={24} style={{ color: LC.accentCyan }} />
-              </div>
-            </div>
-            <p className="text-sm font-bold" style={{ color: LC.text }}>Holo view</p>
-            <p className="mt-1 max-w-xs text-xs" style={{ color: LC.textMuted }}>
-              {isSelfHosted
-                ? "This site can't be embedded inside itself. Open it in a new tab to view it through the Holo lens."
-                : "Some sites block embedding for security. If the page doesn't appear, open it in a new tab."}
-            </p>
-            <a
-              href={url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="mt-4 inline-flex items-center gap-1.5 rounded-xl px-4 py-2 text-xs font-black"
-              style={{ backgroundColor: LC.accentCyan, color: "#000" }}
-            >
-              Open {title} <ExternalLink size={12} />
-            </a>
-            <p className="mt-3 break-all text-[10px] opacity-50" style={{ color: LC.textMuted }}>{url}</p>
-          </div>
-        )}
       </div>
     </div>
   );

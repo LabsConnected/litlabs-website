@@ -1,13 +1,13 @@
 "use client";
 
-import { Terminal, FolderTree, Eye, Bot, Brain, Plug, Boxes, X } from "lucide-react";
+import { Terminal, FolderTree, Eye, Bot, Brain, Plug, X } from "lucide-react";
 import { LC } from "./lit-console-theme";
 
 interface DrawerPanelProps {
   open: boolean;
   onClose: () => void;
   position?: "right" | "bottom";
-  activeTab: "terminal" | "files" | "preview" | "agents" | "memory" | "connectors" | "holo";
+  activeTab: "terminal" | "files" | "preview" | "agents" | "memory" | "connectors";
   onTabChange: (tab: string) => void;
   children?: React.ReactNode;
 }
@@ -19,7 +19,6 @@ const tabs = [
   { id: "agents", label: "Agents", icon: Bot },
   { id: "memory", label: "Memory", icon: Brain },
   { id: "connectors", label: "Connectors", icon: Plug },
-  { id: "holo", label: "Holo", icon: Boxes },
 ];
 
 export default function DrawerPanel({ open, onClose, position = "right", activeTab, onTabChange, children }: DrawerPanelProps) {
