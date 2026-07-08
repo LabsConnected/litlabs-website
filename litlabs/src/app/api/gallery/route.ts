@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeFilterValue } from "@/lib/sanitize";
 
 function getYoutubeIdFromUrl(rawUrl: string): string | null {
   try {
@@ -226,8 +227,13 @@ async function getHandler(req: NextRequest) {
 
     // Apply category filter
     if (category && category !== "all") {
-      // Try to match category field first, then fallback to caption search
-      query = query.or(`category.eq.${category},caption.ilike.%${category}%`);
+      // Sanitize before interpolating into the PostgREST filter grammar to
+      // prevent filter/"SQL" injection via the `category` query param.
+      const safeCategory = sanitizeFilterValue(category);
+      if (safeCategory) {
+        // Try to match category field first, then fallback to caption search
+        query = query.or(`category.eq.${safeCategory},caption.ilike.%${safeCategory}%`);
+      }
     }
 
     // Sort by newest first

@@ -5,7 +5,7 @@ import cors from "cors";
 import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
-import { resolve, normalize } from "path";
+import { resolve, normalize, sep } from "path";
 import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { createClerkClient, verifyToken } from "@clerk/backend";
 import { createClient } from "@supabase/supabase-js";
@@ -124,7 +124,7 @@ function getUserWorkspace(userId: string) {
 function safePath(userId: string, filePath: string) {
   const workspace = getUserWorkspace(userId);
   const target = normalize(resolve(workspace, filePath));
-  if (!target.startsWith(workspace)) {
+  if (target !== workspace && !target.startsWith(workspace + sep)) {
     throw new Error("Invalid path");
   }
   return target;
@@ -293,8 +293,12 @@ app.post("/files/delete", requireAuth, (req: AuthenticatedRequest, res) => {
 });
 
 io.use(async (socket, next) => {
+  // Only skip auth when Clerk is not configured (local/dev degradation).
+  // When Clerk IS configured a valid token is mandatory — otherwise anyone
+  // could open an unauthenticated socket and get an interactive shell.
+  if (!CLERK_SECRET) return next();
   const token = String(socket.handshake.auth?.token || "");
-  if (!CLERK_SECRET || !token) return next();
+  if (!token) return next(new Error("Unauthorized"));
   try {
     const userId = await verifyClerkToken(token);
     if (!userId) return next(new Error("Unauthorized"));

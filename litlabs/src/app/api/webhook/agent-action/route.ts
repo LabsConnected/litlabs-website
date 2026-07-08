@@ -1,4 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
+
+/**
+ * Verify a shared-secret webhook token (constant-time compare).
+ * Fails closed: if AGENT_ACTION_WEBHOOK_SECRET is not configured, no request
+ * is authorized. Previously this endpoint accepted (and exposed) agent actions
+ * from anyone on the internet.
+ */
+function verifyWebhookSecret(req: NextRequest): boolean {
+  const secret = process.env.AGENT_ACTION_WEBHOOK_SECRET;
+  if (!secret) return false;
+  const provided =
+    req.headers.get("x-agent-webhook-secret") ||
+    req.headers.get("authorization")?.replace(/^Bearer\s+/i, "") ||
+    "";
+  const a = Buffer.from(provided);
+  const b = Buffer.from(secret);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 // In-memory queue for agent actions (cleared on restart/deploy)
 interface AgentAction {
@@ -14,6 +33,9 @@ interface AgentAction {
 let actionQueue: AgentAction[] = [];
 
 export async function POST(req: NextRequest) {
+  if (!verifyWebhookSecret(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const body = await req.json();
     const { action, target, payload, source = "activepieces" } = body;
@@ -58,7 +80,10 @@ export async function POST(req: NextRequest) {
   }
 }
 
-export async function GET() {
+export async function GET(req: NextRequest) {
+  if (!verifyWebhookSecret(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   return NextResponse.json({
     actions: actionQueue,
     pendingCount: actionQueue.filter((a) => a.status === "pending").length,
@@ -66,6 +91,9 @@ export async function GET() {
 }
 
 export async function PATCH(req: NextRequest) {
+  if (!verifyWebhookSecret(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { id, status } = await req.json();
     const action = actionQueue.find((a) => a.id === id);

@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { supabase } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
+import { sanitizeIdentifier } from "@/lib/sanitize";
 
 async function resolveDbUserId(clerkId: string): Promise<string | null> {
   const { data: user } = await supabase
@@ -43,12 +44,13 @@ export async function POST(
     }
 
     const { userId } = await params;
+    const safeUserId = sanitizeIdentifier(userId);
 
     // Resolve the target user's DB ID (userId param could be clerk_id or uuid)
     const { data: targetUser } = await supabase
       .from("users")
       .select("id, clerk_id")
-      .or(`id.eq.${userId},clerk_id.eq.${userId}`)
+      .or(`id.eq.${safeUserId},clerk_id.eq.${safeUserId}`)
       .single();
 
     if (!targetUser) {
@@ -130,12 +132,13 @@ export async function GET(
     }
 
     const { userId } = await params;
+    const safeUserId = sanitizeIdentifier(userId);
 
     // Resolve the target user — param could be clerk_id or uuid
     const { data: targetUser } = await supabase
       .from("users")
       .select("id, clerk_id")
-      .or(`id.eq.${userId},clerk_id.eq.${userId}`)
+      .or(`id.eq.${safeUserId},clerk_id.eq.${safeUserId}`)
       .single();
 
     if (!targetUser) {
