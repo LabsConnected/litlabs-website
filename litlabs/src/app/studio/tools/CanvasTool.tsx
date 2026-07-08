@@ -84,16 +84,37 @@ export default function CanvasTool() {
 
   const extractCode = useCallback((text: string): { cleanText: string; files: GeneratedFile[] } => {
     const files: GeneratedFile[] = [];
-    const codeBlockRegex = /```(\w+)?\s*(?:\/\/\s*(.+?)\n)?([\s\S]*?)```/g;
-    let match;
     let cleanText = text;
 
-    while ((match = codeBlockRegex.exec(text)) !== null) {
+    // 1. Fenced markdown blocks (```html, ```tsx, etc.)
+    const fencedRegex = /```(\w+)?\s*(?:\/\/\s*(.+?)\n)?([\s\S]*?)```/g;
+    let match;
+    while ((match = fencedRegex.exec(text)) !== null) {
       const language = match[1] || "text";
-      const filename = match[2] || `generated.${language === "html" ? "html" : language === "css" ? "css" : language === "javascript" || language === "js" ? "js" : "ts"}`;
+      const filename = match[2] || `generated.${language === "html" ? "html" : language === "css" ? "css" : language === "javascript" || language === "js" ? "js" : "tsx"}`;
       const content = match[3].trim();
-      files.push({ name: filename, content, language });
-      cleanText = cleanText.replace(match[0], `[📄 ${filename}]`);
+      if (content) {
+        files.push({ name: filename, content, language });
+        cleanText = cleanText.replace(match[0], `[📄 ${filename}]`);
+      }
+    }
+
+    // 2. Fallback: detect raw HTML page if no fenced blocks were found
+    if (files.length === 0) {
+      const trimmed = text.trim();
+      const htmlStart = trimmed.match(/<(!DOCTYPE html|html)/i);
+      if (htmlStart && htmlStart.index !== undefined) {
+        const htmlContent = trimmed.slice(htmlStart.index).trim();
+        if (htmlContent.length > 60) {
+          files.push({ name: "index.html", content: htmlContent, language: "html" });
+          cleanText = text.replace(htmlContent, "[📄 index.html]").trim();
+        }
+      }
+      // 3. Fallback: detect raw TSX/TS component if it has imports and React patterns
+      if (files.length === 0 && /^(import|export default function|'use client'|const \w+ = \()/im.test(trimmed)) {
+        files.push({ name: "Component.tsx", content: trimmed, language: "tsx" });
+        cleanText = "[📄 Component.tsx]";
+      }
     }
 
     return { cleanText, files };
