@@ -137,8 +137,13 @@ type SuggestedAction = {
 };
 
 function suggestedActions(text: string): SuggestedAction[] {
-  const lower = text.toLowerCase();
-  if (lower.includes("landing page") || lower.includes("website")) {
+  const matches = (...keywords: string[]) =>
+    keywords.some((kw) =>
+      new RegExp(`\\b${kw.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i").test(
+        text,
+      ),
+    );
+  if (matches("landing page", "website")) {
     return [
       {
         label: "Build next section",
@@ -158,7 +163,7 @@ function suggestedActions(text: string): SuggestedAction[] {
       },
     ];
   }
-  if (lower.includes("image") || lower.includes("generate")) {
+  if (matches("image", "generate")) {
     return [
       {
         label: "Improve prompt",
@@ -178,7 +183,7 @@ function suggestedActions(text: string): SuggestedAction[] {
       },
     ];
   }
-  if (lower.includes("code") || lower.includes("component") || lower.includes("tsx")) {
+  if (matches("code", "component", "tsx")) {
     return [
       {
         label: "Find root cause",
@@ -198,7 +203,7 @@ function suggestedActions(text: string): SuggestedAction[] {
       },
     ];
   }
-  if (lower.includes("deploy") || lower.includes("build")) {
+  if (matches("deploy", "build")) {
     return [
       {
         label: "Check deploy health",
@@ -218,7 +223,7 @@ function suggestedActions(text: string): SuggestedAction[] {
       },
     ];
   }
-  if (lower.includes("agent") || lower.includes("create an agent")) {
+  if (matches("agent")) {
     return [
       {
         label: "Make LiTT smarter",
@@ -238,7 +243,7 @@ function suggestedActions(text: string): SuggestedAction[] {
       },
     ];
   }
-  if (lower.includes("purpose") || lower.includes("concept") || lower.includes("users") || lower.includes("ai")) {
+  if (matches("purpose", "concept", "users", "ai")) {
     return [
       {
         label: "Shape product pitch",

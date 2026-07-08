@@ -2,7 +2,6 @@
 
 import dynamic from "next/dynamic";
 import { AppShell } from "@/components/site/AppShell";
-import CreateFAB from "@/components/CreateFAB";
 import FooterWrapper from "@/components/FooterWrapper";
 
 // Lazy-load heavy global components so they don't block the landing page initial bundle.
@@ -31,7 +30,6 @@ export default function LayoutShell({
     <AppShell>
       <SignupAttributionTracker />
       {children}
-      <CreateFAB />
       <FooterWrapper />
       <CookieConsent />
       <ServiceWorkerRegistration />

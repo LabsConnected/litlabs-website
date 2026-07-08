@@ -41,14 +41,6 @@ const QUICK_ACTIONS = [
   { label: "Open Terminal", href: "/studio?tool=terminal", icon: Terminal, color: "#4ade80" },
 ];
 
-const MOBILE_NAV_ACTIONS = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard, color: "#22d3ee" },
-  { label: "Studio", href: "/studio?tool=chat", icon: Sparkles, color: "#fb923c" },
-  { label: "Agents", href: "/studio?tool=agents", icon: Bot, color: "#a3f546" },
-  { label: "Market", href: "/marketplace", icon: Store, color: "#e879f9" },
-  { label: "Profile", href: "/profile", icon: User, color: "#94a3b8" },
-];
-
 const MOBILE_MENU_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "LiTTree", href: "/studio?tool=chat", icon: Bot },
@@ -75,10 +67,21 @@ const USAGE_STATS = [
   { label: "Social posts", value: "3", change: "+1", color: "#fb923c" },
 ];
 
-function LiveCommandCore({ colors: T }: { colors: ReturnType<typeof useTheme>["resolvedColors"] }) {
+function LiveCommandCore({
+  colors: T,
+  agentCount,
+}: {
+  colors: ReturnType<typeof useTheme>["resolvedColors"];
+  agentCount: number;
+}) {
   const signals = [
     { label: "Memory roots", value: "syncing", icon: Database, color: "#49FF9E" },
-    { label: "Agent runtime", value: "3 online", icon: Bot, color: "#2DF6FF" },
+    {
+      label: "Agent runtime",
+      value: `${agentCount} online`,
+      icon: Bot,
+      color: "#2DF6FF",
+    },
     { label: "Deploy orbit", value: "ready", icon: Rocket, color: "#FF8A1C" },
   ];
 
@@ -275,33 +278,7 @@ export default function DashboardPage() {
           </div>
         )}
 
-        <div className="mb-6 hidden">
-          <div className="mb-3 text-[10px] font-black uppercase tracking-[0.18em]" style={{ color: T.accentColor }}>
-            Navigation
-          </div>
-          <div className="grid grid-cols-5 gap-2">
-            {MOBILE_NAV_ACTIONS.map((item) => {
-              const Icon = item.icon;
-              return (
-                <Link
-                  key={item.href}
-                  href={item.href}
-                  className="flex min-h-[62px] flex-col items-center justify-center gap-1 rounded-xl border px-1 text-center transition active:scale-95"
-                  style={{
-                    backgroundColor: `${item.color}10`,
-                    borderColor: `${item.color}25`,
-                    color: item.color,
-                  }}
-                >
-                  <Icon className="h-4 w-4" />
-                  <span className="max-w-full truncate text-[9px] font-black">{item.label}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </div>
-
-        <LiveCommandCore colors={T} />
+        <LiveCommandCore colors={T} agentCount={activeAgents.length} />
 
         {/* Top cards */}
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4 md:gap-4 mb-6 md:mb-8">

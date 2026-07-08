@@ -1,17 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { MOBILE_BOTTOM_ITEMS } from "@/lib/navigation";
 
+const RESERVED_TOOLS = MOBILE_BOTTOM_ITEMS.map(
+  (item) => new URLSearchParams(item.href.split("?")[1] ?? "").get("tool"),
+).filter((tool): tool is string => Boolean(tool));
+
 export default function MobileBottomNav() {
   const pathname = usePathname();
+  const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
 
   const isActive = (href: string) => {
-    const path = href.split("?")[0];
+    const [path, query] = href.split("?");
     if (href === "/") return pathname === "/";
+
+    const tool = new URLSearchParams(query ?? "").get("tool");
+    if (tool) {
+      return pathname === path && searchParams.get("tool") === tool;
+    }
+
+    // Generic item (no tool query). For the shared "/studio" base, only treat
+    // it as active when the current tool isn't owned by another bottom tab so
+    // that exactly one tab is highlighted at a time.
+    if (path === "/studio") {
+      const current = searchParams.get("tool");
+      return (
+        pathname === "/studio" && (!current || !RESERVED_TOOLS.includes(current))
+      );
+    }
+
     return pathname === path || pathname?.startsWith(path + "/");
   };
 
