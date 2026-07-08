@@ -36,6 +36,8 @@ const initialContext: LiTContext = {
 
 type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors" | "holo";
 
+const CHAT_STATE_KEY = "lit-console-state";
+
 export default function LitConsole() {
   const { user } = useUser();
   const router = useRouter();
@@ -47,6 +49,29 @@ export default function LitConsole() {
   const [activeAgent, setActiveAgent] = useState("director");
   const [activeModel, setActiveModel] = useState("gemini-2.5-flash");
   const [litTip, setLitTip] = useState<LiTTipResult | null>(null);
+
+  /* Restore chat state from localStorage on mount */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    try {
+      const raw = localStorage.getItem(CHAT_STATE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw);
+      if (Array.isArray(parsed.messages)) setMessages(parsed.messages);
+      if (typeof parsed.activeAgent === "string") setActiveAgent(parsed.activeAgent);
+      if (typeof parsed.activeModel === "string") setActiveModel(parsed.activeModel);
+      if (typeof parsed.input === "string") setInput(parsed.input);
+    } catch {
+      // ignore corrupt storage
+    }
+  }, []);
+
+  /* Persist chat state whenever it changes */
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const state = { messages, activeAgent, activeModel, input };
+    localStorage.setItem(CHAT_STATE_KEY, JSON.stringify(state));
+  }, [messages, activeAgent, activeModel, input]);
   const [pendingCommand, setPendingCommand] = useState<string | null>(null);
   const [pendingRun, setPendingRun] = useState<{
     runId: string | null;
@@ -739,7 +764,6 @@ export default function LitConsole() {
           stopSpeaking={stopSpeaking}
         />
       )}
-
 
       {pendingCommand && (
         <div

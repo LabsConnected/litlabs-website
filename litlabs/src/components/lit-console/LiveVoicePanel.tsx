@@ -72,10 +72,10 @@ export default function LiveVoicePanel({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex flex-col"
-      style={{ backgroundColor: `${LC.bg}f7`, backdropFilter: "blur(24px)" }}
+      className="relative z-30 flex w-full shrink-0 flex-col border-t"
+      style={{ backgroundColor: `${LC.bg}e6`, backdropFilter: "blur(18px)", borderColor: LC.border }}
     >
-      <div className="flex items-center justify-end gap-2 p-4">
+      <div className="flex items-center justify-between gap-2 px-4 py-2">
         <button
           onClick={() => setShowSettings((v) => !v)}
           className="rounded-full p-2 transition hover:bg-white/10"
@@ -94,8 +94,8 @@ export default function LiveVoicePanel({
         </button>
       </div>
 
-      <div className="flex flex-1 flex-col items-center justify-center px-6 pb-32 text-center">
-        <div className="relative mb-8 flex h-36 w-36 items-center justify-center">
+      <div className="flex items-center gap-4 px-4 py-3">
+        <div className="relative flex h-12 w-12 shrink-0 items-center justify-center">
           {isListening && (
             <>
               <span
@@ -103,7 +103,7 @@ export default function LiveVoicePanel({
                 style={{ background: `radial-gradient(circle, ${LC.accentCyan}, transparent 70%)`, animationDuration: "1.5s" }}
               />
               <span
-                className="absolute inset-5 rounded-full animate-pulse opacity-25"
+                className="absolute inset-2 rounded-full animate-pulse opacity-25"
                 style={{ background: `radial-gradient(circle, ${LC.accentCyan}, transparent 70%)`, animationDuration: "1s" }}
               />
             </>
@@ -111,60 +111,60 @@ export default function LiveVoicePanel({
           <button
             onClick={handleMic}
             disabled={state === "thinking"}
-            className="relative flex h-28 w-28 items-center justify-center rounded-full border-2 transition-all active:scale-95 disabled:opacity-50"
+            className="relative flex h-11 w-11 items-center justify-center rounded-full border-2 transition-all active:scale-95 disabled:opacity-50"
             style={{
               background: `linear-gradient(135deg, ${LC.accentCyan}25, ${LC.bgPanel}40)`,
               borderColor: `${LC.accentCyan}60`,
-              boxShadow: isListening ? `0 0 80px ${LC.accentCyan}50` : `0 0 40px ${LC.accentCyan}25`,
+              boxShadow: isListening ? `0 0 24px ${LC.accentCyan}50` : `0 0 12px ${LC.accentCyan}25`,
               color: LC.accentCyan,
             }}
           >
             {state === "error" ? (
-              <AlertCircle size={44} style={{ color: LC.danger }} />
+              <AlertCircle size={22} style={{ color: LC.danger }} />
             ) : isListening ? (
-              <MicOff size={44} style={{ color: LC.danger }} />
+              <MicOff size={22} style={{ color: LC.danger }} />
             ) : (
-              <Mic size={44} />
+              <Mic size={22} />
             )}
           </button>
         </div>
 
-        <h1 className="text-2xl font-black sm:text-3xl" style={{ color: LC.text }}>
-          LiT Voice
-        </h1>
-        <p className="mt-2 max-w-xs text-sm" style={{ color: LC.textMuted }}>
-          {statusText[state]}
-        </p>
-        {state === "error" && (
-          <button
-            onClick={handleMic}
-            disabled={!isSupported}
-            className="mt-3 rounded-full px-4 py-2 text-xs font-bold transition-all disabled:opacity-50"
-            style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center justify-between gap-2">
+            <span className="text-xs font-black" style={{ color: LC.text }}>LiT Voice</span>
+            <button
+              onClick={() => setContinuous(!continuous)}
+              className="flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] transition hover:bg-white/5"
+              style={{ color: continuous ? LC.accentCyan : LC.textMuted }}
+            >
+              <Repeat size={10} />
+              Continuous {continuous ? "on" : "off"}
+            </button>
+          </div>
+          <p className="text-[11px]" style={{ color: LC.textMuted }}>
+            {statusText[state]}
+          </p>
+          <div
+            className="mt-1 min-h-6 rounded-lg border px-2 py-1 text-xs"
+            style={{ backgroundColor: `${LC.bgPanel}80`, borderColor: LC.borderSubtle, color: LC.text }}
           >
-            Retry
-          </button>
-        )}
-
-        <div
-          className="mt-8 min-h-24 w-full max-w-md rounded-2xl border p-4 text-center"
-          style={{ backgroundColor: `${LC.bgPanel}80`, borderColor: LC.borderSubtle, color: LC.text }}
-        >
-          {transcript || (
-            <span style={{ color: LC.textDim }}>
-              {isSupported ? "Your words will appear here…" : "Voice not supported here."}
-            </span>
+            {transcript || (
+              <span style={{ color: LC.textDim }}>
+                {isSupported ? "Your words will appear here…" : "Voice not supported in this browser."}
+              </span>
+            )}
+          </div>
+          {state === "error" && (
+            <button
+              onClick={handleMic}
+              disabled={!isSupported}
+              className="mt-1 rounded-full px-2 py-0.5 text-[10px] font-bold transition-all disabled:opacity-50"
+              style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+            >
+              Retry
+            </button>
           )}
         </div>
-
-        <button
-          onClick={() => setContinuous(!continuous)}
-          className="mt-6 flex items-center gap-2 rounded-full px-4 py-2 text-xs transition hover:bg-white/5"
-          style={{ color: continuous ? LC.accentCyan : LC.textMuted }}
-        >
-          <Repeat size={14} />
-          Continuous {continuous ? "on" : "off"}
-        </button>
       </div>
 
       {showSettings && (
