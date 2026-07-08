@@ -22,8 +22,8 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className={`relative z-10 flex ${isConsole ? "h-[100dvh] overflow-hidden md:h-screen" : "min-h-screen"}`}>
-        <div className={`min-w-0 flex-1 flex flex-col ${isConsole ? "h-[100dvh] overflow-hidden md:h-screen" : "min-h-screen"}`}>
+      <div className={`relative z-10 flex ${isConsole ? "h-dvh overflow-hidden md:h-screen" : "min-h-screen"}`}>
+        <div className={`min-w-0 flex-1 flex flex-col ${isConsole ? "h-dvh overflow-hidden md:h-screen" : "min-h-screen"}`}>
           {isConsole && pathname?.startsWith("/admin") && (
             <header
               className="md:hidden flex h-[52px] shrink-0 items-center justify-between border-b px-3"
