@@ -301,7 +301,18 @@ export default function CanvasTool() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: "forge",
-          message: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${memoryContext}\n\nUser request: ${text}`,
+          message: `You are a code builder assistant. Generate clean, working code, then explain what it does and how to use it.
+
+Rules:
+- Wrap code in triple backticks with the language specified (e.g. \`\`\`tsx).
+- If multiple files, use comments like // filename.ext before each code block.
+- If generating HTML, make it a complete standalone file.
+- After the code block, explain in 2-4 sentences what the component does.
+- Then provide a "How to use" section with a concrete import example and any props.
+
+${memoryContext}
+
+User request: ${text}`,
           stream: false,
         }),
       });

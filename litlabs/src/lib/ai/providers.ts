@@ -53,6 +53,26 @@ export async function chatWithOpenRouter(messages: ChatMessage[], model = "googl
   return data.choices?.[0]?.message?.content ?? "";
 }
 
+function demoResponse(messages: ChatMessage[]): string {
+  const lastUser = messages
+    .slice()
+    .reverse()
+    .find((m) => m.role === "user")?.content ?? "your request";
+  const topic = lastUser.slice(0, 40).replace(/\n/g, " ");
+  return `I’m running in **demo mode** right now because no AI API key is configured on the server.
+
+I can’t generate a real answer for “${topic}…” yet, but the chat UI is fully functional.
+
+**To make me work for free:**
+1. Get a free Gemini key at [ai.google.dev](https://ai.google.dev) (Google AI Studio — generous free tier)
+2. Or get a free OpenRouter key at [openrouter.ai](https://openrouter.ai)
+3. Add it to your environment: 
+   \`GEMINI_API_KEY=your_key\` or \`OPENROUTER_API_KEY=your_key\`
+4. Redeploy, then I’ll answer for real.
+
+Until then, you can still browse the marketplace, dashboard, and agents pages.`;
+}
+
 export async function runAI({
   provider = "ollama",
   model = "llama3.2:3b",
@@ -62,6 +82,16 @@ export async function runAI({
   model?: string;
   messages: ChatMessage[];
 }) {
+  const hasKey = Boolean(
+    process.env.GEMINI_API_KEY ||
+      process.env.GOOGLE_API_KEY ||
+      process.env.OPENROUTER_API_KEY ||
+      (process.env.LIT_URL && process.env.LIT_URL !== "http://localhost:11434"),
+  );
+  if (!hasKey) {
+    return demoResponse(messages);
+  }
+
   if (provider === "ollama") {
     return chatWithOllama(messages, model);
   }
