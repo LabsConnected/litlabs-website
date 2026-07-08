@@ -30,7 +30,7 @@ type ToolItem = {
 
 const TOOL_ITEMS: ToolItem[] = [
   // Agent
-  { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1", group: "AGENT" },
+  { id: "chat", label: "LiTT CODE", icon: Bot, shortcut: "1", group: "AGENT" },
   { id: "missions", label: "Missions", icon: Zap, shortcut: "M", group: "AGENT" },
 
   // Create

@@ -2,6 +2,57 @@
 
 This is the master build brief for LiTTree. Use it to guide product, UI, agent, and implementation decisions.
 
+> The sections below the **Engineering Execution Plan** are the brand / design / product vision brief. The Execution Plan translates that vision into phased, verifiable engineering work with concrete deliverables, success criteria, dependencies, and live status.
+
+---
+
+# Engineering Execution Plan
+
+LiT is a TypeScript / Next.js LLM companion (there is no separate Python agent engine). "Intelligence" is delivered by: a shared prompt+memory layer (`src/lib/ai/lit-brain.ts`), structured user facts in Supabase (`user_brain`), optional Supermemory vector RAG, and a small persisted personality state (`lit_state`). All layers degrade gracefully when keys/DB are absent.
+
+Status legend: ✅ done · 🟡 in progress · ⬜ planned
+
+### Phase 0 — Memory foundation & one brain ✅
+
+- **Deliverables**
+  - Shared memory/personality module `src/lib/ai/lit-brain.ts` (`loadLitMemory`, `persistLitTurn`, Supermemory, fact extraction, conversation logging).
+  - Main console endpoint `/api/litt-code/think` wired to load identity + brain facts + memories and to persist facts after each reply (previously it had none).
+  - `/api/gemini/chat` refactored onto the same shared module — duplicated prompt/memory logic removed.
+  - Full rename of the legacy "Jarvis" surface to **LiTT CODE** (routes, components, display labels).
+- **Success criteria**: main chat recalls user facts across sessions; both endpoints share one code path; `tsc`/`lint`/`build` green.
+- **Dependencies**: Supabase `user_brain`/`users`, optional `SUPERMEMORY_API_KEY`.
+
+### Phase 1 — Short-term summarization & memory aging ✅
+
+- **Deliverables**
+  - Rolling summarization of turns beyond the recent window (`summarizeHistory`) so long chats keep early context.
+  - Relevance-ordered fact retrieval with an injection cap (`BRAIN_FACT_LIMIT`) so low-signal facts fall out of the prompt.
+  - Aging columns `user_brain.last_used_at` / `usage_count` + soft-forget (`decayStaleFacts`) via migration `20260708220000`.
+- **Success criteria**: prompt size bounded regardless of history length; unused facts expire; reads never break pre-migration.
+- **Dependencies**: Phase 0; migration applied before deploy for aging to take effect.
+
+### Phase 2 — Persisted personality / mood state ✅
+
+- **Deliverables**
+  - `lit_state` table (rapport / energy / momentum, bounded 0–100) via migration `20260708220000`.
+  - Deterministic bounded update per turn (`updateLitState`) + idle energy recovery; injected into the prompt as an internal-state block that subtly shapes tone.
+- **Success criteria**: state persists per user, stays within bounds, and measurably shifts reply tone (warmth/brevity) as it changes.
+- **Dependencies**: Phase 0; `lit_state` migration.
+
+### Phase 3 — Conversation persistence & retrieval ⬜
+
+- **Deliverables**: first-class `conversations`/`messages` tables (server-owned history instead of client-sent), thread list + resume UI, server-side truncation feeding Phase 1 summarization.
+- **Success criteria**: a user can leave and resume a titled thread; history survives client state loss.
+- **Dependencies**: Phases 0–1.
+
+### Phase 4 — Multi-agent orchestration & tools ⬜
+
+- **Deliverables**: shared memory/state across all agents (Forge, Pulse, Visionary…), tool/function calling with permissioned actions, richer action routing beyond keyword matching.
+- **Success criteria**: agents hand off with shared context; tool calls are auditable and permissioned.
+- **Dependencies**: Phases 0–3.
+
+---
+
 ## Core Direction
 
 Build LiTTree as a technical AI operating system, not a basic SaaS dashboard.

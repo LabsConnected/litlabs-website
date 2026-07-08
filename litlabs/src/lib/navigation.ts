@@ -74,7 +74,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Home,
     accent: GROUP_ACCENTS.Home,
     items: [
-      { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Brain, online: true },
+      { label: "LiTT CODE", href: "/studio?tool=chat", icon: Brain, online: true },
       { label: "Feed", href: "/social?feed=main", icon: Flame },
       { label: "Notifications", href: "/social?tab=notifications", icon: Bell, badge: 3 },
       { label: "Showcase", href: "/showcase", icon: Star },
@@ -217,7 +217,7 @@ export const MOBILE_BOTTOM_ITEMS = [
 
 export const MOBILE_MORE_ITEMS = [
   { label: "Dashboard", href: "/dashboard", icon: BarChart3 },
-  { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Bot },
+  { label: "LiTT CODE", href: "/studio?tool=chat", icon: Bot },
   { label: "Profile", href: "/profile", icon: User },
   { label: "Studio", href: "/studio", icon: Paintbrush },
   { label: "Agents", href: "/studio?tool=agents", icon: Users },

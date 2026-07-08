@@ -2,16 +2,16 @@
 
 import { X, Loader2 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import type { ActionResult } from "./useJarvisActions";
+import type { ActionResult } from "./useLittCodeActions";
 
-interface JarvisActionPanelProps {
+interface LittCodeActionPanelProps {
   loading: string | null;
   result: ActionResult | null;
   error: string | null;
   onClear: () => void;
 }
 
-export function JarvisActionPanel({ loading, result, error, onClear }: JarvisActionPanelProps) {
+export function LittCodeActionPanel({ loading, result, error, onClear }: LittCodeActionPanelProps) {
   const { resolvedColors: T } = useTheme();
   if (!loading && !result && !error) return null;
 

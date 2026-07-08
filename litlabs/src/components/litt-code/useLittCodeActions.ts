@@ -8,7 +8,7 @@ export type ActionResult = {
   type: "success" | "info" | "warning" | "error";
 };
 
-export function useJarvisActions() {
+export function useLittCodeActions() {
   const [loading, setLoading] = useState<string | null>(null);
   const [result, setResult] = useState<ActionResult | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -17,7 +17,7 @@ export function useJarvisActions() {
     setLoading("scan");
     setError(null);
     try {
-      const res = await fetch("/api/jarvis/scan");
+      const res = await fetch("/api/litt-code/scan");
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       setResult({
@@ -77,11 +77,11 @@ export function useJarvisActions() {
     }
   }
 
-  async function askJarvis(question: string) {
+  async function askLittCode(question: string) {
     setLoading("ask");
     setError(null);
     try {
-      const res = await fetch("/api/jarvis/think", {
+      const res = await fetch("/api/litt-code/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: question, context: { route: "/agents/lit" } }),
@@ -112,7 +112,7 @@ export function useJarvisActions() {
     runScan,
     startWorkflow,
     deploy,
-    askJarvis,
+    askLittCode,
     clear,
   };
 }

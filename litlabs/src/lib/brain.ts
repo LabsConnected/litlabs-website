@@ -179,6 +179,10 @@ export async function saveProjectContextForUser(
 /*  3. Brain Facts (structured memory in Supabase)                    */
 /* ------------------------------------------------------------------ */
 
+/** Cap on how many facts are injected into a prompt. Lower-relevance
+ *  facts fall out of this window — a soft form of forgetting. */
+const BRAIN_FACT_LIMIT = 40;
+
 export async function getBrainFacts(
   clerkId: string,
 ): Promise<BrainFacts | null> {
@@ -188,25 +192,64 @@ export async function getBrainFacts(
   const admin = getSupabaseAdmin();
   if (!admin) return null;
 
+  // Prioritize by confidence, then recency. Both columns predate the
+  // aging migration, so this read never depends on the new columns.
   const { data, error } = await admin
     .from("user_brain")
-    .select("key, value, category")
+    .select("id, key, value, category")
     .eq("user_id", profile.id)
-    .order("updated_at", { ascending: false });
+    .order("confidence", { ascending: false })
+    .order("updated_at", { ascending: false })
+    .limit(BRAIN_FACT_LIMIT);
 
   if (error || !data?.length) return null;
 
   const facts: BrainFacts = { preferences: [], goals: [], facts: [] };
+  const usedIds: string[] = [];
   for (const row of data) {
     const v = row.value?.trim();
     if (!v) continue;
+    if (row.id) usedIds.push(row.id as string);
     const cat = row.category || "facts";
     if (cat === "preference") facts.preferences.push(v);
     else if (cat === "goal") facts.goals.push(v);
     else facts.facts.push(v);
   }
 
+  // Mark retrieved facts as recently used (best-effort; no-op if the
+  // aging columns haven't been migrated yet).
+  if (usedIds.length) {
+    admin
+      .from("user_brain")
+      .update({ last_used_at: new Date().toISOString() })
+      .in("id", usedIds)
+      .then(undefined, () => {});
+  }
+
   return facts;
+}
+
+/**
+ * Soft-forget: delete facts that were never reinforced (usage_count 0)
+ * and have not been touched in over 60 days. Best-effort and safe to
+ * no-op when the aging columns are not yet migrated.
+ */
+export async function decayStaleFacts(clerkId: string): Promise<void> {
+  const profile = await getUserProfile(clerkId);
+  if (!profile) return;
+  const admin = getSupabaseAdmin();
+  if (!admin) return;
+  const cutoff = new Date(Date.now() - 60 * 24 * 3_600_000).toISOString();
+  try {
+    await admin
+      .from("user_brain")
+      .delete()
+      .eq("user_id", profile.id)
+      .eq("usage_count", 0)
+      .lt("last_used_at", cutoff);
+  } catch {
+    // non-fatal (columns may not exist pre-migration)
+  }
 }
 
 export async function addBrainFact(

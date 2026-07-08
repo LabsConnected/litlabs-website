@@ -53,7 +53,7 @@ export default function NavbarWrapper() {
 
   const mainLinks = [
     { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
-    { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Wand2 },
+    { href: "/studio?tool=chat", label: "LiTT CODE", icon: Wand2 },
     { href: "/agents", label: "Agents", icon: Sparkles },
     { href: "/gallery", label: "Gallery", icon: Images },
     { href: "/marketplace", label: "Marketplace", icon: Store },
@@ -88,7 +88,7 @@ export default function NavbarWrapper() {
           className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
           aria-label="Go home"
-          title="LiTTree Agent"
+          title="LiTT CODE"
         >
           <Home size={20} />
         </Link>

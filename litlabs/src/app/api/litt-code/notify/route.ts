@@ -3,7 +3,7 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { lit, NotificationPayload } from "@/lib/jarvis";
+import { lit, NotificationPayload } from "@/lib/litt-code";
 
 // Admin user IDs
 const ADMIN_IDS = (process.env.ADMIN_CLERK_IDS || process.env.ADMIN_CLERK_ID || "")

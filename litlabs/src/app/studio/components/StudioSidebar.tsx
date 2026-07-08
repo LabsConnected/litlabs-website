@@ -40,7 +40,7 @@ type ToolItem = {
 
 /* ── Tool groups ─────────────────────────────────────────────────── */
 const CORE_TOOLS: ToolItem[] = [
-  { id: "chat", label: "LiTTree Agent", icon: Bot, shortcut: "1" },
+  { id: "chat", label: "LiTT CODE", icon: Bot, shortcut: "1" },
 ];
 
 const CREATE_TOOLS: ToolItem[] = [

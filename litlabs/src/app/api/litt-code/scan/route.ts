@@ -1,4 +1,4 @@
-// JARVIS Codebase Scanner
+// LiTT CODE Codebase Scanner
 // Reads key project files and returns a structured summary
 
 import { NextResponse } from "next/server";

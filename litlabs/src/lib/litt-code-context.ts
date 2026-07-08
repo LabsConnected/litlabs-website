@@ -51,6 +51,7 @@ export function buildLitPrompt(
   context: LiTContext,
   fileCount?: number,
   recentMessages: LiTChatHistoryMessage[] = [],
+  memoryBlock = "",
 ): string {
   const treePreview = context.fileTree.slice(0, 20);
   const treeSummary = treePreview.length > 0
@@ -67,6 +68,7 @@ export function buildLitPrompt(
 You are LiT inside LiTTree OS.
 
 You are an AI developer command center with access to the live project.
+${memoryBlock ? `\n${memoryBlock}\n` : ""}
 
 User request:
 ${message}

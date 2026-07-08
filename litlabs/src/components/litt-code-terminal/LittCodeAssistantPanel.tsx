@@ -24,7 +24,7 @@ import type {
   LiTContext,
   LiTAction,
   LiTThinkResponse,
-} from "@/lib/jarvis-context";
+} from "@/lib/litt-code-context";
 
 const slashCommands = [
   { label: "/scan", desc: "Scan project and terminal state" },
@@ -61,7 +61,7 @@ type Message = {
   loading?: boolean;
 };
 
-interface JarvisAssistantPanelProps {
+interface LittCodeAssistantPanelProps {
   context: LiTContext;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
@@ -70,14 +70,14 @@ interface JarvisAssistantPanelProps {
   onDeploy?: () => void;
 }
 
-export function JarvisAssistantPanel({
+export function LittCodeAssistantPanel({
   context,
   onInsertCommand,
   onRunCommand,
   onCreateFile,
   onStartAgent,
   onDeploy,
-}: JarvisAssistantPanelProps) {
+}: LittCodeAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -97,7 +97,7 @@ export function JarvisAssistantPanel({
     });
   }, [messages]);
 
-  async function askJarvis(rawInput: string) {
+  async function askLittCode(rawInput: string) {
     const text = rawInput.trim();
     if (!text) return;
 
@@ -111,7 +111,7 @@ export function JarvisAssistantPanel({
     setShowSlash(false);
 
     try {
-      const res = await fetch("/api/jarvis/think", {
+      const res = await fetch("/api/litt-code/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, context }),
@@ -181,7 +181,7 @@ export function JarvisAssistantPanel({
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      askJarvis(prompt);
+      askLittCode(prompt);
     } else if (e.key === "/" && prompt === "") {
       setShowSlash(true);
     } else if (e.key === "Escape") {
@@ -332,7 +332,7 @@ export function JarvisAssistantPanel({
             className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-orange-600"
           />
           <button
-            onClick={() => askJarvis(prompt)}
+            onClick={() => askLittCode(prompt)}
             disabled={loading || !prompt.trim()}
             className="absolute bottom-2 right-2 rounded-lg bg-orange-600 p-2 text-white disabled:opacity-50 hover:bg-orange-500"
           >
@@ -346,7 +346,7 @@ export function JarvisAssistantPanel({
             return (
               <button
                 key={item.label}
-                onClick={() => askJarvis(item.prompt)}
+                onClick={() => askLittCode(item.prompt)}
                 className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-orange-600 hover:text-orange-400"
               >
                 <Icon className="h-3.5 w-3.5" />

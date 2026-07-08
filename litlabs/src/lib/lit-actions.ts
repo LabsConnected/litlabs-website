@@ -109,7 +109,7 @@ export async function executeAction(action: LiTAction): Promise<LiTActionResult>
     case "build_app": {
       return {
         ok: true,
-        message: "Opening LiTTree Agent to start your app.",
+        message: "Opening LiTT CODE to start your app.",
         action,
       };
     }
@@ -117,7 +117,7 @@ export async function executeAction(action: LiTAction): Promise<LiTActionResult>
     case "create_agent": {
       return {
         ok: true,
-        message: "Opening LiTTree Agent to create your agent.",
+        message: "Opening LiTT CODE to create your agent.",
         action,
       };
     }
@@ -134,9 +134,9 @@ export function actionMessage(action: LiTAction): string {
     case "generate_audio":
       return "Opening the Audio Studio...";
     case "build_app":
-      return "Opening LiTTree Agent...";
+      return "Opening LiTT CODE...";
     case "create_agent":
-      return "Opening LiTTree Agent...";
+      return "Opening LiTT CODE...";
     case "navigate":
       return "Opening...";
     default:

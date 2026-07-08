@@ -40,7 +40,7 @@ const RECENT_RUNS = [
   { action: "Deploy staging", time: "1 hour ago", status: "completed" },
 ];
 
-export function JarvisToolGrid() {
+export function LittCodeToolGrid() {
   return (
     <div className="space-y-6">
       <div>

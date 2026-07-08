@@ -343,7 +343,7 @@ const [scan, setScan] = useState<{
   const runProjectScan = useCallback(async () => {
     setScan({ loading: true, error: null, data: null });
     try {
-      const res = await fetch("/api/jarvis/scan");
+      const res = await fetch("/api/litt-code/scan");
       if (!res.ok) throw new Error(`Scan failed: ${res.status}`);
       const data = await res.json();
       setScan({ loading: false, error: null, data });

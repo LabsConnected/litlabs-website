@@ -4,15 +4,15 @@ import Link from "next/link";
 import NextImage from "next/image";
 import { Terminal, Rocket, ScanLine, ArrowLeft, Brain, Settings, Zap, ArrowRight, Loader2 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { JarvisToolGrid } from "./JarvisToolGrid";
-import { JarvisChatPanel } from "./JarvisChatPanel";
-import { JarvisSystemStatus } from "./JarvisSystemStatus";
-import { JarvisActionPanel } from "./JarvisActionPanel";
-import { useJarvisActions } from "./useJarvisActions";
+import { LittCodeToolGrid } from "./LittCodeToolGrid";
+import { LittCodeChatPanel } from "./LittCodeChatPanel";
+import { LittCodeSystemStatus } from "./LittCodeSystemStatus";
+import { LittCodeActionPanel } from "./LittCodeActionPanel";
+import { useLittCodeActions } from "./useLittCodeActions";
 
-export function JarvisAgentProfile() {
+export function LittCodeAgentProfile() {
   const { resolvedColors: T } = useTheme();
-  const { loading, result, error, runScan, startWorkflow, deploy, clear } = useJarvisActions();
+  const { loading, result, error, runScan, startWorkflow, deploy, clear } = useLittCodeActions();
 
   return (
     <main className="min-h-screen" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
@@ -112,12 +112,12 @@ export function JarvisAgentProfile() {
                 />
               </div>
 
-              <JarvisToolGrid />
+              <LittCodeToolGrid />
             </div>
 
-            <JarvisSystemStatus />
+            <LittCodeSystemStatus />
 
-            <JarvisActionPanel loading={loading} result={result} error={error} onClear={clear} />
+            <LittCodeActionPanel loading={loading} result={result} error={error} onClear={clear} />
 
             <Link
               href="/studio?tool=chat"
@@ -187,7 +187,7 @@ export function JarvisAgentProfile() {
           </div>
 
           <div className="lg:sticky lg:top-4 lg:h-fit">
-            <JarvisChatPanel compact />
+            <LittCodeChatPanel compact />
           </div>
         </div>
       </div>

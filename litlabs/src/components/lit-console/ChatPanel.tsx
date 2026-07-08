@@ -278,17 +278,17 @@ function suggestedActions(text: string): SuggestedAction[] {
   ];
 }
 
-const PROMPT_SUGGESTIONS = [
-  "Audit this mobile Studio screen and give the next exact fix",
-  "Make LiTT smarter without repeating old replies",
-  "Design inline voice settings that do not block chat",
-  "Create LiTTree brand image prompts with LiTT visible",
-  "Turn this idea into a LiTTree OS feature plan",
-  "Improve the prompt predictions for this conversation",
-  "Check what needs to be saved to memory from this chat",
-  "Map the next user flow from Dashboard to Studio",
-  "Create a mobile QA checklist for this screen",
-  "Plan the next deploy and verification steps",
+const PROMPT_SUGGESTIONS: SuggestedAction[] = [
+  { label: "Audit this screen", prompt: "Audit this mobile Studio screen and give the next exact fix" },
+  { label: "Make LiTT smarter", prompt: "Make LiTT smarter without repeating old replies" },
+  { label: "Inline voice settings", prompt: "Design inline voice settings that do not block chat" },
+  { label: "Brand image prompts", prompt: "Create LiTTree brand image prompts with LiTT visible" },
+  { label: "Idea → OS feature", prompt: "Turn this idea into a LiTTree OS feature plan" },
+  { label: "Improve predictions", prompt: "Improve the prompt predictions for this conversation" },
+  { label: "What to save", prompt: "Check what needs to be saved to memory from this chat" },
+  { label: "Next user flow", prompt: "Map the next user flow from Dashboard to Studio" },
+  { label: "Mobile QA checklist", prompt: "Create a mobile QA checklist for this screen" },
+  { label: "Plan next deploy", prompt: "Plan the next deploy and verification steps" },
 ];
 
 const COMPANION_PROMPTS = [
@@ -803,7 +803,7 @@ export default function ChatPanel({
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full opacity-75" style={{ backgroundColor: LC.accentCyan }} />
             <span className="relative inline-flex h-2 w-2 rounded-full" style={{ backgroundColor: LC.accentCyan }} />
           </span>
-          <Bot size={14} style={{ color: LC.accentCyan }} /> LiTTree Agent
+          <Bot size={14} style={{ color: LC.accentCyan }} /> LiTT CODE
           <span className="hidden text-[9px] font-black uppercase tracking-widest min-[380px]:inline" style={{ color: LC.accentCyan }}>Live</span>
           {demoMode && (
             <span className="rounded-full px-2 py-0.5 text-[9px] font-black" style={{ backgroundColor: `${LC.warning}20`, color: LC.warning }}>
@@ -912,7 +912,7 @@ export default function ChatPanel({
             >
               <div className="pointer-events-none absolute inset-0 opacity-[0.16] [background-image:linear-gradient(rgba(45,246,255,0.12)_1px,transparent_1px),linear-gradient(90deg,rgba(73,255,158,0.08)_1px,transparent_1px)] [background-size:34px_34px]" />
               <div className="pointer-events-none absolute left-1/2 top-[8%] h-[46%] w-px -translate-x-1/2" style={{ background: `linear-gradient(180deg, transparent, ${LC.accentCyan}88, ${LC.accentOrange}44, transparent)`, boxShadow: `0 0 28px ${LC.accentCyan}44` }} />
-              <div className="mx-auto w-full max-w-3xl space-y-3 text-center sm:space-y-6 sm:px-4 lg:px-6">
+              <div className="mx-auto flex w-full max-w-3xl flex-col justify-center gap-6 text-center sm:gap-8 sm:px-4 lg:px-6">
                 <div className="relative mx-auto flex h-24 w-24 items-center justify-center sm:h-40 sm:w-40">
                   <div
                     className="absolute inset-0 rounded-full animate-pulse"
@@ -987,15 +987,16 @@ export default function ChatPanel({
                   })}
                 </div>
 
-                <div className="scrollbar-none -mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0">
+                <div className="scrollbar-none -mx-3 flex snap-x items-center gap-2 overflow-x-auto px-3 pb-1 [mask-image:linear-gradient(to_right,transparent,black_16px,black_calc(100%-28px),transparent)] sm:mx-0 sm:flex-wrap sm:justify-center sm:overflow-visible sm:px-0 sm:pb-0 sm:[mask-image:none]">
                   {PROMPT_SUGGESTIONS
                     .slice(promptSeed % PROMPT_SUGGESTIONS.length)
                     .concat(PROMPT_SUGGESTIONS.slice(0, promptSeed % PROMPT_SUGGESTIONS.length))
                     .slice(0, 6)
-                    .map((prompt) => (
+                    .map((suggestion) => (
                       <button
-                        key={prompt}
-                        onClick={() => onSend(prompt)}
+                        key={suggestion.label}
+                        onClick={() => onSend(suggestion.prompt)}
+                        title={suggestion.prompt}
                         className="snap-start whitespace-nowrap rounded-full border px-3 py-2 text-[11px] font-bold transition-all hover:scale-[1.02] sm:py-1.5"
                         style={{
                           backgroundColor: LC.bgPanel,
@@ -1003,7 +1004,7 @@ export default function ChatPanel({
                           color: LC.textMuted,
                         }}
                       >
-                        {prompt}
+                        {suggestion.label}
                       </button>
                     ))}
                 </div>

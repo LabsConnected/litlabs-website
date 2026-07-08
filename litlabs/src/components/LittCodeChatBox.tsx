@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { askLit } from "@/lib/ai/client";
 
-export default function JarvisChatBox() {
+export default function LittCodeChatBox() {
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState("");
   const [loading, setLoading] = useState(false);

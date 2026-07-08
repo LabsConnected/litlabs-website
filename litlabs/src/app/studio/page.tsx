@@ -126,7 +126,7 @@ const CanvasTool = nextDynamic(() => import("./tools/CanvasTool"), {
 });
 const ChatTool = nextDynamic(() => import("./tools/ChatTool"), {
   ssr: false,
-  loading: () => <StudioLoadingScreen label="Loading LiTTree Agent..." />,
+  loading: () => <StudioLoadingScreen label="Loading LiTT CODE..." />,
 });
 const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), {
   ssr: false,
@@ -250,7 +250,7 @@ function StudioCommandCenter() {
             className="mb-3 text-xs font-black uppercase tracking-[0.28em]"
             style={{ color: T.accentColor }}
           >
-            LiTTree Agent
+            LiTT CODE
           </p>
           <h1
             className="mx-auto mb-4 max-w-2xl text-3xl font-black tracking-tight sm:text-5xl"
@@ -262,7 +262,7 @@ function StudioCommandCenter() {
             className="mx-auto mb-7 max-w-xl text-sm leading-relaxed sm:text-base"
             style={{ color: T.textMuted }}
           >
-            The old Image Studio now routes into LiTTree Agent. Type a prompt like
+            The old Image Studio now routes into LiTT CODE. Type a prompt like
             “generate a hero image” and the image comes back inside the same chat.
           </p>
           <div className="mb-7 flex flex-wrap justify-center gap-2">

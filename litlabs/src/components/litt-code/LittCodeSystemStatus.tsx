@@ -12,7 +12,7 @@ const services = [
   { icon: Rocket, label: "Deployments", status: "Online" },
 ];
 
-export function JarvisSystemStatus() {
+export function LittCodeSystemStatus() {
   const { resolvedColors: T } = useTheme();
   return (
     <div

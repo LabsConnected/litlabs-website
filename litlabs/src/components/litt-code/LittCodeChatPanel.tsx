@@ -17,7 +17,7 @@ import type {
   LiTContext,
   LiTAction,
   LiTThinkResponse,
-} from "@/lib/jarvis-context";
+} from "@/lib/litt-code-context";
 
 type Message = {
   role: "user" | "lit";
@@ -26,7 +26,7 @@ type Message = {
   loading?: boolean;
 };
 
-interface JarvisChatPanelProps {
+interface LittCodeChatPanelProps {
   context?: Partial<LiTContext>;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
@@ -43,12 +43,12 @@ const defaultContext: LiTContext = {
   websocketStatus: "offline",
 };
 
-export function JarvisChatPanel({
+export function LittCodeChatPanel({
   context,
   onInsertCommand,
   onRunCommand,
   compact,
-}: JarvisChatPanelProps) {
+}: LittCodeChatPanelProps) {
   const ctx = { ...defaultContext, ...context };
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
@@ -68,7 +68,7 @@ export function JarvisChatPanel({
     });
   }, [messages]);
 
-  async function askJarvis(text: string) {
+  async function askLittCode(text: string) {
     if (!text.trim()) return;
     setMessages((prev) => [
       ...prev,
@@ -79,7 +79,7 @@ export function JarvisChatPanel({
     setLoading(true);
 
     try {
-      const res = await fetch("/api/jarvis/think", {
+      const res = await fetch("/api/litt-code/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, context: ctx }),
@@ -114,7 +114,7 @@ export function JarvisChatPanel({
   async function executeAction(action: LiTAction) {
     const label = (action.label || "").toLowerCase();
     if (label.includes("scan")) {
-      const res = await fetch("/api/jarvis/scan");
+      const res = await fetch("/api/litt-code/scan");
       if (!res.ok) throw new Error(await res.text());
       const data = await res.json();
       return `Scan complete: ${data.totalFiles} files, ${data.totalLines} lines. ${data.health?.buildStatus}`;
@@ -310,14 +310,14 @@ export function JarvisChatPanel({
             onKeyDown={(e) => {
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
-                askJarvis(prompt);
+                askLittCode(prompt);
               }
             }}
             placeholder="Ask LiT..."
             className={`w-full resize-none rounded-lg border border-neutral-800 bg-black p-2.5 pr-9 text-xs outline-none focus:border-orange-600 ${compact ? "h-16" : "h-20"}`}
           />
           <button
-            onClick={() => askJarvis(prompt)}
+            onClick={() => askLittCode(prompt)}
             disabled={loading || !prompt.trim()}
             className="absolute bottom-1.5 right-1.5 rounded-lg bg-orange-600 p-1.5 text-white disabled:opacity-50 hover:bg-orange-500"
           >
@@ -333,7 +333,7 @@ export function JarvisChatPanel({
             ].map((q) => (
               <button
                 key={q}
-                onClick={() => askJarvis(q)}
+                onClick={() => askLittCode(q)}
                 className="flex items-center gap-1 rounded-lg border border-neutral-800 px-2 py-1 text-[10px] text-neutral-400 hover:border-orange-600 hover:text-orange-400"
               >
                 <Sparkles className="h-2.5 w-2.5" />

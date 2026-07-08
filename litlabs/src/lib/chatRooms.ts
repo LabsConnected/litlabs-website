@@ -12,14 +12,14 @@ export const CHAT_ROOMS: ChatRoom[] = [
     label: "Studio HQ",
     modelId: "adaptive",
     description: "The default command room for planning, execution, and orchestration.",
-    members: ["JARVIS", "Director", "Studio"],
+    members: ["LiTT CODE", "Director", "Studio"],
   },
   {
     id: "terminal-ops",
     label: "Terminal Ops",
     modelId: "gemini-2.5-flash",
     description: "Fast interactive shell tasks and quick agent operations.",
-    members: ["JARVIS", "CLI Bridge", "Terminal"],
+    members: ["LiTT CODE", "CLI Bridge", "Terminal"],
   },
   {
     id: "creative-lab",

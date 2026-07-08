@@ -380,7 +380,7 @@ export default function DashboardContent() {
   const quickLinks = [
     {
       href: "/studio?tool=chat",
-      label: "LiTTree Agent",
+      label: "LiTT CODE",
       icon: Bot,
       desc: "Talk to any AI agent",
     },

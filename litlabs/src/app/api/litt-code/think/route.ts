@@ -8,8 +8,11 @@ import {
   LiTAction,
   LiTChatHistoryMessage,
   parseLitActions,
-} from "@/lib/jarvis-context";
+} from "@/lib/litt-code-context";
 import { getProjectFiles } from "@/lib/project-scan";
+import { loadLitMemory, persistLitTurn } from "@/lib/ai/lit-brain";
+
+const RECENT_WINDOW = 8;
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -22,19 +25,23 @@ export async function POST(req: NextRequest) {
     const message = body.message as string;
     const contextRaw = body.context as Partial<LiTContext> & { route: string };
     const userContext = body.userContext as { plan?: string; balance?: number; username?: string } | undefined;
-    const recentMessages = Array.isArray(body.recentMessages)
-      ? (body.recentMessages as LiTChatHistoryMessage[])
-          .filter((m) =>
+    const allMessages = Array.isArray(body.recentMessages)
+      ? (body.recentMessages as LiTChatHistoryMessage[]).filter(
+          (m) =>
             (m.role === "user" || m.role === "assistant") &&
             typeof m.content === "string" &&
             m.content.trim().length > 0,
-          )
-          .slice(-8)
+        )
       : [];
+    const recentMessages = allMessages.slice(-RECENT_WINDOW);
+    const olderMessages = allMessages.slice(0, -RECENT_WINDOW);
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
+
+    // Long-term memory + personality state + summary of older turns.
+    const memory = await loadLitMemory(userId, message, olderMessages);
 
     const projectFiles = getProjectFiles();
     const fileCount = projectFiles.tree.length;
@@ -47,7 +54,7 @@ export async function POST(req: NextRequest) {
       fileTree: topFiles,
       selectedFile,
     });
-    const prompt = buildLitPrompt(message, context, fileCount, recentMessages);
+    const prompt = buildLitPrompt(message, context, fileCount, recentMessages, memory.block);
 
     const messages = [
       {
@@ -74,7 +81,7 @@ export async function POST(req: NextRequest) {
           "- /studio?tool=chat — Main AI chat console (current page / canonical product route)\n" +
           "- /studio — Create: generate images, music, video, audio, and 3D skyboxes\n" +
           "- /marketplace — Browse and install AI agents, subscribe to tiers (Starter/Creator/Elite)\n" +
-          "- /agents — Redirects to LiTTree Agent in Studio\n" +
+          "- /agents — Redirects to LiTT CODE in Studio\n" +
           "- /dashboard — Analytics dashboard with stats and social agent\n" +
           "- /gallery — Community showcase of generated images and content\n" +
           "- /social — Social feed: posts, follows, community interaction\n" +
@@ -84,7 +91,7 @@ export async function POST(req: NextRequest) {
           "- /profile — User profile page\n" +
           "- /onboarding — New user setup wizard\n" +
           "- /docs — Documentation and guides\n" +
-          "- /builder — Redirects to LiTTree Agent in Studio\n" +
+          "- /builder — Redirects to LiTT CODE in Studio\n" +
           "- /code — Code editor and development workspace\n" +
           "- /flow — Workflow builder for multi-agent orchestration (redirects to /studio?tool=flow)\n" +
           "\n" +
@@ -171,6 +178,16 @@ export async function POST(req: NextRequest) {
         command: "pnpm build",
       });
     }
+
+    // Persist the turn (conversation log, long-term memory, fact
+    // extraction, personality-state advance). Best-effort, non-blocking.
+    void persistLitTurn({
+      clerkId: userId,
+      resolvedUserId: memory.resolvedUserId,
+      message,
+      answer,
+      agentId: "director",
+    });
 
     return NextResponse.json({ answer, actions });
   } catch (error) {

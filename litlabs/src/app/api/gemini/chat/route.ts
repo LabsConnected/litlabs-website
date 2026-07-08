@@ -3,8 +3,7 @@ import { withRateLimit } from "@/lib/rate-limiter";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@clerk/nextjs/server";
-import { getSupabaseAdmin } from "@/lib/supabase";
-import { buildIdentityBlock, extractStructuredFacts, getBrainFacts, getProjectContextForUser, getUserProfile } from "@/lib/brain";
+import { loadLitMemory, persistLitTurn } from "@/lib/ai/lit-brain";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -13,33 +12,6 @@ type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "director";
 const HISTORY_LIMIT = 12;
-
-async function fetchMemories(query: string, userId: string): Promise<string> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return "";
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    const results = await sm.search.memories({ q: query, containerTag: userId, limit: 5 });
-    const memories = (results.results || []).map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk || "").filter(Boolean);
-    if (!memories.length) return "";
-    return `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}\n---`;
-  } catch {
-    return "";
-  }
-}
-
-async function saveMemory(content: string, userId: string, agentId: string): Promise<void> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return;
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    await sm.add({ content, containerTag: userId, metadata: { type: "agent-chat", agent: agentId } });
-  } catch {
-    // non-fatal
-  }
-}
 
 function buildPrompt(
   agent: Agent,
@@ -78,31 +50,6 @@ function buildPrompt(
     .join("\n");
 }
 
-async function logConversation(
-  agent: Agent,
-  userId: string | null,
-  userMessage: string,
-  responseText: string,
-) {
-  try {
-    const admin = getSupabaseAdmin();
-    if (!admin) return; // Build-safe: null when env keys unavailable
-    await admin.from("agent_logs").insert({
-      agent_id: agent.id,
-      level: "info",
-      message: "Agent chat",
-      metadata: {
-        userId,
-        userMessage,
-        responseText,
-        timestamp: new Date().toISOString(),
-      },
-    });
-  } catch {
-    // Failed to log agent chat:
-  }
-}
-
 /**
  * POST /api/gemini/chat
  * Body: { agentSlug, message, history?, provider?, stream?: boolean }
@@ -131,23 +78,10 @@ async function handler(req: NextRequest) {
       AGENTS[agentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
 
-    const uid = userId || "anonymous";
-    const memoryContext = await fetchMemories(message, uid);
-
-    // ── Brain warmup: inject identity + project context + brain facts ──
-    let identityBlock = "";
-    if (uid !== "anonymous") {
-      const [profile, project, brainFacts] = await Promise.all([
-        getUserProfile(uid),
-        getProjectContextForUser(uid),
-        getBrainFacts(uid),
-      ]);
-      identityBlock = buildIdentityBlock(profile, project, brainFacts);
-    }
-
-    const prompt = identityBlock
-      ? `${identityBlock}\n\n${buildPrompt(agent, message, history, memoryContext)}`
-      : buildPrompt(agent, message, history, memoryContext);
+    // Identity + long-term memory + history summary + personality state.
+    const olderHistory = history.slice(0, -HISTORY_LIMIT);
+    const memory = await loadLitMemory(userId ?? null, message, olderHistory);
+    const prompt = buildPrompt(agent, message, history, memory.block);
 
     if (!stream) {
       const r = await generateText(
@@ -155,20 +89,13 @@ async function handler(req: NextRequest) {
         { task: "chat", provider, maxTokens: 2048 },
         undefined,
       );
-      await logConversation(agent, userId, message, r.text);
-      await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
-      // Structured fact extraction (fire-and-forget)
-      if (uid !== "anonymous") {
-        try {
-          const facts = await extractStructuredFacts(message, r.text);
-          for (const f of facts) {
-            const { addBrainFact } = await import("@/lib/brain");
-            await addBrainFact(uid, f.key, f.value, f.category);
-          }
-        } catch {
-          // non-fatal
-        }
-      }
+      void persistLitTurn({
+        clerkId: userId ?? null,
+        resolvedUserId: memory.resolvedUserId,
+        message,
+        answer: r.text,
+        agentId: agent.id,
+      });
       return NextResponse.json({
         response: r.text,
         provider: r.provider,
@@ -206,18 +133,13 @@ async function handler(req: NextRequest) {
         } finally {
           controller.close();
           if (assistantText) {
-            await logConversation(agent, userId, message, assistantText);
-            await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
-            // Structured fact extraction (fire-and-forget)
-            try {
-              const facts = await extractStructuredFacts(message, assistantText);
-              const { addBrainFact } = await import("@/lib/brain");
-              for (const f of facts) {
-                await addBrainFact(uid, f.key, f.value, f.category);
-              }
-            } catch {
-              // non-fatal
-            }
+            await persistLitTurn({
+              clerkId: userId ?? null,
+              resolvedUserId: memory.resolvedUserId,
+              message,
+              answer: assistantText,
+              agentId: agent.id,
+            });
           }
         }
       },

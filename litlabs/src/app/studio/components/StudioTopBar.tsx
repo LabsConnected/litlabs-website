@@ -45,7 +45,7 @@ type CmdItem = {
 };
 
 const TOOL_ITEMS: CmdItem[] = [
-  { id: "chat", label: "LiTTree Agent", type: "tool", icon: Bot, href: "/studio?tool=chat", shortcut: "1", keywords: "chat talk ask ai lit assistant builder terminal agents code" },
+  { id: "chat", label: "LiTT CODE", type: "tool", icon: Bot, href: "/studio?tool=chat", shortcut: "1", keywords: "chat talk ask ai lit assistant builder terminal agents code" },
   { id: "image", label: "Generate Image", type: "tool", icon: Image, href: "/studio?tool=image", shortcut: "1", keywords: "image picture photo generate art wallpaper logo" },
   { id: "video", label: "Video", type: "tool", icon: Film, href: "/studio?tool=video", shortcut: "2", keywords: "video film clip animation movie" },
   { id: "audio", label: "Audio", type: "tool", icon: Music, href: "/studio?tool=audio", shortcut: "3", keywords: "audio music song sound beat track voice" },
@@ -80,7 +80,7 @@ const GHOSTS: Record<string, string> = {
   "image": "generate a wallpaper",
   "build": "build a landing page...",
   "code": "build a dashboard",
-  "agent": "ask LiTTree Agent...",
+  "agent": "ask LiTT CODE...",
   "term": "ask LiTTree to run...",
   "game": "play retro games",
   "help": "show all commands",

@@ -14,7 +14,7 @@ import {
   LiTTreeTerminalHandle,
 } from "@/components/terminal/LiTTreeTerminal";
 import { useLitConsoleTheme } from "./useLitConsoleTheme";
-import type { LiTContext } from "@/lib/jarvis-context";
+import type { LiTContext } from "@/lib/litt-code-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
@@ -174,7 +174,7 @@ export default function LitConsole() {
     ]);
 
     try {
-      const res = await fetch("/api/jarvis/think", {
+      const res = await fetch("/api/litt-code/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -521,7 +521,7 @@ export default function LitConsole() {
     if (nextStep) executeDirectorStep(activeRun.runId, nextStep.id);
   }, [activeRun, executeDirectorStep]);
 
-  // Legacy pending command approval (used by /api/jarvis/think responses)
+  // Legacy pending command approval (used by /api/litt-code/think responses)
   const approveCommand = useCallback((command: string) => {
     if (!command) return;
     setMessages((prev) => [...prev, { id: Math.random().toString(36).slice(2), role: "system", content: `Running: \`${command}\`` }]);
@@ -860,7 +860,7 @@ const STUDIO_TOOLS = [
   { id: "image", label: "Image Agent", href: "/studio?tool=chat", icon: "🎨" },
   { id: "video", label: "Video Studio", href: "/studio?tool=video", icon: "🎬" },
   { id: "audio", label: "Music Studio", href: "/studio?tool=audio", icon: "🎵" },
-  { id: "agents", label: "LiTTree Agent", href: "/studio?tool=chat", icon: "🤖" },
+  { id: "agents", label: "LiTT CODE", href: "/studio?tool=chat", icon: "🤖" },
   { id: "gallery", label: "Asset Gallery", href: "/studio?tool=gallery", icon: "🖼" },
   { id: "terminal", label: "Command Tools", href: "/studio?tool=chat", icon: "⚡" },
 ];

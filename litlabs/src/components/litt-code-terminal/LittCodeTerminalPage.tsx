@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { TerminalPanel, TerminalPanelHandle } from "./TerminalPanel";
-import { JarvisAssistantPanel } from "./JarvisAssistantPanel";
+import { LittCodeAssistantPanel } from "./LittCodeAssistantPanel";
 import { LogsPanel } from "./LogsPanel";
 import { CommandHistory } from "./CommandHistory";
 import { FileExplorer } from "./FileExplorer";
@@ -17,7 +17,7 @@ import {
   RefreshCw,
   AlertTriangle,
 } from "lucide-react";
-import { LiTContext } from "@/lib/jarvis-context";
+import { LiTContext } from "@/lib/litt-code-context";
 
 const AGENTS = [
   { name: "LiTTree", status: "online" as const },
@@ -28,7 +28,7 @@ const AGENTS = [
   { name: "Data Slayer", status: "idle" as const },
 ];
 
-export function JarvisTerminalPage() {
+export function LittCodeTerminalPage() {
   const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">(
     "terminal",
   );
@@ -62,7 +62,7 @@ export function JarvisTerminalPage() {
 
   const loadFileTree = useCallback(async () => {
     try {
-      const res = await fetch("/api/jarvis/scan");
+      const res = await fetch("/api/litt-code/scan");
       const data = await res.json();
       if (Array.isArray(data.files)) {
         setFileTree(data.files.slice(0, 50));
@@ -287,7 +287,7 @@ export function JarvisTerminalPage() {
         </section>
 
         <aside className="hidden flex-col border-l border-neutral-900 bg-[#080808] p-4 lg:flex">
-          <JarvisAssistantPanel
+          <LittCodeAssistantPanel
             context={context}
             onInsertCommand={handleInsertCommand}
             onRunCommand={handleRunCommand}

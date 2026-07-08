@@ -254,22 +254,17 @@ export default function CommandDock(props: CommandDockProps) {
 
   const listening = voiceState === "listening";
 
-  const [activeMode, setActiveMode] = useState<"text" | "voice" | "files" | "tools">("text");
+  const [activeMode, setActiveMode] = useState<"text" | "files" | "tools">("text");
 
   const handleModeClick = (id: typeof activeMode) => {
     setActiveMode(id);
     if (id === "text") textareaRef.current?.focus();
-    if (id === "voice") {
-      if (listening) onVoiceStop?.();
-      else onVoice?.();
-    }
     if (id === "files") fileInputRef.current?.click();
     if (id === "tools") setToolsOpen((v) => !v);
   };
 
   const modeTabs = [
     { id: "text", label: "Text", icon: MessageSquare },
-    { id: "voice", label: "Voice", icon: Mic },
     { id: "files", label: "Files", icon: Paperclip },
     { id: "tools", label: "Tools", icon: Plus },
   ] as const;
@@ -373,7 +368,7 @@ export default function CommandDock(props: CommandDockProps) {
             />
             <button
               onClick={() => fileInputRef.current?.click()}
-              className="hidden rounded-lg p-2 transition-colors hover:bg-white/5 min-[390px]:block"
+              className="rounded-lg p-2 transition-colors hover:bg-white/5"
               style={{ color: LC.textMuted }}
               title="Attach"
             >
@@ -412,7 +407,7 @@ export default function CommandDock(props: CommandDockProps) {
         </div>
 
         {/* Active mode hint */}
-        <div className="mt-1 hidden items-center justify-center gap-1 text-[10px] sm:flex" style={{ color: LC.textDim }}>
+        <div className="mt-1 flex items-center justify-center gap-1 text-[10px]" style={{ color: LC.textDim }}>
           <span style={{ color: MODES.find((m) => m.id === mode)?.color || LC.textDim }}>
             {MODES.find((m) => m.id === mode)?.label || "Ask"}
           </span>

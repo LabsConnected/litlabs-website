@@ -54,35 +54,35 @@ const RULES: IntentRule[] = [
   {
     keywords: ["canvas", "paint", "sketch", "drawing", "pixel art"],
     route: "/studio?tool=chat",
-    label: "LiTTree Agent",
+    label: "LiTT CODE",
     reason: "LiTTree can route that from the main agent.",
   },
   // Builder
   {
     keywords: ["build", "code", "app", "website", "react", "component", "landing page", "dashboard", "frontend", "backend", "api", "function", "bug fix", "debug", "refactor", "html", "css", "typescript", "javascript", "next.js", "game code"],
     route: "/studio?tool=chat",
-    label: "LiTTree Agent",
+    label: "LiTT CODE",
     reason: "LiTTree can build that from the main agent.",
   },
   // Canvas (code gen)
   {
     keywords: ["generate code", "scaffold", "template", "starter code", "boilerplate"],
     route: "/studio?tool=chat",
-    label: "LiTTree Agent",
+    label: "LiTT CODE",
     reason: "LiTTree can generate that from the main agent.",
   },
   // Agents
   {
     keywords: ["agent", "ai agent", "create agent", "agent marketplace", "forge", "pulse", "visionary", "nexus", "social pilot", "automation agent", "custom agent", "agent dna"],
     route: "/studio?tool=chat",
-    label: "LiTTree Agent",
+    label: "LiTT CODE",
     reason: "LiTTree is the main agent hub.",
   },
   // Terminal
   {
     keywords: ["terminal", "console", "command", "shell", "bash", "cli", "deploy", "git push", "build command", "run command"],
     route: "/studio?tool=chat",
-    label: "LiTTree Agent",
+    label: "LiTT CODE",
     reason: "LiTTree can run commands from the main agent.",
   },
   // Gallery
