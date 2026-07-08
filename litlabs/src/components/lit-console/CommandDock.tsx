@@ -24,6 +24,7 @@ import {
   Lightbulb,
   AlertTriangle,
   CheckCircle2,
+  Check,
   Info,
   ShieldCheck,
   Wand2,
@@ -73,11 +74,16 @@ const AGENTS = [
   { id: "security-chief", label: "Security Chief", desc: "Security & Privacy",     color: "#ef4444" },
 ];
 
-const MODELS = [
-  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash" },
-  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro" },
-  { id: "llama3.2:3b", label: "Llama 3.2 3B" },
-  { id: "claude-sonnet-4", label: "Claude Sonnet 4" },
+export const MODELS = [
+  { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "openrouter", model: "google/gemini-2.5-flash", description: "Fast, cheap, great for most tasks" },
+  { id: "gemini-2.5-pro", label: "Gemini 2.5 Pro", provider: "openrouter", model: "google/gemini-2.5-pro", description: "Best reasoning and coding" },
+  { id: "claude-sonnet-4", label: "Claude Sonnet 4", provider: "openrouter", model: "anthropic/claude-sonnet-4", description: "Nuanced writing and analysis" },
+  { id: "claude-opus-4", label: "Claude Opus 4", provider: "openrouter", model: "anthropic/claude-opus-4", description: "Most capable Claude" },
+  { id: "gpt-4o", label: "GPT-4o", provider: "openrouter", model: "openai/gpt-4o", description: "General purpose, fast" },
+  { id: "gpt-4.1-mini", label: "GPT-4.1 Mini", provider: "openrouter", model: "openai/gpt-4.1-mini", description: "Compact, efficient" },
+  { id: "llama-4-maverick", label: "Llama 4 Maverick", provider: "openrouter", model: "meta-llama/llama-4-maverick", description: "Open model, strong performance" },
+  { id: "deepseek-v3", label: "DeepSeek V3", provider: "openrouter", model: "deepseek/deepseek-chat-v3-0324", description: "Coding and reasoning" },
+  { id: "llama3.2:3b", label: "Llama 3.2 3B (local)", provider: "ollama", model: "llama3.2:3b", description: "Runs on your own machine" },
 ];
 
 const TOOLS = [
@@ -508,10 +514,19 @@ export default function CommandDock(props: CommandDockProps) {
                 <button
                   key={m.id}
                   onClick={() => { onModelChange(m.id); setModelOpen(false); }}
-                  className="w-full px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+                  className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
                   style={{ color: m.id === model ? LC.accentCyan : LC.text }}
                 >
-                  {m.label}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-semibold">{m.label}</span>
+                      <span className="text-[9px] px-1 py-0.5 rounded" style={{ backgroundColor: `${LC.bgSecondary}`, color: LC.textDim }}>
+                        {m.provider}
+                      </span>
+                    </div>
+                    <div className="text-[10px] truncate" style={{ color: LC.textDim }}>{m.description}</div>
+                  </div>
+                  {m.id === model && <Check size={12} style={{ color: LC.accentCyan }} />}
                 </button>
               ))}
             </Dropdown>

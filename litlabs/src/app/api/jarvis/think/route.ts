@@ -108,15 +108,28 @@ export async function POST(req: NextRequest) {
       { role: "user" as const, content: prompt },
     ];
 
+    const modelMap: Record<string, { provider: "openrouter" | "ollama"; model: string }> = {
+      "gemini-2.5-flash": { provider: "openrouter", model: "google/gemini-2.5-flash" },
+      "gemini-2.5-pro": { provider: "openrouter", model: "google/gemini-2.5-pro" },
+      "claude-sonnet-4": { provider: "openrouter", model: "anthropic/claude-sonnet-4" },
+      "claude-opus-4": { provider: "openrouter", model: "anthropic/claude-opus-4" },
+      "gpt-4o": { provider: "openrouter", model: "openai/gpt-4o" },
+      "gpt-4.1-mini": { provider: "openrouter", model: "openai/gpt-4.1-mini" },
+      "llama-4-maverick": { provider: "openrouter", model: "meta-llama/llama-4-maverick" },
+      "deepseek-v3": { provider: "openrouter", model: "deepseek/deepseek-chat-v3-0324" },
+      "llama3.2:3b": { provider: "ollama", model: "llama3.2:3b" },
+    };
+    const selectedModel = modelMap[body.model as string] || modelMap["gemini-2.5-flash"];
+
     let answer: string;
     try {
       answer = await runAI({
-        provider: "openrouter",
-        model: "google/gemini-2.5-flash",
+        provider: selectedModel.provider,
+        model: selectedModel.model,
         messages,
       });
     } catch {
-      answer = await runAI({ provider: "ollama", model: "llama3.2:3b", messages });
+      answer = await runAI({ provider: "openrouter", model: "google/gemini-2.5-flash", messages });
     }
 
     const parsed = parseLitActions(answer);

@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect } from "react";
 import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
 import ChatPanel, { Message } from "./ChatPanel";
-import CommandDock from "./CommandDock";
+import CommandDock, { MODELS } from "./CommandDock";
 import DrawerPanel from "./DrawerPanel";
 import ApprovalCard from "./ApprovalCard";
 import RunTimeline from "./RunTimeline";
@@ -114,6 +114,7 @@ export default function LitConsole() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           message: text,
+          model: activeModel,
           context: initialContext,
           userContext: {
             username: user?.username || user?.firstName || undefined,
@@ -189,7 +190,7 @@ export default function LitConsole() {
     } finally {
       setLoading(false);
     }
-  }, [user]);
+  }, [user, activeModel]);
 
   const handleSend = useCallback(
     (text?: string) => {
@@ -533,7 +534,7 @@ export default function LitConsole() {
             <ActivityPanel
               loading={loading}
               activeAgent={activeAgent}
-              activeModel={activeModel}
+              activeModel={MODELS.find((m) => m.id === activeModel)?.label || activeModel}
             />
           </div>
         </div>
