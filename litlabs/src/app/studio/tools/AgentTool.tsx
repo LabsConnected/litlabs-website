@@ -795,10 +795,83 @@ export default function AgentTool() {
   );
 
   return (
-    <div className="flex h-full overflow-hidden select-none">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden select-none md:flex-row">
+      {/* Mobile: compact agent selector */}
+      <div
+        className="shrink-0 border-b px-3 py-2 md:hidden"
+        style={{
+          borderColor: T.borderColor + "15",
+          backgroundColor: T.boxBg + "90",
+        }}
+      >
+        <div className="mb-2 flex items-center justify-between gap-3">
+          <div>
+            <div className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.accentColor }}>
+              Agents
+            </div>
+            <div className="text-[10px]" style={{ color: T.textMuted }}>
+              Pick who should answer this chat.
+            </div>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => setShowBoardroom(true)}
+              aria-label="Open boardroom"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border"
+              style={{
+                borderColor: T.linkColor + "35",
+                color: T.linkColor,
+                backgroundColor: T.linkColor + "10",
+              }}
+            >
+              <Swords size={14} />
+            </button>
+            <button
+              onClick={() => setShowCreate(!showCreate)}
+              aria-label="Create agent"
+              className="flex h-9 w-9 items-center justify-center rounded-xl border"
+              style={{
+                borderColor: T.accentColor + "35",
+                color: T.accentColor,
+                backgroundColor: T.accentColor + "10",
+              }}
+            >
+              <Plus size={14} />
+            </button>
+          </div>
+        </div>
+        <div className="-mx-3 flex snap-x gap-2 overflow-x-auto px-3 pb-1">
+          {allAgents.map((a) => {
+            const isActive = selectedAgent.id === a.id;
+            return (
+              <button
+                key={a.id}
+                onClick={() => switchAgent(a)}
+                className="flex min-w-[136px] snap-start items-center gap-2 rounded-2xl border px-3 py-2 text-left"
+                style={{
+                  backgroundColor: isActive ? a.color + "14" : T.bgColor + "80",
+                  borderColor: isActive ? a.color + "50" : T.borderColor + "18",
+                  boxShadow: isActive ? `0 0 16px ${a.color}16` : "none",
+                }}
+              >
+                <span className="text-lg leading-none">{a.icon}</span>
+                <span className="min-w-0">
+                  <span className="block truncate text-[11px] font-black" style={{ color: isActive ? a.color : T.textColor }}>
+                    {a.name}
+                  </span>
+                  <span className="block truncate text-[9px]" style={{ color: T.textMuted }}>
+                    {a.role}
+                  </span>
+                </span>
+              </button>
+            );
+          })}
+        </div>
+      </div>
+
       {/* ── LEFT SIDEBAR ── */}
       <div
-        className="w-[210px] shrink-0 flex flex-col border-r"
+        className="hidden w-[210px] shrink-0 flex-col border-r md:flex"
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: T.boxBg + "90",
@@ -928,26 +1001,26 @@ export default function AgentTool() {
       </div>
 
       {/* ── CENTER: CHAT ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex min-h-0 flex-1 flex-col">
         {/* Chat header */}
         <div
-          className="flex items-center justify-between px-4 h-11 border-b shrink-0"
+          className="flex min-h-12 shrink-0 items-center justify-between gap-2 border-b px-3 py-2 sm:px-4 md:h-11 md:py-0"
           style={{
             borderColor: T.borderColor + "15",
             backgroundColor: T.boxBg + "50",
           }}
         >
-          <div className="flex items-center gap-2.5">
+          <div className="flex min-w-0 items-center gap-2.5">
             <span className="text-xl">{selectedAvatar.emoji}</span>
-            <div>
+            <div className="min-w-0">
               <div
-                className="text-xs font-bold leading-tight"
+                className="truncate text-xs font-bold leading-tight"
                 style={{ color: selectedAgent.color }}
               >
                 {selectedAgent.name}
               </div>
               <div
-                className="text-[9px] opacity-60"
+                className="truncate text-[9px] opacity-60"
                 style={{ color: T.textMuted }}
               >
                 {selectedAgent.role} ·{" "}
@@ -960,7 +1033,7 @@ export default function AgentTool() {
               style={{ backgroundColor: selectedAgent.color }}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex shrink-0 items-center gap-1 overflow-x-auto sm:gap-2">
             {/* ActivePieces FLOW trigger — Director only */}
             {selectedAgent.id === "director" && (
               <button
@@ -985,7 +1058,7 @@ export default function AgentTool() {
                   setProvider(opt.id as "gemini" | "openrouter-free")
                 }
                 title={opt.hint}
-                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
+                className="rounded px-2 py-1 text-[9px] font-bold transition-all"
                 style={{
                   backgroundColor:
                     provider === opt.id ? T.accentColor + "20" : "transparent",
@@ -1006,7 +1079,7 @@ export default function AgentTool() {
             </span>
             <button
               onClick={clearChat}
-              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border opacity-50 hover:opacity-100 transition-all"
+              className="hidden items-center gap-1 rounded border px-2 py-1 text-[9px] opacity-50 transition-all hover:opacity-100 min-[420px]:flex"
               style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
             >
               <Trash2 size={9} /> Clear
@@ -1015,9 +1088,9 @@ export default function AgentTool() {
         </div>
 
         {/* Messages */}
-        <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4 space-y-4">
           {messages.length === 0 && !streaming && (
-            <div className="flex flex-col items-center justify-center h-full pb-8 text-center">
+            <div className="flex min-h-full flex-col items-center justify-center pb-8 text-center">
               <div className="text-5xl mb-3 opacity-90">
                 {selectedAvatar.emoji}
               </div>
