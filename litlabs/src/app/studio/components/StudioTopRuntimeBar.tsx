@@ -102,7 +102,7 @@ export default function StudioTopRuntimeBar({
             className="text-[11px] font-black uppercase tracking-[0.15em] hidden sm:block"
             style={{ color: T.headerColor }}
           >
-            LiTTree Studio
+            LiTTree OS
           </span>
         </div>
       </div>

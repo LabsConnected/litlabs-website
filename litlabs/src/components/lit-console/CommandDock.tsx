@@ -3,7 +3,13 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Send,
+  Plus,
   Paperclip,
+  Upload,
+  Search,
+  Film,
+  Globe,
+  Code2,
   Wrench,
   Mic,
   ChevronUp,
@@ -72,27 +78,17 @@ const MODELS = [
 ];
 
 const TOOLS = [
-  {
-    id: "terminal",
-    label: "Terminal",
-    icon: Terminal,
-    onClick: "onToggleTerminal",
-  },
-  { id: "file", label: "Create file", icon: FilePlus, onClick: "onCreateFile" },
-  { id: "build", label: "Build", icon: Hammer, onClick: "onBuild" },
-  {
-    id: "media",
-    label: "Generate media",
-    icon: Image,
-    onClick: "onGenerateMedia",
-  },
-  { id: "deploy", label: "Deploy", icon: Rocket, onClick: "onDeploy" },
-  {
-    id: "workflow",
-    label: "Save workflow",
-    icon: Save,
-    onClick: "onSaveWorkflow",
-  },
+  { id: "attach", label: "Upload attachment", icon: Upload },
+  { id: "research", label: "Deep Research", icon: Search },
+  { id: "image", label: "Create Image", icon: Image },
+  { id: "video", label: "Create Video", icon: Film },
+  { id: "website", label: "Web Dev", icon: Globe },
+  { id: "code", label: "Code Fixer", icon: Code2 },
+  { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "build", label: "Build", icon: Hammer },
+  { id: "deploy", label: "Deploy", icon: Rocket },
+  { id: "file", label: "Create file", icon: FilePlus },
+  { id: "workflow", label: "Save workflow", icon: Save },
 ];
 
 function Dropdown({
@@ -192,12 +188,25 @@ export default function CommandDock(props: CommandDockProps) {
 
   const handleTool = (id: string) => {
     setToolsOpen(false);
-    if (id === "terminal") onToggleTerminal?.();
-    if (id === "file") onCreateFile?.();
-    if (id === "build") onBuild?.();
-    if (id === "media") onGenerateMedia?.();
-    if (id === "deploy") onDeploy?.();
-    if (id === "workflow") onSaveWorkflow?.();
+    if (id === "attach") { onAttach?.(); return; }
+    if (id === "terminal") { onToggleTerminal?.(); return; }
+    if (id === "file") { onCreateFile?.(); return; }
+    if (id === "build") { onBuild?.(); return; }
+    if (id === "deploy") { onDeploy?.(); return; }
+    if (id === "workflow") { onSaveWorkflow?.(); return; }
+    // Mode-setting tools switch the prompt context
+    const modeMap: Record<string, ModeId> = {
+      research: "research",
+      image: "image",
+      video: "video",
+      website: "website",
+      code: "code",
+    };
+    if (modeMap[id]) {
+      setMode(modeMap[id]);
+      const placeholder = MODES.find((m) => m.id === modeMap[id])?.placeholder || "";
+      if (!value.trim()) onChange(placeholder);
+    }
   };
 
   const applyRewrite = () => {
@@ -230,34 +239,46 @@ export default function CommandDock(props: CommandDockProps) {
       style={{ backgroundColor: LC.bg }}
     >
       <div className="relative mx-auto max-w-3xl">
-        <div className="mb-1.5 flex flex-wrap items-center gap-1">
-          {MODES.map((m) => {
-            const active = m.id === mode;
-            return (
-              <button
-                key={m.id}
-                onClick={() => setMode(m.id)}
-                className="rounded-full px-2 py-0.5 text-[10px] font-medium transition-all"
-                style={{
-                  backgroundColor: active ? `${m.color}18` : "transparent",
-                  color: active ? m.color : LC.textDim,
-                  border: `1px solid ${LC.borderSubtle}`,
-                }}
-              >
-                {m.label}
-              </button>
-            );
-          })}
-        </div>
-
         <div
-          className="flex min-h-[52px] items-end gap-2 rounded-2xl border px-3 py-2 transition-all"
+          className="flex min-h-[56px] items-end gap-2 rounded-2xl border px-3 py-2.5 transition-all"
           style={{
             backgroundColor: LC.bgPanel,
             borderColor: focused ? LC.accentCyan : LC.borderSubtle,
             boxShadow: focused ? `0 0 0 1px ${LC.accentCyan}40` : undefined,
           }}
         >
+          {/* Tools menu */}
+          <div className="relative shrink-0">
+            <button
+              onClick={() => setToolsOpen((v) => !v)}
+              className="flex h-9 w-9 items-center justify-center rounded-full transition-all hover:bg-white/5"
+              style={{
+                color: LC.textMuted,
+                backgroundColor: toolsOpen ? `${LC.accentCyan}15` : "transparent",
+                border: `1px solid ${toolsOpen ? LC.accentCyan : LC.borderSubtle}`,
+              }}
+              title="Tools"
+            >
+              <Plus size={18} style={{ color: toolsOpen ? LC.accentCyan : LC.textMuted }} />
+            </button>
+            <Dropdown open={toolsOpen} onClose={() => setToolsOpen(false)}>
+              {TOOLS.map((t) => {
+                const Icon = t.icon;
+                return (
+                  <button
+                    key={t.id}
+                    onClick={() => handleTool(t.id)}
+                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
+                    style={{ color: LC.text }}
+                  >
+                    <Icon size={14} style={{ color: LC.textMuted }} />
+                    {t.label}
+                  </button>
+                );
+              })}
+            </Dropdown>
+          </div>
+
           <textarea
             ref={textareaRef}
             value={value}
@@ -265,12 +286,12 @@ export default function CommandDock(props: CommandDockProps) {
             onKeyDown={handleKeyDown}
             onFocus={() => setFocused(true)}
             onBlur={() => setFocused(false)}
-            placeholder={MODES.find((m) => m.id === mode)?.placeholder || "Message LiT..."}
-            className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1 text-sm outline-none"
+            placeholder={MODES.find((m) => m.id === mode)?.placeholder || "Ask LiTTree anything..."}
+            className="max-h-40 min-h-[24px] flex-1 resize-none bg-transparent py-1.5 text-sm outline-none"
             style={{ color: LC.text }}
             rows={1}
           />
-          <div className="flex items-center gap-1">
+          <div className="flex items-center gap-1 shrink-0">
             <button
               onClick={onAttach}
               className="rounded-lg p-2 transition-colors hover:bg-white/5"
@@ -278,14 +299,6 @@ export default function CommandDock(props: CommandDockProps) {
               title="Attach"
             >
               <Paperclip size={18} />
-            </button>
-            <button
-              onClick={onTools}
-              className="rounded-lg p-2 transition-colors hover:bg-white/5 sm:hidden"
-              style={{ color: LC.textMuted }}
-              title="Tools"
-            >
-              <Wrench size={18} />
             </button>
             {onVoice && (
               <button
@@ -310,13 +323,22 @@ export default function CommandDock(props: CommandDockProps) {
             )}
             <button
               onClick={onSend}
-              className="flex items-center justify-center rounded-lg p-2 transition-all"
+              className="flex h-9 w-9 items-center justify-center rounded-full transition-all"
               style={{ backgroundColor: LC.accentCyan, color: "#000" }}
               title="Send"
             >
               <Send size={18} />
             </button>
           </div>
+        </div>
+
+        {/* Active mode hint */}
+        <div className="mt-1.5 flex items-center justify-center gap-1 text-[10px]" style={{ color: LC.textDim }}>
+          <span style={{ color: MODES.find((m) => m.id === mode)?.color || LC.textDim }}>
+            {MODES.find((m) => m.id === mode)?.label || "Ask"}
+          </span>
+          <span>·</span>
+          <span>Type a prompt or pick a tool from the + menu</span>
         </div>
 
         {litTip && value.trim() && (
@@ -475,35 +497,6 @@ export default function CommandDock(props: CommandDockProps) {
             </Dropdown>
           </div>
 
-          <div className="flex-1" />
-
-          <div className="relative hidden sm:block">
-            <button
-              onClick={() => setToolsOpen((v) => !v)}
-              className="flex items-center gap-1 rounded-full bg-transparent px-2 py-0.5 text-[11px] font-medium transition-colors hover:bg-white/5"
-              style={{ color: LC.textDim }}
-            >
-              <Wrench size={11} />
-              <span style={{ color: LC.textMuted }}>Tools</span>
-              <ChevronUp size={10} style={{ transform: toolsOpen ? "rotate(180deg)" : undefined }} />
-            </button>
-            <Dropdown open={toolsOpen} onClose={() => setToolsOpen(false)}>
-              {TOOLS.map((t) => {
-                const Icon = t.icon;
-                return (
-                  <button
-                    key={t.id}
-                    onClick={() => handleTool(t.id)}
-                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs transition-colors hover:bg-white/5"
-                    style={{ color: LC.text }}
-                  >
-                    <Icon size={14} style={{ color: LC.textMuted }} />
-                    {t.label}
-                  </button>
-                );
-              })}
-            </Dropdown>
-          </div>
         </div>
       </div>
     </div>
