@@ -17,7 +17,6 @@ import type { LiTContext } from "@/lib/jarvis-context";
 import type { LiTTipResult } from "@/lib/lit-tip";
 import { useLiTVoice } from "@/hooks/useLiTVoice";
 import LiveVoicePanel from "./LiveVoicePanel";
-import HoloPanel from "./HoloPanel";
 import ConnectorsPanel from "./ConnectorsPanel";
 import ActivityPanel from "./ActivityPanel";
 import { detectIntent, buildNavigationMessage } from "@/lib/intent-router";
@@ -34,7 +33,7 @@ const initialContext: LiTContext = {
   websocketStatus: "connected",
 };
 
-type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors";
+type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "connectors" | "holo";
 
 export default function LitConsole() {
   const { user } = useUser();
@@ -71,7 +70,6 @@ export default function LitConsole() {
   const [approvalStep, setApprovalStep] = useState<DirectorStep | null>(null);
   const [isRunning, setIsRunning] = useState(false);
   const [voiceOpen, setVoiceOpen] = useState(false);
-  const [holoOpen, setHoloOpen] = useState(false);
   const [holoUrl, setHoloUrl] = useState("");
   const [holoTitle, setHoloTitle] = useState("");
   const LC = useLitConsoleTheme();
@@ -168,7 +166,8 @@ export default function LitConsole() {
         setTimeout(() => {
           setHoloUrl(navAction.url!);
           setHoloTitle(navAction.url!.split("/").pop() || "Holo View");
-          setHoloOpen(true);
+          setDrawerTab("holo");
+          setDrawerOpen(true);
         }, 600);
       }
     } catch (err) {
@@ -273,7 +272,8 @@ export default function LitConsole() {
         setTimeout(() => {
           setHoloUrl(intent.route!.path);
           setHoloTitle(intent.route!.label || "Holo View");
-          setHoloOpen(true);
+          setDrawerTab("holo");
+          setDrawerOpen(true);
         }, 800);
         setLoading(false);
         return;
@@ -484,6 +484,7 @@ export default function LitConsole() {
     if (drawerTab === "preview") return <PreviewPanel />;
     if (drawerTab === "agents") return <AgentsPanel activeAgent={activeAgent} onSelect={handleAgentChange} onPrompt={handleSend} />;
     if (drawerTab === "connectors") return <ConnectorsPanel onClose={() => setDrawerOpen(false)} />;
+    if (drawerTab === "holo") return <HoloView url={holoUrl} title={holoTitle} />;
     return <MemoryPanel />;
   })();
 
@@ -710,13 +711,6 @@ export default function LitConsole() {
         />
       )}
 
-      {holoOpen && (
-        <HoloPanel
-          onClose={() => setHoloOpen(false)}
-          url={holoUrl}
-          title={holoTitle}
-        />
-      )}
 
       {pendingCommand && (
         <div
@@ -1024,6 +1018,36 @@ function MemoryPanel() {
         >
           {saving ? <RefreshCw size={12} className="animate-spin" /> : <Plus size={12} />} Save to Memory
         </button>
+      </div>
+    </div>
+  );
+}
+
+function HoloView({ url, title }: { url: string; title: string }) {
+  const LC = useLitConsoleTheme();
+  const isExternal = url.startsWith("http://") || url.startsWith("https://");
+  return (
+    <div className="flex h-full w-full flex-col gap-2">
+      <div className="flex items-center justify-between rounded-lg border px-3 py-2" style={{ backgroundColor: LC.bgPanel, borderColor: LC.border }}>
+        <div className="flex items-center gap-2 text-xs font-black" style={{ color: LC.accentCyan }}>
+          <span className="h-2 w-2 rounded-full animate-pulse" style={{ backgroundColor: LC.accentCyan, boxShadow: `0 0 8px ${LC.accentCyan}` }} />
+          HOLO · {title}
+        </div>
+        {isExternal && (
+          <a href={url} target="_blank" rel="noopener noreferrer" className="text-[10px] font-bold" style={{ color: LC.textMuted }}>
+            Open ↗
+          </a>
+        )}
+      </div>
+      <div className="flex-1 overflow-hidden rounded-xl border" style={{ borderColor: `${LC.accentCyan}30`, boxShadow: `0 0 20px ${LC.accentCyan}08` }}>
+        {isExternal ? (
+          <iframe src={url} className="h-full w-full border-0" style={{ backgroundColor: "#fff" }} title={title} />
+        ) : (
+          <div className="flex h-full flex-col items-center justify-center p-8 text-center" style={{ color: LC.textMuted }}>
+            <p>Internal content view</p>
+            <p className="mt-2 text-xs opacity-50">{url}</p>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -59,7 +59,7 @@ export default function LiveVoicePanel({
     listening: "Listening…",
     thinking: "LiT is thinking…",
     speaking: "LiT is speaking…",
-    error: "Voice needs attention.",
+    error: isSupported ? "Microphone permission denied or unavailable." : "Voice not supported in this browser.",
   };
 
   const handleMic = () => {
@@ -135,6 +135,16 @@ export default function LiveVoicePanel({
         <p className="mt-2 max-w-xs text-sm" style={{ color: LC.textMuted }}>
           {statusText[state]}
         </p>
+        {state === "error" && (
+          <button
+            onClick={handleMic}
+            disabled={!isSupported}
+            className="mt-3 rounded-full px-4 py-2 text-xs font-bold transition-all disabled:opacity-50"
+            style={{ backgroundColor: LC.accentCyan, color: "#000" }}
+          >
+            Retry
+          </button>
+        )}
 
         <div
           className="mt-8 min-h-24 w-full max-w-md rounded-2xl border p-4 text-center"
