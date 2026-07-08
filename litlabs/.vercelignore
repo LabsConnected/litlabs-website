@@ -1,10 +1,10 @@
 node_modules
 lib/oracle-cli
 .next
-docs/
-scripts/
-tasks/
-prompts/
+/docs/
+/scripts/
+/tasks/
+/prompts/
 bun.lock
 *.backup
 tsconfig.tsbuildinfo
