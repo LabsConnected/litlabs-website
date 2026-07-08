@@ -1088,7 +1088,7 @@ export default function AgentTool() {
         </div>
 
         {/* Messages */}
-        <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4 space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-3 pb-28 pt-4 sm:px-4 md:pb-4">
           {messages.length === 0 && !streaming && (
             <div className="flex min-h-full flex-col items-center justify-center pb-8 text-center">
               <div className="text-5xl mb-3 opacity-90">
@@ -1268,7 +1268,7 @@ export default function AgentTool() {
 
         {/* Input */}
         <div
-          className="px-4 py-3 border-t shrink-0"
+          className="shrink-0 border-t px-3 pb-[calc(5.5rem+env(safe-area-inset-bottom))] pt-3 sm:px-4 md:px-4 md:pb-3"
           style={{
             borderColor: T.borderColor + "15",
             backgroundColor: T.boxBg + "40",
