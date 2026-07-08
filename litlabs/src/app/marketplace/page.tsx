@@ -63,7 +63,7 @@ const TIER_PACKAGES: {
   {
     id: "tier-starter",
     coins: 500,
-    price: 5,
+    price: 0,
     priceId: "",
     label: "Starter",
     tier: "starter",
@@ -110,6 +110,20 @@ const TIER_PACKAGES: {
     included: ["Unlimited LBC/mo", "Unlimited agent slots", "All games", "LiT Chat", "Flow Studio", "Terminal", "Daily bonus +2000", "Sell agents", "API access", "Early access"],
     notIncluded: [],
   },
+];
+
+// COIN PACKS — one-time credit top-ups (no subscription needed)
+const COIN_PACKS: {
+  id: string;
+  coins: number;
+  cents: number;
+  label: string;
+  popular: boolean;
+}[] = [
+  { id: "pack-small", coins: 500, cents: 499, label: "Starter Pack", popular: false },
+  { id: "pack-medium", coins: 1500, cents: 999, label: "Creator Pack", popular: true },
+  { id: "pack-large", coins: 5000, cents: 1999, label: "Pro Pack", popular: false },
+  { id: "pack-elite", coins: 15000, cents: 3999, label: "Elite Pack", popular: false },
 ];
 
 // SPEND COINS — interactive features with real coin deduction
@@ -448,6 +462,37 @@ function MarketplaceInner() {
           mode: "subscription",
           priceId: pack.priceId,
           metadata: { clerk_id: userId, tier: pack.tier, coin_amount: String(pack.coins) },
+        }),
+      });
+      const data = await res.json();
+      if (data.url) {
+        window.location.assign(data.url);
+      } else {
+        showToast(data.error || "Checkout failed. Try again.", "error");
+      }
+    } catch {
+      showToast("Network error during checkout.", "error");
+    }
+  };
+
+  const buyCoinPack = async (pack: (typeof COIN_PACKS)[0]) => {
+    if (!isSignedIn || !userId) {
+      showToast("Please sign in to purchase.", "error");
+      return;
+    }
+    try {
+      const res = await fetch("/api/stripe/checkout", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          mode: "payment",
+          priceData: {
+            amount: pack.cents,
+            currency: "usd",
+            name: `${pack.coins.toLocaleString()} LiTBit Coins`,
+            description: `One-time credit pack — ${pack.coins.toLocaleString()} LBC`,
+          },
+          metadata: { clerk_id: userId, type: "coin_pack", coin_amount: String(pack.coins) },
         }),
       });
       const data = await res.json();
@@ -865,7 +910,7 @@ function MarketplaceInner() {
             <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.15em] mb-1" style={{ color: "#22d3ee" }}>Choose Your Tier</div>
-                <p className="text-sm" style={{ color: "#6b7280" }}>Start at $5/mo. Upgrade anytime to unlock more.</p>
+                <p className="text-sm" style={{ color: "#6b7280" }}>Start free with 500 LBC/mo. Upgrade anytime to unlock more.</p>
               </div>
               <button onClick={earnCoins} disabled={claimLoading}
                 className="px-4 py-2 rounded-xl text-xs font-black transition-all hover:scale-[1.02] disabled:opacity-50"
@@ -993,6 +1038,57 @@ function MarketplaceInner() {
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+
+          {/* ── COIN PACKS ── */}
+          <div className="mb-10">
+            <div className="flex items-center justify-between mb-5 flex-wrap gap-4">
+              <div>
+                <div className="text-xs font-black uppercase tracking-[0.15em] mb-1" style={{ color: "#22d3ee" }}>Coin Packs</div>
+                <p className="text-sm" style={{ color: "#6b7280" }}>Need more credits? Top up anytime without a subscription.</p>
+              </div>
+            </div>
+            <div className="grid gap-4" style={{ gridTemplateColumns: "repeat(4,1fr)" }}>
+              {COIN_PACKS.map(pack => {
+                const tc = pack.popular ? { accent: "#a78bfa", glow: "#a78bfa40", bg: "#a78bfa0a" } : { accent: "#22d3ee", glow: "#22d3ee30", bg: "#22d3ee08" };
+                return (
+                  <div key={pack.id} className="relative flex flex-col p-5 rounded-2xl transition-all"
+                    style={{
+                      background: tc.bg,
+                      border: `2px solid ${pack.popular ? tc.accent + "60" : "#1e1e2e"}`,
+                      boxShadow: pack.popular ? `0 0 16px ${tc.glow}` : "none",
+                    }}>
+                    {pack.popular && (
+                      <div className="absolute -top-3 left-1/2 -translate-x-1/2 px-3 py-0.5 rounded-full text-[10px] font-black" style={{ background: tc.accent, color: "#08080c" }}>
+                        ⭐ Best Value
+                      </div>
+                    )}
+                    <div className="text-[11px] font-black uppercase tracking-[0.15em] mb-2" style={{ color: tc.accent }}>{pack.label}</div>
+                    <div className="mb-1" style={{ color: "#f0f0f6" }}>
+                      <span className="text-3xl font-black">${(pack.cents / 100).toFixed(pack.cents % 100 === 0 ? 0 : 2)}</span>
+                    </div>
+                    <div className="text-xs mb-4" style={{ color: "#6b7280" }}>{pack.coins.toLocaleString()} LBC one-time</div>
+                    <ul className="flex-1 space-y-1.5 mb-4">
+                      <li className="flex items-center gap-2 text-[11px]" style={{ color: "#9ca3af" }}>
+                        <Check size={12} style={{ color: tc.accent }} />Instant credit
+                      </li>
+                      <li className="flex items-center gap-2 text-[11px]" style={{ color: "#9ca3af" }}>
+                        <Check size={12} style={{ color: tc.accent }} />No subscription
+                      </li>
+                      <li className="flex items-center gap-2 text-[11px]" style={{ color: "#9ca3af" }}>
+                        <Check size={12} style={{ color: tc.accent }} />Use on any tool
+                      </li>
+                    </ul>
+                    <button
+                      onClick={() => buyCoinPack(pack)}
+                      className="w-full py-2.5 rounded-xl text-sm font-black transition-all hover:scale-[1.02]"
+                      style={{ background: tc.accent, color: "#08080c" }}>
+                      Buy {pack.coins.toLocaleString()} LBC
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           </div>
 
