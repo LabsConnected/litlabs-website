@@ -18,6 +18,7 @@ import {
   BookOpen,
   Code2,
   ChevronDown,
+  BarChart3,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import Link from "next/link";
@@ -51,6 +52,7 @@ export default function NavbarWrapper() {
   }, []);
 
   const mainLinks = [
+    { href: "/dashboard", label: "Dashboard", icon: BarChart3 },
     { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Wand2 },
     { href: "/agents", label: "Agents", icon: Sparkles },
     { href: "/gallery", label: "Gallery", icon: Images },
