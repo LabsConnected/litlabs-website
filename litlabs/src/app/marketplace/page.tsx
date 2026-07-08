@@ -46,7 +46,7 @@ function getCategoryColor(category: string): string {
 }
 
 // TIER PACKAGES — Stripe price_id required for each (create in Stripe Dashboard)
-// All prices created in test mode: Starter($5), Pro($19.99), Elite($50)
+// All prices created in test mode: Starter($5), Basic($9.99), Pro($19.99), Elite($39)
 const TIER_PACKAGES: {
   id: string;
   coins: number;
@@ -61,12 +61,12 @@ const TIER_PACKAGES: {
   notIncluded: string[];
 }[] = [
   {
-    id: "tier-free",
+    id: "tier-starter",
     coins: 500,
-    price: 0,
+    price: 5,
     priceId: "",
     label: "Starter",
-    tier: "free",
+    tier: "starter",
     popular: false,
     features: ["500 credits/mo", "3 agent slots", "All games", "LiT Chat"],
     included: ["500 LBC/mo", "3 agent slots", "All games", "LiT Chat", "Community support"],
@@ -86,12 +86,12 @@ const TIER_PACKAGES: {
     notIncluded: ["Flow Studio", "Terminal", "Daily bonus", "Sell agents", "API access", "Early access"],
   },
   {
-    id: "tier-creator",
+    id: "tier-pro",
     coins: 5000,
-    price: 12,
+    price: 19.99,
     priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
-    label: "Creator",
-    tier: "creator",
+    label: "Pro",
+    tier: "pro",
     popular: true,
     features: ["5K credits/mo", "10 agent slots", "Flow Studio", "Terminal", "Daily bonus +500"],
     included: ["5,000 LBC/mo", "10 agent slots", "All games", "LiT Chat", "Flow Studio", "Terminal", "Daily bonus +500"],
@@ -717,11 +717,11 @@ function MarketplaceInner() {
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider" style={{ background: "#22d3ee15", color: "#22d3ee", border: "1px solid #22d3ee30" }}>Beta</span>
                 <span className="px-2 py-0.5 rounded-md text-[10px] font-black uppercase tracking-wider"
                   style={{
-                    background: currentPlan === "elite" ? "#a3f5460a" : currentPlan === "creator" || currentPlan === "pro" ? "#a78bfa0a" : "#22d3ee08",
-                    color: currentPlan === "elite" ? "#a3f546" : currentPlan === "creator" || currentPlan === "pro" ? "#a78bfa" : "#22d3ee",
-                    border: `1px solid ${currentPlan === "elite" ? "#a3f54630" : currentPlan === "creator" || currentPlan === "pro" ? "#a78bfa30" : "#22d3ee30"}`,
+                    background: currentPlan === "elite" ? "#a3f5460a" : currentPlan === "pro" || currentPlan === "creator" ? "#a78bfa0a" : "#22d3ee08",
+                    color: currentPlan === "elite" ? "#a3f546" : currentPlan === "pro" || currentPlan === "creator" ? "#a78bfa" : "#22d3ee",
+                    border: `1px solid ${currentPlan === "elite" ? "#a3f54630" : currentPlan === "pro" || currentPlan === "creator" ? "#a78bfa30" : "#22d3ee30"}`,
                   }}>
-                  {currentPlan === "elite" ? "Elite" : currentPlan === "creator" || currentPlan === "pro" ? "Creator" : "Starter"}
+                  {currentPlan === "elite" ? "Elite" : currentPlan === "pro" || currentPlan === "creator" ? "Pro" : "Starter"}
                 </span>
               </div>
               <p className="text-sm" style={{ color: "#6b7280", maxWidth: 520 }}>
@@ -865,7 +865,7 @@ function MarketplaceInner() {
             <div className="flex items-center justify-between mb-6 flex-wrap gap-4">
               <div>
                 <div className="text-xs font-black uppercase tracking-[0.15em] mb-1" style={{ color: "#22d3ee" }}>Choose Your Tier</div>
-                <p className="text-sm" style={{ color: "#6b7280" }}>Starter is free forever. Upgrade anytime to unlock more.</p>
+                <p className="text-sm" style={{ color: "#6b7280" }}>Start at $5/mo. Upgrade anytime to unlock more.</p>
               </div>
               <button onClick={earnCoins} disabled={claimLoading}
                 className="px-4 py-2 rounded-xl text-xs font-black transition-all hover:scale-[1.02] disabled:opacity-50"
@@ -878,7 +878,7 @@ function MarketplaceInner() {
               {TIER_PACKAGES.map(tier => {
                 const isCurrent = currentPlan === tier.tier;
                 const tc = tier.tier === "elite" ? { accent: "#a3f546", glow: "#a3f54640", bg: "#a3f5460a" }
-                         : tier.tier === "creator" ? { accent: "#a78bfa", glow: "#a78bfa40", bg: "#a78bfa0a" }
+                         : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa", glow: "#a78bfa40", bg: "#a78bfa0a" }
                          : tier.tier === "basic" ? { accent: "#fbbf24", glow: "#fbbf2440", bg: "#fbbf240a" }
                          : { accent: "#22d3ee", glow: "#22d3ee30", bg: "#22d3ee08" };
                 const missingPrice = !tier.priceId && tier.price > 0;
@@ -949,7 +949,7 @@ function MarketplaceInner() {
                     <th className="px-4 py-3 text-left font-black" style={{ color: "#9ca3af", width: "40%" }}>Feature</th>
                     {TIER_PACKAGES.map(tier => {
                       const tc = tier.tier === "elite" ? { accent: "#a3f546" }
-                               : tier.tier === "creator" ? { accent: "#a78bfa" }
+                               : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa" }
                                : tier.tier === "basic" ? { accent: "#fbbf24" }
                                : { accent: "#22d3ee" };
                       return (
@@ -963,13 +963,13 @@ function MarketplaceInner() {
                 <tbody>
                   {[
                     { label: "Monthly LBC credits", value: (t: typeof TIER_PACKAGES[0]) => t.coins.toLocaleString() + (t.tier === "elite" ? "+" : "") },
-                    { label: "Agent slots", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" ? "Unlimited" : t.tier === "creator" ? "10" : t.tier === "basic" ? "5" : "3" },
+                    { label: "Agent slots", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" ? "Unlimited" : t.tier === "pro" || t.tier === "creator" ? "10" : t.tier === "basic" ? "5" : "3" },
                     { label: "All games", value: (t: typeof TIER_PACKAGES[0]) => true },
                     { label: "LiT Chat", value: (t: typeof TIER_PACKAGES[0]) => true },
-                    { label: "Priority support", value: (t: typeof TIER_PACKAGES[0]) => t.tier !== "free" },
-                    { label: "Flow Studio", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" || t.tier === "elite" },
-                    { label: "Terminal", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" || t.tier === "elite" },
-                    { label: "Daily bonus", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "creator" ? "+500" : t.tier === "elite" ? "+2000" : "—" },
+                    { label: "Priority support", value: (t: typeof TIER_PACKAGES[0]) => t.tier !== "free" && t.tier !== "starter" },
+                    { label: "Flow Studio", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "pro" || t.tier === "creator" || t.tier === "elite" },
+                    { label: "Terminal", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "pro" || t.tier === "creator" || t.tier === "elite" },
+                    { label: "Daily bonus", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "pro" || t.tier === "creator" ? "+500" : t.tier === "elite" ? "+2000" : "—" },
                     { label: "Sell agents", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
                     { label: "API access", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
                     { label: "Early access", value: (t: typeof TIER_PACKAGES[0]) => t.tier === "elite" },
@@ -980,7 +980,7 @@ function MarketplaceInner() {
                         const val = row.value(tier);
                         const has = typeof val === "boolean" ? val : val !== "—";
                         const tc = tier.tier === "elite" ? { accent: "#a3f546" }
-                                 : tier.tier === "creator" ? { accent: "#a78bfa" }
+                                 : tier.tier === "pro" || tier.tier === "creator" ? { accent: "#a78bfa" }
                                  : tier.tier === "basic" ? { accent: "#fbbf24" }
                                  : { accent: "#22d3ee" };
                         return (
