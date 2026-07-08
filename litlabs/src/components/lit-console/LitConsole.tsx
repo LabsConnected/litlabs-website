@@ -3,6 +3,7 @@
 import { useState, useCallback, useRef, useEffect } from "react";
 import { Play, Search, Plus, Trash2, RefreshCw, ExternalLink, Brain, FolderOpen, Bot } from "lucide-react";
 import { useUser } from "@clerk/nextjs";
+import { useRouter } from "next/navigation";
 import ChatPanel, { Message } from "./ChatPanel";
 import CommandDock, { MODELS } from "./CommandDock";
 import DrawerPanel from "./DrawerPanel";
@@ -37,6 +38,7 @@ type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "conne
 
 export default function LitConsole() {
   const { user } = useUser();
+  const router = useRouter();
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -164,12 +166,17 @@ export default function LitConsole() {
           a.type === "navigate" && a.url,
       );
       if (navAction?.url) {
-        setTimeout(() => {
-          setHoloUrl(navAction.url!);
-          setHoloTitle(navAction.url!.split("/").pop() || "Holo View");
-          setDrawerTab("holo");
-          setDrawerOpen(true);
-        }, 600);
+        const url = navAction.url!;
+        if (url.startsWith("/")) {
+          setTimeout(() => router.push(url), 600);
+        } else {
+          setTimeout(() => {
+            setHoloUrl(url);
+            setHoloTitle(url.split("/").pop() || "Holo View");
+            setDrawerTab("holo");
+            setDrawerOpen(true);
+          }, 600);
+        }
       }
     } catch (err) {
       setMessages((prev) =>
@@ -190,7 +197,7 @@ export default function LitConsole() {
     } finally {
       setLoading(false);
     }
-  }, [user, activeModel]);
+  }, [user, activeModel, router]);
 
   const handleSend = useCallback(
     (text?: string) => {
@@ -210,7 +217,11 @@ export default function LitConsole() {
           confidence: intent.confidence,
           isAmbiguous: intent.isAmbiguous,
         });
-        if (action && action.type !== "navigate") {
+        const currentRoute = typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "";
+        const isChatPage = currentRoute.startsWith("/studio");
+        const skipOnChat = action && ["build_app", "create_agent"].includes(action.type) && isChatPage;
+
+        if (action && action.type !== "navigate" && !skipOnChat) {
           const toolId = Math.random().toString(36).slice(2);
           setMessages((prev) => [
             ...prev,
@@ -261,23 +272,35 @@ export default function LitConsole() {
           return;
         }
 
-        const navMsg = buildNavigationMessage(intent);
-        setMessages((prev) => [
-          ...prev,
-          {
-            id: Math.random().toString(36).slice(2),
-            role: "lit",
-            content: navMsg,
-          },
-        ]);
-        setTimeout(() => {
-          setHoloUrl(intent.route!.path);
-          setHoloTitle(intent.route!.label || "Holo View");
-          setDrawerTab("holo");
-          setDrawerOpen(true);
-        }, 800);
-        setLoading(false);
-        return;
+        const routePath = intent.route!.path;
+        const currentRoute = typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "";
+        const isSamePage = routePath === currentRoute || routePath === "/studio?tool=chat" && currentRoute.startsWith("/studio");
+
+        if (!isSamePage) {
+          const navMsg = buildNavigationMessage(intent);
+          setMessages((prev) => [
+            ...prev,
+            {
+              id: Math.random().toString(36).slice(2),
+              role: "lit",
+              content: navMsg,
+            },
+          ]);
+          if (routePath.startsWith("/")) {
+            setTimeout(() => router.push(routePath), 800);
+          } else {
+            setTimeout(() => {
+              setHoloUrl(routePath);
+              setHoloTitle(intent.route!.label || "Holo View");
+              setDrawerTab("holo");
+              setDrawerOpen(true);
+            }, 800);
+          }
+          setLoading(false);
+          return;
+        }
+
+        // Already on the right page — fall through to askLiT so it actually does the work
       }
 
       if (intent.isAmbiguous && intent.suggestions.length > 0) {
@@ -296,7 +319,7 @@ export default function LitConsole() {
 
       askLiT(t);
     },
-    [input, loading, askLiT],
+    [input, loading, askLiT, router],
   );
 
   const handleSendRef = useRef(handleSend);
