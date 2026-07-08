@@ -17,47 +17,109 @@ import StudioInspector from "./components/StudioInspector";
 
 import { Sparkles, X, Coins, Settings, Bot, ArrowRight } from "lucide-react";
 import { useWallet } from "@/context/WalletContext";
+import ErrorBoundary from "@/components/ErrorBoundary";
+
+function StudioLoadingScreen({ label = "Loading Studio..." }: { label?: string }) {
+  return (
+    <div className="grid h-full min-h-[320px] place-items-center px-4">
+      <div className="rounded-xl border border-cyan-400/20 bg-black/35 px-5 py-4 text-sm font-bold text-cyan-100 shadow-[0_0_32px_rgba(0,245,255,0.08)]">
+        {label}
+      </div>
+    </div>
+  );
+}
+
+function StudioCrashScreen() {
+  return (
+    <div className="grid h-full min-h-[320px] place-items-center px-4">
+      <div className="w-full max-w-md rounded-xl border border-red-400/25 bg-[#101018] p-5 text-center shadow-2xl">
+        <p className="mb-2 text-xs font-black uppercase tracking-[0.22em] text-red-300">
+          Studio failed to load
+        </p>
+        <h2 className="mb-2 text-xl font-black text-white">
+          The workspace hit a render error.
+        </h2>
+        <p className="mb-4 text-sm leading-relaxed text-slate-400">
+          The shell is still alive. Reload Studio, or open Settings while we keep
+          the crash contained to this panel.
+        </p>
+        <div className="flex flex-wrap justify-center gap-2">
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-lg bg-cyan-300 px-4 py-2 text-xs font-black text-black transition hover:bg-cyan-200"
+          >
+            Reload
+          </button>
+          <Link
+            href="/settings"
+            className="rounded-lg border border-white/10 px-4 py-2 text-xs font-black text-slate-200 transition hover:bg-white/10"
+          >
+            Settings
+          </Link>
+        </div>
+      </div>
+    </div>
+  );
+}
 
 const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading image tools..." />,
 });
 const VideoTool = nextDynamic(() => import("./tools/VideoTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading video tools..." />,
 });
 const AudioTool = nextDynamic(() => import("./tools/AudioTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading audio tools..." />,
 });
 const AgentTool = nextDynamic(() => import("./tools/AgentTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading agents..." />,
 });
 const AgentsTerminalTool = nextDynamic(
   () => import("./tools/AgentsTerminalTool"),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <StudioLoadingScreen label="Loading terminal..." />,
+  },
 );
 const CLIBridgeTool = nextDynamic(() => import("./tools/CLIBridgeTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading CLI bridge..." />,
 });
 const GalleryTool = nextDynamic(() => import("./tools/GalleryTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading gallery..." />,
 });
 const SpaceTool = nextDynamic(() => import("./tools/SpaceTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading space..." />,
 });
 const ColorByNumberTool = nextDynamic(
   () => import("./tools/ColorByNumberTool"),
-  { ssr: false },
+  {
+    ssr: false,
+    loading: () => <StudioLoadingScreen label="Loading color studio..." />,
+  },
 );
 const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading pipeline..." />,
 });
 const CanvasTool = nextDynamic(() => import("./tools/CanvasTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading canvas..." />,
 });
 const ChatTool = nextDynamic(() => import("./tools/ChatTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading LiTTree Agent..." />,
 });
 const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), {
   ssr: false,
+  loading: () => <StudioLoadingScreen label="Loading builder..." />,
 });
 
 const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
@@ -282,7 +344,9 @@ function StudioCommandCenter() {
         <main className="flex-1 min-w-0 flex flex-col overflow-hidden">
           {/* Active tool fills center canvas */}
           <div className="flex-1 min-h-0 overflow-hidden">
-            <ToolRouter tool={activeTool} />
+            <ErrorBoundary fallback={<StudioCrashScreen />}>
+              <ToolRouter tool={activeTool} />
+            </ErrorBoundary>
           </div>
         </main>
 

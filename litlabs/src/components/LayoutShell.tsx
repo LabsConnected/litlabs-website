@@ -1,13 +1,26 @@
 "use client";
 
+import dynamic from "next/dynamic";
 import { AppShell } from "@/components/site/AppShell";
 import CreateFAB from "@/components/CreateFAB";
 import FooterWrapper from "@/components/FooterWrapper";
-import CookieConsent from "@/components/CookieConsent";
-import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
-import SignupAttributionTracker from "@/components/SignupAttributionTracker";
-import GlobalLiTAssistant from "@/components/GlobalLiTAssistant";
-import { LiTAssistantProvider } from "@/context/LiTAssistantContext";
+
+// Lazy-load heavy global components so they don't block the landing page initial bundle.
+const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
+  ssr: false,
+});
+const ServiceWorkerRegistration = dynamic(
+  () => import("@/components/ServiceWorkerRegistration"),
+  { ssr: false },
+);
+const SignupAttributionTracker = dynamic(
+  () => import("@/components/SignupAttributionTracker"),
+  { ssr: false },
+);
+const LazyAssistantShell = dynamic(
+  () => import("@/components/LazyAssistantShell"),
+  { ssr: false },
+);
 
 export default function LayoutShell({
   children,
@@ -15,16 +28,14 @@ export default function LayoutShell({
   children: React.ReactNode;
 }) {
   return (
-    <LiTAssistantProvider>
-      <AppShell>
-        <SignupAttributionTracker />
-        {children}
-        <CreateFAB />
-        <FooterWrapper />
-        <CookieConsent />
-        <ServiceWorkerRegistration />
-        <GlobalLiTAssistant />
-      </AppShell>
-    </LiTAssistantProvider>
+    <AppShell>
+      <SignupAttributionTracker />
+      {children}
+      <CreateFAB />
+      <FooterWrapper />
+      <CookieConsent />
+      <ServiceWorkerRegistration />
+      <LazyAssistantShell />
+    </AppShell>
   );
 }

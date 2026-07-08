@@ -1,10 +1,5 @@
-"use client";
-
 import Link from "next/link";
-import { useRouter } from "next/navigation";
-import { useEffect, useRef, useState } from "react";
-import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
+import dynamic from "next/dynamic";
 import {
   Bot,
   BarChart3,
@@ -134,61 +129,12 @@ const TIERS = [
   },
 ];
 
-function useInView<T extends HTMLElement>(threshold = 0.15) {
-  const ref = useRef<T>(null);
-  const [inView, setInView] = useState(false);
+const AuthRedirect = dynamic(() => import("@/components/landing/AuthRedirect"));
 
-  useEffect(() => {
-    const el = ref.current;
-    if (!el) return;
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setInView(true);
-          observer.disconnect();
-        }
-      },
-      { threshold },
-    );
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [threshold]);
-
-  return { ref, inView };
-}
-
-function LandingPage() {
-  const { ref: heroRef, inView: heroInView } = useInView<HTMLDivElement>();
-  const { ref: modulesRef, inView: modulesInView } = useInView<HTMLDivElement>();
-  const { ref: agentsRef, inView: agentsInView } = useInView<HTMLDivElement>();
-  const { ref: pricingRef, inView: pricingInView } = useInView<HTMLDivElement>();
-  const { ref: stepsRef, inView: stepsInView } = useInView<HTMLDivElement>();
-  const { ref: ctaRef, inView: ctaInView } = useInView<HTMLDivElement>();
-
+export default function HomePage() {
   return (
     <div className="min-h-screen" style={{ backgroundColor: BG, color: TEXT }}>
-      <style>{`
-        @keyframes float {
-          0%, 100% { transform: translateY(0) translateX(0); }
-          33% { transform: translateY(-20px) translateX(10px); }
-          66% { transform: translateY(10px) translateX(-10px); }
-        }
-        @keyframes pulse-glow {
-          0%, 100% { opacity: 0.15; }
-          50% { opacity: 0.25; }
-        }
-        @keyframes gradient-shift {
-          0% { background-position: 0% 50%; }
-          50% { background-position: 100% 50%; }
-          100% { background-position: 0% 50%; }
-        }
-        .animate-float { animation: float 8s ease-in-out infinite; }
-        .animate-float-delayed { animation: float 10s ease-in-out infinite reverse; }
-        .animate-pulse-glow { animation: pulse-glow 4s ease-in-out infinite; }
-        .animate-gradient { background-size: 200% 200%; animation: gradient-shift 6s ease infinite; }
-        .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s ease, transform 0.7s ease; }
-        .reveal.in-view { opacity: 1; transform: translateY(0); }
-      `}</style>
+      <AuthRedirect />
 
       {/* ── HEADER ── */}
       <header
@@ -206,10 +152,10 @@ function LandingPage() {
           ))}
         </nav>
         <div className="flex items-center gap-2">
-          <Link href="/sign-in" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-80" style={{ color: "#a5b4fc" }}>
+          <Link href="/sign-in" className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[11px] font-bold transition-opacity hover:opacity-80" style={{ color: "#a5b4fc" }}>
             <LogIn size={13} /> Sign In
           </Link>
-          <Link href="/sign-up" className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[11px] font-black transition-all hover:scale-105"
+          <Link href="/sign-up" className="flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-[11px] font-black transition-transform hover:scale-105"
             style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 20px ${INDIGO}40` }}>
             <UserPlus size={13} /> Get Started
           </Link>
@@ -218,18 +164,17 @@ function LandingPage() {
 
       {/* ── HERO ── */}
       <section
-        ref={heroRef}
-        className={`relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden reveal ${heroInView ? "in-view" : ""}`}
+        className="relative px-4 pt-20 pb-16 md:pt-32 md:pb-28 text-center overflow-hidden"
       >
         {/* Background glows */}
         <div className="absolute inset-0 pointer-events-none overflow-hidden">
-          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full animate-pulse-glow"
+          <div className="absolute top-0 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full lp-animate-pulse-glow"
             style={{ background: `radial-gradient(ellipse, ${INDIGO}60 0%, transparent 70%)`, filter: "blur(60px)" }} />
-          <div className="absolute top-20 left-1/4 w-64 h-64 rounded-full animate-float opacity-15"
+          <div className="absolute top-20 left-1/4 w-64 h-64 rounded-full lp-animate-float opacity-15"
             style={{ background: `radial-gradient(circle, ${CYAN}60 0%, transparent 70%)`, filter: "blur(50px)" }} />
-          <div className="absolute top-10 right-1/4 w-64 h-64 rounded-full animate-float-delayed opacity-15"
+          <div className="absolute top-10 right-1/4 w-64 h-64 rounded-full lp-animate-float-reverse opacity-15"
             style={{ background: `radial-gradient(circle, ${GREEN}60 0%, transparent 70%)`, filter: "blur(50px)" }} />
-          <div className="absolute bottom-0 left-1/3 w-96 h-96 rounded-full animate-float opacity-10"
+          <div className="absolute bottom-0 left-1/3 w-96 h-96 rounded-full lp-animate-float opacity-10"
             style={{ background: `radial-gradient(circle, ${INDIGO}50 0%, transparent 70%)`, filter: "blur(60px)" }} />
           {/* Top border glow line */}
           <div className="absolute inset-x-0 top-0 h-px"
@@ -244,7 +189,7 @@ function LandingPage() {
 
           <h1 className="text-5xl md:text-8xl font-black tracking-tight mb-6 leading-[0.95]" style={{ color: TEXT }}>
             Build with AI.<br />
-            <span className="bg-clip-text text-transparent animate-gradient"
+            <span className="bg-clip-text text-transparent"
               style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${INDIGO}, ${GREEN}, ${CYAN})` }}>
               Ship everything.
             </span>
@@ -257,12 +202,12 @@ function LandingPage() {
 
           <div className="flex flex-col sm:flex-row items-center justify-center gap-4 mb-14">
             <Link href="/sign-up"
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-black transition-all hover:scale-105 hover:brightness-110"
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-black transition-transform hover:scale-105 hover:brightness-110"
               style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 40px ${INDIGO}40` }}>
               Start Free — 500 Credits <ArrowRight size={16} />
             </Link>
             <Link href="/sign-in"
-              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold border transition-all hover:bg-white/5"
+              className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl text-sm font-bold border transition-colors hover:bg-white/5"
               style={{ borderColor: BORDER, color: MUTED }}>
               <LogIn size={15} /> Sign In
             </Link>
@@ -282,8 +227,7 @@ function LandingPage() {
 
       {/* ── OS MODULES GRID ── */}
       <section
-        ref={modulesRef}
-        className={`px-4 py-16 border-t reveal ${modulesInView ? "in-view" : ""}`}
+        className="px-4 py-16 border-t"
         style={{ borderColor: `${BORDER}50` }}
         id="features"
       >
@@ -297,15 +241,15 @@ function LandingPage() {
               const Icon = m.icon;
               return (
                 <Link key={m.label} href={m.href}
-                  className="group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-all duration-300 hover:scale-[1.05] hover:-translate-y-1 text-center"
+                  className="group flex flex-col items-center gap-2 p-4 rounded-2xl border transition-transform duration-300 hover:scale-[1.05] hover:-translate-y-1 text-center"
                   style={{
                     backgroundColor: PANEL,
                     borderColor: BORDER,
                     transitionDelay: `${i * 30}ms`,
                   }}
                 >
-                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-all duration-300 group-hover:scale-110 group-hover:shadow-lg"
-                    style={{ backgroundColor: `${m.color}15`, color: m.color, boxShadow: `0 0 0 ${m.color}00`, }}>
+                  <div className="w-10 h-10 rounded-xl flex items-center justify-center transition-transform duration-300 group-hover:scale-110"
+                    style={{ backgroundColor: `${m.color}15`, color: m.color }}>
                     <Icon size={18} />
                   </div>
                   <div className="text-xs font-black" style={{ color: TEXT }}>{m.label}</div>
@@ -319,8 +263,7 @@ function LandingPage() {
 
       {/* ── AGENTS ── */}
       <section
-        ref={agentsRef}
-        className={`px-4 py-20 border-t reveal ${agentsInView ? "in-view" : ""}`}
+        className="px-4 py-20 border-t"
         style={{ borderColor: `${BORDER}50` }}
         id="agents"
       >
@@ -332,14 +275,13 @@ function LandingPage() {
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {AGENTS.map((a, i) => (
               <Link key={a.name} href={a.href}
-                className="group flex items-start gap-4 p-5 rounded-2xl border transition-all duration-300 hover:scale-[1.02] hover:-translate-y-1 hover:shadow-xl"
+                className="group flex items-start gap-4 p-5 rounded-2xl border transition-transform duration-300 hover:scale-[1.02] hover:-translate-y-1"
                 style={{
                   backgroundColor: PANEL,
                   borderColor: BORDER,
-                  boxShadow: `0 0 0 ${a.color}00`,
                   transitionDelay: `${i * 50}ms`,
                 }}>
-                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-all duration-300 group-hover:scale-110"
+                <div className="w-12 h-12 rounded-2xl flex items-center justify-center text-2xl shrink-0 transition-transform duration-300 group-hover:scale-110"
                   style={{ backgroundColor: `${a.color}15`, border: `1px solid ${a.color}30` }}>
                   {a.emoji}
                 </div>
@@ -357,7 +299,7 @@ function LandingPage() {
             ))}
           </div>
           <div className="text-center mt-8">
-            <Link href="/agents" className="inline-flex items-center gap-2 text-xs font-bold transition-all hover:opacity-100 opacity-60" style={{ color: CYAN }}>
+            <Link href="/agents" className="inline-flex items-center gap-2 text-xs font-bold transition-opacity hover:opacity-100 opacity-60" style={{ color: CYAN }}>
               Meet the Agent Team <ChevronRight size={13} />
             </Link>
           </div>
@@ -366,8 +308,7 @@ function LandingPage() {
 
       {/* ── PRICING ── */}
       <section
-        ref={pricingRef}
-        className={`px-4 py-20 border-t reveal ${pricingInView ? "in-view" : ""}`}
+        className="px-4 py-20 border-t"
         style={{ borderColor: `${BORDER}50` }}
         id="pricing"
       >
@@ -384,7 +325,7 @@ function LandingPage() {
           <div className="grid md:grid-cols-3 gap-5 items-start">
             {TIERS.map((tier) => (
               <div key={tier.name}
-                className="relative rounded-2xl border p-6 flex flex-col"
+                className="relative rounded-2xl border p-6 flex flex-col transition-transform duration-300 hover:scale-[1.01]"
                 style={{
                   backgroundColor: tier.highlight ? `${CYAN}06` : PANEL,
                   borderColor: tier.highlight ? `${CYAN}50` : BORDER,
@@ -413,7 +354,7 @@ function LandingPage() {
                 </div>
 
                 <Link href={tier.href}
-                  className="flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm mb-5 transition-all hover:scale-[1.02]"
+                  className="flex items-center justify-center gap-2 py-3 rounded-xl font-black text-sm mb-5 transition-transform hover:scale-[1.02]"
                   style={{
                     background: tier.highlight
                       ? `linear-gradient(135deg, ${INDIGO}, ${CYAN})`
@@ -446,8 +387,7 @@ function LandingPage() {
 
       {/* ── HOW IT WORKS ── */}
       <section
-        ref={stepsRef}
-        className={`px-4 py-20 border-t reveal ${stepsInView ? "in-view" : ""}`}
+        className="px-4 py-20 border-t"
         style={{ borderColor: `${BORDER}50` }}
       >
         <div className="max-w-4xl mx-auto text-center">
@@ -462,7 +402,7 @@ function LandingPage() {
               const Icon = s.icon;
               return (
                 <div key={s.n} className="flex flex-col items-center gap-4" style={{ transitionDelay: `${i * 80}ms` }}>
-                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-all duration-300 hover:scale-110"
+                  <div className="w-14 h-14 rounded-2xl flex items-center justify-center transition-transform duration-300 hover:scale-110"
                     style={{ background: `linear-gradient(135deg, ${INDIGO}30, ${CYAN}20)`, border: `1px solid ${INDIGO}40` }}>
                     <Icon size={22} style={{ color: CYAN }} />
                   </div>
@@ -478,8 +418,7 @@ function LandingPage() {
 
       {/* ── FINAL CTA ── */}
       <section
-        ref={ctaRef}
-        className={`px-4 py-24 border-t reveal ${ctaInView ? "in-view" : ""}`}
+        className="px-4 py-24 border-t"
         style={{ borderColor: `${BORDER}50` }}
       >
         <div className="max-w-3xl mx-auto text-center relative">
@@ -489,7 +428,7 @@ function LandingPage() {
             <div className="text-5xl mb-6">🤖</div>
             <h2 className="text-4xl md:text-6xl font-black mb-4 leading-tight" style={{ color: TEXT }}>
               LiTT is waiting.<br />
-              <span className="bg-clip-text text-transparent animate-gradient"
+              <span className="bg-clip-text text-transparent"
                 style={{ backgroundImage: `linear-gradient(135deg, ${CYAN}, ${GREEN}, ${CYAN})` }}>
                 What are we building?
               </span>
@@ -499,12 +438,12 @@ function LandingPage() {
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               <Link href="/sign-up"
-                className="inline-flex items-center gap-2 px-10 py-4 rounded-2xl font-black text-sm transition-all hover:scale-105"
+                className="inline-flex items-center gap-2 px-10 py-4 rounded-2xl font-black text-sm transition-transform hover:scale-105"
                 style={{ background: `linear-gradient(135deg, ${INDIGO}, ${CYAN})`, color: "#fff", boxShadow: `0 0 50px ${INDIGO}40` }}>
                 <UserPlus size={16} /> Create Free Account
               </Link>
               <Link href="/sign-in"
-                className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-sm border transition-all hover:bg-white/5"
+                className="inline-flex items-center gap-2 px-8 py-4 rounded-2xl font-bold text-sm border transition-colors hover:bg-white/5"
                 style={{ borderColor: BORDER, color: MUTED }}>
                 <LogIn size={15} /> Already have an account
               </Link>
@@ -557,18 +496,4 @@ function LandingPage() {
       </footer>
     </div>
   );
-}
-
-export default function HomePage() {
-  const { isSignedIn: supabaseSignedIn } = useSupabaseAuthHook();
-  const { isSignedIn: clerkSignedIn } = useClerkAuth();
-  const router = useRouter();
-
-  useEffect(() => {
-    if (supabaseSignedIn || clerkSignedIn) {
-      router.replace("/studio?tool=chat");
-    }
-  }, [supabaseSignedIn, clerkSignedIn, router]);
-
-  return <LandingPage />;
 }

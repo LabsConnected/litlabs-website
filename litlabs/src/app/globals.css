@@ -438,6 +438,51 @@ a:hover {
 .animate-pulse-opacity { animation: pulse-opacity 2s ease-in-out infinite; will-change: opacity; }
 
 /* ============================================================
+   LANDING PAGE — Composited animations
+   ============================================================ */
+@keyframes lp-float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  33% { transform: translateY(-20px) translateX(10px); }
+  66% { transform: translateY(10px) translateX(-10px); }
+}
+
+@keyframes lp-float-reverse {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  33% { transform: translateY(20px) translateX(-10px); }
+  66% { transform: translateY(-10px) translateX(10px); }
+}
+
+@keyframes lp-pulse-glow {
+  0%, 100% { opacity: 0.15; }
+  50% { opacity: 0.25; }
+}
+
+.lp-animate-float {
+  animation: lp-float 8s ease-in-out infinite;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.lp-animate-float-reverse {
+  animation: lp-float-reverse 10s ease-in-out infinite;
+  will-change: transform;
+  transform: translateZ(0);
+}
+
+.lp-animate-pulse-glow {
+  animation: lp-pulse-glow 4s ease-in-out infinite;
+  will-change: opacity;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-animate-float,
+  .lp-animate-float-reverse,
+  .lp-animate-pulse-glow {
+    animation: none;
+  }
+}
+
+/* ============================================================
    AGENT TILES
    ============================================================ */
 .agent-tile {

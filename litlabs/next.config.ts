@@ -127,9 +127,12 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Allow browser caching but force revalidation (enables bfcache)
+      // Note: Vercel/Next.js handles _next/static caching natively.
+      // Avoid custom Cache-Control here because it can break dev behavior.
+      // Allow browser caching but force revalidation (enables bfcache).
+      // Exclude asset paths so Next.js/Vercel can apply native long-term caching to _next/static.
       {
-        source: "/:path*",
+        source: "/:path((?!_next|static|fonts|images).*)",
         headers: [
           {
             key: "Cache-Control",
@@ -139,7 +142,7 @@ const nextConfig: NextConfig = {
       },
       // Cache static assets for 1 year
       {
-        source: "/static/(.*)",
+        source: "/static/:path*",
         headers: [
           {
             key: "Cache-Control",
@@ -149,7 +152,7 @@ const nextConfig: NextConfig = {
       },
       // Cache fonts for 1 year
       {
-        source: "/fonts/(.*)",
+        source: "/fonts/:path*",
         headers: [
           {
             key: "Cache-Control",
@@ -159,7 +162,7 @@ const nextConfig: NextConfig = {
       },
       // Cache images for 30 days
       {
-        source: "/images/(.*)",
+        source: "/images/:path*",
         headers: [
           {
             key: "Cache-Control",
@@ -167,8 +170,6 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Note: /_next/static caching is handled natively by Vercel/Next.js
-      // Setting a custom Cache-Control here triggers a build warning, so it is intentionally omitted.
     ];
   },
 

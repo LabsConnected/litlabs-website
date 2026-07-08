@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import AnimatedBackground from "@/components/AnimatedBackground";
 
 const SHOW_BACKGROUND_PATHS = [
-  "/",
   "/sign-in",
   "/sign-up",
   "/settings",
