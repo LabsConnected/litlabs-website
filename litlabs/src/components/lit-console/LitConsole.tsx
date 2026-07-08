@@ -38,6 +38,36 @@ type DrawerTab = "terminal" | "files" | "preview" | "agents" | "memory" | "conne
 
 const CHAT_STATE_KEY = "lit-console-state";
 
+const SMART_FALLBACK =
+  "I have that context now. I will stay in this chat, use memory and recent messages, and answer with the next useful step instead of repeating the intro.";
+
+function normalizeAssistantReply(answer: string, history: Message[]) {
+  const trimmed = answer.trim();
+  if (!trimmed) return SMART_FALLBACK;
+
+  const assistantHistory = history
+    .filter((m) => m.role === "lit")
+    .map((m) => m.content.toLowerCase());
+  const lower = trimmed.toLowerCase();
+  const genericPatterns = [
+    /i am lit/,
+    /i('|’)m lit/,
+    /i can help you/,
+    /what would you like to achieve/,
+    /what do you want to accomplish/,
+    /your project appears to be/,
+    /this project appears to be/,
+  ];
+  const isGeneric = genericPatterns.some((pattern) => pattern.test(lower));
+  const genericAlreadyUsed = assistantHistory.some((content) =>
+    genericPatterns.some((pattern) => pattern.test(content)),
+  );
+  const repeatedExact = assistantHistory.some((content) => content === lower);
+
+  if (repeatedExact || (isGeneric && genericAlreadyUsed)) return SMART_FALLBACK;
+  return trimmed;
+}
+
 export default function LitConsole() {
   const { user } = useUser();
   const router = useRouter();
@@ -165,9 +195,10 @@ export default function LitConsole() {
         }),
       });
       const data = await res.json();
-      const answer = data.error
+      const rawAnswer = data.error
         ? `Error: ${data.error}`
         : data.answer || "No response.";
+      const answer = normalizeAssistantReply(rawAnswer, messages);
 
       setMessages((prev) =>
         prev.map((m) =>

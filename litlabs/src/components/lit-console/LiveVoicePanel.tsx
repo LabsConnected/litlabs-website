@@ -182,8 +182,12 @@ export default function LiveVoicePanel({
 
       {showSettings && (
         <div
-          className="fixed bottom-0 left-0 right-0 border-t p-4 sm:left-auto sm:right-4 sm:top-20 sm:w-80 sm:rounded-2xl sm:border"
-          style={{ backgroundColor: LC.bgPanel, borderColor: LC.borderSubtle }}
+          className="mx-4 mb-4 rounded-2xl border p-4"
+          style={{
+            background: `linear-gradient(135deg, ${LC.bgPanel}, ${LC.bgSecondary})`,
+            borderColor: LC.borderSubtle,
+            boxShadow: `inset 0 0 20px ${LC.accentCyan}0f`,
+          }}
         >
           <div className="mb-4 flex items-center justify-between">
             <span className="text-sm font-semibold" style={{ color: LC.text }}>Voice</span>
@@ -193,6 +197,7 @@ export default function LiveVoicePanel({
               className="max-w-[60%] rounded-lg border px-2 py-1 text-sm outline-none"
               style={{ backgroundColor: LC.bgSecondary, borderColor: LC.borderSubtle, color: LC.text }}
             >
+              {!voices.length && <option value="">System default</option>}
               {voices.map((v) => (
                 <option key={v.name} value={v.name}>
                   {v.name}
