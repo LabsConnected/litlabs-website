@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   Bot,
   Plug,
+  Volume2,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -46,6 +47,14 @@ const BYOK_KEYS = [
   { id: "openrouter", label: "OpenRouter", env: "OPENROUTER_API_KEY" },
   { id: "openai", label: "OpenAI", env: "OPENAI_API_KEY" },
 ] as const;
+
+const GEMINI_VOICES = [
+  { id: "Kore", label: "Kore" },
+  { id: "Puck", label: "Puck" },
+  { id: "Charon", label: "Charon" },
+  { id: "Fenrir", label: "Fenrir" },
+  { id: "Aoede", label: "Aoede" },
+];
 
 const TABS = [
   { id: "profile", label: "Profile", icon: User },
@@ -125,7 +134,14 @@ export default function SettingsPage() {
   const [voiceContinuous, setVoiceContinuous] = useState(
     () => typeof window !== "undefined" && localStorage.getItem("litlabs-voice-continuous") === "true",
   );
+  const [voiceProvider, setVoiceProvider] = useState<"system" | "gemini">(
+    () => (typeof window !== "undefined" ? (localStorage.getItem("litlabs-voice-provider") as "system" | "gemini") : null) || "system",
+  );
+  const [geminiVoice, setGeminiVoice] = useState(
+    () => (typeof window !== "undefined" ? localStorage.getItem("litlabs-gemini-voice") : null) || "Kore",
+  );
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [previewLoading, setPreviewLoading] = useState(false);
 
   /* Notifications state — seeded from localStorage */
   const [discordWebhook, setDiscordWebhook] = useState(() =>
@@ -278,9 +294,44 @@ export default function SettingsPage() {
     localStorage.setItem("litlabs-voice-rate", String(voiceRate));
     localStorage.setItem("litlabs-voice-pitch", String(voicePitch));
     localStorage.setItem("litlabs-voice-continuous", String(voiceContinuous));
+    localStorage.setItem("litlabs-voice-provider", voiceProvider);
+    localStorage.setItem("litlabs-gemini-voice", geminiVoice);
     setAgentSaved(true);
     setTimeout(() => setAgentSaved(false), 2000);
-  }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions, voiceName, voiceRate, voicePitch, voiceContinuous]);
+  }, [agentTone, agentLength, agentAutoSpeak, agentDefaultMode, agentInstructions, voiceName, voiceRate, voicePitch, voiceContinuous, voiceProvider, geminiVoice]);
+
+  const playPreview = useCallback(async () => {
+    if (typeof window === "undefined") return;
+    const sample = "Hi, I'm LiT. This is how I sound.";
+    if (voiceProvider === "gemini") {
+      setPreviewLoading(true);
+      try {
+        const res = await fetch("/api/media/generate-audio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: sample, voice: geminiVoice }),
+        });
+        const data = await res.json();
+        if (data.audioBase64) {
+          const audio = new Audio(data.audioBase64);
+          await audio.play();
+        }
+      } catch (e) {
+        console.error("Voice preview failed", e);
+      } finally {
+        setPreviewLoading(false);
+      }
+      return;
+    }
+    if (!window.speechSynthesis) return;
+    const utter = new SpeechSynthesisUtterance(sample);
+    utter.rate = voiceRate;
+    utter.pitch = voicePitch;
+    const selected = voices.find((v) => v.name === voiceName);
+    if (selected) utter.voice = selected;
+    window.speechSynthesis.cancel();
+    window.speechSynthesis.speak(utter);
+  }, [voiceProvider, geminiVoice, voiceRate, voicePitch, voiceName, voices]);
 
   const saveWorkspace = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -758,25 +809,81 @@ export default function SettingsPage() {
                   </button>
                 </div>
 
+                {/* Voice engine */}
+                <div>
+                  <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
+                    Voice engine
+                  </label>
+                  <div className="flex gap-2">
+                    {[
+                      { id: "system", label: "System voices" },
+                      { id: "gemini", label: "Premium (Gemini TTS)" },
+                    ].map((p) => (
+                      <button
+                        key={p.id}
+                        onClick={() => setVoiceProvider(p.id as "system" | "gemini")}
+                        className="flex-1 rounded-lg border py-2 text-xs font-bold transition-all"
+                        style={{
+                          backgroundColor: voiceProvider === p.id ? `${T.accentColor}20` : `${T.boxBg}40`,
+                          borderColor: voiceProvider === p.id ? `${T.accentColor}50` : `${T.borderColor}30`,
+                          color: voiceProvider === p.id ? T.accentColor : T.textColor,
+                        }}
+                      >
+                        {p.label}
+                      </button>
+                    ))}
+                  </div>
+                  {voiceProvider === "gemini" && (
+                    <p className="mt-2 text-[10px] opacity-70" style={{ color: T.textMuted }}>
+                      Premium voices cost 2 LiTBit Coins per spoken reply.
+                    </p>
+                  )}
+                </div>
+
                 {/* Voice selection */}
                 <div>
                   <label className="text-[10px] font-mono uppercase tracking-wider opacity-70 block mb-2" style={{ color: T.textMuted }}>
-                    Synthesis voice
+                    {voiceProvider === "gemini" ? "Premium voice" : "Synthesis voice"}
                   </label>
                   <select
-                    value={voiceName}
-                    onChange={(e) => setVoiceName(e.target.value)}
+                    value={voiceProvider === "gemini" ? geminiVoice : voiceName}
+                    onChange={(e) => voiceProvider === "gemini" ? setGeminiVoice(e.target.value) : setVoiceName(e.target.value)}
                     className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
                     style={inputStyle}
                   >
-                    <option value="">System default</option>
-                    {voices.map((v) => (
-                      <option key={v.name} value={v.name}>
-                        {v.name}
-                      </option>
-                    ))}
+                    {voiceProvider === "gemini" ? (
+                      GEMINI_VOICES.map((v) => (
+                        <option key={v.id} value={v.id}>
+                          {v.label}
+                        </option>
+                      ))
+                    ) : (
+                      <>
+                        <option value="">System default</option>
+                        {voices.map((v) => (
+                          <option key={v.name} value={v.name}>
+                            {v.name}
+                          </option>
+                        ))}
+                      </>
+                    )}
                   </select>
                 </div>
+
+                {/* Preview */}
+                <button
+                  onClick={playPreview}
+                  disabled={previewLoading}
+                  className="flex items-center justify-center gap-2 w-full rounded-lg border py-2 text-xs font-bold transition-all disabled:opacity-50"
+                  style={{
+                    backgroundColor: `${T.accentColor}15`,
+                    borderColor: `${T.accentColor}40`,
+                    color: T.accentColor,
+                  }}
+                >
+                  {previewLoading ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
+                  {previewLoading ? "Generating preview…" : "Preview voice"}
+                </button>
 
                 {/* Rate */}
                 <div>

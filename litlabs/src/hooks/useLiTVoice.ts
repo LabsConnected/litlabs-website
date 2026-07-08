@@ -235,8 +235,47 @@ export function useLiTVoice({
     setTranscript("");
   }, [clearRestart]);
 
-  const speak = useCallback((text: string) => {
-    if (!synthRef.current || typeof window === "undefined") return;
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+
+  const speak = useCallback(async (text: string) => {
+    if (typeof window === "undefined") return;
+    clearRestart();
+    synthRef.current?.cancel();
+
+    // Check if user selected a premium Gemini voice
+    const provider = typeof window !== "undefined" ? window.localStorage.getItem("litlabs-voice-provider") : "system";
+    const geminiVoice = typeof window !== "undefined" ? window.localStorage.getItem("litlabs-gemini-voice") || "Kore" : "Kore";
+
+    if (provider === "gemini") {
+      try {
+        setState("speaking");
+        const res = await fetch("/api/media/generate-audio", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ prompt: text, voice: geminiVoice }),
+        });
+        const data = await res.json();
+        if (data.audioBase64) {
+          const audio = new Audio(data.audioBase64);
+          audioRef.current = audio;
+          audio.onended = () => {
+            setState("idle");
+            if (continuous) {
+              restartTimerRef.current = setTimeout(() => startListening(), 400);
+            }
+          };
+          audio.onerror = () => setState("idle");
+          await audio.play();
+        } else {
+          setState("idle");
+        }
+      } catch {
+        setState("idle");
+      }
+      return;
+    }
+
+    if (!synthRef.current) return;
     const utter = new SpeechSynthesisUtterance(text);
     utter.rate = rate;
     utter.pitch = pitch;
@@ -249,14 +288,18 @@ export function useLiTVoice({
       }
     };
     utter.onerror = () => setState("idle");
-    clearRestart();
-    synthRef.current.cancel();
     synthRef.current.speak(utter);
   }, [selectedVoice, rate, pitch, continuous, startListening, clearRestart]);
 
   const stopSpeaking = useCallback(() => {
     clearRestart();
     synthRef.current?.cancel();
+    try {
+      audioRef.current?.pause();
+      audioRef.current = null;
+    } catch {
+      void 0;
+    }
     setState("idle");
   }, [clearRestart]);
 
