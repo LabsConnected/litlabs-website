@@ -349,7 +349,7 @@ User request: ${text}`,
         setActiveFile(files[0].name);
         setPreviewMode("code");
       }
-    } catch (err) {
+    } catch {
       // Fallback: generate a local starter template so the tool never errors
       const { response, files } = fallbackResponse(text);
       const assistantMsg: Message = {
@@ -367,7 +367,7 @@ User request: ${text}`,
     } finally {
       setIsLoading(false);
     }
-  }, [isLoading, messages, extractCode, model, memories, fallbackResponse]);
+  }, [isLoading, extractCode, memories, fallbackResponse]);
 
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {

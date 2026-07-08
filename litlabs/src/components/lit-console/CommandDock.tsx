@@ -11,7 +11,6 @@ import {
   Film,
   Globe,
   Code2,
-  Wrench,
   Mic,
   ChevronUp,
   Cpu,
@@ -59,6 +58,8 @@ interface CommandDockProps {
   onVoiceStop?: () => void;
   voiceState?: "idle" | "listening" | "thinking" | "speaking" | "error";
   onHolo?: () => void;
+  mode?: ModeId;
+  onModeChange?: (mode: ModeId) => void;
   /* Run Execution Loop support */
   onRun?: (text: string) => void;
   isRunning?: boolean;
@@ -76,6 +77,20 @@ const AGENTS = [
   { id: "nexus",          label: "Nexus",          desc: "Automation",             color: "#34d399" },
   { id: "security-chief", label: "Security Chief", desc: "Security & Privacy",     color: "#ef4444" },
 ];
+
+const MODES = [
+  { id: "ask", label: "Ask", placeholder: "Ask LiTTree anything...", color: "#94a3b8" },
+  { id: "image", label: "Images", placeholder: "Describe the image you want...", color: "#e879f9" },
+  { id: "website", label: "Website", placeholder: "Describe the website you want...", color: "#f472b6" },
+  { id: "code", label: "Code", placeholder: "Paste code or describe the bug...", color: "#f97316" },
+  { id: "audio", label: "Audio", placeholder: "Describe the audio or music you want...", color: "#38bdf8" },
+  { id: "video", label: "Video", placeholder: "Describe the video you want...", color: "#a78bfa" },
+  { id: "flow", label: "Flow", placeholder: "Describe the workflow or automation...", color: "#4ade80" },
+  { id: "research", label: "Research", placeholder: "What do you want to research?", color: "#fbbf24" },
+  { id: "terminal", label: "Terminal", placeholder: "Run a command or ask about the terminal...", color: "#94a3b8" },
+  { id: "deploy", label: "Deploy", placeholder: "What should I deploy or run?", color: "#22c55e" },
+] as const;
+type ModeId = typeof MODES[number]["id"];
 
 export const MODELS = [
   { id: "gemini-2.5-flash", label: "Gemini 2.5 Flash", provider: "openrouter", model: "google/gemini-2.5-flash", description: "Fast, cheap, great for most tasks" },
@@ -150,18 +165,18 @@ export default function CommandDock(props: CommandDockProps) {
     onModelChange,
     onAttach,
     onFileSelect,
-    onTools,
     onConnectors,
     onToggleTerminal,
     onCreateFile,
     onBuild,
-    onGenerateMedia,
     onDeploy,
     onSaveWorkflow,
     onVoice,
     onVoiceStop,
     voiceState,
     onHolo,
+    mode: modeProp,
+    onModeChange,
   } = props;
 
   const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -170,21 +185,12 @@ export default function CommandDock(props: CommandDockProps) {
   const [modelOpen, setModelOpen] = useState(false);
   const [toolsOpen, setToolsOpen] = useState(false);
   const [focused, setFocused] = useState(false);
-
-  const MODES = [
-    { id: "ask", label: "Ask", placeholder: "Ask LiTTree anything...", color: LC.textMuted },
-    { id: "image", label: "Images", placeholder: "Describe the image you want...", color: "#e879f9" },
-    { id: "website", label: "Website", placeholder: "Describe the website you want...", color: "#f472b6" },
-    { id: "code", label: "Code", placeholder: "Paste code or describe the bug...", color: LC.accentOrange },
-    { id: "audio", label: "Audio", placeholder: "Describe the audio or music you want...", color: "#38bdf8" },
-    { id: "video", label: "Video", placeholder: "Describe the video you want...", color: "#a78bfa" },
-    { id: "flow", label: "Flow", placeholder: "Describe the workflow or automation...", color: "#4ade80" },
-    { id: "research", label: "Research", placeholder: "What do you want to research?", color: "#fbbf24" },
-    { id: "terminal", label: "Terminal", placeholder: "Run a command or ask about the terminal...", color: "#94a3b8" },
-    { id: "deploy", label: "Deploy", placeholder: "What should I deploy or run?", color: "#22c55e" },
-  ] as const;
-  type ModeId = typeof MODES[number]["id"];
-  const [mode, setMode] = useState<ModeId>("ask");
+  const [internalMode, setInternalMode] = useState<ModeId>("ask");
+  const mode = modeProp ?? internalMode;
+  const setMode = (next: ModeId) => {
+    setInternalMode(next);
+    onModeChange?.(next);
+  };
 
   useEffect(() => {
     const el = textareaRef.current;
@@ -256,7 +262,10 @@ export default function CommandDock(props: CommandDockProps) {
   const handleModeClick = (id: typeof activeMode) => {
     setActiveMode(id);
     if (id === "text") textareaRef.current?.focus();
-    if (id === "voice") onVoice?.();
+    if (id === "voice") {
+      if (listening) onVoiceStop?.();
+      else onVoice?.();
+    }
     if (id === "holo") onHolo?.();
     if (id === "files") fileInputRef.current?.click();
     if (id === "tools") setToolsOpen((v) => !v);
