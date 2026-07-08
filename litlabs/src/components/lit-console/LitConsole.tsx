@@ -273,8 +273,7 @@ export default function LitConsole() {
         }
 
         const routePath = intent.route!.path;
-        const currentRoute = typeof window !== "undefined" ? `${window.location.pathname}${window.location.search}` : "";
-        const isSamePage = routePath === currentRoute || routePath === "/studio?tool=chat" && currentRoute.startsWith("/studio");
+        const isSamePage = routePath === currentRoute || (routePath === "/studio?tool=chat" && currentRoute.startsWith("/studio"));
 
         if (!isSamePage) {
           const navMsg = buildNavigationMessage(intent);
