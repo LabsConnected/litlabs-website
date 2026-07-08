@@ -1,5 +1,6 @@
 "use client";
 
+import { Suspense } from "react";
 import Link from "next/link";
 import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
@@ -9,7 +10,7 @@ const RESERVED_TOOLS = MOBILE_BOTTOM_ITEMS.map(
   (item) => new URLSearchParams(item.href.split("?")[1] ?? "").get("tool"),
 ).filter((tool): tool is string => Boolean(tool));
 
-export default function MobileBottomNav() {
+function MobileBottomNavInner() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
@@ -71,5 +72,15 @@ export default function MobileBottomNav() {
         })}
       </div>
     </nav>
+  );
+}
+
+export default function MobileBottomNav() {
+  // `useSearchParams` must sit under a Suspense boundary so this globally
+  // rendered nav doesn't de-opt every page out of static generation.
+  return (
+    <Suspense fallback={null}>
+      <MobileBottomNavInner />
+    </Suspense>
   );
 }
