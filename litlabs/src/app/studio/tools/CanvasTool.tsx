@@ -59,7 +59,7 @@ export default function CanvasTool() {
   const [model, setModel] = useState("gemini-flash");
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [activeFile, setActiveFile] = useState<string>("");
-  const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
+  const [previewMode, setPreviewMode] = useState<"code" | "preview">("preview");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [memories, setMemories] = useState<string[]>([]);
@@ -368,7 +368,7 @@ User request: ${text}`,
       if (files.length > 0) {
         setGeneratedFiles(files);
         setActiveFile(files[0].name);
-        setPreviewMode("code");
+        setPreviewMode(files.some((f) => f.name.endsWith(".html")) ? "preview" : "code");
       }
     } catch {
       // Fallback: generate a local starter template so the tool never errors
@@ -384,7 +384,7 @@ User request: ${text}`,
       setMessages((prev) => [...prev, assistantMsg]);
       setGeneratedFiles(files);
       setActiveFile(files[0]?.name || "");
-      setPreviewMode("code");
+      setPreviewMode("preview");
     } finally {
       setIsLoading(false);
     }
