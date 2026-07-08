@@ -95,4 +95,3 @@ chrome/
 **/AppData/Local/lighthouse*/
 
 .vercel
-.env*
