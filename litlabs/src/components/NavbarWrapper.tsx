@@ -8,7 +8,6 @@ import {
   Home,
   Gamepad2,
   Store,
-  Bot,
   User,
   Images,
   Wand2,
@@ -52,7 +51,6 @@ export default function NavbarWrapper() {
   }, []);
 
   const mainLinks = [
-    { href: "/dashboard", label: "Dashboard", icon: Bot },
     { href: "/studio?tool=chat", label: "LiTTree Agent", icon: Wand2 },
     { href: "/agents", label: "Agents", icon: Sparkles },
     { href: "/gallery", label: "Gallery", icon: Images },
@@ -84,15 +82,15 @@ export default function NavbarWrapper() {
     >
       <div className="flex items-center gap-3">
         <Link
-          href="/dashboard"
+          href="/studio?tool=chat"
           className="flex items-center gap-2 p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
           aria-label="Go home"
-          title="Dashboard"
+          title="LiTTree Agent"
         >
           <Home size={20} />
         </Link>
-        <Link href="/dashboard" className="font-black text-sm" style={{ color: T.headerColor }}>
+        <Link href="/studio?tool=chat" className="font-black text-sm" style={{ color: T.headerColor }}>
           LiTTree OS
         </Link>
       </div>

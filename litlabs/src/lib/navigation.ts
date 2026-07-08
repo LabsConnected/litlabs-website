@@ -1,6 +1,5 @@
 import type { LucideIcon } from "lucide-react";
 import {
-  LayoutDashboard,
   Users,
   Sparkles,
   ShoppingBag,
@@ -71,13 +70,11 @@ export const GROUP_ACCENTS: Record<string, string> = {
 export const NAV_GROUPS: NavGroup[] = [
   {
     label: "Home",
-    href: "/dashboard",
+    href: "/studio?tool=chat",
     icon: Home,
     accent: GROUP_ACCENTS.Home,
     items: [
-      { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-      { label: "LiTTree", href: "/studio?tool=chat", icon: Brain, online: true },
-      { label: "LiT Console", href: "/studio?tool=chat", icon: Terminal, online: true },
+      { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Brain, online: true },
       { label: "Feed", href: "/social?feed=main", icon: Flame },
       { label: "Notifications", href: "/social?tab=notifications", icon: Bell, badge: 3 },
       { label: "Showcase", href: "/showcase", icon: Star },
@@ -211,7 +208,6 @@ export const NAV_GROUPS: NavGroup[] = [
 ];
 
 export const MOBILE_BOTTOM_ITEMS = [
-  { label: "Home", href: "/dashboard", icon: Home },
   { label: "LiT", href: "/studio?tool=chat", icon: Bot },
   { label: "Studio", href: "/studio", icon: Sparkles },
   { label: "Agents", href: "/studio?tool=agents", icon: Users },
@@ -220,15 +216,12 @@ export const MOBILE_BOTTOM_ITEMS = [
 
 export const MOBILE_MORE_ITEMS = [
   { label: "Profile", href: "/profile", icon: User },
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Paintbrush },
-  { label: "Agent", href: "/studio?tool=chat", icon: Bot },
+  { label: "LiTTree Agent", href: "/studio?tool=chat", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games/cloud", icon: Gamepad2 },
   { label: "Social", href: "/social", icon: Users },
-  { label: "LiT Console", href: "/studio?tool=chat", icon: Terminal },
-  { label: "LiTTree", href: "/studio?tool=chat", icon: Brain },
   { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "Admin", href: "/admin", icon: Shield },
   { label: "Settings", href: "/settings", icon: Settings },
