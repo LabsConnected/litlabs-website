@@ -126,26 +126,52 @@ const TELEMETRY_LINES = [
 function OnboardingBanner({ displayName }: { displayName: string }) {
   const { resolvedColors: T } = useTheme();
   const [visible, setVisible] = useState(() => {
-    try { return localStorage.getItem("litlabs-new-user") === "1"; } catch { return false; }
+    try {
+      return localStorage.getItem("litlabs-new-user") === "1";
+    } catch {
+      return false;
+    }
   });
 
   if (!visible) return null;
 
   const dismiss = () => {
-    try { localStorage.setItem("litlabs-new-user", "done"); } catch { /* ignore */ }
+    try {
+      localStorage.setItem("litlabs-new-user", "done");
+    } catch {
+      /* ignore */
+    }
     setVisible(false);
   };
 
   const actions = [
-    { icon: ImageIcon, label: "Generate your first image", href: "/studio?tool=image", color: "#ff00a0" },
-    { icon: Bot, label: "Try the AI agent", href: "/dashboard?app=jarvis", color: "#00f0ff" },
-    { icon: MessageSquare, label: "Explore the community", href: "/social", color: "#8b5cf6" },
+    {
+      icon: ImageIcon,
+      label: "Generate your first image",
+      href: "/studio?tool=image",
+      color: "#ff00a0",
+    },
+    {
+      icon: Bot,
+      label: "Try the AI agent",
+      href: "/litt-terminal",
+      color: "#00f0ff",
+    },
+    {
+      icon: MessageSquare,
+      label: "Explore the community",
+      href: "/social",
+      color: "#8b5cf6",
+    },
   ];
 
   return (
     <div
       className="relative mx-4 mt-4 rounded-xl border p-5"
-      style={{ backgroundColor: `${T.accentColor}08`, borderColor: `${T.accentColor}30` }}
+      style={{
+        backgroundColor: `${T.accentColor}08`,
+        borderColor: `${T.accentColor}30`,
+      }}
     >
       <button
         onClick={dismiss}
@@ -158,11 +184,11 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
       <div className="flex items-center gap-2 mb-3">
         <Sparkles size={16} style={{ color: T.accentColor }} />
         <span className="text-sm font-black" style={{ color: T.headerColor }}>
-          Welcome to your Creator OS, {displayName} 👋
+          Welcome to LiTT Code, {displayName} 👋
         </span>
       </div>
       <p className="text-xs mb-4" style={{ color: T.textMuted }}>
-        You have 500 LitBit coins to start. Here&apos;s what to do first:
+        You have 500 LiTT credits to start. Here&apos;s what to do first:
       </p>
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
         {actions.map((a) => (
@@ -171,7 +197,10 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
             href={a.href}
             onClick={dismiss}
             className="flex items-center gap-3 p-3 rounded-lg border transition-all hover:scale-[1.02]"
-            style={{ backgroundColor: `${a.color}10`, borderColor: `${a.color}25` }}
+            style={{
+              backgroundColor: `${a.color}10`,
+              borderColor: `${a.color}25`,
+            }}
           >
             <div
               className="w-8 h-8 rounded-lg flex items-center justify-center shrink-0"
@@ -179,7 +208,10 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
             >
               <a.icon size={15} style={{ color: a.color }} />
             </div>
-            <span className="text-xs font-bold leading-tight" style={{ color: T.textColor }}>
+            <span
+              className="text-xs font-bold leading-tight"
+              style={{ color: T.textColor }}
+            >
               {a.label}
             </span>
           </Link>

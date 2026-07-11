@@ -118,7 +118,7 @@ function WalletContent() {
           {[
             { href: "/marketplace", label: "Marketplace", icon: ShoppingBag, desc: "Buy agents & tools" },
             { href: "/studio", label: "Studio", icon: Sparkles, desc: "Spend on generation" },
-            { href: "/wallet?tab=litbits", label: "LitBits info", icon: Coins, desc: "How coins work" },
+            { href: "/wallet?tab=litbits", label: "LiTTs info", icon: Coins, desc: "How coins work" },
           ].map((item) => (
             <Link
               key={item.href}

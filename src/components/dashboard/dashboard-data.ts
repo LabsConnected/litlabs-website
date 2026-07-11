@@ -23,11 +23,11 @@ export type IconComponent = React.ComponentType<{
 
 export const APPS = [
   {
-    id: "jarvis",
+    id: "litt",
     label: "LiTT",
     icon: Terminal,
     color: "#ff00a0",
-    href: "/dashboard?app=jarvis",
+    href: "/dashboard?app=litt",
   },
   {
     id: "studio",
@@ -182,13 +182,13 @@ export const GAMES = [
 export const WATCH = [
   {
     title: "Agent Setup Guide",
-    channel: "LiTree LabStudios",
+    channel: "LiTT Code",
     views: "12k",
     color: "#ff00a0",
   },
   {
     title: "Studio Deep Dive",
-    channel: "LiTree LabStudios",
+    channel: "LiTT Code",
     views: "8.5k",
     color: "#00f0ff",
   },

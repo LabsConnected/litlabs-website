@@ -7,7 +7,7 @@ export default function GameHero() {
           HEXTIS TOURNAMENT
         </h2>
         <p className="text-sm text-slate-300 mt-2">
-          Compete for prizes, XP, LitBits, and leaderboard glory.
+          Compete for prizes, XP, LiTTs, and leaderboard glory.
         </p>
         <button className="mt-5 rounded-xl bg-orange-500 px-5 py-3 text-sm font-black text-black hover:bg-orange-400 transition-colors">
           Play Now

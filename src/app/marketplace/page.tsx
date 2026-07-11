@@ -500,7 +500,7 @@ function MarketplaceInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [sortBy, setSortBy] = useState("featured");
   const [previewAgent, setPreviewAgent] = useState<Agent | null>(null);
-  const [litBitCoins, setLitBitCoins] = useState(500);
+  const [litBitCoins, setLiTTCoins] = useState(500);
   const [toast, setToast] = useState<{
     msg: string;
     type: "success" | "error" | "info";
@@ -564,7 +564,7 @@ function MarketplaceInner() {
       const res = await fetch("/api/wallet");
       const data = await res.json();
       if (typeof data.balance === "number") {
-        setLitBitCoins(data.balance);
+        setLiTTCoins(data.balance);
       }
     } catch {
       // silent fail
@@ -680,7 +680,7 @@ function MarketplaceInner() {
       });
       const data = await res.json();
       if (res.ok) {
-        setLitBitCoins(data.balance);
+        setLiTTCoins(data.balance);
         showToast(
           `+50 LBC Daily bonus claimed. Balance: ${data.balance}`,
           "success",
@@ -735,7 +735,7 @@ function MarketplaceInner() {
       });
       const data = await res.json();
       if (res.ok && typeof data.balance === "number") {
-        setLitBitCoins(data.balance);
+        setLiTTCoins(data.balance);
         return data.balance;
       }
     } catch {

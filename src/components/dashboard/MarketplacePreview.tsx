@@ -161,7 +161,7 @@ export default function MarketplacePreview() {
                 {tier.coins.toLocaleString()}
               </div>
               <div className="text-[10px] font-bold" style={{ color: T.textMuted }}>
-                LitBits
+                LiTTs
               </div>
               <div className="text-xs font-black mt-1" style={{ color: T.textColor }}>
                 {tier.price}
