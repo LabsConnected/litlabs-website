@@ -15,7 +15,6 @@ export function LiTTTerminalPage() {
     "[SYSTEM] Agent swarm standing by...",
   ]);
   const [connected, setConnected] = useState(false);
-  const [files, setFiles] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [orbState, setOrbState] = useState<
@@ -25,37 +24,12 @@ export function LiTTTerminalPage() {
   const addLog = (entry: string) =>
     setLogs((prev) => [...prev.slice(-99), entry]);
 
-  const handleDeploy = useCallback(async () => {
-    addLog("[DEPLOY] Triggering production deploy...");
-    setOrbState("working");
-    try {
-      const res = await fetch("/api/deploy/trigger", { method: "POST" });
-      const data = await res.json();
-      if (data.ok) {
-        addLog(`[DEPLOY] Deploy started: ${data.id}`);
-      } else {
-        addLog(`[DEPLOY] Failed: ${data.error || res.statusText}`);
-      }
-    } catch (err) {
-      addLog(
-        `[DEPLOY] Error: ${err instanceof Error ? err.message : "Failed"}`,
-      );
-    } finally {
-      setOrbState("success");
-      setTimeout(() => setOrbState("idle"), 2000);
-    }
-  }, []);
-
   const loadFileTree = useCallback(async () => {
     try {
       const res = await fetch("/api/litt/scan");
       const data = await res.json();
-      const scanned = Array.isArray(data.files)
-        ? data.files.map((f: { path?: string }) => f.path || "").filter(Boolean)
-        : [];
-      if (scanned.length) {
-        setFiles(scanned);
-        setSelectedFile(scanned[0] || null);
+      if (Array.isArray(data.files)) {
+        setSelectedFile(data.files[0] || null);
       }
     } catch {
       // silent
@@ -97,7 +71,6 @@ export function LiTTTerminalPage() {
           <AgentCommandCenter
             activeId={activeCommand}
             onSelect={setActiveCommand}
-            onDeploy={handleDeploy}
           />
         </div>
 
@@ -146,11 +119,7 @@ export function LiTTTerminalPage() {
         <aside className="hidden flex-col gap-3 overflow-y-auto border-l border-neutral-800/40 p-3 lg:flex">
           <AIIntelligencePanel />
           <div className="flex-1 min-h-[280px]">
-            <OutputPanel
-              logs={logs}
-              selectedFile={selectedFile}
-              files={files}
-            />
+            <OutputPanel logs={logs} selectedFile={selectedFile} />
           </div>
         </aside>
       </div>

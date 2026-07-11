@@ -65,11 +65,9 @@ const STATUS_DOT: Record<string, string> = {
 export function AgentCommandCenter({
   activeId,
   onSelect,
-  onDeploy,
 }: {
   activeId: string;
   onSelect: (id: string) => void;
-  onDeploy?: () => void;
 }) {
   return (
     <div className="flex h-full flex-col gap-4 border-r border-neutral-800/60 bg-[#060606] p-3">
@@ -95,12 +93,7 @@ export function AgentCommandCenter({
           return (
             <button
               key={cmd.id}
-              onClick={() => {
-                if (cmd.id === "deploy" && onDeploy) {
-                  onDeploy();
-                }
-                onSelect(cmd.id);
-              }}
+              onClick={() => onSelect(cmd.id)}
               className={`group flex w-full items-center gap-2.5 rounded-lg px-2.5 py-2 text-left transition-all ${
                 isActive
                   ? "bg-cyan-500/10 border border-cyan-500/30 shadow-[0_0_12px_rgba(34,211,238,0.12)]"

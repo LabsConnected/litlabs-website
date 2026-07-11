@@ -24,11 +24,9 @@ const OUTPUTS = [
 export function OutputPanel({
   logs,
   selectedFile,
-  files = [],
 }: {
   logs: string[];
   selectedFile: string | null;
-  files?: string[];
 }) {
   const [active, setActive] = useState<OutputType>("preview");
 
@@ -101,20 +99,18 @@ export function OutputPanel({
                 {selectedFile}
               </div>
             ) : null}
-            {files.length === 0 ? (
-              <div className="text-[10px] text-neutral-500">
-                No files scanned yet.
+            {[
+              "src/app/page.tsx",
+              "src/lib/agents.ts",
+              "src/components/Hero.tsx",
+            ].map((f) => (
+              <div
+                key={f}
+                className="flex items-center gap-2 rounded-lg border border-neutral-800/40 bg-neutral-900/30 px-2.5 py-1.5 text-[10px] text-neutral-300 hover:bg-neutral-800/40 transition"
+              >
+                <FileText size={12} className="text-neutral-500" /> {f}
               </div>
-            ) : (
-              files.slice(0, 20).map((f) => (
-                <div
-                  key={f}
-                  className="flex items-center gap-2 rounded-lg border border-neutral-800/40 bg-neutral-900/30 px-2.5 py-1.5 text-[10px] text-neutral-300 hover:bg-neutral-800/40 transition"
-                >
-                  <FileText size={12} className="text-neutral-500" /> {f}
-                </div>
-              ))
-            )}
+            ))}
           </div>
         )}
 
