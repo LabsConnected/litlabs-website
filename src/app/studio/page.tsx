@@ -37,6 +37,7 @@ const AgentsTerminalTool = nextDynamic(
   () => import("./tools/AgentsTerminalTool"),
   { ssr: false },
 );
+const ChatTool = nextDynamic(() => import("./tools/ChatTool"), { ssr: false });
 const CLIBridgeTool = nextDynamic(() => import("./tools/CLIBridgeTool"), {
   ssr: false,
 });
@@ -57,6 +58,8 @@ const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), { ssr: fals
 
 const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
   switch (tool) {
+    case "chat":
+      return <ChatTool />;
     case "image":
       return <ImageTool />;
     case "video":

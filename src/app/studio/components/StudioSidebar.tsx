@@ -9,6 +9,7 @@ import {
   Palette,
   LayoutGrid,
   Bot,
+  MessageCircle,
   Rocket,
   ChevronLeft,
   ChevronRight,
@@ -20,6 +21,7 @@ import {
 } from "lucide-react";
 
 export type StudioTool =
+  | "chat"
   | "image"
   | "video"
   | "audio"
@@ -49,6 +51,7 @@ const CREATE_TOOLS: ToolItem[] = [
 ];
 
 const AI_TOOLS: ToolItem[] = [
+  { id: "chat",      label: "LiTT Chat",  icon: MessageCircle, shortcut: "C" },
   { id: "builder",   label: "Builder",   icon: Hammer, shortcut: "B" },
   { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "5" },
   { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "6" },
