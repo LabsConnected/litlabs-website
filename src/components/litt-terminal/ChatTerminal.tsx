@@ -8,6 +8,8 @@ import {
   Mic,
   Paperclip,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from "lucide-react";
 import { TerminalPanel, TerminalPanelHandle } from "./TerminalPanel";
 
@@ -56,6 +58,112 @@ export function ChatTerminal({
   const nextId = () => {
     idCounter.current += 1;
     return `${idCounter.current}`;
+  };
+  const [speakEnabled, setSpeakEnabled] = useState(false);
+  const [listening, setListening] = useState(false);
+  const spokenRef = useRef<Set<string>>(new Set());
+  type SpeechRec = {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onresult: ((event: { results: { transcript: string }[][] }) => void) | null;
+    onerror: (() => void) | null;
+    onend: (() => void) | null;
+    start(): void;
+    stop(): void;
+  };
+  const recognitionRef = useRef<SpeechRec | null>(null);
+
+  const speak = (text: string) => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    window.speechSynthesis.cancel();
+    const clean = text.replace(/\[.*?\]|\*|`|#/g, "").slice(0, 280);
+    const utter = new SpeechSynthesisUtterance(clean);
+    utter.rate = 1.05;
+    utter.pitch = 1;
+    const voices = window.speechSynthesis.getVoices();
+    const preferred =
+      voices.find((v) =>
+        /Google US English|Microsoft David|Daniel|Alex|Fred/i.test(v.name),
+      ) ||
+      voices.find(
+        (v) => v.lang.startsWith("en") && v.name.toLowerCase().includes("male"),
+      ) ||
+      voices.find((v) => v.lang.startsWith("en")) ||
+      null;
+    if (preferred) utter.voice = preferred;
+    window.speechSynthesis.speak(utter);
+  };
+
+  useEffect(() => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return;
+    const handleVoices = () => {
+      // voices loaded; no-op needed, they are read lazily in speak()
+    };
+    window.speechSynthesis.onvoiceschanged = handleVoices;
+    window.speechSynthesis.getVoices();
+    return () => {
+      window.speechSynthesis.onvoiceschanged = null;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!speakEnabled) return;
+    messages.forEach((m) => {
+      if (m.role === "agent" && !spokenRef.current.has(m.id)) {
+        spokenRef.current.add(m.id);
+        speak(m.content);
+      }
+    });
+  }, [messages, speakEnabled]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const SpeechRecognitionAPI =
+      (
+        window as unknown as {
+          SpeechRecognition?: new () => SpeechRec;
+          webkitSpeechRecognition?: new () => SpeechRec;
+        }
+      ).SpeechRecognition ||
+      (
+        window as unknown as {
+          SpeechRecognition?: new () => SpeechRec;
+          webkitSpeechRecognition?: new () => SpeechRec;
+        }
+      ).webkitSpeechRecognition;
+    if (!SpeechRecognitionAPI) return;
+    const rec = new SpeechRecognitionAPI();
+    rec.continuous = false;
+    rec.interimResults = false;
+    rec.lang = "en-US";
+    rec.onresult = (event) => {
+      const transcript = event.results[0][0].transcript;
+      setInput((prev) => (prev ? prev + " " + transcript : transcript));
+      setListening(false);
+    };
+    rec.onerror = () => setListening(false);
+    rec.onend = () => setListening(false);
+    recognitionRef.current = rec;
+    return () => {
+      rec.stop();
+    };
+  }, []);
+
+  const toggleListening = () => {
+    const rec = recognitionRef.current;
+    if (!rec) {
+      onLogAction("[VOICE] Speech recognition not available in this browser.");
+      return;
+    }
+    if (listening) {
+      rec.stop();
+      setListening(false);
+    } else {
+      setInput("");
+      rec.start();
+      setListening(true);
+    }
   };
 
   useEffect(() => {
@@ -149,8 +257,25 @@ export function ChatTerminal({
             </button>
           </div>
         </div>
-        <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-          {mode === "chat" ? "Natural language" : "Shell execution"}
+        <div className="flex items-center gap-2">
+          <button
+            onClick={() => setSpeakEnabled((v) => !v)}
+            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider transition ${
+              speakEnabled
+                ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30"
+                : "text-neutral-500 hover:text-neutral-300 border border-transparent"
+            }`}
+            aria-label={speakEnabled ? "Mute LiTT" : "Enable LiTT voice"}
+            title={
+              speakEnabled ? "LiTT will speak replies" : "LiTT voice muted"
+            }
+          >
+            {speakEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
+            {speakEnabled ? "Voice on" : "Voice off"}
+          </button>
+          <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+            {mode === "chat" ? "Natural language" : "Shell execution"}
+          </div>
         </div>
       </div>
 
@@ -259,8 +384,14 @@ export function ChatTerminal({
             <Send size={16} />
           </button>
           <button
-            className="rounded-lg bg-neutral-800/60 p-2 text-neutral-400 hover:text-neutral-200 transition"
-            aria-label="Voice"
+            onClick={toggleListening}
+            className={`rounded-lg p-2 transition ${
+              listening
+                ? "bg-red-500/15 text-red-300 animate-pulse"
+                : "bg-neutral-800/60 text-neutral-400 hover:text-neutral-200"
+            }`}
+            aria-label={listening ? "Stop listening" : "Speak to LiTT"}
+            title={listening ? "Listening..." : "Speak to LiTT"}
           >
             <Mic size={16} />
           </button>
