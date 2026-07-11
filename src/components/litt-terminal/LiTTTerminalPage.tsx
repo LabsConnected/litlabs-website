@@ -13,7 +13,7 @@ import { Cpu, Activity, Zap, Menu, RefreshCw, AlertTriangle } from "lucide-react
 import { JarvisContext } from "@/lib/litt-context";
 
 const AGENTS = [
-  { name: "JARVIS", status: "online" as const },
+  { name: "LiTT", status: "online" as const },
   { name: "Code Architect", status: "idle" as const },
   { name: "DevOps Engineer", status: "idle" as const },
   { name: "Security Auditor", status: "idle" as const },
@@ -24,7 +24,7 @@ const AGENTS = [
 export function LiTTTerminalPage() {
   const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">("terminal");
   const [logs, setLogs] = useState<string[]>([
-    "[SYSTEM] LiTTree OS Terminal initialized",
+    "[SYSTEM] LiTT Code Terminal initialized",
     "[SYSTEM] Waiting for terminal server connection...",
   ]);
   const [commands, setCommands] = useState<string[]>([]);
@@ -144,7 +144,7 @@ export function LiTTTerminalPage() {
               </button>
               <div>
                 <div className="text-[10px] font-black uppercase tracking-[0.35em] text-orange-500">
-                  LiTTree LabStudios
+                  LiTT Code LabStudios
                 </div>
                 <h1 className="text-2xl font-bold lg:text-3xl">LiTT Terminal</h1>
                 <p className="text-sm text-neutral-400">

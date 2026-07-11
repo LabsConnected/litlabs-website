@@ -1,5 +1,5 @@
 /**
- * Game Cloud System for LiTTree Lab Studios
+ * Game Cloud System for LiTT Code
  * Browser-based gaming with HTML5 games
  */
 

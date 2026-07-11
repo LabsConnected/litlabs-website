@@ -179,7 +179,7 @@ export default function GamesPage() {
                 className="text-2xl md:text-4xl font-black mb-2"
                 style={{ color: T.headerColor }}
               >
-                LiTTree Game Cloud
+                LiTT Code Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
                 {GAME_LIBRARY.length} games available • HTML5 games

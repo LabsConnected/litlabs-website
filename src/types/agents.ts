@@ -1,5 +1,5 @@
 export type AgentRole =
-  | "LiTTree"
+  | "LiTT Code"
   | "Forge"
   | "Pulse"
   | "Visionary"

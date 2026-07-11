@@ -30,7 +30,7 @@ const DOC_SECTIONS = [
 
 export const metadata = {
   title: "Docs",
-  description: "Quick-start documentation for LiTTree Lab Studios.",
+  description: "Quick-start documentation for LiTT Code.",
 };
 
 export default function DocsPage() {
@@ -43,7 +43,7 @@ export default function DocsPage() {
             Build, automate, publish.
           </h1>
           <p className="max-w-2xl text-base leading-relaxed opacity-65 md:text-lg">
-            LiTTree Lab Studios is organized around one loop: choose an agent, create in Studio,
+            LiTT Code is organized around one loop: choose an agent, create in Studio,
             automate the repeatable parts, and ship the result to your audience or marketplace.
           </p>
         </div>

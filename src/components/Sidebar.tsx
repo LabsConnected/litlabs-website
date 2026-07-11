@@ -445,7 +445,7 @@ function SidebarContent({
                 className="text-xs font-bold uppercase tracking-widest"
                 style={{ color: T.accentColor }}
               >
-                LiTTree OS
+                LiTT Code
               </span>
             )}
             {collapsed && <Home size={16} style={{ color: T.accentColor }} />}

@@ -1032,7 +1032,7 @@ export default function ProfilePage() {
         className="border-t mt-8 p-6 text-center text-[10px]"
         style={{ borderColor: T.borderColor, color: T.textMuted }}
       >
-        © {new Date().getFullYear()} LiTTree LabStudios
+        © {new Date().getFullYear()} LiTT Code LabStudios
       </div>
     </PageShell>
   );

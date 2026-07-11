@@ -1,4 +1,4 @@
-// JARVIS Codebase Scanner
+// LiTT Codebase Scanner
 // Reads key project files and returns a structured summary
 
 import { NextResponse } from "next/server";
@@ -222,7 +222,7 @@ export async function GET() {
       : `${envVarsMissing.length} env vars missing`;
 
   const result: ScanResult = {
-    projectName: "LiTTree Lab Studios",
+    projectName: "LiTT Code",
     totalFiles: allFiles.length,
     totalLines,
     techStack: Array.from(new Set(techStack)),

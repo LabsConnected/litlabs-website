@@ -1,5 +1,5 @@
 /**
- * Music System for LiTTree Lab Studios
+ * Music System for LiTT Code
  * Provides background music capabilities with user preferences
  */
 

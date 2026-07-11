@@ -54,7 +54,7 @@ export default function MemoriesPage() {
       <div className="mx-auto max-w-3xl space-y-6">
         <div>
           <p className="text-sm uppercase tracking-[0.35em] text-orange-400">
-            LiTTree LabStudios
+            LiTT Code LabStudios
           </p>
           <h1 className="text-4xl font-black">Memories</h1>
           <p className="text-zinc-400 mt-2">

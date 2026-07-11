@@ -138,7 +138,7 @@ export default function AdminTerminal() {
     {
       id: makeId(),
       type: "info",
-      text: "LiTTree Admin Terminal — commands run as the server OS user.",
+      text: "LiTT Code Admin Terminal — commands run as the server OS user.",
       ts: Date.now(),
     },
     {

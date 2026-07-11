@@ -36,9 +36,7 @@ export default function AgentsPageClient() {
     };
   }, []);
 
-  const list = Object.values(AGENTS).filter(
-    (a) => a.id !== "pixel-forge"
-  );
+  const list = Object.values(AGENTS).filter((a) => a.id !== "pixel-forge");
 
   return (
     <main
@@ -61,7 +59,7 @@ export default function AgentsPageClient() {
               className="text-2xl font-black"
               style={{ color: T.headerColor }}
             >
-              Agent Command Center
+              LiTT Command Center
             </h1>
             <p className="text-xs" style={{ color: T.textMuted }}>
               5 consolidated AI agents — live status & quick access

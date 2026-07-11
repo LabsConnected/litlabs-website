@@ -212,7 +212,7 @@ function buildBootLogs(): LogEntry[] {
       id: uid(),
       timestamp: getTimestamp(),
       type: "system",
-      text: "INITIALIZING LiTTree CORE v3.0-MAD...",
+      text: "INITIALIZING LiTT Code CORE v3.0-MAD...",
     },
     {
       id: uid(),
@@ -552,7 +552,7 @@ export default function LiTTTerminal() {
         addLog({
           type: "brain",
           text: fullText || "No response received.",
-          agentName: "JARVIS",
+          agentName: "LiTT",
         });
         speak(fullText);
       } catch (err) {
@@ -616,7 +616,7 @@ export default function LiTTTerminal() {
         case "help":
           addLog({
             type: "success",
-            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route JARVIS speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey JARVIS' to activate",
+            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route LiTT speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey LiTT' to activate",
           });
           setIsProcessing(false);
           return;
@@ -779,7 +779,7 @@ export default function LiTTTerminal() {
             ]
               .filter(Boolean)
               .join("\n");
-            addLog({ type: "agent", text: report, agentName: "JARVIS" });
+            addLog({ type: "agent", text: report, agentName: "LiTT" });
           } catch (err) {
             addLog({
               type: "error",
@@ -1011,7 +1011,7 @@ export default function LiTTTerminal() {
             className="text-[#00ff9d] drop-shadow-[0_0_6px_#00ff9d]"
           />
           <span className="text-xs font-mono uppercase tracking-[0.2em] font-bold text-white">
-            JARVIS<span className="text-[#00ff9d]">.MAD</span>
+            LiTT<span className="text-[#00ff9d]">.MAD</span>
           </span>
           <span
             className="w-2 h-2 rounded-full animate-pulse"
@@ -1199,7 +1199,7 @@ export default function LiTTTerminal() {
                 {log.type === "brain" && (
                   <>
                     <span className="font-bold mr-1 text-[#ff66cc] drop-shadow-[0_0_4px_rgba(255,102,204,0.5)]">
-                      [JARVIS]
+                      [LiTT]
                     </span>
                     <span className="text-gray-200">{log.text}</span>
                   </>
@@ -1227,7 +1227,7 @@ export default function LiTTTerminal() {
                 <span className="opacity-30 mr-1.5 text-[10px]">
                   [{getTimestamp()}]
                 </span>
-                <span className="font-bold mr-1 text-[#ff66cc]">[JARVIS]</span>
+                <span className="font-bold mr-1 text-[#ff66cc]">[LiTT]</span>
                 <span className="text-gray-200">{brainText}</span>
                 <span className="inline-block w-1.5 h-4 bg-[#ff66cc] ml-0.5 animate-pulse" />
               </div>
@@ -1300,7 +1300,7 @@ export default function LiTTTerminal() {
                   const next = !v;
                   addLog({
                     type: "success",
-                    text: `Wake word ${next ? "ENABLED" : "DISABLED"} — say "Hey JARVIS".`,
+                    text: `Wake word ${next ? "ENABLED" : "DISABLED"} — say "Hey LiTT".`,
                   });
                   return next;
                 });
@@ -1340,7 +1340,7 @@ export default function LiTTTerminal() {
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
-                placeholder="Command JARVIS... (try /scan, /help)"
+                placeholder="Command LiTT... (try /scan, /help)"
                 className="w-full bg-transparent border-none outline-none text-white text-sm font-mono placeholder:text-white/20 min-w-0"
                 style={{ caretColor: "#00ff9d" }}
               />

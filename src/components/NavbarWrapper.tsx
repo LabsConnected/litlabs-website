@@ -39,7 +39,7 @@ export default function NavbarWrapper({
           <Menu size={20} />
         </button>
         <span className="font-black text-sm" style={{ color: T.headerColor }}>
-          LiTTree OS
+          LiTT Code
         </span>
       </div>
 

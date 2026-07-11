@@ -18,7 +18,7 @@ export default function GlobalError({
   return (
     <html lang="en">
       <head>
-        <title>Error — LiTTree Lab Studios</title>
+        <title>Error — LiTT Code</title>
         <meta name="description" content="An unexpected error occurred." />
       </head>
       <body

@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Social",
-  description: "Connect with creators, share your AI-generated content, and join the LiTTree community.",
+  description: "Connect with creators, share your AI-generated content, and join the LiTT Code community.",
 };
 
 export default function SocialLayout({

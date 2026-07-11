@@ -2,8 +2,8 @@ import { Metadata } from "next";
 import { LiTTTerminalPage } from "@/components/litt-terminal/LiTTTerminalPage";
 
 export const metadata: Metadata = {
-  title: "LiTT Terminal | LiTTree OS",
-  description: "AI-powered browser terminal for LiTTree LabStudios.",
+  title: "LiTT Terminal | LiTT Code",
+  description: "AI-powered browser terminal for LiTT Code LabStudios.",
 };
 
 export default function JarvisPage() {

@@ -194,7 +194,7 @@ function defaultConfig(
 
 function toYAML(nodes: PipelineNode[]): string {
   const lines: string[] = [
-    "# LiTTree Labs Pipeline Protocol",
+    "# LiTT Code Pipeline Protocol",
     `# Generated: ${new Date().toISOString()}`,
     `# ${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}`,
     "",

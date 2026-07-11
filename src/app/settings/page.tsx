@@ -887,7 +887,7 @@ export default function SettingsPage() {
                     Bring Your Own Keys
                   </h2>
                   <p className="text-xs opacity-70 max-w-2xl" style={{ color: T.textMuted }}>
-                    Keys are stored in your browser and sent to LiTTree servers when you use
+                    Keys are stored in your browser and sent to LiTT Code servers when you use
                     agent features. Never commit keys to a repo.
                   </p>
                 </div>

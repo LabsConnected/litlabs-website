@@ -75,7 +75,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
     termRef.current = term;
     fitAddonRef.current = fit;
 
-    term.writeln("\x1b[1;32m🔥 LiTTree OS LiTT Terminal\x1b[0m");
+    term.writeln("\x1b[1;32m🔥 LiTT Code LiTT Terminal\x1b[0m");
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
@@ -186,7 +186,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
 
   const resetTerminal = () => {
     termRef.current?.clear();
-    termRef.current?.writeln("\x1b[1;32m🔥 LiTTree OS LiTT Terminal\x1b[0m");
+    termRef.current?.writeln("\x1b[1;32m🔥 LiTT Code LiTT Terminal\x1b[0m");
   };
 
   const clearTerminal = () => {

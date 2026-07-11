@@ -1,5 +1,5 @@
 /**
- * Code Scanner System for LiTTree Lab Studios
+ * Code Scanner System for LiTT Code
  * VS Code-style codebase analysis and exploration
  */
 

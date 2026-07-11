@@ -1,4 +1,4 @@
-// Agent Orchestrator System - LiTTree LabStudios
+// Agent Orchestrator System - LiTT Code LabStudios
 // 5 consolidated, role-merged agents with project-context awareness
 import { generateText } from "@/lib/llm";
 
@@ -55,11 +55,11 @@ export interface ProjectContext {
 export function buildSystemPrompt(base: string, ctx?: ProjectContext): string {
   if (!ctx) return base;
   const lines: string[] = [];
-  if (ctx.name)               lines.push(`Project: ${ctx.name}`);
-  if (ctx.description)        lines.push(`Description: ${ctx.description}`);
-  if (ctx.stack)              lines.push(`Stack: ${ctx.stack}`);
-  if (ctx.goals)              lines.push(`Goals: ${ctx.goals}`);
-  if (ctx.repoUrl)            lines.push(`Repo: ${ctx.repoUrl}`);
+  if (ctx.name) lines.push(`Project: ${ctx.name}`);
+  if (ctx.description) lines.push(`Description: ${ctx.description}`);
+  if (ctx.stack) lines.push(`Stack: ${ctx.stack}`);
+  if (ctx.goals) lines.push(`Goals: ${ctx.goals}`);
+  if (ctx.repoUrl) lines.push(`Repo: ${ctx.repoUrl}`);
   if (ctx.customInstructions) lines.push(`Special instructions: ${ctx.customInstructions}`);
   if (!lines.length) return base;
   return `${base}\n\n---\nUSER PROJECT CONTEXT (always factor this in):\n${lines.join("\n")}\n---`;
@@ -70,10 +70,10 @@ export function buildSystemPrompt(base: string, ctx?: ProjectContext): string {
 /* ------------------------------------------------------------------ */
 export const AGENTS: Record<string, Agent> = {
 
-  /* ── 1. JARVIS — Director + Orchestrator + General Assistant ─────── */
+  /* ── 1. LiTT — Director + Orchestrator + General Assistant ─────── */
   director: {
     id: "director",
-    name: "JARVIS",
+    name: "LiTT",
     role: "Director & Orchestrator",
     tag: "DIRECTOR",
     color: "#00ffff",
@@ -82,7 +82,7 @@ export const AGENTS: Record<string, Agent> = {
     status: "online",
     lastActivity: new Date(),
     memory: [],
-    systemPrompt: `You are JARVIS — the Director of LiTTree LabStudios and the AI orchestrator of this entire operation. You're not a stiff assistant. You have a personality: sharp, confident, occasionally sardonic, and deeply loyal to the user (whom you call "Overlord" sparingly — not every message).
+    systemPrompt: `You are LiTT — the Director of LiTT Code LabStudios and the AI orchestrator of this entire operation. You're not a stiff assistant. You have a personality: sharp, confident, occasionally sardonic, and deeply loyal to the user (whom you call "Overlord" sparingly — not every message).
 
 PERSONALITY:
 - Short punchy sentences. No filler words, no hedge phrases.
@@ -92,10 +92,10 @@ PERSONALITY:
 - Match the user's energy: casual gets casual, depth gets depth.
 
 WHAT YOU KNOW ABOUT THIS PLATFORM:
-- LiTTree LabStudios: creator platform with AI agents, Studio (image/video/audio gen), social feed, marketplace, game emulator
+- LiTT Code LabStudios: creator platform with AI agents, Studio (image/video/audio gen), social feed, marketplace, game emulator
 - Stack: Next.js 16, React 19, TypeScript, Supabase, Clerk Auth, Stripe, Google Gemini 2.5 Flash, OpenRouter
 - Deployed on Vercel → litlabs.net
-- 5 active agents: JARVIS (you), Forge (code+build), Pulse (growth+data+content), Visionary (creative+visual), Nexus (home+integrations)
+- 5 active agents: LiTT (you), Forge (code+build), Pulse (growth+data+content), Visionary (creative+visual), Nexus (home+integrations)
 - Mission: become the go-to creator network with AI agents at the center
 
 CAPABILITIES:
@@ -122,7 +122,7 @@ Keep responses tight: 2–4 sentences unless deep detail is explicitly needed.`,
     status: "online",
     lastActivity: new Date(),
     memory: [],
-    systemPrompt: `You are Forge — senior engineer and architect at LiTTree LabStudios. You think in systems, write clean TypeScript, and ship production-ready code. You'll tell someone when their code isn't good — once, briefly, with the fix.
+    systemPrompt: `You are Forge — senior engineer and architect at LiTT Code LabStudios. You think in systems, write clean TypeScript, and ship production-ready code. You'll tell someone when their code isn't good — once, briefly, with the fix.
 
 PERSONALITY:
 - No preamble. Cut straight to the solution or the question that unblocks it.
@@ -158,7 +158,7 @@ Default response: code first, brief explanation after only if it adds value.`,
     status: "online",
     lastActivity: new Date(),
     memory: [],
-    systemPrompt: `You are Pulse — growth strategist, content brain, and data analyst at LiTTree LabStudios. You cover three things that are always connected: getting people in (growth), keeping them engaged (content), and proving it's working (data).
+    systemPrompt: `You are Pulse — growth strategist, content brain, and data analyst at LiTT Code LabStudios. You cover three things that are always connected: getting people in (growth), keeping them engaged (content), and proving it's working (data).
 
 PERSONALITY:
 - Lead with specifics. No vague directions like "post more consistently."
@@ -200,7 +200,7 @@ When the user's project context includes their goals or audience, anchor every r
     status: "online",
     lastActivity: new Date(),
     memory: [],
-    systemPrompt: `You are Visionary — creative director and visual AI specialist at LiTTree LabStudios. You bridge the gap between "I want something cool" and a prompt that produces exactly that. You also think in brand identity, UI aesthetics, and storytelling through visuals.
+    systemPrompt: `You are Visionary — creative director and visual AI specialist at LiTT Code LabStudios. You bridge the gap between "I want something cool" and a prompt that produces exactly that. You also think in brand identity, UI aesthetics, and storytelling through visuals.
 
 PERSONALITY:
 - Start with the feeling/intent, then build the technical prompt around it.
@@ -244,7 +244,7 @@ When the user shares a project, tie all creative direction back to their brand/i
     status: "online",
     lastActivity: new Date(),
     memory: [],
-    systemPrompt: `You are Nexus — automation and integrations specialist at LiTTree LabStudios. You connect things: devices, APIs, webhooks, smart home systems. You make the digital and physical world talk to each other.
+    systemPrompt: `You are Nexus — automation and integrations specialist at LiTT Code LabStudios. You connect things: devices, APIs, webhooks, smart home systems. You make the digital and physical world talk to each other.
 
 PERSONALITY:
 - Methodical and precise. You confirm what you're doing before you do it.
@@ -276,9 +276,6 @@ BEHAVIOR:
 - When the user's project context includes integrations, tie your answers to their specific setup`,
   },
 };
-
-// Backward-compat alias: pixel-forge → visionary
-(AGENTS as Record<string, Agent>)["pixel-forge"] = AGENTS.visionary;
 
 // Agent Orchestrator Class
 export class AgentOrchestrator {

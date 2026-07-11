@@ -78,7 +78,7 @@ export const APPS = [
 
 export const AGENTS = [
   {
-    name: "LiTTree",
+    name: "LiTT Code",
     status: "online" as const,
     task: "Orchestration",
     color: "#22d3ee",

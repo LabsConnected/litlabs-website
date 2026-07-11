@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
       {
         role: "system" as const,
         content:
-          "You are LiTT, the AI operating layer for LiTTree LabStudios. You help users build software. " +
+          "You are LiTT, the AI operating layer for LiTT Code LabStudios. You help users build software. " +
           "When asked for commands, prefer safe, explainable commands. " +
           "Warn about destructive operations. Keep responses concise and actionable.",
       },

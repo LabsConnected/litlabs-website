@@ -59,7 +59,7 @@ const TAB_CONTENT: Record<TabId, { title: string; body: string; cta?: { href: st
   },
   promote: {
     title: "Promote",
-    body: "Share your agents and listings to grow your audience on LiTTree Lab Studios.",
+    body: "Share your agents and listings to grow your audience on LiTT Code.",
     cta: { href: "/marketplace?tab=sell", label: "List on marketplace" },
   },
 };

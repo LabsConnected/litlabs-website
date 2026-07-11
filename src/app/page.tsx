@@ -30,7 +30,7 @@ const PROOF_POINTS = [
 ];
 
 const AGENTS = [
-  { icon: '🎯', name: 'LiTTree', role: 'Core AI Copilot & Navigator', desc: 'The brain — routes tasks, navigates the platform, orchestrates the team.', color: '#22d3ee', href: '/agents' },
+  { icon: '🎯', name: 'LiTT Code', role: 'Core AI Copilot & Navigator', desc: 'The brain — routes tasks, navigates the platform, orchestrates the team.', color: '#22d3ee', href: '/agents' },
   { icon: '💻', name: 'Forge', role: 'Engineer, Architect & Security', desc: 'Writes, debugs, and reviews code. Full-stack + security hardening.', color: '#22d3ee', href: '/agents' },
   { icon: '�', name: 'Pulse', role: 'Growth, Content & Analytics', desc: 'Growth strategy, content creation, social media, and data insights.', color: '#f472b6', href: '/agents' },
   { icon: '🎨', name: 'Visionary', role: 'Creative Director & Visual/Audio AI', desc: 'Image prompts, brand identity, UI/UX, music and audio production.', color: '#e879f9', href: '/agents' },
@@ -116,7 +116,7 @@ function LandingPage() {
         <div className="max-w-6xl mx-auto">
           <div className="text-center mb-16">
             <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>Everything You Need</h2>
-            <p className="opacity-50 max-w-xl mx-auto">The clearest version of LiTTree is not another AI chat page. It is the place where agents help creators build, package, and publish.</p>
+            <p className="opacity-50 max-w-xl mx-auto">The clearest version of LiTT Code is not another AI chat page. It is the place where agents help creators build, package, and publish.</p>
           </div>
 
           <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">

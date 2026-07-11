@@ -18,7 +18,7 @@ const WORLD_AGENTS = [
   },
   {
     id: "director",
-    name: "LiTTree",
+    name: "LiTT Code",
     icon: "🎯",
     color: "#22d3ee",
     desc: "Orchestrates creative vision and world-building strategy",

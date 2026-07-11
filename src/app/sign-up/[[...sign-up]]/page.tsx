@@ -14,7 +14,7 @@ export default function SignUpPage() {
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
           >
-            LiTTree LabStudios
+            LiTT Code LabStudios
           </h1>
           <p className="text-xs opacity-50" style={{ color: "#94a3b8" }}>
             Create your account to start building with AI agents

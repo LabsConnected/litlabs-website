@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Terms",
-  description: "Terms of service for LiTTree Lab Studios.",
+  description: "Terms of service for LiTT Code.",
 };
 
 const UPDATED = "July 2, 2026";
@@ -17,7 +17,7 @@ export default function TermsPage() {
           <section>
             <h2 className="mb-2 text-lg font-black text-slate-50">Use of the Platform</h2>
             <p>
-              LiTTree Lab Studios provides creative AI tools, agent workflows, gallery features,
+              LiTT Code provides creative AI tools, agent workflows, gallery features,
               marketplace experiences, and related services. Use the platform lawfully and do not
               attempt to disrupt, abuse, or bypass security controls.
             </p>

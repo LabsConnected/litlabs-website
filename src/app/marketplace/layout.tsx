@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Marketplace",
-  description: "Browse and purchase AI agents, tools, and creative assets on the LiTTree marketplace.",
+  description: "Browse and purchase AI agents, tools, and creative assets on the LiTT Code marketplace.",
 };
 
 export default function MarketplaceLayout({

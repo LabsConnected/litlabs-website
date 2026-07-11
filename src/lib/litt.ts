@@ -124,7 +124,7 @@ class LiTT {
             inline: true,
           }))
         : [],
-      footer: { text: `LiTTree Labs \u2022 ${payload.priority.toUpperCase()}` },
+      footer: { text: `LiTT Code \u2022 ${payload.priority.toUpperCase()}` },
     };
 
     try {
@@ -222,7 +222,7 @@ class LiTT {
             <p>${payload.body}</p>
             ${payload.data ? `<pre>${JSON.stringify(payload.data, null, 2)}</pre>` : ""}
             <hr />
-            <p style="color: #888; font-size: 12px;">LiTTree Labs Notification System</p>
+            <p style="color: #888; font-size: 12px;">LiTT Code Notification System</p>
           `,
         }),
       });
@@ -334,7 +334,7 @@ if (typeof window === "undefined") {
   jarvis.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
-    webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+    webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
     pushVapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
     pushVapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
     pushVapidSubject: process.env.VAPID_SUBJECT || "mailto:admin@litlabs.net",

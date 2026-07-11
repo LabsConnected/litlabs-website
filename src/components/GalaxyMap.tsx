@@ -19,7 +19,7 @@ export type GalaxyNode = {
 };
 
 const DEFAULT_NODES: GalaxyNode[] = [
-  { id: "core", label: "LiTTree Core", type: "system", status: "active", x: 0, y: 0, size: 34, color: "#22d3ee", connections: ["studio", "marketplace", "social", "agents"], subtitle: "central orbit", metric: 98 },
+  { id: "core", label: "LiTT Code Core", type: "system", status: "active", x: 0, y: 0, size: 34, color: "#22d3ee", connections: ["studio", "marketplace", "social", "agents"], subtitle: "central orbit", metric: 98 },
   { id: "studio", label: "Studio", type: "zone", status: "active", x: -190, y: -60, size: 26, color: "#f97316", connections: ["core", "agents"], subtitle: "builder activity", metric: 32 },
   { id: "marketplace", label: "Marketplace", type: "zone", status: "busy", x: 180, y: -70, size: 26, color: "#a78bfa", connections: ["core", "social"], subtitle: "sales / installs", metric: 18 },
   { id: "social", label: "Social", type: "zone", status: "active", x: -160, y: 140, size: 24, color: "#ec4899", connections: ["core", "users"], subtitle: "community flow", metric: 44 },

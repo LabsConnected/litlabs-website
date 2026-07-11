@@ -29,7 +29,7 @@ export default function LiTTChatBox() {
       <div>
         <h2 className="text-xl font-black">🤖 LiTT Gateway</h2>
         <p className="text-sm text-zinc-400">
-          Local AI powered by Ollama through LiTTree&apos;s unified AI route.
+          Local AI powered by Ollama through LiTT Code&apos;s unified AI route.
         </p>
       </div>
 

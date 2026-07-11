@@ -14,7 +14,7 @@ export type AdminEvent = {
 
 const DEFAULT_EVENTS: AdminEvent[] = [
   { id: "1", type: "signup", message: "New user joined the platform", timestamp: new Date(Date.now() - 1000 * 60 * 2) },
-  { id: "2", type: "agent", message: "JARVIS completed a command cycle", timestamp: new Date(Date.now() - 1000 * 60 * 4) },
+  { id: "2", type: "agent", message: "LiTT completed a command cycle", timestamp: new Date(Date.now() - 1000 * 60 * 4) },
   { id: "3", type: "sale", message: "Code Champion purchased", timestamp: new Date(Date.now() - 1000 * 60 * 7) },
   { id: "4", type: "system", message: "Provider health check passed", timestamp: new Date(Date.now() - 1000 * 60 * 10) },
 ];

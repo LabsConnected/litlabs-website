@@ -169,7 +169,7 @@ export default function SpotifyPlayer() {
     if (!sdkReady || !isPremium) return;
 
     const player = new window.Spotify.Player({
-      name: "LiTTree LabStudios",
+      name: "LiTT Code LabStudios",
       getOAuthToken: async (cb) => {
         const res = await fetch("/api/spotify/token");
         const data = await res.json();
@@ -297,7 +297,7 @@ export default function SpotifyPlayer() {
         </div>
         <div>
           <div className="text-base font-black mb-1" style={{ color: T.textColor }}>Connect Spotify</div>
-          <div className="text-xs" style={{ color: T.textMuted }}>Stream your music directly in LiTTree LabStudios</div>
+          <div className="text-xs" style={{ color: T.textMuted }}>Stream your music directly in LiTT Code LabStudios</div>
         </div>
         {error && (
           <div className="flex items-center gap-2 text-xs px-3 py-2 rounded-lg" style={{ backgroundColor: "#ff444420", color: "#ff4444" }}>

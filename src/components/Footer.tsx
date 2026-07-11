@@ -50,12 +50,16 @@ export default function Footer() {
           }}
         >
           <div>
-            <div className="flex items-center gap-2 text-sm font-bold mb-1" style={{ color: C.textColor }}>
+            <div
+              className="flex items-center gap-2 text-sm font-bold mb-1"
+              style={{ color: C.textColor }}
+            >
               <Sparkles size={14} style={{ color: C.accentColor }} />
               Ready to turn an idea into a live product?
             </div>
             <p className="text-sm opacity-65" style={{ color: C.textColor }}>
-              Start in Studio, browse agents, or jump into the marketplace. Keep the path short and obvious.
+              Start in Studio, browse agents, or jump into the marketplace. Keep
+              the path short and obvious.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -169,7 +173,7 @@ export default function Footer() {
               className="text-sm font-black"
               style={{ color: C.headerColor }}
             >
-              LiTTree Labs
+              LiTT Code
             </span>
             <span className="text-xs opacity-60">© 2026</span>
           </div>

@@ -102,3 +102,6 @@ package-lock.json
 chrome/
 **/lighthouse.*/
 **/AppData/Local/lighthouse*/
+
+.vercel
+.env*

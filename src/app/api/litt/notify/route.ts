@@ -32,7 +32,7 @@ export async function POST(req: NextRequest) {
       jarvis.init({
         discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
         adminEmail: process.env.ADMIN_EMAIL,
-        webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+        webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
       });
     }
 
@@ -69,7 +69,7 @@ export async function PUT(req: NextRequest) {
       jarvis.init({
         discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
         adminEmail: process.env.ADMIN_EMAIL,
-        webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+        webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
       });
     }
 
