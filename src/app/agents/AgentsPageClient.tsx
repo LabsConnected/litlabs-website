@@ -160,7 +160,11 @@ export default function AgentsPageClient() {
 
                   <div className="mt-4 flex items-center gap-2">
                     <Link
-                      href={`/agents/${agent.id}`}
+                      href={
+                        agent.id === "director"
+                          ? "/litt"
+                          : `/agents/${agent.id}`
+                      }
                       className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
                       style={{
                         backgroundColor: agent.color + "15",
@@ -171,7 +175,11 @@ export default function AgentsPageClient() {
                       <MessageSquare size={14} /> Chat
                     </Link>
                     <Link
-                      href="/studio?tool=agents"
+                      href={
+                        agent.id === "director"
+                          ? "/litt"
+                          : "/studio?tool=agents"
+                      }
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
                       style={{
                         backgroundColor: T.bgColor + "60",

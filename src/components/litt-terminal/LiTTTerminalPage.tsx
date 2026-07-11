@@ -76,7 +76,7 @@ export function LiTTTerminalPage() {
     <main className="min-h-screen overflow-hidden bg-[#050505] text-white selection:bg-cyan-500/30">
       {/* Holographic background */}
       <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-[size:40px_40px] [mask-image:radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
+        <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-size-[40px_40px] mask-[radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
         <div className="absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-cyan-500/10 blur-[120px]" />
         <div className="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-[120px]" />
       </div>
@@ -117,7 +117,7 @@ export function LiTTTerminalPage() {
                   LiTT Code
                 </div>
                 <h1 className="text-lg font-bold lg:text-xl">
-                  Mission Control
+                  Director Console
                 </h1>
               </div>
             </div>
@@ -134,6 +134,7 @@ export function LiTTTerminalPage() {
 
           <div className="flex-1 min-h-0 p-3">
             <ChatTerminal
+              agentId="director"
               onLogAction={addLog}
               onCommandAction={addLog}
               onConnectionChangeAction={setConnected}

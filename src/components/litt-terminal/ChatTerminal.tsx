@@ -30,11 +30,13 @@ export function ChatTerminal({
   onCommandAction,
   onConnectionChangeAction,
   onTerminalOutputAction,
+  agentId = "director",
 }: {
   onLogAction: (entry: string) => void;
   onCommandAction: (cmd: string) => void;
   onConnectionChangeAction: (connected: boolean) => void;
   onTerminalOutputAction: (output: string) => void;
+  agentId?: string;
 }) {
   const [mode, setMode] = useState<"chat" | "terminal">("chat");
   const [input, setInput] = useState("");
@@ -75,13 +77,14 @@ export function ChatTerminal({
     onLogAction(`[CHAT] User: ${text}`);
 
     try {
-      const res = await fetch("/api/litt/command", {
+      const res = await fetch("/api/agents/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text }),
+        body: JSON.stringify({ agentId, message: text }),
       });
       const data = await res.json();
-      const answer = data.answer || data.error || "LiTT is thinking...";
+      const answer =
+        data.response || data.answer || data.error || "LiTT is thinking...";
       const agentMsg: ChatMessage = {
         id: `a_${nextId()}`,
         role: "agent",
