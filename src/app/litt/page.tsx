@@ -3,9 +3,9 @@ import { LiTTTerminalPage } from "@/components/litt-terminal/LiTTTerminalPage";
 
 export const metadata: Metadata = {
   title: "LiTT Terminal | LiTT Code",
-  description: "AI-powered browser terminal for LiTT Code.",
+  description: "AI-powered browser terminal for LiTT Code LabStudios.",
 };
 
-export default function LiTTPage() {
+export default function JarvisPage() {
   return <LiTTTerminalPage />;
 }
