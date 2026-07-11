@@ -38,6 +38,7 @@ export function ChatTerminal({
 }) {
   const [mode, setMode] = useState<"chat" | "terminal">("chat");
   const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
@@ -61,7 +62,7 @@ export function ChatTerminal({
     }
   }, [messages, mode]);
 
-  const sendChat = (text: string) => {
+  const sendChat = async (text: string) => {
     if (!text.trim()) return;
     const userMsg: ChatMessage = {
       id: `u_${nextId()}`,
@@ -70,18 +71,38 @@ export function ChatTerminal({
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
+    setLoading(true);
     onLogAction(`[CHAT] User: ${text}`);
 
-    // Simulate agent thinking then response
-    setTimeout(() => {
+    try {
+      const res = await fetch("/api/litt/command", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text }),
+      });
+      const data = await res.json();
+      const answer = data.answer || data.error || "LiTT is thinking...";
       const agentMsg: ChatMessage = {
         id: `a_${nextId()}`,
         role: "agent",
-        content: `I'll route that to the right agent. Forge is standing by to execute.`,
+        content: answer,
         agent: "Director",
       };
       setMessages((prev) => [...prev, agentMsg]);
-    }, 800);
+      onLogAction(`[CHAT] Director: ${answer.slice(0, 120)}`);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Request failed";
+      const agentMsg: ChatMessage = {
+        id: `a_${nextId()}`,
+        role: "agent",
+        content: `Error: ${errorMsg}`,
+        agent: "Director",
+      };
+      setMessages((prev) => [...prev, agentMsg]);
+      onLogAction(`[CHAT] Error: ${errorMsg}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const runAsCommand = () => {
@@ -161,6 +182,14 @@ export function ChatTerminal({
                 </div>
               </div>
             ))}
+            {loading && (
+              <div className="flex justify-start">
+                <div className="flex items-center gap-2 rounded-2xl bg-neutral-900/60 border border-neutral-800/60 px-3.5 py-2.5 text-sm text-neutral-300">
+                  <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                  <span className="text-xs">LiTT is thinking...</span>
+                </div>
+              </div>
+            )}
           </div>
         ) : (
           <div className="absolute inset-0 p-2">
