@@ -32,9 +32,9 @@ export const viewport: Viewport = {
   themeColor: "#0d0d0d",
 };
 
-const META_TITLE = "LiTTree Lab Studios — The Creator Network With AI Agents";
+const META_TITLE = "LiTTree Lab Studios — AI Agents for Creators";
 const META_DESC =
-  "Build, share, and grow with agents at your side. LiTTree is a creator network where AI helps you create, connect, and distribute your work.";
+  "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -44,10 +44,11 @@ export const metadata: Metadata = {
   },
   description: META_DESC,
   keywords: [
-    "creator network",
+    "creator operating system",
     "AI agents",
     "creators",
     "builders",
+    "AI workflow studio",
     "social distribution",
     "automation",
     "artificial intelligence",

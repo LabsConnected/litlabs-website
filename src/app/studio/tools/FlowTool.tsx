@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import {
   Play,
   Plus,
@@ -92,32 +93,14 @@ export default function FlowTool() {
       return [];
     }
   });
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use shared WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    // Then sync from API
-    fetch("/api/wallet")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.balance === "number") {
-          setCoinBalance(d.balance);
-          try {
-            localStorage.setItem("litcoins", String(d.balance));
-          } catch {}
-        }
-      })
-      .catch(() => {});
-  }, []);
+    // Ensure wallet data is loaded
+    refreshWallet().catch(() => {});
+  }, [refreshWallet]);
 
   const cellCosts = useMemo(
     () =>
@@ -197,12 +180,7 @@ export default function FlowTool() {
           ].slice(0, MAX_HISTORY),
         ),
       );
-      fetch("/api/wallet")
-        .then((r) => r.json())
-        .then((d) => {
-          if (typeof d.balance === "number") setCoinBalance(d.balance);
-        })
-        .catch(() => {});
+      refreshWallet();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Flow run failed");
     } finally {
@@ -257,6 +235,8 @@ export default function FlowTool() {
         <input
           value={flowName}
           onChange={(e) => setFlowName(e.target.value)}
+          aria-label="Flow name"
+          title="Flow name"
           placeholder="Flow name..."
           className="flex-1 min-w-[180px] px-3 py-2 text-sm rounded outline-none"
           style={{
@@ -358,6 +338,9 @@ export default function FlowTool() {
                       updateCell(cell.id, { label: e.target.value })
                     }
                     disabled={running}
+                    aria-label="Cell label"
+                    title="Cell label"
+                    placeholder="Cell label"
                     className="flex-1 min-w-0 bg-transparent text-xs font-bold outline-none"
                     style={{ color: T.headerColor }}
                   />
@@ -399,6 +382,8 @@ export default function FlowTool() {
                       })
                     }
                     disabled={running}
+                    aria-label="Output format"
+                    title="Output format"
                     className="w-full px-2 py-1 text-xs rounded outline-none"
                     style={{
                       backgroundColor: T.bgColor,
@@ -425,6 +410,8 @@ export default function FlowTool() {
                       })
                     }
                     disabled={running}
+                    aria-label="Provider for this cell"
+                    title="Provider for this cell"
                     className="w-full px-2 py-1 text-xs rounded outline-none"
                     style={{
                       backgroundColor: T.bgColor,
@@ -451,6 +438,8 @@ export default function FlowTool() {
                   onChange={(e) =>
                     updateCell(cell.id, { prompt: e.target.value })
                   }
+                  aria-label="Cell prompt"
+                  title="Cell prompt"
                   placeholder={
                     cell.format === "video"
                       ? "Describe the motion..."
@@ -470,6 +459,8 @@ export default function FlowTool() {
                   onChange={(e) =>
                     updateCell(cell.id, { negativePrompt: e.target.value })
                   }
+                  aria-label="Negative prompt"
+                  title="Negative prompt"
                   placeholder="Negative prompt (optional)"
                   disabled={running}
                   className="w-full px-2 py-1 text-[11px] rounded outline-none disabled:opacity-50"

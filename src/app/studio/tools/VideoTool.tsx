@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import {
   Film,
   Wand2,
@@ -91,33 +92,14 @@ export default function VideoTool() {
       return [];
     }
   });
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
 
   const cost = VIDEO_MODELS.find((m) => m.id === model)?.cost || 5;
   const canAfford = coinBalance === null || coinBalance >= cost;
 
   useEffect(() => {
-    // Then sync from API
-    fetch("/api/wallet")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.balance === "number") {
-          setCoinBalance(d.balance);
-          try {
-            localStorage.setItem("litcoins", String(d.balance));
-          } catch {}
-        }
-      })
-      .catch(() => {});
+    refreshWallet();
   }, []);
 
   useEffect(() => {
@@ -178,7 +160,7 @@ export default function VideoTool() {
         }),
       });
       const wdata = await wres.json();
-      if (typeof wdata.balance === "number") setCoinBalance(wdata.balance);
+      refreshWallet().catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Video generation failed");
       setCurrent((prev) =>
@@ -264,6 +246,8 @@ export default function VideoTool() {
                 setPrompt(e.target.value);
                 setError(null);
               }}
+              aria-label="Video scene description"
+              title="Video scene description"
               placeholder="A dramatic sunset over a cyberpunk city..."
               rows={4}
               disabled={isGenerating}
@@ -336,6 +320,11 @@ export default function VideoTool() {
               value={duration}
               onChange={(e) => setDuration(parseInt(e.target.value))}
               disabled={isGenerating}
+              aria-label="Video duration in seconds"
+              title="Video duration in seconds"
+              aria-valuemin={2}
+              aria-valuemax={8}
+              aria-valuenow={duration}
               className="w-full"
             />
             <div

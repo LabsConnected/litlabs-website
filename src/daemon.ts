@@ -22,7 +22,7 @@ if (fs.existsSync(envPath)) {
   });
 }
 
-const agentSlug = process.env.TARGET_AGENT_SLUG || "champion";
+const agentSlug = process.env.TARGET_AGENT_SLUG || "director";
 const maxConcurrency = parseInt(process.env.MAX_CONCURRENCY || "3", 10);
 const pollIntervalMs = parseInt(process.env.POLL_INTERVAL_MS || "5000", 10);
 

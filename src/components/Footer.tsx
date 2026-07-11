@@ -12,6 +12,7 @@ const PRODUCT_LINKS = [
 ];
 
 const RESOURCE_LINKS = [
+  { href: "/docs", label: "Docs" },
   { href: "/flow", label: "Flow" },
   { href: "/social", label: "Social" },
   { href: "/code", label: "Code Scanner" },

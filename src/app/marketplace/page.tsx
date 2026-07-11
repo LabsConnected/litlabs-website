@@ -43,61 +43,57 @@ function getCategoryColor(category: string): string {
   return colors[category] || "#fbbf24";
 }
 
-// CREDIT PACKS — Stripe price_id required for each (create in Stripe Dashboard)
-// Note: Found price_1TYs4AJ53kgx4fp5RgAChEmk (Pro Membership) in Stripe, but not specific coin packs.
-const CREDIT_PACKS: {
+// TIER PACKAGES — Stripe price_id required for each (create in Stripe Dashboard)
+// All prices created in test mode: Starter($5), Pro($19.99), Elite($50)
+const TIER_PACKAGES: {
   id: string;
   coins: number;
   price: number;
   priceId: string;
   label: string;
+  tier: string;
   popular: boolean;
-  savings: string;
+  features: string[];
 }[] = [
   {
-    id: "starter",
+    id: "tier-free",
+    coins: 100,
+    price: 0,
+    priceId: "",
+    label: "Free",
+    tier: "free",
+    popular: false,
+    features: ["1 agent slot", "Basic tools", "Community support"],
+  },
+  {
+    id: "tier-starter",
     coins: 500,
-    price: 1,
-    priceId: "",
-    label: "Starter",
-    popular: false,
-    savings: "Entry pack",
-  },
-  {
-    id: "popular",
-    coins: 1200,
     price: 5,
-    priceId: "",
-    label: "Popular",
+    priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
+    label: "Starter",
+    tier: "starter",
     popular: true,
-    savings: "Save 20%",
+    features: ["5 agent slots", "All basic tools", "Priority support", "Daily bonus +50"],
   },
   {
-    id: "pro",
-    coins: 3000,
-    price: 10,
-    priceId: "",
+    id: "tier-pro",
+    coins: 1500,
+    price: 19.99,
+    priceId: "price_1TogZdJ53kgx4fp56g6bewkx",
     label: "Pro",
+    tier: "pro",
     popular: false,
-    savings: "Save 33%",
+    features: ["Unlimited agent slots", "All premium tools", "24/7 support", "Daily bonus +200", "Priority processing"],
   },
   {
-    id: "whale",
-    coins: 7000,
-    price: 25,
-    priceId: "",
-    label: "Whale",
-    popular: false,
-    savings: "Save 43%",
-  },
-  {
-    id: "max",
-    coins: 15000,
+    id: "tier-elite",
+    coins: 5000,
     price: 50,
-    priceId: "",
-    label: "Max",
+    priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
+    label: "Elite",
+    tier: "elite",
     popular: false,
-    savings: "Save 50%",
+    features: ["Unlimited agent slots", "All tools + beta", "Dedicated support", "Daily bonus +1000", "Highest priority", "Early access"],
   },
 ];
 
@@ -210,31 +206,16 @@ const DEMO_AGENTS: Agent[] = [
   },
   {
     id: "2",
-    slug: "champion",
-    name: "Champion",
+    slug: "forge",
+    name: "Forge",
     description:
-      "Your all-purpose AI partner. Brainstorm, research, plan, and execute any task with unlimited versatility.",
-    category: "general",
-    avatar_url: AGENT_AVATARS.champion,
-    price_cents: 0,
-    features: ["General assistance", "Brainstorming", "Research"],
-    is_featured: true,
-    personality: "Helpful, thorough, direct",
-    rating: 4.8,
-    installs: 2103,
-  },
-  {
-    id: "3",
-    slug: "code-champion",
-    name: "Code Champion",
-    description:
-      "Senior software engineer. Writes, reviews, debugs, and explains code across all languages and frameworks.",
+      "Senior software engineer, architect, and security lead. Writes, reviews, debugs, and secures code across all languages and frameworks.",
     category: "developer",
-    avatar_url: AGENT_AVATARS["code-champion"],
+    avatar_url: AGENT_AVATARS.forge,
     price_cents: 0,
-    features: ["Code generation", "Debugging", "Architecture"],
+    features: ["Code generation", "Debugging", "Architecture", "Security review"],
     is_featured: true,
-    personality: "Precise, clean, practical",
+    personality: "Precise, clean, practical, security-minded",
     rating: 4.9,
     installs: 1567,
   },
@@ -242,16 +223,16 @@ const DEMO_AGENTS: Agent[] = [
   // BUDGET TIER (50-150 coins ~ $0.50-$1.50)
   {
     id: "4",
-    slug: "writing-coach",
-    name: "Writing Coach",
+    slug: "pulse",
+    name: "Pulse Pro",
     description:
-      "Master copywriter. Elevates writing quality — editing, tone adjustment, copywriting, and storytelling.",
-    category: "content",
-    avatar_url: AGENT_AVATARS["writing-coach"],
+      "Growth hacker, content creator, and analytics specialist. Writes viral posts, crafts strategies, and surfaces actionable insights.",
+    category: "marketing",
+    avatar_url: AGENT_AVATARS.pulse,
     price_cents: 75,
-    features: ["Editing", "Tone adjustment", "Copywriting"],
+    features: ["Viral content", "Growth strategy", "Analytics", "Data insights"],
     is_featured: false,
-    personality: "Constructive, articulate, refined",
+    personality: "Bold, creative, results-driven",
     rating: 4.8,
     installs: 1120,
   },
@@ -289,63 +270,33 @@ const DEMO_AGENTS: Agent[] = [
   // PRO TIER (200-500 coins ~ $2-$5)
   {
     id: "7",
-    slug: "social-dominator",
-    name: "Social Dominator",
+    slug: "visionary",
+    name: "Visionary",
     description:
-      "Growth hacker and content creator. Writes viral posts, crafts strategies, and helps you dominate social media.",
-    category: "marketing",
-    avatar_url: AGENT_AVATARS["social-dominator"],
-    price_cents: 250,
-    features: ["Viral content", "Growth strategy", "Analytics"],
-    is_featured: true,
-    personality: "Bold, creative, results-driven",
-    rating: 4.7,
-    installs: 890,
-  },
-  {
-    id: "8",
-    slug: "data-slayer",
-    name: "Data Slayer",
-    description:
-      "Data scientist. Analyzes data, builds models, creates visualizations, and surfaces actionable insights.",
-    category: "analytics",
-    avatar_url: AGENT_AVATARS["data-slayer"],
-    price_cents: 300,
-    features: ["Data analysis", "Modeling", "Visualization"],
-    is_featured: true,
-    personality: "Precise, analytical, data-driven",
-    rating: 4.6,
-    installs: 654,
-  },
-  {
-    id: "9",
-    slug: "pixel-forge",
-    name: "Pixel Forge",
-    description:
-      "AI image and 3D world generation specialist. Creates stunning visuals, textures, and immersive environments.",
+      "Creative director and visual/audio AI specialist. Crafts enhanced image prompts, brand identity, UI/UX, music and audio production.",
     category: "design",
-    avatar_url: AGENT_AVATARS["pixel-forge"],
-    price_cents: 200,
-    features: ["Image generation", "360 worlds", "Texture design"],
+    avatar_url: AGENT_AVATARS.visionary,
+    price_cents: 250,
+    features: ["Image prompts", "Brand identity", "UI/UX feedback", "Music & audio"],
     is_featured: true,
     personality: "Visionary, artistic, detailed",
     rating: 4.8,
     installs: 921,
   },
   {
-    id: "10",
-    slug: "music-producer",
-    name: "Music Producer",
+    id: "8",
+    slug: "home",
+    name: "Nexus",
     description:
-      "Creates original music from text prompts and lyrics. Generates songs, instrumentals, and covers with AI.",
-    category: "music",
-    avatar_url: AGENT_AVATARS["music-producer"],
-    price_cents: 400,
-    features: ["Music generation", "Lyrics writing", "Style guidance"],
+      "Automation and integrations specialist. Smart home, IoT, webhooks, and automation flows for the digital and physical world.",
+    category: "automation",
+    avatar_url: AGENT_AVATARS.home,
+    price_cents: 300,
+    features: ["Smart home control", "Webhook setup", "Automation flows", "Device management"],
     is_featured: true,
-    personality: "Creative, musical, expressive",
-    rating: 4.7,
-    installs: 743,
+    personality: "Calm, methodical, precise",
+    rating: 4.6,
+    installs: 654,
   },
 
   // ELITE TIER (1000+ coins ~ $10+)
@@ -558,6 +509,7 @@ function MarketplaceInner() {
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"agents" | "coins">("agents");
+  const [currentPlan, setCurrentPlan] = useState<string>("free");
 
   const showToast = (
     msg: string,
@@ -652,6 +604,14 @@ function MarketplaceInner() {
     const id = requestAnimationFrame(() => {
       loadAgents();
       fetchWallet();
+      if (isSignedIn && userId) {
+        fetch(`/api/users/${userId}/plan`)
+          .then((r) => (r.ok ? r.json() : { plan: "free" }))
+          .then((data) => {
+            if (data.plan) setCurrentPlan(data.plan);
+          })
+          .catch(() => {});
+      }
 
       // Stripe return detection
       const success = searchParams.get("success");
@@ -666,7 +626,7 @@ function MarketplaceInner() {
       }
     });
     return () => cancelAnimationFrame(id);
-  }, [loadAgents, fetchWallet, searchParams]);
+  }, [loadAgents, fetchWallet, searchParams, isSignedIn, userId]);
 
   useEffect(() => {
     if (isSignedIn) {
@@ -675,9 +635,9 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
-  const buyPack = async (pack: (typeof CREDIT_PACKS)[0]) => {
+  const buyPack = async (pack: (typeof TIER_PACKAGES)[0]) => {
     if (!isSignedIn || !userId) {
-      showToast("Please sign in to purchase coins.", "error");
+      showToast("Please sign in to purchase.", "error");
       return;
     }
     try {
@@ -685,14 +645,15 @@ function MarketplaceInner() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "payment",
+          mode: "subscription",
+          priceId: pack.priceId || "",
           priceData: {
             amount: pack.price * 100,
             currency: "usd",
-            name: `${pack.coins} LiTBit Coins`,
-            description: `${pack.label} pack — ${pack.savings}`,
+            name: `${pack.label} Membership`,
+            description: `${pack.features.slice(0, 2).join(", ")}`,
           },
-          metadata: { clerk_id: userId, coin_amount: String(pack.coins) },
+          metadata: { clerk_id: userId, tier: pack.tier, coin_amount: String(pack.coins) },
         }),
       });
       const data = await res.json();
@@ -1646,7 +1607,7 @@ function MarketplaceInner() {
             width: "100%",
           }}
         >
-          {/* SMART COIN PACKS */}
+          {/* MEMBERSHIP TIERS */}
           <div style={{ marginBottom: "32px" }}>
             <div
               style={{
@@ -1668,14 +1629,14 @@ function MarketplaceInner() {
                     fontWeight: "bold",
                   }}
                 >
-                  🪙 BUY COINS
+                  ⭐ CHOOSE YOUR TIER
                 </div>
                 <p
                   style={{ color: T.textColor, fontSize: "12px", opacity: 0.7 }}
                 >
-                  Purchase LiTBit Coins to unlock premium agents and features.
+                  Unlock features and capabilities based on your membership level.
                   <strong style={{ color: T.accentColor }}>
-                    1 LBC = $0.01
+                    Free forever, upgrade anytime.
                   </strong>
                 </p>
               </div>
@@ -1695,7 +1656,7 @@ function MarketplaceInner() {
                     opacity: claimLoading ? 0.6 : 1,
                   }}
                 >
-                  {claimLoading ? "⏳ Claiming..." : "⚡ Claim Daily +50"}
+                  {claimLoading ? "⏳ Claiming..." : "⚡ Claim Daily Bonus"}
                 </button>
               </div>
             </div>
@@ -1703,29 +1664,54 @@ function MarketplaceInner() {
             <div
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
                 gap: "16px",
               }}
             >
-              {CREDIT_PACKS.map((pack) => (
+              {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
+                const isCurrent = currentPlan === tier.tier;
+                const missingPrice = !tier.priceId && tier.price > 0;
+                return (
                 <div
-                  key={pack.id}
+                  key={tier.id}
                   style={{
                     position: "relative",
                     padding: "24px 20px",
-                    border: `2px solid ${pack.popular ? "gold" : T.borderColor}`,
-                    backgroundColor: pack.popular
+                    border: `2px solid ${isCurrent ? "#22d3ee" : tier.popular ? "gold" : T.borderColor}`,
+                    backgroundColor: isCurrent
+                      ? "rgba(34,211,238,0.10)"
+                      : tier.popular
                       ? "rgba(255,215,0,0.12)"
                       : T.boxBg,
                     textAlign: "center",
                     borderRadius: "12px",
                     transition: "all 0.2s",
-                    boxShadow: pack.popular
+                    boxShadow: isCurrent
+                      ? "0 8px 32px rgba(34,211,238,0.15)"
+                      : tier.popular
                       ? "0 8px 32px rgba(255,215,0,0.15)"
                       : "none",
                   }}
                 >
-                  {pack.popular && (
+                  {isCurrent && (
+                    <div
+                      style={{
+                        position: "absolute",
+                        top: "-12px",
+                        left: "50%",
+                        transform: "translateX(-50%)",
+                        backgroundColor: "#22d3ee",
+                        color: "black",
+                        padding: "4px 16px",
+                        fontSize: "11px",
+                        fontWeight: "bold",
+                        borderRadius: "4px",
+                      }}
+                    >
+                      ✓ CURRENT PLAN
+                    </div>
+                  )}
+                  {tier.popular && (
                     <div
                       style={{
                         position: "absolute",
@@ -1753,17 +1739,17 @@ function MarketplaceInner() {
                       letterSpacing: "1px",
                     }}
                   >
-                    {pack.label}
+                    {tier.label}
                   </div>
                   <div
                     style={{
-                      color: pack.popular ? "gold" : T.headerColor,
+                      color: tier.popular ? "gold" : T.headerColor,
                       fontSize: "36px",
                       fontWeight: "bold",
                       marginBottom: "4px",
                     }}
                   >
-                    {pack.coins.toLocaleString()}
+                    {tier.price}
                   </div>
                   <div
                     style={{
@@ -1773,17 +1759,7 @@ function MarketplaceInner() {
                       opacity: 0.8,
                     }}
                   >
-                    LiTBit Coins
-                  </div>
-                  <div
-                    style={{
-                      color: pack.popular ? "gold" : T.accentColor,
-                      fontSize: "24px",
-                      fontWeight: "bold",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    ${pack.price}
+                    {tier.coins.toLocaleString()} LiTBit Coins included
                   </div>
                   <div
                     style={{
@@ -1793,26 +1769,40 @@ function MarketplaceInner() {
                       marginBottom: "16px",
                     }}
                   >
-                    {pack.savings}
+                    {tier.features.slice(0, 3).join(" • ")}
                   </div>
+                  {missingPrice && (
+                    <div style={{ color: "#ff6b6b", fontSize: "10px", marginBottom: "8px" }}>
+                      ⚠ Stripe price ID missing — update in code/env
+                    </div>
+                  )}
                   <button
-                    onClick={() => buyPack(pack)}
+                    onClick={() => !isCurrent && !missingPrice && buyPack(tier)}
+                    disabled={isCurrent || missingPrice}
                     style={{
                       width: "100%",
                       padding: "12px",
-                      backgroundColor: pack.popular ? "gold" : T.linkColor,
-                      color: pack.popular ? "black" : "white",
+                      backgroundColor: isCurrent
+                        ? "#22d3ee"
+                        : missingPrice
+                        ? "#444"
+                        : tier.popular
+                        ? "gold"
+                        : T.linkColor,
+                      color: isCurrent ? "black" : tier.popular ? "black" : "white",
                       border: "none",
                       fontWeight: "bold",
                       fontSize: "13px",
-                      cursor: "pointer",
+                      cursor: isCurrent || missingPrice ? "not-allowed" : "pointer",
                       borderRadius: "6px",
+                      opacity: isCurrent || missingPrice ? 0.7 : 1,
                     }}
                   >
-                    {pack.popular ? "⚡ Buy Best Value" : "Buy Pack"}
+                    {isCurrent ? "Current Plan" : missingPrice ? "Not Configured" : tier.popular ? "⚡ Get Best Value" : "Get " + tier.label}
                   </button>
                 </div>
-              ))}
+              );
+              })}
             </div>
           </div>
 

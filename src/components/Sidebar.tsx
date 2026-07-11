@@ -40,6 +40,7 @@ import {
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
+  collapsed?: boolean;
 }
 
 function loadJson<T>(key: string, fallback: T): T {
@@ -89,11 +90,12 @@ function NavItemRow({
 
   const iconColor = groupActive ? accent : T.textMuted;
   const baseClasses =
-    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all group select-none";
+    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group select-none hover:bg-white/5";
   const style = {
-    backgroundColor: groupActive ? `${accent}12` : "transparent",
+    backgroundColor: groupActive ? `${accent}14` : "transparent",
     color: groupActive ? accent : T.textMuted,
     paddingLeft: collapsed ? undefined : `${12 + depth * 8}px`,
+    boxShadow: groupActive ? `inset 2px 0 0 0 ${accent}` : "none",
   };
 
   const icon = (
@@ -118,13 +120,6 @@ function NavItemRow({
     </span>
   ) : null;
 
-  const activeBar = groupActive ? (
-    <span
-      className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full"
-      style={{ backgroundColor: accent }}
-    />
-  ) : null;
-
   if (hidden) return null;
 
   if (hasChildren) {
@@ -136,7 +131,6 @@ function NavItemRow({
           style={style}
           type="button"
         >
-          {activeBar}
           {icon}
           {label}
           {badge}
@@ -173,7 +167,6 @@ function NavItemRow({
   return (
     <Link href={item.href || "#"} onClick={onClose} className="block">
       <div className={baseClasses} style={style}>
-        {activeBar}
         {icon}
         {label}
         {badge}
@@ -204,19 +197,22 @@ function GroupSection({
   if (hidden) return null;
 
   return (
-    <div className="group-section">
+    <div className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`} style={{ borderColor: group.label === "System" ? `${group.accent}20` : undefined }}>
       {!collapsed && (
         <button
           onClick={onToggle}
-          className="w-full flex items-center justify-between px-3 mb-1.5 text-[9px] font-bold uppercase tracking-widest opacity-80 hover:opacity-100 transition-opacity"
-          style={{ color: group.accent + "cc" }}
+          className="w-full flex items-center justify-between px-3 py-1.5 mb-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
+          style={{
+            color: group.accent,
+            backgroundColor: `${group.accent}12`,
+          }}
           type="button"
         >
           <span className="flex items-center gap-1.5">
             <group.icon size={12} />
             {group.label}
           </span>
-          <span className="flex items-center gap-1">
+          <span className="flex items-center gap-1 opacity-70">
             {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
           </span>
         </button>
@@ -259,6 +255,32 @@ function GroupSection({
             ))}
         </div>
       )}
+
+      {collapsed && (
+        <div className="flex flex-col items-center gap-1">
+          {group.items
+            .filter((i) => !i.children)
+            .map((item) => {
+              const active = isActive(item.href);
+              return (
+                <Link
+                  key={item.href || item.label}
+                  href={item.href || "#"}
+                  onClick={onClose}
+                  title={item.label}
+                  aria-label={item.label}
+                  className="flex items-center justify-center w-10 h-10 rounded-lg transition-colors hover:opacity-100"
+                  style={{
+                    backgroundColor: active ? `${group.accent}20` : "transparent",
+                    color: active ? group.accent : `${group.accent}80`,
+                  }}
+                >
+                  <item.icon size={18} />
+                </Link>
+              );
+            })}
+        </div>
+      )}
     </div>
   );
 }
@@ -291,10 +313,24 @@ function SidebarContent({
     if (typeof window === "undefined") return "creator";
     return localStorage.getItem(MODE_KEY) || "creator";
   });
-
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
   const [jarvisFocused, setJarvisFocused] = useState(false);
+  const [plan, setPlan] = useState<string>("free");
+
+  useEffect(() => {
+    if (!isSignedIn || !user?.id) return;
+    let active = true;
+    fetch(`/api/users/${user.id}/plan`)
+      .then((res) => (res.ok ? res.json() : { plan: "free" }))
+      .then((data) => {
+        if (active && data.plan) setPlan(data.plan);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
+  }, [isSignedIn, user?.id]);
 
   const isActive = useCallback(
     (href?: string) => {
@@ -591,46 +627,8 @@ function SidebarContent({
 
       {/* Footer */}
       <div className="px-3 py-3 border-t" style={{ borderColor: `${T.borderColor}30` }}>
-        <Link href="/profile" onClick={onClose} className="block">
-          <div
-            className="flex items-center gap-3 px-3 py-2.5 rounded-lg transition-all hover:bg-white/5"
-            style={{ backgroundColor: `${T.boxBg}60` }}
-          >
-            <div
-              className="w-9 h-9 rounded-full flex items-center justify-center text-sm font-bold shrink-0"
-              style={{
-                backgroundColor: T.accentColor + "20",
-                border: `1.5px solid ${T.accentColor}40`,
-                color: T.accentColor,
-              }}
-            >
-              {profile.avatarUrl ? (
-                <NextImage
-                  src={profile.avatarUrl}
-                  alt={profile.displayName}
-                  width={36}
-                  height={36}
-                  className="w-full h-full rounded-full object-cover"
-                />
-              ) : (
-                profile.displayName?.charAt(0)?.toUpperCase() || "?"
-              )}
-            </div>
-            {!collapsed && (
-              <div className="flex-1 min-w-0">
-                <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
-                  {profile.displayName || "Guest"}
-                </div>
-                <div className="text-[10px] opacity-60 truncate" style={{ color: T.textMuted }}>
-                  {isSignedIn ? "@" + (profile.username || "user") : "Sign in"}
-                </div>
-              </div>
-            )}
-          </div>
-        </Link>
-
         {!collapsed && (
-          <div className="mt-2 space-y-1.5">
+          <div className="space-y-1.5">
             <div
               className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
               style={{ backgroundColor: T.bgColor + "30", border: `1px solid ${T.borderColor}20` }}
@@ -647,7 +645,7 @@ function SidebarContent({
               <span className="flex items-center gap-1" style={{ color: T.accentColor }}>
                 <CrownIcon size={10} /> Plan
               </span>
-              <span style={{ color: T.textColor }}>Free</span>
+              <span style={{ color: T.textColor }}>{plan.charAt(0).toUpperCase() + plan.slice(1)}</span>
             </div>
           </div>
         )}
@@ -656,15 +654,17 @@ function SidebarContent({
   );
 }
 
-export default function Sidebar({ open = false, onClose }: SidebarProps) {
+export default function Sidebar({ open = false, onClose, collapsed: externalCollapsed }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(() => {
+  const [internalCollapsed, setInternalCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
     return localStorage.getItem(COLLAPSED_KEY) === "true";
   });
 
+  const collapsed = externalCollapsed ?? internalCollapsed;
+
   const toggleCollapse = useCallback(() => {
-    setCollapsed((v) => {
+    setInternalCollapsed((v) => {
       const next = !v;
       if (typeof window !== "undefined") localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;
@@ -679,19 +679,12 @@ export default function Sidebar({ open = false, onClose }: SidebarProps) {
   return (
     <>
       <aside
-        className={`hidden lg:flex flex-col h-screen sticky top-0 border-r shrink-0 transition-all duration-300 ${
+        className={`hidden md:flex flex-col h-screen sticky top-0 border-r shrink-0 transition-all duration-300 ${
           collapsed ? "w-16" : "w-72"
         }`}
         style={sidebarBase}
       >
         <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
-      </aside>
-
-      <aside
-        className="hidden md:flex lg:hidden flex-col w-16 h-screen sticky top-0 border-r shrink-0"
-        style={sidebarBase}
-      >
-        <SidebarContent collapsed={true} />
       </aside>
 
       {open && (

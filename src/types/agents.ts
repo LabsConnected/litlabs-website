@@ -1,16 +1,9 @@
 export type AgentRole =
-  | "Director"
-  | "Champion"
-  | "Pixel Forge"
-  | "Home"
-  | "Crafter"
-  | "Monitor"
-  | "Scout"
-  | "Messenger"
-  | "Archivist"
-  | "Sentinel"
-  | "Muse"
-  | "Catalyst";
+  | "LiTTree"
+  | "Forge"
+  | "Pulse"
+  | "Visionary"
+  | "Nexus";
 
 export interface Agent {
   id: string;

@@ -2,9 +2,13 @@ import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
-const sm = new Supermemory({
-  apiKey: process.env.SUPERMEMORY_API_KEY!,
-});
+function getSupermemory() {
+  const key = process.env.SUPERMEMORY_API_KEY;
+  if (!key) {
+    throw new Error("SUPERMEMORY_API_KEY is not configured");
+  }
+  return new Supermemory({ apiKey: key });
+}
 
 export async function GET(req: NextRequest) {
   try {
@@ -15,7 +19,7 @@ export async function GET(req: NextRequest) {
     const q = searchParams.get("q") || "";
     const limit = Number(searchParams.get("limit")) || 20;
 
-    const results = await sm.search.memories({
+    const results = await getSupermemory().search.memories({
       q,
       containerTag: uid,
       limit,

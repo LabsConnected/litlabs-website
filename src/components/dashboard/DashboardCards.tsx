@@ -69,24 +69,31 @@ export function HeroCard({
     <div
       className="relative overflow-hidden rounded-2xl p-6 lg:p-8"
       style={{
-        background: `linear-gradient(135deg, ${color}10 0%, ${T.boxBg} 100%)`,
-        border: `1px solid ${color}25`,
+        background: `linear-gradient(135deg, ${color}18 0%, ${T.boxBg} 60%, ${T.bgColor} 100%)`,
+        border: `1px solid ${color}35`,
       }}
     >
       <div
-        className="absolute top-0 right-0 w-64 h-64 rounded-full opacity-10 pointer-events-none"
+        className="absolute -top-20 -right-20 w-80 h-80 rounded-full opacity-20 pointer-events-none"
+        style={{
+          background: `radial-gradient(circle, ${color} 0%, transparent 65%)`,
+          filter: "blur(48px)",
+        }}
+      />
+      <div
+        className="absolute bottom-0 left-0 w-48 h-48 rounded-full opacity-10 pointer-events-none"
         style={{
           background: `radial-gradient(circle, ${color} 0%, transparent 70%)`,
           filter: "blur(40px)",
         }}
       />
       <h2
-        className="text-2xl lg:text-3xl font-black tracking-tight mb-2"
+        className="relative text-2xl lg:text-3xl font-black tracking-tight mb-2"
         style={{ color: T.textColor }}
       >
         {title}
       </h2>
-      <p className="text-sm max-w-lg" style={{ color: T.textMuted }}>
+      <p className="relative text-sm max-w-lg font-medium" style={{ color: T.textMuted }}>
         {subtitle}
       </p>
     </div>
@@ -112,22 +119,29 @@ export function QuickActionGrid({
           <Link
             key={a.label}
             href={a.href}
-            className="group flex flex-col items-center gap-3 p-4 rounded-xl transition-all hover:scale-[1.02]"
+            className="group relative flex flex-col items-center gap-3 p-4 rounded-xl transition-all hover:scale-[1.02] hover:-translate-y-0.5 overflow-hidden"
             style={{
               backgroundColor: `${T.boxBg}80`,
-              border: `1px solid ${a.color}20`,
+              border: `1px solid ${a.color}25`,
             }}
           >
             <div
-              className="w-10 h-10 rounded-lg flex items-center justify-center transition-transform group-hover:scale-110"
+              className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+              style={{
+                background: `radial-gradient(circle at top center, ${a.color}10 0%, transparent 60%)`,
+              }}
+            />
+            <div
+              className="relative w-11 h-11 rounded-xl flex items-center justify-center transition-transform group-hover:scale-110 group-hover:rotate-3"
               style={{
                 backgroundColor: `${a.color}15`,
-                border: `1px solid ${a.color}30`,
+                border: `1px solid ${a.color}35`,
+                boxShadow: `0 4px 20px ${a.color}15`,
               }}
             >
-              <Icon size={18} style={{ color: a.color }} />
+              <Icon size={20} style={{ color: a.color }} />
             </div>
-            <span className="text-xs font-bold" style={{ color: T.textColor }}>
+            <span className="relative text-xs font-black" style={{ color: T.textColor }}>
               {a.label}
             </span>
           </Link>
@@ -522,37 +536,64 @@ export function CenterStage({
     }
     default:
       return (
-        <div className="space-y-6">
+        <div className="space-y-6 md:space-y-8">
           <HeroCard
             title={`Welcome back, ${displayName}`}
             subtitle="Your creator OS is live. Ship something today."
             color={T.accentColor}
           />
-          <QuickActionGrid
-            actions={[
-              { label: "New Post", icon: Send, color: "#00f0ff", href: "/social" },
-              {
-                label: "Image Gen",
-                icon: ImageIcon,
-                color: "#ff00a0",
-                href: "/studio?tool=image",
-              },
-              {
-                label: "Agent Chat",
-                icon: Zap,
-                color: "#8b5cf6",
-                href: "/agent-chat",
-              },
-              {
-                label: "Marketplace",
-                icon: ShoppingBag,
-                color: "#ff9ff3",
-                href: "/marketplace",
-              },
-            ]}
-          />
-          <DashboardContent />
-          <SocialFeed embedded />
+
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
+              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+                Quick Actions
+              </span>
+            </div>
+            <QuickActionGrid
+              actions={[
+                { label: "New Post", icon: Send, color: "#00f0ff", href: "/social" },
+                {
+                  label: "Image Gen",
+                  icon: ImageIcon,
+                  color: "#ff00a0",
+                  href: "/studio?tool=image",
+                },
+                {
+                  label: "Agent Chat",
+                  icon: Zap,
+                  color: "#8b5cf6",
+                  href: "/agent-chat",
+                },
+                {
+                  label: "Marketplace",
+                  icon: ShoppingBag,
+                  color: "#ff9ff3",
+                  href: "/marketplace",
+                },
+              ]}
+            />
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
+              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+                Overview
+              </span>
+            </div>
+            <DashboardContent />
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div className="w-1 h-4 rounded-full" style={{ backgroundColor: T.accentColor }} />
+              <span className="text-xs font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
+                Community Feed
+              </span>
+            </div>
+            <SocialFeed embedded />
+          </div>
         </div>
       );
   }

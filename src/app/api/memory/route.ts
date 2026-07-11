@@ -1,9 +1,13 @@
 import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 
-const sm = new Supermemory({
-  apiKey: process.env.SUPERMEMORY_API_KEY!,
-});
+function getSupermemory() {
+  const key = process.env.SUPERMEMORY_API_KEY;
+  if (!key) {
+    throw new Error("SUPERMEMORY_API_KEY is not configured");
+  }
+  return new Supermemory({ apiKey: key });
+}
 
 export async function POST(req: NextRequest) {
   try {
@@ -13,7 +17,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "content is required" }, { status: 400 });
     }
 
-    const result = await sm.add({
+    const result = await getSupermemory().add({
       content,
       containerTag: userId || "default",
       metadata,
@@ -33,7 +37,7 @@ export async function GET(req: NextRequest) {
     const userId = searchParams.get("userId") || "default";
     const limit = Number(searchParams.get("limit")) || 5;
 
-    const results = await sm.search.memories({
+    const results = await getSupermemory().search.memories({
       q: query,
       containerTag: userId,
       limit,
@@ -54,7 +58,7 @@ export async function DELETE(req: NextRequest) {
       return NextResponse.json({ error: "id or content is required" }, { status: 400 });
     }
 
-    const result = await sm.memories.forget({
+    const result = await getSupermemory().memories.forget({
       containerTag: userId || "default",
       id,
       content,
@@ -78,7 +82,7 @@ export async function PATCH(req: NextRequest) {
       );
     }
 
-    const result = await sm.memories.updateMemory({
+    const result = await getSupermemory().memories.updateMemory({
       containerTag: userId || "default",
       id,
       content,

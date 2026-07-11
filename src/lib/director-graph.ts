@@ -28,7 +28,7 @@ export class DirectorGraphPlanner {
 
     const researcherId = "task-researcher";
     tasks.push({
-      agentSlug: "champion",
+      agentSlug: "director",
       prompt: `Research background, constraints, and existing solutions for: ${normalized}`,
       provider: "openrouter",
       model: targetModel,
@@ -37,7 +37,7 @@ export class DirectorGraphPlanner {
 
     const builderId = "task-builder";
     tasks.push({
-      agentSlug: "pixel-forge",
+      agentSlug: "visionary",
       prompt: `Draft an implementation or content plan for: ${normalized}`,
       provider: "openrouter",
       model: targetModel,
@@ -46,7 +46,7 @@ export class DirectorGraphPlanner {
 
     const validatorId = "task-validator";
     tasks.push({
-      agentSlug: "sentinel",
+      agentSlug: "forge",
       prompt: `Review and validate the plan for correctness, risks, and missing steps: ${normalized}`,
       provider: "openrouter",
       model: targetModel,

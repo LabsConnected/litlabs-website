@@ -2,139 +2,424 @@
 
 export const dynamic = "force-dynamic";
 
-import { Suspense, useEffect, useState } from "react";
+import { Suspense, memo, useEffect, useMemo, useState } from "react";
 import nextDynamic from "next/dynamic";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Bot, Sparkles, Image as ImageIcon, PanelLeftClose } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
-const CanvasTool = nextDynamic(() => import("./tools/CanvasTool"), { ssr: false });
-const AgentTool = nextDynamic(() => import("./tools/AgentTool"), { ssr: false });
-const ImageTool = nextDynamic(() => import("./tools/ImageTool"), { ssr: false });
+import StudioSidebar, { type StudioTool } from "./components/StudioSidebar";
+import StudioTopBar from "./components/StudioTopBar";
+import StudioInspector from "./components/StudioInspector";
+import StudioCommandDock, {
+  type DockAction,
+} from "./components/StudioCommandDock";
+import StudioModeSwitcher, {
+  defaultToolForMode,
+  type StudioMode,
+} from "./components/StudioModeSwitcher";
+import { Sparkles, X } from "lucide-react";
 
-type Tool = "canvas" | "agents" | "image";
+const ImageTool = nextDynamic(() => import("./tools/ImageTool"), {
+  ssr: false,
+});
+const VideoTool = nextDynamic(() => import("./tools/VideoTool"), {
+  ssr: false,
+});
+const AudioTool = nextDynamic(() => import("./tools/AudioTool"), {
+  ssr: false,
+});
+const AgentTool = nextDynamic(() => import("./tools/AgentTool"), {
+  ssr: false,
+});
+const AgentsTerminalTool = nextDynamic(
+  () => import("./tools/AgentsTerminalTool"),
+  { ssr: false },
+);
+const CLIBridgeTool = nextDynamic(() => import("./tools/CLIBridgeTool"), {
+  ssr: false,
+});
+const GalleryTool = nextDynamic(() => import("./tools/GalleryTool"), {
+  ssr: false,
+});
+const SpaceTool = nextDynamic(() => import("./tools/SpaceTool"), {
+  ssr: false,
+});
+const ColorByNumberTool = nextDynamic(
+  () => import("./tools/ColorByNumberTool"),
+  { ssr: false },
+);
+const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
+  ssr: false,
+});
 
-const TOOLS: { id: Tool; label: string; icon: typeof Bot; desc: string }[] = [
-  { id: "canvas", label: "Canvas", icon: Sparkles, desc: "AI code builder with live preview" },
-  { id: "agents", label: "Agents", icon: Bot, desc: "Chat with your AI team" },
-  { id: "image", label: "Generate", icon: ImageIcon, desc: "Image generation studio" },
-];
+const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
+  switch (tool) {
+    case "image":
+      return <ImageTool />;
+    case "video":
+      return <VideoTool />;
+    case "audio":
+      return <AudioTool />;
+    case "agents":
+      return <AgentTool />;
+    case "terminal":
+      return <AgentsTerminalTool />;
+    case "clibridge":
+      return <CLIBridgeTool />;
+    case "pipeline":
+      return <PipelineTool />;
+    case "gallery":
+      return <GalleryTool />;
+    case "space":
+      return <SpaceTool />;
+    case "color":
+      return <ColorByNumberTool />;
+    default:
+      return <ImageTool />;
+  }
+});
 
-function StudioInner() {
+const MODE_HEADLINE: Record<StudioMode, { title: string; subtitle: string }> = {
+  command: {
+    title: "Command Center",
+    subtitle:
+      "Talk, work, inspect status, and launch tools from one home base.",
+  },
+  media: {
+    title: "Media Studio",
+    subtitle: "Image, video, audio, color, and exports for creators.",
+  },
+  research: {
+    title: "Research Desk",
+    subtitle: "Sources, citations, notes, and answers you can trust.",
+  },
+  agent: {
+    title: "Agent Ops",
+    subtitle: "Agents, queues, runs, cost, health, and logs.",
+  },
+  minimal: {
+    title: "Minimal Pro",
+    subtitle: "Less chrome, more work. Ship fast.",
+  },
+};
+
+const MODE_QUICKSTART: Record<StudioMode, DockAction[]> = {
+  command: [
+    {
+      id: "qs-gen",
+      label: "Generate an image",
+      icon: Sparkles,
+      tool: "image",
+      prompt: "Generate an image of ",
+    },
+    { id: "qs-chat", label: "Open agent chat", icon: Sparkles, tool: "agents" },
+    {
+      id: "qs-scan",
+      label: "Scan code for issues",
+      icon: Sparkles,
+      tool: "terminal",
+    },
+  ],
+  media: [
+    { id: "qs-img", label: "New image", icon: Sparkles, tool: "image" },
+    { id: "qs-vid", label: "New video", icon: Sparkles, tool: "video" },
+    { id: "qs-aud", label: "New audio", icon: Sparkles, tool: "audio" },
+    { id: "qs-color", label: "Color by number", icon: Sparkles, tool: "color" },
+  ],
+  research: [
+    { id: "qs-gal", label: "Browse gallery", icon: Sparkles, tool: "gallery" },
+    { id: "qs-space", label: "Generate skybox", icon: Sparkles, tool: "space" },
+    { id: "qs-chat", label: "Ask a question", icon: Sparkles, tool: "agents" },
+  ],
+  agent: [
+    { id: "qs-agents", label: "List agents", icon: Sparkles, tool: "agents" },
+    { id: "qs-term", label: "Open terminal", icon: Sparkles, tool: "terminal" },
+    { id: "qs-pipe", label: "Open pipeline", icon: Sparkles, tool: "pipeline" },
+  ],
+  minimal: [
+    { id: "qs-min-img", label: "Quick image", icon: Sparkles, tool: "image" },
+    { id: "qs-min-chat", label: "Quick chat", icon: Sparkles, tool: "agents" },
+  ],
+};
+
+function StudioCommandCenter() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const [activeTool, setActiveTool] = useState<Tool>("canvas");
-  const [sidebarOpen, setSidebarOpen] = useState(true);
+
+  // Top-level state
+  const [mode, setMode] = useState<StudioMode>("command");
+  const [activeTool, setActiveTool] = useState<StudioTool>("image");
+  const [selectedModel, setSelectedModel] = useState("adaptive");
+  const [search, setSearch] = useState("");
+  const [prompt, setPrompt] = useState("");
+  const [recentActions, setRecentActions] = useState<
+    { tool: StudioTool; label: string }[]
+  >([]);
+
+  // Mobile inspector sheet
+  const [mobileInspector, setMobileInspector] = useState(false);
+
+  // URL → tool (deep-link sync; the prev-comparison prevents redundant
+  // re-renders that would otherwise fire on every router push).
 
   useEffect(() => {
-    const toolParam = searchParams.get("tool") as Tool | null;
-    if (toolParam && TOOLS.some((t) => t.id === toolParam)) {
-      setActiveTool(toolParam);
+    const toolParam = searchParams.get("tool") as StudioTool | null;
+    if (toolParam) {
+      setActiveTool((prev) => (prev === toolParam ? prev : toolParam));
     }
   }, [searchParams]);
 
+  // Auth gate
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.push("/sign-in?redirect_url=/studio");
   }, [isLoaded, isSignedIn, router]);
 
-  if (!isLoaded) {
-    return <div className="min-h-screen grid place-items-center" style={{ backgroundColor: T.bgColor, color: T.accentColor }}>Loading Studio...</div>;
-  }
+  const handleModeChange = (m: StudioMode) => {
+    const tool = defaultToolForMode(m);
+    setMode(m);
+    setActiveTool(tool);
+    router.push(`/studio?tool=${tool}`, { scroll: false });
+  };
 
+  const handleToolChange = (t: StudioTool) => {
+    setActiveTool(t);
+    router.push(`/studio?tool=${t}`, { scroll: false });
+  };
+
+  const handlePromptSubmit = () => {
+    const text = prompt.trim();
+    if (!text) return;
+    setRecentActions((prev) =>
+      [{ tool: activeTool, label: text.slice(0, 24) }, ...prev].slice(0, 5),
+    );
+    setPrompt("");
+  };
+
+  const handleAction = (a: DockAction) => {
+    if (a.tool) handleToolChange(a.tool);
+    if (a.prompt) setPrompt(a.prompt);
+  };
+
+  const headline = useMemo(() => MODE_HEADLINE[mode], [mode]);
+  const quickstart = useMemo(() => MODE_QUICKSTART[mode], [mode]);
+
+  if (!isLoaded) {
+    return (
+      <div
+        className="min-h-screen grid place-items-center"
+        style={{ backgroundColor: T.bgColor, color: T.accentColor }}
+      >
+        Loading Studio…
+      </div>
+    );
+  }
   if (!isSignedIn) {
     return (
       <div className="min-h-[60vh] grid place-items-center">
-        <Link href="/sign-in?redirect_url=/studio" className="rounded-xl px-4 py-2 font-bold text-white" style={{ backgroundColor: T.accentColor }}>
+        <Link
+          href="/sign-in?redirect_url=/studio"
+          className="rounded-xl px-4 py-2 font-bold text-white"
+          style={{ backgroundColor: T.accentColor }}
+        >
           Sign in to continue
         </Link>
       </div>
     );
   }
 
-  const currentTool = TOOLS.find((t) => t.id === activeTool)!;
-
   return (
-    <div className="flex h-[calc(100vh-4rem)] overflow-hidden" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
-      {/* Sidebar - Clean & Minimal */}
-      <aside
-        className={`flex flex-col border-r shrink-0 transition-all duration-300 ${sidebarOpen ? "w-52" : "w-14"}`}
-        style={{ backgroundColor: T.boxBg + "90", borderColor: T.borderColor + "20" }}
-      >
-        <div className="flex items-center justify-between px-3 h-12 border-b" style={{ borderColor: T.borderColor + "18" }}>
-          {sidebarOpen && <span className="text-xs font-black uppercase tracking-[0.2em]" style={{ color: T.headerColor }}>Studio</span>}
-          <button onClick={() => setSidebarOpen((v) => !v)} className="p-1.5 rounded-lg hover:bg-white/5 ml-auto" style={{ color: T.textMuted }}>
-            <PanelLeftClose size={14} />
-          </button>
-        </div>
-        <nav className="flex-1 p-2 space-y-1">
-          {TOOLS.map((tool) => {
-            const Icon = tool.icon;
-            const active = activeTool === tool.id;
-            return (
-              <button
-                key={tool.id}
-                onClick={() => { setActiveTool(tool.id); router.push(`/studio?tool=${tool.id}`, { scroll: false }); }}
-                className={`group relative w-full flex items-center rounded-xl transition-all ${sidebarOpen ? "gap-2.5 px-3 py-2.5" : "justify-center px-2 py-2.5"}`}
-                style={{
-                  color: active ? T.accentColor : T.textColor + "99",
-                  backgroundColor: active ? T.accentColor + "12" : "transparent",
-                }}
-              >
-                {active && <span className="absolute left-0 top-1/2 -translate-y-1/2 w-[3px] h-5 rounded-r-full" style={{ backgroundColor: T.accentColor }} />}
-                <Icon size={16} strokeWidth={active ? 2.5 : 1.8} className="shrink-0" />
-                {sidebarOpen && (
-                  <div className="flex-1 text-left">
-                    <div className="text-xs font-bold">{tool.label}</div>
-                    <div className="text-[9px] mt-0.5" style={{ color: T.textMuted }}>{tool.desc}</div>
-                  </div>
-                )}
-              </button>
-            );
-          })}
-        </nav>
-        <div className="px-3 py-2.5 border-t" style={{ borderColor: T.borderColor + "12" }}>
-          {sidebarOpen ? (
-            <div className="flex items-center justify-between">
-              <span className="text-[9px] font-mono opacity-40" style={{ color: T.textMuted }}>v2.0</span>
-              <span className="flex items-center gap-1.5 text-[9px] font-mono" style={{ color: T.textMuted + "80" }}>
-                <span className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: "#34d399" }} /> Online
-              </span>
-            </div>
-          ) : (
-            <div className="flex justify-center">
-              <span className="w-2 h-2 rounded-full animate-pulse" style={{ backgroundColor: "#34d399" }} />
-            </div>
-          )}
-        </div>
-      </aside>
+    <div
+      className="h-[calc(100vh-4rem)] flex flex-col overflow-hidden"
+      style={{
+        background: `radial-gradient(circle at top, ${T.accentColor}14, transparent 30%), linear-gradient(180deg, ${T.bgColor} 0%, ${T.boxBg} 100%)`,
+        color: T.textColor,
+      }}
+    >
+      <StudioTopBar
+        search={search}
+        onSearchChange={setSearch}
+        selectedModel={selectedModel}
+        onModelChange={setSelectedModel}
+        onInspectorToggle={() => setMobileInspector(true)}
+        T={T}
+      />
 
-      {/* Main - Just the tool, no clutter */}
-      <main className="flex-1 min-w-0 flex flex-col">
-        <div className="flex items-center justify-between px-4 h-12 border-b shrink-0" style={{ backgroundColor: T.boxBg + "50", borderColor: T.borderColor + "18" }}>
-          <div className="flex items-center gap-2">
-            <currentTool.icon size={14} style={{ color: T.accentColor }} />
-            <span className="text-sm font-bold" style={{ color: T.headerColor }}>{currentTool.label}</span>
+      <div className="flex-1 min-h-0 flex">
+        <StudioSidebar
+          activeTool={activeTool}
+          onToolChange={handleToolChange}
+        />
+
+        <main className="flex-1 min-w-0 flex flex-col">
+          {/* Mode header + switcher */}
+          <div
+            className="flex items-center justify-between gap-2 px-3 sm:px-4 h-12 shrink-0"
+            style={{
+              backgroundColor: T.boxBg + "60",
+              borderBottom: `1px solid ${T.borderColor}18`,
+            }}
+          >
+            <div className="min-w-0">
+              <div
+                className="text-[9px] uppercase tracking-[0.25em]"
+                style={{ color: T.textMuted }}
+              >
+                {mode === "command" ? "Default" : "Mode"} · {activeTool}
+              </div>
+              <div
+                className="text-[12px] font-black truncate"
+                style={{ color: T.headerColor }}
+              >
+                {headline.title}
+              </div>
+            </div>
+            <div className="hidden md:block shrink-0">
+              <StudioModeSwitcher
+                active={mode}
+                onChange={handleModeChange}
+                T={T}
+              />
+            </div>
           </div>
-          <div className="text-[10px] opacity-50" style={{ color: T.textMuted }}>{currentTool.desc}</div>
+
+          {/* Mobile mode switcher */}
+          <div
+            className="md:hidden px-3 py-2 flex items-center gap-2 overflow-x-auto"
+            style={{ borderBottom: `1px solid ${T.borderColor}10` }}
+          >
+            <StudioModeSwitcher
+              active={mode}
+              onChange={handleModeChange}
+              T={T}
+            />
+          </div>
+
+          {/* Welcome strip (quickstart) */}
+          <div
+            className="px-3 sm:px-4 py-3 shrink-0"
+            style={{ borderBottom: `1px solid ${T.borderColor}10` }}
+          >
+            <div className="flex items-end justify-between gap-3 mb-2">
+              <div>
+                <div
+                  className="text-[9px] uppercase tracking-[0.25em]"
+                  style={{ color: T.textMuted }}
+                >
+                  {headline.subtitle}
+                </div>
+                <div
+                  className="text-[10px] font-bold mt-0.5"
+                  style={{ color: T.textColor }}
+                >
+                  Quick start
+                </div>
+              </div>
+            </div>
+            <div className="flex gap-2 overflow-x-auto pb-0.5">
+              {quickstart.map((q) => (
+                <button
+                  key={q.id}
+                  onClick={() => handleAction(q)}
+                  className="shrink-0 flex items-center gap-1.5 rounded-xl border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:scale-[1.02]"
+                  style={{
+                    backgroundColor: T.bgColor + "65",
+                    borderColor: T.borderColor + "25",
+                    color: T.textColor,
+                  }}
+                >
+                  <Sparkles size={10} style={{ color: T.accentColor }} />
+                  {q.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Active tool */}
+          <div
+            className="flex-1 min-h-0 overflow-auto p-3 sm:p-4"
+            style={{ color: T.textColor }}
+          >
+            <ToolRouter tool={activeTool} />
+          </div>
+
+          {/* Bottom command dock */}
+          <StudioCommandDock
+            prompt={prompt}
+            onPromptChange={setPrompt}
+            onSubmit={handlePromptSubmit}
+            activeTool={activeTool}
+            onToolChange={handleToolChange}
+            recentActions={recentActions}
+            onAction={handleAction}
+            T={T}
+          />
+        </main>
+
+        {/* Desktop inspector */}
+        <StudioInspector T={T} />
+      </div>
+
+      {/* Mobile inspector sheet */}
+      {mobileInspector && (
+        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={() => setMobileInspector(false)}
+          />
+          <div
+            className="relative rounded-t-3xl border-t shadow-2xl"
+            style={{
+              backgroundColor: T.boxBg,
+              borderColor: T.borderColor + "30",
+              boxShadow: `0 -12px 40px rgba(0,0,0,0.6)`,
+            }}
+          >
+            <div
+              className="flex items-center justify-between px-4 py-3"
+              style={{ borderBottom: `1px solid ${T.borderColor}18` }}
+            >
+              <span
+                className="text-[10px] font-black uppercase tracking-[0.18em]"
+                style={{ color: T.headerColor }}
+              >
+                Inspector
+              </span>
+              <button
+                onClick={() => setMobileInspector(false)}
+                className="rounded-lg p-1.5 hover:bg-white/10"
+                style={{ color: T.textMuted }}
+                aria-label="Close inspector"
+                title="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <StudioInspector
+              variant="sheet"
+              onClose={() => setMobileInspector(false)}
+              T={T}
+            />
+          </div>
         </div>
-        <div className="flex-1 min-h-0 overflow-hidden">
-          {activeTool === "canvas" && <CanvasTool />}
-          {activeTool === "agents" && <AgentTool />}
-          {activeTool === "image" && <ImageTool />}
-        </div>
-      </main>
+      )}
     </div>
   );
 }
 
 export default function StudioPage() {
   return (
-    <Suspense fallback={<div className="min-h-screen grid place-items-center">Loading Studio...</div>}>
-      <StudioInner />
+    <Suspense
+      fallback={
+        <div className="min-h-screen grid place-items-center">
+          Loading Studio…
+        </div>
+      }
+    >
+      <StudioCommandCenter />
     </Suspense>
   );
 }

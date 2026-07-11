@@ -78,40 +78,34 @@ export const APPS = [
 
 export const AGENTS = [
   {
-    name: "Director",
+    name: "LiTTree",
     status: "online" as const,
     task: "Orchestration",
-    color: "#00ffff",
+    color: "#22d3ee",
   },
   {
-    name: "Champion",
-    status: "online" as const,
-    task: "General tasks",
-    color: "#ff0080",
-  },
-  {
-    name: "Code Champion",
+    name: "Forge",
     status: "working" as const,
-    task: "Load tests",
-    color: "#00ff41",
+    task: "Code review",
+    color: "#22d3ee",
   },
   {
-    name: "Social Dominator",
+    name: "Pulse",
+    status: "online" as const,
+    task: "Content scheduling",
+    color: "#f472b6",
+  },
+  {
+    name: "Visionary",
     status: "idle" as const,
-    task: "Analytics review",
-    color: "#ff6b6b",
+    task: "Awaiting creative brief",
+    color: "#e879f9",
   },
   {
-    name: "Data Slayer",
-    status: "working" as const,
-    task: "Profiling",
-    color: "#ffff00",
-  },
-  {
-    name: "Writing Coach",
+    name: "Nexus",
     status: "online" as const,
-    task: "Content review",
-    color: "#ff9ff3",
+    task: "Automation monitoring",
+    color: "#34d399",
   },
   {
     name: "Alex Chen",

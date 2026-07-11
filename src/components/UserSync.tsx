@@ -3,6 +3,9 @@
 import { useEffect } from "react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 
+// Make this component resilient when Clerk isn't configured or the hook errors
+
+
 /**
  * Syncs user identity to the database on mount.
  * Primary: GET /api/account. Backup: POST /api/user/ensure if primary fails.
@@ -11,7 +14,12 @@ export default function UserSync() {
   const { isSignedIn, userId } = useClerkAuth();
 
   useEffect(() => {
-    if (!isSignedIn || !userId) return;
+    // Be defensive: if Clerk isn't configured or hook is still not loaded, do nothing
+    try {
+      if (!isSignedIn || !userId) return;
+    } catch {
+      return; // hook threw, bail out
+    }
 
     fetch("/api/account", { method: "GET" })
       .then(async (res) => {
@@ -30,5 +38,5 @@ export default function UserSync() {
       });
   }, [isSignedIn, userId]);
 
-  return null;
+  return null; // renders nothing (headless)
 }

@@ -1,6 +1,6 @@
 // API Route: List marketplace agents from Supabase + create custom agents
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 
@@ -11,7 +11,7 @@ async function getHandler(req: NextRequest) {
     const coreOnly = searchParams.get("featured") === "true";
     const includeOwn = searchParams.get("mine") === "true";
 
-    let query = supabase
+    let query = supabaseAdmin
       .from("agents")
       .select(
         "id, slug, display_name, description, role, system_prompt, model, is_core, owner_id, created_at, updated_at",
@@ -23,7 +23,7 @@ async function getHandler(req: NextRequest) {
       const { userId } = await auth();
       if (!userId)
         return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-      const { data: user } = await supabase
+      const { data: user } = await supabaseAdmin
         .from("users")
         .select("id")
         .eq("clerk_id", userId)
@@ -105,7 +105,7 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json({ error: "Invalid slug" }, { status: 400 });
     }
 
-    const { data: user } = await supabase
+    const { data: user } = await supabaseAdmin
       .from("users")
       .select("id")
       .eq("clerk_id", clerkId)
@@ -114,7 +114,7 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    const { data: existing } = await supabase
+    const { data: existing } = await supabaseAdmin
       .from("agents")
       .select("id")
       .eq("slug", slugClean)
@@ -126,7 +126,7 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    const { data: agent, error } = await supabase
+    const { data: agent, error } = await supabaseAdmin
       .from("agents")
       .insert({
         display_name: String(name).trim(),

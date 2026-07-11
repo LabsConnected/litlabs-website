@@ -4,14 +4,17 @@ import { streamText } from "ai";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 
-const sm = new Supermemory({
-  apiKey: process.env.SUPERMEMORY_API_KEY!,
-});
+function getSupermemory() {
+  const key = process.env.SUPERMEMORY_API_KEY;
+  if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
+  return new Supermemory({ apiKey: key });
+}
 
-const openrouter = createOpenAI({
-  baseURL: "https://openrouter.ai/api/v1",
-  apiKey: process.env.OPENROUTER_API_KEY!,
-});
+function getOpenRouter() {
+  const key = process.env.OPENROUTER_API_KEY;
+  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
+  return createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: key });
+}
 
 const MODELS: Record<string, string> = {
   "gemini-flash": "google/gemini-2.5-flash",
@@ -29,14 +32,14 @@ export async function POST(req: NextRequest) {
     const { messages, model = "gemini-flash" } = await req.json();
     const lastMessage = messages[messages.length - 1]?.content || "";
 
-    const memoryResults = await sm.search.memories({
+    const memoryResults = await getSupermemory().search.memories({
       q: lastMessage,
       containerTag: uid,
       limit: 8,
     });
 
     const memoryContext = memoryResults.results
-      .map((m) => m.memory || m.chunk)
+      .map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk)
       .filter(Boolean)
       .join("\n");
 
@@ -50,14 +53,14 @@ Be concise, helpful, and natural.`;
     const selectedModel = MODELS[model] || MODELS["gemini-flash"];
 
     const result = streamText({
-      model: openrouter(selectedModel),
+      model: getOpenRouter()(selectedModel),
       system: systemPrompt,
       messages,
       temperature: 0.7,
       maxOutputTokens: 2048,
       onFinish: async ({ text }) => {
         try {
-          await sm.add({
+          await getSupermemory().add({
             content: `User: ${lastMessage}\nAssistant: ${text}`,
             containerTag: uid,
             metadata: { type: "chat", model },

@@ -15,6 +15,7 @@ import { useTheme } from "@/context/ThemeContext";
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const { resolvedColors: T } = useTheme();
 
   useEffect(() => {
@@ -33,7 +34,11 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
     <>
       <AnimatedBackgroundWrapper />
       <div className="relative z-10 flex min-h-screen">
-        <Sidebar open={mobileSidebarOpen} onClose={() => setMobileSidebarOpen(false)} />
+        <Sidebar
+          open={mobileSidebarOpen}
+          onClose={() => setMobileSidebarOpen(false)}
+          collapsed={desktopSidebarCollapsed}
+        />
         <div className="flex-1 flex flex-col min-h-screen">
           {/* Mobile hamburger trigger */}
           <button
@@ -48,8 +53,8 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
           >
             <Menu size={20} />
           </button>
-          <UserSync />
-          <NavbarWrapper onMenuClick={() => setMobileSidebarOpen(true)} />
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+          <NavbarWrapper onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)} />
           <main className="flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0">
             {children}
           </main>

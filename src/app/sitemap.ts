@@ -32,6 +32,12 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.8,
     },
     {
+      url: `${base}/docs`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.8,
+    },
+    {
       url: `${base}/social`,
       lastModified: now,
       changeFrequency: "daily",
@@ -78,6 +84,24 @@ export default function sitemap(): MetadataRoute.Sitemap {
       lastModified: now,
       changeFrequency: "weekly",
       priority: 0.5,
+    },
+    {
+      url: `${base}/wallet`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/creator`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
+    },
+    {
+      url: `${base}/jarvis`,
+      lastModified: now,
+      changeFrequency: "weekly",
+      priority: 0.6,
     },
     {
       url: `${base}/settings`,

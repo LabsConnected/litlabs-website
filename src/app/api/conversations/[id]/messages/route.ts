@@ -1,11 +1,13 @@
 // API Route: Messages for a specific conversation
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { supabaseAdmin } from "@/lib/supabase";
 import { generateText } from "@/lib/llm";
 
-async function resolveDbUserId(clerkId: string): Promise<string | null> {
-  const { data: user } = await supabase
+async function getUserId() {
+  const { userId: clerkId } = await auth();
+  if (!clerkId) return null;
+  const { data: user } = await supabaseAdmin
     .from("users")
     .select("id")
     .eq("clerk_id", clerkId)
@@ -19,21 +21,15 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId: clerkId } = await auth();
-
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const dbUserId = await resolveDbUserId(clerkId);
+    const dbUserId = await getUserId();
     if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id: conversationId } = await params;
 
     // Verify conversation belongs to user
-    const { data: conversation } = await supabase
+    const { data: conversation } = await supabaseAdmin
       .from("conversations")
       .select("*")
       .eq("id", conversationId)
@@ -47,14 +43,13 @@ export async function GET(
       );
     }
 
-    const { data: messages, error } = await supabase
+    const { data: messages, error } = await supabaseAdmin
       .from("messages")
       .select("*")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
 
     if (error) {
-      // Supabase error:
       return NextResponse.json(
         { error: "Failed to fetch messages" },
         { status: 500 },
@@ -66,7 +61,6 @@ export async function GET(
       conversation,
     });
   } catch {
-    // Error fetching messages:
     return NextResponse.json(
       { error: "Failed to fetch messages" },
       { status: 500 },
@@ -80,15 +74,9 @@ export async function POST(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const { userId: clerkId } = await auth();
-
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
-
-    const dbUserId = await resolveDbUserId(clerkId);
+    const dbUserId = await getUserId();
     if (!dbUserId) {
-      return NextResponse.json({ error: "User not found" }, { status: 404 });
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const { id: conversationId } = await params;
@@ -100,7 +88,7 @@ export async function POST(
     }
 
     // Get conversation with agent details
-    const { data: conversation } = await supabase
+    const { data: conversation } = await supabaseAdmin
       .from("conversations")
       .select(
         `
@@ -120,7 +108,7 @@ export async function POST(
     }
 
     // Save user message
-    const { data: userMessage, error: msgError } = await supabase
+    const { data: userMessage, error: msgError } = await supabaseAdmin
       .from("messages")
       .insert({
         conversation_id: conversationId,
@@ -135,7 +123,7 @@ export async function POST(
     }
 
     // Get recent conversation history
-    const { data: recentMessages } = await supabase
+    const { data: recentMessages } = await supabaseAdmin
       .from("messages")
       .select("role, content")
       .eq("conversation_id", conversationId)
@@ -172,7 +160,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
     }
 
     // Save AI response
-    const { data: assistantMessage, error: aiMsgError } = await supabase
+    const { data: assistantMessage, error: aiMsgError } = await supabaseAdmin
       .from("messages")
       .insert({
         conversation_id: conversationId,
@@ -187,7 +175,7 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
     }
 
     // Update conversation timestamp
-    await supabase
+    await supabaseAdmin
       .from("conversations")
       .update({ updated_at: new Date().toISOString() })
       .eq("id", conversationId);

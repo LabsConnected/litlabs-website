@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useWallet } from "@/context/WalletContext";
 import {
   Music,
   Wand2,
@@ -98,16 +99,8 @@ export default function AudioTool() {
     }
   });
   const [playingId, setPlayingId] = useState<string | null>(null);
-  const [coinBalance, setCoinBalance] = useState<number | null>(() => {
-    if (typeof window === "undefined") return null;
-    try {
-      const coinsRaw = localStorage.getItem("litcoins");
-      const val = coinsRaw ? Number(coinsRaw) : null;
-      return val !== null && !isNaN(val) ? val : null;
-    } catch {
-      return null;
-    }
-  });
+  // Use WalletContext
+  const { balance: coinBalance, refresh: refreshWallet } = useWallet();
   const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const cost =
@@ -117,17 +110,7 @@ export default function AudioTool() {
   const canAfford = coinBalance === null || coinBalance >= cost;
 
   useEffect(() => {
-    fetch("/api/wallet")
-      .then((r) => r.json())
-      .then((d) => {
-        if (typeof d.balance === "number") {
-          setCoinBalance(d.balance);
-          try {
-            localStorage.setItem("litcoins", String(d.balance));
-          } catch {}
-        }
-      })
-      .catch(() => {});
+    refreshWallet();
   }, []);
 
   useEffect(() => {
@@ -237,7 +220,10 @@ export default function AudioTool() {
         }),
       });
       const wdata = await wres.json();
-      if (typeof wdata.balance === "number") setCoinBalance(wdata.balance);
+      if (typeof wdata.balance === "number") {
+        // WalletContext updates via its periodic refresh; call refresh to sync immediately
+        refreshWallet().catch(() => {});
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Audio generation failed");
       setCurrent((prev) =>
@@ -365,6 +351,8 @@ export default function AudioTool() {
                 setText(e.target.value);
                 setError(null);
               }}
+              aria-label="Audio prompt text"
+              title="Audio prompt text"
               placeholder={
                 mode === "tts"
                   ? "Hello world, this is a test of text-to-speech..."
@@ -634,6 +622,7 @@ export default function AudioTool() {
                           onClick={() => togglePlay(g.id, g.audioUrl!)}
                           className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.accentColor }}
+                          aria-label={playingId === g.id ? "Pause audio" : "Play audio"}
                         >
                           {playingId === g.id ? (
                             <Pause size={14} />
@@ -645,6 +634,7 @@ export default function AudioTool() {
                           onClick={() => handleDownload(g.audioUrl!, g.mode)}
                           className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.textMuted }}
+                          aria-label="Download audio"
                         >
                           <Download size={14} />
                         </button>
