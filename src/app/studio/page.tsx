@@ -53,6 +53,7 @@ const ColorByNumberTool = nextDynamic(
 const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
   ssr: false,
 });
+const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), { ssr: false });
 
 const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
   switch (tool) {
@@ -66,6 +67,8 @@ const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
       return <AgentTool />;
     case "terminal":
       return <AgentsTerminalTool />;
+    case "builder":
+      return <BuilderTool />;
     case "clibridge":
       return <CLIBridgeTool />;
     case "pipeline":

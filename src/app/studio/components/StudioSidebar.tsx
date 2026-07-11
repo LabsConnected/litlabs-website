@@ -14,6 +14,7 @@ import {
   ChevronRight,
   Sparkles,
   Terminal,
+  Hammer,
   Network,
   Shell,
 } from "lucide-react";
@@ -24,6 +25,7 @@ export type StudioTool =
   | "audio"
   | "agents"
   | "terminal"
+  | "builder"
   | "pipeline"
   | "gallery"
   | "space"
@@ -47,6 +49,7 @@ const CREATE_TOOLS: ToolItem[] = [
 ];
 
 const AI_TOOLS: ToolItem[] = [
+  { id: "builder",   label: "Builder",   icon: Hammer, shortcut: "B" },
   { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "5" },
   { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "6" },
   { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "7" },

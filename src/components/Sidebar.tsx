@@ -84,7 +84,7 @@ function NavItemRow({
   const hasChildren = !!item.children?.length;
   const isChildActive = useMemo(
     () => hasChildren && item.children?.some((c) => isActive(c.href)),
-    [hasChildren, item.children, isActive]
+    [hasChildren, item.children, isActive],
   );
   const groupActive = active || isChildActive;
 
@@ -111,14 +111,15 @@ function NavItemRow({
     <span className="truncate">{item.label}</span>
   ) : null;
 
-  const badge = !collapsed && item.badge ? (
-    <span
-      className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-      style={{ backgroundColor: accent, color: "#0a0b14" }}
-    >
-      {item.badge > 99 ? "99+" : item.badge}
-    </span>
-  ) : null;
+  const badge =
+    !collapsed && item.badge ? (
+      <span
+        className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
+        style={{ backgroundColor: accent, color: "#0a0b14" }}
+      >
+        {item.badge > 99 ? "99+" : item.badge}
+      </span>
+    ) : null;
 
   if (hidden) return null;
 
@@ -197,7 +198,12 @@ function GroupSection({
   if (hidden) return null;
 
   return (
-    <div className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`} style={{ borderColor: group.label === "System" ? `${group.accent}20` : undefined }}>
+    <div
+      className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`}
+      style={{
+        borderColor: group.label === "System" ? `${group.accent}20` : undefined,
+      }}
+    >
       {!collapsed && (
         <button
           onClick={onToggle}
@@ -271,7 +277,9 @@ function GroupSection({
                   aria-label={item.label}
                   className="flex items-center justify-center w-10 h-10 rounded-lg transition-colors hover:opacity-100"
                   style={{
-                    backgroundColor: active ? `${group.accent}20` : "transparent",
+                    backgroundColor: active
+                      ? `${group.accent}20`
+                      : "transparent",
                     color: active ? group.accent : `${group.accent}80`,
                   }}
                 >
@@ -302,13 +310,21 @@ function SidebarContent({
   const { isSignedIn } = useClerkAuth();
   const { user } = useUser();
 
-  const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(() => {
-    const saved = loadJson<Record<string, boolean>>(GROUP_EXPANDED_KEY, {});
-    const defaults = Object.fromEntries(NAV_GROUPS.map((g) => [g.label, true]));
-    return { ...defaults, ...saved };
-  });
-  const [pinned, setPinned] = useState<string[]>(() => loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]));
-  const [hidden, setHidden] = useState<string[]>(() => loadJson(HIDDEN_KEY, []));
+  const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(
+    () => {
+      const saved = loadJson<Record<string, boolean>>(GROUP_EXPANDED_KEY, {});
+      const defaults = Object.fromEntries(
+        NAV_GROUPS.map((g) => [g.label, true]),
+      );
+      return { ...defaults, ...saved };
+    },
+  );
+  const [pinned, setPinned] = useState<string[]>(() =>
+    loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]),
+  );
+  const [hidden, setHidden] = useState<string[]>(() =>
+    loadJson(HIDDEN_KEY, []),
+  );
   const [mode, setMode] = useState<string>(() => {
     if (typeof window === "undefined") return "creator";
     return localStorage.getItem(MODE_KEY) || "creator";
@@ -336,16 +352,18 @@ function SidebarContent({
     (href?: string) => {
       if (!href) return false;
       const [path, query] = href.split("?");
-      const hrefParams = query ? new URLSearchParams(query) : new URLSearchParams();
+      const hrefParams = query
+        ? new URLSearchParams(query)
+        : new URLSearchParams();
       if (query) {
         const searchMatch = Array.from(hrefParams.entries()).every(
-          ([key, value]) => searchParams.get(key) === value
+          ([key, value]) => searchParams.get(key) === value,
         );
         return pathname === path && searchMatch;
       }
       return pathname?.startsWith(path) ?? false;
     },
-    [pathname, searchParams]
+    [pathname, searchParams],
   );
 
   const toggleGroup = (label: string) => {
@@ -358,7 +376,9 @@ function SidebarContent({
 
   const togglePin = (label: string) => {
     setPinned((prev) => {
-      const next = prev.includes(label) ? prev.filter((l) => l !== label) : [label, ...prev];
+      const next = prev.includes(label)
+        ? prev.filter((l) => l !== label)
+        : [label, ...prev];
       saveJson(PINNED_KEY, next);
       return next;
     });
@@ -366,7 +386,9 @@ function SidebarContent({
 
   const toggleHidden = (label: string) => {
     setHidden((prev) => {
-      const next = prev.includes(label) ? prev.filter((l) => l !== label) : [...prev, label];
+      const next = prev.includes(label)
+        ? prev.filter((l) => l !== label)
+        : [...prev, label];
       saveJson(HIDDEN_KEY, next);
       return next;
     });
@@ -395,7 +417,7 @@ function SidebarContent({
     const match = NAV_GROUPS.flatMap((g) => g.items).find(
       (i) =>
         i.label.toLowerCase().includes(aiQuery.toLowerCase()) ||
-        aiQuery.toLowerCase().includes(i.label.toLowerCase())
+        aiQuery.toLowerCase().includes(i.label.toLowerCase()),
     );
     if (match?.href) window.location.href = match.href;
     else window.location.href = `/agents?query=${encodeURIComponent(aiQuery)}`;
@@ -409,14 +431,20 @@ function SidebarContent({
         style={{ borderColor: `${T.borderColor}30` }}
       >
         {onClose && (
-          <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+          <span
+            className="text-xs font-bold uppercase tracking-widest"
+            style={{ color: T.textMuted }}
+          >
             Menu
           </span>
         )}
         {!onClose && (
           <Link href="/dashboard" className="flex items-center gap-2">
             {!collapsed && (
-              <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>
+              <span
+                className="text-xs font-bold uppercase tracking-widest"
+                style={{ color: T.accentColor }}
+              >
                 LiTTree OS
               </span>
             )}
@@ -441,12 +469,20 @@ function SidebarContent({
               style={{ color: T.textMuted }}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             >
-              {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+              {collapsed ? (
+                <ChevronRight size={16} />
+              ) : (
+                <ChevronLeft size={16} />
+              )}
             </button>
           )}
         </div>
         {onClose && (
-          <button onClick={onClose} className="p-1.5 rounded-lg hover:bg-white/10 transition-colors" style={{ color: T.textMuted }}>
+          <button
+            onClick={onClose}
+            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+            style={{ color: T.textMuted }}
+          >
             <X size={16} />
           </button>
         )}
@@ -462,7 +498,10 @@ function SidebarContent({
             href="/profile"
             className="flex items-center gap-3 p-2 rounded-lg transition-colors hover:bg-white/5"
           >
-            <div className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2" style={{ borderColor: T.accentColor }}>
+            <div
+              className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2"
+              style={{ borderColor: T.accentColor }}
+            >
               {user.imageUrl ? (
                 <NextImage
                   src={user.imageUrl}
@@ -476,13 +515,23 @@ function SidebarContent({
                   className="w-full h-full flex items-center justify-center text-sm font-bold"
                   style={{ backgroundColor: T.boxBg, color: T.accentColor }}
                 >
-                  {(user.firstName?.[0] || user.username?.[0] || "?").toUpperCase()}
+                  {(
+                    user.firstName?.[0] ||
+                    user.username?.[0] ||
+                    "?"
+                  ).toUpperCase()}
                 </div>
               )}
             </div>
             <div className="flex-1 min-w-0">
-              <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
-                {profile?.displayName || user.firstName || user.username || "Creator"}
+              <div
+                className="text-sm font-bold truncate"
+                style={{ color: T.textColor }}
+              >
+                {profile?.displayName ||
+                  user.firstName ||
+                  user.username ||
+                  "Creator"}
               </div>
               <div className="text-xs truncate" style={{ color: T.textMuted }}>
                 @{user.username || "litree"}
@@ -492,15 +541,20 @@ function SidebarContent({
         </div>
       )}
 
-      {/* Jarvis / AI assistant */}
+      {/* LiTT / AI assistant */}
       {!collapsed && (
-        <div className="px-3 py-3 border-b" style={{ borderColor: `${T.borderColor}30` }}>
+        <div
+          className="px-3 py-3 border-b"
+          style={{ borderColor: `${T.borderColor}30` }}
+        >
           <form onSubmit={handleJarvisSubmit} className="relative">
             <div
               className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all"
               style={{
                 backgroundColor: T.boxBg,
-                borderColor: jarvisFocused ? T.accentColor : `${T.borderColor}30`,
+                borderColor: jarvisFocused
+                  ? T.accentColor
+                  : `${T.borderColor}30`,
                 color: T.textMuted,
               }}
             >
@@ -510,18 +564,26 @@ function SidebarContent({
                 onChange={(e) => setAiQuery(e.target.value)}
                 onFocus={() => setJarvisFocused(true)}
                 onBlur={() => setJarvisFocused(false)}
-                placeholder="Ask Jarvis..."
+                placeholder="Ask LiTT..."
                 className="bg-transparent border-none outline-none flex-1 min-w-0 text-xs"
                 style={{ color: T.textColor }}
               />
-              <button type="submit" aria-label="Submit Jarvis query" className="p-1 rounded hover:bg-white/10" style={{ color: T.accentColor }}>
+              <button
+                type="submit"
+                aria-label="Submit LiTT query"
+                className="p-1 rounded hover:bg-white/10"
+                style={{ color: T.accentColor }}
+              >
                 <Send size={14} />
               </button>
             </div>
             {jarvisFocused && (
               <div
                 className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border shadow-xl p-2 space-y-1"
-                style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}
+                style={{
+                  backgroundColor: T.boxBg,
+                  borderColor: `${T.borderColor}30`,
+                }}
               >
                 {AI_SUGGESTIONS.slice(0, 4).map((s) => (
                   <button
@@ -544,10 +606,16 @@ function SidebarContent({
       {showPersonalize && !collapsed && (
         <div
           className="px-3 py-3 border-b space-y-3"
-          style={{ borderColor: `${T.borderColor}30`, backgroundColor: `${T.bgColor}60` }}
+          style={{
+            borderColor: `${T.borderColor}30`,
+            backgroundColor: `${T.bgColor}60`,
+          }}
         >
           <div className="space-y-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textMuted }}>
+            <div
+              className="text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: T.textMuted }}
+            >
               Mode
             </div>
             <div className="grid grid-cols-2 gap-1.5">
@@ -557,7 +625,8 @@ function SidebarContent({
                   onClick={() => setCreatorMode(m.value)}
                   className="flex items-center gap-1.5 px-2 py-1.5 rounded text-[10px] font-bold transition-colors"
                   style={{
-                    backgroundColor: mode === m.value ? `${T.accentColor}20` : `${T.boxBg}60`,
+                    backgroundColor:
+                      mode === m.value ? `${T.accentColor}20` : `${T.boxBg}60`,
                     color: mode === m.value ? T.accentColor : T.textMuted,
                     border: `1px solid ${mode === m.value ? T.accentColor : T.borderColor}30`,
                   }}
@@ -569,7 +638,10 @@ function SidebarContent({
             </div>
           </div>
           <div className="space-y-1.5">
-            <div className="text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textMuted }}>
+            <div
+              className="text-[10px] font-bold uppercase tracking-wider"
+              style={{ color: T.textMuted }}
+            >
               Sections
             </div>
             <div className="flex flex-wrap gap-1">
@@ -578,26 +650,41 @@ function SidebarContent({
                   key={g.label}
                   className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold"
                   style={{
-                    backgroundColor: hidden.includes(g.label) ? `${T.borderColor}20` : `${g.accent}20`,
+                    backgroundColor: hidden.includes(g.label)
+                      ? `${T.borderColor}20`
+                      : `${g.accent}20`,
                     border: `1px solid ${hidden.includes(g.label) ? T.borderColor : g.accent}40`,
                   }}
                 >
-                  <span style={{ color: hidden.includes(g.label) ? T.textMuted : g.accent }}>
+                  <span
+                    style={{
+                      color: hidden.includes(g.label) ? T.textMuted : g.accent,
+                    }}
+                  >
                     {g.label}
                   </span>
                   <button
                     onClick={() => togglePin(g.label)}
                     className="p-0.5 rounded hover:bg-white/10"
                     title={pinned.includes(g.label) ? "Unpin" : "Pin to top"}
-                    style={{ color: pinned.includes(g.label) ? g.accent : T.textMuted }}
+                    style={{
+                      color: pinned.includes(g.label) ? g.accent : T.textMuted,
+                    }}
                   >
-                    <Pin size={10} style={{ fill: pinned.includes(g.label) ? g.accent : "none" }} />
+                    <Pin
+                      size={10}
+                      style={{
+                        fill: pinned.includes(g.label) ? g.accent : "none",
+                      }}
+                    />
                   </button>
                   <button
                     onClick={() => toggleHidden(g.label)}
                     className="p-0.5 rounded hover:bg-white/10"
                     title={hidden.includes(g.label) ? "Show" : "Hide"}
-                    style={{ color: hidden.includes(g.label) ? g.accent : T.textMuted }}
+                    style={{
+                      color: hidden.includes(g.label) ? g.accent : T.textMuted,
+                    }}
                   >
                     <EyeOff size={10} />
                   </button>
@@ -626,26 +713,45 @@ function SidebarContent({
       </nav>
 
       {/* Footer */}
-      <div className="px-3 py-3 border-t" style={{ borderColor: `${T.borderColor}30` }}>
+      <div
+        className="px-3 py-3 border-t"
+        style={{ borderColor: `${T.borderColor}30` }}
+      >
         {!collapsed && (
           <div className="space-y-1.5">
             <div
               className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
-              style={{ backgroundColor: T.bgColor + "30", border: `1px solid ${T.borderColor}20` }}
+              style={{
+                backgroundColor: T.bgColor + "30",
+                border: `1px solid ${T.borderColor}20`,
+              }}
             >
-              <span className="flex items-center gap-1" style={{ color: "#fbbf24" }}>
+              <span
+                className="flex items-center gap-1"
+                style={{ color: "#fbbf24" }}
+              >
                 <Coins size={10} /> Balance
               </span>
-              <span style={{ color: T.textColor }}>{balance.toLocaleString()} LBC</span>
+              <span style={{ color: T.textColor }}>
+                {balance.toLocaleString()} LBC
+              </span>
             </div>
             <div
               className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
-              style={{ backgroundColor: T.bgColor + "30", border: `1px solid ${T.borderColor}20` }}
+              style={{
+                backgroundColor: T.bgColor + "30",
+                border: `1px solid ${T.borderColor}20`,
+              }}
             >
-              <span className="flex items-center gap-1" style={{ color: T.accentColor }}>
+              <span
+                className="flex items-center gap-1"
+                style={{ color: T.accentColor }}
+              >
                 <CrownIcon size={10} /> Plan
               </span>
-              <span style={{ color: T.textColor }}>{plan.charAt(0).toUpperCase() + plan.slice(1)}</span>
+              <span style={{ color: T.textColor }}>
+                {plan.charAt(0).toUpperCase() + plan.slice(1)}
+              </span>
             </div>
           </div>
         )}
@@ -654,7 +760,11 @@ function SidebarContent({
   );
 }
 
-export default function Sidebar({ open = false, onClose, collapsed: externalCollapsed }: SidebarProps) {
+export default function Sidebar({
+  open = false,
+  onClose,
+  collapsed: externalCollapsed,
+}: SidebarProps) {
   const { resolvedColors: T } = useTheme();
   const [internalCollapsed, setInternalCollapsed] = useState(() => {
     if (typeof window === "undefined") return false;
@@ -666,7 +776,8 @@ export default function Sidebar({ open = false, onClose, collapsed: externalColl
   const toggleCollapse = useCallback(() => {
     setInternalCollapsed((v) => {
       const next = !v;
-      if (typeof window !== "undefined") localStorage.setItem(COLLAPSED_KEY, String(next));
+      if (typeof window !== "undefined")
+        localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;
     });
   }, []);
@@ -684,12 +795,18 @@ export default function Sidebar({ open = false, onClose, collapsed: externalColl
         }`}
         style={sidebarBase}
       >
-        <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
+        <SidebarContent
+          collapsed={collapsed}
+          onToggleCollapse={toggleCollapse}
+        />
       </aside>
 
       {open && (
         <div className="fixed inset-0 z-50 md:hidden flex">
-          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={onClose} />
+          <div
+            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
+            onClick={onClose}
+          />
           <aside
             className="relative flex flex-col w-80 h-full border-r shadow-2xl"
             style={sidebarBase}

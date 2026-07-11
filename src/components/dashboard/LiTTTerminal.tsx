@@ -251,7 +251,7 @@ function buildBootLogs(): LogEntry[] {
   return bootLogs;
 }
 
-export default function JarvisTerminal() {
+export default function LiTTTerminal() {
   const { resolvedColors: T } = useTheme();
   const [logs, setLogs] = useState<LogEntry[]>(buildBootLogs);
   const [input, setInput] = useState("");
@@ -758,7 +758,7 @@ export default function JarvisTerminal() {
               type: "system",
               text: "Scanning codebase... this may take a moment.",
             });
-            const res = await fetch("/api/jarvis/scan");
+            const res = await fetch("/api/litt/scan");
             if (!res.ok) throw new Error("Scan failed");
             const data = await res.json();
             const report = [

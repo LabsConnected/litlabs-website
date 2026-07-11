@@ -20,7 +20,7 @@ import {
   FilePlus,
   RotateCcw,
 } from "lucide-react";
-import type { JarvisContext, JarvisAction, JarvisThinkResponse } from "@/lib/jarvis-context";
+import type { JarvisContext, JarvisAction, JarvisThinkResponse } from "@/lib/litt-context";
 
 const slashCommands = [
   { label: "/scan", desc: "Scan project and terminal state" },
@@ -49,7 +49,7 @@ type Message = {
   loading?: boolean;
 };
 
-interface JarvisAssistantPanelProps {
+interface LiTTAssistantPanelProps {
   context: JarvisContext;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
@@ -58,14 +58,14 @@ interface JarvisAssistantPanelProps {
   onDeploy?: () => void;
 }
 
-export function JarvisAssistantPanel({
+export function LiTTAssistantPanel({
   context,
   onInsertCommand,
   onRunCommand,
   onCreateFile,
   onStartAgent,
   onDeploy,
-}: JarvisAssistantPanelProps) {
+}: LiTTAssistantPanelProps) {
   const [prompt, setPrompt] = useState("");
   const [messages, setMessages] = useState<Message[]>([
     {
@@ -97,7 +97,7 @@ export function JarvisAssistantPanel({
     setShowSlash(false);
 
     try {
-      const res = await fetch("/api/jarvis/think", {
+      const res = await fetch("/api/litt/think", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: text, context }),
@@ -119,7 +119,7 @@ export function JarvisAssistantPanel({
         const next = [...prev];
         const last = next[next.length - 1];
         if (last?.role === "jarvis" && last.loading) {
-          last.text = err instanceof Error ? err.message : "Failed to reach Jarvis.";
+          last.text = err instanceof Error ? err.message : "Failed to reach LiTT.";
           last.loading = false;
         }
         return next;
@@ -184,7 +184,7 @@ export function JarvisAssistantPanel({
             <Wrench className="h-4 w-4 text-orange-400" />
           </div>
           <div>
-            <h2 className="text-lg font-bold">Jarvis Command Center</h2>
+            <h2 className="text-lg font-bold">LiTT Command Center</h2>
             <p className="text-xs text-neutral-500">AI connected to terminal, files, logs, agents</p>
           </div>
         </div>
@@ -220,12 +220,12 @@ export function JarvisAssistantPanel({
             }`}
           >
             <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {msg.role === "user" ? "You" : "Jarvis"}
+              {msg.role === "user" ? "You" : "LiTT"}
             </div>
             {msg.loading ? (
               <div className="flex items-center gap-2 text-neutral-400">
                 <div className="h-4 w-4 animate-spin rounded-full border-2 border-orange-500 border-t-transparent" />
-                Jarvis is thinking...
+                LiTT is thinking...
               </div>
             ) : (
               <div className="prose prose-invert prose-sm max-w-none">
@@ -285,7 +285,7 @@ export function JarvisAssistantPanel({
               setShowSlash(e.target.value.startsWith("/"));
             }}
             onKeyDown={handleKeyDown}
-            placeholder="Ask Jarvis or type / for commands..."
+            placeholder="Ask LiTT or type / for commands..."
             className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-orange-600"
           />
           <button

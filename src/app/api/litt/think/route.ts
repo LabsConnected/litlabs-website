@@ -7,7 +7,7 @@ import {
   JarvisContext,
   JarvisAction,
   parseJarvisActions,
-} from "@/lib/jarvis-context";
+} from "@/lib/litt-context";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -24,14 +24,14 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
-    const context = collectJarvisContext(contextRaw || { route: "/jarvis" });
+    const context = collectJarvisContext(contextRaw || { route: "/litt" });
     const prompt = buildJarvisPrompt(message, context);
 
     const messages = [
       {
         role: "system" as const,
         content:
-          "You are Jarvis, the AI operating layer for LiTTree LabStudios. " +
+          "You are LiTT, the AI operating layer for LiTTree LabStudios. " +
           "You are connected to a real terminal, file explorer, logs, and agent runner. " +
           "Inspect the provided context, diagnose issues, and give prioritized fixes with commands. " +
           "When you include a command, wrap it in a bash code block. " +

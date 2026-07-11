@@ -24,7 +24,7 @@ export type IconComponent = React.ComponentType<{
 export const APPS = [
   {
     id: "jarvis",
-    label: "Jarvis",
+    label: "LiTT",
     icon: Terminal,
     color: "#ff00a0",
     href: "/dashboard?app=jarvis",

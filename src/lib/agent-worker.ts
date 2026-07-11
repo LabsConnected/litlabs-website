@@ -1,6 +1,6 @@
 import { createClient, SupabaseClient } from "@supabase/supabase-js";
 import { logAgentEvent } from "@/lib/agent-logger";
-import { jarvis } from "@/lib/jarvis";
+import { jarvis } from "@/lib/litt";
 import { OpenRouterExecutor } from "@/lib/llm-executor";
 
 export interface WorkerConfig {

@@ -8,7 +8,7 @@ export type ChatMessage = {
 export async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:3b") {
   const baseUrl = process.env.JARVIS_URL || process.env.NEXT_PUBLIC_JARVIS_URL || "http://localhost:11434";
   if (!baseUrl || baseUrl === "http://localhost:11434") {
-    throw new Error("Ollama backend is not configured. Set JARVIS_URL to enable Jarvis.");
+    throw new Error("Ollama backend is not configured. Set JARVIS_URL to enable LiTT.");
   }
 
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {

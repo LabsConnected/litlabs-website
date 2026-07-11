@@ -6,7 +6,7 @@ import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { resolve, normalize } from "path";
-import { mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleJarvisCommand } from "./jarvis-ai";
@@ -44,7 +44,24 @@ interface Session {
 const sessions = new Map<string, Session>();
 
 app.get("/health", (_req, res) => {
-  res.json({ ok: true, sessions: sessions.size, docker: USE_DOCKER });
+  const entries = existsSync(WORKSPACE_ROOT) ? readdirSync(WORKSPACE_ROOT, { withFileTypes: true }) : [];
+  const repoRoot = entries.find((entry) => entry.isDirectory())?.name;
+  const workspace = repoRoot ? resolve(WORKSPACE_ROOT, repoRoot) : WORKSPACE_ROOT;
+  res.json({
+    ok: true,
+    sessions: sessions.size,
+    docker: USE_DOCKER,
+    clerk: Boolean(process.env.CLERK_SECRET_KEY),
+    supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
+    shells: { ubuntu: process.platform !== "win32", powershell: process.platform === "win32" },
+    workspace: {
+      root: WORKSPACE_ROOT,
+      exists: existsSync(WORKSPACE_ROOT),
+      repoCloned: existsSync(resolve(workspace, ".git")),
+      packageJson: existsSync(resolve(workspace, "package.json")),
+      nodeModules: existsSync(resolve(workspace, "node_modules")),
+    },
+  });
 });
 
 function getUserWorkspace(userId: string) {

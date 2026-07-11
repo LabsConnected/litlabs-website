@@ -20,8 +20,8 @@ import {
 
 const navItems = [
   { label: "Dashboard", icon: LayoutDashboard, href: "/dashboard" },
-  { label: "Jarvis Terminal", icon: Terminal, href: "/jarvis" },
-  { label: "Files", icon: FolderOpen, href: "/jarvis?tab=files" },
+  { label: "LiTT Terminal", icon: Terminal, href: "/litt" },
+  { label: "Files", icon: FolderOpen, href: "/litt?tab=files" },
   { label: "Agents", icon: Bot, href: "/agents" },
   { label: "Deployments", icon: Rocket, href: "/deployments" },
   { label: "API Keys", icon: Key, href: "/settings?tab=cli" },

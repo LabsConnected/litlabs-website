@@ -2,7 +2,7 @@
 
 import { useEffect, useState, useRef, useCallback } from "react";
 import { TerminalPanel, TerminalPanelHandle } from "./TerminalPanel";
-import { JarvisAssistantPanel } from "./JarvisAssistantPanel";
+import { LiTTAssistantPanel } from "./LiTTAssistantPanel";
 import { LogsPanel } from "./LogsPanel";
 import { CommandHistory } from "./CommandHistory";
 import { FileExplorer } from "./FileExplorer";
@@ -10,7 +10,7 @@ import { CodeEditor } from "./CodeEditor";
 import { DeployButton } from "./DeployButton";
 import { LeftSidebar } from "./LeftSidebar";
 import { Cpu, Activity, Zap, Menu, RefreshCw, AlertTriangle } from "lucide-react";
-import { JarvisContext } from "@/lib/jarvis-context";
+import { JarvisContext } from "@/lib/litt-context";
 
 const AGENTS = [
   { name: "JARVIS", status: "online" as const },
@@ -21,7 +21,7 @@ const AGENTS = [
   { name: "Data Slayer", status: "idle" as const },
 ];
 
-export function JarvisTerminalPage() {
+export function LiTTTerminalPage() {
   const [activeTab, setActiveTab] = useState<"terminal" | "agents" | "logs">("terminal");
   const [logs, setLogs] = useState<string[]>([
     "[SYSTEM] LiTTree OS Terminal initialized",
@@ -48,7 +48,7 @@ export function JarvisTerminalPage() {
 
   const loadFileTree = useCallback(async () => {
     try {
-      const res = await fetch("/api/jarvis/scan");
+      const res = await fetch("/api/litt/scan");
       const data = await res.json();
       if (Array.isArray(data.files)) {
         setFileTree(data.files.slice(0, 50));
@@ -77,7 +77,7 @@ export function JarvisTerminalPage() {
   }, [loadFileTree]);
 
   const context: JarvisContext = {
-    route: "/jarvis",
+    route: "/litt",
     terminalOutput,
     commandHistory: commands,
     logs,
@@ -115,7 +115,7 @@ export function JarvisTerminalPage() {
   };
 
   const handleDeploy = () => {
-    addLog("[DEPLOY] Deployment requested via Jarvis");
+    addLog("[DEPLOY] Deployment requested via LiTT");
   };
 
   const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
@@ -146,7 +146,7 @@ export function JarvisTerminalPage() {
                 <div className="text-[10px] font-black uppercase tracking-[0.35em] text-orange-500">
                   LiTTree LabStudios
                 </div>
-                <h1 className="text-2xl font-bold lg:text-3xl">Jarvis Terminal</h1>
+                <h1 className="text-2xl font-bold lg:text-3xl">LiTT Terminal</h1>
                 <p className="text-sm text-neutral-400">
                   AI Dev OS • Build, Ship, Scale.
                 </p>
@@ -239,7 +239,7 @@ export function JarvisTerminalPage() {
         </section>
 
         <aside className="hidden flex-col border-l border-neutral-900 bg-[#080808] p-4 lg:flex">
-          <JarvisAssistantPanel
+          <LiTTAssistantPanel
             context={context}
             onInsertCommand={handleInsertCommand}
             onRunCommand={handleRunCommand}

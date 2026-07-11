@@ -6,7 +6,7 @@ export async function askJarvis(message: string, model = "llama3.2:3b") {
   });
 
   if (!res.ok) {
-    throw new Error(`Jarvis failed: ${res.status}`);
+    throw new Error(`LiTT failed: ${res.status}`);
   }
 
   return res.json();

@@ -41,7 +41,7 @@ export type JarvisThinkResponse = {
 
 export function buildJarvisPrompt(message: string, context: JarvisContext): string {
   return `
-You are Jarvis inside LiTTree OS.
+You are LiTT inside LiTTree OS.
 
 You are not a normal chatbot.
 You are an AI developer command center.

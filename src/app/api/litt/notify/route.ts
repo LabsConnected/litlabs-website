@@ -1,9 +1,9 @@
-// Jarvis Notification API
+// LiTT Notification API
 // Triggers notifications to Discord, webhooks, etc.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { jarvis, NotificationPayload } from "@/lib/jarvis";
+import { jarvis, NotificationPayload } from "@/lib/litt";
 
 // Admin user ID
 const ADMIN_USER_ID = process.env.ADMIN_CLERK_ID || "user_litbit";
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
       );
     }
 
-    // Ensure Jarvis is initialized
+    // Ensure LiTT is initialized
     if (typeof process.env.DISCORD_WEBHOOK_URL === "string") {
       jarvis.init({
         discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,

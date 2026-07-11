@@ -98,7 +98,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.6,
     },
     {
-      url: `${base}/jarvis`,
+      url: `${base}/litt`,
       lastModified: now,
       changeFrequency: "weekly",
       priority: 0.6,

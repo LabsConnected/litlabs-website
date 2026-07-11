@@ -3,7 +3,7 @@
 import { useState } from "react";
 import { askJarvis } from "@/lib/ai/client";
 
-export default function JarvisChatBox() {
+export default function LiTTChatBox() {
   const [message, setMessage] = useState("");
   const [reply, setReply] = useState("");
   const [loading, setLoading] = useState(false);
@@ -18,7 +18,7 @@ export default function JarvisChatBox() {
       const data = await askJarvis(message);
       setReply(data.reply || "No reply returned.");
     } catch (err) {
-      setReply(err instanceof Error ? err.message : "Jarvis failed.");
+      setReply(err instanceof Error ? err.message : "LiTT failed.");
     } finally {
       setLoading(false);
     }
@@ -27,7 +27,7 @@ export default function JarvisChatBox() {
   return (
     <section className="rounded-2xl border border-white/10 bg-zinc-950/80 p-4 shadow-2xl space-y-3">
       <div>
-        <h2 className="text-xl font-black">🤖 Jarvis Gateway</h2>
+        <h2 className="text-xl font-black">🤖 LiTT Gateway</h2>
         <p className="text-sm text-zinc-400">
           Local AI powered by Ollama through LiTTree&apos;s unified AI route.
         </p>
@@ -38,7 +38,7 @@ export default function JarvisChatBox() {
         rows={5}
         value={message}
         onChange={(e) => setMessage(e.target.value)}
-        placeholder="Ask Jarvis anything..."
+        placeholder="Ask LiTT anything..."
       />
 
       <button
@@ -46,7 +46,7 @@ export default function JarvisChatBox() {
         disabled={loading}
         className="rounded-xl bg-orange-500 px-4 py-2 font-bold text-black disabled:opacity-50"
       >
-        {loading ? "Thinking..." : "Ask Jarvis"}
+        {loading ? "Thinking..." : "Ask LiTT"}
       </button>
 
       {reply && (

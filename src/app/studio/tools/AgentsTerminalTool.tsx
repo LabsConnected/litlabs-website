@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
+import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 type AgentProfile = (typeof AGENTS)[keyof typeof AGENTS] & {
@@ -416,7 +417,9 @@ export default function AgentsTerminalTool() {
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col lg:flex-row overflow-hidden select-none relative">
+    <div className="flex h-full min-h-0 flex-col gap-2 overflow-hidden select-none relative">
+      <SystemTopologyPanel compact />
+      <div className="flex flex-1 min-h-0 flex-col lg:flex-row overflow-hidden relative">
       {/* CRT overlay */}
       {crtEnabled && (
         <div
@@ -1219,6 +1222,7 @@ export default function AgentsTerminalTool() {
             </div>
           </div>
         )}
+      </div>
       </div>
     </div>
   );

@@ -24,7 +24,7 @@ export async function POST(req: NextRequest) {
       {
         role: "system" as const,
         content:
-          "You are Jarvis, the AI operating layer for LiTTree LabStudios. Be direct, useful, and practical.",
+          "You are LiTT, the AI operating layer for LiTTree LabStudios. Be direct, useful, and practical.",
       },
       { role: "user" as const, content: message },
     ];

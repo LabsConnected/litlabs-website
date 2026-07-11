@@ -31,7 +31,7 @@ export interface NotificationConfig {
   resendApiKey?: string;
 }
 
-class Jarvis {
+class LiTT {
   private config: NotificationConfig;
   private initialized = false;
 
@@ -46,7 +46,7 @@ class Jarvis {
 
   async notify(payload: NotificationPayload): Promise<boolean> {
     if (!this.initialized) {
-      // Jarvis not initialized — using default config
+      // LiTT not initialized — using default config
     }
 
     const channels = payload.channels || ["discord"];
@@ -214,7 +214,7 @@ class Jarvis {
           Authorization: `Bearer ${this.config.resendApiKey}`,
         },
         body: JSON.stringify({
-          from: "Jarvis <notifications@litlabs.net>",
+          from: "LiTT <notifications@litlabs.net>",
           to: this.config.adminEmail,
           subject: `[${payload.priority.toUpperCase()}] ${payload.title}`,
           html: `
@@ -328,7 +328,7 @@ class Jarvis {
   }
 }
 
-export const jarvis = new Jarvis();
+export const jarvis = new LiTT();
 
 if (typeof window === "undefined") {
   jarvis.init({

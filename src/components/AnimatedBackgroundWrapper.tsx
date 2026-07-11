@@ -18,7 +18,7 @@ const SHOW_BACKGROUND_PATHS = [
   "/library",
 ];
 
-const HIDE_BACKGROUND_PATHS = ["/jarvis", "/admin/terminal", "/code", "/games"];
+const HIDE_BACKGROUND_PATHS = ["/litt", "/admin/terminal", "/code", "/games"];
 
 export default function AnimatedBackgroundWrapper() {
   const pathname = usePathname();

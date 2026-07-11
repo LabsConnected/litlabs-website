@@ -36,7 +36,7 @@ const SocialPageContent = dynamic(
     ),
   },
 );
-const JarvisTerminal = dynamic(() => import("./JarvisTerminal"), {
+const LiTTTerminal = dynamic(() => import("./LiTTTerminal"), {
   ssr: false,
   loading: () => (
     <div className="flex-1 min-h-0 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
@@ -489,7 +489,7 @@ export function CenterStage({
     case "jarvis":
       return (
         <div className="h-full flex flex-col min-h-0">
-          <JarvisTerminal />
+          <LiTTTerminal />
         </div>
       );
     case "tools": {

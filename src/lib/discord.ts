@@ -1,5 +1,5 @@
 /**
- * Jarvis Discord Integration System
+ * LiTT Discord Integration System
  * Multi-channel webhook notifications for events
  */
 
@@ -72,10 +72,10 @@ export async function sendDiscordMessage(
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         ...message,
-        username: message.username || "Jarvis",
+        username: message.username || "LiTT",
         avatar_url:
           message.avatar_url ||
-          `${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/jarvis-avatar.png`,
+          `${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/litt-avatar.png`,
       }),
     });
 
@@ -237,7 +237,7 @@ export async function notifyDeployment(
 
   await sendDiscordMessage("agents", {
     username: "LiTBiT Deploy",
-    avatar_url: `${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/jarvis-avatar.png`,
+    avatar_url: `${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}/litt-avatar.png`,
     embeds: [
       {
         title: `${emojis[status]} Deploy ${status.charAt(0).toUpperCase() + status.slice(1)}`,
