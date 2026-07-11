@@ -7,13 +7,21 @@ const eslintConfig = defineConfig([
   ...nextTs,
   // Override default ignores of eslint-config-next.
   globalIgnores([
-    // Default ignores of eslint-config-next:
+    // Dependencies and build output
+    "node_modules/**",
     ".next/**",
     "out/**",
     "build/**",
+    "dist/**",
     "next-env.d.ts",
-    // Local Chrome binary
+    // Local binaries and heavy folders
     "chrome/**",
+    "terminal-server/**",
+    "Zoo-Code/**",
+    // Generated / copied
+    "public/**",
+    "*.lock",
+    "pnpm-lock.yaml",
   ]),
 ]);
 
