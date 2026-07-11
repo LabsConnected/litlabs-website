@@ -1,5 +1,6 @@
 "use client";
 import React, { useState, useCallback } from "react";
+import { useSelfHeal } from "@/hooks/useSelfHeal";
 
 interface GeneratedImage {
   url: string;
@@ -75,6 +76,14 @@ export default function NeuralImagingStudio() {
   const [generatedImages, setGeneratedImages] = useState<GeneratedImage[]>([]);
   const [previewImage, setPreviewImage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [remediation, setRemediation] = useState<{
+    action: string;
+    autoFixable: boolean;
+    fallbackProvider?: string;
+    suggestedPrompt?: string;
+  } | null>(null);
+
+  const { validate, validating } = useSelfHeal();
 
   // Use useCallback for stable handler
   const handlePromptChange = useCallback(
@@ -96,6 +105,7 @@ export default function NeuralImagingStudio() {
 
     setIsGenerating(true);
     setError(null);
+    setRemediation(null);
 
     try {
       const response = await fetch("/api/studio/generate", {
@@ -116,8 +126,25 @@ export default function NeuralImagingStudio() {
 
       const data = await response.json();
       if (data.images && data.images.length > 0) {
+        const firstImage = data.images[0];
+        const validation = await validate("image", {
+          url: firstImage.url,
+          prompt: firstImage.prompt,
+          provider: firstImage.provider,
+        });
+
+        if (!validation.ok && validation.remediation) {
+          setRemediation(validation.remediation);
+          if (validation.remediation.fallbackProvider) {
+            setSelectedProvider(validation.remediation.fallbackProvider);
+          }
+          if (validation.remediation.suggestedPrompt) {
+            setPrompt(validation.remediation.suggestedPrompt);
+          }
+        }
+
         setGeneratedImages(data.images);
-        setPreviewImage(data.images[0]?.url || null);
+        setPreviewImage(firstImage?.url || null);
       } else {
         throw new Error("No images returned");
       }
@@ -163,6 +190,28 @@ export default function NeuralImagingStudio() {
       {error && (
         <div className="bg-red-500/20 border border-red-500 rounded-xl p-3 text-red-400 text-sm">
           ⚠️ {error}
+        </div>
+      )}
+
+      {validating && (
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-xl p-3 text-blue-300 text-sm flex items-center gap-2">
+          <span className="animate-spin">🔍</span>
+          LiTT is checking the output…
+        </div>
+      )}
+
+      {remediation && (
+        <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl p-3 text-amber-200 text-sm">
+          <div className="font-semibold mb-1">⚠️ Output issue detected</div>
+          <div className="mb-2">{remediation.action}</div>
+          {remediation.autoFixable && (
+            <button
+              onClick={handleGenerate}
+              className="px-3 py-1.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-xs font-semibold transition"
+            >
+              Retry with fix
+            </button>
+          )}
         </div>
       )}
 
