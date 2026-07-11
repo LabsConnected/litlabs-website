@@ -7,6 +7,8 @@ import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleTagManager } from "@next/third-parties/google";
+import { Analytics } from "@vercel/analytics/react";
+import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./globals.css";
 
 export const dynamic = "force-dynamic";
@@ -168,6 +170,8 @@ export default function RootLayout({
         ) : (
           shell
         )}
+        <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );

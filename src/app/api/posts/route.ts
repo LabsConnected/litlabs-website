@@ -180,7 +180,7 @@ async function postHandler(req: NextRequest) {
 
       // Create initial wallet
       await sb.from("wallets").insert({
-        user_id: user.id,
+        user_id: user!.id,
         balance: 500,
         lifetime_earned: 500,
       });
@@ -189,7 +189,7 @@ async function postHandler(req: NextRequest) {
     const { data: post, error } = await sb
       .from("posts")
       .insert({
-        user_id: user.id,
+        user_id: user!.id,
         content: body.content.trim(),
         media_urls: body.media_urls || [],
       })

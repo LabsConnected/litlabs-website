@@ -21,19 +21,17 @@ interface VersionHistoryProps {
 
 export default function VersionHistory({ currentData, onRestore, onSave }: VersionHistoryProps) {
   const { resolvedColors: T } = useTheme();
-  const [versions, setVersions] = useState<Version[]>([]);
+  const [versions, setVersions] = useState<Version[]>(() => {
+    try {
+      const saved = localStorage.getItem("versionHistory");
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
   const [showHistory, setShowHistory] = useState(false);
   const [saveName, setSaveName] = useState("");
   const [saveDescription, setSaveDescription] = useState("");
-
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem("versionHistory");
-      if (saved) {
-        setVersions(JSON.parse(saved));
-      }
-    } catch {}
-  }, []);
 
   useEffect(() => {
     localStorage.setItem("versionHistory", JSON.stringify(versions));

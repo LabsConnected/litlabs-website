@@ -27,7 +27,14 @@ export default clerkMiddleware(async (auth, req) => {
     return NextResponse.next();
   }
 
-  const { userId } = await auth();
+  let userId: string | null = null;
+  try {
+    const authResult = await auth();
+    userId = authResult.userId;
+  } catch (error) {
+    // Clerk unreachable — allow request through rather than crashing
+    console.error("Clerk auth error:", error);
+  }
 
   const response = NextResponse.next();
 

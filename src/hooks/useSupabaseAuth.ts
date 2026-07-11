@@ -23,7 +23,7 @@ export function useSupabaseAuthHook() {
   useEffect(() => {
     const client = getSupabaseClient();
     if (!client) {
-      setLoading(false);
+      setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect -- early exit for missing config
       return;
     }
 

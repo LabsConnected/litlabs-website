@@ -27,18 +27,16 @@ export default function PromptComposer({
   placeholder = "Describe what you want to create..."
 }: PromptComposerProps) {
   const { resolvedColors: T } = useTheme();
-  const [history, setHistory] = useState<PromptHistory[]>([]);
-  const [showHistory, setShowHistory] = useState(false);
-  const [isEnhancing, setIsEnhancing] = useState(false);
-
-  useEffect(() => {
+  const [history, setHistory] = useState<PromptHistory[]>(() => {
     try {
       const saved = localStorage.getItem("promptHistory");
-      if (saved) {
-        setHistory(JSON.parse(saved));
-      }
-    } catch {}
-  }, []);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+  const [showHistory, setShowHistory] = useState(false);
+  const [isEnhancing, setIsEnhancing] = useState(false);
 
   useEffect(() => {
     localStorage.setItem("promptHistory", JSON.stringify(history));

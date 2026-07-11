@@ -114,7 +114,7 @@ export async function POST(request: Request) {
       },
       { status: 201 },
     );
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("Critical Gateway Router Exception:", error);
     return NextResponse.json(
       {

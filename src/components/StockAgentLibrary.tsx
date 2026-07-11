@@ -170,7 +170,7 @@ const STOCK_AGENTS: StockAgent[] = [
   },
 ];
 
-const ICONS: Record<string, any> = {
+const ICONS: Record<string, typeof Sparkles> = {
   brain: Sparkles,
   sparkles: Sparkles,
   code: Code,

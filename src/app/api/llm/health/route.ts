@@ -6,20 +6,25 @@ import { llmHealth, DEFAULT_MODELS } from "@/lib/llm";
 export const runtime = "nodejs";
 
 export async function GET() {
-  const health = llmHealth();
-  // Build list of free models available (no key required = truly free)
-  const freeModels = [
-    { id: "openrouter-qwen", name: "Qwen 2.5 Coder", provider: "OpenRouter", task: "code" },
-    { id: "openrouter-deepseek", name: "DeepSeek Chat", provider: "OpenRouter", task: "chat" },
-    { id: "openrouter-mistral", name: "Mistral Small 3.2", provider: "OpenRouter", task: "general" },
-    { id: "openrouter-llama", name: "Llama 3.3 70B", provider: "OpenRouter", task: "general" },
-    { id: "openrouter-trinity", name: "Trinity Large", provider: "OpenRouter", task: "general" },
-  ];
-  return NextResponse.json({
-    ...health,
-    models: DEFAULT_MODELS,
-    freeModels,
-    hasGemini: health.gemini.available,
-    hasOpenRouter: health.openrouter.available,
-  });
+  try {
+    const health = llmHealth();
+    // Build list of free models available (no key required = truly free)
+    const freeModels = [
+      { id: "openrouter-qwen", name: "Qwen 2.5 Coder", provider: "OpenRouter", task: "code" },
+      { id: "openrouter-deepseek", name: "DeepSeek Chat", provider: "OpenRouter", task: "chat" },
+      { id: "openrouter-mistral", name: "Mistral Small 3.2", provider: "OpenRouter", task: "general" },
+      { id: "openrouter-llama", name: "Llama 3.3 70B", provider: "OpenRouter", task: "general" },
+      { id: "openrouter-trinity", name: "Trinity Large", provider: "OpenRouter", task: "general" },
+    ];
+    return NextResponse.json({
+      ...health,
+      models: DEFAULT_MODELS,
+      freeModels,
+      hasGemini: health.gemini.available,
+      hasOpenRouter: health.openrouter.available,
+    });
+  } catch (error) {
+    console.error("LLM health check error:", error);
+    return NextResponse.json({ error: "Health check failed" }, { status: 500 });
+  }
 }

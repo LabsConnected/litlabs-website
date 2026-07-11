@@ -4,14 +4,11 @@
   "private": true,
   "packageManager": "pnpm@9.15.0",
   "scripts": {
-    "dev": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --webpack",
-    "dev:turbo": "cross-env NODE_OPTIONS=--max-old-space-size=4096 next dev --turbo",
+    "dev": "next dev --turbo",
+    "dev:webpack": "next dev --webpack",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint",
-    "pages:build": "npx @cloudflare/next-on-pages@1",
-    "pages:deploy": "npm run pages:build && npx wrangler pages deploy .vercel/output/static",
-    "pages:dev": "npx wrangler pages dev .vercel/output/static --compatibility-flags=nodejs_compat"
+    "lint": "eslint"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.7",
@@ -26,6 +23,8 @@
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.106.2",
     "@usejarvis/brain": "^0.8.0",
+    "@vercel/analytics": "^2.0.1",
+    "@vercel/speed-insights": "^2.0.0",
     "ai": "^7.0.14",
     "bcryptjs": "^3.0.3",
     "jose": "^6.2.3",
@@ -33,6 +32,7 @@
     "keytar": "^7.9.0",
     "lucide-react": "^1.17.0",
     "next": "^16.2.9",
+    "prismjs": "^1.30.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
@@ -42,12 +42,11 @@
     "svix": "^1.95.1"
   },
   "devDependencies": {
-    "@netlify/plugin-nextjs": "^5",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
+    "@types/prismjs": "^1.26.6",
     "@types/react": "^19",
     "@types/react-dom": "^19",
-    "cross-env": "^10.1.0",
     "eslint": "^9",
     "eslint-config-next": "16.2.6",
     "tailwindcss": "^4",

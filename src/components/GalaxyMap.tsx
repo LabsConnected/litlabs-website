@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Maximize2, Minus, Move, Plus, RotateCw, Search, ZoomIn, ZoomOut } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
@@ -47,24 +47,7 @@ export default function GalaxyMap({
 
   const displayNodes = useMemo(() => nodes.length ? nodes : DEFAULT_NODES, [nodes]);
 
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const wrapper = wrapperRef.current;
-    if (!canvas || !wrapper) return;
-    const resize = () => {
-      canvas.width = wrapper.clientWidth * window.devicePixelRatio;
-      canvas.height = wrapper.clientHeight * window.devicePixelRatio;
-      canvas.style.width = `${wrapper.clientWidth}px`;
-      canvas.style.height = `${wrapper.clientHeight}px`;
-      draw();
-    };
-    const ro = new ResizeObserver(resize);
-    ro.observe(wrapper);
-    resize();
-    return () => ro.disconnect();
-  }, []);
-
-  const draw = () => {
+  const draw = useCallback(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
@@ -156,7 +139,24 @@ export default function GalaxyMap({
     });
 
     ctx.restore();
-  };
+  }, [T, displayNodes, offset.x, offset.y, zoom, rotation]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const wrapper = wrapperRef.current;
+    if (!canvas || !wrapper) return;
+    const resize = () => {
+      canvas.width = wrapper.clientWidth * window.devicePixelRatio;
+      canvas.height = wrapper.clientHeight * window.devicePixelRatio;
+      canvas.style.width = `${wrapper.clientWidth}px`;
+      canvas.style.height = `${wrapper.clientHeight}px`;
+      draw();
+    };
+    const ro = new ResizeObserver(resize);
+    ro.observe(wrapper);
+    resize();
+    return () => ro.disconnect();
+  }, [draw]);
 
   useEffect(() => {
     let raf = 0;

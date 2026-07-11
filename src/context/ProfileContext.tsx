@@ -131,7 +131,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   // Hydrate from localStorage after mount
   useEffect(() => {
     const stored = loadLocal();
-    setProfile(stored);
+    setProfile(stored); // eslint-disable-line react-hooks/set-state-in-effect -- valid hydration pattern
     setHydrated(true);
   }, []);
 

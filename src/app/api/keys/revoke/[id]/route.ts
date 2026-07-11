@@ -55,4 +55,4 @@ async function handler(
   return NextResponse.json({ revoked: true });
 }
 
-export const DELETE = withRateLimit(handler, 30, 60);
+export const DELETE = withRateLimit(handler as (req: NextRequest, ctx?: unknown) => Promise<NextResponse>, 30, 60);

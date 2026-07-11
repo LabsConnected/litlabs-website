@@ -11,9 +11,8 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    if (process.env.NODE_ENV === "development") {
-      console.error("Global Error:", error);
-    }
+    // Log in all environments so Vercel logs capture client-side errors
+    console.error("Global Error:", error);
   }, [error]);
 
   return (

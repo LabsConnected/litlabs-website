@@ -274,7 +274,7 @@ export default function JarvisTerminal() {
   >([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
   const [showVoicePicker, setShowVoicePicker] = useState(false);
-  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number>>({});
+  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number | undefined>>({});
   const [micPermission, setMicPermission] = useState<
     "prompt" | "granted" | "denied" | "unknown"
   >("unknown");
@@ -332,13 +332,13 @@ export default function JarvisTerminal() {
       const placeAbove = spaceBelow < 260;
       setVoicePickerStyle({
         position: "fixed",
-        right: Math.max(8, window.innerWidth - rect.right),
-        top: placeAbove ? undefined : rect.bottom + 6,
-        bottom: placeAbove ? window.innerHeight - rect.top + 6 : undefined,
-        width: Math.min(320, window.innerWidth - 16),
-        maxHeight: 240,
+        right: String(Math.max(8, window.innerWidth - rect.right)),
+        top: placeAbove ? undefined : String(rect.bottom + 6),
+        bottom: placeAbove ? String(window.innerHeight - rect.top + 6) : undefined,
+        width: String(Math.min(320, window.innerWidth - 16)),
+        maxHeight: "240",
         overflowY: "auto",
-        zIndex: 9999,
+        zIndex: "9999",
       });
     };
     position();

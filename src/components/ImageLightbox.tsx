@@ -42,6 +42,18 @@ export default function ImageLightbox({
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
+  const goToPrevious = useCallback(() => {
+    setCurrentIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
+  }, [images.length]);
+
+  const goToNext = useCallback(() => {
+    setCurrentIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
+  }, [images.length]);
+
+  const handleZoom = useCallback((delta: number) => {
+    setZoom((prev) => Math.max(0.5, Math.min(5, prev + delta)));
+  }, []);
+
   // Handle keyboard shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
@@ -76,27 +88,15 @@ export default function ImageLightbox({
 
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, []);
+  }, [onClose, goToPrevious, goToNext, handleZoom]);
 
   // Reset zoom/position when image changes
   useEffect(() => {
-    setZoom(1);
+    setZoom(1); // eslint-disable-line react-hooks/set-state-in-effect -- intentional reset on image change
     setPosition({ x: 0, y: 0 });
     setRotation(0);
     setFlip(false);
   }, [currentIndex]);
-
-  const goToPrevious = useCallback(() => {
-    setCurrentIndex((prev) => (prev === 0 ? images.length - 1 : prev - 1));
-  }, [images.length]);
-
-  const goToNext = useCallback(() => {
-    setCurrentIndex((prev) => (prev === images.length - 1 ? 0 : prev + 1));
-  }, [images.length]);
-
-  const handleZoom = (delta: number) => {
-    setZoom((prev) => Math.max(0.5, Math.min(5, prev + delta)));
-  };
 
   const handleZoomReset = () => {
     setZoom(1);

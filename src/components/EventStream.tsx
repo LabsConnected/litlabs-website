@@ -57,10 +57,20 @@ export default function EventStream({
   );
 }
 
+const EVENT_ICONS: Record<AdminEvent["type"], typeof AlertCircle> = {
+  signup: UserPlus,
+  user: UserPlus,
+  sale: ShoppingCart,
+  agent: CheckCircle2,
+  chat: CheckCircle2,
+  alert: AlertCircle,
+  system: Users,
+};
+
 function EventRow({ event }: { event: AdminEvent }) {
   const { resolvedColors: T } = useTheme();
   const color = getEventColor(event.type, T.accentColor);
-  const Icon = getEventIcon(event.type);
+  const Icon = EVENT_ICONS[event.type] ?? Users;
 
   return (
     <div className="flex items-start gap-3 rounded-2xl border p-3 transition-transform hover:scale-[1.01]" style={{ backgroundColor: T.boxBg + "60", borderColor: color + "26" }}>

@@ -135,13 +135,13 @@ async function postHandler(req: NextRequest) {
       user = newUser;
       await sb
         .from("wallets")
-        .insert({ user_id: user.id, balance: 500, lifetime_earned: 500 });
+        .insert({ user_id: user!.id, balance: 500, lifetime_earned: 500 });
     }
 
     const { data: post, error } = await sb
       .from("posts")
       .insert({
-        user_id: user.id,
+        user_id: user!.id,
         content: body.content.trim(),
         media_urls: body.media_urls || [],
       })
