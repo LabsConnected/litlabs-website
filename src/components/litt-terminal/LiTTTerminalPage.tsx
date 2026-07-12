@@ -20,6 +20,11 @@ export function LiTTTerminalPage() {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [mobileBuilderOpen, setMobileBuilderOpen] = useState(false);
   const [chatMode, setChatMode] = useState<"chat" | "terminal">("chat");
+  const [media, setMedia] = useState<{
+    type: "image" | "video";
+    url: string;
+    title: string;
+  } | null>(null);
   const [orbState, setOrbState] = useState<
     "idle" | "thinking" | "working" | "listening" | "success"
   >("idle");
@@ -143,6 +148,7 @@ export function LiTTTerminalPage() {
               onCommandAction={addLog}
               onConnectionChangeAction={setConnected}
               onTerminalOutputAction={() => setOrbState("working")}
+              onMediaGeneratedAction={(m) => setMedia(m)}
             />
           </div>
         </section>
@@ -161,6 +167,7 @@ export function LiTTTerminalPage() {
               logs={logs}
               selectedFile={selectedFile}
               files={files}
+              media={media}
             />
           </div>
         </aside>

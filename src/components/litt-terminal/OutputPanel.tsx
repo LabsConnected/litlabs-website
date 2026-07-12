@@ -11,25 +11,35 @@ import {
   Layers,
 } from "lucide-react";
 
-type OutputType = "preview" | "code" | "files" | "logs" | "browser";
-
-const OUTPUTS = [
-  { id: "preview" as const, label: "Preview", icon: Eye },
-  { id: "code" as const, label: "Code", icon: Code },
-  { id: "files" as const, label: "Files", icon: FileText },
-  { id: "logs" as const, label: "Logs", icon: Terminal },
-  { id: "browser" as const, label: "Browser", icon: Globe },
-];
+type OutputType = "preview" | "media" | "code" | "files" | "logs" | "browser";
 
 export function OutputPanel({
   logs,
   selectedFile,
   files = [],
+  media,
 }: {
   logs: string[];
   selectedFile: string | null;
   files?: string[];
+  media?: { type: "image" | "video"; url: string; title: string } | null;
 }) {
+  const OUTPUTS = [
+    { id: "preview" as const, label: "Preview", icon: Eye },
+    ...(media
+      ? [
+          {
+            id: "media" as const,
+            label: media.type === "video" ? "Video" : "Image",
+            icon: ImageIcon,
+          },
+        ]
+      : []),
+    { id: "code" as const, label: "Code", icon: Code },
+    { id: "files" as const, label: "Files", icon: FileText },
+    { id: "logs" as const, label: "Logs", icon: Terminal },
+    { id: "browser" as const, label: "Browser", icon: Globe },
+  ];
   const [active, setActive] = useState<OutputType>("preview");
 
   return (
@@ -63,7 +73,7 @@ export function OutputPanel({
       </div>
 
       <div className="flex-1 min-h-0 p-3 overflow-y-auto">
-        {active === "preview" && (
+        {active === "preview" && !media && (
           <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800/60 bg-neutral-900/20 text-neutral-500">
             <ImageIcon
               size={28}
@@ -74,6 +84,27 @@ export function OutputPanel({
             <div className="text-[10px]">
               Run a command or ask LiTT to generate something.
             </div>
+          </div>
+        )}
+
+        {active === "media" && media && (
+          <div className="flex h-full flex-col gap-2">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              {media.title}
+            </div>
+            {media.type === "image" ? (
+              <img
+                src={media.url}
+                alt={media.title}
+                className="max-h-full w-auto rounded-xl border border-neutral-800/60 object-contain"
+              />
+            ) : (
+              <video
+                src={media.url}
+                controls
+                className="max-h-full w-auto rounded-xl border border-neutral-800/60"
+              />
+            )}
           </div>
         )}
 

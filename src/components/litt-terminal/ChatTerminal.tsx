@@ -10,6 +10,8 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  Image as ImageIcon,
+  Film,
 } from "lucide-react";
 import { TerminalPanel, TerminalPanelHandle } from "./TerminalPanel";
 
@@ -35,6 +37,7 @@ export function ChatTerminal({
   agentId = "director",
   mode: controlledMode,
   onModeChangeAction,
+  onMediaGeneratedAction,
 }: {
   onLogAction: (entry: string) => void;
   onCommandAction: (cmd: string) => void;
@@ -43,6 +46,11 @@ export function ChatTerminal({
   agentId?: string;
   mode?: "chat" | "terminal";
   onModeChangeAction?: (mode: "chat" | "terminal") => void;
+  onMediaGeneratedAction?: (media: {
+    type: "image" | "video";
+    url: string;
+    title: string;
+  }) => void;
 }) {
   const [internalMode, setInternalMode] = useState<"chat" | "terminal">("chat");
   const mode = controlledMode ?? internalMode;
@@ -238,8 +246,67 @@ export function ChatTerminal({
     }
   }, [messages, mode]);
 
+  const generateMedia = async (prompt: string, format: "image" | "video") => {
+    if (!prompt.trim()) return;
+    const actionLabel = format === "image" ? "Image" : "Video";
+    onLogAction(`[${actionLabel.toUpperCase()}] Generating: ${prompt}`);
+    setLoading(true);
+    try {
+      const res = await fetch("/api/media/generate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt, format }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) {
+        throw new Error(data.error || "Generation failed");
+      }
+      const url = data.downloadUrl || data.thumbUrl;
+      if (!url) throw new Error("No media URL returned");
+      const media = {
+        type: format,
+        url,
+        title: data.title || `${actionLabel}: ${prompt}`,
+      };
+      onMediaGeneratedAction?.(media);
+      onLogAction(`[${actionLabel.toUpperCase()}] Done: ${url}`);
+      const agentMsg: ChatMessage = {
+        id: `a_${nextId()}`,
+        role: "agent",
+        content: `Generated your ${format} — ${prompt}`,
+        agent: "Director",
+      };
+      setMessages((prev) => [...prev, agentMsg]);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Generation failed";
+      onLogAction(`[${actionLabel.toUpperCase()}] Error: ${errorMsg}`);
+      const agentMsg: ChatMessage = {
+        id: `a_${nextId()}`,
+        role: "agent",
+        content: `Could not generate ${format}: ${errorMsg}`,
+        agent: "Director",
+      };
+      setMessages((prev) => [...prev, agentMsg]);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   const sendChat = async (text: string) => {
     if (!text.trim()) return;
+    const lower = text.toLowerCase();
+    if (
+      /\b(make|generate|create)\b.*\b(image|picture|photo|pic)\b/i.test(lower)
+    ) {
+      await generateMedia(text, "image");
+      return;
+    }
+    if (
+      /\b(make|generate|create)\b.*\b(video|clip|film|movie)\b/i.test(lower)
+    ) {
+      await generateMedia(text, "video");
+      return;
+    }
     const userMsg: ChatMessage = {
       id: `u_${nextId()}`,
       role: "user",
@@ -448,6 +515,26 @@ export function ChatTerminal({
             }
             className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
           />
+          {mode === "chat" && input.trim() && (
+            <>
+              <button
+                onClick={() => generateMedia(input, "image")}
+                className="rounded-lg bg-fuchsia-500/10 p-2 text-fuchsia-300 hover:bg-fuchsia-500/20 transition"
+                aria-label="Generate image"
+                title="Generate image"
+              >
+                <ImageIcon size={16} />
+              </button>
+              <button
+                onClick={() => generateMedia(input, "video")}
+                className="rounded-lg bg-orange-500/10 p-2 text-orange-300 hover:bg-orange-500/20 transition"
+                aria-label="Generate video"
+                title="Generate video"
+              >
+                <Film size={16} />
+              </button>
+            </>
+          )}
           <button
             onClick={() => (mode === "chat" ? sendChat(input) : runAsCommand())}
             className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 hover:bg-cyan-500/25 transition"
