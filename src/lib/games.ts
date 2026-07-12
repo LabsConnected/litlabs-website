@@ -3,8 +3,14 @@
  * Browser-based gaming with HTML5 games
  */
 
-export type GameCategory = "retro" | "arcade" | "puzzle" | "multiplayer";
-export type GamePlatform = "html5";
+export type GameCategory =
+  | "retro"
+  | "arcade"
+  | "puzzle"
+  | "multiplayer"
+  | "emulator";
+export type GamePlatform = "html5" | "emulator" | "dos" | "browser";
+export type EmulatorEngine = "emulatorjs" | "jsdos";
 
 export interface Game {
   id: string;
@@ -14,12 +20,16 @@ export interface Game {
   platform: GamePlatform;
   coverUrl: string;
   html5Url?: string;
+  externalUrl?: string;
+  emulator?: EmulatorEngine;
   year: number;
   developer: string;
   players: number;
   rating: number;
   tags: string[];
   plays: string;
+  license?: string;
+  sourceUrl?: string;
   progress?: number;
   difficulty?: "easy" | "medium" | "hard" | "expert";
   controls?: string[];
@@ -199,6 +209,169 @@ export const GAME_LIBRARY: Game[] = [
     rating: 4.5,
     tags: ["puzzle", "logic", "classic"],
     plays: "22.3K",
+  },
+  // More freeware HTML5 games
+  {
+    id: "chess",
+    title: "Chess",
+    description: "Classic chess with a clean board and AI opponent.",
+    category: "puzzle",
+    platform: "html5",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/chess%20board%20game%20cover%20dark%20elegant%20minimal?width=400&height=250&nologo=true&seed=110",
+    html5Url: "https://chess.com/play/computer",
+    year: 1475,
+    developer: "Chess.com",
+    players: 2,
+    rating: 4.7,
+    tags: ["puzzle", "strategy", "classic"],
+    plays: "85.1K",
+    license: "Freeware",
+  },
+  {
+    id: "wordle",
+    title: "Wordle",
+    description: "Guess the five-letter word in six tries.",
+    category: "puzzle",
+    platform: "html5",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/wordle%20word%20game%20cover%20colorful%20tiles%20dark%20background?width=400&height=250&nologo=true&seed=111",
+    html5Url: "https://wordleplay.com/",
+    year: 2021,
+    developer: "Josh Wardle",
+    players: 1,
+    rating: 4.6,
+    tags: ["puzzle", "word", "daily"],
+    plays: "91.2K",
+    license: "Freeware",
+  },
+  {
+    id: "asteroids",
+    title: "Asteroids",
+    description: "Blast asteroids and UFOs in vector arcade action.",
+    category: "arcade",
+    platform: "html5",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/asteroids%20space%20arcade%20game%20cover%20vector%20neon%20dark?width=400&height=250&nologo=true&seed=112",
+    html5Url: "https://heckman.github.io/asteroids/",
+    year: 1979,
+    developer: "Atari",
+    players: 1,
+    rating: 4.5,
+    tags: ["arcade", "space", "retro"],
+    plays: "18.7K",
+    license: "Freeware",
+  },
+  {
+    id: "loderunner",
+    title: "Lode Runner",
+    description: "Collect gold and outsmart enemies in this classic platformer.",
+    category: "arcade",
+    platform: "html5",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/lode%20runner%20platformer%20game%20cover%20retro%20neon%20dark?width=400&height=250&nologo=true&seed=113",
+    html5Url: "https://loderunnerwebgame.com/game/",
+    year: 1983,
+    developer: "Broderbund",
+    players: 1,
+    rating: 4.4,
+    tags: ["arcade", "platformer", "classic"],
+    plays: "14.3K",
+    license: "Freeware",
+  },
+  // Emulators (bring-your-own-ROM)
+  {
+    id: "emulatorjs",
+    title: "Retro Console Lab",
+    description:
+      "Play NES, SNES, GBA, Genesis and more. Upload your own legally owned ROMs.",
+    category: "emulator",
+    platform: "emulator",
+    emulator: "emulatorjs",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/retro%20console%20controller%20collage%20nes%20snes%20gba%20genesis%20dark%20neon?width=400&height=250&nologo=true&seed=201",
+    externalUrl: "https://demo.emulatorjs.org/",
+    year: 1985,
+    developer: "EmulatorJS",
+    players: 1,
+    rating: 4.8,
+    tags: ["emulator", "console", "retro"],
+    plays: "50.2K",
+    license: "GPL-3.0",
+    sourceUrl: "https://github.com/EmulatorJS/EmulatorJS",
+  },
+  {
+    id: "jsdos",
+    title: "DOS Box Lab",
+    description:
+      "Run classic DOS games and apps. Upload your own legally owned DOS files.",
+    category: "emulator",
+    platform: "dos",
+    emulator: "jsdos",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/dos%20computer%20retro%20monitor%20command%20line%20dark%20neon?width=400&height=250&nologo=true&seed=202",
+    externalUrl: "https://js-dos.com/",
+    year: 1981,
+    developer: "js-dos",
+    players: 1,
+    rating: 4.7,
+    tags: ["emulator", "dos", "retro"],
+    plays: "32.6K",
+    license: "GPL-2.0",
+    sourceUrl: "https://github.com/caiiiycuk/js-dos",
+  },
+  // External freeware / open-source hubs
+  {
+    id: "itchio-free",
+    title: "itch.io Free Games",
+    description: "Thousands of free indie games you can play in your browser.",
+    category: "arcade",
+    platform: "browser",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/itch.io%20indie%20game%20marketplace%20cover%20colorful%20dark?width=400&height=250&nologo=true&seed=301",
+    externalUrl: "https://itch.io/games/free/platform-web",
+    year: 2013,
+    developer: "itch.io",
+    players: 1,
+    rating: 4.6,
+    tags: ["indie", "browser", "free"],
+    plays: "1M+",
+    license: "Varies",
+  },
+  {
+    id: "homegames",
+    title: "Homegames",
+    description: "Open-source party games you can play in the browser with friends.",
+    category: "multiplayer",
+    platform: "browser",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/homegames%20party%20multiplayer%20game%20cover%20fun%20dark?width=400&height=250&nologo=true&seed=302",
+    externalUrl: "https://homegames.io/",
+    year: 2020,
+    developer: "Homegames",
+    players: 8,
+    rating: 4.5,
+    tags: ["multiplayer", "party", "browser"],
+    plays: "8.4K",
+    license: "MIT",
+    sourceUrl: "https://github.com/homegamesio/homegames",
+  },
+  {
+    id: "openretro",
+    title: "Open Retro Game Database",
+    description: "Discover legally available classic games and homebrew titles.",
+    category: "retro",
+    platform: "browser",
+    coverUrl:
+      "https://image.pollinations.ai/prompt/retro%20game%20database%20cover%20pixel%20art%20dark?width=400&height=250&nologo=true&seed=303",
+    externalUrl: "https://www.mobygames.com/",
+    year: 1999,
+    developer: "MobyGames",
+    players: 1,
+    rating: 4.4,
+    tags: ["retro", "database", "discovery"],
+    plays: "2M+",
+    license: "Catalog",
   },
 ];
 

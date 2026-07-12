@@ -37,6 +37,7 @@ const CATEGORIES: {
   { id: "retro", label: "Retro", icon: Gamepad2 },
   { id: "arcade", label: "Arcade", icon: Zap },
   { id: "puzzle", label: "Puzzle", icon: Grid3X3 },
+  { id: "emulator", label: "Emulators", icon: Gamepad2 },
 ];
 
 export default function GamesPage() {
@@ -60,6 +61,22 @@ export default function GamesPage() {
     : activeCategory === "all"
       ? GAME_LIBRARY
       : getGamesByCategory(activeCategory);
+
+  const handlePlay = useCallback((game: Game) => {
+    if (game.platform === "browser" || game.externalUrl) {
+      window.open(
+        game.externalUrl || game.html5Url,
+        "_blank",
+        "noopener,noreferrer",
+      );
+      return;
+    }
+    if (game.platform === "emulator" || game.platform === "dos") {
+      setSelectedGame(game);
+      return;
+    }
+    setSelectedGame(game);
+  }, []);
 
   const handleToggleFav = useCallback((gameId: string) => {
     const isNowFav = toggleFavorite(gameId);
@@ -108,7 +125,7 @@ export default function GamesPage() {
   return (
     <PageShell
       title="Game Cloud"
-      subtitle="Play classic retro games and modern HTML5 titles"
+      subtitle="Play classic retro games, HTML5 titles, and open-source emulators"
       icon="🎮"
     >
       <div className="px-4 sm:px-6 pt-4">
@@ -121,11 +138,16 @@ export default function GamesPage() {
           }}
         >
           <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-1" style={{ color: T.accentColor }}>
+            <div
+              className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-1"
+              style={{ color: T.accentColor }}
+            >
               <Sparkles size={12} /> Best build path
             </div>
             <p className="text-sm opacity-75 max-w-2xl">
-              Play games here, but build new experiences in Studio. That&apos;s where we can make coloring pages, mini-games, and printable templates all from one place.
+              Play games here, but build new experiences in Studio. That&apos;s
+              where we can make coloring pages, mini-games, and printable
+              templates all from one place.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -182,7 +204,8 @@ export default function GamesPage() {
                 LiTT Code Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
-                {GAME_LIBRARY.length} games available • HTML5 games
+                {GAME_LIBRARY.length} games & labs • HTML5 + emulators +
+                freeware hubs
               </p>
             </div>
           </div>
@@ -254,7 +277,52 @@ export default function GamesPage() {
               className="aspect-video border-2 relative overflow-hidden"
               style={{ backgroundColor: "#000", borderColor: T.borderColor }}
             >
-              {selectedGame.html5Url ? (
+              {selectedGame.platform === "emulator" ||
+              selectedGame.platform === "dos" ? (
+                <div className="absolute inset-0 flex items-center justify-center p-6">
+                  <div className="max-w-2xl text-center space-y-4">
+                    <div className="text-4xl mb-2">🕹️</div>
+                    <p
+                      className="text-sm font-bold"
+                      style={{ color: T.headerColor }}
+                    >
+                      {selectedGame.title}
+                    </p>
+                    <p className="text-xs opacity-60">
+                      Emulators require ROMs or DOS files that you legally own.
+                      LiTT Code does not host copyrighted games.
+                    </p>
+                    <div className="flex items-center justify-center gap-3">
+                      <a
+                        href={selectedGame.externalUrl}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
+                        style={{
+                          backgroundColor: T.accentColor,
+                          color: T.bgColor,
+                        }}
+                      >
+                        <ExternalLink size={14} /> Launch Emulator
+                      </a>
+                      {selectedGame.sourceUrl && (
+                        <a
+                          href={selectedGame.sourceUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
+                          style={{
+                            borderColor: T.borderColor,
+                            color: T.textColor,
+                          }}
+                        >
+                          Source
+                        </a>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : selectedGame.html5Url ? (
                 <div className="w-full h-full relative">
                   <iframe
                     src={selectedGame.html5Url}
@@ -262,6 +330,7 @@ export default function GamesPage() {
                     allow="fullscreen; gamepad"
                     sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                     referrerPolicy="no-referrer"
+                    title={selectedGame.title}
                     style={{ border: "none" }}
                   />
                   <a
@@ -427,7 +496,7 @@ export default function GamesPage() {
               className={`relative overflow-hidden cursor-pointer ${
                 viewMode === "grid" ? "aspect-square" : "w-20 h-20 shrink-0"
               }`}
-              onClick={() => setSelectedGame(game)}
+              onClick={() => handlePlay(game)}
             >
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
@@ -487,6 +556,27 @@ export default function GamesPage() {
                 <span>👤 {game.players}P</span>
                 <span>{game.year}</span>
               </div>
+              <div className="flex items-center gap-2 mt-2">
+                {game.license && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                    style={{
+                      backgroundColor: T.accentColor + "20",
+                      color: T.accentColor,
+                    }}
+                  >
+                    {game.license}
+                  </span>
+                )}
+                {game.platform === "emulator" && (
+                  <span
+                    className="px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                    style={{ backgroundColor: "#f59e0b20", color: "#f59e0b" }}
+                  >
+                    BYO ROM
+                  </span>
+                )}
+              </div>
             </div>
           </div>
         ))}
@@ -494,10 +584,10 @@ export default function GamesPage() {
 
       {/* Empty State */}
       {filteredGames.length === 0 && (
-          <div className="text-center py-16">
-            <div className="text-4xl mb-4">🔍</div>
-            <p className="opacity-60">No games found matching your search.</p>
-            <button
+        <div className="text-center py-16">
+          <div className="text-4xl mb-4">🔍</div>
+          <p className="opacity-60">No games found matching your search.</p>
+          <button
             onClick={() => {
               setSearchQuery("");
               setActiveCategory("all");
@@ -509,6 +599,67 @@ export default function GamesPage() {
           </button>
         </div>
       )}
+
+      {/* Discovery + Legal */}
+      <div
+        className="rounded-2xl border p-4 sm:p-5 my-6"
+        style={{
+          background:
+            "linear-gradient(135deg, rgba(139,92,246,0.10), rgba(34,211,238,0.08))",
+          borderColor: `${T.borderColor}30`,
+        }}
+      >
+        <div
+          className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-2"
+          style={{ color: T.accentColor }}
+        >
+          <Sparkles size={12} /> More places to play
+        </div>
+        <p className="text-sm opacity-70 max-w-3xl mb-4">
+          LiTT Code Game Cloud only hosts free, open-source, or embeddable
+          games. Emulators let you run your own legally owned ROMs. Discover
+          thousands more browser games on itch.io, Homegames, and open-source
+          retro communities.
+        </p>
+        <div className="flex flex-wrap gap-2">
+          <a
+            href="https://itch.io/games/free/platform-web"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border"
+            style={{ borderColor: T.borderColor, color: T.textColor }}
+          >
+            <ExternalLink size={12} /> itch.io Free
+          </a>
+          <a
+            href="https://homegames.io/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border"
+            style={{ borderColor: T.borderColor, color: T.textColor }}
+          >
+            <ExternalLink size={12} /> Homegames
+          </a>
+          <a
+            href="https://github.com/EmulatorJS/EmulatorJS"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border"
+            style={{ borderColor: T.borderColor, color: T.textColor }}
+          >
+            <ExternalLink size={12} /> EmulatorJS
+          </a>
+          <a
+            href="https://js-dos.com/"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="inline-flex items-center gap-2 px-3 py-1.5 rounded-lg text-xs font-bold border"
+            style={{ borderColor: T.borderColor, color: T.textColor }}
+          >
+            <ExternalLink size={12} /> js-dos
+          </a>
+        </div>
+      </div>
     </PageShell>
   );
 }
