@@ -43,7 +43,7 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
   }, [filePath, userId, wsUrl]);
 
   useEffect(() => {
-    loadFile();
+    queueMicrotask(() => loadFile());
   }, [loadFile]);
 
   const saveFile = async () => {

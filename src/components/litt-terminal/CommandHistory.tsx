@@ -40,22 +40,27 @@ export function CommandHistory({ commands: liveCommands = [] }: CommandHistoryPr
   };
 
   useEffect(() => {
-    const cancel = fetchHistory();
-    return cancel;
+    let cancel = () => {};
+    queueMicrotask(() => {
+      cancel = fetchHistory();
+    });
+    return () => cancel();
   }, []);
 
   useEffect(() => {
     if (liveCommands.length > 0) {
       const latest = liveCommands[liveCommands.length - 1];
-      setHistory((prev) => {
-        const item: HistoryItem = {
-          id: `live-${Date.now()}`,
-          command: latest,
-          exit_code: null,
-          created_at: new Date().toISOString(),
-        };
-        return [item, ...prev].slice(0, 50);
-      });
+      queueMicrotask(() =>
+        setHistory((prev) => {
+          const item: HistoryItem = {
+            id: `live-${Date.now()}`,
+            command: latest,
+            exit_code: null,
+            created_at: new Date().toISOString(),
+          };
+          return [item, ...prev].slice(0, 50);
+        }),
+      );
     }
   }, [liveCommands]);
 

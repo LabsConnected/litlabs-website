@@ -1,259 +1,118 @@
 "use client";
 
-import Link from 'next/link';
-import { useRouter } from 'next/navigation';
-import { useEffect } from 'react';
-import { useSupabaseAuthHook } from '@/hooks/useSupabaseAuth';
-import { useClerkAuth } from '@/hooks/useClerkAuth';
-import { Code2, Bot, BarChart3, ChevronRight, Shield, ArrowRight, Globe, Coins, Sparkles, Rocket, Workflow, Layers3, MessageSquareText, Users } from 'lucide-react';
+import Link from "next/link";
+import { useRouter } from "next/navigation";
+import { useEffect } from "react";
+import {
+  ArrowRight,
+  Bot,
+  Check,
+  Code2,
+  Command,
+  Layers3,
+  Palette,
+  Play,
+  Radio,
+  Rocket,
+  Sparkles,
+  Workflow,
+  Zap,
+} from "lucide-react";
+import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
-const FEATURES = [
-  { icon: Bot, title: 'Agent Workforce', desc: 'Start with specialist agents for code, writing, media, research, and distribution, then route bigger work through Director.' },
-  { icon: Workflow, title: 'Workflow Studio', desc: 'Chain prompts, tools, media generation, and publishing tasks from one workspace instead of hopping between AI apps.' },
-  { icon: BarChart3, title: 'Creator Dashboard', desc: 'Track agent activity, wallet balance, gallery output, and community signals from a single operating view.' },
-  { icon: Coins, title: 'Marketplace Economy', desc: 'Install free and premium agents, package your own workflows, and prepare them for a creator-first marketplace.' },
-  { icon: Globe, title: 'Publishing Loop', desc: 'Move from idea to asset to post. The platform is built around creation that actually leaves the workspace.' },
-  { icon: Shield, title: 'Owned Workspace', desc: 'Keep your agents, profile, media, and data under your account with auth, wallet, and storage foundations already in place.' },
+const agents = [
+  { icon: Command, name: "LiTT Code", role: "Orchestrator", copy: "Routes the mission, holds the context, and keeps every specialist moving together.", color: "#c8ff3d" },
+  { icon: Code2, name: "Forge", role: "Engineer", copy: "Builds, reviews, and hardens production software alongside your team.", color: "#6ee7f9" },
+  { icon: Palette, name: "Visionary", role: "Creative Director", copy: "Turns rough ideas into sharp visuals, audio, interfaces, and brand systems.", color: "#9f8cff" },
 ];
 
-const BENEFITS = [
-  { icon: Workflow, title: 'Ship faster', text: 'Turn an idea into a working agent workflow in minutes instead of days.' },
-  { icon: Layers3, title: 'One system', text: 'Manage studio, feed, analytics, and marketplace from a single control plane.' },
-  { icon: MessageSquareText, title: 'Stay human', text: 'Agents assist the work without replacing the personality behind the brand.' },
+const steps = [
+  ["01", "Pick your crew", "Start with a specialist or let LiTT Code assemble the right team for the mission."],
+  ["02", "Connect the work", "Bring prompts, tools, media, and automations together in one visual workspace."],
+  ["03", "Ship the result", "Review the output, publish it, or turn it into a reusable workflow for next time."],
 ];
 
-const PROOF_POINTS = [
-  { value: 'Studio', label: 'build workspace' },
-  { value: 'Agents', label: 'specialist crew' },
-  { value: 'Flow', label: 'automation canvas' },
-  { value: 'Market', label: 'agent economy' },
-];
-
-const AGENTS = [
-  { icon: '🎯', name: 'LiTT Code', role: 'Core AI Copilot & Navigator', desc: 'The brain — routes tasks, navigates the platform, orchestrates the team.', color: '#22d3ee', href: '/agents' },
-  { icon: '💻', name: 'Forge', role: 'Engineer, Architect & Security', desc: 'Writes, debugs, and reviews code. Full-stack + security hardening.', color: '#22d3ee', href: '/agents' },
-  { icon: '�', name: 'Pulse', role: 'Growth, Content & Analytics', desc: 'Growth strategy, content creation, social media, and data insights.', color: '#f472b6', href: '/agents' },
-  { icon: '🎨', name: 'Visionary', role: 'Creative Director & Visual/Audio AI', desc: 'Image prompts, brand identity, UI/UX, music and audio production.', color: '#e879f9', href: '/agents' },
-  { icon: '🏠', name: 'Nexus', role: 'Automation & Integrations', desc: 'Smart home, IoT, webhooks, and automation flows.', color: '#34d399', href: '/agents' },
-];
+function AgentConsole() {
+  return (
+    <div className="relative mx-auto w-full max-w-xl">
+      <div className="absolute -inset-16 rounded-full bg-violet-500/20 blur-3xl" />
+      <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#141610] p-4 shadow-2xl shadow-black/60 sm:p-6">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4 font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">
+          <span className="flex items-center gap-2"><Sparkles size={13} className="text-[#c8ff3d]" /> Mission control</span>
+          <span className="flex items-center gap-2 text-[#c8ff3d]"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#c8ff3d]" /> Live</span>
+        </div>
+        <div className="flex items-center gap-3 py-6">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#7657ff] text-white"><Rocket size={19} /></span>
+          <div className="min-w-0 flex-1"><span className="block font-mono text-[9px] uppercase tracking-[0.18em] text-white/35">Active mission</span><strong className="mt-1 block truncate text-sm text-white">Launch the Signal campaign</strong></div>
+          <b className="font-mono text-xs text-[#c8ff3d]">72%</b>
+        </div>
+        <div className="mb-4 h-1 overflow-hidden rounded-full bg-white/10"><i className="block h-full w-[72%] rounded-full bg-[#c8ff3d]" /></div>
+        {[
+          ["CD", "Visionary", "Campaign system complete", "Done", "#c8ff3d"],
+          ["FG", "Forge", "Building landing experience", "Working", "#6ee7f9"],
+          ["PL", "Pulse", "12 launch posts queued", "Ready", "#9f8cff"],
+        ].map(([initials, name, task, state, color]) => (
+          <div key={name} className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3.5">
+            <span className="grid h-9 w-9 place-items-center rounded-lg text-[9px] font-black text-[#10110d]" style={{ backgroundColor: color }}>{initials}</span>
+            <div className="min-w-0 flex-1"><strong className="block text-xs text-white">{name}</strong><small className="mt-1 block truncate text-[10px] text-white/40">{task}</small></div>
+            <span className="font-mono text-[9px] text-white/35">{state}</span>
+          </div>
+        ))}
+        <div className="mt-5 flex h-12 items-center gap-3 rounded-xl border border-white/10 px-4 font-mono text-[10px] text-white/30"><Zap size={14} className="text-[#c8ff3d]" /><span className="flex-1">Give your crew a new mission…</span><span>↵</span></div>
+      </div>
+      <div className="absolute -bottom-7 -left-4 hidden items-center gap-3 rounded-xl border border-black bg-[#f5f2e9] px-4 py-3 text-[#12130f] shadow-[5px_5px_0_#111] sm:flex">
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-[#c8ff3d]"><Check size={14} strokeWidth={3} /></span>
+        <div><strong className="block text-[10px]">Landing page shipped</strong><small className="text-[9px] opacity-50">Forge · just now</small></div>
+      </div>
+    </div>
+  );
+}
 
 function LandingPage() {
   return (
-    <div className="min-h-screen" style={{ backgroundColor: '#08080c', color: '#e2e2e9' }}>
-      {/* Hero */}
-      <section className="relative px-4 pt-20 pb-16 md:pt-28 md:pb-24 text-center overflow-hidden">
-        <div className="absolute inset-0 pointer-events-none">
-          <div className="absolute top-1/4 left-1/4 w-96 h-96 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, #6366f140 0%, transparent 70%)', filter: 'blur(60px)' }} />
-          <div className="absolute bottom-1/4 right-1/4 w-80 h-80 rounded-full opacity-20" style={{ background: 'radial-gradient(circle, #3b82f640 0%, transparent 70%)', filter: 'blur(60px)' }} />
-          <div className="absolute inset-x-0 top-0 h-px" style={{ background: 'linear-gradient(90deg, transparent, #6366f180, transparent)' }} />
-        </div>
-
-        <div className="relative max-w-6xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-4 py-1.5 rounded-full text-xs font-bold mb-8 border" style={{ borderColor: '#26262e', backgroundColor: '#12121a' }}>
-            <Sparkles size={12} className="text-cyan-300" />
-            Marketplace + studio for specialized AI agents
-          </div>
-
-          <h1 className="text-4xl md:text-7xl font-black tracking-tight mb-6 leading-tight" style={{ color: '#f8fafc' }}>
-            Deploy an AI agent in{' '}
-            <span className="bg-clip-text text-transparent" style={{ backgroundImage: 'linear-gradient(135deg, #6366f1, #3b82f6)' }}>
-              minutes, not sprints
-            </span>
-          </h1>
-
-          <p className="text-lg md:text-xl mb-8 max-w-3xl mx-auto opacity-70 leading-relaxed">
-            Discover ready-made agents, customize your own in the Creative Studio, and wire them into automated workflows without piecing together the infrastructure yourself.
-          </p>
-
-          <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-            <Link
-              href="/studio"
-              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all hover:scale-105"
-              style={{ backgroundColor: '#6366f1', color: '#fff', boxShadow: '0 0 30px #6366f130' }}
-            >
-              Browse the Agent Market <ArrowRight size={16} />
-            </Link>
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold border transition-all hover:bg-white/5"
-              style={{ borderColor: '#26262e' }}
-            >
-              Build Your First Agent
-            </Link>
-          </div>
-
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 md:gap-4 mt-10 max-w-4xl mx-auto">
-            {PROOF_POINTS.map((item) => (
-              <div key={item.label} className="rounded-2xl border px-4 py-4" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-                <div className="text-2xl md:text-3xl font-black" style={{ color: '#f8fafc' }}>{item.value}</div>
-                <div className="text-[10px] uppercase tracking-[0.28em] opacity-45 font-bold mt-1">{item.label}</div>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Why it works */}
-      <section className="px-4 py-14" style={{ borderTop: '1px solid #26262e30', borderBottom: '1px solid #26262e30' }}>
-        <div className="max-w-6xl mx-auto grid md:grid-cols-3 gap-4">
-          {BENEFITS.map((item) => {
-            const Icon = item.icon;
-            return (
-              <div key={item.title} className="rounded-2xl border p-6 text-left" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-                <div className="w-11 h-11 rounded-xl flex items-center justify-center mb-4" style={{ backgroundColor: '#6366f120', color: '#7dd3fc' }}>
-                  <Icon size={20} />
-                </div>
-                <h3 className="font-bold mb-2" style={{ color: '#f8fafc' }}>{item.title}</h3>
-                <p className="text-sm opacity-55 leading-relaxed">{item.text}</p>
-              </div>
-            );
-          })}
-        </div>
-      </section>
-
-      {/* Features */}
-      <section className="px-4 py-24" id="features">
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>Everything You Need</h2>
-            <p className="opacity-50 max-w-xl mx-auto">The clearest version of LiTT Code is not another AI chat page. It is the place where agents help creators build, package, and publish.</p>
-          </div>
-
-          <div className="grid md:grid-cols-2 lg:grid-cols-3 gap-6">
-            {FEATURES.map(f => {
-              const Icon = f.icon;
-              return (
-                <div key={f.title} className="group p-6 rounded-xl border transition-all hover:translate-y-[-2px]" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-                  <div className="w-10 h-10 rounded-lg flex items-center justify-center mb-4 text-sm transition-all group-hover:scale-110" style={{ backgroundColor: '#6366f120', color: '#6366f1' }}>
-                    <Icon size={20} />
-                  </div>
-                  <h3 className="font-bold mb-2" style={{ color: '#f8fafc' }}>{f.title}</h3>
-                  <p className="text-sm opacity-50 leading-relaxed">{f.desc}</p>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-      </section>
-
-      {/* How It Works */}
-      <section className="px-4 py-24" style={{ borderTop: '1px solid #26262e30' }}>
-        <div className="max-w-5xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>How It Works</h2>
-            <p className="opacity-50 max-w-xl mx-auto">Keep the path short: pick an agent, make something useful, then publish or automate the next step.</p>
-          </div>
-
-          <div className="grid md:grid-cols-3 gap-8">
-            {[
-              { step: '01', title: 'Pick the Right Crew', desc: 'Use Director for orchestration or jump straight into code, writing, media, research, or growth specialists.' },
-              { step: '02', title: 'Build in Studio', desc: "Generate assets, chain workflows, test agents, and keep the useful output in your gallery or dashboard." },
-              { step: '03', title: 'Publish the Result', desc: 'Turn the work into a post, a reusable workflow, a marketplace listing, or the next task in your automation loop.' },
-            ].map(s => (
-              <div key={s.step} className="text-center">
-                <div className="w-14 h-14 rounded-full flex items-center justify-center mx-auto mb-5 text-sm font-black" style={{ backgroundColor: '#6366f120', color: '#6366f1', border: '1px solid #6366f140' }}>
-                  {s.step}
-                </div>
-                <h3 className="font-bold mb-2" style={{ color: '#f8fafc' }}>{s.title}</h3>
-                <p className="text-sm opacity-50 leading-relaxed max-w-xs mx-auto">{s.desc}</p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Agents Showcase */}
-      <section className="px-4 py-24" style={{ borderTop: '1px solid #26262e30' }}>
-        <div className="max-w-6xl mx-auto">
-          <div className="text-center mb-16">
-            <h2 className="text-3xl md:text-5xl font-black mb-4" style={{ color: '#f8fafc' }}>Meet Your AI Workforce</h2>
-            <p className="opacity-50 max-w-xl mx-auto">Six specialized agents ready to deploy. Each one gives the platform a clear personality and a real job.</p>
-          </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {AGENTS.map(a => (
-              <Link
-                key={a.name}
-                href={a.href}
-                className="group p-5 rounded-xl border transition-all hover:translate-y-[-2px]"
-                style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}
-              >
-                <div className="flex items-center gap-3 mb-3">
-                  <span className="text-2xl">{a.icon}</span>
-                  <div>
-                    <div className="font-bold text-sm" style={{ color: '#f8fafc' }}>{a.name}</div>
-                    <div className="text-[10px] uppercase tracking-wider font-bold opacity-40">{a.role}</div>
-                  </div>
-                  <span className="ml-auto w-2 h-2 rounded-full" style={{ backgroundColor: a.color, boxShadow: `0 0 6px ${a.color}` }} />
-                </div>
-                <p className="text-xs opacity-60 leading-relaxed">{a.desc}</p>
-              </Link>
-            ))}
-          </div>
-
-          <div className="text-center mt-10">
-            <Link href="/agents" className="inline-flex items-center gap-2 text-sm font-bold opacity-60 hover:opacity-100 transition-all">
-              View All Agents <ChevronRight size={14} />
-            </Link>
-          </div>
-        </div>
-      </section>
-
-      {/* Audience */}
-      <section className="px-4 py-18" style={{ borderTop: '1px solid #26262e30' }}>
-        <div className="max-w-6xl mx-auto grid lg:grid-cols-[1.2fr_0.8fr] gap-6 items-stretch">
-          <div className="rounded-3xl border p-8 md:p-10" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full text-[11px] font-bold mb-5" style={{ backgroundColor: '#6366f115', color: '#93c5fd' }}>
-              <Users size={12} /> Built for creators, teams, and solo builders
+    <div className="relative overflow-hidden bg-[#f4f1e8] text-[#11120f]">
+      <section className="relative px-4 pb-24 pt-20 sm:px-6 md:pb-32 md:pt-28">
+        <div className="pointer-events-none absolute inset-0 opacity-40" style={{ backgroundImage: "linear-gradient(rgba(17,18,15,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(17,18,15,.06) 1px,transparent 1px)", backgroundSize: "70px 70px" }} />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-[1.05fr_.95fr]">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em]"><i className="h-2 w-2 rounded-full bg-[#c8ff3d] ring-4 ring-[#c8ff3d]/20" /> Public beta is live</div>
+            <h1 className="mt-8 max-w-3xl text-[clamp(4.3rem,8vw,7.6rem)] font-black leading-[0.82] tracking-[-0.075em]">Your AI crew.<br /><span className="font-serif font-normal italic text-[#7559ff]">Always building.</span></h1>
+            <p className="mt-8 max-w-xl text-base leading-8 text-black/60 sm:text-lg">LiTTree brings specialized agents, creative tools, and automated workflows into one connected workspace—so a small team can move like a studio.</p>
+            <div className="mt-9 flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+              <Link href="/sign-up" className="group inline-flex min-h-14 items-center gap-8 rounded-lg border border-black bg-[#c8ff3d] px-6 text-sm font-black shadow-[5px_5px_0_#111] transition hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[3px_3px_0_#111]">Build your first agent <ArrowRight size={16} className="transition group-hover:translate-x-1" /></Link>
+              <Link href="/studio" className="inline-flex items-center gap-3 border-b border-black py-2 text-sm font-bold"><Play size={14} fill="currentColor" /> See it in action</Link>
             </div>
-            <h2 className="text-3xl md:text-4xl font-black mb-4" style={{ color: '#f8fafc' }}>
-              One workspace. Every tool. Zero friction.
-            </h2>
-            <p className="opacity-55 max-w-2xl leading-relaxed">
-              The platform is strongest when it leads with one promise: agents help builders create useful work and get it out into the world. Everything else should support that path.
-            </p>
+            <div className="mt-10 flex flex-wrap gap-x-7 gap-y-2 text-[11px] font-bold text-black/50"><span className="flex items-center gap-2"><Check size={13} /> Start free</span><span className="flex items-center gap-2"><Check size={13} /> No credit card</span><span className="flex items-center gap-2"><Check size={13} /> Your data stays yours</span></div>
           </div>
-          <div className="grid gap-4">
-            <div className="rounded-3xl border p-6" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-              <div className="flex items-center gap-3 mb-3">
-                <Rocket size={18} className="text-cyan-300" />
-                <h3 className="font-bold" style={{ color: '#f8fafc' }}>Best first click</h3>
-              </div>
-              <p className="text-sm opacity-55 leading-relaxed">
-                Start in <span className="font-bold text-slate-100">Studio</span> to build, or browse <span className="font-bold text-slate-100">Agents</span> to see what&apos;s possible. Either way, you&apos;re productive in minutes.
-              </p>
-            </div>
-            <div className="rounded-3xl border p-6" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-              <div className="flex items-center gap-3 mb-3">
-                <Shield size={18} className="text-emerald-300" />
-                <h3 className="font-bold" style={{ color: '#f8fafc' }}>No credit card required</h3>
-              </div>
-              <p className="text-sm opacity-55 leading-relaxed">
-                500 starter credits, full platform access. Upgrade only when you need more power.
-              </p>
-            </div>
+          <AgentConsole />
+        </div>
+      </section>
+
+      <section className="border-y border-black/10 bg-[#ece9df] px-4 py-8 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 md:flex-row md:items-center md:justify-between"><p className="m-0 font-serif text-base italic text-black/50">One workspace. An unfair amount of momentum.</p><div className="grid grid-cols-2 gap-x-8 gap-y-4 text-[10px] font-black uppercase tracking-[0.16em] text-black/45 sm:flex sm:gap-10"><span>Agents</span><span>Studio</span><span>Automations</span><span>Marketplace</span></div></div>
+      </section>
+
+      <section className="px-4 py-24 sm:px-6 md:py-32">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-8 lg:grid-cols-2 lg:items-end"><div><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7559ff]">The platform</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">From idea to impact,<br />without the busywork.</h2></div><p className="max-w-lg text-sm leading-7 text-black/55 lg:justify-self-end">Every part of your process gets an intelligent co-pilot—connected, coordinated, and ready to move from a clear mission to finished work.</p></div>
+          <div className="mt-16 grid gap-4 lg:grid-cols-2">
+            <article className="relative min-h-[560px] overflow-hidden rounded-2xl border border-black bg-[#dfe6d9] p-8 sm:p-11 lg:row-span-2 lg:min-h-[760px]"><span className="font-mono text-[9px] font-bold tracking-[0.16em]">01 / ORCHESTRATE</span><h3 className="mt-20 max-w-xl text-4xl font-black leading-[1] tracking-[-0.055em] sm:text-5xl">Give the mission.<br />Your crew handles the rest.</h3><p className="mt-6 max-w-md text-sm leading-7 text-black/55">Coordinate multiple specialists from one command center. Set the outcome, review the work, and stay in control of every decision.</p><div className="absolute bottom-10 left-8 right-8 flex items-center justify-between border-y border-black/15 py-10 font-mono text-[9px] font-bold tracking-widest sm:left-11 sm:right-11"><span>YOUR IDEA</span><span className="grid h-20 w-20 place-items-center rounded-full bg-[#c8ff3d] text-2xl shadow-[0_0_0_16px_rgba(200,255,61,.22)]">✦</span><span>SHIPPED</span></div></article>
+            <article className="relative min-h-[370px] overflow-hidden rounded-2xl border border-black bg-[#151610] p-8 text-white"><span className="font-mono text-[9px] font-bold tracking-[0.16em] text-white/45">02 / CREATE</span><h3 className="mt-14 text-3xl font-black leading-[1.05] tracking-[-0.05em]">Every creative tool.<br />One fluid workspace.</h3><p className="mt-5 max-w-md text-sm leading-7 text-white/45">Generate images, audio, code, copy, and workflows without breaking your flow.</p><div className="absolute bottom-7 left-8 flex flex-wrap gap-2">{["IMAGE","AUDIO","CODE","WORDS","FLOW"].map(t=><span key={t} className="rounded-full border border-white/15 px-3 py-2 font-mono text-[8px] text-white/55">{t}</span>)}</div></article>
+            <article className="relative min-h-[370px] overflow-hidden rounded-2xl border border-[#7559ff] bg-[#7559ff] p-8 text-white"><span className="font-mono text-[9px] font-bold tracking-[0.16em] text-white/60">03 / CONNECT</span><h3 className="mt-14 text-3xl font-black leading-[1.05] tracking-[-0.05em]">Built around the tools<br />you already use.</h3><p className="mt-5 max-w-md text-sm leading-7 text-white/65">Turn scattered tasks into one visible, reliable system.</p><div className="absolute bottom-7 right-7 flex">{[Workflow,Layers3,Radio,Bot].map((Icon,i)=><span key={i} className="-ml-2 grid h-12 w-12 place-items-center rounded-full border-4 border-[#7559ff] bg-[#f4f1e8] text-[#11120f]"><Icon size={16}/></span>)}</div></article>
           </div>
         </div>
       </section>
 
-      {/* CTA */}
-      <section className="px-4 py-24" style={{ borderTop: '1px solid #26262e30' }}>
-        <div className="max-w-3xl mx-auto text-center p-12 rounded-xl border relative overflow-hidden" style={{ backgroundColor: '#12121a', borderColor: '#26262e' }}>
-          <div className="absolute inset-0 pointer-events-none opacity-10" style={{ background: 'radial-gradient(circle at 50% 50%, #6366f1, transparent 70%)' }} />
-          <div className="relative">
-            <h2 className="text-3xl md:text-4xl font-black mb-4" style={{ color: '#f8fafc' }}>Ready to Build?</h2>
-            <p className="opacity-50 mb-8 max-w-lg mx-auto">Start in Studio, install your first agents, and turn the next idea into something you can ship or share.</p>
-            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
-              <Link href="/sign-up" className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold transition-all hover:scale-105" style={{ backgroundColor: '#6366f1', color: '#fff' }}>
-                Get Started Free <ArrowRight size={16} />
-              </Link>
-              <Link href="/studio" className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl text-sm font-bold border transition-all hover:bg-white/5" style={{ borderColor: '#26262e' }}>
-                Explore Studio
-              </Link>
-            </div>
-          </div>
+      <section className="bg-[#151610] px-4 py-24 text-white sm:px-6 md:py-32">
+        <div className="mx-auto max-w-7xl"><div className="flex flex-col justify-between gap-8 sm:flex-row sm:items-end"><div><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#c8ff3d]">Meet the crew</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">Specialists who never<br />lose the thread.</h2></div><Link href="/agents" className="inline-flex w-fit items-center gap-4 border-b border-white/50 py-2 text-sm font-bold">Explore all agents <ArrowRight size={15}/></Link></div>
+          <div className="mt-16 grid gap-4 md:grid-cols-3">{agents.map((agent,index)=>{const Icon=agent.icon;return <article key={agent.name} className="group rounded-2xl border border-white/10 bg-white/[0.025] p-7 transition hover:-translate-y-1 hover:border-white/25"><div className="flex items-center justify-between font-mono text-[9px] text-white/35"><span>0{index+1}</span><span>{agent.role.toUpperCase()}</span></div><div className="mx-auto my-14 grid h-28 w-28 place-items-center rounded-full text-[#11120f] shadow-[0_0_70px_rgba(200,255,61,.12)]" style={{background:`radial-gradient(circle at 35% 30%,white,${agent.color} 65%)`}}><Icon size={31}/></div><h3 className="text-2xl font-black tracking-[-0.04em]">{agent.name}</h3><p className="mt-3 min-h-16 text-sm leading-6 text-white/45">{agent.copy}</p><Link href="/agents" className="mt-7 flex items-center justify-between border-t border-white/10 pt-5 text-xs font-bold text-[#c8ff3d]">Meet this agent <ArrowRight size={14}/></Link></article>})}</div>
         </div>
       </section>
+
+      <section className="px-4 py-24 sm:px-6 md:py-32"><div className="mx-auto max-w-7xl"><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7559ff]">How it works</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">A bigger team<br />in three small steps.</h2><div className="mt-16 grid gap-10 md:grid-cols-3">{steps.map(([no,title,copy])=><article key={no} className="border-t border-black pt-6"><span className="font-mono text-[10px] font-bold text-[#7559ff]">{no}</span><h3 className="mt-14 text-2xl font-black tracking-[-0.04em]">{title}</h3><p className="mt-4 text-sm leading-7 text-black/55">{copy}</p></article>)}</div></div></section>
+
+      <section className="px-4 pb-24 sm:px-6 md:pb-32"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-12 overflow-hidden rounded-2xl border border-black bg-[#c8ff3d] p-8 shadow-[8px_8px_0_#111] sm:p-14 lg:flex-row lg:items-center"><div><span className="text-[10px] font-black uppercase tracking-[0.2em]">Ready when you are</span><h2 className="mt-6 text-5xl font-black leading-[0.88] tracking-[-0.07em] sm:text-7xl">Build what’s next.<br /><span className="font-serif font-normal italic">Bring your crew.</span></h2><p className="mt-6 text-sm text-black/60">Your first agent is free. No setup maze, no credit card, no waiting.</p><Link href="/sign-up" className="mt-8 inline-flex min-h-14 items-center gap-8 rounded-lg bg-black px-6 text-sm font-black text-white">Start building for free <ArrowRight size={16}/></Link></div><div className="hidden text-[13rem] font-black leading-none tracking-[-0.18em] lg:block">L<span className="text-5xl text-[#7559ff]">✦</span></div></div></section>
     </div>
   );
 }
@@ -264,9 +123,7 @@ export default function HomePage() {
   const router = useRouter();
 
   useEffect(() => {
-    if (supabaseSignedIn || clerkSignedIn) {
-      router.replace('/dashboard');
-    }
+    if (supabaseSignedIn || clerkSignedIn) router.replace("/dashboard");
   }, [supabaseSignedIn, clerkSignedIn, router]);
 
   return <LandingPage />;

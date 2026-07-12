@@ -317,7 +317,15 @@ export default function CodeScannerPage() {
   const [scan, setScan] = useState<{
     loading: boolean;
     error: string | null;
-    data: any | null;
+    data: {
+      projectName: string;
+      totalFiles: number;
+      totalLines: number;
+      techStack: string[];
+      keyFeatures: string[];
+      recentChanges: string[];
+      health: { buildStatus: string; envVarsMissing: string[] };
+    } | null;
   }>({ loading: false, error: null, data: null });
 
   const selectedFile = getFileByPath(DEMO_FILE_TREE, selectedPath);

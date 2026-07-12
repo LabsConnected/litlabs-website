@@ -26,7 +26,7 @@ export default function LibraryFilesPage() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      setLoading(false);
+      queueMicrotask(() => setLoading(false));
       return;
     }
     let alive = true;

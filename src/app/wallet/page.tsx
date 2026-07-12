@@ -54,7 +54,9 @@ function WalletContent() {
   }, [claim]);
 
   useEffect(() => {
-    if (isLoaded && !isSignedIn) setClaimMsg("Sign in to manage your wallet.");
+    if (isLoaded && !isSignedIn) {
+      queueMicrotask(() => setClaimMsg("Sign in to manage your wallet."));
+    }
   }, [isLoaded, isSignedIn]);
 
   const cardStyle = {

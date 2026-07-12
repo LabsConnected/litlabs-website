@@ -177,7 +177,9 @@ function StudioCommandCenter() {
   useEffect(() => {
     const toolParam = searchParams.get("tool") as StudioTool | null;
     if (toolParam) {
-      setActiveTool((prev) => (prev === toolParam ? prev : toolParam));
+      queueMicrotask(() =>
+        setActiveTool((prev) => (prev === toolParam ? prev : toolParam)),
+      );
     }
   }, [searchParams]);
 
