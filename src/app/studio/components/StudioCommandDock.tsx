@@ -54,7 +54,10 @@ export default function StudioCommandDock({
   onAction: (action: DockAction) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
-  const [expanded, setExpanded] = useState(true);
+  const [expanded, setExpanded] = useState(() => {
+    if (typeof window === "undefined") return true;
+    return window.innerWidth > 768;
+  });
   const [busy, setBusy] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 

@@ -54,7 +54,9 @@ const ColorByNumberTool = nextDynamic(
 const PipelineTool = nextDynamic(() => import("./tools/PipelineTool"), {
   ssr: false,
 });
-const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), { ssr: false });
+const BuilderTool = nextDynamic(() => import("./tools/BuilderTool"), {
+  ssr: false,
+});
 
 const ToolRouter = memo(function ToolRouter({ tool }: { tool: StudioTool }) {
   switch (tool) {
@@ -304,9 +306,9 @@ function StudioCommandCenter() {
             />
           </div>
 
-          {/* Welcome strip (quickstart) */}
+          {/* Welcome strip (quickstart) — hidden on mobile to save space */}
           <div
-            className="px-3 sm:px-4 py-3 shrink-0"
+            className="hidden sm:block px-3 sm:px-4 py-3 shrink-0"
             style={{ borderBottom: `1px solid ${T.borderColor}10` }}
           >
             <div className="flex items-end justify-between gap-3 mb-2">
@@ -346,7 +348,7 @@ function StudioCommandCenter() {
 
           {/* Active tool */}
           <div
-            className="flex-1 min-h-0 overflow-auto p-3 sm:p-4"
+            className="flex-1 min-h-0 overflow-auto p-3 sm:p-4 pb-20 md:pb-4"
             style={{ color: T.textColor }}
           >
             <ToolRouter tool={activeTool} />

@@ -62,17 +62,32 @@ export function ChatTerminal({
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [listening, setListening] = useState(false);
   const spokenRef = useRef<Set<string>>(new Set());
+  type SpeechRecognitionResult = { transcript: string }[];
+  type SpeechRecognitionEvent = {
+    resultIndex: number;
+    results: (SpeechRecognitionResult & { isFinal: boolean })[];
+  };
+  type SpeechRecognitionErrorEvent = { error?: string };
   type SpeechRec = {
     continuous: boolean;
     interimResults: boolean;
     lang: string;
-    onresult: ((event: { results: { transcript: string }[][] }) => void) | null;
-    onerror: (() => void) | null;
+    maxAlternatives: number;
+    onresult: ((event: SpeechRecognitionEvent) => void) | null;
+    onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
     onend: (() => void) | null;
     start(): void;
     stop(): void;
   };
   const recognitionRef = useRef<SpeechRec | null>(null);
+
+  const voicesRef = useRef<SpeechSynthesisVoice[]>([]);
+
+  const loadVoices = () => {
+    if (typeof window === "undefined" || !window.speechSynthesis) return [];
+    voicesRef.current = window.speechSynthesis.getVoices();
+    return voicesRef.current;
+  };
 
   const speak = (text: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
@@ -81,7 +96,7 @@ export function ChatTerminal({
     const utter = new SpeechSynthesisUtterance(clean);
     utter.rate = 1.05;
     utter.pitch = 1;
-    const voices = window.speechSynthesis.getVoices();
+    const voices = voicesRef.current.length ? voicesRef.current : loadVoices();
     const preferred =
       voices.find((v) =>
         /Google US English|Microsoft David|Daniel|Alex|Fred/i.test(v.name),
@@ -97,11 +112,11 @@ export function ChatTerminal({
 
   useEffect(() => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
+    loadVoices();
     const handleVoices = () => {
-      // voices loaded; no-op needed, they are read lazily in speak()
+      voicesRef.current = window.speechSynthesis.getVoices();
     };
     window.speechSynthesis.onvoiceschanged = handleVoices;
-    window.speechSynthesis.getVoices();
     return () => {
       window.speechSynthesis.onvoiceschanged = null;
     };
@@ -115,54 +130,82 @@ export function ChatTerminal({
         speak(m.content);
       }
     });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, speakEnabled]);
 
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const SpeechRecognitionAPI =
-      (
-        window as unknown as {
-          SpeechRecognition?: new () => SpeechRec;
-          webkitSpeechRecognition?: new () => SpeechRec;
-        }
-      ).SpeechRecognition ||
-      (
-        window as unknown as {
-          SpeechRecognition?: new () => SpeechRec;
-          webkitSpeechRecognition?: new () => SpeechRec;
-        }
-      ).webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) return;
-    const rec = new SpeechRecognitionAPI();
-    rec.continuous = false;
-    rec.interimResults = false;
-    rec.lang = "en-US";
-    rec.onresult = (event) => {
-      const transcript = event.results[0][0].transcript;
-      setInput((prev) => (prev ? prev + " " + transcript : transcript));
-      setListening(false);
-    };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => setListening(false);
-    recognitionRef.current = rec;
-    return () => {
-      rec.stop();
-    };
-  }, []);
+  const getSpeechRecognitionAPI = () => {
+    if (typeof window === "undefined") return null;
+    return (
+      (window as unknown as { SpeechRecognition?: new () => SpeechRec })
+        .SpeechRecognition ||
+      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRec })
+        .webkitSpeechRecognition ||
+      null
+    );
+  };
 
-  const toggleListening = () => {
-    const rec = recognitionRef.current;
-    if (!rec) {
+  const stopListening = () => {
+    recognitionRef.current?.stop();
+    recognitionRef.current = null;
+    setListening(false);
+  };
+
+  const startListening = () => {
+    const SpeechRecognitionAPI = getSpeechRecognitionAPI();
+    if (!SpeechRecognitionAPI) {
       onLogAction("[VOICE] Speech recognition not available in this browser.");
       return;
     }
-    if (listening) {
-      rec.stop();
-      setListening(false);
-    } else {
+    try {
+      const rec = new SpeechRecognitionAPI();
+      rec.continuous = false;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+      rec.maxAlternatives = 1;
+      let finalTranscript = "";
+      rec.onresult = (event) => {
+        let interim = "";
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript;
+          if (event.results[i].isFinal) {
+            finalTranscript += transcript;
+          } else {
+            interim += transcript;
+          }
+        }
+        const display = finalTranscript + (interim ? " " + interim : "");
+        setInput(display.trim());
+      };
+      rec.onerror = (event) => {
+        onLogAction(`[VOICE] Recognition error: ${event.error ?? "unknown"}`);
+        stopListening();
+      };
+      rec.onend = () => {
+        const text = finalTranscript.trim();
+        if (text) {
+          setInput(text);
+          if (mode === "chat") {
+            sendChat(text);
+          }
+        }
+        setListening(false);
+      };
+      recognitionRef.current = rec;
       setInput("");
       rec.start();
       setListening(true);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : "Unknown error";
+      onLogAction(`[VOICE] Could not start microphone: ${errorMsg}`);
+      setListening(false);
+    }
+  };
+
+  const toggleListening = () => {
+    if (listening) {
+      stopListening();
+    } else {
+      startListening();
     }
   };
 
