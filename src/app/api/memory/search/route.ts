@@ -11,17 +11,20 @@ function getSupermemory() {
 }
 
 export async function GET(req: NextRequest) {
-  try {
-    const { userId } = await auth();
-    const uid = userId || "anonymous";
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
 
+  try {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q") || "";
+    const scope = searchParams.get("scope") || undefined;
     const limit = Number(searchParams.get("limit")) || 20;
 
     const results = await getSupermemory().search.memories({
       q,
-      containerTag: uid,
+      containerTag: scope ? `${userId}:${scope}` : userId,
       limit,
     });
 

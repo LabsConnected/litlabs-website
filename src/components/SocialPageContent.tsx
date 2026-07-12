@@ -6,15 +6,11 @@ import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import {
-  Zap,
-  Sparkles,
   Heart,
   MessageSquare,
   Share2,
-  TrendingUp,
   Users,
   Plus,
-  BarChart3,
   Send,
   Flame,
   Loader2,
@@ -211,7 +207,10 @@ export default function SocialPageContent() {
   }
 
   return (
-    <div className="pb-24" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+    <div
+      className="pb-24"
+      style={{ backgroundColor: C.bgColor, color: C.textColor }}
+    >
       {/* Toast */}
       {toast && (
         <div
@@ -269,7 +268,11 @@ export default function SocialPageContent() {
         {isMock && (
           <div
             className="w-full px-4 py-2 text-[10px] text-center"
-            style={{ backgroundColor: C.accentColor + "20", color: C.accentColor, borderBottom: `1px solid ${C.accentColor}40` }}
+            style={{
+              backgroundColor: C.accentColor + "20",
+              color: C.accentColor,
+              borderBottom: `1px solid ${C.accentColor}40`,
+            }}
           >
             🛠 Demo feed — connect Supabase to see real community posts.
           </div>
@@ -341,41 +344,6 @@ export default function SocialPageContent() {
                 </div>
               </div>
             )}
-
-            {/* Navigation */}
-            <div
-              className="border-2 p-3"
-              style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
-            >
-              <div className="text-[9px] uppercase opacity-40 mb-2">
-                Navigation
-              </div>
-              {[
-                {
-                  label: "Feed",
-                  href: "/social",
-                  icon: TrendingUp,
-                  active: true,
-                },
-                { label: "Studio", href: "/studio", icon: Zap },
-                { label: "Gallery", href: "/gallery", icon: Sparkles },
-                { label: "Market", href: "/marketplace", icon: BarChart3 },
-                { label: "Agents", href: "/agents", icon: Users },
-              ].map((link) => (
-                <Link
-                  key={link.label}
-                  href={link.href}
-                  className={`flex items-center gap-2 p-2 border mb-1 hover:opacity-80 ${link.active ? "opacity-100" : "opacity-60"}`}
-                  style={{ borderColor: C.borderColor }}
-                >
-                  <link.icon
-                    size={14}
-                    style={{ color: link.active ? C.headerColor : C.textMuted }}
-                  />
-                  <span className="text-xs">{link.label}</span>
-                </Link>
-              ))}
-            </div>
 
             {/* Live Agents */}
             <div
@@ -683,7 +651,9 @@ export default function SocialPageContent() {
                           : C.textMuted,
                         opacity: likedPosts.has(post.id) ? 1 : 0.6,
                       }}
-                      aria-label={likedPosts.has(post.id) ? "Unlike post" : "Like post"}
+                      aria-label={
+                        likedPosts.has(post.id) ? "Unlike post" : "Like post"
+                      }
                     >
                       <Heart
                         size={14}
@@ -691,7 +661,9 @@ export default function SocialPageContent() {
                           likedPosts.has(post.id) ? C.linkColor : "transparent"
                         }
                       />
-                      <span className="sr-only">{likedPosts.has(post.id) ? "Unlike" : "Like"}</span>
+                      <span className="sr-only">
+                        {likedPosts.has(post.id) ? "Unlike" : "Like"}
+                      </span>
                       {post.likes_count}
                     </button>
                     <button

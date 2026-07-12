@@ -91,6 +91,9 @@ meta/
 lib/oracle-cli/
 litlabs/
 litlabs-website/
+work/
+.codex-reference/
+Zoo-Code/
 
 # Misc
 *.backup

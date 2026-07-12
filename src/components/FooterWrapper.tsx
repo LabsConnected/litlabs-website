@@ -3,11 +3,16 @@
 import { usePathname } from "next/navigation";
 import Footer from "@/components/Footer";
 
-const HIDE_PATHS = ["/dashboard"];
+const HIDE_PATHS = ["/dashboard", "/studio", "/social"];
 
 export default function FooterWrapper() {
   const pathname = usePathname();
-  const hidden = HIDE_PATHS.some((p) => pathname === p || pathname?.startsWith(p + "?") || pathname?.startsWith(p + "/"));
+  const hidden = HIDE_PATHS.some(
+    (p) =>
+      pathname === p ||
+      pathname?.startsWith(p + "?") ||
+      pathname?.startsWith(p + "/"),
+  );
   if (hidden) return null;
   return <Footer />;
 }

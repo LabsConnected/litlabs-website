@@ -25,6 +25,7 @@ interface ScanResult {
   apiEndpoints: string[];
   agents: string[];
   recentChanges: string[];
+  files: FileSummary[];
   health: {
     envVarsConfigured: number;
     envVarsMissing: string[];
@@ -237,6 +238,7 @@ export async function GET() {
     apiEndpoints: apiEndpoints.slice(0, 20),
     agents: agents.slice(0, 10),
     recentChanges,
+    files: allFiles,
     health: {
       envVarsConfigured,
       envVarsMissing,

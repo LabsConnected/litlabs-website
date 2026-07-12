@@ -3,44 +3,59 @@
 import { useState } from "react";
 import {
   Eye,
-  Code,
   FileText,
-  Globe,
-  Image as ImageIcon,
   Terminal,
   Layers,
+  Image as ImageIcon,
+  Download,
+  ExternalLink,
+  FileDiff,
+  GitBranch,
 } from "lucide-react";
 
-type OutputType = "preview" | "media" | "code" | "files" | "logs" | "browser";
+type OutputType = "preview" | "artifact" | "files" | "changes" | "logs";
 
 export function OutputPanel({
   logs,
   selectedFile,
   files = [],
-  media,
+  artifact,
+  onSelectFileAction,
 }: {
   logs: string[];
   selectedFile: string | null;
   files?: string[];
-  media?: { type: "image" | "video"; url: string; title: string } | null;
+  artifact?: {
+    type: "image" | "video" | "file";
+    url: string;
+    title: string;
+    downloadUrl?: string;
+  } | null;
+  onSelectFileAction?: (file: string) => void;
 }) {
   const OUTPUTS = [
     { id: "preview" as const, label: "Preview", icon: Eye },
-    ...(media
+    ...(artifact
       ? [
           {
-            id: "media" as const,
-            label: media.type === "video" ? "Video" : "Image",
-            icon: ImageIcon,
+            id: "artifact" as const,
+            label:
+              artifact.type === "image"
+                ? "Image"
+                : artifact.type === "video"
+                  ? "Video"
+                  : "Artifact",
+            icon: artifact.type === "image" ? ImageIcon : FileText,
           },
         ]
       : []),
-    { id: "code" as const, label: "Code", icon: Code },
     { id: "files" as const, label: "Files", icon: FileText },
+    { id: "changes" as const, label: "Changes", icon: FileDiff },
     { id: "logs" as const, label: "Logs", icon: Terminal },
-    { id: "browser" as const, label: "Browser", icon: Globe },
   ];
-  const [active, setActive] = useState<OutputType>("preview");
+  const [active, setActive] = useState<OutputType>(
+    artifact ? "artifact" : "preview",
+  );
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm overflow-hidden">
@@ -73,7 +88,7 @@ export function OutputPanel({
       </div>
 
       <div className="flex-1 min-h-0 p-3 overflow-y-auto">
-        {active === "preview" && !media && (
+        {active === "preview" && !artifact && (
           <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800/60 bg-neutral-900/20 text-neutral-500">
             <ImageIcon
               size={28}
@@ -87,20 +102,17 @@ export function OutputPanel({
           </div>
         )}
 
-        {active === "media" && media && (
-          <div className="flex h-full flex-col gap-2">
-            <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
-              {media.title}
-            </div>
-            {media.type === "image" ? (
+        {active === "preview" && artifact && artifact.type !== "file" && (
+          <div className="flex h-full flex-col items-center justify-center gap-2">
+            {artifact.type === "image" ? (
               <img
-                src={media.url}
-                alt={media.title}
+                src={artifact.url}
+                alt={artifact.title}
                 className="max-h-full w-auto rounded-xl border border-neutral-800/60 object-contain"
               />
             ) : (
               <video
-                src={media.url}
+                src={artifact.url}
                 controls
                 className="max-h-full w-auto rounded-xl border border-neutral-800/60"
               />
@@ -108,86 +120,96 @@ export function OutputPanel({
           </div>
         )}
 
-        {active === "code" && (
-          <div className="rounded-xl border border-neutral-800/60 bg-neutral-950 p-3 font-mono text-[10px] text-neutral-300 space-y-1">
-            <div className="text-neutral-500">
-              {"// Generated code will appear here"}
+        {active === "artifact" && artifact && (
+          <div className="flex h-full flex-col gap-3">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-neutral-500">
+              {artifact.title}
             </div>
-            <div>
-              <span className="text-cyan-400">export default</span>{" "}
-              <span className="text-fuchsia-400">function</span>{" "}
-              <span className="text-yellow-300">App</span>() {"{"}
+            {artifact.type === "image" ? (
+              <img
+                src={artifact.url}
+                alt={artifact.title}
+                className="w-full rounded-xl border border-neutral-800/60 object-contain"
+              />
+            ) : artifact.type === "video" ? (
+              <video
+                src={artifact.url}
+                controls
+                className="w-full rounded-xl border border-neutral-800/60"
+              />
+            ) : (
+              <div className="rounded-xl border border-neutral-800/60 bg-neutral-950 p-3 text-xs text-neutral-300">
+                {artifact.url}
+              </div>
+            )}
+            <div className="flex gap-2">
+              {artifact.downloadUrl && (
+                <a
+                  href={artifact.downloadUrl}
+                  download
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-[10px] font-bold text-neutral-300 transition hover:bg-neutral-800/60"
+                >
+                  <Download size={12} /> Download
+                </a>
+              )}
+              <a
+                href={artifact.url}
+                target="_blank"
+                rel="noreferrer"
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-[10px] font-bold text-neutral-300 transition hover:bg-neutral-800/60"
+              >
+                <ExternalLink size={12} /> Open Full Size
+              </a>
             </div>
-            <div className="pl-3 text-neutral-400">
-              return &lt;div&gt;Hello LiTT&lt;/div&gt;;
-            </div>
-            <div>{"}"}</div>
           </div>
         )}
 
         {active === "files" && (
-          <div className="space-y-1.5">
-            {selectedFile ? (
-              <div className="rounded-lg border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1.5 text-[10px] text-cyan-200">
-                {selectedFile}
-              </div>
-            ) : null}
+          <div className="space-y-1">
             {files.length === 0 ? (
-              <div className="text-[10px] text-neutral-500">
+              <div className="text-xs text-neutral-500">
                 No files scanned yet.
               </div>
             ) : (
-              files.slice(0, 20).map((f) => (
-                <div
+              files.map((f) => (
+                <button
                   key={f}
-                  className="flex items-center gap-2 rounded-lg border border-neutral-800/40 bg-neutral-900/30 px-2.5 py-1.5 text-[10px] text-neutral-300 hover:bg-neutral-800/40 transition"
+                  onClick={() => onSelectFileAction?.(f)}
+                  className={`flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left text-[11px] font-medium transition ${
+                    selectedFile === f
+                      ? "bg-cyan-500/10 text-cyan-300"
+                      : "text-neutral-400 hover:bg-neutral-900/60 hover:text-neutral-200"
+                  }`}
                 >
-                  <FileText size={12} className="text-neutral-500" /> {f}
-                </div>
+                  <FileText size={12} />
+                  <span className="truncate">{f}</span>
+                </button>
               ))
             )}
           </div>
         )}
 
-        {active === "logs" && (
-          <div className="space-y-1 font-mono text-[9px]">
-            {logs.length === 0 ? (
-              <div className="text-neutral-500">No logs yet.</div>
-            ) : null}
-            {logs.slice(-30).map((log, i) => (
-              <div key={i} className="break-all text-neutral-300">
-                <span className="text-neutral-600">
-                  {new Date().toLocaleTimeString([], {
-                    hour12: false,
-                    hour: "2-digit",
-                    minute: "2-digit",
-                    second: "2-digit",
-                  })}
-                </span>{" "}
-                {log}
-              </div>
-            ))}
+        {active === "changes" && (
+          <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800/60 bg-neutral-900/20 text-neutral-500">
+            <GitBranch size={28} className="mb-2 opacity-40" />
+            <div className="text-xs font-semibold">No changes yet</div>
+            <div className="text-[10px]">
+              Start building to create file changes.
+            </div>
           </div>
         )}
 
-        {active === "browser" && (
-          <div className="flex h-full flex-col rounded-xl border border-neutral-800/60 bg-neutral-900/20">
-            <div className="flex items-center gap-2 border-b border-neutral-800/40 px-2 py-1.5">
-              <div className="flex gap-1">
-                <span className="h-2 w-2 rounded-full bg-red-500/60" />
-                <span className="h-2 w-2 rounded-full bg-amber-500/60" />
-                <span className="h-2 w-2 rounded-full bg-green-500/60" />
-              </div>
-              <div className="flex-1 rounded-md bg-neutral-900/60 px-2 py-0.5 text-[9px] text-neutral-500">
-                https://localhost:3000
-              </div>
-            </div>
-            <div className="flex flex-1 items-center justify-center text-neutral-500">
-              <div className="text-center">
-                <Globe size={24} className="mx-auto mb-2 opacity-40" />
-                <div className="text-[10px]">Live browser preview</div>
-              </div>
-            </div>
+        {active === "logs" && (
+          <div className="space-y-1 font-mono text-[10px] leading-4 text-neutral-400">
+            {logs.length === 0 ? (
+              <div className="text-neutral-500">No logs yet.</div>
+            ) : (
+              logs.map((entry, i) => (
+                <div key={i} className="border-l-2 border-neutral-800/60 pl-2">
+                  {entry}
+                </div>
+              ))
+            )}
           </div>
         )}
       </div>

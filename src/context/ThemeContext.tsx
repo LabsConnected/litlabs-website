@@ -448,6 +448,21 @@ interface ThemeContextType {
     success: string;
     warning: string;
   };
+  tokens: {
+    background: string;
+    surface: string;
+    surfaceElevated: string;
+    border: string;
+    text: string;
+    textMuted: string;
+    textInverse: string;
+    primary: string;
+    secondary: string;
+    success: string;
+    warning: string;
+    danger: string;
+    focus: string;
+  };
   setMode: (mode: ThemeMode) => void;
   setSkin: (skin: SkinPreset) => void;
   setAccent: (accent: AccentColor) => void;
@@ -507,6 +522,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   const resolvedColors = getResolvedColors(theme);
+  const semanticTokens = {
+    background: resolvedColors.bgColor,
+    surface: resolvedColors.boxBg,
+    surfaceElevated: resolvedColors.boxBg,
+    border: resolvedColors.borderColor,
+    text: resolvedColors.textColor,
+    textMuted: resolvedColors.textMuted,
+    textInverse: resolvedColors.bgColor,
+    primary: resolvedColors.accentColor,
+    secondary: resolvedColors.linkColor,
+    success: resolvedColors.success,
+    warning: resolvedColors.warning,
+    danger: "#ef4444",
+    focus: resolvedColors.accentColor,
+  };
+  const tokens = { ...resolvedColors, ...semanticTokens };
 
   const [mounted, setMounted] = useState(false);
 
@@ -572,6 +603,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       value={{
         theme,
         resolvedColors,
+        tokens,
         setMode,
         setSkin,
         setAccent,

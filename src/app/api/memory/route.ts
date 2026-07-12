@@ -1,5 +1,6 @@
 import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -9,18 +10,30 @@ function getSupermemory() {
   return new Supermemory({ apiKey: key });
 }
 
+function getContainerTag(userId: string | null, scope?: string) {
+  if (!userId) return "anonymous";
+  // Tenant-safe container. Scope allows profile/agent/project/conversation buckets.
+  return scope ? `${userId}:${scope}` : userId;
+}
+
 export async function POST(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const { content, userId, metadata } = await req.json();
+    const { content, scope, metadata } = await req.json();
 
     if (!content) {
       return NextResponse.json({ error: "content is required" }, { status: 400 });
     }
 
+    const containerTag = getContainerTag(userId, scope);
     const result = await getSupermemory().add({
       content,
-      containerTag: userId || "default",
-      metadata,
+      containerTag,
+      metadata: { ...metadata, ownerId: userId, scope: scope || "profile" },
     });
 
     return NextResponse.json(result);
@@ -31,15 +44,20 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const { searchParams } = new URL(req.url);
     const query = searchParams.get("q") || "";
-    const userId = searchParams.get("userId") || "default";
+    const scope = searchParams.get("scope") || undefined;
     const limit = Number(searchParams.get("limit")) || 5;
 
     const results = await getSupermemory().search.memories({
       q: query,
-      containerTag: userId,
+      containerTag: getContainerTag(userId, scope),
       limit,
     });
 
@@ -51,15 +69,20 @@ export async function GET(req: NextRequest) {
 }
 
 export async function DELETE(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const { id, userId, content } = await req.json();
+    const { id, content, scope } = await req.json();
 
     if (!id && !content) {
       return NextResponse.json({ error: "id or content is required" }, { status: 400 });
     }
 
     const result = await getSupermemory().memories.forget({
-      containerTag: userId || "default",
+      containerTag: getContainerTag(userId, scope),
       id,
       content,
     });
@@ -72,8 +95,13 @@ export async function DELETE(req: NextRequest) {
 }
 
 export async function PATCH(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
-    const { id, content, userId, newContent } = await req.json();
+    const { id, content, newContent, scope } = await req.json();
 
     if ((!id && !content) || !newContent) {
       return NextResponse.json(
@@ -83,7 +111,7 @@ export async function PATCH(req: NextRequest) {
     }
 
     const result = await getSupermemory().memories.updateMemory({
-      containerTag: userId || "default",
+      containerTag: getContainerTag(userId, scope),
       id,
       content,
       newContent,

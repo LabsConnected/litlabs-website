@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, useCallback } from "react";
+import { startTransition, useState, useEffect, useCallback } from "react";
 import Editor from "@monaco-editor/react";
 import { useUser } from "@clerk/nextjs";
 import { Save, FileCode, X, Loader2 } from "lucide-react";
@@ -11,7 +11,11 @@ interface CodeEditorProps {
   onContentChange?: (content: string) => void;
 }
 
-export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorProps) {
+export function CodeEditor({
+  filePath,
+  onClose,
+  onContentChange,
+}: CodeEditorProps) {
   const { user } = useUser();
   const userId = user?.id ?? "anonymous";
   const [content, setContent] = useState("");
@@ -19,12 +23,15 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+  const wsUrl =
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
 
   const loadFile = useCallback(async () => {
     if (!filePath) return;
-    setLoading(true);
-    setError(null);
+    startTransition(() => {
+      setLoading(true);
+      setError(null);
+    });
     try {
       const res = await fetch(`${wsUrl}/files/read`, {
         method: "POST",
@@ -43,7 +50,7 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
   }, [filePath, userId, wsUrl]);
 
   useEffect(() => {
-    loadFile();
+    loadFile(); // eslint-disable-line react-hooks/set-state-in-effect
   }, [loadFile]);
 
   const saveFile = async () => {
@@ -97,7 +104,9 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="flex items-center gap-2">
           <FileCode className="h-4 w-4 text-orange-400" />
-          <span className="text-sm font-semibold text-neutral-200">{filePath || "Untitled"}</span>
+          <span className="text-sm font-semibold text-neutral-200">
+            {filePath || "Untitled"}
+          </span>
           {dirty && <span className="text-xs text-orange-400">● unsaved</span>}
         </div>
         <div className="flex items-center gap-2">
@@ -106,7 +115,11 @@ export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorPro
             disabled={saving || !dirty}
             className="flex items-center gap-1.5 rounded-lg bg-orange-600 px-3 py-1.5 text-xs font-bold text-white disabled:opacity-50 hover:bg-orange-500"
           >
-            {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Save className="h-3.5 w-3.5" />}
+            {saving ? (
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+            ) : (
+              <Save className="h-3.5 w-3.5" />
+            )}
             Save
           </button>
           <button

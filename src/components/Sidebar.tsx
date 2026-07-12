@@ -14,11 +14,9 @@ import {
   ChevronRight,
   ChevronDown,
   ChevronUp,
-  Bot,
   Coins,
   Pin,
   EyeOff,
-  Send,
   MoreHorizontal,
   CrownIcon,
   Home,
@@ -26,16 +24,18 @@ import {
 import { useState, useCallback, useMemo, useEffect } from "react";
 import {
   NAV_GROUPS,
-  AI_SUGGESTIONS,
-  CREATOR_MODES,
   COLLAPSED_KEY,
   GROUP_EXPANDED_KEY,
   PINNED_KEY,
   HIDDEN_KEY,
-  MODE_KEY,
   type NavGroup,
   type NavItem,
 } from "@/lib/navigation";
+import {
+  DirectorCard,
+  type DirectorMode,
+} from "@/components/litt-director/DirectorCard";
+import { DirectorDrawer } from "@/components/litt-director/DirectorDrawer";
 
 interface SidebarProps {
   open?: boolean;
@@ -101,25 +101,12 @@ function NavItemRow({
   const icon = (
     <div className="relative shrink-0">
       <item.icon size={17} style={{ color: iconColor }} />
-      {item.online && !collapsed && (
-        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 ring-1 ring-[#0a0b14]" />
-      )}
     </div>
   );
 
   const label = !collapsed ? (
     <span className="truncate">{item.label}</span>
   ) : null;
-
-  const badge =
-    !collapsed && item.badge ? (
-      <span
-        className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-        style={{ backgroundColor: accent, color: "#0a0b14" }}
-      >
-        {item.badge > 99 ? "99+" : item.badge}
-      </span>
-    ) : null;
 
   if (hidden) return null;
 
@@ -134,7 +121,6 @@ function NavItemRow({
         >
           {icon}
           {label}
-          {badge}
           {!collapsed && (
             <ChevronDown
               size={14}
@@ -170,7 +156,6 @@ function NavItemRow({
       <div className={baseClasses} style={style}>
         {icon}
         {label}
-        {badge}
       </div>
     </Link>
   );
@@ -325,14 +310,10 @@ function SidebarContent({
   const [hidden, setHidden] = useState<string[]>(() =>
     loadJson(HIDDEN_KEY, []),
   );
-  const [mode, setMode] = useState<string>(() => {
-    if (typeof window === "undefined") return "creator";
-    return localStorage.getItem(MODE_KEY) || "creator";
-  });
   const [showPersonalize, setShowPersonalize] = useState(false);
-  const [aiQuery, setAiQuery] = useState("");
-  const [jarvisFocused, setJarvisFocused] = useState(false);
   const [plan, setPlan] = useState<string>("free");
+  const [directorOpen, setDirectorOpen] = useState(false);
+  const [directorMode, setDirectorMode] = useState<DirectorMode>("ask");
 
   useEffect(() => {
     if (!isSignedIn || !user?.id) return;
@@ -394,11 +375,6 @@ function SidebarContent({
     });
   };
 
-  const setCreatorMode = (value: string) => {
-    setMode(value);
-    if (typeof window !== "undefined") localStorage.setItem(MODE_KEY, value);
-  };
-
   const orderedGroups = useMemo(() => {
     const pinnedFirst = [...NAV_GROUPS].sort((a, b) => {
       const aPinned = pinned.includes(a.label);
@@ -409,19 +385,6 @@ function SidebarContent({
     });
     return pinnedFirst;
   }, [pinned]);
-
-  const handleJarvisSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiQuery.trim()) return;
-    // Best-effort navigation: search all nav items and match label
-    const match = NAV_GROUPS.flatMap((g) => g.items).find(
-      (i) =>
-        i.label.toLowerCase().includes(aiQuery.toLowerCase()) ||
-        aiQuery.toLowerCase().includes(i.label.toLowerCase()),
-    );
-    if (match?.href) window.location.href = match.href;
-    else window.location.href = `/agents?query=${encodeURIComponent(aiQuery)}`;
-  };
 
   return (
     <div className="flex flex-col h-full">
@@ -541,65 +504,22 @@ function SidebarContent({
         </div>
       )}
 
-      {/* LiTT / AI assistant */}
+      {/* LiTT Director card */}
       {!collapsed && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
-          <form onSubmit={handleJarvisSubmit} className="relative">
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all"
-              style={{
-                backgroundColor: T.boxBg,
-                borderColor: jarvisFocused
-                  ? T.accentColor
-                  : `${T.borderColor}30`,
-                color: T.textMuted,
-              }}
-            >
-              <Bot size={16} style={{ color: T.accentColor }} />
-              <input
-                value={aiQuery}
-                onChange={(e) => setAiQuery(e.target.value)}
-                onFocus={() => setJarvisFocused(true)}
-                onBlur={() => setJarvisFocused(false)}
-                placeholder="Ask LiTT..."
-                className="bg-transparent border-none outline-none flex-1 min-w-0 text-xs"
-                style={{ color: T.textColor }}
-              />
-              <button
-                type="submit"
-                aria-label="Submit LiTT query"
-                className="p-1 rounded hover:bg-white/10"
-                style={{ color: T.accentColor }}
-              >
-                <Send size={14} />
-              </button>
-            </div>
-            {jarvisFocused && (
-              <div
-                className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border shadow-xl p-2 space-y-1"
-                style={{
-                  backgroundColor: T.boxBg,
-                  borderColor: `${T.borderColor}30`,
-                }}
-              >
-                {AI_SUGGESTIONS.slice(0, 4).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onMouseDown={() => setAiQuery(s)}
-                    className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-white/5 truncate"
-                    style={{ color: T.textMuted }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </form>
-        </div>
+        <>
+          <DirectorCard
+            onOpenAction={() => setDirectorOpen(true)}
+            onModeAction={(m) => {
+              setDirectorMode(m);
+              setDirectorOpen(true);
+            }}
+          />
+          <DirectorDrawer
+            open={directorOpen}
+            onCloseAction={() => setDirectorOpen(false)}
+            initialMode={directorMode}
+          />
+        </>
       )}
 
       {/* Personalize panel */}
@@ -611,32 +531,6 @@ function SidebarContent({
             backgroundColor: `${T.bgColor}60`,
           }}
         >
-          <div className="space-y-1.5">
-            <div
-              className="text-[10px] font-bold uppercase tracking-wider"
-              style={{ color: T.textMuted }}
-            >
-              Mode
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {CREATOR_MODES.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => setCreatorMode(m.value)}
-                  className="flex items-center gap-1.5 px-2 py-1.5 rounded text-[10px] font-bold transition-colors"
-                  style={{
-                    backgroundColor:
-                      mode === m.value ? `${T.accentColor}20` : `${T.boxBg}60`,
-                    color: mode === m.value ? T.accentColor : T.textMuted,
-                    border: `1px solid ${mode === m.value ? T.accentColor : T.borderColor}30`,
-                  }}
-                >
-                  <m.icon size={12} />
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
           <div className="space-y-1.5">
             <div
               className="text-[10px] font-bold uppercase tracking-wider"

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { startTransition, useEffect, useRef, useState } from "react";
 import { History, Terminal, RefreshCw } from "lucide-react";
 
 interface HistoryItem {
@@ -14,13 +14,15 @@ interface CommandHistoryProps {
   commands?: string[];
 }
 
-export function CommandHistory({ commands: liveCommands = [] }: CommandHistoryProps) {
+export function CommandHistory({
+  commands: liveCommands = [],
+}: CommandHistoryProps) {
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [loading, setLoading] = useState(true);
 
   const fetchHistory = () => {
     let active = true;
-    setLoading(true);
+    startTransition(() => setLoading(true));
     fetch("/api/terminal/history?limit=50")
       .then((res) => res.json())
       .then((data) => {
@@ -44,24 +46,33 @@ export function CommandHistory({ commands: liveCommands = [] }: CommandHistoryPr
     return cancel;
   }, []);
 
+  const prevCommandsRef = useRef<string[]>([]);
   useEffect(() => {
-    if (liveCommands.length > 0) {
-      const latest = liveCommands[liveCommands.length - 1];
-      setHistory((prev) => {
+    const prev = prevCommandsRef.current;
+    const hasNew = liveCommands.length > prev.length;
+    prevCommandsRef.current = liveCommands;
+    if (!hasNew) return;
+    const latest = liveCommands[liveCommands.length - 1];
+    const t = setTimeout(() => {
+      setHistory((h) => {
         const item: HistoryItem = {
           id: `live-${Date.now()}`,
           command: latest,
           exit_code: null,
           created_at: new Date().toISOString(),
         };
-        return [item, ...prev].slice(0, 50);
+        return [item, ...h].slice(0, 50);
       });
-    }
+    }, 0);
+    return () => clearTimeout(t);
   }, [liveCommands]);
 
   const formatTime = (date: string) => {
     try {
-      return new Date(date).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+      return new Date(date).toLocaleTimeString([], {
+        hour: "2-digit",
+        minute: "2-digit",
+      });
     } catch {
       return "";
     }
@@ -98,11 +109,15 @@ export function CommandHistory({ commands: liveCommands = [] }: CommandHistoryPr
             </div>
             <div className="flex shrink-0 items-center gap-2">
               {item.exit_code !== null && (
-                <span className={`${item.exit_code === 0 ? "text-green-400" : "text-red-400"}`}>
+                <span
+                  className={`${item.exit_code === 0 ? "text-green-400" : "text-red-400"}`}
+                >
                   {item.exit_code}
                 </span>
               )}
-              <span className="text-neutral-600">{formatTime(item.created_at)}</span>
+              <span className="text-neutral-600">
+                {formatTime(item.created_at)}
+              </span>
             </div>
           </div>
         ))}

@@ -7,7 +7,15 @@ import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
-import { FileText, Download, Upload, Loader2, Image, Video, Music } from "lucide-react";
+import {
+  FileText,
+  Download,
+  Upload,
+  Loader2,
+  Image,
+  Video,
+  Music,
+} from "lucide-react";
 
 type MediaFile = {
   id: string;
@@ -26,7 +34,7 @@ export default function LibraryFilesPage() {
   useEffect(() => {
     if (!isLoaded) return;
     if (!isSignedIn) {
-      setLoading(false);
+      setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect
       return;
     }
     let alive = true;
@@ -36,13 +44,22 @@ export default function LibraryFilesPage() {
         if (alive) {
           const items = Array.isArray(data.items) ? data.items : [];
           setFiles(
-            items.map((item: { id: string; imageUrl?: string; videoUrl?: string; mediaType?: string; title?: string; createdAt?: string }) => ({
-              id: item.id,
-              url: item.videoUrl || item.imageUrl || "",
-              type: item.mediaType || "image",
-              caption: item.title || null,
-              created_at: item.createdAt || new Date().toISOString(),
-            })),
+            items.map(
+              (item: {
+                id: string;
+                imageUrl?: string;
+                videoUrl?: string;
+                mediaType?: string;
+                title?: string;
+                createdAt?: string;
+              }) => ({
+                id: item.id,
+                url: item.videoUrl || item.imageUrl || "",
+                type: item.mediaType || "image",
+                caption: item.title || null,
+                created_at: item.createdAt || new Date().toISOString(),
+              }),
+            ),
           );
         }
       })
@@ -94,12 +111,20 @@ export default function LibraryFilesPage() {
 
         {!isLoaded || loading ? (
           <div className="flex justify-center py-12">
-            <Loader2 className="animate-spin" size={28} style={{ color: T.accentColor }} />
+            <Loader2
+              className="animate-spin"
+              size={28}
+              style={{ color: T.accentColor }}
+            />
           </div>
         ) : !isSignedIn ? (
           <div className="rounded-2xl border p-6 text-center" style={cardStyle}>
             <p className="opacity-70 mb-4">Sign in to view your files.</p>
-            <Link href="/sign-in" className="text-sm font-bold" style={{ color: T.accentColor }}>
+            <Link
+              href="/sign-in"
+              className="text-sm font-bold"
+              style={{ color: T.accentColor }}
+            >
               Sign in
             </Link>
           </div>
@@ -107,16 +132,29 @@ export default function LibraryFilesPage() {
           <div className="rounded-2xl border p-8 text-center" style={cardStyle}>
             <FileText size={32} className="mx-auto mb-3 opacity-40" />
             <p className="opacity-70 mb-2">No files yet.</p>
-            <p className="text-sm opacity-50">Generate in Studio or upload to see files here.</p>
+            <p className="text-sm opacity-50">
+              Generate in Studio or upload to see files here.
+            </p>
           </div>
         ) : (
           <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-4">
             {files.map((file) => {
               const Icon = typeIcon(file.type);
               return (
-                <div key={file.id} className="rounded-xl border p-4" style={cardStyle}>
-                  <Icon size={18} style={{ color: T.accentColor }} className="mb-2" />
-                  <p className="text-sm font-bold truncate" style={{ color: T.headerColor }}>
+                <div
+                  key={file.id}
+                  className="rounded-xl border p-4"
+                  style={cardStyle}
+                >
+                  <Icon
+                    size={18}
+                    style={{ color: T.accentColor }}
+                    className="mb-2"
+                  />
+                  <p
+                    className="text-sm font-bold truncate"
+                    style={{ color: T.headerColor }}
+                  >
                     {file.caption || file.type}
                   </p>
                   <p className="text-xs opacity-50 mt-1">

@@ -150,19 +150,27 @@ function ActionButton({
   const { tokens } = useTheme();
   const content = (
     <div
-      className="flex flex-col items-center gap-2 rounded-xl sm:rounded-2xl border p-4 text-center transition-all hover:scale-[1.02] active:scale-[0.98]"
+      className="group flex flex-col items-center gap-2.5 rounded-2xl border p-4 text-center transition-all hover:scale-[1.03] hover:-translate-y-0.5 active:scale-[0.97]"
       style={{
         backgroundColor: tokens.surface,
-        borderColor: `${color}30`,
+        borderColor: `${color}25`,
+        boxShadow: `0 0 0 1px ${color}08`,
       }}
     >
       <div
-        className="flex h-10 w-10 items-center justify-center rounded-lg"
-        style={{ backgroundColor: `${color}15`, color }}
+        className="flex h-11 w-11 items-center justify-center rounded-xl transition-all group-hover:scale-110"
+        style={{
+          backgroundColor: `${color}12`,
+          color,
+          boxShadow: `0 0 16px ${color}20`,
+        }}
       >
         <Icon size={20} />
       </div>
-      <span className="text-xs font-bold" style={{ color: tokens.text }}>
+      <span
+        className="text-xs font-black tracking-wide"
+        style={{ color: tokens.text }}
+      >
         {label}
       </span>
     </div>
@@ -227,36 +235,57 @@ export default function DashboardView() {
   return (
     <WorkspaceShell>
       <PageHeader
-        title={`Good to see you, ${displayName}`}
-        subtitle="Your daily overview. Pick up where you left off or start something new."
+        title={`Welcome back, ${displayName}`}
+        subtitle="Your mission control. Pick up where you left off or start something new."
         actions={
           <Link
             href="/studio"
-            className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-xs font-bold text-black transition-opacity hover:opacity-90"
-            style={{ backgroundColor: tokens.primary }}
+            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
+            style={{
+              background: `linear-gradient(135deg, ${tokens.primary}, ${tokens.primary}cc)`,
+              boxShadow: `0 0 20px ${tokens.primary}40`,
+            }}
           >
-            <Plus size={14} /> Create
+            <Plus size={14} /> Open Studio
           </Link>
         }
       />
 
       {/* Search / command bar */}
       <Panel className="mb-6 flex items-center gap-3" padding="compact">
-        <Search size={16} style={{ color: tokens.textMuted }} />
+        <Search size={15} style={{ color: tokens.textMuted }} />
         <input
           type="text"
           placeholder="Search projects, agents, artifacts..."
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-500"
           style={{ color: tokens.text }}
         />
+        <kbd
+          className="hidden rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest sm:block"
+          style={{
+            backgroundColor: `${tokens.border}40`,
+            color: tokens.textMuted,
+          }}
+        >
+          ⌘K
+        </kbd>
       </Panel>
 
       {/* Continue + Activity */}
       <div className="mb-6 grid gap-4 lg:grid-cols-2">
-        <Card padding="loose" className="flex flex-col justify-between">
-          <div>
+        <Card
+          padding="loose"
+          className="relative flex flex-col justify-between overflow-hidden"
+        >
+          <div
+            className="pointer-events-none absolute inset-0 opacity-30"
+            style={{
+              background: `radial-gradient(circle at 0% 0%, ${tokens.primary}15 0%, transparent 60%)`,
+            }}
+          />
+          <div className="relative">
             <div
-              className="text-[10px] font-bold uppercase tracking-wider"
+              className="text-[10px] font-black uppercase tracking-widest"
               style={{ color: tokens.textMuted }}
             >
               Continue working
@@ -265,46 +294,53 @@ export default function DashboardView() {
               className="mt-2 text-lg font-black"
               style={{ color: tokens.text }}
             >
-              LiTT Code Workspace
+              LiTT Studio
             </h3>
-            <p className="mt-1 text-xs" style={{ color: tokens.textMuted }}>
-              Last active today. 3 pending changes ready for review.
+            <p
+              className="mt-1 text-xs leading-relaxed"
+              style={{ color: tokens.textMuted }}
+            >
+              Your AI crew is standing by. Start a mission or review pending
+              work.
             </p>
           </div>
-          <div className="mt-4 flex gap-2">
+          <div className="relative mt-4 flex gap-2">
             <Link
               href="/studio"
-              className="inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-bold text-black"
-              style={{ backgroundColor: tokens.primary }}
+              className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black text-black transition-all hover:opacity-90"
+              style={{
+                backgroundColor: tokens.primary,
+                boxShadow: `0 0 16px ${tokens.primary}40`,
+              }}
             >
               Open Studio <ArrowRight size={12} />
             </Link>
             <Link
               href="/projects"
-              className="inline-flex items-center gap-1 rounded-lg border px-3 py-1.5 text-xs font-bold"
+              className="inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-all hover:opacity-80"
               style={{ borderColor: tokens.border, color: tokens.text }}
             >
-              View projects
+              Projects
             </Link>
           </div>
         </Card>
 
         <Card padding="loose">
           <div
-            className="text-[10px] font-bold uppercase tracking-wider"
+            className="text-[10px] font-black uppercase tracking-widest"
             style={{ color: tokens.textMuted }}
           >
             Live activity
           </div>
-          <div className="mt-3 space-y-2">
-            <div className="flex items-center gap-2 text-xs">
-              <StatusBadge status="running" label="Director idle" />
+          <div className="mt-3 space-y-2.5">
+            <div className="flex items-center gap-2.5 text-xs">
+              <StatusBadge status="running" label="Director" />
               <span style={{ color: tokens.textMuted }}>
-                Waiting for your next mission.
+                Standing by for your next mission.
               </span>
             </div>
-            <div className="flex items-center gap-2 text-xs">
-              <StatusBadge status="pending" label="0 running" />
+            <div className="flex items-center gap-2.5 text-xs">
+              <StatusBadge status="pending" label="0 tasks" />
               <span style={{ color: tokens.textMuted }}>
                 No active generations.
               </span>
@@ -441,6 +477,7 @@ export default function DashboardView() {
                     style={{ borderColor: tokens.border }}
                   >
                     <div className="aspect-square bg-neutral-900">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
                       <img
                         src={a.imageUrl}
                         alt={a.title}

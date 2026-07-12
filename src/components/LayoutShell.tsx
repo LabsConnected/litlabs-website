@@ -14,12 +14,28 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { Menu } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
+const PUBLIC_PATHS = [
+  "/",
+  "/login",
+  "/sign-in",
+  "/sign-up",
+  "/privacy",
+  "/terms",
+  "/cookies",
+  "/docs",
+];
+
+function isPublicPath(path: string) {
+  return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
 export default function LayoutShell({
   children,
 }: {
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const publicPage = isPublicPath(pathname || "/");
   const isStudio = pathname === "/studio";
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
@@ -37,6 +53,18 @@ export default function LayoutShell({
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
+
+  if (publicPage) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+        <main className="relative z-10 min-h-screen">{children}</main>
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+      </>
+    );
+  }
 
   return (
     <>

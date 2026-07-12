@@ -19,10 +19,10 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "mb-6 flex flex-col gap-2 border-b pb-4 sm:mb-8 sm:flex-row sm:items-end sm:justify-between",
+        "mb-6 flex flex-col gap-3 border-b pb-5 sm:mb-8 sm:flex-row sm:items-end sm:justify-between",
         className,
       )}
-      style={{ borderColor: tokens.border }}
+      style={{ borderColor: `${tokens.border}60` }}
     >
       <div className="min-w-0">
         <h1
@@ -32,12 +32,17 @@ export function PageHeader({
           {title}
         </h1>
         {subtitle && (
-          <p className="mt-1 text-xs sm:text-sm" style={{ color: tokens.textMuted }}>
+          <p
+            className="mt-1.5 text-xs leading-relaxed sm:text-sm"
+            style={{ color: tokens.textMuted }}
+          >
             {subtitle}
           </p>
         )}
       </div>
-      {actions && <div className="flex items-center gap-2">{actions}</div>}
+      {actions && (
+        <div className="flex shrink-0 items-center gap-2">{actions}</div>
+      )}
     </div>
   );
 }

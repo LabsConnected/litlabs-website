@@ -916,18 +916,94 @@ function MarketplaceInner() {
     total: agents.length,
     free: agents.filter((a) => a.price_cents === 0).length,
     installed: installedAgents.size,
-    coins: litBitCoins + " 🪙",
+    coins: formatLbc(litBitCoins),
   };
 
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="marketplace-page flex min-h-screen flex-col"
       style={{
         backgroundColor: T.bgColor,
         color: T.textColor,
         position: "relative",
       }}
     >
+      <style jsx global>{`
+        .marketplace-page {
+          min-height: 100dvh;
+          overflow-x: hidden;
+        }
+        .marketplace-hero-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+          gap: 20px;
+          align-items: stretch;
+        }
+        .marketplace-tab-row {
+          overflow-x: auto;
+          scrollbar-width: none;
+        }
+        .marketplace-tab-row::-webkit-scrollbar {
+          display: none;
+        }
+        .marketplace-tier-grid {
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          gap: 18px !important;
+          align-items: stretch;
+        }
+        .marketplace-spend-grid {
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          gap: 16px !important;
+        }
+        .marketplace-buy-grid {
+          display: grid !important;
+          grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)) !important;
+          gap: 10px !important;
+        }
+        .marketplace-tier-card,
+        .marketplace-spend-card,
+        .marketplace-buy-chip {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .marketplace-price {
+          font-variant-numeric: tabular-nums;
+          letter-spacing: -0.01em;
+        }
+        @media (max-width: 900px) {
+          .marketplace-hero-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .marketplace-tier-grid,
+          .marketplace-spend-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
+        @media (max-width: 640px) {
+          .marketplace-page [style*="padding: 24px"] {
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+          }
+          .marketplace-tier-grid,
+          .marketplace-spend-grid,
+          .marketplace-buy-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .marketplace-tier-card {
+            padding: 28px 18px 18px !important;
+          }
+          .marketplace-spend-card {
+            padding: 16px !important;
+          }
+          .marketplace-tab-row {
+            justify-content: flex-start !important;
+            padding-inline: 16px;
+            margin-inline: -16px;
+          }
+        }
+      `}</style>
       {/* Toast notification */}
       {toast && (
         <div
@@ -979,6 +1055,7 @@ function MarketplaceInner() {
       >
         <div className="mx-auto max-w-6xl">
           <div
+            className="marketplace-hero-grid"
             style={{
               display: "grid",
               gridTemplateColumns: "1.15fr 0.85fr",
@@ -1241,6 +1318,7 @@ function MarketplaceInner() {
             </div>
           </div>
           <div
+            className="marketplace-tab-row"
             style={{
               display: "flex",
               justifyContent: "center",
@@ -1671,6 +1749,7 @@ function MarketplaceInner() {
             </div>
 
             <div
+              className="marketplace-tier-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
@@ -1683,6 +1762,7 @@ function MarketplaceInner() {
                 return (
                 <div
                   key={tier.id}
+                  className="marketplace-tier-card"
                   style={{
                     position: "relative",
                     padding: "24px 20px",
@@ -1751,14 +1831,15 @@ function MarketplaceInner() {
                     {tier.label}
                   </div>
                   <div
+                    className="marketplace-price"
                     style={{
                       color: tier.popular ? "gold" : T.headerColor,
-                      fontSize: "36px",
+                      fontSize: "34px",
                       fontWeight: "bold",
                       marginBottom: "4px",
                     }}
                   >
-                    {tier.price}
+                    {formatUsdPrice(tier.price)}
                   </div>
                   <div
                     style={{
@@ -1768,7 +1849,7 @@ function MarketplaceInner() {
                       opacity: 0.8,
                     }}
                   >
-                    {tier.coins.toLocaleString()} LiTBit Coins included
+                    {formatLbc(tier.coins)} included
                   </div>
                   <div
                     style={{
@@ -1776,6 +1857,8 @@ function MarketplaceInner() {
                       fontSize: "11px",
                       opacity: 0.6,
                       marginBottom: "16px",
+                      lineHeight: 1.5,
+                      minHeight: "50px",
                     }}
                   >
                     {tier.features.slice(0, 3).join(" • ")}
@@ -1835,6 +1918,7 @@ function MarketplaceInner() {
               💎 SPEND YOUR COINS
             </div>
             <div
+              className="marketplace-spend-grid"
               style={{
                 display: "grid",
                 gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
@@ -1844,6 +1928,7 @@ function MarketplaceInner() {
               {SPEND_FEATURES.map((feat) => (
                 <div
                   key={feat.id}
+                  className="marketplace-spend-card"
                   style={{
                     padding: "20px",
                     border: "1px solid " + T.borderColor,
@@ -1900,13 +1985,13 @@ function MarketplaceInner() {
                         fontWeight: "bold",
                       }}
                     >
-                      {feat.cost} LBC
+                      {formatLbc(feat.cost)}
                     </span>
                     <button
                       onClick={async () => {
                         if (litBitCoins < feat.cost) {
                           showToast(
-                            `Need ${feat.cost} LBC. You have ${litBitCoins}`,
+                            `Need ${formatLbc(feat.cost)}. You have ${formatLbc(litBitCoins)}`,
                             "error",
                           );
                           return;
@@ -1920,7 +2005,7 @@ function MarketplaceInner() {
                           return;
                         }
                         showToast(
-                          `${feat.action} ${feat.title}. -${feat.cost} LBC. Balance: ${newBal}`,
+                          `${feat.action} ${feat.title}. -${formatLbc(feat.cost)}. Balance: ${formatLbc(newBal)}`,
                           "success",
                         );
                       }}
@@ -1962,7 +2047,7 @@ function MarketplaceInner() {
             >
               📊 WHAT CAN YOU BUY?
             </div>
-            <div style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
+            <div className="marketplace-buy-grid" style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}>
               {[
                 { name: "Support Agent", cost: 50, color: T.accentColor },
                 { name: "Writing Coach", cost: 75, color: T.headerColor },
@@ -1977,6 +2062,7 @@ function MarketplaceInner() {
               ].map((item) => (
                 <div
                   key={item.name}
+                  className="marketplace-buy-chip"
                   style={{
                     padding: "10px 16px",
                     border: "1px solid " + T.borderColor,
@@ -2002,7 +2088,7 @@ function MarketplaceInner() {
                       fontWeight: "bold",
                     }}
                   >
-                    {item.cost} LBC
+                    {formatLbc(item.cost)}
                   </span>
                 </div>
               ))}

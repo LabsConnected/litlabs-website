@@ -22,6 +22,8 @@ const eslintConfig = defineConfig([
     "public/**",
     "*.lock",
     "pnpm-lock.yaml",
+    // Consolidation scratch copies
+    "work/**",
   ]),
 ]);
 
