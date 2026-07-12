@@ -15,6 +15,7 @@ import {
   Wand2,
   Zap,
   HelpCircle,
+  Rocket,
 } from "lucide-react";
 
 export type NavItem = {
@@ -36,6 +37,7 @@ export const GROUP_ACCENTS: Record<string, string> = {
   Dashboard: "#00f0ff",
   Studio: "#ff00a0",
   Projects: "#22d3ee",
+  Deployments: "#22c55e",
   Agents: "#ec4899",
   Gallery: "#a855f7",
   Marketplace: "#f59e0b",
@@ -74,6 +76,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Projects,
     items: [
       { label: "All projects", href: "/projects", icon: Folder },
+      { label: "Deployments", href: "/deployments", icon: Rocket },
       { label: "GitHub installs", href: "/settings?tab=integrations", icon: Zap },
     ],
   },
@@ -144,6 +147,8 @@ export const MOBILE_BOTTOM_ITEMS = [
 export const MOBILE_MORE_ITEMS = [
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
+  { label: "Deployments", href: "/deployments", icon: Rocket },
+  { label: "Social", href: "/social", icon: Users },
   { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

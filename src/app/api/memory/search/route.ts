@@ -1,13 +1,15 @@
-import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { Supermemory } from "supermemory";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
-  if (!key) {
-    throw new Error("SUPERMEMORY_API_KEY is not configured");
-  }
+  if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
   return new Supermemory({ apiKey: key });
+}
+
+function getContainerTag(userId: string, scope?: string) {
+  return scope ? `${userId}:${scope}` : userId;
 }
 
 export async function GET(req: NextRequest) {
@@ -20,11 +22,11 @@ export async function GET(req: NextRequest) {
     const { searchParams } = new URL(req.url);
     const q = searchParams.get("q") || "";
     const scope = searchParams.get("scope") || undefined;
-    const limit = Number(searchParams.get("limit")) || 20;
+    const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
 
     const results = await getSupermemory().search.memories({
       q,
-      containerTag: scope ? `${userId}:${scope}` : userId,
+      containerTag: getContainerTag(userId, scope),
       limit,
     });
 
