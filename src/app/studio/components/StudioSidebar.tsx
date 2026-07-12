@@ -44,20 +44,20 @@ type ToolItem = {
 
 /* ── Tool groups ─────────────────────────────────────────────────── */
 const CREATE_TOOLS: ToolItem[] = [
-  { id: "image",  label: "Image",   icon: Image,   shortcut: "1" },
-  { id: "video",  label: "Video",   icon: Film,    shortcut: "2" },
-  { id: "audio",  label: "Audio",   icon: Music,   shortcut: "3" },
-  { id: "color",  label: "Color",   icon: Palette, shortcut: "4" },
+  { id: "image", label: "Image", icon: Image, shortcut: "1" },
+  { id: "video", label: "Video", icon: Film, shortcut: "2" },
+  { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
+  { id: "color", label: "Color", icon: Palette, shortcut: "4" },
 ];
 
 const AI_TOOLS: ToolItem[] = [
-  { id: "chat",      label: "LiTT Chat",  icon: MessageCircle, shortcut: "C" },
-  { id: "builder",   label: "Builder",   icon: Hammer, shortcut: "B" },
-  { id: "agents",    label: "Agents",    icon: Bot,     shortcut: "5" },
-  { id: "terminal",  label: "Terminal",  icon: Terminal, shortcut: "6" },
-  { id: "pipeline",  label: "Pipeline",  icon: Network,  shortcut: "7" },
-  { id: "canvas",    label: "Canvas",    icon: Sparkles, shortcut: "9" },
-  { id: "clibridge", label: "CLI Bridge", icon: Shell,   shortcut: "0" },
+  { id: "chat", label: "LiTT Chat", icon: MessageCircle, shortcut: "C" },
+  { id: "builder", label: "Builder", icon: Hammer, shortcut: "B" },
+  { id: "agents", label: "Agents", icon: Bot, shortcut: "5" },
+  { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
+  { id: "pipeline", label: "Pipeline", icon: Network, shortcut: "7" },
+  { id: "canvas", label: "Canvas", icon: Sparkles, shortcut: "9" },
+  { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
 ];
 
 const ORGANIZE_TOOLS: ToolItem[] = [
@@ -77,12 +77,18 @@ const ALL_TOOLS: ToolItem[] = [
 ];
 
 /* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = ["image", "color", "agents", "terminal", "gallery"];
+const MOBILE_PRIMARY: StudioTool[] = [
+  "image",
+  "chat",
+  "builder",
+  "agents",
+  "terminal",
+];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
-  { title: "Create",   tools: CREATE_TOOLS },
-  { title: "AI",       tools: AI_TOOLS },
+  { title: "Create", tools: CREATE_TOOLS },
+  { title: "AI", tools: AI_TOOLS },
   { title: "Organize", tools: ORGANIZE_TOOLS },
   { title: "External", tools: EXTERNAL_TOOLS },
 ];
@@ -267,7 +273,10 @@ export default function StudioSidebar({
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <span className="text-[9px] font-mono opacity-40" style={{ color: T.textMuted }}>
+              <span
+                className="text-[9px] font-mono opacity-40"
+                style={{ color: T.textMuted }}
+              >
                 v1.0
               </span>
               <span
@@ -276,7 +285,10 @@ export default function StudioSidebar({
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full"
-                  style={{ backgroundColor: T.success, boxShadow: `0 0 4px ${T.success}` }}
+                  style={{
+                    backgroundColor: T.success,
+                    boxShadow: `0 0 4px ${T.success}`,
+                  }}
                 />
                 Online
               </span>
@@ -290,11 +302,7 @@ export default function StudioSidebar({
           Shows the 5 primary tools as icon+label tabs.
           "More" opens a compact drawer for the rest.
       ═══════════════════════════════════════════════════════════ */}
-      <MobileTabBar
-        activeTool={activeTool}
-        onToolChange={onToolChange}
-        T={T}
-      />
+      <MobileTabBar activeTool={activeTool} onToolChange={onToolChange} T={T} />
     </>
   );
 }
@@ -312,7 +320,9 @@ function MobileTabBar({
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   const primaryTools = ALL_TOOLS.filter((t) => MOBILE_PRIMARY.includes(t.id));
-  const secondaryTools = ALL_TOOLS.filter((t) => !MOBILE_PRIMARY.includes(t.id));
+  const secondaryTools = ALL_TOOLS.filter(
+    (t) => !MOBILE_PRIMARY.includes(t.id),
+  );
   const activeIsSecondary = secondaryTools.some((t) => t.id === activeTool);
 
   return (
@@ -349,17 +359,24 @@ function MobileTabBar({
               return (
                 <button
                   key={tool.id}
-                  onClick={() => { onToolChange(tool.id); setDrawerOpen(false); }}
+                  onClick={() => {
+                    onToolChange(tool.id);
+                    setDrawerOpen(false);
+                  }}
                   className="flex flex-col items-center gap-1 py-2 rounded-xl transition-all"
                   style={{
-                    backgroundColor: active ? T.accentColor + "20" : T.boxBg + "80",
+                    backgroundColor: active
+                      ? T.accentColor + "20"
+                      : T.boxBg + "80",
                     border: `1px solid ${active ? T.accentColor + "50" : T.borderColor + "20"}`,
                   }}
                 >
                   <Icon
                     size={18}
                     strokeWidth={active ? 2.5 : 1.8}
-                    style={{ color: active ? T.accentColor : T.textColor + "99" }}
+                    style={{
+                      color: active ? T.accentColor : T.textColor + "99",
+                    }}
                   />
                   <span
                     className="text-[9px] font-bold"
@@ -390,7 +407,10 @@ function MobileTabBar({
           return (
             <button
               key={tool.id}
-              onClick={() => { onToolChange(tool.id); setDrawerOpen(false); }}
+              onClick={() => {
+                onToolChange(tool.id);
+                setDrawerOpen(false);
+              }}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
               style={{ color: active ? T.accentColor : T.textMuted + "80" }}
             >
@@ -413,7 +433,9 @@ function MobileTabBar({
         <button
           onClick={() => setDrawerOpen((v) => !v)}
           className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-          style={{ color: activeIsSecondary ? T.accentColor : T.textMuted + "80" }}
+          style={{
+            color: activeIsSecondary ? T.accentColor : T.textMuted + "80",
+          }}
         >
           {activeIsSecondary && (
             <span
@@ -425,9 +447,18 @@ function MobileTabBar({
             />
           )}
           <div className="flex gap-[3px] items-center">
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
-            <span className="w-1 h-1 rounded-full" style={{ backgroundColor: "currentColor" }} />
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ backgroundColor: "currentColor" }}
+            />
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ backgroundColor: "currentColor" }}
+            />
+            <span
+              className="w-1 h-1 rounded-full"
+              style={{ backgroundColor: "currentColor" }}
+            />
           </div>
           <span className="text-[9px] font-bold">More</span>
         </button>

@@ -25,9 +25,9 @@ export function FloatingOrb({ state = "idle" }: { state?: OrbState }) {
   const [open, setOpen] = useState(false);
 
   return (
-    <div className="fixed bottom-6 right-6 z-50 flex flex-col items-end gap-3">
+    <div className="fixed bottom-[calc(env(safe-area-inset-bottom)+84px)] right-4 z-40 flex max-w-[calc(100vw-32px)] flex-col items-end gap-3 sm:bottom-6 sm:right-6 sm:z-50">
       {open && (
-        <div className="w-64 rounded-2xl border border-cyan-500/30 bg-[#080808]/95 p-4 backdrop-blur-md shadow-[0_0_40px_rgba(34,211,238,0.15)]">
+        <div className="w-[min(16rem,calc(100vw-32px))] rounded-2xl border border-cyan-500/30 bg-[#080808]/95 p-4 backdrop-blur-md shadow-[0_0_40px_rgba(34,211,238,0.15)]">
           <div className="mb-2 flex items-center justify-between">
             <span className="text-xs font-black text-cyan-300">LiTT</span>
             <button
@@ -54,7 +54,7 @@ export function FloatingOrb({ state = "idle" }: { state?: OrbState }) {
 
       <button
         onClick={() => setOpen((v) => !v)}
-        className={`relative flex h-14 w-14 items-center justify-center rounded-full border border-cyan-500/40 bg-neutral-900/90 text-2xl transition-all hover:scale-110 ${ORB_GLOW[state]} animate-pulse-slow`}
+        className={`relative flex h-12 w-12 items-center justify-center rounded-full border border-cyan-500/40 bg-neutral-900/90 text-xl transition-all hover:scale-110 sm:h-14 sm:w-14 sm:text-2xl ${ORB_GLOW[state]} animate-pulse-slow`}
         aria-label="Open LiTT"
       >
         {ORB_EMOJI[state]}

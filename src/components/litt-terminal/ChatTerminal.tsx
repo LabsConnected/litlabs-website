@@ -273,14 +273,14 @@ export function ChatTerminal({
   };
 
   return (
-    <div className="flex h-full flex-col rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm overflow-hidden">
+    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm sm:rounded-2xl">
       {/* Header tabs */}
-      <div className="flex items-center justify-between border-b border-neutral-800/60 px-4 py-3">
-        <div className="flex items-center gap-2">
+      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-800/60 px-3 py-2.5 sm:px-4 sm:py-3">
+        <div className="flex min-w-0 items-center gap-2">
           <div className="flex rounded-lg border border-neutral-800/60 bg-neutral-900/60 p-0.5">
             <button
               onClick={() => setMode("chat")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-bold transition-all sm:px-3 ${
                 mode === "chat"
                   ? "bg-cyan-500/15 text-cyan-300"
                   : "text-neutral-400 hover:text-neutral-200"
@@ -290,7 +290,7 @@ export function ChatTerminal({
             </button>
             <button
               onClick={() => setMode("terminal")}
-              className={`flex items-center gap-1.5 rounded-md px-3 py-1.5 text-xs font-bold transition-all ${
+              className={`flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-xs font-bold transition-all sm:px-3 ${
                 mode === "terminal"
                   ? "bg-orange-500/15 text-orange-300"
                   : "text-neutral-400 hover:text-neutral-200"
@@ -300,10 +300,10 @@ export function ChatTerminal({
             </button>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex min-w-0 flex-1 items-center justify-end gap-2">
           <button
             onClick={() => setSpeakEnabled((v) => !v)}
-            className={`flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold uppercase tracking-wider transition ${
+            className={`flex shrink-0 items-center gap-1.5 rounded-lg px-2 py-1.5 text-[9px] font-bold uppercase tracking-wider transition sm:px-2.5 sm:text-[10px] ${
               speakEnabled
                 ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30"
                 : "text-neutral-500 hover:text-neutral-300 border border-transparent"
@@ -316,7 +316,7 @@ export function ChatTerminal({
             {speakEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
             {speakEnabled ? "Voice on" : "Voice off"}
           </button>
-          <div className="text-[10px] font-bold uppercase tracking-widest text-neutral-500">
+          <div className="hidden truncate text-[10px] font-bold uppercase tracking-widest text-neutral-500 min-[390px]:block">
             {mode === "chat" ? "Natural language" : "Shell execution"}
           </div>
         </div>
@@ -327,7 +327,7 @@ export function ChatTerminal({
         {mode === "chat" ? (
           <div
             ref={scrollRef}
-            className="absolute inset-0 overflow-y-auto p-4 space-y-3"
+            className="absolute inset-0 space-y-3 overflow-y-auto p-3 sm:p-4"
           >
             {messages.map((m) => (
               <div
@@ -335,7 +335,7 @@ export function ChatTerminal({
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[85%] rounded-2xl px-3.5 py-2.5 text-sm ${
+                  className={`max-w-[min(85%,calc(100vw-48px))] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm break-words ${
                     m.role === "user"
                       ? "bg-cyan-500/15 border border-cyan-500/25 text-cyan-100"
                       : "bg-neutral-900/60 border border-neutral-800/60 text-neutral-200"
@@ -376,14 +376,14 @@ export function ChatTerminal({
       </div>
 
       {/* Composer */}
-      <div className="border-t border-neutral-800/60 p-3">
+      <div className="border-t border-neutral-800/60 p-2.5 sm:p-3">
         {mode === "chat" && messages.length < 3 ? (
-          <div className="mb-2 flex flex-wrap gap-1.5">
+          <div className="mb-2 flex max-w-full gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {SUGGESTED.map((s) => (
               <button
                 key={s}
                 onClick={() => sendChat(s)}
-                className="rounded-full border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1 text-[10px] font-semibold text-neutral-300 hover:border-cyan-500/30 hover:text-cyan-300 transition"
+                className="shrink-0 rounded-full border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1 text-[10px] font-semibold text-neutral-300 transition hover:border-cyan-500/30 hover:text-cyan-300"
               >
                 <Sparkles size={10} className="inline mr-1 text-cyan-500/70" />
                 {s}
@@ -392,7 +392,7 @@ export function ChatTerminal({
           </div>
         ) : null}
 
-        <div className="flex items-center gap-2 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-3 py-2 focus-within:border-cyan-500/40 focus-within:shadow-[0_0_12px_rgba(34,211,238,0.12)] transition-all">
+        <div className="flex min-w-0 items-center gap-1.5 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-2 py-2 transition-all focus-within:border-cyan-500/40 focus-within:shadow-[0_0_12px_rgba(34,211,238,0.12)] sm:gap-2 sm:px-3">
           <button
             className="text-neutral-500 hover:text-neutral-300"
             aria-label="Attach"
@@ -417,7 +417,7 @@ export function ChatTerminal({
                 ? "What do you want to build?"
                 : "Type command and press Enter..."
             }
-            className="flex-1 bg-transparent text-sm text-neutral-100 placeholder:text-neutral-500 outline-none"
+            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
           />
           <button
             onClick={() => (mode === "chat" ? sendChat(input) : runAsCommand())}

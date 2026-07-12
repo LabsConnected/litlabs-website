@@ -23,7 +23,16 @@ import {
 
 function formatPrice(cents: number): string {
   if (cents === 0) return "FREE";
-  return cents + " LBC";
+  return `${cents.toLocaleString()} LBC`;
+}
+
+function formatUsdPrice(price: number): string {
+  if (price === 0) return "Free";
+  return `$${Number.isInteger(price) ? price.toFixed(0) : price.toFixed(2)}/mo`;
+}
+
+function formatLbc(amount: number): string {
+  return `${amount.toLocaleString()} LBC`;
 }
 
 // Category color mapping for consistent theming

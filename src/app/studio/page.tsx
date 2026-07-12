@@ -263,9 +263,9 @@ function StudioCommandCenter() {
         />
 
         <main className="flex-1 min-w-0 flex flex-col">
-          {/* Mode header + switcher */}
+          {/* Mode header + switcher — hidden on mobile */}
           <div
-            className="flex items-center justify-between gap-2 px-3 sm:px-4 h-12 shrink-0"
+            className="hidden md:flex items-center justify-between gap-2 px-3 sm:px-4 h-12 shrink-0"
             style={{
               backgroundColor: T.boxBg + "60",
               borderBottom: `1px solid ${T.borderColor}18`,
@@ -285,7 +285,7 @@ function StudioCommandCenter() {
                 {headline.title}
               </div>
             </div>
-            <div className="hidden md:block shrink-0">
+            <div className="shrink-0">
               <StudioModeSwitcher
                 active={mode}
                 onChange={handleModeChange}
