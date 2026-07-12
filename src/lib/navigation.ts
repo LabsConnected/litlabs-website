@@ -104,6 +104,7 @@ export const NAV_GROUPS: NavGroup[] = [
     icon: Home,
     accent: GROUP_ACCENTS.Home,
     items: [
+      { label: "LiTT", href: "/studio", icon: Brain, online: true },
       { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
       { label: "Feed", href: "/social?feed=main", icon: Flame },
       {
@@ -119,7 +120,6 @@ export const NAV_GROUPS: NavGroup[] = [
         badge: 1,
       },
       { label: "Wallet", href: "/wallet", icon: Wallet },
-      { label: "LiTT", href: "/studio", icon: Brain, online: true },
       { label: "Showcase", href: "/showcase", icon: Star },
     ],
   },

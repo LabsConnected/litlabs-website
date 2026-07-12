@@ -70,6 +70,7 @@ export function ChatTerminal({
   };
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [listening, setListening] = useState(false);
+  const [speakingId, setSpeakingId] = useState<string | null>(null);
   const spokenRef = useRef<Set<string>>(new Set());
   type SpeechRecognitionResult = { transcript: string }[];
   type SpeechRecognitionEvent = {
@@ -98,24 +99,29 @@ export function ChatTerminal({
     return voicesRef.current;
   };
 
-  const speak = (text: string) => {
+  const speak = (text: string, id: string) => {
     if (typeof window === "undefined" || !window.speechSynthesis) return;
     window.speechSynthesis.cancel();
     const clean = text.replace(/\[.*?\]|\*|`|#/g, "").slice(0, 280);
+    if (!clean.trim()) return;
     const utter = new SpeechSynthesisUtterance(clean);
     utter.rate = 1.05;
     utter.pitch = 1;
     const voices = voicesRef.current.length ? voicesRef.current : loadVoices();
     const preferred =
       voices.find((v) =>
-        /Google US English|Microsoft David|Daniel|Alex|Fred/i.test(v.name),
-      ) ||
-      voices.find(
-        (v) => v.lang.startsWith("en") && v.name.toLowerCase().includes("male"),
+        /Google US English|Microsoft David|Daniel|Alex|Fred|Karen|Samantha/i.test(
+          v.name,
+        ),
       ) ||
       voices.find((v) => v.lang.startsWith("en")) ||
       null;
     if (preferred) utter.voice = preferred;
+    utter.onstart = () => setSpeakingId(id);
+    utter.onend = () =>
+      setSpeakingId((current) => (current === id ? null : current));
+    utter.onerror = () =>
+      setSpeakingId((current) => (current === id ? null : current));
     window.speechSynthesis.speak(utter);
   };
 
@@ -133,12 +139,11 @@ export function ChatTerminal({
 
   useEffect(() => {
     if (!speakEnabled) return;
-    messages.forEach((m) => {
-      if (m.role === "agent" && !spokenRef.current.has(m.id)) {
-        spokenRef.current.add(m.id);
-        speak(m.content);
-      }
-    });
+    const lastAgent = [...messages].reverse().find((m) => m.role === "agent");
+    if (lastAgent && !spokenRef.current.has(lastAgent.id)) {
+      spokenRef.current.add(lastAgent.id);
+      speak(lastAgent.content, lastAgent.id);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [messages, speakEnabled]);
 
@@ -172,7 +177,9 @@ export function ChatTerminal({
       rec.lang = "en-US";
       rec.maxAlternatives = 1;
       let finalTranscript = "";
+      let hasResult = false;
       rec.onresult = (event) => {
+        hasResult = true;
         let interim = "";
         for (let i = event.resultIndex; i < event.results.length; i++) {
           const transcript = event.results[i][0].transcript;
@@ -186,7 +193,9 @@ export function ChatTerminal({
         setInput(display.trim());
       };
       rec.onerror = (event) => {
-        onLogAction(`[VOICE] Recognition error: ${event.error ?? "unknown"}`);
+        if (event.error !== "aborted" && event.error !== "no-speech") {
+          onLogAction(`[VOICE] Recognition error: ${event.error ?? "unknown"}`);
+        }
         stopListening();
       };
       rec.onend = () => {
@@ -194,8 +203,12 @@ export function ChatTerminal({
         if (text) {
           setInput(text);
           if (mode === "chat") {
+            setSpeakEnabled(true);
             sendChat(text);
           }
+        } else if (!hasResult) {
+          setInput("");
+          onLogAction("[VOICE] No speech detected. Try again.");
         }
         setListening(false);
       };
@@ -203,6 +216,7 @@ export function ChatTerminal({
       setInput("");
       rec.start();
       setListening(true);
+      onLogAction("[VOICE] Listening...");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       onLogAction(`[VOICE] Could not start microphone: ${errorMsg}`);
@@ -316,14 +330,20 @@ export function ChatTerminal({
               speakEnabled
                 ? "bg-cyan-500/15 text-cyan-300 border border-cyan-500/30"
                 : "text-neutral-500 hover:text-neutral-300 border border-transparent"
-            }`}
+            } ${speakingId ? "animate-pulse" : ""}`}
             aria-label={speakEnabled ? "Mute LiTT" : "Enable LiTT voice"}
             title={
               speakEnabled ? "LiTT will speak replies" : "LiTT voice muted"
             }
           >
-            {speakEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
-            {speakEnabled ? "Voice on" : "Voice off"}
+            {speakingId ? (
+              <Volume2 size={13} className="text-cyan-300" />
+            ) : speakEnabled ? (
+              <Volume2 size={13} />
+            ) : (
+              <VolumeX size={13} />
+            )}
+            {speakingId ? "Speaking" : speakEnabled ? "Voice on" : "Voice off"}
           </button>
           <div className="hidden truncate text-[10px] font-bold uppercase tracking-widest text-neutral-500 min-[390px]:block">
             {mode === "chat" ? "Natural language" : "Shell execution"}

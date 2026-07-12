@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import FooterWrapper from "@/components/FooterWrapper";
 import Sidebar from "@/components/Sidebar";
@@ -13,9 +14,16 @@ import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { Menu } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
-export default function LayoutShell({ children }: { children: React.ReactNode }) {
+export default function LayoutShell({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const isStudio = pathname === "/studio";
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
+    useState(isStudio);
   const { resolvedColors: T } = useTheme();
 
   useEffect(() => {
@@ -54,7 +62,9 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
             <Menu size={20} />
           </button>
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)} />
+          <NavbarWrapper
+            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+          />
           <main className="flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0">
             {children}
           </main>
