@@ -47,7 +47,7 @@ export default function LayoutShell({
           onClose={() => setMobileSidebarOpen(false)}
           collapsed={desktopSidebarCollapsed}
         />
-        <div className="flex-1 flex flex-col min-h-screen">
+        <div className="flex-1 flex flex-col h-[calc(100dvh-56px)] min-h-0">
           {/* Mobile hamburger trigger */}
           <button
             onClick={() => setMobileSidebarOpen(true)}
@@ -65,7 +65,7 @@ export default function LayoutShell({
           <NavbarWrapper
             onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
           />
-          <main className="flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0">
+          <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto pb-16 md:pb-0">
             {children}
           </main>
           <MobileBottomNav />

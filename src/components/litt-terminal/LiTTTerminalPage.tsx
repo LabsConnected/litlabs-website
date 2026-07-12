@@ -80,7 +80,7 @@ export function LiTTTerminalPage() {
   }, [loadFileTree]);
 
   return (
-    <main className="min-h-[100dvh] overflow-x-hidden bg-[#050505] text-white selection:bg-cyan-500/30">
+    <main className="h-full min-h-0 overflow-x-hidden bg-[#050505] text-white selection:bg-cyan-500/30">
       {/* Holographic background */}
       <div className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-size-[40px_40px] mask-[radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
@@ -88,7 +88,7 @@ export function LiTTTerminalPage() {
         <div className="absolute bottom-0 right-0 h-96 w-96 rounded-full bg-fuchsia-500/10 blur-[120px]" />
       </div>
 
-      <div className="relative z-10 grid h-[100dvh] max-w-full grid-cols-1 overflow-hidden lg:grid-cols-[260px_minmax(0,1fr)_420px]">
+      <div className="relative z-10 grid h-full min-w-0 max-w-full grid-cols-1 overflow-hidden lg:grid-cols-[minmax(220px,260px)_minmax(0,1fr)_minmax(320px,420px)]">
         {/* Mobile overlay */}
         {mobileSidebarOpen && (
           <div
@@ -99,7 +99,7 @@ export function LiTTTerminalPage() {
 
         {/* Left: AI Command Center */}
         <div
-          className={`fixed inset-y-0 left-0 z-50 w-[260px] transform transition-transform duration-200 lg:static lg:transform-none ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
+          className={`fixed inset-y-0 left-0 z-50 min-w-0 w-[260px] transform transition-transform duration-200 lg:static lg:transform-none lg:min-w-0 ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full lg:translate-x-0"}`}
         >
           <AgentCommandCenter
             activeId={activeCommand}
@@ -154,7 +154,7 @@ export function LiTTTerminalPage() {
         </section>
 
         {/* Right: Builder + Output */}
-        <aside className="hidden flex-col gap-3 overflow-y-auto border-l border-neutral-800/40 p-3 lg:flex">
+        <aside className="hidden min-w-0 flex-col gap-3 overflow-y-auto border-l border-neutral-800/40 p-3 lg:flex">
           <BuilderPanel
             files={files}
             selectedFile={selectedFile}
