@@ -5,10 +5,13 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import SocialPageContent from "@/components/SocialPageContent";
+import { useTheme } from "@/context/ThemeContext";
+import { Loader2, Lock } from "lucide-react";
 
 export default function SocialPage() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const router = useRouter();
+  const { tokens } = useTheme();
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
@@ -18,10 +21,19 @@ export default function SocialPage() {
 
   if (!isLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0a0a12] text-cyan-400 font-mono">
-        <div className="text-center">
-          <div className="text-2xl mb-2 animate-pulse">▓▒░</div>
-          <div className="text-xs opacity-50">SYSTEM_INIT...</div>
+      <div
+        className="flex min-h-screen items-center justify-center p-6"
+        style={{ backgroundColor: tokens.background, color: tokens.textMuted }}
+      >
+        <div className="flex flex-col items-center gap-3">
+          <Loader2
+            size={24}
+            className="animate-spin"
+            style={{ color: tokens.primary }}
+          />
+          <span className="text-xs font-bold uppercase tracking-wider">
+            Loading social feed
+          </span>
         </div>
       </div>
     );
@@ -29,10 +41,15 @@ export default function SocialPage() {
 
   if (!isSignedIn) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-[#0a0a12] text-white/60">
-        <div className="text-center">
-          <div className="text-3xl mb-4">🔒</div>
-          <div>Sign in to join the social feed.</div>
+      <div
+        className="flex min-h-screen items-center justify-center p-6"
+        style={{ backgroundColor: tokens.background, color: tokens.textMuted }}
+      >
+        <div className="flex flex-col items-center gap-3 text-center">
+          <Lock size={28} style={{ color: tokens.primary }} />
+          <div className="text-sm font-bold" style={{ color: tokens.text }}>
+            Sign in to join the social feed
+          </div>
         </div>
       </div>
     );
