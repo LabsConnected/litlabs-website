@@ -154,7 +154,7 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
     {
       icon: Bot,
       label: "Try the AI agent",
-      href: "/litt-terminal",
+      href: "/studio",
       color: "#00f0ff",
     },
     {

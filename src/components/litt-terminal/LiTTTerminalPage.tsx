@@ -3,10 +3,10 @@
 import { useEffect, useState, useCallback } from "react";
 import { AgentCommandCenter } from "./AgentCommandCenter";
 import { ChatTerminal } from "./ChatTerminal";
-import { AIIntelligencePanel } from "./AIIntelligencePanel";
+import { BuilderPanel } from "./BuilderPanel";
 import { OutputPanel } from "./OutputPanel";
 import { FloatingOrb } from "./FloatingOrb";
-import { Menu } from "lucide-react";
+import { Menu, MessageSquare, Hammer, Terminal, X } from "lucide-react";
 
 export function LiTTTerminalPage() {
   const [activeCommand, setActiveCommand] = useState("terminal");
@@ -18,6 +18,8 @@ export function LiTTTerminalPage() {
   const [files, setFiles] = useState<string[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [mobileBuilderOpen, setMobileBuilderOpen] = useState(false);
+  const [chatMode, setChatMode] = useState<"chat" | "terminal">("chat");
   const [orbState, setOrbState] = useState<
     "idle" | "thinking" | "working" | "listening" | "success"
   >("idle");
@@ -135,6 +137,8 @@ export function LiTTTerminalPage() {
           <div className="min-h-0 flex-1 p-2 pb-[calc(env(safe-area-inset-bottom)+84px)] sm:p-3 sm:pb-3">
             <ChatTerminal
               agentId="director"
+              mode={chatMode}
+              onModeChangeAction={setChatMode}
               onLogAction={addLog}
               onCommandAction={addLog}
               onConnectionChangeAction={setConnected}
@@ -143,9 +147,15 @@ export function LiTTTerminalPage() {
           </div>
         </section>
 
-        {/* Right: AI Intelligence + Output */}
+        {/* Right: Builder + Output */}
         <aside className="hidden flex-col gap-3 overflow-y-auto border-l border-neutral-800/40 p-3 lg:flex">
-          <AIIntelligencePanel />
+          <BuilderPanel
+            files={files}
+            selectedFile={selectedFile}
+            onSelectFileAction={setSelectedFile}
+            onDeployAction={handleDeploy}
+            logs={logs}
+          />
           <div className="flex-1 min-h-[280px]">
             <OutputPanel
               logs={logs}
@@ -155,6 +165,74 @@ export function LiTTTerminalPage() {
           </div>
         </aside>
       </div>
+
+      {/* Mobile builder sheet */}
+      {mobileBuilderOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+            onClick={() => setMobileBuilderOpen(false)}
+          />
+          <div className="fixed inset-x-0 bottom-0 z-50 h-[75dvh] rounded-t-2xl border-t border-neutral-700/50 bg-[#060606] p-3 lg:hidden">
+            <div className="mb-2 flex items-center justify-between">
+              <span className="text-xs font-black uppercase tracking-widest text-cyan-300">
+                Builder
+              </span>
+              <button
+                onClick={() => setMobileBuilderOpen(false)}
+                className="rounded-lg p-1.5 text-neutral-400 hover:bg-white/10"
+                aria-label="Close builder"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="h-[calc(100%-40px)]">
+              <BuilderPanel
+                files={files}
+                selectedFile={selectedFile}
+                onSelectFileAction={setSelectedFile}
+                onDeployAction={handleDeploy}
+                logs={logs}
+              />
+            </div>
+          </div>
+        </>
+      )}
+
+      {/* Mobile bottom tab bar: Builder / Chat / Terminal */}
+      <nav className="fixed bottom-0 left-0 right-0 z-30 border-t border-neutral-800/60 bg-[#060606]/95 px-2 pb-[env(safe-area-inset-bottom)] pt-1 backdrop-blur-md lg:hidden">
+        <div className="grid grid-cols-3 gap-1">
+          <button
+            onClick={() => setChatMode("chat")}
+            className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+              chatMode === "chat"
+                ? "bg-cyan-500/15 text-cyan-300"
+                : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            <MessageSquare size={15} />
+            Chat
+          </button>
+          <button
+            onClick={() => setMobileBuilderOpen(true)}
+            className="flex items-center justify-center gap-1.5 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider text-neutral-400 transition hover:bg-white/5 hover:text-neutral-200"
+          >
+            <Hammer size={15} />
+            Builder
+          </button>
+          <button
+            onClick={() => setChatMode("terminal")}
+            className={`flex items-center justify-center gap-1.5 rounded-lg py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+              chatMode === "terminal"
+                ? "bg-orange-500/15 text-orange-300"
+                : "text-neutral-400 hover:text-neutral-200"
+            }`}
+          >
+            <Terminal size={15} />
+            Terminal
+          </button>
+        </div>
+      </nav>
 
       <FloatingOrb state={orbState} />
     </main>

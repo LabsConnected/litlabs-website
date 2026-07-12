@@ -18,13 +18,17 @@ const SHOW_BACKGROUND_PATHS = [
   "/library",
 ];
 
-const HIDE_BACKGROUND_PATHS = ["/litt", "/admin/terminal", "/code", "/games"];
+const HIDE_BACKGROUND_PATHS = ["/studio", "/admin/terminal", "/code", "/games"];
 
 export default function AnimatedBackgroundWrapper() {
   const pathname = usePathname();
 
   if (!pathname) return null;
-  if (HIDE_BACKGROUND_PATHS.some((p) => pathname === p || pathname.startsWith(`${p}/`))) {
+  if (
+    HIDE_BACKGROUND_PATHS.some(
+      (p) => pathname === p || pathname.startsWith(`${p}/`),
+    )
+  ) {
     return null;
   }
   if (

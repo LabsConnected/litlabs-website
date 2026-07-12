@@ -33,14 +33,23 @@ export function ChatTerminal({
   onConnectionChangeAction,
   onTerminalOutputAction,
   agentId = "director",
+  mode: controlledMode,
+  onModeChangeAction,
 }: {
   onLogAction: (entry: string) => void;
   onCommandAction: (cmd: string) => void;
   onConnectionChangeAction: (connected: boolean) => void;
   onTerminalOutputAction: (output: string) => void;
   agentId?: string;
+  mode?: "chat" | "terminal";
+  onModeChangeAction?: (mode: "chat" | "terminal") => void;
 }) {
-  const [mode, setMode] = useState<"chat" | "terminal">("chat");
+  const [internalMode, setInternalMode] = useState<"chat" | "terminal">("chat");
+  const mode = controlledMode ?? internalMode;
+  const setMode = (m: "chat" | "terminal") => {
+    if (controlledMode === undefined) setInternalMode(m);
+    onModeChangeAction?.(m);
+  };
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<ChatMessage[]>([

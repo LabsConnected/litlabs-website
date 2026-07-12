@@ -162,7 +162,7 @@ export default function AgentsPageClient() {
                     <Link
                       href={
                         agent.id === "director"
-                          ? "/litt"
+                          ? "/studio"
                           : `/agents/${agent.id}`
                       }
                       className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
@@ -177,7 +177,7 @@ export default function AgentsPageClient() {
                     <Link
                       href={
                         agent.id === "director"
-                          ? "/litt"
+                          ? "/studio"
                           : "/studio?tool=agents"
                       }
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
