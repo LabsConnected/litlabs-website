@@ -17,15 +17,18 @@ export function HoloDirector({
   state = "idle",
   audioLevel = 0,
   size = 160,
+  className = "",
 }: {
   state?: DirectorState;
   audioLevel?: number;
   size?: number;
+  className?: string;
 }) {
   const { resolvedColors: T } = useTheme();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const rafRef = useRef<number | null>(null);
   const tRef = useRef(0);
+  const visibleRef = useRef(true);
 
   const stateColor = useMemo(() => {
     switch (state) {
@@ -66,7 +69,16 @@ export function HoloDirector({
     const ringRadius = (size * 0.38 * dpr) / 2;
     const innerRadius = (size * 0.28 * dpr) / 2;
 
+    const onVisChange = () => {
+      visibleRef.current = !document.hidden;
+    };
+    document.addEventListener("visibilitychange", onVisChange);
+
     const draw = () => {
+      if (!visibleRef.current) {
+        rafRef.current = requestAnimationFrame(draw);
+        return;
+      }
       tRef.current += 0.02;
       const t = tRef.current;
       ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -138,53 +150,40 @@ export function HoloDirector({
       ctx.fillStyle = coreGrad;
       ctx.fill();
 
-      // Face silhouette
+      // Inner energy arcs — rotating, responsive to state and audio
       ctx.save();
       ctx.translate(cx, cy);
-      ctx.globalAlpha = 0.9;
-      ctx.strokeStyle = "#ffffff";
-      ctx.lineWidth = 1.5 * dpr;
       ctx.lineCap = "round";
-
-      // Eyes
-      const eyeY = -innerRadius * 0.15;
-      const eyeSpacing = innerRadius * 0.22;
-      const blink = state === "idle" && Math.sin(t * 0.7) > 0.95 ? 0.1 : 1;
+      const arcSpeed =
+        state === "working" ? 3 : state === "thinking" ? 1.5 : 0.6;
+      const arcCount = 3;
+      for (let i = 0; i < arcCount; i++) {
+        const startAngle = t * arcSpeed + (i * Math.PI * 2) / arcCount;
+        const sweep =
+          Math.PI * 0.5 +
+          (state === "speaking" ? audioLevel * Math.PI * 0.4 : 0) +
+          Math.sin(t * 2 + i) * 0.2;
+        ctx.beginPath();
+        ctx.arc(
+          0,
+          0,
+          innerRadius * (0.55 + i * 0.14),
+          startAngle,
+          startAngle + sweep,
+        );
+        ctx.strokeStyle = `#ffffff${i === 0 ? "cc" : i === 1 ? "80" : "40"}`;
+        ctx.lineWidth = (2 - i * 0.5) * dpr;
+        ctx.stroke();
+      }
+      // Center point pulse
+      const dotR =
+        innerRadius *
+        0.14 *
+        (state === "speaking"
+          ? 1 + audioLevel * 0.5
+          : 1 + Math.sin(t * 3) * 0.15);
       ctx.beginPath();
-      ctx.ellipse(
-        -eyeSpacing,
-        eyeY,
-        innerRadius * 0.08,
-        innerRadius * 0.08 * blink,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.ellipse(
-        eyeSpacing,
-        eyeY,
-        innerRadius * 0.08,
-        innerRadius * 0.08 * blink,
-        0,
-        0,
-        Math.PI * 2,
-      );
-      ctx.fillStyle = "#ffffff";
-      ctx.fill();
-
-      // Mouth - moves when speaking
-      const mouthY = innerRadius * 0.25;
-      const mouthOpen = state === "speaking" ? 0.2 + audioLevel * 0.3 : 0.05;
-      ctx.beginPath();
-      ctx.ellipse(
-        0,
-        mouthY,
-        innerRadius * 0.12,
-        innerRadius * mouthOpen,
-        0,
-        0,
-        Math.PI * 2,
-      );
+      ctx.arc(0, 0, dotR, 0, Math.PI * 2);
       ctx.fillStyle = "#ffffff";
       ctx.fill();
       ctx.restore();
@@ -211,14 +210,15 @@ export function HoloDirector({
 
     draw();
     return () => {
+      document.removeEventListener("visibilitychange", onVisChange);
       if (rafRef.current) cancelAnimationFrame(rafRef.current);
     };
   }, [state, audioLevel, size, stateColor]);
 
   return (
     <div
-      className="relative flex items-center justify-center"
-      style={{ width: size, height: size }}
+      className={`relative flex items-center justify-center ${className}`}
+      style={{ width: size, height: size, maxWidth: "100%", maxHeight: "100%" }}
     >
       <div
         className="absolute inset-0 rounded-full blur-2xl"
@@ -227,7 +227,7 @@ export function HoloDirector({
           transform: "scale(1.4)",
         }}
       />
-      <canvas ref={canvasRef} className="relative z-10" />
+      <canvas ref={canvasRef} className="relative z-10 h-full w-full" />
     </div>
   );
 }

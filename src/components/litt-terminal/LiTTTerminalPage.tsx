@@ -8,6 +8,13 @@ import {
   DirectorRuntimeProvider,
   useDirectorRuntime,
 } from "@/components/litt-director/DirectorRuntime";
+import { ConnectorStrip } from "./ConnectorStrip";
+import { useProfile } from "@/context/ProfileContext";
+import {
+  WALLPAPERS,
+  getWallpaperById,
+  type WallpaperId,
+} from "@/lib/wallpapers";
 import {
   Menu,
   ChevronRight,
@@ -41,7 +48,8 @@ function LiTTTerminalPageInner() {
   const [activeTab, setActiveTab] = useState<
     "mission" | "files" | "changes" | "memory" | "activity"
   >("mission");
-  const [wallpaper, setWallpaper] = useState<string | null>(null);
+  const { profile, updateProfile } = useProfile();
+  const activeWallpaper = getWallpaperById(profile.wallpaper);
 
   const addLog = (entry: string) =>
     setLogs((prev) => [...prev.slice(-99), entry]);
@@ -104,37 +112,28 @@ function LiTTTerminalPageInner() {
     { id: "activity" as const, label: "Activity", icon: History },
   ];
 
-  const WALLPAPERS = [
-    { id: "none", name: "Default", url: null },
-    {
-      id: "nebula",
-      name: "Nebula",
-      url: "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=1920&q=80",
-    },
-    {
-      id: "cyber",
-      name: "Cyber",
-      url: "https://images.unsplash.com/photo-1515630278258-407f66498911?w=1920&q=80",
-    },
-    {
-      id: "grid",
-      name: "Grid",
-      url: "https://images.unsplash.com/photo-1550751827-4bd374c3f58b?w=1920&q=80",
-    },
-  ];
+  const handleWallpaperChange = (id: WallpaperId) => {
+    updateProfile({ wallpaper: id });
+  };
+
+  const wallpaperStyle: React.CSSProperties =
+    profile.wallpaper === "custom" && profile.customWallpaperUrl
+      ? { backgroundImage: `url(${profile.customWallpaperUrl})` }
+      : activeWallpaper.fullStyle;
 
   return (
     <main
       className="h-full min-h-0 overflow-x-hidden text-white selection:bg-cyan-500/30"
-      style={{ backgroundColor: "#050505" }}
+      style={{
+        backgroundColor: "#050505",
+        ...wallpaperStyle,
+        backgroundSize:
+          wallpaperStyle.backgroundSize ||
+          (profile.wallpaper === "custom" ? "cover" : undefined),
+      }}
     >
-      {/* Wallpaper layer */}
-      {wallpaper && (
-        <div
-          className="pointer-events-none fixed inset-0 z-0 opacity-20 bg-cover bg-center bg-no-repeat"
-          style={{ backgroundImage: `url(${wallpaper})` }}
-        />
-      )}
+      {/* Wallpaper overlay to keep workspace readable */}
+      <div className="pointer-events-none fixed inset-0 z-0 bg-black/30" />
       <div className="pointer-events-none fixed inset-0 z-0">
         <div className="absolute inset-0 bg-[linear-gradient(rgba(34,211,238,0.03)_1px,transparent_1px),linear-gradient(90deg,rgba(34,211,238,0.03)_1px,transparent_1px)] bg-size-[40px_40px] mask-[radial-gradient(circle_at_center,black_30%,transparent_80%)]" />
         <div className="absolute -top-40 left-1/2 h-96 w-96 -translate-x-1/2 rounded-full bg-cyan-500/10 blur-[120px]" />
@@ -183,12 +182,12 @@ function LiTTTerminalPageInner() {
           </div>
 
           <div className="hidden shrink-0 items-center gap-2 sm:flex">
+            <ConnectorStrip connected={connected} />
             <select
-              value={wallpaper || "none"}
-              onChange={(e) => {
-                const w = WALLPAPERS.find((w) => w.id === e.target.value);
-                setWallpaper(w?.url || null);
-              }}
+              value={profile.wallpaper}
+              onChange={(e) =>
+                handleWallpaperChange(e.target.value as WallpaperId)
+              }
               className="rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-400 outline-none"
             >
               {WALLPAPERS.map((w) => (
@@ -214,6 +213,11 @@ function LiTTTerminalPageInner() {
             </button>
           </div>
         </header>
+
+        {/* Mobile connector strip */}
+        <div className="flex shrink-0 items-center gap-2 overflow-x-auto border-b border-neutral-800/40 px-3 py-1.5 backdrop-blur-md sm:hidden">
+          <ConnectorStrip connected={connected} />
+        </div>
 
         <div className="flex min-h-0 flex-1 overflow-hidden">
           {/* Center: mission canvas + chat composer */}

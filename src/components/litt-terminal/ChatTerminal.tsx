@@ -170,6 +170,32 @@ export function ChatTerminal({
 
   const setIdle = useCallback(() => runtime.setState("idle"), [runtime]);
 
+  const fetchWithTimeout = useCallback(
+    async (
+      url: string,
+      options: RequestInit & { signal?: AbortSignal },
+      timeoutMs = 30000,
+    ) => {
+      const controller = new AbortController();
+      const external = options.signal;
+      const onExternalAbort = () => controller.abort();
+      external?.addEventListener("abort", onExternalAbort);
+
+      const id = setTimeout(() => controller.abort(), timeoutMs);
+      try {
+        const res = await fetch(url, {
+          ...options,
+          signal: controller.signal,
+        });
+        return res;
+      } finally {
+        clearTimeout(id);
+        external?.removeEventListener("abort", onExternalAbort);
+      }
+    },
+    [],
+  );
+
   const normalizeResponse = (data: unknown): string => {
     if (!data || typeof data !== "object") return String(data);
     const d = data as {
@@ -242,10 +268,15 @@ export function ChatTerminal({
     }
   };
 
+  const isImageIntent = (text: string) =>
+    /\b(make|create|generate|design|draw|render)\b.*\b(logo|image|picture|banner|icon|artwork|art|graphic|wallpaper|poster|thumbnail)\b/i.test(
+      text,
+    );
+
   const sendChat = async (text: string) => {
     if (!text.trim()) return;
 
-    if (mode === "image") {
+    if (mode === "image" || (mode === "ask" && isImageIntent(text))) {
       await generateImage(text);
       setInput("");
       return;
@@ -273,12 +304,16 @@ export function ChatTerminal({
     abortRef.current = new AbortController();
 
     try {
-      const res = await fetch("/api/agents/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, message: text }),
-        signal: abortRef.current.signal,
-      });
+      const res = await fetchWithTimeout(
+        "/api/agents/chat",
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ agentId, message: text }),
+          signal: abortRef.current.signal,
+        },
+        30000,
+      );
       const data = await res.json();
       const answer = normalizeResponse(data);
       runtime.setAgentResponse(runId, answer);
@@ -287,7 +322,14 @@ export function ChatTerminal({
       setTimeout(setIdle, 2000);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
-        runtime.setAgentResponse(runId, "Stopped.");
+        if (abortRef.current?.signal.aborted) {
+          runtime.setAgentResponse(runId, "Stopped.");
+        } else {
+          runtime.setAgentResponse(
+            runId,
+            "LiTT took too long to respond. Try a shorter prompt or check your connection.",
+          );
+        }
       } else {
         const errorMsg = err instanceof Error ? err.message : "Request failed";
         runtime.setAgentResponse(runId, `Error: ${errorMsg}`);

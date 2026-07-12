@@ -2,6 +2,7 @@
 
 import { HoloDirector } from "./HoloDirector";
 import { useDirectorRuntime } from "./DirectorRuntime";
+import { useTheme } from "@/context/ThemeContext";
 import {
   Image,
   Wrench,
@@ -46,6 +47,68 @@ const STARTERS = [
   },
 ];
 
+const STATUS_CONFIG: Record<
+  ReturnType<typeof useDirectorRuntime>["state"],
+  { label: string; dot: string; border: string; bg: string; text: string }
+> = {
+  idle: {
+    label: "Standby",
+    dot: "bg-neutral-500",
+    border: "border-neutral-700/50",
+    bg: "bg-neutral-800/40",
+    text: "text-neutral-400",
+  },
+  listening: {
+    label: "Listening",
+    dot: "bg-cyan-400 animate-pulse",
+    border: "border-cyan-500/30",
+    bg: "bg-cyan-500/10",
+    text: "text-cyan-300",
+  },
+  speaking: {
+    label: "Speaking",
+    dot: "bg-cyan-400 animate-pulse",
+    border: "border-cyan-500/30",
+    bg: "bg-cyan-500/10",
+    text: "text-cyan-300",
+  },
+  thinking: {
+    label: "Thinking",
+    dot: "bg-purple-400 animate-pulse",
+    border: "border-purple-500/30",
+    bg: "bg-purple-500/10",
+    text: "text-purple-300",
+  },
+  working: {
+    label: "Working",
+    dot: "bg-amber-400 animate-pulse",
+    border: "border-amber-500/30",
+    bg: "bg-amber-500/10",
+    text: "text-amber-300",
+  },
+  complete: {
+    label: "Complete",
+    dot: "bg-green-400",
+    border: "border-green-500/30",
+    bg: "bg-green-500/10",
+    text: "text-green-300",
+  },
+  error: {
+    label: "Error",
+    dot: "bg-red-400",
+    border: "border-red-500/30",
+    bg: "bg-red-500/10",
+    text: "text-red-300",
+  },
+  approval: {
+    label: "Approval",
+    dot: "bg-orange-400 animate-pulse",
+    border: "border-orange-500/30",
+    bg: "bg-orange-500/10",
+    text: "text-orange-300",
+  },
+};
+
 export function MissionCanvas({
   onPromptAction,
 }: {
@@ -53,21 +116,36 @@ export function MissionCanvas({
 }) {
   const { state, steps, artifacts, activeArtifact, setActiveArtifact } =
     useDirectorRuntime();
+  const { resolvedColors: T } = useTheme();
+  const status = STATUS_CONFIG[state];
 
   const hasStarted = steps.length > 0;
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
       {/* Holo Director area */}
-      <div className="relative flex shrink-0 flex-col items-center justify-center p-6">
-        <div className="absolute inset-0 opacity-30 bg-[radial-gradient(circle_at_center,var(--tw-gradient-stops))] from-cyan-500/10 via-transparent to-transparent" />
-        <HoloDirector state={state} size={180} />
-        <div className="mt-3 text-center">
-          <div className="text-xs font-black uppercase tracking-widest text-cyan-300">
+      <div className="relative flex shrink-0 flex-col items-center justify-center p-4 sm:p-5">
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            background: `radial-gradient(circle at center, ${T.accentColor}12 0%, transparent 70%)`,
+          }}
+        />
+        <div className="relative h-28 w-28 sm:h-36 sm:w-36">
+          <HoloDirector state={state} className="h-full w-full" />
+        </div>
+        <div className="relative mt-2 flex flex-col items-center gap-1 text-center">
+          <div
+            className="text-[10px] font-black uppercase tracking-[0.25em] sm:text-xs"
+            style={{ color: T.headerColor }}
+          >
             LiTT Director
           </div>
-          <div className="text-[10px] text-neutral-500 capitalize">
-            {state.replace("-", " ")}
+          <div
+            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${status.border} ${status.bg} ${status.text}`}
+          >
+            <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
+            {status.label}
           </div>
         </div>
       </div>
@@ -112,6 +190,7 @@ export function MissionCanvas({
                     className="relative aspect-square overflow-hidden rounded-xl border border-neutral-800/60"
                   >
                     {a.type === "image" ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={a.url}
                         alt={a.title}
@@ -162,6 +241,7 @@ export function MissionCanvas({
                 <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-neutral-500">
                   Generated Artifact
                 </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={activeArtifact.url}
                   alt={activeArtifact.title}
