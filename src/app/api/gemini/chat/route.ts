@@ -122,8 +122,8 @@ async function handler(req: NextRequest) {
       AGENTS[agentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
 
-    const uid = userId || "anonymous";
-    const memoryContext = await fetchMemories(message, uid);
+    const uid = userId || "anonymous-dev";
+    const memoryContext = userId ? await fetchMemories(message, uid) : "";
     const prompt = buildPrompt(agent, message, history, memoryContext);
 
     if (!stream) {
@@ -133,7 +133,9 @@ async function handler(req: NextRequest) {
         undefined,
       );
       await logConversation(agent, userId, message, r.text);
-      await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
+      if (userId) {
+        await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
+      }
       return NextResponse.json({
         response: r.text,
         provider: r.provider,
@@ -172,7 +174,9 @@ async function handler(req: NextRequest) {
           controller.close();
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
-            await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
+            if (userId) {
+              await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
+            }
           }
         }
       },
