@@ -109,11 +109,7 @@ const STATUS_CONFIG: Record<
   },
 };
 
-export function MissionCanvas({
-  onPromptAction,
-}: {
-  onPromptAction?: (starter: { id: string; prompt: string }) => void;
-}) {
+export function MissionCanvas() {
   const { state, steps, artifacts, activeArtifact, setActiveArtifact } =
     useDirectorRuntime();
   const { resolvedColors: T } = useTheme();
@@ -121,8 +117,16 @@ export function MissionCanvas({
 
   const hasStarted = steps.length > 0;
 
+  const handleStarter = (starter: { id: string; prompt: string }) => {
+    window.dispatchEvent(
+      new CustomEvent("litt-chat-trigger", {
+        detail: { text: starter.prompt },
+      }),
+    );
+  };
+
   return (
-    <div className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
+    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
       {/* Compact Holo Director header */}
       <div className="relative flex shrink-0 items-center gap-3 p-3 sm:p-4">
         <div
@@ -151,7 +155,7 @@ export function MissionCanvas({
       </div>
 
       {/* Canvas content */}
-      <div className="max-h-[240px] overflow-y-auto p-3 sm:p-4">
+      <div className="flex-1 min-h-0 overflow-y-auto p-3 sm:p-4">
         {!hasStarted ? (
           <div className="space-y-3">
             <div className="flex flex-wrap gap-1.5">
@@ -161,7 +165,7 @@ export function MissionCanvas({
                   <button
                     key={s.id}
                     onClick={() =>
-                      onPromptAction?.({ id: s.id, prompt: s.prompt })
+                      handleStarter({ id: s.id, prompt: s.prompt })
                     }
                     className="flex items-center gap-1.5 rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1.5 text-center transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
                   >

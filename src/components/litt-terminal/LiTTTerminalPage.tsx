@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useState, useCallback, useMemo, useRef } from "react";
-import { ChatTerminal } from "./ChatTerminal";
 import { OutputPanel } from "./OutputPanel";
 import { MissionCanvas } from "@/components/litt-director/MissionCanvas";
 import {
@@ -46,20 +45,10 @@ type ProjectRecord = {
   status: string;
 };
 
-type ChatTriggerMode =
-  | "ask"
-  | "image"
-  | "build"
-  | "code"
-  | "agent"
-  | "search"
-  | "memory"
-  | "deploy";
-
 function LiTTTerminalPageInner() {
   const { activeArtifact } = useDirectorRuntime();
   const [logs, setLogs] = useState<string[]>([]);
-  const [connected, setConnected] = useState(false);
+  const [connected] = useState(false);
   const [files, setFiles] = useState<{ path: string; type: string }[]>([]);
   const [selectedFile, setSelectedFile] = useState<string | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
@@ -69,18 +58,6 @@ function LiTTTerminalPageInner() {
     "mission" | "files" | "changes" | "memory" | "activity"
   >("mission");
   const [project, setProject] = useState<ProjectRecord | null>(null);
-  const [chatTrigger, setChatTrigger] = useState<{
-    text: string;
-    mode?:
-      | "ask"
-      | "image"
-      | "build"
-      | "code"
-      | "agent"
-      | "search"
-      | "memory"
-      | "deploy";
-  } | null>(null);
   const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
   const wallpaperInputRef = useRef<HTMLInputElement>(null);
   const { profile, updateProfile } = useProfile();
@@ -88,23 +65,6 @@ function LiTTTerminalPageInner() {
 
   const addLog = (entry: string) =>
     setLogs((prev) => [...prev.slice(-99), entry]);
-
-  const handleDeploy = useCallback(async () => {
-    addLog("[DEPLOY] Triggering preview deployment...");
-    try {
-      const res = await fetch("/api/deploy/trigger", { method: "POST" });
-      const data = await res.json();
-      if (data.ok) {
-        addLog(`[DEPLOY] Deploy started: ${data.id}`);
-      } else {
-        addLog(`[DEPLOY] Failed: ${data.error || res.statusText}`);
-      }
-    } catch (err) {
-      addLog(
-        `[DEPLOY] Error: ${err instanceof Error ? err.message : "Failed"}`,
-      );
-    }
-  }, []);
 
   const loadFileTree = useCallback(async () => {
     try {
@@ -192,24 +152,6 @@ function LiTTTerminalPageInner() {
       if (wallpaperInputRef.current) wallpaperInputRef.current.value = "";
     }
   };
-
-  const handleStarterPrompt = useCallback(
-    (starter: { id: string; prompt: string }) => {
-      const modeMap: Record<string, ChatTriggerMode> = {
-        image: "image",
-        build: "build",
-        code: "code",
-        agent: "agent",
-        search: "search",
-        memory: "memory",
-      };
-      setChatTrigger({
-        text: starter.prompt,
-        mode: modeMap[starter.id] || "ask",
-      });
-    },
-    [],
-  );
 
   const wallpaperStyle: React.CSSProperties =
     profile.wallpaper === "custom" && profile.customWallpaperUrl
@@ -340,19 +282,7 @@ function LiTTTerminalPageInner() {
             <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
               {activeTab === "mission" ? (
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
-                  <div className="shrink-0">
-                    <MissionCanvas onPromptAction={handleStarterPrompt} />
-                  </div>
-                  <div className="flex min-h-0 flex-1 flex-col">
-                    <ChatTerminal
-                      agentId="director"
-                      onLogAction={addLog}
-                      onCommandAction={addLog}
-                      onConnectionChangeAction={setConnected}
-                      onDeployAction={handleDeploy}
-                      trigger={chatTrigger}
-                    />
-                  </div>
+                  <MissionCanvas />
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center text-neutral-400">

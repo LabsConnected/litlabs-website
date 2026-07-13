@@ -140,6 +140,18 @@ export function FloatingChat() {
     [loading],
   );
 
+  // Listen for external chat triggers (e.g. MissionCanvas starter buttons)
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail as { text?: string } | null;
+      if (!detail?.text) return;
+      setOpen(true);
+      setTimeout(() => send(detail.text!), 50);
+    };
+    window.addEventListener("litt-chat-trigger", handler);
+    return () => window.removeEventListener("litt-chat-trigger", handler);
+  }, [send]);
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

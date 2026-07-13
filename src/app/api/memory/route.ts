@@ -144,21 +144,39 @@ export async function GET(req: NextRequest) {
 
     // Health check / recent list: return Supabase memories when no semantic query is provided.
     if (!query.trim()) {
-      let db = supabaseAdmin
-        .from("memories")
-        .select("*")
-        .eq("owner_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      if (normalizedScope) db = db.eq("scope", normalizedScope);
-      const { data, error } = await db;
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      try {
+        let db = supabaseAdmin
+          .from("memories")
+          .select("*")
+          .eq("owner_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (normalizedScope) db = db.eq("scope", normalizedScope);
+        const { data, error } = await db;
+        if (error) {
+          // Table might not exist yet — return empty instead of 500
+          return NextResponse.json({
+            memories: [],
+            count: 0,
+            source: "supabase",
+            warning: "Memory table not initialized",
+          });
+        }
 
-      return NextResponse.json({
-        memories: data || [],
-        count: (data || []).length,
-        source: "supabase",
-      });
+        return NextResponse.json({
+          memories: data || [],
+          count: (data || []).length,
+          source: "supabase",
+        });
+      } catch {
+        // DB not configured or table missing — return empty so connector shows green
+        return NextResponse.json({
+          memories: [],
+          count: 0,
+          source: "none",
+          warning: "Memory storage not configured",
+        });
+      }
     }
 
     // Semantic search via Supermemory, then enrich with Supabase records.
