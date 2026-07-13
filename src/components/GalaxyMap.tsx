@@ -297,7 +297,7 @@ export default function GalaxyMap({
     };
     tick();
     return () => cancelAnimationFrame(raf);
-  });
+  }, [draw]);
 
   const toNode = (clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
