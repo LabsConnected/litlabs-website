@@ -498,6 +498,20 @@ interface ThemeContextType {
   resetTheme: () => void;
 }
 
+// Helper: produce a muted variant with safe contrast for small text.
+// We lighten the base text color toward white so it never drops below ~4.5:1
+// on the matching dark background.
+function mixMuted(hex: string): string {
+  const c = hex.replace("#", "");
+  if (c.length !== 6) return "#c4c4d4";
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const mix = (v: number) => Math.round(v + (235 - v) * 0.45);
+  const to2 = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
+}
+
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
@@ -527,7 +541,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       bgColor: custom.bgColor || skinColors.bgColor,
       textColor: custom.textColor || skinColors.textColor,
-      textMuted: "#a8a8c0",
+      textMuted: mixMuted(custom.textColor || skinColors.textColor),
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor:
         accent?.headerColor || custom.headerColor || skinColors.headerColor,

@@ -262,7 +262,7 @@ export const TerminalPanel = forwardRef<
 
       <div
         ref={containerRef}
-        className={`flex-1 overflow-hidden p-3 ${fullScreen ? "fixed inset-0 z-[100] h-screen w-screen bg-black" : ""}`}
+        className={`flex-1 overflow-hidden p-3 ${fullScreen ? "fixed inset-0 z-[10000] h-screen w-screen bg-black" : ""}`}
       />
     </div>
   );

@@ -186,7 +186,7 @@ export default function FlowTool() {
     } finally {
       setRunning(false);
     }
-  }, [canRun, cells, cellCosts, flowName, history]);
+  }, [canRun, cells, cellCosts, flowName, history, refreshWallet]);
 
   const clearHistory = () => {
     setHistory([]);

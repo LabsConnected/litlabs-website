@@ -263,6 +263,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                       : "none",
                   }}
                   title={link.label}
+                  aria-label={link.label}
                 >
                   <Icon size={12} strokeWidth={active ? 2.5 : 2} />
                   <span className="hidden xl:inline">{link.label}</span>
@@ -525,14 +526,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
         <>
           {/* Tap-outside scrim */}
           <div
-            className="lg:hidden fixed inset-0 z-48"
+            className="lg:hidden fixed inset-0 z-[10000]"
             style={{ top: "56px", backgroundColor: "rgba(0,0,0,0.6)" }}
             onClick={() => setMobileOpen(false)}
             onTouchStart={() => setMobileOpen(false)}
           />
           {/* Drawer panel */}
           <div
-            className="lg:hidden fixed left-0 right-0 z-49 flex flex-col overflow-y-auto"
+            className="lg:hidden fixed left-0 right-0 z-[10001] flex flex-col overflow-y-auto"
             style={{
               top: "56px",
               maxHeight: "calc(100dvh - 56px)",

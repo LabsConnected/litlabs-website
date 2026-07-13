@@ -100,7 +100,7 @@ export default function VideoTool() {
 
   useEffect(() => {
     refreshWallet();
-  }, []);
+  }, [refreshWallet]);
 
   useEffect(() => {
     if (history.length > 0)
@@ -135,10 +135,19 @@ export default function VideoTool() {
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
 
     try {
-      const encoded = encodeURIComponent(prompt.trim());
-      const url = `https://gen.pollinations.ai/video/${encoded}?model=${model}&duration=${duration}`;
-      const res = await fetch(url, { method: "GET" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}: ${await res.text()}`);
+      const res = await fetch("/api/studio/video", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: prompt.trim(),
+          model,
+          duration,
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
       const blob = await res.blob();
       const videoUrl = URL.createObjectURL(blob);
       setCurrent((prev) =>
@@ -186,7 +195,7 @@ export default function VideoTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, model, duration, cost, canAfford]);
+  }, [prompt, model, duration, cost, canAfford, refreshWallet]);
 
   const handleDownload = useCallback((url: string) => {
     const a = document.createElement("a");

@@ -24,6 +24,9 @@ const eslintConfig = defineConfig([
     "pnpm-lock.yaml",
     // Consolidation scratch copies
     "work/**",
+    ".codex-reference/**",
+    // Local artifact directories
+    "litlabs/**",
   ]),
 ]);
 

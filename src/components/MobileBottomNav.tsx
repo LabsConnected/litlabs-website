@@ -21,7 +21,7 @@ export default function MobileBottomNav() {
   return (
     <>
       <nav
-        className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-xl"
+        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-[100] border-t backdrop-blur-xl"
         style={{ borderColor: `${T.borderColor}20` }}
       >
         <div
@@ -63,7 +63,7 @@ export default function MobileBottomNav() {
 
       {/* More menu slide-up */}
       {moreOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="md:hidden fixed inset-0 z-[10000] flex flex-col justify-end">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setMoreOpen(false)}

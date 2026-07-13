@@ -15,6 +15,7 @@ import {
   X,
   Folder,
   FolderGit2,
+  Plus,
 } from "lucide-react";
 
 type GalaxyItem = {
@@ -419,315 +420,344 @@ export default function FileGalaxy() {
     );
   };
 
+  const isEmpty = !loading && data != null && nodes.length === 0;
+
   return (
     <div
-      ref={wrapperRef}
       className="relative h-full w-full overflow-hidden rounded-2xl border"
       style={{
         background: `radial-gradient(circle at 50% 50%, ${T.accentColor}08, transparent 40%), linear-gradient(180deg, ${T.bgColor}, #050510)`,
         borderColor: `${T.borderColor}30`,
       }}
-      onPointerDown={(e) => {
-        setDragging(true);
-        dragStart.current = {
-          x: e.clientX - offset.x,
-          y: e.clientY - offset.y,
-        };
-      }}
-      onPointerMove={(e) => {
-        if (dragging) {
-          setOffset({
-            x: e.clientX - dragStart.current.x,
-            y: e.clientY - dragStart.current.y,
-          });
-        } else {
-          const node = toNode(e.clientX, e.clientY);
-          setHovered(node?.id || null);
-        }
-      }}
-      onPointerUp={() => setDragging(false)}
-      onPointerLeave={() => {
-        setDragging(false);
-        setHovered(null);
-      }}
-      onWheel={(e) => {
-        e.preventDefault();
-        setZoom((z) =>
-          Math.max(0.3, Math.min(4, z + (e.deltaY > 0 ? -0.1 : 0.1))),
-        );
-      }}
     >
-      <canvas
-        ref={canvasRef}
-        onClick={(e) => {
-          const node = toNode(e.clientX, e.clientY);
-          if (node) setSelected(node);
-        }}
-        className="absolute inset-0 cursor-grab active:cursor-grabbing"
-      />
-
-      {/* Header badge */}
-      <div
-        className="absolute left-3 top-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{
-          backgroundColor: `${T.boxBg}cc`,
-          borderColor: `${T.borderColor}30`,
-          color: T.accentColor,
-          backdropFilter: "blur(8px)",
-        }}
-      >
-        <FolderGit2 size={11} /> File Galaxy
-        {data?.count != null && (
-          <span style={{ color: T.textMuted }}>· {data.count} nodes</span>
-        )}
-      </div>
-
-      {/* Loading */}
-      {loading && (
-        <div
-          className="absolute left-3 top-12 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textMuted,
-          }}
-        >
-          <RefreshCw size={10} className="animate-spin" /> Scanning systems...
-        </div>
-      )}
-
-      {/* Hint */}
-      <div
-        className="absolute bottom-3 left-3 flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[10px]"
-        style={{
-          backgroundColor: `${T.boxBg}cc`,
-          borderColor: `${T.borderColor}30`,
-          color: T.textMuted,
-          backdropFilter: "blur(8px)",
-        }}
-      >
-        Drag to pan · Scroll to zoom · Click nodes to inspect
-      </div>
-
-      {/* Zoom controls */}
-      <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
-        <button
-          onClick={() => setZoom((z) => Math.max(0.3, z - 0.15))}
-          className="rounded-lg border p-1.5 transition-transform hover:scale-110"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textColor,
-          }}
-          title="Zoom out"
-        >
-          <ZoomOut size={13} />
-        </button>
-        <button
-          onClick={() => {
-            setZoom(1);
-            setRotation(0);
-            setOffset({ x: 0, y: 0 });
-          }}
-          className="rounded-lg border p-1.5 transition-transform hover:scale-110"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textColor,
-          }}
-          title="Reset view"
-        >
-          <Maximize2 size={13} />
-        </button>
-        <button
-          onClick={() => setZoom((z) => Math.min(4, z + 0.15))}
-          className="rounded-lg border p-1.5 transition-transform hover:scale-110"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textColor,
-          }}
-          title="Zoom in"
-        >
-          <ZoomIn size={13} />
-        </button>
-        <button
-          onClick={() => setRotation((r) => r + 15)}
-          className="rounded-lg border p-1.5 transition-transform hover:scale-110"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textColor,
-          }}
-          title="Rotate"
-        >
-          <RotateCw size={13} />
-        </button>
-        <button
-          onClick={() => void load()}
-          className="rounded-lg border p-1.5 transition-transform hover:scale-110"
-          style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: `${T.borderColor}30`,
-            color: T.textColor,
-          }}
-          title="Refresh data"
-        >
-          <RefreshCw size={13} />
-        </button>
-      </div>
-
-      {/* Detail panel */}
-      {selected && (
-        <div
-          className="absolute right-3 top-3 w-64 rounded-xl border p-3 shadow-2xl"
-          style={{
-            backgroundColor: `${T.boxBg}f0`,
-            borderColor: `${T.borderColor}50`,
-            backdropFilter: "blur(12px)",
-          }}
-        >
-          <div className="flex items-start justify-between mb-2">
-            <div className="flex items-center gap-2">
-              {selected.type === "system" ? (
-                <FolderGit2 size={14} style={{ color: T.accentColor }} />
-              ) : selected.type === "repo" ? (
-                <Folder
-                  size={14}
-                  style={{ color: langColor(selected.meta?.language) }}
-                />
-              ) : (
-                <Folder size={14} style={{ color: "#22d3ee" }} />
-              )}
-              <span
-                className="text-sm font-black truncate max-w-[140px]"
-                style={{ color: T.textColor }}
-              >
-                {selected.label}
-              </span>
-            </div>
-            <button
-              onClick={() => setSelected(null)}
-              className="opacity-50 hover:opacity-100 transition-opacity"
-              style={{ color: T.textMuted }}
+      {isEmpty ? (
+        <div className="flex h-full flex-col items-center justify-center p-6 text-center">
+          <div
+            className="flex h-12 w-12 items-center justify-center rounded-2xl"
+            style={{
+              backgroundColor: `${T.accentColor}15`,
+              color: T.accentColor,
+            }}
+          >
+            <FolderGit2 size={24} />
+          </div>
+          <h3
+            className="mt-4 text-sm font-black"
+            style={{ color: T.textColor }}
+          >
+            File Galaxy
+          </h3>
+          <p
+            className="mt-1 max-w-[240px] text-xs"
+            style={{ color: T.textMuted }}
+          >
+            Connect a GitHub account or create a local project to map your code
+            universe.
+          </p>
+          <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+            <a
+              href="/settings?tab=integrations"
+              className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black text-black transition-opacity hover:opacity-90"
+              style={{ backgroundColor: T.accentColor }}
             >
-              <X size={14} />
+              <ExternalLink size={14} /> Connect GitHub
+            </a>
+            <a
+              href="/projects"
+              className="inline-flex items-center gap-1.5 rounded-xl border px-3.5 py-2 text-xs font-bold transition-opacity hover:opacity-80"
+              style={{ borderColor: `${T.borderColor}50`, color: T.textColor }}
+            >
+              <Plus size={14} /> Create Project
+            </a>
+          </div>
+        </div>
+      ) : (
+        <div
+          ref={wrapperRef}
+          className="relative h-full w-full overflow-hidden rounded-2xl"
+          onPointerDown={(e) => {
+            setDragging(true);
+            dragStart.current = {
+              x: e.clientX - offset.x,
+              y: e.clientY - offset.y,
+            };
+          }}
+          onPointerMove={(e) => {
+            if (dragging) {
+              setOffset({
+                x: e.clientX - dragStart.current.x,
+                y: e.clientY - dragStart.current.y,
+              });
+            } else {
+              const node = toNode(e.clientX, e.clientY);
+              setHovered(node?.id || null);
+            }
+          }}
+          onPointerUp={() => setDragging(false)}
+          onPointerLeave={() => {
+            setDragging(false);
+            setHovered(null);
+          }}
+          onWheel={(e) => {
+            e.preventDefault();
+            setZoom((z) =>
+              Math.max(0.3, Math.min(4, z + (e.deltaY > 0 ? -0.1 : 0.1))),
+            );
+          }}
+        >
+          <canvas
+            ref={canvasRef}
+            onClick={(e) => {
+              const node = toNode(e.clientX, e.clientY);
+              if (node) setSelected(node);
+            }}
+            className="absolute inset-0 cursor-grab active:cursor-grabbing"
+          />
+
+          {/* Header badge */}
+          <div
+            className="absolute left-3 top-3 flex items-center gap-2 rounded-full border px-3 py-1.5 text-[10px] font-black uppercase tracking-[0.18em]"
+            style={{
+              backgroundColor: `${T.boxBg}cc`,
+              borderColor: `${T.borderColor}30`,
+              color: T.accentColor,
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            <FolderGit2 size={11} /> File Galaxy
+            {data?.count != null && (
+              <span style={{ color: T.textMuted }}>· {data.count} nodes</span>
+            )}
+          </div>
+
+          {/* Loading */}
+          {loading && (
+            <div
+              className="absolute left-3 top-12 flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-[10px]"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textMuted,
+              }}
+            >
+              <RefreshCw size={10} className="animate-spin" /> Scanning
+              systems...
+            </div>
+          )}
+
+          {/* Hint */}
+          <div
+            className="absolute bottom-3 left-3 flex items-center gap-2 rounded-xl border px-2.5 py-1.5 text-[10px]"
+            style={{
+              backgroundColor: `${T.boxBg}cc`,
+              borderColor: `${T.borderColor}30`,
+              color: T.textMuted,
+              backdropFilter: "blur(8px)",
+            }}
+          >
+            Drag to pan · Scroll to zoom · Click nodes to inspect
+          </div>
+
+          {/* Zoom controls */}
+          <div className="absolute bottom-3 right-3 flex items-center gap-1.5">
+            <button
+              onClick={() => setZoom((z) => Math.max(0.3, z - 0.15))}
+              className="rounded-lg border p-1.5 transition-transform hover:scale-110"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textColor,
+              }}
+              title="Zoom out"
+            >
+              <ZoomOut size={13} />
+            </button>
+            <button
+              onClick={() => {
+                setZoom(1);
+                setRotation(0);
+                setOffset({ x: 0, y: 0 });
+              }}
+              className="rounded-lg border p-1.5 transition-transform hover:scale-110"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textColor,
+              }}
+              title="Reset view"
+            >
+              <Maximize2 size={13} />
+            </button>
+            <button
+              onClick={() => setZoom((z) => Math.min(4, z + 0.15))}
+              className="rounded-lg border p-1.5 transition-transform hover:scale-110"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textColor,
+              }}
+              title="Zoom in"
+            >
+              <ZoomIn size={13} />
+            </button>
+            <button
+              onClick={() => setRotation((r) => r + 15)}
+              className="rounded-lg border p-1.5 transition-transform hover:scale-110"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textColor,
+              }}
+              title="Rotate"
+            >
+              <RotateCw size={13} />
+            </button>
+            <button
+              onClick={() => void load()}
+              className="rounded-lg border p-1.5 transition-transform hover:scale-110"
+              style={{
+                backgroundColor: `${T.boxBg}cc`,
+                borderColor: `${T.borderColor}30`,
+                color: T.textColor,
+              }}
+              title="Refresh data"
+            >
+              <RefreshCw size={13} />
             </button>
           </div>
 
-          <div
-            className="text-[10px] font-mono uppercase tracking-wider mb-2"
-            style={{ color: T.textMuted }}
-          >
-            {selected.type}
-            {selected.meta?.private && " · private"}
-          </div>
-
-          {selected.meta?.language && (
+          {/* Detail panel */}
+          {selected && (
             <div
-              className="flex items-center gap-1.5 mb-1.5 text-[11px]"
-              style={{ color: T.textColor }}
+              className="absolute right-3 top-3 w-64 rounded-xl border p-3 shadow-2xl"
+              style={{
+                backgroundColor: `${T.boxBg}f0`,
+                borderColor: `${T.borderColor}50`,
+                backdropFilter: "blur(12px)",
+              }}
             >
-              <span
-                className="w-2.5 h-2.5 rounded-full"
-                style={{ backgroundColor: langColor(selected.meta.language) }}
-              />
-              {selected.meta.language}
-            </div>
-          )}
+              <div className="flex items-start justify-between mb-2">
+                <div className="flex items-center gap-2">
+                  {selected.type === "system" ? (
+                    <FolderGit2 size={14} style={{ color: T.accentColor }} />
+                  ) : selected.type === "repo" ? (
+                    <Folder
+                      size={14}
+                      style={{ color: langColor(selected.meta?.language) }}
+                    />
+                  ) : (
+                    <Folder size={14} style={{ color: "#22d3ee" }} />
+                  )}
+                  <span
+                    className="text-sm font-black truncate max-w-[140px]"
+                    style={{ color: T.textColor }}
+                  >
+                    {selected.label}
+                  </span>
+                </div>
+                <button
+                  onClick={() => setSelected(null)}
+                  className="opacity-50 hover:opacity-100 transition-opacity"
+                  style={{ color: T.textMuted }}
+                >
+                  <X size={14} />
+                </button>
+              </div>
 
-          {selected.meta?.stars != null && selected.meta.stars > 0 && (
-            <div
-              className="flex items-center gap-1.5 mb-1.5 text-[11px]"
-              style={{ color: T.textColor }}
-            >
-              <Star size={11} style={{ color: "#fbbf24" }} />
-              {selected.meta.stars} stars
-            </div>
-          )}
-
-          {selected.meta?.branch && (
-            <div
-              className="flex items-center gap-1.5 mb-1.5 text-[11px]"
-              style={{ color: T.textColor }}
-            >
-              <GitBranch size={11} style={{ color: T.textMuted }} />
-              {selected.meta.branch}
-            </div>
-          )}
-
-          {selected.meta?.status && (
-            <div
-              className="flex items-center gap-1.5 mb-1.5 text-[11px]"
-              style={{ color: T.textColor }}
-            >
-              <span
-                className="w-2 h-2 rounded-full"
-                style={{
-                  backgroundColor:
-                    selected.meta.status === "online"
-                      ? "#22c55e"
-                      : selected.meta.status === "building"
-                        ? "#f59e0b"
-                        : "#6b7280",
-                }}
-              />
-              {selected.meta.status}
-            </div>
-          )}
-
-          {selected.meta?.private && (
-            <div
-              className="flex items-center gap-1.5 mb-1.5 text-[11px]"
-              style={{ color: T.textMuted }}
-            >
-              <Lock size={11} /> Private repo
-            </div>
-          )}
-
-          {selected.meta?.url && (
-            <a
-              href={selected.meta.url}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="flex items-center gap-1.5 text-[11px] font-bold mt-2 transition-opacity hover:opacity-80"
-              style={{ color: T.accentColor }}
-            >
-              <ExternalLink size={11} /> Open on GitHub
-            </a>
-          )}
-
-          {selected.meta?.updated && (
-            <div className="text-[10px] mt-2" style={{ color: T.textMuted }}>
-              Updated {new Date(selected.meta.updated).toLocaleDateString()}
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!loading && data && data.count === 1 && (
-        <div className="absolute inset-0 flex items-center justify-center pointer-events-none">
-          <div className="text-center max-w-xs px-4">
-            <div className="text-3xl mb-2">🌌</div>
-            <p
-              className="text-sm font-bold mb-1"
-              style={{ color: T.textColor }}
-            >
-              Your galaxy is waiting
-            </p>
-            <p className="text-[11px]" style={{ color: T.textMuted }}>
-              Connect a GitHub account in{" "}
-              <a
-                href="/settings?tab=integrations"
-                className="underline"
-                style={{ color: T.accentColor }}
+              <div
+                className="text-[10px] font-mono uppercase tracking-wider mb-2"
+                style={{ color: T.textMuted }}
               >
-                Settings → Integrations
-              </a>{" "}
-              to populate your file galaxy.
-            </p>
-          </div>
+                {selected.type}
+                {selected.meta?.private && " · private"}
+              </div>
+
+              {selected.meta?.language && (
+                <div
+                  className="flex items-center gap-1.5 mb-1.5 text-[11px]"
+                  style={{ color: T.textColor }}
+                >
+                  <span
+                    className="w-2.5 h-2.5 rounded-full"
+                    style={{
+                      backgroundColor: langColor(selected.meta.language),
+                    }}
+                  />
+                  {selected.meta.language}
+                </div>
+              )}
+
+              {selected.meta?.stars != null && selected.meta.stars > 0 && (
+                <div
+                  className="flex items-center gap-1.5 mb-1.5 text-[11px]"
+                  style={{ color: T.textColor }}
+                >
+                  <Star size={11} style={{ color: "#fbbf24" }} />
+                  {selected.meta.stars} stars
+                </div>
+              )}
+
+              {selected.meta?.branch && (
+                <div
+                  className="flex items-center gap-1.5 mb-1.5 text-[11px]"
+                  style={{ color: T.textColor }}
+                >
+                  <GitBranch size={11} style={{ color: T.textMuted }} />
+                  {selected.meta.branch}
+                </div>
+              )}
+
+              {selected.meta?.status && (
+                <div
+                  className="flex items-center gap-1.5 mb-1.5 text-[11px]"
+                  style={{ color: T.textColor }}
+                >
+                  <span
+                    className="w-2 h-2 rounded-full"
+                    style={{
+                      backgroundColor:
+                        selected.meta.status === "online"
+                          ? "#22c55e"
+                          : selected.meta.status === "building"
+                            ? "#f59e0b"
+                            : "#6b7280",
+                    }}
+                  />
+                  {selected.meta.status}
+                </div>
+              )}
+
+              {selected.meta?.private && (
+                <div
+                  className="flex items-center gap-1.5 mb-1.5 text-[11px]"
+                  style={{ color: T.textMuted }}
+                >
+                  <Lock size={11} /> Private repo
+                </div>
+              )}
+
+              {selected.meta?.url && (
+                <a
+                  href={selected.meta.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="flex items-center gap-1.5 text-[11px] font-bold mt-2 transition-opacity hover:opacity-80"
+                  style={{ color: T.accentColor }}
+                >
+                  <ExternalLink size={11} /> Open on GitHub
+                </a>
+              )}
+
+              {selected.meta?.updated && (
+                <div
+                  className="text-[10px] mt-2"
+                  style={{ color: T.textMuted }}
+                >
+                  Updated {new Date(selected.meta.updated).toLocaleDateString()}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
     </div>

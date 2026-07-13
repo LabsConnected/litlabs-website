@@ -54,7 +54,7 @@ interface TerminalLine {
 
 export default function CLIBridgeTool() {
   const { resolvedColors: T } = useTheme();
-  const { userId, isLoaded, isSignedIn } = useClerkAuth();
+  const { isLoaded, isSignedIn } = useClerkAuth();
   const [selectedTool, setSelectedTool] = useState(CLI_TOOLS[0]);
   const [isConnected, setIsConnected] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -62,23 +62,10 @@ export default function CLIBridgeTool() {
   const [input, setInput] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
 
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
-
-  // Check if user is admin
-  useEffect(() => {
-    if (isLoaded && userId) {
-      // In production, this would check against a database or env var
-      // For now, hardcoded to your user ID
-      const id = requestAnimationFrame(() =>
-        setIsAdmin(userId === "user_litbit" || userId?.includes("litbit")),
-      );
-      return () => cancelAnimationFrame(id);
-    }
-  }, [isLoaded, userId]);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -113,7 +100,7 @@ export default function CLIBridgeTool() {
   }, [sessionId, addLine]);
 
   const connect = useCallback(async () => {
-    if (!isAdmin || isConnecting || isConnected) return;
+    if (!isSignedIn || isConnecting || isConnected) return;
 
     setIsConnecting(true);
     setError(null);
@@ -172,7 +159,14 @@ export default function CLIBridgeTool() {
       setIsConnecting(false);
       addLine("error", "❌ Connection failed");
     }
-  }, [isAdmin, isConnecting, isConnected, selectedTool, addLine, disconnect]);
+  }, [
+    isSignedIn,
+    isConnecting,
+    isConnected,
+    selectedTool,
+    addLine,
+    disconnect,
+  ]);
 
   const sendInput = useCallback(async () => {
     if (!input.trim() || !isConnected || !sessionId) return;
@@ -228,18 +222,6 @@ export default function CLIBridgeTool() {
     );
   }
 
-  if (!isAdmin) {
-    return (
-      <div className="flex flex-col items-center justify-center h-full gap-4">
-        <AlertCircle size={48} style={{ color: T.warning }} />
-        <p style={{ color: T.textMuted }}>CLI Bridge is admin-only</p>
-        <p className="text-xs" style={{ color: T.textMuted + "80" }}>
-          User ID: {userId}
-        </p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col h-full overflow-hidden">
       {/* Header */}
@@ -259,7 +241,7 @@ export default function CLIBridgeTool() {
               color: T.accentColor,
             }}
           >
-            Admin Only
+            Authenticated
           </span>
         </div>
 
@@ -400,6 +382,8 @@ export default function CLIBridgeTool() {
           {isConnected ? "❯" : "○"}
         </span>
         <input
+          id="cli-bridge-input"
+          name="cli-bridge-input"
           ref={inputRef}
           type="text"
           value={input}

@@ -27,7 +27,7 @@ export function Card({
       className={cn(
         "rounded-xl sm:rounded-2xl border transition-all",
         pad,
-        interactive && "cursor-pointer hover:border-primary/50 hover:bg-surfaceElevated",
+        interactive && "cursor-pointer hover:border-white/20 hover:bg-white/5",
         className,
       )}
       style={{

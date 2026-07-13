@@ -137,6 +137,8 @@ export default function StudioCommandDock({
             >
               <Sparkles size={12} style={{ color: T.accentColor }} />
               <input
+                id="studio-command-input"
+                name="studio-command-input"
                 ref={inputRef}
                 value={prompt}
                 onChange={(e) => onPromptChange(e.target.value)}

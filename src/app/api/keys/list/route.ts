@@ -1,4 +1,4 @@
-import { NextRequest, NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { withRateLimit } from "@/lib/rate-limiter";
@@ -15,7 +15,7 @@ async function getUserId() {
   return user?.id ?? null;
 }
 
-async function handler(_req: NextRequest) {
+async function handler() {
   const dbUserId = await getUserId();
   if (!dbUserId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });

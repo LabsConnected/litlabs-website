@@ -129,9 +129,7 @@ export default function Gallery() {
 
   // Real API items first; fall back to user items only when API returns nothing
   const baseItems =
-    apiItems.length > 0
-      ? [...apiItems, ...userItems]
-      : [...userItems];
+    apiItems.length > 0 ? [...apiItems, ...userItems] : [...userItems];
   const items = baseItems.map((item) => ({
     ...item,
     likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
@@ -475,7 +473,11 @@ export default function Gallery() {
       {isMock && (
         <div
           className="w-full px-4 py-2 text-[10px] text-center"
-          style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
+          style={{
+            backgroundColor: T.accentColor + "20",
+            color: T.accentColor,
+            borderBottom: `1px solid ${T.accentColor}40`,
+          }}
         >
           🛠 Demo gallery — connect Supabase to see real community uploads.
         </div>
@@ -556,7 +558,9 @@ export default function Gallery() {
                     >
                       {featured.artist}
                     </span>
-                    <span className="text-[9px] sm:text-[10px] opacity-30">·</span>
+                    <span className="text-[9px] sm:text-[10px] opacity-30">
+                      ·
+                    </span>
                     <span
                       className="text-[9px] sm:text-[10px] opacity-40"
                       style={{ color: T.textColor }}
@@ -997,6 +1001,7 @@ export default function Gallery() {
                       </div>
                     ) : uploadForm.imageUrl ? (
                       <div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={uploadForm.imageUrl}
                           alt="Preview"
@@ -1456,6 +1461,7 @@ export default function Gallery() {
                 <div className="px-3 py-2.5 flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
                     {item.artistAvatar ? (
+                      // eslint-disable-next-line @next/next/no-img-element
                       <img
                         src={item.artistAvatar}
                         alt={item.artist}

@@ -6,7 +6,7 @@ import { Suspense } from "react";
 import Link from "next/link";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
-import { LiTTTerminalPage } from "@/components/litt-terminal/LiTTTerminalPage";
+import StudioOS from "./components/StudioOS";
 import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
 
 function StudioHub() {
@@ -132,7 +132,7 @@ function StudioHub() {
     );
   }
 
-  return <LiTTTerminalPage />;
+  return <StudioOS />;
 }
 
 export default function StudioPage() {

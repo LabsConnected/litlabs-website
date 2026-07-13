@@ -7,7 +7,7 @@ import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
 import { FloatingChat } from "@/components/FloatingChat";
 import { SITE_URL } from "@/lib/siteConfig";
-import { GoogleTagManager } from "@next/third-parties/google";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./globals.css";
@@ -127,7 +127,28 @@ export default function RootLayout({
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <GoogleTagManager gtmId="G-0G4JPF3HXG" />
+      <link
+        rel="preconnect"
+        href="https://accounts.dev"
+        crossOrigin="anonymous"
+      />
+      <link
+        rel="preconnect"
+        href="https://eternal-chow-60.clerk.accounts.dev"
+        crossOrigin="anonymous"
+      />
+      <link
+        rel="preconnect"
+        href="https://static.cloudflareinsights.com"
+        crossOrigin="anonymous"
+      />
+      <link rel="dns-prefetch" href="https://accounts.dev" />
+      <link
+        rel="dns-prefetch"
+        href="https://eternal-chow-60.clerk.accounts.dev"
+      />
+      <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
+      <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#0d0a05" }}

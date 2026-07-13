@@ -43,7 +43,7 @@ async function handler(req: NextRequest) {
         const selectedTopic =
           topic ||
           CONVERSATION_TOPERS[
-            Math.floor(Math.random() * CONVERSATION_TOPERS.length)
+          Math.floor(Math.random() * CONVERSATION_TOPERS.length)
           ];
 
         const conversation = await orchestrator.startBackgroundConversation(
@@ -84,6 +84,13 @@ async function handler(req: NextRequest) {
           .from("orchestration_jobs")
           .update({ status: "paused" })
           .eq("conversation_id", conversationId);
+
+        if (error) {
+          return NextResponse.json(
+            { error: "Failed to pause conversation" },
+            { status: 500 },
+          );
+        }
 
         const conversation = orchestrator.getConversation(conversationId);
         if (conversation) {

@@ -10,7 +10,7 @@ export const maxDuration = 60;
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
-const DEFAULT_AGENT_SLUG = "director";
+const DEFAULT_AGENT_SLUG = "littcode";
 const HISTORY_LIMIT = 12;
 
 /**

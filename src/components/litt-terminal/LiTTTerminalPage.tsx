@@ -24,6 +24,8 @@ import {
   History,
   Cpu,
   Upload,
+  Send,
+  Loader2,
 } from "lucide-react";
 
 export function LiTTTerminalPage() {
@@ -35,6 +37,73 @@ export function LiTTTerminalPage() {
 }
 
 type RightPanelTab = "context" | "output";
+
+function StudioChatComposer() {
+  const [input, setInput] = useState("");
+  const [loading, setLoading] = useState(false);
+  const { addUserStep, setAgentResponse, setState } = useDirectorRuntime();
+
+  const handleSend = useCallback(async () => {
+    const text = input.trim();
+    if (!text || loading) return;
+    setInput("");
+    setLoading(true);
+    const runId = addUserStep(text);
+    setState("thinking");
+    try {
+      const res = await fetch("/api/agents/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId: "director", message: text }),
+      });
+      const data = (await res.json()) as { response?: string; error?: string };
+      if (!res.ok || data.error) throw new Error(data.error || "Chat failed");
+      setAgentResponse(runId, data.response || "I'm on it.");
+      setState("complete");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Failed to reach LiTT.";
+      setAgentResponse(runId, msg);
+      setState("error");
+    } finally {
+      setLoading(false);
+    }
+  }, [input, loading, addUserStep, setAgentResponse, setState]);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && !e.shiftKey) {
+      e.preventDefault();
+      void handleSend();
+    }
+  };
+
+  return (
+    <div className="shrink-0 rounded-2xl border border-neutral-800/60 bg-black/40 p-2 sm:p-3">
+      <div className="flex items-center gap-2">
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder="Ask LiTT Director..."
+          disabled={loading}
+          className="flex-1 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-500 focus:border-cyan-500/40"
+        />
+        <button
+          onClick={() => void handleSend()}
+          disabled={loading || !input.trim()}
+          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-cyan-500/10 text-cyan-400 transition hover:bg-cyan-500/20 disabled:opacity-40"
+          aria-label="Send"
+        >
+          {loading ? (
+            <Loader2 size={16} className="animate-spin" />
+          ) : (
+            <Send size={16} />
+          )}
+        </button>
+      </div>
+    </div>
+  );
+}
 
 type ProjectRecord = {
   id: string;
@@ -282,7 +351,10 @@ function LiTTTerminalPageInner() {
             <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
               {activeTab === "mission" ? (
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
-                  <MissionCanvas />
+                  <div className="min-h-0 flex-1">
+                    <MissionCanvas />
+                  </div>
+                  <StudioChatComposer />
                 </div>
               ) : (
                 <div className="flex h-full items-center justify-center text-neutral-400">
@@ -364,7 +436,7 @@ function LiTTTerminalPageInner() {
       {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 z-40 bg-black/60 lg:hidden"
+          className="fixed inset-0 z-[10000] bg-black/60 lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}

@@ -1,7 +1,9 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { createPortal } from "react-dom";
 import { useProfile } from "@/context/ProfileContext";
+import { useTheme } from "@/context/ThemeContext";
 import {
   MessageCircle,
   X,
@@ -11,11 +13,23 @@ import {
   Volume2,
   VolumeX,
   StopCircle,
+  ChevronDown,
+  ChevronUp,
+  RefreshCw,
 } from "lucide-react";
 
 type ChatMessage = {
   role: "user" | "agent";
   content: string;
+};
+
+type Toast = {
+  id: string;
+  message: string;
+  retry?:
+    | { type: "send"; text: string }
+    | { type: "record" }
+    | { type: "speak"; text: string; idx: number };
 };
 
 const SUGGESTIONS = [
@@ -33,10 +47,18 @@ const VOICES = [
   { value: "Orus", label: "Orus", desc: "Steady · Male" },
 ];
 
+function audioSrcFromBase64(input: string): string {
+  if (!input) return "";
+  if (input.startsWith("data:")) return input;
+  return `data:audio/wav;base64,${input}`;
+}
+
 export function FloatingChat() {
   const { profile } = useProfile();
-  const userName = profile.displayName || "Creator";
-  const [open, setOpen] = useState(false);
+  const { tokens } = useTheme();
+  const userName = profile?.displayName || "Creator";
+  const [chatOpen, setChatOpen] = useState(false);
+  const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
@@ -50,13 +72,28 @@ export function FloatingChat() {
   const [transcribing, setTranscribing] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
+  const [autoSpeak, setAutoSpeak] = useState(true);
+  const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
+  const [voicePreviewError, setVoicePreviewError] = useState<string | null>(
+    null,
+  );
+  const [toasts, setToasts] = useState<Toast[]>([]);
+  const [mounted, setMounted] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
-  const voiceMenuRef = useRef<HTMLDivElement>(null);
+  const sendRef = useRef<(text: string) => void>(() => {});
+  const retryRecordRef = useRef<() => void>(() => {});
+  const retrySpeakRef = useRef<(text: string, idx: number) => void>(() => {});
+  const speakRef = useRef<(text: string, idx: number) => void>(() => {});
+
+  useEffect(() => {
+    const id = requestAnimationFrame(() => setMounted(true));
+    return () => cancelAnimationFrame(id);
+  }, []);
 
   // Update greeting when profile name changes
   useEffect(() => {
@@ -80,31 +117,40 @@ export function FloatingChat() {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight;
     }
-  }, [messages, open]);
+  }, [messages, chatOpen]);
 
   useEffect(() => {
-    if (open && inputRef.current) {
+    if (chatOpen && inputRef.current) {
       inputRef.current.focus();
     }
-  }, [open]);
-
-  useEffect(() => {
-    const handle = (e: MouseEvent) => {
-      if (
-        voiceMenuRef.current &&
-        !voiceMenuRef.current.contains(e.target as Node)
-      )
-        setVoiceMenuOpen(false);
-    };
-    document.addEventListener("mousedown", handle);
-    return () => document.removeEventListener("mousedown", handle);
-  }, []);
+  }, [chatOpen]);
 
   useEffect(() => {
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
     };
+  }, []);
+
+  const showToast = useCallback(
+    (
+      message: string,
+      retry?:
+        | { type: "send"; text: string }
+        | { type: "record" }
+        | { type: "speak"; text: string; idx: number },
+    ) => {
+      const id = Math.random().toString(36).slice(2);
+      setToasts((prev) => [...prev, { id, message, retry }]);
+      setTimeout(() => {
+        setToasts((prev) => prev.filter((t) => t.id !== id));
+      }, 6000);
+    },
+    [],
+  );
+
+  const dismissToast = useCallback((id: string) => {
+    setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
 
   const send = useCallback(
@@ -122,35 +168,46 @@ export function FloatingChat() {
         });
         const data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || "Chat failed");
-        setMessages((prev) => [
-          ...prev,
-          { role: "agent", content: data.response || "I'm on it." },
-        ]);
+        const reply = data.response || "I'm on it.";
+        const newIdx = messages.length + 1;
+        setMessages((prev) => [...prev, { role: "agent", content: reply }]);
+        if (autoSpeak) {
+          // slight delay so the UI renders first
+          setTimeout(() => void speakRef.current(reply, newIdx), 300);
+        }
       } catch (err) {
         const msg =
           err instanceof Error ? err.message : "Something went wrong.";
-        setMessages((prev) => [
-          ...prev,
-          { role: "agent", content: `Error: ${msg}` },
-        ]);
+        showToast(msg, { type: "send", text: trimmed });
       } finally {
         setLoading(false);
       }
     },
-    [loading],
+    [loading, showToast, autoSpeak, messages.length],
   );
+
+  useEffect(() => {
+    sendRef.current = send;
+  }, [send]);
 
   // Listen for external chat triggers (e.g. MissionCanvas starter buttons)
   useEffect(() => {
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail as { text?: string } | null;
       if (!detail?.text) return;
-      setOpen(true);
+      setChatOpen(true);
       setTimeout(() => send(detail.text!), 50);
     };
     window.addEventListener("litt-chat-trigger", handler);
     return () => window.removeEventListener("litt-chat-trigger", handler);
   }, [send]);
+
+  // Listen for external open requests (e.g. "Talk to LiTT" buttons)
+  useEffect(() => {
+    const handler = () => setChatOpen(true);
+    window.addEventListener("litt-chat-open", handler);
+    return () => window.removeEventListener("litt-chat-open", handler);
+  }, []);
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
@@ -165,20 +222,14 @@ export function FloatingChat() {
       return;
     }
 
-    // Check if getUserMedia is available (requires HTTPS or localhost)
     if (
       typeof navigator === "undefined" ||
       !navigator.mediaDevices ||
       !navigator.mediaDevices.getUserMedia
     ) {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "agent",
-          content:
-            "Voice input needs a secure connection (HTTPS). If you're on http://localhost, try https://localhost instead, or use the live site at litlabs.net.",
-        },
-      ]);
+      showToast(
+        "Voice input needs a secure connection (HTTPS). Try the live site at litlabs.net.",
+      );
       return;
     }
 
@@ -219,6 +270,7 @@ export function FloatingChat() {
         window.dispatchEvent(
           new CustomEvent("litt-voice", { detail: { active: false } }),
         );
+        showToast("Recording failed. Try again.", { type: "record" });
       };
 
       recorder.start();
@@ -234,7 +286,7 @@ export function FloatingChat() {
         e?.name === "PermissionDeniedError"
       ) {
         hint =
-          "Microphone permission was denied. Click the camera/mic icon in your browser's address bar to allow access, then try again.";
+          "Microphone permission was denied. Allow access in your browser bar and try again.";
       } else if (
         e?.name === "NotFoundError" ||
         e?.name === "DevicesNotFoundError"
@@ -255,7 +307,7 @@ export function FloatingChat() {
       } else if (e?.message) {
         hint = `Mic error: ${e.message}`;
       }
-      setMessages((prev) => [...prev, { role: "agent", content: hint }]);
+      showToast(hint, { type: "record" });
     }
   };
 
@@ -284,17 +336,11 @@ export function FloatingChat() {
         setInput(text);
         void send(text);
       } else {
-        setMessages((prev) => [
-          ...prev,
-          { role: "agent", content: "I didn't catch that. Try again?" },
-        ]);
+        showToast("Didn't catch that. Try again?", { type: "record" });
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : "Transcription failed";
-      setMessages((prev) => [
-        ...prev,
-        { role: "agent", content: `Voice error: ${msg}` },
-      ]);
+      showToast(`Voice error: ${msg}`, { type: "record" });
     } finally {
       setTranscribing(false);
     }
@@ -303,14 +349,30 @@ export function FloatingChat() {
   const speak = async (text: string, idx: number) => {
     if (speaking === idx) {
       audioRef.current?.pause();
+      window.speechSynthesis.cancel();
       audioRef.current = null;
       setSpeaking(null);
       return;
     }
 
     audioRef.current?.pause();
+    window.speechSynthesis.cancel();
     audioRef.current = null;
     setSpeaking(idx);
+
+    const fallbackToBrowserTTS = () => {
+      if (!window.speechSynthesis) return false;
+      const utter = new SpeechSynthesisUtterance(text);
+      utter.rate = 1.05;
+      utter.pitch = 1;
+      const voices = window.speechSynthesis.getVoices();
+      const enVoice = voices.find((v) => v.lang.startsWith("en"));
+      if (enVoice) utter.voice = enVoice;
+      utter.onend = () => setSpeaking(null);
+      utter.onerror = () => setSpeaking(null);
+      window.speechSynthesis.speak(utter);
+      return true;
+    };
 
     try {
       const res = await fetch("/api/media/generate-audio", {
@@ -321,7 +383,10 @@ export function FloatingChat() {
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "TTS failed");
 
-      const audio = new Audio(data.audioBase64 as string);
+      const audioSrc = audioSrcFromBase64(data.audioBase64);
+      if (!audioSrc) throw new Error("No audio source returned");
+
+      const audio = new Audio(audioSrc);
       audioRef.current = audio;
       audio.onended = () => {
         setSpeaking(null);
@@ -334,227 +399,356 @@ export function FloatingChat() {
       await audio.play();
     } catch (err) {
       const msg = err instanceof Error ? err.message : "TTS failed";
-      setMessages((prev) => [
-        ...prev,
-        { role: "agent", content: `Voice error: ${msg}` },
-      ]);
+      if (!fallbackToBrowserTTS()) {
+        showToast(`Voice error: ${msg}`, { type: "speak", text, idx });
+      }
       setSpeaking(null);
     }
   };
 
-  return (
-    <>
-      {/* Chat panel */}
-      {open && (
+  useEffect(() => {
+    retryRecordRef.current = () => void toggleRecording();
+    retrySpeakRef.current = (text: string, idx: number) =>
+      void speak(text, idx);
+    speakRef.current = (text: string, idx: number) => void speak(text, idx);
+  });
+
+  const chatPanel = chatOpen && (
+    <div
+      className={`fixed inset-0 z-9999 flex flex-col bg-[#080910] md:inset-auto md:right-6 md:bottom-24 md:rounded-2xl md:border md:border-neutral-800 md:shadow-2xl ${
+        desktopExpanded
+          ? "md:h-[650px] md:w-[420px]"
+          : "md:h-[520px] md:w-[380px]"
+      }`}
+      style={{ backdropFilter: "blur(12px)" }}
+      role="dialog"
+      aria-modal="true"
+      aria-label="LiTT Director chat"
+    >
+      {/* Header */}
+      <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
+        <div className="flex items-center gap-2">
+          <div
+            className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-black"
+            style={{ background: tokens.primary, color: "#0a0a0f" }}
+          >
+            L
+          </div>
+          <div>
+            <div className="text-xs font-black text-neutral-100">
+              LiTT Director · {userName}
+            </div>
+            <div
+              className="flex items-center gap-1 text-[9px]"
+              style={{ color: tokens.success }}
+            >
+              <span className="h-1.5 w-1.5 rounded-full bg-current" />
+              Available
+            </div>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-1">
+          {/* Voice selector */}
+          <button
+            onClick={() => setVoiceMenuOpen(true)}
+            aria-label="Select voice"
+            title={`Voice: ${voice}`}
+            className="flex h-7 items-center gap-1 rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 text-[10px] font-bold text-neutral-300 transition hover:border-white/20 hover:text-white"
+          >
+            <Volume2 size={10} />
+            {voice}
+          </button>
+
+          {/* Desktop expand/collapse toggle */}
+          <button
+            onClick={() => setDesktopExpanded((v) => !v)}
+            className="hidden rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 md:block"
+            aria-label={desktopExpanded ? "Collapse chat" : "Expand chat"}
+            title={desktopExpanded ? "Collapse chat" : "Expand chat"}
+          >
+            {desktopExpanded ? (
+              <ChevronDown size={16} />
+            ) : (
+              <ChevronUp size={16} />
+            )}
+          </button>
+
+          <button
+            onClick={() => setChatOpen(false)}
+            className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+            aria-label="Close chat"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      </div>
+
+      {/* Voice picker modal */}
+      {voiceMenuOpen && (
         <div
-          className="fixed bottom-36 left-4 right-4 z-[9999] flex flex-col rounded-2xl border border-neutral-700/50 shadow-2xl md:bottom-20 md:left-auto md:right-4 md:w-[calc(100vw-2rem)] md:max-w-sm"
-          style={{
-            height: "min(60vh, 420px)",
-            backgroundColor: "#0f0f15",
-            backdropFilter: "blur(12px)",
+          className="absolute inset-0 z-50 flex items-end justify-center bg-black/70 p-4 backdrop-blur-sm md:items-center"
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setVoiceMenuOpen(false);
           }}
         >
-          {/* Header */}
-          <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-3">
-            <div className="flex items-center gap-2">
-              <div
-                className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-black"
-                style={{
-                  background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
-                  color: "#1a1a1a",
-                }}
-              >
-                L
-              </div>
-              <div>
-                <div className="text-xs font-black text-neutral-100">
-                  LiTT Director · {userName}
-                </div>
-                <div className="flex items-center gap-1 text-[9px] text-green-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                  Online
-                </div>
-              </div>
-            </div>
-
-            <div className="flex items-center gap-1">
-              {/* Voice selector */}
-              <div className="relative" ref={voiceMenuRef}>
-                <button
-                  onClick={() => setVoiceMenuOpen((v) => !v)}
-                  aria-label="Select voice"
-                  title={`Voice: ${voice}`}
-                  className="flex h-7 items-center gap-1 rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 text-[10px] font-bold text-neutral-300 transition hover:border-amber-500/30 hover:text-amber-300"
-                >
-                  <Volume2 size={10} />
-                  {voice}
-                </button>
-                {voiceMenuOpen && (
-                  <div className="absolute right-0 top-full mt-1 w-36 rounded-lg border border-neutral-700/50 bg-[#16161d] py-1 shadow-xl">
-                    {VOICES.map((v) => (
-                      <button
-                        key={v.value}
-                        onClick={() => {
-                          setVoice(v.value);
-                          setVoiceMenuOpen(false);
-                        }}
-                        className={`flex w-full items-center justify-between px-2.5 py-1.5 text-[10px] transition hover:bg-white/5 ${
-                          voice === v.value
-                            ? "text-amber-400"
-                            : "text-neutral-300"
-                        }`}
-                      >
-                        <span className="font-bold">{v.label}</span>
-                        <span className="text-neutral-500">{v.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-
+          <div className="w-full max-w-xs rounded-2xl border border-neutral-700/50 bg-[#16161d] p-4 shadow-2xl">
+            <div className="mb-3 flex items-center justify-between">
+              <span className="text-xs font-black text-white">
+                Choose a voice
+              </span>
               <button
-                onClick={() => setOpen(false)}
-                className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
-                aria-label="Close chat"
+                onClick={() => setVoiceMenuOpen(false)}
+                className="rounded-lg p-1 text-neutral-400 hover:bg-neutral-800"
               >
-                <X size={16} />
+                <X size={14} />
               </button>
             </div>
-          </div>
-
-          {/* Messages */}
-          <div
-            ref={scrollRef}
-            className="flex-1 space-y-3 overflow-y-auto px-4 py-3"
-          >
-            {messages.map((m, i) => (
-              <div
-                key={i}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`group relative max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
-                    m.role === "user"
-                      ? "rounded-br-sm bg-amber-500/20 text-amber-100"
-                      : "rounded-bl-sm bg-neutral-800/80 text-neutral-200"
-                  }`}
-                >
-                  {m.content}
-                  {m.role === "agent" && (
-                    <button
-                      onClick={() => void speak(m.content, i)}
-                      disabled={loading || transcribing}
-                      className="absolute -right-6 top-1/2 -translate-y-1/2 opacity-0 transition group-hover:opacity-100 disabled:opacity-30"
-                      style={{ color: speaking === i ? "#fbbf24" : "#737373" }}
-                      title={speaking === i ? "Stop speaking" : "Read aloud"}
-                      aria-label={
-                        speaking === i ? "Stop speaking" : "Read aloud"
-                      }
-                    >
-                      {speaking === i ? (
-                        <VolumeX size={12} />
-                      ) : (
-                        <Volume2 size={12} />
-                      )}
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-neutral-800/80 px-3 py-2 text-sm text-neutral-400">
-                  <Loader2 size={12} className="animate-spin" />
-                  Thinking…
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* Suggestions */}
-          {messages.length <= 1 && !loading && (
-            <div className="flex flex-wrap gap-1.5 px-4 pb-2">
-              {SUGGESTIONS.map((s) => (
+            <div className="space-y-1">
+              {VOICES.map((v) => (
                 <button
-                  key={s}
-                  onClick={() => void send(s)}
-                  className="rounded-full border border-neutral-700/50 bg-neutral-800/40 px-2.5 py-1 text-[10px] font-bold text-neutral-400 transition hover:border-amber-500/30 hover:text-amber-300"
+                  key={v.value}
+                  onClick={() => {
+                    setVoice(v.value);
+                    setVoiceMenuOpen(false);
+                  }}
+                  className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-[10px] transition hover:bg-white/5 ${
+                    voice === v.value ? "text-white" : "text-neutral-300"
+                  }`}
+                  style={{
+                    backgroundColor:
+                      voice === v.value ? `${tokens.primary}20` : undefined,
+                  }}
                 >
-                  {s}
+                  <span className="font-bold">{v.label}</span>
+                  <span className="text-neutral-500">{v.desc}</span>
                 </button>
               ))}
             </div>
-          )}
-
-          {/* Input */}
-          <div className="flex items-center gap-2 border-t border-neutral-800 px-3 py-3">
+            {voicePreviewError && (
+              <div className="mt-3 rounded-xl bg-red-500/10 px-3 py-2 text-[10px] text-red-300">
+                {voicePreviewError}
+              </div>
+            )}
             <button
-              onClick={() => void toggleRecording()}
-              disabled={loading || transcribing}
-              className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition disabled:opacity-40 ${
-                recording
-                  ? "animate-pulse bg-red-500/20 text-red-400"
-                  : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-              }`}
-              style={
-                recording
-                  ? {}
-                  : {
-                      border: "1px solid #52525240",
-                      backgroundColor: "#17171780",
-                    }
-              }
-              title={recording ? "Stop recording" : "Voice input"}
-              aria-label={recording ? "Stop recording" : "Voice input"}
-            >
-              {recording ? (
-                <StopCircle size={14} />
-              ) : transcribing ? (
-                <Loader2 size={12} className="animate-spin" />
-              ) : (
-                <Mic size={14} />
-              )}
-            </button>
-            <input
-              ref={inputRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder={recording ? "Listening…" : `Ask LiTT Director…`}
-              disabled={loading || recording || transcribing}
-              className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-500/40"
-            />
-            <button
-              onClick={() => void send(input)}
-              disabled={loading || !input.trim() || recording || transcribing}
-              className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-neutral-900 transition disabled:opacity-40"
-              style={{
-                background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
+              onClick={async () => {
+                setVoicePreviewError(null);
+                setVoicePreviewLoading(true);
+                try {
+                  await speak(`Hi, I'm ${voice}. Ready when you are.`, -1);
+                } catch {
+                  setVoicePreviewError(
+                    "Preview failed. Browser voice will be used.",
+                  );
+                } finally {
+                  setVoicePreviewLoading(false);
+                }
               }}
-              aria-label="Send message"
+              disabled={voicePreviewLoading}
+              className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl py-2 text-xs font-bold disabled:opacity-50"
+              style={{ background: tokens.primary, color: "#0a0a0f" }}
             >
-              <Send size={14} />
+              {voicePreviewLoading ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                <Volume2 size={14} />
+              )}
+              Preview voice
             </button>
+            <div className="mt-3 flex items-center justify-between rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2">
+              <span className="text-[10px] text-neutral-300">
+                Read replies aloud
+              </span>
+              <button
+                onClick={() => setAutoSpeak((v) => !v)}
+                className={`relative h-5 w-9 rounded-full transition ${autoSpeak ? "bg-cyan-500" : "bg-neutral-600"}`}
+              >
+                <span
+                  className={`absolute top-0.5 h-4 w-4 rounded-full bg-white transition ${autoSpeak ? "left-[18px]" : "left-0.5"}`}
+                />
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Floating bubble */}
-      <button
-        onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-28 left-4 z-[9999] flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 md:bottom-4 md:left-auto md:right-4"
-        style={{
-          background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
-          boxShadow: "0 4px 20px rgba(251, 191, 36, 0.3)",
-        }}
-        aria-label={open ? "Close chat" : "Open chat"}
+      {/* Messages */}
+      <div
+        ref={scrollRef}
+        className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3"
       >
-        {open ? (
-          <X size={22} className="text-neutral-900" />
-        ) : (
-          <MessageCircle size={22} className="text-neutral-900" />
+        {messages.map((m, i) => (
+          <div
+            key={i}
+            className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+          >
+            <div
+              className={`group relative max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
+                m.role === "user"
+                  ? "rounded-br-sm"
+                  : "rounded-bl-sm bg-neutral-800/80 text-neutral-200"
+              }`}
+              style={
+                m.role === "user"
+                  ? {
+                      backgroundColor: `${tokens.primary}20`,
+                      color: tokens.text,
+                    }
+                  : undefined
+              }
+            >
+              {m.content}
+              {m.role === "agent" && (
+                <button
+                  onClick={() => void speak(m.content, i)}
+                  disabled={loading || transcribing}
+                  className="absolute -right-7 top-1/2 -translate-y-1/2 rounded-full bg-neutral-900/80 p-1.5 opacity-100 transition hover:bg-neutral-800 disabled:opacity-30 md:opacity-0 md:group-hover:opacity-100"
+                  style={{ color: speaking === i ? tokens.primary : "#737373" }}
+                  title={speaking === i ? "Stop speaking" : "Read aloud"}
+                  aria-label={speaking === i ? "Stop speaking" : "Read aloud"}
+                >
+                  {speaking === i ? (
+                    <VolumeX size={12} />
+                  ) : (
+                    <Volume2 size={12} />
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        ))}
+        {loading && (
+          <div className="flex justify-start">
+            <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-neutral-800/80 px-3 py-2 text-sm text-neutral-400">
+              <Loader2 size={12} className="animate-spin" />
+              Thinking…
+            </div>
+          </div>
         )}
-        {!open && (
+      </div>
+
+      {/* Toasts */}
+      {toasts.length > 0 && (
+        <div className="shrink-0 space-y-2 px-4 pt-2">
+          {toasts.map((t) => (
+            <div
+              key={t.id}
+              className="flex items-center justify-between gap-2 rounded-lg border border-red-500/30 bg-red-500/10 px-3 py-2 text-xs text-red-200"
+            >
+              <span className="min-w-0 flex-1">{t.message}</span>
+              {t.retry && (
+                <button
+                  onClick={() => {
+                    if (t.retry?.type === "send") {
+                      sendRef.current(t.retry.text);
+                    } else if (t.retry?.type === "record") {
+                      retryRecordRef.current();
+                    } else if (t.retry?.type === "speak") {
+                      retrySpeakRef.current(t.retry.text, t.retry.idx);
+                    }
+                    dismissToast(t.id);
+                  }}
+                  className="flex shrink-0 items-center gap-1 rounded px-1.5 py-0.5 text-[10px] font-bold text-red-300 transition hover:bg-red-500/20 hover:text-red-100"
+                >
+                  <RefreshCw size={10} />
+                  Retry
+                </button>
+              )}
+              <button
+                onClick={() => dismissToast(t.id)}
+                className="shrink-0 text-red-300 hover:text-red-100"
+                aria-label="Dismiss"
+              >
+                <X size={12} />
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Suggestions */}
+      {messages.length <= 1 && !loading && (
+        <div className="flex flex-wrap gap-1.5 px-4 pb-2 pt-2">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              onClick={() => void send(s)}
+              className="rounded-full border border-neutral-700/50 bg-neutral-800/40 px-2.5 py-1 text-[10px] font-bold text-neutral-400 transition hover:border-white/20 hover:text-white"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+
+      {/* Input */}
+      <div className="flex shrink-0 items-center gap-2 border-t border-neutral-800 px-3 py-3 pb-[env(safe-area-inset-bottom)]">
+        <button
+          onClick={() => void toggleRecording()}
+          disabled={loading || transcribing}
+          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-xl transition disabled:opacity-40 ${
+            recording
+              ? "animate-pulse bg-red-500/20 text-red-400"
+              : "text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+          }`}
+          style={
+            recording
+              ? {}
+              : {
+                  border: "1px solid #52525240",
+                  backgroundColor: "#17171780",
+                }
+          }
+          title={recording ? "Stop recording" : "Voice input"}
+          aria-label={recording ? "Stop recording" : "Voice input"}
+        >
+          {recording ? (
+            <StopCircle size={14} />
+          ) : transcribing ? (
+            <Loader2 size={12} className="animate-spin" />
+          ) : (
+            <Mic size={14} />
+          )}
+        </button>
+        <input
+          id="floating-chat-input"
+          name="floating-chat-input"
+          ref={inputRef}
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={handleKeyDown}
+          placeholder={recording ? "Listening…" : "Ask LiTT Director…"}
+          disabled={loading || recording || transcribing}
+          className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-white/30"
+        />
+        <button
+          onClick={() => void send(input)}
+          disabled={loading || !input.trim() || recording || transcribing}
+          className="flex h-8 w-8 shrink-0 items-center justify-center rounded-xl text-neutral-900 transition disabled:opacity-40"
+          style={{ background: tokens.primary }}
+          aria-label="Send message"
+        >
+          <Send size={14} />
+        </button>
+      </div>
+    </div>
+  );
+
+  return (
+    <>
+      {mounted && chatPanel && createPortal(chatPanel, document.body)}
+      <button
+        onClick={() => setChatOpen(true)}
+        className="chat-launcher flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95"
+        style={{
+          background: tokens.primary,
+          color: "#0a0a0f",
+          boxShadow: `0 4px 20px ${tokens.primary}40`,
+        }}
+        aria-label="Open chat"
+      >
+        <MessageCircle size={22} />
+        {!chatOpen && (
           <span className="absolute -top-1 -right-1 flex h-3 w-3">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
             <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />

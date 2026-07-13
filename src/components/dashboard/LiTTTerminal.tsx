@@ -9,6 +9,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
+import { useProfile } from "@/context/ProfileContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
 import {
   Terminal,
@@ -212,7 +213,7 @@ function AudioBars() {
   );
 }
 
-function buildBootLogs(): LogEntry[] {
+function buildBootLogs(userName = "Creator"): LogEntry[] {
   const bootLogs: LogEntry[] = [
     {
       id: uid(),
@@ -252,14 +253,17 @@ function buildBootLogs(): LogEntry[] {
     id: uid(),
     timestamp: getTimestamp(),
     type: "success",
-    text: "WELCOME BACK, OVERLORD. ALL AGENTS NOMINAL. AWAITING COMMAND.",
+    text: `WELCOME BACK, ${userName.toUpperCase()}. ALL AGENTS NOMINAL. AWAITING COMMAND.`,
   });
   return bootLogs;
 }
 
 export default function LiTTTerminal() {
   const { resolvedColors: T } = useTheme();
-  const [logs, setLogs] = useState<LogEntry[]>(buildBootLogs);
+  const { profile } = useProfile();
+  const [logs, setLogs] = useState<LogEntry[]>(() =>
+    buildBootLogs(profile.displayName || "Creator"),
+  );
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isListening, setIsListening] = useState(false);

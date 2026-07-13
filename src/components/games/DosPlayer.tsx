@@ -32,6 +32,8 @@ declare global {
 
 const JS_DOS_SCRIPT = "/jsdos/js-dos.js";
 const JS_DOS_CSS = "/jsdos/js-dos.css";
+const JS_DOS_CDN_SCRIPT = "https://v8.js-dos.com/latest/js-dos.js";
+const JS_DOS_CDN_CSS = "https://v8.js-dos.com/latest/js-dos.css";
 
 // A free demo bundle from dos.zone — a simple DOS prompt
 const DEMO_BUNDLE_URL = "https://cdn.dos.zone/original/2x/3007/game.jsdos";
@@ -54,7 +56,7 @@ export default function DosPlayer({
   const [urlInput, setUrlInput] = useState(bundleUrl || "");
   const [scriptLoaded, setScriptLoaded] = useState(false);
 
-  /* Load the js-dos script + CSS once */
+  /* Load the js-dos script + CSS once, with CDN fallback */
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.Dos) {
@@ -63,20 +65,52 @@ export default function DosPlayer({
       return () => clearTimeout(id);
     }
 
-    // Inject CSS
-    const css = document.createElement("link");
+    let css = document.createElement("link");
     css.rel = "stylesheet";
     css.href = JS_DOS_CSS;
     document.head.appendChild(css);
 
-    // Inject script
-    const script = document.createElement("script");
+    let script = document.createElement("script");
     script.src = JS_DOS_SCRIPT;
     script.async = true;
-    script.onload = () => setScriptLoaded(true);
+
+    const loadFromCdn = () => {
+      // Local bundle didn't expose Dos; try CDN
+      css = document.createElement("link");
+      css.rel = "stylesheet";
+      css.href = JS_DOS_CDN_CSS;
+      document.head.appendChild(css);
+
+      script = document.createElement("script");
+      script.src = JS_DOS_CDN_SCRIPT;
+      script.async = true;
+      script.crossOrigin = "anonymous";
+      script.onload = () => {
+        if (window.Dos) setScriptLoaded(true);
+        else {
+          setError("js-dos engine unavailable");
+          setLoadState("error");
+        }
+      };
+      script.onerror = () => {
+        setError("Failed to load js-dos engine from CDN");
+        setLoadState("error");
+      };
+      document.head.appendChild(script);
+    };
+
+    script.onload = () => {
+      // Give the bundle a moment to register window.Dos
+      setTimeout(() => {
+        if (window.Dos) {
+          setScriptLoaded(true);
+        } else {
+          loadFromCdn();
+        }
+      }, 500);
+    };
     script.onerror = () => {
-      setError("Failed to load js-dos engine");
-      setLoadState("error");
+      loadFromCdn();
     };
     document.head.appendChild(script);
 

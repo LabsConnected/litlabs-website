@@ -191,7 +191,7 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     return () => {
       if (syncTimer.current) clearTimeout(syncTimer.current);
     };
-  }, [profile, mounted]);
+  }, [profile, mounted, hydrated]);
 
   const updateProfile = useCallback((updates: Partial<UserProfile>) => {
     setProfile((prev) => ({ ...prev, ...updates }));

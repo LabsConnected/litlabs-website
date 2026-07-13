@@ -11,8 +11,6 @@ import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
-import { Menu } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
 
 const PUBLIC_PATHS = [
   "/",
@@ -25,8 +23,17 @@ const PUBLIC_PATHS = [
   "/docs",
 ];
 
+// Routes that render their own bottom navigation / floating chrome
+const SELF_CONTAINED_CHROME = ["/games/cloud"];
+
 function isPublicPath(path: string) {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+function hasOwnChrome(path: string) {
+  return SELF_CONTAINED_CHROME.some(
+    (p) => path === p || path.startsWith(`${p}/`),
+  );
 }
 
 export default function LayoutShell({
@@ -37,22 +44,48 @@ export default function LayoutShell({
   const pathname = usePathname();
   const publicPage = isPublicPath(pathname || "/");
   const isStudio = pathname === "/studio";
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const ownChrome = hasOwnChrome(pathname || "/");
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
     useState(isStudio);
-  const { resolvedColors: T } = useTheme();
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileSidebarOpen(false);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
-        if (window.innerWidth < 1024) setMobileSidebarOpen((v) => !v);
+        if (window.innerWidth >= 1024) {
+          setDesktopSidebarCollapsed((v) => !v);
+        }
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
+
+  if (isStudio) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        <div className="relative z-10 flex h-screen w-screen flex-col overflow-hidden">
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+          <NavbarWrapper
+            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+          />
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <Sidebar
+              open={false}
+              onClose={() => {}}
+              collapsed={desktopSidebarCollapsed}
+            />
+            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+              {children}
+            </main>
+          </div>
+        </div>
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+      </>
+    );
+  }
 
   if (publicPage) {
     return (
@@ -71,33 +104,24 @@ export default function LayoutShell({
       <AnimatedBackgroundWrapper />
       <div className="relative z-10 flex min-h-screen">
         <Sidebar
-          open={mobileSidebarOpen}
-          onClose={() => setMobileSidebarOpen(false)}
+          open={false}
+          onClose={() => {}}
           collapsed={desktopSidebarCollapsed}
         />
         <div className="flex-1 flex flex-col h-dvh md:h-[calc(100dvh-56px)] min-h-0">
-          {/* Mobile hamburger trigger */}
-          <button
-            onClick={() => setMobileSidebarOpen(true)}
-            className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-lg backdrop-blur-md border"
-            style={{
-              backgroundColor: `${T.bgColor}e0`,
-              borderColor: `${T.borderColor}30`,
-              color: T.textMuted,
-            }}
-            aria-label="Open navigation"
-          >
-            <Menu size={20} />
-          </button>
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper
             onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
           />
-          <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto pb-16 md:pb-0">
+          <main
+            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto md:pb-0 ${
+              ownChrome ? "pb-0" : "pb-[calc(72px+env(safe-area-inset-bottom))]"
+            }`}
+          >
             {children}
           </main>
-          <MobileBottomNav />
-          <CreateFAB />
+          {!ownChrome && <MobileBottomNav />}
+          {!ownChrome && <CreateFAB />}
           <FooterWrapper />
           <CookieConsent />
           <ServiceWorkerRegistration />

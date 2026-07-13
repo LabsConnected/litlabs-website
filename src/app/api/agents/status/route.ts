@@ -8,18 +8,15 @@ function uptimeFromHour(name: string): string {
 }
 
 const STATUS_MESSAGES: Record<string, { running: string; idle: string }> = {
-  director:       { running: "Coordinating agent strategy & platform health",  idle: "Awaiting orchestration requests"    },
-  forge:          { running: "Reviewing latest TypeScript changes",              idle: "Awaiting code review requests"      },
-  pulse:          { running: "Scheduling social content queue",                  idle: "Content calendar up to date"        },
-  visionary:      { running: "Crafting enhanced visual/audio prompts",           idle: "Standing by for creative requests"  },
-  home:           { running: "Checking integration & automation state",          idle: "All systems nominal"                },
+  littcode: { running: "Reviewing latest TypeScript changes", idle: "Awaiting code review requests" },
+  littlebit: { running: "Coordinating strategy, content & integrations", idle: "Standing by for requests" },
 };
 
 export async function GET() {
   try {
     const minute = new Date().getMinutes();
-    const agentIds = ["director", "forge", "pulse", "visionary", "home"];
-    const runningIdx = new Set([minute % 5, (minute + 2) % 5]);
+    const agentIds = ["littcode", "littlebit"];
+    const runningIdx = new Set([minute % 2]);
 
     const agents = agentIds.map((id, i) => {
       const a = AGENTS[id];

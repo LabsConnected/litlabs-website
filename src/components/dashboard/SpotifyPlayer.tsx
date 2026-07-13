@@ -463,8 +463,8 @@ export default function SpotifyPlayer() {
                 key={t.id}
                 className="flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-all group"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 {t.cover ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={t.cover}
                     alt={t.title}
@@ -770,8 +770,8 @@ export default function SpotifyPlayer() {
                 onClick={() => playTrack(t.uri)}
                 className="w-full flex items-center gap-3 p-2 rounded-lg hover:bg-white/5 transition-all text-left group"
               >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
                 {t.cover ? (
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={t.cover}
                     alt={t.title}

@@ -40,7 +40,7 @@ export default function AgentsPageClient() {
 
   return (
     <main
-      className="min-h-screen pb-20"
+      className="h-full overflow-y-auto pb-20"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
       <section className="max-w-7xl mx-auto px-4 pt-8 pb-6">
@@ -62,7 +62,7 @@ export default function AgentsPageClient() {
               LiTTree-LabStudios
             </h1>
             <p className="text-xs" style={{ color: T.textMuted }}>
-              LiTT Command Center — 5 consolidated AI agents, live status &
+              LiTT Command Center — 2 consolidated AI agents, live status &
               quick access
             </p>
           </div>
@@ -72,7 +72,7 @@ export default function AgentsPageClient() {
       <section className="max-w-7xl mx-auto px-4 mt-6">
         <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-3 gap-4">
           {loading &&
-            Array.from({ length: 5 }).map((_, i) => (
+            Array.from({ length: 2 }).map((_, i) => (
               <div
                 key={i}
                 className="h-56 rounded-3xl border animate-pulse"
@@ -161,11 +161,7 @@ export default function AgentsPageClient() {
 
                   <div className="mt-4 flex items-center gap-2">
                     <Link
-                      href={
-                        agent.id === "director"
-                          ? "/studio"
-                          : `/agents/${agent.id}`
-                      }
+                      href={`/agents/${agent.id}`}
                       className="flex-1 inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
                       style={{
                         backgroundColor: agent.color + "15",
@@ -176,11 +172,7 @@ export default function AgentsPageClient() {
                       <MessageSquare size={14} /> Chat
                     </Link>
                     <Link
-                      href={
-                        agent.id === "director"
-                          ? "/studio"
-                          : "/studio?tool=agents"
-                      }
+                      href="/studio?tool=agents"
                       className="inline-flex items-center justify-center gap-2 px-3 py-2 rounded-xl text-sm font-bold"
                       style={{
                         backgroundColor: T.bgColor + "60",

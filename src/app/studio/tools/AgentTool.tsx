@@ -46,54 +46,24 @@ type BoardroomEntry = {
 /* ─── Built-in Agents ────────────────────────────────────────────────── */
 const AGENTS: Agent[] = [
   {
-    id: "director",
-    name: "LiTT",
-    icon: "🎯",
-    role: "Core AI Copilot",
-    desc: "Routes tasks, navigates the platform, and orchestrates the agent team.",
-    systemPrompt:
-      "You are LiTT, the master orchestrator of LiTTree-LabStudios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.",
-    color: "#22d3ee",
-  },
-  {
-    id: "forge",
-    name: "Forge",
+    id: "littcode",
+    name: "LiTT-Code",
     icon: "💻",
-    role: "Engineer, Architect & Security",
-    desc: "Writes, debugs, and reviews code. Full-stack + security hardening.",
+    role: "Engineer & Architect",
+    desc: "Writes, debugs, and reviews code. Full-stack + architecture.",
     systemPrompt:
-      "You are Forge, a senior software engineer and security lead at LiTTree-LabStudios. You write clean, production-ready code and harden systems against threats. Always provide complete working examples. Explain your reasoning.",
+      "You are LiTT-Code, a senior software engineer and architect at LiTTree-LabStudios. You write clean, production-ready code. Always provide complete working examples. Explain your reasoning briefly.",
     color: "#22d3ee",
   },
   {
-    id: "pulse",
-    name: "Pulse",
-    icon: "�",
-    role: "Growth, Content & Analytics",
-    desc: "Growth strategy, content creation, social media, and data insights.",
+    id: "littlebit",
+    name: "LiTTle-Bit",
+    icon: "🎯",
+    role: "Director, Growth, Creative & Operations",
+    desc: "Strategy, content, brand, design, integrations, and everything else.",
     systemPrompt:
-      "You are Pulse, a growth hacker and content creator at LiTTree-LabStudios. You write viral posts, craft content strategies, analyze data, and help users grow their audience. Be bold, creative, and results-focused.",
-    color: "#f472b6",
-  },
-  {
-    id: "visionary",
-    name: "Visionary",
-    icon: "🎨",
-    role: "Creative Director & Visual/Audio AI",
-    desc: "Image prompts, brand identity, UI/UX, music and audio production.",
-    systemPrompt:
-      "You are Visionary, a creative director at LiTTree-LabStudios. You craft enhanced image prompts, design brand identities, give UI/UX feedback, and help with music and audio production. Be visionary, artistic, and detailed.",
+      "You are LiTTle-Bit, the Director of Operations at LiTTree-LabStudios. You handle strategy, growth, content, creative direction, brand, and integrations. Be decisive, creative, and concise.",
     color: "#e879f9",
-  },
-  {
-    id: "home",
-    name: "Nexus",
-    icon: "�",
-    role: "Automation & Integrations",
-    desc: "Smart home, IoT, webhooks, and automation flows.",
-    systemPrompt:
-      "You are Nexus, an automation and integrations specialist at LiTTree-LabStudios. You help users set up smart home controls, webhook integrations, and automation flows. Be calm, methodical, and precise.",
-    color: "#34d399",
   },
 ];
 
@@ -109,63 +79,39 @@ function getAgentAvatar(agent: Agent) {
 }
 
 const QUICK: Record<string, string[]> = {
-  director: [
-    "Build me an agent system for my business",
-    "What agents do I need to automate my workflow?",
-    "Create a 30-day AI roadmap for me",
-  ],
-  forge: [
+  littcode: [
     "Write a React component for a chat interface",
     "Debug: TypeError cannot read property of undefined",
     "Explain async/await vs Promises",
   ],
-  pulse: [
+  littlebit: [
+    "Build me an agent system for my business",
+    "Create a 30-day AI roadmap for me",
     "Write 5 viral Twitter threads about AI",
-    "Create a content calendar for this month",
-    "Write a LinkedIn post about my AI project",
-  ],
-  visionary: [
     "Generate a prompt for album cover art",
     "Create a brand color palette for a tech startup",
-    "Design a UI layout for a mobile dashboard",
-  ],
-  home: [
     "Set up an automation: lights on at sunset",
-    "List all my connected smart home devices",
     "Create a webhook integration for my app",
   ],
 };
 
 const CAPABILITIES: Record<string, string[]> = {
-  director: [
-    "AI system design",
-    "Agent orchestration",
-    "Strategic roadmaps",
-    "Workflow automation",
-  ],
-  forge: [
+  littcode: [
     "Code generation",
     "Bug debugging",
     "Code review",
     "Architecture design",
   ],
-  pulse: [
+  littlebit: [
+    "AI system design",
+    "Agent orchestration",
+    "Strategic roadmaps",
     "Viral content",
     "Growth hacking",
-    "SEO strategy",
-    "Campaign planning",
-  ],
-  visionary: [
     "Image prompts",
     "Brand identity",
-    "UI/UX feedback",
-    "Music & audio",
-  ],
-  home: [
     "Smart home control",
     "Webhook setup",
-    "Automation flows",
-    "Device management",
   ],
 };
 
@@ -380,7 +326,7 @@ export default function AgentTool() {
 
   /* Boardroom */
   const [brAgentA, setBrAgentA] = useState(AGENTS[0].id);
-  const [brAgentB, setBrAgentB] = useState(AGENTS[2].id);
+  const [brAgentB, setBrAgentB] = useState(AGENTS[1].id);
   const [brTopic, setBrTopic] = useState("");
   const [brRunning, setBrRunning] = useState(false);
   const [brLog, setBrLog] = useState<BoardroomEntry[]>([]);
@@ -700,7 +646,7 @@ export default function AgentTool() {
     setBrLog([]);
     setBrCurrentRound(0);
     const agA = allAgents.find((a) => a.id === brAgentA) || AGENTS[0];
-    const agB = allAgents.find((a) => a.id === brAgentB) || AGENTS[2];
+    const agB = allAgents.find((a) => a.id === brAgentB) || AGENTS[1];
     let context: { role: string; content: string }[] = [
       {
         role: "user",
@@ -1349,7 +1295,7 @@ export default function AgentTool() {
       {/* ── CREATE AGENT SLIDE-IN ── */}
       {showCreate && (
         <div
-          className="fixed inset-0 z-50 flex justify-end"
+          className="fixed inset-0 z-10000 flex justify-end"
           style={{ backgroundColor: "rgba(0,0,0,0.6)" }}
           onClick={() => setShowCreate(false)}
         >
@@ -1557,7 +1503,7 @@ export default function AgentTool() {
       {/* ── BOARDROOM MODAL ── */}
       {showBoardroom && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-10000 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
           onClick={() => setShowBoardroom(false)}
         >

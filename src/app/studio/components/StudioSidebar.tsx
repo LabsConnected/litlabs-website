@@ -9,7 +9,6 @@ import {
   Palette,
   LayoutGrid,
   Bot,
-  MessageCircle,
   Rocket,
   ChevronLeft,
   ChevronRight,
@@ -51,7 +50,7 @@ const CREATE_TOOLS: ToolItem[] = [
 ];
 
 const AI_TOOLS: ToolItem[] = [
-  { id: "chat", label: "LiTT Chat", icon: MessageCircle, shortcut: "C" },
+  { id: "chat", label: "Chat", icon: Bot, shortcut: "C" },
   { id: "builder", label: "Builder", icon: Hammer, shortcut: "B" },
   { id: "agents", label: "Agents", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
@@ -77,13 +76,7 @@ const ALL_TOOLS: ToolItem[] = [
 ];
 
 /* Primary 5 shown in mobile bottom bar (most-used) */
-const MOBILE_PRIMARY: StudioTool[] = [
-  "image",
-  "chat",
-  "builder",
-  "agents",
-  "terminal",
-];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "agents", "terminal"];
 
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
@@ -149,11 +142,14 @@ function ToolButton({
       />
       {!collapsed && (
         <>
-          <span className="flex-1 text-left text-[11px] font-bold tracking-wide">
+          <span
+            className="flex-1 text-left text-[11px] font-bold tracking-wide"
+            style={{ color: active ? T.accentColor : T.textColor }}
+          >
             {tool.label}
           </span>
           <kbd
-            className="text-[9px] px-1 py-px rounded font-mono opacity-30"
+            className="text-[9px] px-1 py-px rounded font-mono"
             style={{ backgroundColor: T.bgColor + "60", color: T.textMuted }}
           >
             {tool.shortcut}
@@ -168,12 +164,15 @@ function ToolButton({
 export default function StudioSidebar({
   activeTool,
   onToolChange,
+  search = "",
 }: {
   activeTool: StudioTool;
   onToolChange: (tool: StudioTool) => void;
+  search?: string;
 }) {
   const { resolvedColors: T } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
+  const query = search.trim().toLowerCase();
 
   return (
     <>
@@ -224,36 +223,46 @@ export default function StudioSidebar({
 
         {/* Grouped nav */}
         <nav className="flex-1 py-2 overflow-y-auto space-y-1">
-          {GROUPS.map((group) => (
-            <div key={group.title} className="mb-1">
-              {!collapsed && (
-                <div
-                  className="px-3 pt-2 pb-1 text-[9px] font-bold uppercase tracking-[0.2em]"
-                  style={{ color: T.textMuted + "60" }}
-                >
-                  {group.title}
-                </div>
-              )}
-              {collapsed && (
-                <div
-                  className="mx-2 my-1 h-px"
-                  style={{ backgroundColor: T.borderColor + "20" }}
-                />
-              )}
-              <div className="space-y-0.5 px-1.5">
-                {group.tools.map((tool) => (
-                  <ToolButton
-                    key={tool.id}
-                    tool={tool}
-                    active={activeTool === tool.id}
-                    collapsed={collapsed}
-                    onClick={() => onToolChange(tool.id)}
-                    T={T}
+          {GROUPS.map((group) => {
+            const visibleTools = query
+              ? group.tools.filter(
+                  (tool) =>
+                    tool.label.toLowerCase().includes(query) ||
+                    tool.id.toLowerCase().includes(query),
+                )
+              : group.tools;
+            if (visibleTools.length === 0) return null;
+            return (
+              <div key={group.title} className="mb-1">
+                {!collapsed && (
+                  <div
+                    className="px-3 pt-2 pb-1 text-[10px] font-bold uppercase tracking-[0.2em]"
+                    style={{ color: T.textColor, opacity: 0.65 }}
+                  >
+                    {group.title}
+                  </div>
+                )}
+                {collapsed && (
+                  <div
+                    className="mx-2 my-1 h-px"
+                    style={{ backgroundColor: T.borderColor + "20" }}
                   />
-                ))}
+                )}
+                <div className="space-y-0.5 px-1.5">
+                  {visibleTools.map((tool) => (
+                    <ToolButton
+                      key={tool.id}
+                      tool={tool}
+                      active={activeTool === tool.id}
+                      collapsed={collapsed}
+                      onClick={() => onToolChange(tool.id)}
+                      T={T}
+                    />
+                  ))}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </nav>
 
         {/* Bottom status */}
@@ -269,19 +278,20 @@ export default function StudioSidebar({
                   backgroundColor: T.success,
                   boxShadow: `0 0 6px ${T.success}`,
                 }}
+                aria-hidden
               />
             </div>
           ) : (
             <div className="flex items-center justify-between">
               <span
-                className="text-[9px] font-mono opacity-40"
-                style={{ color: T.textMuted }}
+                className="text-[11px] font-mono"
+                style={{ color: T.textColor, opacity: 0.7 }}
               >
                 v1.0
               </span>
               <span
-                className="flex items-center gap-1.5 text-[9px] font-mono"
-                style={{ color: T.textMuted + "80" }}
+                className="flex items-center gap-1.5 text-[11px] font-mono"
+                style={{ color: T.textColor, opacity: 0.85 }}
               >
                 <span
                   className="w-1.5 h-1.5 rounded-full"
@@ -289,6 +299,7 @@ export default function StudioSidebar({
                     backgroundColor: T.success,
                     boxShadow: `0 0 4px ${T.success}`,
                   }}
+                  aria-hidden
                 />
                 Online
               </span>
@@ -330,7 +341,7 @@ function MobileTabBar({
       {/* Scrim for secondary drawer */}
       {drawerOpen && (
         <div
-          className="fixed inset-0 z-40 md:hidden"
+          className="fixed inset-0 z-[10000] md:hidden"
           style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
           onClick={() => setDrawerOpen(false)}
         />
@@ -339,7 +350,7 @@ function MobileTabBar({
       {/* Secondary tools drawer — slides up above tab bar */}
       {drawerOpen && (
         <div
-          className="fixed bottom-[56px] left-0 right-0 z-50 md:hidden rounded-t-2xl border-t px-3 pt-3 pb-2"
+          className="fixed bottom-[56px] left-0 right-0 z-[10000] md:hidden rounded-t-2xl border-t px-3 pt-3 pb-2"
           style={{
             backgroundColor: T.bgColor,
             borderColor: T.borderColor + "30",
@@ -393,7 +404,7 @@ function MobileTabBar({
 
       {/* Bottom tab bar */}
       <div
-        className="fixed bottom-0 left-0 right-0 z-40 md:hidden flex items-stretch h-14"
+        className="fixed bottom-0 left-0 right-0 z-[10000] md:hidden flex items-stretch h-14"
         style={{
           backgroundColor: T.bgColor + "f5",
           backdropFilter: "blur(20px) saturate(180%)",

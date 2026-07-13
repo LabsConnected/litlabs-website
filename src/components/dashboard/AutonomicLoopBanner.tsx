@@ -152,17 +152,27 @@ export default function AutonomicLoopBanner() {
             cache: "no-store",
           });
           if (signal.aborted) {
-            return { id: endpoint.id, label: endpoint.label, ok: false, detail: "aborted" };
+            return {
+              id: endpoint.id,
+              label: endpoint.label,
+              ok: false,
+              detail: "aborted",
+            };
           }
           return {
             id: endpoint.id,
             label: endpoint.label,
-            ok: res.status < 500,
+            ok: res.ok,
             detail: `${res.status}`,
           };
         } catch (err) {
           if ((err as { name?: string })?.name === "AbortError") {
-            return { id: endpoint.id, label: endpoint.label, ok: false, detail: "aborted" };
+            return {
+              id: endpoint.id,
+              label: endpoint.label,
+              ok: false,
+              detail: "aborted",
+            };
           }
           return {
             id: endpoint.id,
@@ -226,11 +236,7 @@ export default function AutonomicLoopBanner() {
   }[state];
 
   const StatusIcon =
-    state === "ok"
-      ? CheckIcon
-      : state === "checking"
-        ? SpinnerIcon
-        : AlertIcon;
+    state === "ok" ? CheckIcon : state === "checking" ? SpinnerIcon : AlertIcon;
 
   return (
     <div

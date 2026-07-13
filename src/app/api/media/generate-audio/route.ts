@@ -33,7 +33,7 @@ async function handler(req: NextRequest) {
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
     const response = await ai.models.generateContent({
-      model: "gemini-3.1-flash-tts-preview",
+      model: "gemini-2.5-flash-tts-preview",
       contents: [{ parts: [{ text: prompt.trim() }] }],
       config: {
         responseModalities: [Modality.AUDIO],

@@ -80,7 +80,7 @@ export default function GameCloudHome() {
   }, []);
 
   return (
-    <main className="min-h-screen bg-[#070812] text-white pb-28">
+    <main className="min-h-screen bg-[#070812] text-white pb-[calc(112px+env(safe-area-inset-bottom))]">
       <section className="px-4 pt-5 space-y-5 max-w-7xl mx-auto">
         <div>
           <p className="text-sm text-orange-400 font-bold">
@@ -167,7 +167,7 @@ export default function GameCloudHome() {
       {/* Game Player Overlay */}
       {selectedGame && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
         >
           <div

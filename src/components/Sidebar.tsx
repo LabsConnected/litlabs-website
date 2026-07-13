@@ -175,6 +175,7 @@ function GroupSection({
   hidden: boolean;
   isPinned: boolean;
 }) {
+  const { resolvedColors: T } = useTheme();
   if (hidden) return null;
 
   return (
@@ -260,7 +261,7 @@ function GroupSection({
                     backgroundColor: active
                       ? `${group.accent}20`
                       : "transparent",
-                    color: active ? group.accent : `${group.accent}80`,
+                    color: active ? group.accent : T.textMuted,
                   }}
                 >
                   <item.icon size={18} />
@@ -395,7 +396,12 @@ function SidebarContent({
           </span>
         )}
         {!onClose && (
-          <Link href="/dashboard" className="flex items-center gap-2">
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2"
+            aria-label="Dashboard home"
+            title="Dashboard home"
+          >
             {!collapsed && (
               <span
                 className="text-xs font-bold uppercase tracking-widest"
@@ -404,7 +410,11 @@ function SidebarContent({
                 LiTTree-LabStudios
               </span>
             )}
-            {collapsed && <Home size={16} style={{ color: T.accentColor }} />}
+            {collapsed && (
+              <span className="flex items-center justify-center w-8 h-8 rounded-lg">
+                <Home size={18} style={{ color: T.accentColor }} />
+              </span>
+            )}
           </Link>
         )}
         <div className="flex items-center gap-1">
@@ -675,7 +685,7 @@ export default function Sidebar({
       </aside>
 
       {open && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
+        <div className="fixed inset-0 z-[10000] md:hidden flex">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={onClose}

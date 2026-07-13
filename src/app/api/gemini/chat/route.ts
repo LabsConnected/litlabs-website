@@ -4,13 +4,14 @@ import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import type { Part } from "@google/generative-ai";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
-const DEFAULT_AGENT_SLUG = "director";
+const DEFAULT_AGENT_SLUG = "littcode";
 const HISTORY_LIMIT = 12;
 
 async function fetchMemories(query: string, userId: string): Promise<string> {
@@ -40,11 +41,63 @@ async function saveMemory(content: string, userId: string, agentId: string): Pro
   }
 }
 
+function sanitizeOutput(text: string): string {
+  return text.replace(/\{\{?userName\}?\}/gi, "there");
+}
+
+function dataUrlToInlineData(dataUrl: string) {
+  const match = dataUrl.match(/^data:([a-zA-Z0-9+/\-._]+);base64,(.+)$/);
+  if (!match) return null;
+  const mimeType = match[1];
+  const base64 = match[2];
+  // Only accept common image MIME types
+  if (!mimeType.startsWith("image/")) return null;
+  return { inlineData: { mimeType, data: base64 } };
+}
+
+async function generateWithImages(
+  systemPrompt: string,
+  userText: string,
+  history: HistoryEntry[],
+  images: string[],
+  modelName = "gemini-2.5-flash",
+): Promise<{ text: string; provider: string; model: string; latencyMs: number }> {
+  const { GoogleGenerativeAI } = await import("@google/generative-ai");
+  const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
+  if (!key) throw new Error("Gemini API key not configured");
+  const genAI = new GoogleGenerativeAI(key);
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    systemInstruction: systemPrompt,
+  });
+
+  const contents: { role: "user" | "model"; parts: Part[] }[] = [];
+  for (const entry of history.slice(-HISTORY_LIMIT)) {
+    contents.push({
+      role: entry.role === "user" ? "user" : "model",
+      parts: [{ text: entry.content }],
+    });
+  }
+
+  const parts: Part[] = [{ text: userText }];
+  for (const image of images) {
+    const inline = dataUrlToInlineData(image);
+    if (inline) parts.push(inline as Part);
+  }
+  contents.push({ role: "user", parts });
+
+  const t0 = Date.now();
+  const result = await model.generateContent({ contents });
+  const text = result.response.text();
+  return { text, provider: "gemini", model: modelName, latencyMs: Date.now() - t0 };
+}
+
 function buildPrompt(
   agent: Agent,
   message: string,
   history: HistoryEntry[],
   memoryContext: string,
+  userName?: string,
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
 
@@ -56,8 +109,11 @@ function buildPrompt(
     )
     .join("\n");
 
+  const resolvedName = userName?.trim() || "Creator";
+  const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
+
   return [
-    agent.systemPrompt,
+    systemPrompt,
     memoryContext,
     "",
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
@@ -111,7 +167,10 @@ async function handler(req: NextRequest) {
       message,
       history = [],
       provider = "gemini",
+      model: requestedModel,
       stream = false,
+      userName,
+      images = [],
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -124,20 +183,51 @@ async function handler(req: NextRequest) {
 
     const uid = userId || "anonymous-dev";
     const memoryContext = userId ? await fetchMemories(message, uid) : "";
-    const prompt = buildPrompt(agent, message, history, memoryContext);
+    const systemPrompt = buildPrompt(agent, message, history, memoryContext, userName)
+      .split("User: ")[0]
+      .trim();
+
+    const geminiModel =
+      typeof requestedModel === "string" && requestedModel.startsWith("gemini")
+        ? requestedModel
+        : "gemini-2.5-flash";
+
+    // Multimodal path: send image snapshots directly to Gemini
+    const imageArray = Array.isArray(images) ? images : [];
+    if (imageArray.length > 0 && !stream) {
+      const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
+      const cleanText = sanitizeOutput(r.text);
+      if (userId) {
+        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
+      }
+      return NextResponse.json({
+        response: cleanText,
+        provider: r.provider,
+        model: r.model,
+        latencyMs: r.latencyMs,
+      });
+    }
+
+    const prompt = buildPrompt(agent, message, history, memoryContext, userName);
 
     if (!stream) {
       const r = await generateText(
         prompt,
-        { task: "chat", provider, maxTokens: 2048 },
+        {
+          task: "chat",
+          provider,
+          maxTokens: 2048,
+          modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+        },
         undefined,
       );
-      await logConversation(agent, userId, message, r.text);
+      const cleanText = sanitizeOutput(r.text);
+      await logConversation(agent, userId, message, cleanText);
       if (userId) {
-        await saveMemory(`User: ${message}\n${agent.name}: ${r.text}`, uid, agent.id);
+        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
       return NextResponse.json({
-        response: r.text,
+        response: cleanText,
         provider: r.provider,
         model: r.model,
         latencyMs: r.latencyMs,
@@ -152,12 +242,18 @@ async function handler(req: NextRequest) {
           const r = await streamText(
             prompt,
             (chunk) => {
-              assistantText += chunk;
+              const cleanChunk = sanitizeOutput(chunk);
+              assistantText += cleanChunk;
               controller.enqueue(
-                encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
+                encoder.encode(`data: ${JSON.stringify({ text: cleanChunk })}\n\n`),
               );
             },
-            { task: "chat", provider, maxTokens: 2048 },
+            {
+              task: "chat",
+              provider,
+              maxTokens: 2048,
+              modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+            },
           );
           controller.enqueue(
             encoder.encode(

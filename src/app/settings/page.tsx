@@ -1,13 +1,25 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
+import dynamic from "next/dynamic";
 import { useTheme, useCrtToggle, ACCENT_MAP } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import PageShell from "@/components/PageShell";
-import CLIBridgeTool from "@/app/studio/tools/CLIBridgeTool";
 import { THEMES } from "@/lib/themes";
+
+const CLIBridgeTool = dynamic(
+  () => import("@/app/studio/tools/CLIBridgeTool"),
+  {
+    ssr: false,
+    loading: () => (
+      <div className="flex h-48 items-center justify-center text-xs text-slate-400">
+        Loading CLI Bridge…
+      </div>
+    ),
+  },
+);
 import type { BackgroundMode } from "@/components/AnimatedBackground";
 import type { SkinPreset, AccentColor } from "@/context/ThemeContext";
 import {
@@ -428,7 +440,10 @@ export default function SettingsPage() {
         icon="⚙️"
       >
         <div className="p-8 max-w-md mx-auto text-center">
-          <p className="mb-4 opacity-70" style={{ color: T.textMuted }}>
+          <p
+            className="mb-4 opacity-70"
+            style={{ color: T.textColor, opacity: 0.7 }}
+          >
             You need to be signed in to view settings.
           </p>
           <Link
@@ -464,7 +479,10 @@ export default function SettingsPage() {
           >
             <Coins size={14} /> {balance.toLocaleString()} LiTBits
           </div>
-          <span className="opacity-60" style={{ color: T.textMuted }}>
+          <span
+            className="opacity-60"
+            style={{ color: T.textColor, opacity: 0.7 }}
+          >
             Your balance is synced across every page.
           </span>
         </div>
@@ -478,6 +496,7 @@ export default function SettingsPage() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
+                aria-current={active ? "true" : undefined}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-all"
                 style={{
                   backgroundColor: active
@@ -486,7 +505,8 @@ export default function SettingsPage() {
                   border: active
                     ? `1px solid ${T.accentColor}50`
                     : `1px solid ${T.borderColor}30`,
-                  color: active ? T.accentColor : T.textMuted,
+                  color: active ? T.accentColor : T.textColor,
+                  opacity: active ? 1 : 0.7,
                 }}
               >
                 <Icon size={14} />
@@ -508,7 +528,7 @@ export default function SettingsPage() {
               </h2>
               <p
                 className="text-xs mb-5 opacity-70"
-                style={{ color: T.textMuted }}
+                style={{ color: T.textColor, opacity: 0.7 }}
               >
                 This is what other creators see across the platform.
               </p>
@@ -538,31 +558,40 @@ export default function SettingsPage() {
                     set: setLocation,
                     placeholder: "City, Country",
                   },
-                ].map((field) => (
-                  <div key={field.label} className="space-y-1">
-                    <label
-                      className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                      style={{ color: T.textMuted }}
-                    >
-                      {field.label}
-                    </label>
-                    <input
-                      value={field.value}
-                      onChange={(e) => field.set(e.target.value)}
-                      placeholder={field.placeholder}
-                      className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
-                      style={inputStyle}
-                    />
-                  </div>
-                ))}
+                ].map((field) => {
+                  const id = `profile-${field.label.toLowerCase().replace(/\s+/g, "-")}`;
+                  return (
+                    <div key={field.label} className="space-y-1">
+                      <label
+                        htmlFor={id}
+                        className="text-[10px] font-mono uppercase tracking-wider opacity-70"
+                        style={{ color: T.textColor, opacity: 0.7 }}
+                      >
+                        {field.label}
+                      </label>
+                      <input
+                        id={id}
+                        name={id}
+                        value={field.value}
+                        onChange={(e) => field.set(e.target.value)}
+                        placeholder={field.placeholder}
+                        className="w-full px-3 py-2 rounded-lg border text-sm outline-none focus:ring-2 transition-all"
+                        style={inputStyle}
+                      />
+                    </div>
+                  );
+                })}
                 <div className="sm:col-span-2 space-y-1">
                   <label
+                    htmlFor="profile-avatar-url"
                     className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Avatar URL
                   </label>
                   <input
+                    id="profile-avatar-url"
+                    name="profile-avatar-url"
                     value={avatarUrl}
                     onChange={(e) => setAvatarUrl(e.target.value)}
                     placeholder="https://..."
@@ -572,12 +601,15 @@ export default function SettingsPage() {
                 </div>
                 <div className="sm:col-span-2 space-y-1">
                   <label
+                    htmlFor="profile-bio"
                     className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Bio
                   </label>
                   <textarea
+                    id="profile-bio"
+                    name="profile-bio"
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     placeholder="Tell the community who you are..."
@@ -626,7 +658,10 @@ export default function SettingsPage() {
                     >
                       Theme Presets
                     </h2>
-                    <p className="text-xs mt-1" style={{ color: T.textMuted }}>
+                    <p
+                      className="text-xs mt-1"
+                      style={{ color: T.textColor, opacity: 0.7 }}
+                    >
                       Five premium directions designed as real visual systems,
                       not color chips.
                     </p>
@@ -737,7 +772,7 @@ export default function SettingsPage() {
                             </div>
                             <div
                               className="text-[11px] mt-1"
-                              style={{ color: T.textMuted }}
+                              style={{ color: T.textColor, opacity: 0.7 }}
                             >
                               {preset.id === "volcanic"
                                 ? "Command-center energy"
@@ -773,7 +808,7 @@ export default function SettingsPage() {
                   </h2>
                   <p
                     className="text-xs mb-4 opacity-70"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Daytime mode now uses deep navy (#1a1a2e) text for crisp
                     contrast.
@@ -841,7 +876,7 @@ export default function SettingsPage() {
                     >
                       <div
                         className="text-xs uppercase tracking-[0.18em]"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         {themeSaved ? "Saved" : "Save"}
                       </div>
@@ -866,7 +901,7 @@ export default function SettingsPage() {
                     >
                       <div
                         className="text-xs uppercase tracking-[0.18em]"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         Reset
                       </div>
@@ -978,7 +1013,10 @@ export default function SettingsPage() {
                 >
                   Workspace Controls
                 </h2>
-                <p className="text-xs mb-5" style={{ color: T.textMuted }}>
+                <p
+                  className="text-xs mb-5"
+                  style={{ color: T.textColor, opacity: 0.7 }}
+                >
                   Tune how the site behaves so the whole platform feels like
                   your command center.
                 </p>
@@ -1012,6 +1050,7 @@ export default function SettingsPage() {
                     <button
                       key={item.title}
                       onClick={() => item.set((v) => !v)}
+                      aria-pressed={item.value}
                       className="w-full flex items-center justify-between gap-4 rounded-2xl border px-4 py-4 text-left transition-all"
                       style={{
                         backgroundColor: item.value
@@ -1031,7 +1070,7 @@ export default function SettingsPage() {
                         </div>
                         <div
                           className="text-xs mt-1 max-w-xl"
-                          style={{ color: T.textMuted }}
+                          style={{ color: T.textColor, opacity: 0.7 }}
                         >
                           {item.desc}
                         </div>
@@ -1060,14 +1099,17 @@ export default function SettingsPage() {
                   ))}
                 </div>
                 <div className="mt-5 grid sm:grid-cols-2 gap-3">
-                  <label className="space-y-1">
-                    <span
+                  <div className="space-y-1">
+                    <label
+                      htmlFor="workspace-default"
                       className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       Default workspace
-                    </span>
+                    </label>
                     <select
+                      id="workspace-default"
+                      name="workspace-default"
                       value={defaultWorkspace}
                       onChange={(e) => setDefaultWorkspace(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
@@ -1079,7 +1121,7 @@ export default function SettingsPage() {
                       <option value="gallery">Gallery</option>
                       <option value="dashboard">Dashboard</option>
                     </select>
-                  </label>
+                  </div>
                   <div className="flex items-end">
                     <button
                       onClick={saveWorkspace}
@@ -1152,7 +1194,7 @@ export default function SettingsPage() {
                       </div>
                       <div
                         className="text-xs mt-1"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         {item.desc}
                       </div>
@@ -1193,7 +1235,7 @@ export default function SettingsPage() {
                       </h2>
                       <p
                         className="text-xs mt-1 leading-relaxed"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         Launch Qwen, Hermes, Gemini, OpenClaw, or a shell from
                         the same bridge used in Studio. Access is limited to
@@ -1255,7 +1297,7 @@ export default function SettingsPage() {
                             </span>
                             <span
                               className="block text-xs mt-0.5"
-                              style={{ color: T.textMuted }}
+                              style={{ color: T.textColor, opacity: 0.7 }}
                             >
                               {item.desc}
                             </span>
@@ -1263,7 +1305,7 @@ export default function SettingsPage() {
                           <ExternalLink
                             size={14}
                             className="ml-auto shrink-0 opacity-60"
-                            style={{ color: T.textMuted }}
+                            style={{ color: T.textColor, opacity: 0.7 }}
                           />
                         </Link>
                       );
@@ -1300,7 +1342,7 @@ export default function SettingsPage() {
                   </h2>
                   <p
                     className="text-xs opacity-70 max-w-2xl"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Keys are stored in your browser and sent to
                     LiTTree-LabStudios servers when you use agent features.
@@ -1312,12 +1354,15 @@ export default function SettingsPage() {
                 {BYOK_KEYS.map((k) => (
                   <div key={k.id} className="space-y-1">
                     <label
+                      htmlFor={`byok-${k.id}`}
                       className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       {k.label} ({k.env})
                     </label>
                     <input
+                      id={`byok-${k.id}`}
+                      name={`byok-${k.id}`}
                       type="password"
                       value={keys[k.id] || ""}
                       onChange={(e) =>
@@ -1359,7 +1404,7 @@ export default function SettingsPage() {
                   </h2>
                   <p
                     className="text-xs opacity-70 max-w-2xl"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Connect a GitHub repository to create a real, isolated
                     workspace. LiTT uses a GitHub App — you choose exactly which
@@ -1371,7 +1416,7 @@ export default function SettingsPage() {
               {integrationsLoading ? (
                 <div
                   className="flex items-center gap-2 text-sm"
-                  style={{ color: T.textMuted }}
+                  style={{ color: T.textColor, opacity: 0.7 }}
                 >
                   <Loader2 size={16} className="animate-spin" />
                   Checking GitHub status…
@@ -1390,10 +1435,16 @@ export default function SettingsPage() {
                   >
                     GitHub integration is not ready
                   </div>
-                  <p className="text-xs mb-3" style={{ color: T.textMuted }}>
+                  <p
+                    className="text-xs mb-3"
+                    style={{ color: T.textColor, opacity: 0.7 }}
+                  >
                     {integrationsError}
                   </p>
-                  <p className="text-xs" style={{ color: T.textMuted }}>
+                  <p
+                    className="text-xs"
+                    style={{ color: T.textColor, opacity: 0.7 }}
+                  >
                     Ask the site owner to configure the GitHub App environment
                     variables (GITHUB_APP_ID and GITHUB_PRIVATE_KEY) before
                     connecting a repository.
@@ -1417,7 +1468,7 @@ export default function SettingsPage() {
                       </div>
                       <p
                         className="text-xs mb-3"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         Connect your GitHub account to choose repositories for
                         LiTT workspaces.
@@ -1437,7 +1488,7 @@ export default function SettingsPage() {
                     <div className="space-y-4">
                       <div
                         className="text-[10px] font-black uppercase tracking-widest"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         Connected GitHub accounts
                       </div>
@@ -1524,7 +1575,7 @@ export default function SettingsPage() {
                     >
                       <div
                         className="text-[10px] font-mono uppercase tracking-wider mb-1"
-                        style={{ color: T.textMuted }}
+                        style={{ color: T.textColor, opacity: 0.7 }}
                       >
                         {stat.label}
                       </div>
@@ -1552,7 +1603,7 @@ export default function SettingsPage() {
                     </div>
                     <div
                       className="text-[10px] opacity-70"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       {usageSummary.role === "admin"
                         ? "Unlimited usage — admin account"
@@ -1584,7 +1635,7 @@ export default function SettingsPage() {
                   </h2>
                   <p
                     className="text-xs mb-5 opacity-70"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     {usageDemo
                       ? "Demo data — connect Supabase for real stats."
@@ -1647,7 +1698,7 @@ export default function SettingsPage() {
                               color: T.textColor,
                             }}
                           >
-                            <div style={{ color: T.textMuted }}>
+                            <div style={{ color: T.textColor, opacity: 0.7 }}>
                               {day.date.slice(5)}
                             </div>
                             <div style={{ color: "#22d3ee" }}>
@@ -1682,7 +1733,7 @@ export default function SettingsPage() {
                         />
                         <span
                           className="text-[10px] font-bold uppercase tracking-wider"
-                          style={{ color: T.textMuted }}
+                          style={{ color: T.textColor, opacity: 0.7 }}
                         >
                           {item.label}
                         </span>
@@ -1725,7 +1776,7 @@ export default function SettingsPage() {
                     </div>
                     <div
                       className="text-[10px] mt-2 font-mono"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       {usageSummary.hourlyUsed} / {usageSummary.hourlyLimit}{" "}
                       used this hour
@@ -1738,7 +1789,10 @@ export default function SettingsPage() {
                 className="rounded-2xl border p-8 text-center"
                 style={cardStyle}
               >
-                <p className="text-sm" style={{ color: T.textMuted }}>
+                <p
+                  className="text-sm"
+                  style={{ color: T.textColor, opacity: 0.7 }}
+                >
                   Unable to load usage data. Try refreshing.
                 </p>
               </div>
@@ -1758,19 +1812,22 @@ export default function SettingsPage() {
               </h2>
               <p
                 className="text-xs mb-5 opacity-70"
-                style={{ color: T.textMuted }}
+                style={{ color: T.textColor, opacity: 0.7 }}
               >
                 Connect how you want to be alerted.
               </p>
               <div className="space-y-4">
                 <div className="space-y-1">
                   <label
+                    htmlFor="discord-webhook"
                     className="text-[10px] font-mono uppercase tracking-wider opacity-70"
-                    style={{ color: T.textMuted }}
+                    style={{ color: T.textColor, opacity: 0.7 }}
                   >
                     Discord Webhook URL
                   </label>
                   <input
+                    id="discord-webhook"
+                    name="discord-webhook"
                     value={discordWebhook}
                     onChange={(e) => setDiscordWebhook(e.target.value)}
                     placeholder="https://discord.com/api/webhooks/..."
@@ -1791,13 +1848,15 @@ export default function SettingsPage() {
                     </div>
                     <div
                       className="text-[10px] opacity-70"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       Announce alerts on your Echo devices.
                     </div>
                   </div>
                   <button
                     onClick={() => setAlexaEnabled((v) => !v)}
+                    aria-pressed={alexaEnabled}
+                    aria-label="Toggle Alexa Voice Monkey announcements"
                     className="w-12 h-6 rounded-full transition-colors relative"
                     style={{
                       backgroundColor: alexaEnabled
@@ -1828,13 +1887,15 @@ export default function SettingsPage() {
                     </div>
                     <div
                       className="text-[10px] opacity-70"
-                      style={{ color: T.textMuted }}
+                      style={{ color: T.textColor, opacity: 0.7 }}
                     >
                       Summary of your agent activity and coin balance.
                     </div>
                   </div>
                   <button
                     onClick={() => setEmailDigest((v) => !v)}
+                    aria-pressed={emailDigest}
+                    aria-label="Toggle weekly email digest"
                     className="w-12 h-6 rounded-full transition-colors relative"
                     style={{
                       backgroundColor: emailDigest
