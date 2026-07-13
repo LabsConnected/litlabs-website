@@ -436,6 +436,7 @@ function SidebarContent({
         {onClose && (
           <button
             onClick={onClose}
+            aria-label="Close sidebar"
             className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
             style={{ color: T.textMuted }}
           >

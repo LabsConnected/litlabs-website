@@ -22,6 +22,15 @@ async function getHandler() {
 
     // Auto-create user if not exists (first time sign in)
     if (!user) {
+      // Check if DB is configured before trying to create
+      const dbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+      if (!dbUrl || dbUrl.includes("your-project")) {
+        return NextResponse.json(
+          { error: "Database not configured" },
+          { status: 503 },
+        );
+      }
+
       // Get user info from Clerk
       const clerkRes = await fetch(
         `https://api.clerk.dev/v1/users/${clerkId}`,
@@ -46,6 +55,13 @@ async function getHandler() {
 
       const result = await getOrCreateUser(clerkId, email, name);
       user = result.user;
+    }
+
+    if (!user) {
+      return NextResponse.json(
+        { error: "Failed to load or create user profile" },
+        { status: 503 },
+      );
     }
 
     return NextResponse.json({

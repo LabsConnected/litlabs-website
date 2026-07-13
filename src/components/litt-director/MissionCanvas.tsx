@@ -173,11 +173,11 @@ export function MissionCanvas({
                 );
               })}
             </div>
-            <div className="text-xs font-bold uppercase tracking-widest text-neutral-500 pt-2">
+            <div className="text-xs font-bold uppercase tracking-widest text-neutral-400 pt-2">
               Recent artifacts
             </div>
             {artifacts.length === 0 ? (
-              <div className="text-[10px] text-neutral-500">
+              <div className="text-[10px] text-neutral-400">
                 No artifacts yet. Generate something to get started.
               </div>
             ) : (
@@ -186,6 +186,7 @@ export function MissionCanvas({
                   <button
                     key={a.id}
                     onClick={() => setActiveArtifact(a)}
+                    aria-label={`View artifact: ${a.title}`}
                     className="relative aspect-square overflow-hidden rounded-xl border border-neutral-800/60"
                   >
                     {a.type === "image" ? (
@@ -228,7 +229,7 @@ export function MissionCanvas({
                   )}
                 </div>
                 <div className="min-w-0 flex-1">
-                  <div className="text-[10px] font-black uppercase tracking-wider text-neutral-500">
+                  <div className="text-[10px] font-black uppercase tracking-wider text-neutral-400">
                     {step.role}
                   </div>
                   <div className="text-sm text-neutral-200">{step.content}</div>
@@ -237,7 +238,7 @@ export function MissionCanvas({
             ))}
             {activeArtifact && activeArtifact.type === "image" && (
               <div className="rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-3">
-                <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-neutral-500">
+                <div className="mb-2 text-[10px] font-black uppercase tracking-wider text-neutral-400">
                   Generated Artifact
                 </div>
                 {/* eslint-disable-next-line @next/next/no-img-element */}

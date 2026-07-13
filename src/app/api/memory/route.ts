@@ -79,6 +79,10 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: insertError.message }, { status: 500 });
     }
 
+    if (!record) {
+      return NextResponse.json({ error: "Failed to create memory record" }, { status: 503 });
+    }
+
     // 2. Index the memory in Supermemory for semantic search.
     let supermemoryResult: unknown = null;
     let supermemoryId: string | null = null;

@@ -593,7 +593,7 @@ export function ChatTerminal({
             className={`flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-[10px] font-bold uppercase transition ${
               speakEnabled
                 ? "text-cyan-300"
-                : "text-neutral-500 hover:text-neutral-300"
+                : "text-neutral-400 hover:text-neutral-200"
             }`}
           >
             {speakEnabled ? <Volume2 size={13} /> : <VolumeX size={13} />}
@@ -659,7 +659,8 @@ export function ChatTerminal({
                   })}
                   <button
                     onClick={() => setShowModePicker(false)}
-                    className="rounded-lg p-1.5 text-neutral-500 hover:text-neutral-300"
+                    className="rounded-lg p-1.5 text-neutral-400 hover:text-neutral-200"
+                    aria-label="Close mode picker"
                   >
                     <X size={12} />
                   </button>
@@ -672,6 +673,7 @@ export function ChatTerminal({
                 <select
                   value={imageStyle}
                   onChange={(e) => setImageStyle(e.target.value)}
+                  aria-label="Image style"
                   className="rounded-lg border border-neutral-800/60 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-300 outline-none"
                 >
                   {IMAGE_STYLES.map((s) => (
@@ -683,6 +685,7 @@ export function ChatTerminal({
                 <select
                   value={imageRatio}
                   onChange={(e) => setImageRatio(e.target.value)}
+                  aria-label="Image aspect ratio"
                   className="rounded-lg border border-neutral-800/60 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-300 outline-none"
                 >
                   {IMAGE_RATIOS.map((r) => (
@@ -696,8 +699,8 @@ export function ChatTerminal({
 
             <div className="flex items-center gap-1.5 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-2 py-2 transition-all focus-within:border-cyan-500/40 focus-within:shadow-[0_0_12px_rgba(34,211,238,0.12)]">
               <button
-                className="text-neutral-500 hover:text-neutral-300"
-                aria-label="Attach"
+                className="text-neutral-400 hover:text-neutral-200"
+                aria-label="Attach file"
               >
                 <Paperclip size={16} />
               </button>
@@ -715,19 +718,21 @@ export function ChatTerminal({
                   }
                 }}
                 placeholder={activeMode.placeholder}
-                className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
+                className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-400"
               />
               <button
                 onClick={() =>
                   chatMode === "chat" ? sendChat(input) : runAsCommand()
                 }
                 disabled={loading}
+                aria-label="Send message"
                 className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 transition disabled:opacity-40"
               >
                 <Send size={16} />
               </button>
               <button
                 onClick={toggleListening}
+                aria-label={listening ? "Stop listening" : "Start voice input"}
                 className={`rounded-lg p-2 transition ${
                   listening
                     ? "bg-red-500/15 text-red-300 animate-pulse"

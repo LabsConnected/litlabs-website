@@ -285,7 +285,8 @@ function LiTTTerminalPageInner() {
               onChange={(e) =>
                 handleWallpaperChange(e.target.value as WallpaperId)
               }
-              className="rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-400 outline-none"
+              aria-label="Wallpaper theme"
+              className="rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 py-1 text-[10px] font-bold text-neutral-300 outline-none"
             >
               {WALLPAPERS.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -354,7 +355,7 @@ function LiTTTerminalPageInner() {
                   </div>
                 </div>
               ) : (
-                <div className="flex h-full items-center justify-center text-neutral-500">
+                <div className="flex h-full items-center justify-center text-neutral-400">
                   {activeTab} tab coming soon
                 </div>
               )}
@@ -370,7 +371,7 @@ function LiTTTerminalPageInner() {
                   className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-widest transition ${
                     rightTab === "output"
                       ? "bg-cyan-500/10 text-cyan-300"
-                      : "text-neutral-500 hover:text-neutral-300"
+                      : "text-neutral-400 hover:text-neutral-200"
                   }`}
                 >
                   Output
@@ -380,7 +381,7 @@ function LiTTTerminalPageInner() {
                   className={`flex-1 px-3 py-2 text-[10px] font-black uppercase tracking-widest transition ${
                     rightTab === "context"
                       ? "bg-cyan-500/10 text-cyan-300"
-                      : "text-neutral-500 hover:text-neutral-300"
+                      : "text-neutral-400 hover:text-neutral-200"
                   }`}
                 >
                   Context
