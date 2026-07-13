@@ -35,6 +35,7 @@ import {
   Code2,
   Wand2,
   Bot,
+  BrainCircuit,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -45,15 +46,17 @@ const NavAuth = dynamic(
 /* ------------------------------------------------------------------ */
 /*  Primary nav links ΓÇö ALL surfaced, no hidden dropdown               */
 /* ------------------------------------------------------------------ */
-const navLinks = [
+const leftNavLinks = [
   { href: "/", label: "Home", icon: Home },
   { href: "/dashboard", label: "Dashboard", icon: Bot },
   { href: "/studio", label: "Studio", icon: Wand2 },
-  { href: "/agents", label: "Agents", icon: Bot },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
+
+const agentsLink = { href: "/agents", label: "Agents", icon: BrainCircuit };
+const AgentsIcon = agentsLink.icon;
 
 /* ------------------------------------------------------------------ */
 /*  Utility items for mobile / user dropdown                           */
@@ -240,7 +243,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               border: `1px solid ${resolvedColors.borderColor}20`,
             }}
           >
-            {navLinks.map((link) => {
+            {leftNavLinks.map((link) => {
               const active = isActive(link.href);
               const Icon = link.icon;
               return (
@@ -274,6 +277,33 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             {authLoaded && isSignedIn && (
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
+
+            {/* Agents ΓÇö dedicated quick-access icon on the far right */}
+            <Link
+              href={agentsLink.href}
+              className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
+              style={{
+                border: `1px solid ${
+                  isActive(agentsLink.href)
+                    ? resolvedColors.accentColor
+                    : resolvedColors.accentColor + "30"
+                }`,
+                color: resolvedColors.accentColor,
+                backgroundColor: isActive(agentsLink.href)
+                  ? resolvedColors.accentColor + "25"
+                  : resolvedColors.accentColor + "08",
+                boxShadow: isActive(agentsLink.href)
+                  ? `0 0 12px ${resolvedColors.accentColor}50`
+                  : "none",
+              }}
+              title={agentsLink.label}
+              aria-label={agentsLink.label}
+            >
+              <AgentsIcon
+                size={17}
+                strokeWidth={isActive(agentsLink.href) ? 2.5 : 2}
+              />
+            </Link>
 
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>
@@ -511,8 +541,23 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               boxShadow: `0 8px 32px rgba(0,0,0,0.5)`,
             }}
           >
+            {/* Featured Agents link at the top of the mobile menu */}
             <div className="px-4 pt-5 pb-2 space-y-1">
-              {navLinks.map((link) => {
+              <Link
+                href={agentsLink.href}
+                className="flex items-center gap-3 px-4 py-4 text-sm font-bold rounded-xl transition-all active:scale-95"
+                style={{
+                  color: resolvedColors.bgColor,
+                  backgroundColor: resolvedColors.accentColor,
+                  boxShadow: `0 0 16px ${resolvedColors.accentColor}50`,
+                }}
+              >
+                <AgentsIcon size={20} />
+                {agentsLink.label}
+              </Link>
+            </div>
+            <div className="px-4 pb-2 space-y-1">
+              {leftNavLinks.map((link) => {
                 const Icon = link.icon;
                 const active = isActive(link.href);
                 return (

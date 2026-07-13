@@ -99,8 +99,7 @@ export function FloatingChat() {
               <div
                 className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-black"
                 style={{
-                  background:
-                    "linear-gradient(135deg, #fbbf24, #f59e0b)",
+                  background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
                   color: "#1a1a1a",
                 }}
               >
@@ -136,7 +135,7 @@ export function FloatingChat() {
                 className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
               >
                 <div
-                  className={`max-w-[80%] rounded-2xl px-3 py-2 text-xs leading-relaxed ${
+                  className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm leading-relaxed ${
                     m.role === "user"
                       ? "rounded-br-sm bg-amber-500/20 text-amber-100"
                       : "rounded-bl-sm bg-neutral-800/80 text-neutral-200"
@@ -148,7 +147,7 @@ export function FloatingChat() {
             ))}
             {loading && (
               <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-neutral-800/80 px-3 py-2 text-xs text-neutral-400">
+                <div className="flex items-center gap-2 rounded-2xl rounded-bl-sm bg-neutral-800/80 px-3 py-2 text-sm text-neutral-400">
                   <Loader2 size={12} className="animate-spin" />
                   Thinking…
                 </div>
@@ -180,7 +179,7 @@ export function FloatingChat() {
               onKeyDown={handleKeyDown}
               placeholder="Ask LiTT Director…"
               disabled={loading}
-              className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-500/40"
+              className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-500/40"
             />
             <button
               onClick={() => void send(input)}
