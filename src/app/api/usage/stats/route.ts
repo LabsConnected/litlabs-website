@@ -62,8 +62,12 @@ function bucketize(
  *  - Short Cache-Control header prevents stale usage between requests.
  */
 export async function GET() {
+  const start = Date.now();
+  const tag = `[usage/stats]`;
+
   const { userId } = await auth();
   if (!userId) {
+    console.info(`${tag} 401 userId=anon dur=${Date.now() - start}ms`);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
@@ -73,6 +77,9 @@ export async function GET() {
   // Demo data path — when Supabase isn't configured, return plausible
   // sample buckets so the UI can still render.
   if (!isAdminSupabaseConfigured()) {
+    console.info(
+      `${tag} demo=true userId=${userId} dur=${Date.now() - start}ms`,
+    );
     const buckets = buildEmptyBuckets(14);
     buckets.forEach((b, i) => {
       b.commands = Math.floor(Math.random() * 30) + 5 + i;
@@ -152,6 +159,12 @@ export async function GET() {
   const totalCommands = buckets.reduce((s, b) => s + b.commands, 0);
   const totalAgentTasks = buckets.reduce((s, b) => s + b.agentTasks, 0);
   const totalGenerations = buckets.reduce((s, b) => s + b.generations, 0);
+
+  console.info(
+    `${tag} demo=false partial=${failed.length > 0} failed=${
+      failed.length
+    }[${failed.join(",")}] userId=${userId} dur=${Date.now() - start}ms`,
+  );
 
   return NextResponse.json(
     {

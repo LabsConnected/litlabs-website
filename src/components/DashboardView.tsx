@@ -31,7 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import UsageChart from "@/components/dashboard/UsageChart";
-import HologramCore from "@/components/dashboard/HologramCore";
+import FileGalaxy from "@/components/dashboard/FileGalaxy";
 
 type Project = {
   id: string;
@@ -515,21 +515,31 @@ export default function DashboardView() {
 
         {/* Right column */}
         <div className="space-y-6">
-          {/* Hologram Core */}
-          <section className="flex flex-col items-center">
-            <Card padding="loose" className="w-full flex flex-col items-center">
-              <HologramCore
-                size={240}
-                label="LiTT Core"
-                trackCursor
-                trackKeyboard
-              />
+          {/* File Galaxy Map */}
+          <section>
+            <Card padding="loose" className="w-full">
+              <div className="mb-2 flex items-center justify-between">
+                <div
+                  className="text-[10px] font-black uppercase tracking-[0.2em]"
+                  style={{ color: tokens.textMuted }}
+                >
+                  File Galaxy
+                </div>
+                <div
+                  className="text-[10px]"
+                  style={{ color: tokens.textMuted }}
+                >
+                  GitHub repos + projects
+                </div>
+              </div>
+              <div style={{ height: 320 }} className="w-full">
+                <FileGalaxy />
+              </div>
               <p
                 className="mt-2 text-center text-[10px]"
                 style={{ color: tokens.textMuted }}
               >
-                The core reacts to your voice, typing, and cursor — talk to LiTT
-                Director to wake it up.
+                Drag to pan · Scroll to zoom · Click any node to inspect
               </p>
             </Card>
           </section>
