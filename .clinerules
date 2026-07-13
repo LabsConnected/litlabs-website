@@ -40,7 +40,7 @@
 7. The Devin config is `.devin-config.json` (root-level). The legacy `devin.config.json` is
    kept for backward compatibility — if asked to update Devin, update BOTH files.
 8. `lucide-react` is pinned to `^1.24.0` (very old, pre-rename). Many modern icons are
-   unavailable — prefer inline SVG (see `src/app/(dashboard)/loading.tsx`) or
+   unavailable — prefer inline SVG (see `src/components/dashboard/AutonomicLoopBanner.tsx`) or
    `src/components/dashboard/AutonomicLoopBanner.tsx` for the pattern.
 
 [COMMANDS]

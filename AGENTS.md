@@ -66,7 +66,7 @@ Run `bash scripts/setup-env.sh` to configure Vercel environment variables intera
 - `chrome/` directory contains a local Chromium binary for Lighthouse/Playwright
 - `.clinerules` and `.cursorrules` carry environment context — do not scaffold boilerplate
 - `lucide-react` is pinned to `^1.24.0` (very old); many modern icons may be missing —
-  fall back to inline SVG (see `src/app/(dashboard)/loading.tsx` for the pattern)
+  fall back to inline SVG (see `src/components/dashboard/AutonomicLoopBanner.tsx` for the pattern)
 - `litlabs/`, `litlabs-website/`, `Zoo-Code/`, `work/`, `meta/` are local artifacts
   and are excluded from `tsconfig.json` — do not import from them
 
