@@ -107,11 +107,19 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // FloatingChat calls useProfile()/useClerkAuth() — it MUST live inside the
+  // provider tree, otherwise it throws on the homepage and the whole route
+  // returns 500 (see https://litlabs.net/ Lighthouse report, Jul 2026).
+  // We mount it as a sibling of {children} inside LayoutShell, behind all
+  // providers, so it always sees ProfileContext.
   const shell = (
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <LayoutShell>
+            {children}
+            <FloatingChat />
+          </LayoutShell>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
@@ -171,7 +179,6 @@ export default function RootLayout({
         ) : (
           shell
         )}
-        <FloatingChat />
         <Analytics />
         <SpeedInsights />
       </body>

@@ -32,6 +32,7 @@ import {
 import Link from "next/link";
 import UsageChart from "@/components/dashboard/UsageChart";
 import FileGalaxy from "@/components/dashboard/FileGalaxy";
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 type Project = {
   id: string;
@@ -238,6 +239,7 @@ export default function DashboardView() {
 
   return (
     <WorkspaceShell>
+      <AutonomicLoopBanner />
       <PageHeader
         title={`Welcome back, ${displayName}`}
         subtitle="Your mission control. Pick up where you left off or start something new."
