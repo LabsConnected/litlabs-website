@@ -42,6 +42,9 @@ export async function GET(req: NextRequest) {
 
     let rawHits: unknown[] = [];
     let supermemoryError: string | null = null;
+    let memories: unknown[] = [];
+    let source = hasSupermemory() ? "supermemory+supabase" : "supabase";
+
     if (hasSupermemory()) {
       try {
         const results = (await getSupermemory().search.memories({
@@ -52,6 +55,7 @@ export async function GET(req: NextRequest) {
         rawHits = results.memories || results.results || [];
       } catch (err) {
         supermemoryError = err instanceof Error ? err.message : "Supermemory search failed";
+        source = "supabase";
       }
     }
 
@@ -64,7 +68,6 @@ export async function GET(req: NextRequest) {
       })
       .filter(Boolean) as string[];
 
-    let memories: unknown[] = [];
     if (supabaseIds.length) {
       const { data, error } = await supabaseAdmin
         .from("memories")
@@ -74,13 +77,43 @@ export async function GET(req: NextRequest) {
       if (!error) memories = data || [];
     }
 
+    // Fallback: if Supermemory is missing, failed, or returned no matches,
+    // search Supabase content directly and then fall back to recent memories.
+    if (!memories.length) {
+      source = "supabase";
+      const { data: textMatches, error: textError } = await supabaseAdmin
+        .from("memories")
+        .select("*")
+        .eq("owner_id", userId)
+        .ilike("content", `%${q}%`)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      const textResults = textError
+        ? []
+        : (textMatches || []).filter((m) => (scope ? m.scope === scope : true));
+
+      if (textResults.length) {
+        memories = textResults;
+      } else {
+        const { data: recent, error: recentError } = await supabaseAdmin
+          .from("memories")
+          .select("*")
+          .eq("owner_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        memories = recentError
+          ? []
+          : (recent || []).filter((m) => (scope ? m.scope === scope : true));
+      }
+    }
+
     return NextResponse.json({
       query: q,
       memories,
       hits: rawHits,
       count: memories.length,
       supermemoryError,
-      source: hasSupermemory() ? "supermemory+supabase" : "supabase",
+      source,
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Search failed";
