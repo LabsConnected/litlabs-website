@@ -156,7 +156,7 @@ function LiTTTerminalPageInner() {
                 Project Workspace
               </div>
               <h1 className="truncate text-base font-bold sm:text-lg">
-                LitLabs
+                LiTTree-LabStudios
               </h1>
             </div>
           </div>
@@ -286,13 +286,16 @@ function LiTTTerminalPageInner() {
                       <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">
                         Active Mission
                       </div>
-                      <p>Build a real GitHub-backed workspace for LitLabs.</p>
+                      <p>
+                        Build a real GitHub-backed workspace for
+                        LiTTree-LabStudios.
+                      </p>
                     </div>
                     <div className="rounded-xl border border-neutral-800/60 p-3">
                       <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">
                         Connected Repos
                       </div>
-                      <p>LitLabs/litlab</p>
+                      <p>LiTTree-LabStudios/litlab</p>
                     </div>
                     <div className="rounded-xl border border-neutral-800/60 p-3">
                       <div className="mb-1 text-[10px] font-black uppercase tracking-widest text-cyan-300">

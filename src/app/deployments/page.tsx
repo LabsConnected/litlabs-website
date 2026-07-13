@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import DeploymentsPageClient from "./DeploymentsPageClient";
 
 export const metadata: Metadata = {
-  title: "Deployments | LiTT Code",
+  title: "Deployments | LiTTree-LabStudios",
   description: "Track project deployments, previews, and production releases.",
 };
 

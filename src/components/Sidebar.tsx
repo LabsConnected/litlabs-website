@@ -408,7 +408,7 @@ function SidebarContent({
                 className="text-xs font-bold uppercase tracking-widest"
                 style={{ color: T.accentColor }}
               >
-                LiTT Code
+                LiTTree-LabStudios
               </span>
             )}
             {collapsed && <Home size={16} style={{ color: T.accentColor }} />}
@@ -504,8 +504,9 @@ function SidebarContent({
         </div>
       )}
 
-      {/* LiTT Director card */}
-      {!collapsed && (
+      {/* Studio already owns the full Director experience. Keeping the global
+          card/drawer out of that route prevents two composers from stacking. */}
+      {!collapsed && pathname !== "/studio" && (
         <>
           <DirectorCard
             onOpenAction={() => setDirectorOpen(true)}

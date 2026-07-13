@@ -164,11 +164,51 @@ export function ChatTerminal({
   const terminalRef = useRef<TerminalPanelHandle>(null);
   const abortRef = useRef<AbortController | null>(null);
   const idCounter = useRef(0);
+  const ttsQueue = useRef<string[]>([]);
+  const isSpeaking = useRef(false);
 
   const activeMode = MODES.find((m) => m.id === mode) ?? MODES[0];
   const ActiveIcon = activeMode.icon;
 
   const setIdle = useCallback(() => runtime.setState("idle"), [runtime]);
+
+  const speak = useCallback(
+    (text: string) => {
+      if (
+        !speakEnabled ||
+        typeof window === "undefined" ||
+        !window.speechSynthesis
+      )
+        return;
+      ttsQueue.current.push(text);
+      if (isSpeaking.current) return;
+      const processQueue = () => {
+        if (ttsQueue.current.length === 0) {
+          isSpeaking.current = false;
+          return;
+        }
+        isSpeaking.current = true;
+        const utterance = new SpeechSynthesisUtterance(
+          ttsQueue.current.shift()!,
+        );
+        utterance.rate = 1.1;
+        utterance.pitch = 0.9;
+        const voices = window.speechSynthesis.getVoices();
+        const preferred =
+          voices.find((v) =>
+            /Google US English|Microsoft David|Samantha/i.test(v.name),
+          ) ||
+          voices.find((v) => v.lang.startsWith("en")) ||
+          voices[0];
+        if (preferred) utterance.voice = preferred;
+        utterance.onend = processQueue;
+        utterance.onerror = processQueue;
+        window.speechSynthesis.speak(utterance);
+      };
+      processQueue();
+    },
+    [speakEnabled],
+  );
 
   const fetchWithTimeout = useCallback(
     async (
@@ -319,6 +359,7 @@ export function ChatTerminal({
       runtime.setAgentResponse(runId, answer);
       runtime.setState("complete");
       onLogAction(`[CHAT] Director: ${answer.slice(0, 120)}`);
+      speak(answer);
       setTimeout(setIdle, 2000);
     } catch (err) {
       if (err instanceof Error && err.name === "AbortError") {
@@ -372,20 +413,30 @@ export function ChatTerminal({
     ).webkitSpeechRecognition;
     const recognition = new Rec();
     recognition.continuous = false;
-    recognition.interimResults = false;
+    recognition.interimResults = true;
     recognition.lang = "en-US";
+    let finalTranscript = "";
     recognition.onresult = (event: SpeechRecognitionEvent) => {
-      const transcript =
-        event.results[event.resultIndex]?.[0]?.transcript || "";
-      if (transcript) setInput(transcript);
+      for (let i = event.resultIndex; i < event.results.length; i++) {
+        const result = event.results[i];
+        const t = result[0]?.transcript || "";
+        if (result.isFinal) finalTranscript += t;
+      }
+      if (finalTranscript) setInput(finalTranscript);
     };
-    recognition.onerror = () => {
+    recognition.onerror = (event: Event) => {
+      const err = (event as ErrorEvent).error || "unknown";
+      onLogAction(`[VOICE] Error: ${err}`);
       setListening(false);
       runtime.setState("idle");
     };
     recognition.onend = () => {
       setListening(false);
       runtime.setState("idle");
+      if (finalTranscript.trim()) {
+        setInput(finalTranscript);
+        sendChat(finalTranscript.trim());
+      }
     };
     recognition.start();
   };

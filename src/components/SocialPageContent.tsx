@@ -50,7 +50,7 @@ type ApiPost = {
 const TRENDING = [
   { tag: "#AIAgents", posts: "2.4k" },
   { tag: "#CodeChampion", posts: "1.8k" },
-  { tag: "#LiTT Code LabStudios", posts: "956" },
+  { tag: "#LiTTreeLabStudios", posts: "956" },
   { tag: "#AgentBuilder", posts: "743" },
   { tag: "#NeonVibes", posts: "521" },
 ];
@@ -237,7 +237,7 @@ export default function SocialPageContent() {
               className="text-sm sm:text-lg font-black uppercase"
               style={{ color: C.headerColor }}
             >
-              ⚡ LiTT Code
+              ⚡ LiTTree-LabStudios
             </Link>
             <div className="hidden sm:flex items-center gap-1 text-[10px] opacity-50">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
@@ -742,7 +742,7 @@ export default function SocialPageContent() {
                   className="text-xs font-bold mb-2"
                   style={{ color: C.accentColor }}
                 >
-                  Join LiTT Code LabStudios
+                  Join LiTTree-LabStudios
                 </div>
                 <p className="text-[11px] opacity-60 mb-3">
                   Build AI agents, generate media, and connect with 50k+

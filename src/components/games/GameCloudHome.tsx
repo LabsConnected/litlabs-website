@@ -84,7 +84,7 @@ export default function GameCloudHome() {
       <section className="px-4 pt-5 space-y-5 max-w-7xl mx-auto">
         <div>
           <p className="text-sm text-orange-400 font-bold">
-            🎮 LiTT Code Game Cloud
+            🎮 LiTTree Game Cloud
           </p>
           <h1 className="text-3xl font-black mt-2">Play instantly.</h1>
           <p className="text-sm text-slate-400">
