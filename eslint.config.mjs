@@ -27,6 +27,7 @@ const eslintConfig = defineConfig([
     ".codex-reference/**",
     // Local artifact directories
     "litlabs/**",
+    "OmniRoute/**",
   ]),
 ]);
 

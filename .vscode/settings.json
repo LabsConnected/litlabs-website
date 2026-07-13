@@ -23,5 +23,6 @@
   "editor.wordWrap": "on",
   "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 1000,
-  "typescript.tsserver.maxTsServerMemory": 1536
+  "typescript.tsserver.maxTsServerMemory": 1536,
+  "python.defaultInterpreterPath": "C:\\Python311\\python.exe"
 }
