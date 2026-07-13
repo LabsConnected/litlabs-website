@@ -475,8 +475,14 @@ export function ChatTerminal({
   );
 
   // Process external triggers from the mission canvas / other UI surfaces.
+  // Guard against re-processing the same trigger to prevent infinite loops
+  // (sendChat depends on mode, and this effect changes mode → circular).
+  const processedTriggerRef = useRef<string | null>(null);
   useEffect(() => {
     if (!trigger?.text) return;
+    const triggerKey = `${trigger.text}-${trigger.mode ?? ""}`;
+    if (processedTriggerRef.current === triggerKey) return;
+    processedTriggerRef.current = triggerKey;
     const task = () => {
       if (trigger.mode && MODES.some((m) => m.id === trigger.mode)) {
         setMode(trigger.mode);

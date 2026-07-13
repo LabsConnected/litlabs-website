@@ -339,10 +339,10 @@ function LiTTTerminalPageInner() {
             <div className="flex min-h-0 flex-1 flex-col p-2 sm:p-3">
               {activeTab === "mission" ? (
                 <div className="flex min-h-0 flex-1 flex-col gap-2">
-                  <div className="flex min-h-0 flex-1 overflow-hidden">
+                  <div className="shrink-0">
                     <MissionCanvas onPromptAction={handleStarterPrompt} />
                   </div>
-                  <div className="shrink-0">
+                  <div className="flex min-h-0 flex-1 flex-col">
                     <ChatTerminal
                       agentId="director"
                       onLogAction={addLog}

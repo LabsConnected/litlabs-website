@@ -122,27 +122,27 @@ export function MissionCanvas({
   const hasStarted = steps.length > 0;
 
   return (
-    <div className="flex h-full w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
-      {/* Holo Director area */}
-      <div className="relative flex shrink-0 flex-col items-center justify-center p-4 sm:p-5">
+    <div className="flex w-full min-w-0 flex-col overflow-hidden rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm">
+      {/* Compact Holo Director header */}
+      <div className="relative flex shrink-0 items-center gap-3 p-3 sm:p-4">
         <div
-          className="absolute inset-0 opacity-30"
+          className="absolute inset-0 opacity-20"
           style={{
-            background: `radial-gradient(circle at center, ${T.accentColor}12 0%, transparent 70%)`,
+            background: `radial-gradient(circle at left, ${T.accentColor}12 0%, transparent 60%)`,
           }}
         />
-        <div className="relative h-28 w-28 sm:h-36 sm:w-36">
+        <div className="relative h-14 w-14 sm:h-16 sm:w-16 shrink-0">
           <HoloDirector state={state} className="h-full w-full" />
         </div>
-        <div className="relative mt-2 flex flex-col items-center gap-1 text-center">
+        <div className="relative flex min-w-0 flex-col gap-1">
           <div
-            className="text-[10px] font-black uppercase tracking-[0.25em] sm:text-xs"
+            className="text-xs font-black uppercase tracking-[0.2em] sm:text-sm"
             style={{ color: T.headerColor }}
           >
             LiTT Director
           </div>
           <div
-            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${status.border} ${status.bg} ${status.text}`}
+            className={`inline-flex w-fit items-center gap-1.5 rounded-full border px-2 py-0.5 text-[9px] font-black uppercase tracking-wider ${status.border} ${status.bg} ${status.text}`}
           >
             <span className={`h-1.5 w-1.5 rounded-full ${status.dot}`} />
             {status.label}
@@ -151,13 +151,10 @@ export function MissionCanvas({
       </div>
 
       {/* Canvas content */}
-      <div className="flex-1 min-h-0 overflow-y-auto p-4">
+      <div className="max-h-[240px] overflow-y-auto p-3 sm:p-4">
         {!hasStarted ? (
-          <div className="space-y-4">
-            <div className="text-xs font-bold uppercase tracking-widest text-neutral-500">
-              Start a mission
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
+          <div className="space-y-3">
+            <div className="flex flex-wrap gap-1.5">
               {STARTERS.map((s) => {
                 const Icon = s.icon;
                 return (
@@ -166,9 +163,9 @@ export function MissionCanvas({
                     onClick={() =>
                       onPromptAction?.({ id: s.id, prompt: s.prompt })
                     }
-                    className="flex flex-col items-center gap-2 rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-3 text-center transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
+                    className="flex items-center gap-1.5 rounded-lg border border-neutral-800/60 bg-neutral-900/40 px-2.5 py-1.5 text-center transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
                   >
-                    <Icon size={18} className="text-cyan-400" />
+                    <Icon size={13} className="text-cyan-400" />
                     <span className="text-[10px] font-bold text-neutral-300">
                       {s.label}
                     </span>
@@ -209,11 +206,11 @@ export function MissionCanvas({
             )}
           </div>
         ) : (
-          <div className="space-y-3">
-            {steps.map((step) => (
+          <div className="space-y-2">
+            {steps.slice(-30).map((step) => (
               <div
                 key={step.id}
-                className={`flex gap-3 rounded-xl border border-neutral-800/60 p-3 ${
+                className={`flex gap-2.5 rounded-lg border border-neutral-800/60 p-2.5 ${
                   step.role === "user" ? "bg-cyan-500/5" : "bg-neutral-900/40"
                 }`}
               >
