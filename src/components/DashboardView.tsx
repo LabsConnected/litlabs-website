@@ -30,6 +30,7 @@ import {
   LogOut,
 } from "lucide-react";
 import Link from "next/link";
+import UsageChart from "@/components/dashboard/UsageChart";
 
 type Project = {
   id: string;
@@ -589,12 +590,8 @@ export default function DashboardView() {
                 icon={<ImageIcon size={16} />}
               />
             </div>
-            <div
-              className="mt-3 rounded-lg border p-3 text-[10px]"
-              style={{ borderColor: tokens.border, color: tokens.textMuted }}
-            >
-              Usage tracking is in beta. Credits and detailed spend will appear
-              here once billing is connected.
+            <div className="mt-3">
+              <UsageChart />
             </div>
           </section>
 

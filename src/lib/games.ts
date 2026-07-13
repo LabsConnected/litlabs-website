@@ -310,7 +310,7 @@ export const GAME_LIBRARY: Game[] = [
     emulator: "jsdos",
     coverUrl:
       "https://image.pollinations.ai/prompt/dos%20computer%20retro%20monitor%20command%20line%20dark%20neon?width=400&height=250&nologo=true&seed=202",
-    externalUrl: "https://js-dos.com/",
+    externalUrl: "/games/dos",
     year: 1981,
     developer: "js-dos",
     players: 1,

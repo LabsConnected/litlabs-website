@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 
 type LoopState = "checking" | "ok" | "degraded" | "down";
@@ -18,6 +18,8 @@ const CHECK_ENDPOINTS: Array<{ id: string; label: string; url: string }> = [
   { id: "memory", label: "Memory store", url: "/api/memory" },
   { id: "agent-tasks", label: "Task intake", url: "/api/agent-tasks" },
 ];
+
+const POLL_INTERVAL_MS = 60_000;
 
 /* ---------- Inline SVG icons (no external icon dependency) ---------- */
 
@@ -114,11 +116,11 @@ function CloseIcon(props: IconProps) {
  * pipeline is healthy. This directly satisfies the "Verify the
  * Autonomic Loop setup" portion of the active Director task.
  *
- * - Polls once on mount and every 60 s.
- * - Collapsible; defaults to a single-line status pill.
- * - Reads the active volcanic cyber theme tokens for visual cohesion.
- * - Uses inline SVG icons to avoid a lucide-react type resolution
- *   dependency.
+ * Memory hygiene:
+ * - AbortController cancels any in-flight fetch on unmount or remount.
+ * - Polling pauses when the tab is hidden (visibilitychange listener).
+ * - All timers + listeners are cleaned up on unmount.
+ * - runChecks is stable via useCallback to avoid re-creating closures.
  */
 export default function AutonomicLoopBanner() {
   const { tokens } = useTheme();
@@ -128,12 +130,30 @@ export default function AutonomicLoopBanner() {
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
   const [dismissed, setDismissed] = useState(false);
 
-  const runChecks = async () => {
+  // AbortController lives in a ref so it survives across renders
+  // without triggering re-renders. Cancelled on unmount.
+  const abortRef = useRef<AbortController | null>(null);
+
+  const runChecks = useCallback(async () => {
+    // Cancel any prior probe so we never setState on a stale cycle.
+    abortRef.current?.abort();
+    const controller = new AbortController();
+    abortRef.current = controller;
+
     setState("checking");
+    const signal = controller.signal;
+
     const results: CheckResult[] = await Promise.all(
       CHECK_ENDPOINTS.map(async (endpoint) => {
         try {
-          const res = await fetch(endpoint.url, { method: "GET" });
+          const res = await fetch(endpoint.url, {
+            method: "GET",
+            signal,
+            cache: "no-store",
+          });
+          if (signal.aborted) {
+            return { id: endpoint.id, label: endpoint.label, ok: false, detail: "aborted" };
+          }
           return {
             id: endpoint.id,
             label: endpoint.label,
@@ -141,6 +161,9 @@ export default function AutonomicLoopBanner() {
             detail: `${res.status}`,
           };
         } catch (err) {
+          if ((err as { name?: string })?.name === "AbortError") {
+            return { id: endpoint.id, label: endpoint.label, ok: false, detail: "aborted" };
+          }
           return {
             id: endpoint.id,
             label: endpoint.label,
@@ -150,28 +173,48 @@ export default function AutonomicLoopBanner() {
         }
       }),
     );
+
+    if (signal.aborted) return;
+
     setChecks(results);
     const okCount = results.filter((r) => r.ok).length;
     if (okCount === results.length) setState("ok");
     else if (okCount === 0) setState("down");
     else setState("degraded");
     setLastChecked(new Date());
-  };
+  }, []);
 
   useEffect(() => {
+    // Track whether the tab is visible so we can pause polling when
+    // the user isn't watching — saves CPU + RAM for background tabs.
+    let visible = typeof document === "undefined" ? true : !document.hidden;
+    const onVisibility = () => {
+      const next = !document.hidden;
+      if (next === visible) return;
+      visible = next;
+      // Probe immediately on becoming visible again.
+      if (visible) void runChecks();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+
     // Defer the initial probe so setState calls happen in a callback
     // (satisfies the react-hooks/set-state-in-effect lint rule).
     const initial = setTimeout(() => {
-      void runChecks();
+      if (visible) void runChecks();
     }, 0);
+
     const id = setInterval(() => {
-      void runChecks();
-    }, 60_000);
+      if (visible) void runChecks();
+    }, POLL_INTERVAL_MS);
+
     return () => {
       clearTimeout(initial);
       clearInterval(id);
+      document.removeEventListener("visibilitychange", onVisibility);
+      abortRef.current?.abort();
+      abortRef.current = null;
     };
-  }, []);
+  }, [runChecks]);
 
   if (dismissed) return null;
 

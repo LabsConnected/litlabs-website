@@ -62,21 +62,29 @@ export default function GamesPage() {
       ? GAME_LIBRARY
       : getGamesByCategory(activeCategory);
 
-  const handlePlay = useCallback((game: Game) => {
-    if (game.platform === "browser" || game.externalUrl) {
-      window.open(
-        game.externalUrl || game.html5Url,
-        "_blank",
-        "noopener,noreferrer",
-      );
-      return;
-    }
-    if (game.platform === "emulator" || game.platform === "dos") {
+  const handlePlay = useCallback(
+    (game: Game) => {
+      // js-dos has its own dedicated page
+      if (game.emulator === "jsdos") {
+        router.push("/games/dos");
+        return;
+      }
+      if (game.platform === "browser" || game.externalUrl) {
+        window.open(
+          game.externalUrl || game.html5Url,
+          "_blank",
+          "noopener,noreferrer",
+        );
+        return;
+      }
+      if (game.platform === "emulator" || game.platform === "dos") {
+        setSelectedGame(game);
+        return;
+      }
       setSelectedGame(game);
-      return;
-    }
-    setSelectedGame(game);
-  }, []);
+    },
+    [router],
+  );
 
   const handleToggleFav = useCallback((gameId: string) => {
     const isNowFav = toggleFavorite(gameId);
