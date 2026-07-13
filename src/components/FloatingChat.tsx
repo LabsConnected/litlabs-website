@@ -133,8 +133,31 @@ export function FloatingChat() {
       return;
     }
 
+    // Check if getUserMedia is available (requires HTTPS or localhost)
+    if (
+      typeof navigator === "undefined" ||
+      !navigator.mediaDevices ||
+      !navigator.mediaDevices.getUserMedia
+    ) {
+      setMessages((prev) => [
+        ...prev,
+        {
+          role: "agent",
+          content:
+            "Voice input needs a secure connection (HTTPS). If you're on http://localhost, try https://localhost instead, or use the live site at litlabs.net.",
+        },
+      ]);
+      return;
+    }
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+        },
+      });
       streamRef.current = stream;
       const mimeType = MediaRecorder.isTypeSupported("audio/webm")
         ? "audio/webm"
@@ -152,24 +175,55 @@ export function FloatingChat() {
       recorder.onstop = () => {
         stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
+        window.dispatchEvent(
+          new CustomEvent("litt-voice", { detail: { active: false } }),
+        );
         void processRecording(mimeType || "audio/webm");
       };
 
       recorder.onerror = () => {
         stream.getTracks().forEach((t) => t.stop());
         setRecording(false);
+        window.dispatchEvent(
+          new CustomEvent("litt-voice", { detail: { active: false } }),
+        );
       };
 
       recorder.start();
       setRecording(true);
-    } catch {
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: "agent",
-          content: "Microphone access is needed for voice input.",
-        },
-      ]);
+      window.dispatchEvent(
+        new CustomEvent("litt-voice", { detail: { active: true } }),
+      );
+    } catch (err) {
+      const e = err as DOMException;
+      let hint = "Microphone access is needed for voice input.";
+      if (
+        e?.name === "NotAllowedError" ||
+        e?.name === "PermissionDeniedError"
+      ) {
+        hint =
+          "Microphone permission was denied. Click the camera/mic icon in your browser's address bar to allow access, then try again.";
+      } else if (
+        e?.name === "NotFoundError" ||
+        e?.name === "DevicesNotFoundError"
+      ) {
+        hint = "No microphone found. Connect a mic or headset and try again.";
+      } else if (
+        e?.name === "NotReadableError" ||
+        e?.name === "TrackStartError"
+      ) {
+        hint =
+          "Your microphone is busy or blocked by another app. Close other apps using the mic and try again.";
+      } else if (e?.name === "OverconstrainedError") {
+        hint =
+          "Your mic doesn't support the required audio constraints. Try a different device.";
+      } else if (e?.name === "SecurityError") {
+        hint =
+          "Voice input requires HTTPS. The live site at litlabs.net supports this.";
+      } else if (e?.message) {
+        hint = `Mic error: ${e.message}`;
+      }
+      setMessages((prev) => [...prev, { role: "agent", content: hint }]);
     }
   };
 

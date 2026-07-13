@@ -31,6 +31,7 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import UsageChart from "@/components/dashboard/UsageChart";
+import HologramCore from "@/components/dashboard/HologramCore";
 
 type Project = {
   id: string;
@@ -514,6 +515,25 @@ export default function DashboardView() {
 
         {/* Right column */}
         <div className="space-y-6">
+          {/* Hologram Core */}
+          <section className="flex flex-col items-center">
+            <Card padding="loose" className="w-full flex flex-col items-center">
+              <HologramCore
+                size={240}
+                label="LiTT Core"
+                trackCursor
+                trackKeyboard
+              />
+              <p
+                className="mt-2 text-center text-[10px]"
+                style={{ color: tokens.textMuted }}
+              >
+                The core reacts to your voice, typing, and cursor — talk to LiTT
+                Director to wake it up.
+              </p>
+            </Card>
+          </section>
+
           {/* Active agents */}
           <section>
             <SectionTitle

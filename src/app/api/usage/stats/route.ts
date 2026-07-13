@@ -117,12 +117,12 @@ export async function GET() {
     sb
       .from("agent_tasks")
       .select("created_at")
-      .eq("owner_id", userId)
+      .eq("user_id", userId)
       .gte("created_at", since),
     sb
       .from("agent_runs")
       .select("created_at")
-      .eq("owner_id", userId)
+      .eq("user_id", userId)
       .gte("created_at", since),
   ]);
 
