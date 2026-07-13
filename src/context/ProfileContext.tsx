@@ -29,7 +29,8 @@ export type WallpaperId =
   | "lava"
   | "crystal"
   | "tokyo"
-  | "solar";
+  | "solar"
+  | "honeycomb";
 
 export interface UserProfile {
   displayName: string;

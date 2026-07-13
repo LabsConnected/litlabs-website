@@ -27,7 +27,8 @@ export type SkinPreset =
   | "neon"
   | "blood"
   | "cosmic"
-  | "miami";
+  | "miami"
+  | "honeycomb";
 
 // Theme mode
 export type ThemeMode = "dark" | "light" | "system";
@@ -217,6 +218,15 @@ const darkSkins: Record<
     accentColor: "#14b8a6",
     boxBg: "#15252a",
   },
+  honeycomb: {
+    bgColor: "#0d0a05",
+    textColor: "#f5e6c8",
+    linkColor: "#fbbf24",
+    headerColor: "#fcd34d",
+    borderColor: "#3d3220",
+    accentColor: "#f59e0b",
+    boxBg: "#1a1510",
+  },
 };
 
 // Light mode variants — deep navy text for crisp daytime contrast
@@ -374,6 +384,15 @@ const lightSkins: Record<
     headerColor: "#0f766e",
     borderColor: "#ccfbf1",
     accentColor: "#14b8a6",
+    boxBg: "#ffffff",
+  },
+  honeycomb: {
+    bgColor: "#fefce8",
+    textColor: "#1a1510",
+    linkColor: "#d97706",
+    headerColor: "#b45309",
+    borderColor: "#fde68a",
+    accentColor: "#f59e0b",
     boxBg: "#ffffff",
   },
 };

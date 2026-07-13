@@ -5,6 +5,7 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
+import { FloatingChat } from "@/components/FloatingChat";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleTagManager } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
@@ -29,7 +30,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#0d0d0d",
+  themeColor: "#0d0a05",
 };
 
 const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
@@ -54,8 +55,8 @@ export const metadata: Metadata = {
     "artificial intelligence",
     "NoCode",
     "LiTTree-LabStudios",
-    "LiTT Code",
-    "LiTPage",
+    "LiTLabs",
+    "litlabs.net",
     "AI platform",
   ],
   authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
@@ -121,7 +122,7 @@ export default function RootLayout({
       <GoogleTagManager gtmId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
-        style={{ backgroundColor: "#0a0a0f" }}
+        style={{ backgroundColor: "#0d0a05" }}
       >
         {clerkKey ? (
           <ClerkProvider
@@ -136,31 +137,31 @@ export default function RootLayout({
             }
             appearance={{
               variables: {
-                colorPrimary: "#00f0ff",
-                colorBackground: "#0a0a12",
-                colorText: "#e0e0ff",
-                colorTextSecondary: "#8888aa",
-                colorDanger: "#ff00a0",
-                colorSuccess: "#00ff41",
+                colorPrimary: "#fbbf24",
+                colorBackground: "#0a0a0f",
+                colorText: "#f5e6c8",
+                colorTextSecondary: "#a8916b",
+                colorDanger: "#ef4444",
+                colorSuccess: "#22c55e",
                 borderRadius: "8px",
               },
               elements: {
                 card: {
-                  backgroundColor: "#151520",
-                  border: "1px solid #2a2a45",
-                  boxShadow: "0 4px 20px rgba(0,240,255,0.1)",
+                  backgroundColor: "#1a1510",
+                  border: "1px solid #3d3220",
+                  boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
                 },
                 userButtonPopoverCard: {
-                  backgroundColor: "#151520",
-                  border: "1px solid #2a2a45",
+                  backgroundColor: "#1a1510",
+                  border: "1px solid #3d3220",
                 },
                 userButtonPopoverActionButton: {
                   "&:hover": {
-                    backgroundColor: "rgba(0,240,255,0.1)",
+                    backgroundColor: "rgba(251,191,36,0.1)",
                   },
                 },
                 badge: {
-                  backgroundColor: "#ff00a0",
+                  backgroundColor: "#f59e0b",
                 },
               },
             }}
@@ -170,6 +171,7 @@ export default function RootLayout({
         ) : (
           shell
         )}
+        <FloatingChat />
         <Analytics />
         <SpeedInsights />
       </body>

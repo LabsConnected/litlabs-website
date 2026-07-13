@@ -5,7 +5,7 @@ export type WallpaperId =
   | 'default' | 'gradient' | 'mesh' | 'dark' | 'custom'
   | 'nebula' | 'cyberpunk' | 'aurora' | 'matrix' | 'sunset'
   | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass'
-  | 'lava' | 'crystal' | 'tokyo' | 'solar';
+  | 'lava' | 'crystal' | 'tokyo' | 'solar' | 'honeycomb';
 
 export interface Wallpaper {
   id: WallpaperId;
@@ -254,6 +254,21 @@ export const WALLPAPERS: Wallpaper[] = [
         radial-gradient(ellipse at 40% 60%, #f9731630 0%, transparent 50%),
         radial-gradient(ellipse at 60% 40%, #f59e0b30 0%, transparent 50%),
         linear-gradient(135deg, #2a1a0a 0%, #3d1f0a 100%)
+      `
+    }
+  },
+  {
+    id: 'honeycomb',
+    name: 'Honeycomb Drip',
+    description: 'Hexagonal honeycomb pattern with amber glow',
+    category: 'abstract',
+    preview: 'repeating-conic-gradient(from 30deg at 50% 50%, #f59e0b10 0deg 60deg, transparent 60deg 120deg), #0d0a05',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 50% 50%, #fbbf2415 0%, transparent 60%),
+        radial-gradient(ellipse at 20% 80%, #f59e0b12 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, #d9770612 0%, transparent 50%),
+        linear-gradient(180deg, #0d0a05 0%, #1a1510 100%)
       `
     }
   },
