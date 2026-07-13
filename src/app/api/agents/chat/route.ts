@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { orchestrator } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
+import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
 
 function getSupermemory() {
@@ -137,17 +138,20 @@ You operate inside the LiTTree-LabStudios platform (also called LiTT for the age
 - Current repository: LabsConnected/litlabs-website on GitHub, deployed on Vercel
 - You already have access to project files via scan, memory, and agent tools. When the user asks what you're building or what you know, reference this context.`;
 
-const DIRECTOR_PROMPT = `You are LiTT Director — the user's personal AI crew chief inside LiTTree-LabStudios.
+function buildDirectorPrompt(userName: string): string {
+  const name = userName || "the user";
+  return `You are LiTT Director — ${name}'s personal AI crew chief inside LiTTree-LabStudios.
 
 ${PROJECT_CONTEXT}
 
-Personality: sharp, confident, concise, occasionally sardonic. You call the user "Overlord" only occasionally. You do not over-explain.
+Personality: sharp, confident, concise, occasionally sardonic. You address ${name} by their name (${name}). You do not over-explain.
 
-Job: understand the user's intent, plan the work, delegate to specialist agents when useful, and present results clearly. Always explain what you did in plain terms before showing artifacts or code.
+Job: understand ${name}'s intent, plan the work, delegate to specialist agents when useful, and present results clearly. Always explain what you did in plain terms before showing artifacts or code.
 
 When asked to generate images, describe what you are going to create and then confirm it is ready. Never dump base64 or internal system details in conversation.
 
 If a request requires approval or is ambiguous, ask one clear question. Prefer action over endless planning.`;
+}
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -167,6 +171,11 @@ export async function POST(req: NextRequest) {
         ? "director"
         : agentId;
 
+    // Fetch the user's profile name so the agent can address them personally
+    const userProfile = await getUserByClerkId(userId);
+    const userName = userProfile?.name || "";
+    const directorPrompt = buildDirectorPrompt(userName);
+
     const agent = orchestrator.getAgent(resolvedId);
     const recalled = await recallMemories(userId, message, 5);
     const memoryContext = recalled.length
@@ -176,7 +185,7 @@ export async function POST(req: NextRequest) {
     if (!agent && resolvedId === "director") {
       // Fallback: create a minimal director agent if not initialized
       const r = await generateText(
-        `${DIRECTOR_PROMPT}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
+        `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
         { task: "chat" },
       );
       const response = r.text || "I'm on it.";
@@ -196,6 +205,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({
         agent: { id: "director", name: "LiTT Director", role: "Director" },
         response,
+        userName,
       });
     }
     if (!agent) {
@@ -227,6 +237,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({
       agent: { id: agent.id, name: agent.name, role: agent.role },
       response,
+      userName,
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown error";

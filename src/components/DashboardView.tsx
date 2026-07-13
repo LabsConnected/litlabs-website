@@ -272,9 +272,33 @@ export default function DashboardView() {
         <Search size={15} style={{ color: tokens.textMuted }} />
         <input
           type="text"
-          placeholder="Search projects, agents, artifacts..."
+          placeholder={`Search ${displayName}'s projects, agents, artifacts...`}
           className="flex-1 bg-transparent text-sm outline-none placeholder:text-neutral-500"
           style={{ color: tokens.text }}
+          onChange={(e) => {
+            // Store query for potential future use
+            void e.target.value;
+          }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              const input = e.target as HTMLInputElement;
+              const q = input.value.trim().toLowerCase();
+              const routes: Record<string, string> = {
+                studio: "/studio",
+                agents: "/agents",
+                games: "/games",
+                settings: "/settings",
+                projects: "/projects",
+                dashboard: "/dashboard",
+                gallery: "/gallery",
+                social: "/social",
+                wallet: "/wallet",
+                marketplace: "/marketplace",
+              };
+              const match = Object.keys(routes).find((k) => k.startsWith(q));
+              if (match) window.location.href = routes[match];
+            }
+          }}
         />
         <kbd
           className="hidden rounded px-1.5 py-0.5 text-[9px] font-bold uppercase tracking-widest sm:block"
@@ -352,13 +376,29 @@ export default function DashboardView() {
             <div className="flex items-center gap-2.5 text-xs">
               <StatusBadge status="running" label="Director" />
               <span style={{ color: tokens.textMuted }}>
-                Standing by for your next mission.
+                Standing by for {displayName}&apos;s next mission.
               </span>
             </div>
             <div className="flex items-center gap-2.5 text-xs">
-              <StatusBadge status="pending" label="0 tasks" />
+              <StatusBadge
+                status="pending"
+                label={`${agents.data?.length ?? 0} agents`}
+              />
               <span style={{ color: tokens.textMuted }}>
-                No active generations.
+                {agents.data?.length
+                  ? `${agents.data.length} agent${agents.data.length === 1 ? "" : "s"} on roster.`
+                  : "No agents deployed yet."}
+              </span>
+            </div>
+            <div className="flex items-center gap-2.5 text-xs">
+              <StatusBadge
+                status="info"
+                label={`${artifacts.data?.length ?? 0} artifacts`}
+              />
+              <span style={{ color: tokens.textMuted }}>
+                {artifacts.data?.length
+                  ? `${artifacts.data.length} artifact${artifacts.data.length === 1 ? "" : "s"} created.`
+                  : "No artifacts yet — start creating in Studio."}
               </span>
             </div>
           </div>

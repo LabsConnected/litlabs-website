@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useProfile } from "@/context/ProfileContext";
 import {
   HelpCircle,
   Image,
@@ -83,13 +84,18 @@ export function DirectorDrawer({
   initialMode?: DirectorMode;
 }) {
   const { resolvedColors: T } = useTheme();
+  const { profile } = useProfile();
+  const userName = profile.displayName || "Creator";
   const [mode, setMode] = useState<DirectorMode>(initialMode);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [messages, setMessages] = useState<
     { role: "user" | "agent"; content: string }[]
   >([
-    { role: "agent", content: "I'm LiTT Director. What would you like to do?" },
+    {
+      role: "agent",
+      content: `Hey ${userName}, I'm LiTT Director. What would you like to do?`,
+    },
   ]);
   const scrollRef = useRef<HTMLDivElement>(null);
 
@@ -179,7 +185,7 @@ export function DirectorDrawer({
                 className="text-sm font-black"
                 style={{ color: T.headerColor }}
               >
-                LiTT Director
+                LiTT Director · {userName}
               </div>
               <div className="text-[10px] opacity-60">Working in: LitLabs</div>
             </div>

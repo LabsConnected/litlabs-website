@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useProfile } from "@/context/ProfileContext";
 import {
   MessageCircle,
   X,
@@ -33,13 +34,14 @@ const VOICES = [
 ];
 
 export function FloatingChat() {
+  const { profile } = useProfile();
+  const userName = profile.displayName || "Creator";
   const [open, setOpen] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "agent",
-      content:
-        "Hey, I'm LiTT Director — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?",
+      content: `Hey ${userName}, I'm LiTT Director — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
     },
   ]);
   const [loading, setLoading] = useState(false);
@@ -55,6 +57,24 @@ export function FloatingChat() {
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const voiceMenuRef = useRef<HTMLDivElement>(null);
+
+  // Update greeting when profile name changes
+  useEffect(() => {
+    const id = setTimeout(() => {
+      setMessages((prev) => {
+        if (prev.length === 1 && prev[0].role === "agent") {
+          return [
+            {
+              role: "agent" as const,
+              content: `Hey ${userName}, I'm LiTT Director — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
+            },
+          ];
+        }
+        return prev;
+      });
+    }, 0);
+    return () => clearTimeout(id);
+  }, [userName]);
 
   useEffect(() => {
     if (scrollRef.current) {
@@ -336,7 +356,7 @@ export function FloatingChat() {
               </div>
               <div>
                 <div className="text-xs font-black text-neutral-100">
-                  LiTT Director
+                  LiTT Director · {userName}
                 </div>
                 <div className="flex items-center gap-1 text-[9px] text-green-400">
                   <span className="h-1.5 w-1.5 rounded-full bg-green-400" />
@@ -488,7 +508,7 @@ export function FloatingChat() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder={recording ? "Listening…" : "Ask LiTT Director…"}
+              placeholder={recording ? "Listening…" : `Ask LiTT Director…`}
               disabled={loading || recording || transcribing}
               className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-amber-500/40"
             />
