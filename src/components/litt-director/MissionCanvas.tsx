@@ -112,7 +112,7 @@ const STATUS_CONFIG: Record<
 export function MissionCanvas({
   onPromptAction,
 }: {
-  onPromptAction?: (prompt: string) => void;
+  onPromptAction?: (starter: { id: string; prompt: string }) => void;
 }) {
   const { state, steps, artifacts, activeArtifact, setActiveArtifact } =
     useDirectorRuntime();
@@ -163,7 +163,9 @@ export function MissionCanvas({
                 return (
                   <button
                     key={s.id}
-                    onClick={() => onPromptAction?.(s.prompt)}
+                    onClick={() =>
+                      onPromptAction?.({ id: s.id, prompt: s.prompt })
+                    }
                     className="flex flex-col items-center gap-2 rounded-xl border border-neutral-800/60 bg-neutral-900/40 p-3 text-center transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
                   >
                     <Icon size={18} className="text-cyan-400" />

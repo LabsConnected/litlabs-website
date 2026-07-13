@@ -9,6 +9,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  if (!process.env.GITHUB_APP_ID || !process.env.GITHUB_PRIVATE_KEY) {
+    return NextResponse.json(
+      { error: "GitHub App is not configured" },
+      { status: 503 },
+    );
+  }
+
   try {
     const { data: rows, error } = await supabaseAdmin
       .from("github_installations")

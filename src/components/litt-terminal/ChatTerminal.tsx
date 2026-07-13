@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useDirectorRuntime } from "@/components/litt-director/DirectorRuntime";
 
 interface SpeechRecognitionAlternative {
@@ -144,12 +144,14 @@ export function ChatTerminal({
   onConnectionChangeAction,
   agentId = "director",
   onDeployAction,
+  trigger,
 }: {
   onLogAction: (entry: string) => void;
   onCommandAction: (cmd: string) => void;
   onConnectionChangeAction: (connected: boolean) => void;
   agentId?: string;
   onDeployAction?: () => void;
+  trigger?: { text: string; mode?: ComposerMode } | null;
 }) {
   const runtime = useDirectorRuntime();
   const [mode, setMode] = useState<ComposerMode>("ask");
@@ -275,24 +277,24 @@ export function ChatTerminal({
       const data = await res.json();
       if (!res.ok || data.error)
         throw new Error(data.error || "Image generation failed");
-      const url = data.downloadUrl || data.thumbUrl || data.url;
+      const firstImage = Array.isArray(data.images) ? data.images[0] : null;
+      const url =
+        firstImage?.url || data.downloadUrl || data.thumbUrl || data.url;
       if (!url) throw new Error("No image URL returned");
       idCounter.current += 1;
       const artifact = {
         id: `img_${idCounter.current}`,
         type: "image" as const,
         url,
-        title: data.title || `Image: ${prompt}`,
+        title: firstImage?.title || data.title || `Image: ${prompt}`,
         downloadUrl: url,
-        width: data.width || 1024,
-        height: data.height || 1024,
+        width: firstImage?.width || data.width || 1024,
+        height: firstImage?.height || data.height || 1024,
       };
       runtime.addArtifact(artifact);
       runtime.addToolStep(runId, "Visionary generated the image");
-      runtime.setAgentResponse(
-        runId,
-        `Your image is ready. ${data.title || "Generated image"}.`,
-      );
+      const title = firstImage?.title || data.title || "Generated image";
+      runtime.setAgentResponse(runId, `Your image is ready. ${title}.`);
       runtime.setState("complete");
       onLogAction(`[IMAGE] Generated: ${url.slice(0, 60)}...`);
       setTimeout(setIdle, 2500);
@@ -313,28 +315,97 @@ export function ChatTerminal({
       text,
     );
 
-  const sendChat = async (text: string) => {
+  const sendChat = async (text: string, forcedMode?: ComposerMode) => {
     if (!text.trim()) return;
+    const effectiveMode = forcedMode || mode;
 
-    if (mode === "image" || (mode === "ask" && isImageIntent(text))) {
+    if (
+      effectiveMode === "image" ||
+      (effectiveMode === "ask" && isImageIntent(text))
+    ) {
       await generateImage(text);
       setInput("");
       return;
     }
-    if (mode === "deploy") {
+    if (effectiveMode === "deploy") {
       onDeployAction?.();
       setInput("");
       return;
     }
-    if (mode === "memory") {
-      runtime.setState("thinking");
+    if (effectiveMode === "memory") {
       const runId = runtime.addUserStep(text);
-      runtime.setAgentResponse(
-        runId,
-        "Memory controls are being wired to your personal agent. Try again after the memory UI integration is complete.",
+      runtime.setState("thinking");
+      setLoading(true);
+
+      const isSaveIntent = /^(remember|save|note|store|record)\b/i.test(
+        text.trim(),
       );
-      runtime.setState("idle");
-      setInput("");
+      const cleanedText = text
+        .trim()
+        .replace(/^(remember|save|note|store|record)\b[\s:,-]*/i, "")
+        .trim();
+
+      try {
+        if (isSaveIntent && cleanedText) {
+          const res = await fetch("/api/memory", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              content: cleanedText,
+              scope: "conversation",
+              reason: "user asked LiTT to remember",
+              metadata: { source: "studio-chat", agentId },
+            }),
+          });
+          const data = await res.json();
+          if (!res.ok || data.error)
+            throw new Error(data.error || "Save failed");
+          runtime.setAgentResponse(
+            runId,
+            `Saved to memory: "${cleanedText}". It is now indexed in Supabase${process.env.NEXT_PUBLIC_SUPERMEMORY_API_KEY ? " + Supermemory" : ""}.`,
+          );
+          onLogAction(`[MEMORY] Saved: ${cleanedText.slice(0, 60)}`);
+        } else {
+          const res = await fetch(
+            `/api/memory?q=${encodeURIComponent(text.trim())}&limit=5`,
+          );
+          const data = await res.json();
+          if (!res.ok || data.error)
+            throw new Error(data.error || "Recall failed");
+          const memories = Array.isArray(data.memories) ? data.memories : [];
+          if (memories.length === 0) {
+            runtime.setAgentResponse(
+              runId,
+              'I don\'t have any memories matching that. Try saying "remember [something]" to save it.',
+            );
+          } else {
+            const summary = memories
+              .map(
+                (m: { content?: string }, i: number) =>
+                  `${i + 1}. ${m.content || ""}`,
+              )
+              .join("\n");
+            runtime.setAgentResponse(
+              runId,
+              `Found ${memories.length} memory match${memories.length === 1 ? "" : "es"}:\n${summary}`,
+            );
+          }
+          onLogAction(
+            `[MEMORY] Recalled ${memories.length} items for: ${text.slice(0, 60)}`,
+          );
+        }
+        runtime.setState("complete");
+      } catch (err) {
+        const errorMsg =
+          err instanceof Error ? err.message : "Memory request failed";
+        runtime.setAgentResponse(runId, `Memory error: ${errorMsg}`);
+        runtime.setState("error");
+        onLogAction(`[MEMORY] Error: ${errorMsg}`);
+      } finally {
+        setLoading(false);
+        setTimeout(setIdle, 2000);
+        setInput("");
+      }
       return;
     }
 
@@ -382,6 +453,20 @@ export function ChatTerminal({
       abortRef.current = null;
     }
   };
+
+  // Process external triggers from the mission canvas / other UI surfaces.
+  useEffect(() => {
+    if (!trigger?.text) return;
+    const task = () => {
+      if (trigger.mode && MODES.some((m) => m.id === trigger.mode)) {
+        setMode(trigger.mode);
+      }
+      setInput(trigger.text);
+      sendChat(trigger.text, trigger.mode);
+    };
+    const id = setTimeout(task, 0);
+    return () => clearTimeout(id);
+  }, [trigger, sendChat]);
 
   const runAsCommand = () => {
     if (!input.trim()) return;

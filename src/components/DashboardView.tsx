@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useUser, useAuth } from "@clerk/nextjs";
 import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
 import {
@@ -27,6 +27,7 @@ import {
   Users,
   ArrowRight,
   Zap,
+  LogOut,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -221,6 +222,7 @@ function SectionTitle({
 
 export default function DashboardView() {
   const { user } = useUser();
+  const { signOut } = useAuth();
   const { profile } = useProfile();
   const { tokens } = useTheme();
 
@@ -238,16 +240,28 @@ export default function DashboardView() {
         title={`Welcome back, ${displayName}`}
         subtitle="Your mission control. Pick up where you left off or start something new."
         actions={
-          <Link
-            href="/studio"
-            className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
-            style={{
-              background: `linear-gradient(135deg, ${tokens.primary}, ${tokens.primary}cc)`,
-              boxShadow: `0 0 20px ${tokens.primary}40`,
-            }}
-          >
-            <Plus size={14} /> Open Studio
-          </Link>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => signOut?.({ redirectUrl: "/" })}
+              className="inline-flex items-center gap-2 rounded-xl px-3 py-2 text-xs font-black transition-all hover:opacity-90 hover:scale-[1.02]"
+              style={{
+                border: `1px solid ${tokens.border}50`,
+                color: tokens.text,
+              }}
+            >
+              <LogOut size={14} /> Sign Out
+            </button>
+            <Link
+              href="/studio"
+              className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
+              style={{
+                background: `linear-gradient(135deg, ${tokens.primary}, ${tokens.primary}cc)`,
+                boxShadow: `0 0 20px ${tokens.primary}40`,
+              }}
+            >
+              <Plus size={14} /> Open Studio
+            </Link>
+          </div>
         }
       />
 

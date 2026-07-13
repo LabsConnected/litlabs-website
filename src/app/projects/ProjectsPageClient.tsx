@@ -43,9 +43,23 @@ export default function ProjectsPageClient() {
       setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect
       return;
     }
+    const safeJson = async (r: Response) => {
+      const text = await r.text();
+      try {
+        return JSON.parse(text);
+      } catch {
+        return {
+          error: text.slice(0, 200) || `Unexpected response (${r.status})`,
+        };
+      }
+    };
     Promise.all([
-      fetch("/api/projects").then((r) => r.json()),
-      fetch("/api/github/installations").then((r) => r.json()),
+      fetch("/api/projects")
+        .then(safeJson)
+        .catch(() => ({ projects: [] })),
+      fetch("/api/github/installations")
+        .then(safeJson)
+        .catch(() => ({ installations: [] })),
     ])
       .then(([projectsData, installationsData]) => {
         setProjects(projectsData.projects || []);
@@ -167,8 +181,8 @@ export default function ProjectsPageClient() {
               LiTT uses a GitHub App — you choose exactly which repos to access.
             </p>
           </div>
-          <a
-            href="/api/github/install"
+          <Link
+            href="/settings?tab=integrations"
             className="inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-black transition-all hover:opacity-90"
             style={{
               backgroundColor: tokens.primary,
@@ -177,7 +191,7 @@ export default function ProjectsPageClient() {
             }}
           >
             <Plus size={14} /> Connect GitHub
-          </a>
+          </Link>
         </div>
       </div>
 
@@ -230,8 +244,8 @@ export default function ProjectsPageClient() {
                   Connect a GitHub repository to start building in a real,
                   isolated workspace.
                 </p>
-                <a
-                  href="/api/github/install"
+                <Link
+                  href="/settings?tab=integrations"
                   className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-black"
                   style={{
                     backgroundColor: tokens.primary,
@@ -239,7 +253,7 @@ export default function ProjectsPageClient() {
                   }}
                 >
                   <GitPullRequest size={14} /> Connect GitHub
-                </a>
+                </Link>
               </div>
             ) : (
               projects.map((p) => (

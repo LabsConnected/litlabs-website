@@ -25,7 +25,11 @@ export type WallpaperId =
   | "forest"
   | "cosmic"
   | "minimal"
-  | "glass";
+  | "glass"
+  | "lava"
+  | "crystal"
+  | "tokyo"
+  | "solar";
 
 export interface UserProfile {
   displayName: string;
@@ -94,14 +98,18 @@ function loadLocal(): UserProfile {
   try {
     const stored = localStorage.getItem("litlabs-profile");
     if (stored) return { ...defaultProfile, ...JSON.parse(stored) };
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
   return defaultProfile;
 }
 
 function saveLocal(profile: UserProfile) {
   try {
     localStorage.setItem("litlabs-profile", JSON.stringify(profile));
-  } catch { /* ignore */ }
+  } catch {
+    /* ignore */
+  }
 }
 
 function profileToApi(p: UserProfile) {
@@ -193,7 +201,9 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <ProfileContext.Provider value={{ profile, updateProfile, resetProfile, loading }}>
+    <ProfileContext.Provider
+      value={{ profile, updateProfile, resetProfile, loading }}
+    >
       {children}
     </ProfileContext.Provider>
   );

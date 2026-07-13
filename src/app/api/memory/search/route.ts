@@ -1,11 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { Supermemory } from "supermemory";
+import { supabaseAdmin } from "@/lib/supabase";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
   if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
   return new Supermemory({ apiKey: key });
+}
+
+function hasSupermemory() {
+  return Boolean(process.env.SUPERMEMORY_API_KEY?.trim());
 }
 
 function getContainerTag(userId: string, scope?: string) {
@@ -24,13 +29,59 @@ export async function GET(req: NextRequest) {
     const scope = searchParams.get("scope") || undefined;
     const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
 
-    const results = await getSupermemory().search.memories({
-      q,
-      containerTag: getContainerTag(userId, scope),
-      limit,
-    });
+    if (!q.trim()) {
+      const { data, error } = await supabaseAdmin
+        .from("memories")
+        .select("*")
+        .eq("owner_id", userId)
+        .order("created_at", { ascending: false })
+        .limit(limit);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ memories: data || [], count: (data || []).length, source: "supabase" });
+    }
 
-    return NextResponse.json(results);
+    let rawHits: unknown[] = [];
+    let supermemoryError: string | null = null;
+    if (hasSupermemory()) {
+      try {
+        const results = (await getSupermemory().search.memories({
+          q,
+          containerTag: getContainerTag(userId, scope),
+          limit,
+        })) as { memories?: unknown[]; results?: unknown[] };
+        rawHits = results.memories || results.results || [];
+      } catch (err) {
+        supermemoryError = err instanceof Error ? err.message : "Supermemory search failed";
+      }
+    }
+
+    const supabaseIds = rawHits
+      .map((hit: unknown) => {
+        if (!hit || typeof hit !== "object") return null;
+        const h = hit as Record<string, unknown>;
+        const metadata = h.metadata as Record<string, unknown> | undefined;
+        return (metadata?.supabaseMemoryId as string) || null;
+      })
+      .filter(Boolean) as string[];
+
+    let memories: unknown[] = [];
+    if (supabaseIds.length) {
+      const { data, error } = await supabaseAdmin
+        .from("memories")
+        .select("*")
+        .in("id", supabaseIds)
+        .eq("owner_id", userId);
+      if (!error) memories = data || [];
+    }
+
+    return NextResponse.json({
+      query: q,
+      memories,
+      hits: rawHits,
+      count: memories.length,
+      supermemoryError,
+      source: hasSupermemory() ? "supermemory+supabase" : "supabase",
+    });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Search failed";
     return NextResponse.json({ error: message }, { status: 500 });

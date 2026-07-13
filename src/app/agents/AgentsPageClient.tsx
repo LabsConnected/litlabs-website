@@ -59,10 +59,11 @@ export default function AgentsPageClient() {
               className="text-2xl font-black"
               style={{ color: T.headerColor }}
             >
-              LiTT Command Center
+              LiTTree-LabStudios
             </h1>
             <p className="text-xs" style={{ color: T.textMuted }}>
-              5 consolidated AI agents — live status & quick access
+              LiTT Command Center — 5 consolidated AI agents, live status &
+              quick access
             </p>
           </div>
         </div>

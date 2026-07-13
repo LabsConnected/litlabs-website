@@ -1,5 +1,8 @@
 "use client";
 
+import { useEffect } from "react";
+import { useRouter } from "next/navigation";
+import { useAuth } from "@clerk/nextjs";
 import { useState } from "react";
 import Link from "next/link";
 import Image from "next/image";
@@ -7,6 +10,29 @@ import { useTheme } from "@/context/ThemeContext";
 import PageShell from "@/components/PageShell";
 
 export default function ShowcasePage() {
+  const { isLoaded, userId } = useAuth();
+  const router = useRouter();
+
+  useEffect(() => {
+    if (isLoaded && !userId) {
+      router.push("/sign-in?redirect_url=/showcase");
+    }
+  }, [isLoaded, userId, router]);
+
+  if (!isLoaded) {
+    return (
+      <PageShell>
+        <div className="flex min-h-[50vh] items-center justify-center text-sm text-neutral-500">
+          Loading showcase...
+        </div>
+      </PageShell>
+    );
+  }
+
+  return <ShowcasePageInner />;
+}
+
+function ShowcasePageInner() {
   const { resolvedColors: T } = useTheme();
   const [activeTab, setActiveTab] = useState<
     "images" | "architecture" | "case-study"

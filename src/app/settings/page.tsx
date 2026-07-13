@@ -28,6 +28,8 @@ import {
   ExternalLink,
   Terminal,
   ShieldCheck,
+  GitBranch,
+  Plus,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -49,6 +51,7 @@ const TABS = [
   { id: "profile", label: "Profile", icon: User },
   { id: "appearance", label: "Appearance", icon: Palette },
   { id: "workspace", label: "Workspace", icon: LayoutGrid },
+  { id: "integrations", label: "Integrations", icon: GitBranch },
   { id: "cli", label: "CLI Tools", icon: Terminal },
   { id: "keys", label: "BYOK", icon: Key },
   { id: "notifications", label: "Notifications", icon: Bell },
@@ -69,7 +72,55 @@ export default function SettingsPage() {
   const { balance } = useWallet();
   const { crtEnabled, toggleCrt } = useCrtToggle();
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [activeTab, setActiveTab] = useState<TabId>(() => {
+    if (typeof window === "undefined") return "profile";
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    return tab && TABS.some((t) => t.id === tab) ? (tab as TabId) : "profile";
+  });
+
+  /* Integrations state */
+  const [installations, setInstallations] = useState<
+    { id: number; account: string | null }[]
+  >([]);
+  const [integrationsLoading, setIntegrationsLoading] = useState(false);
+  const [integrationsError, setIntegrationsError] = useState<string | null>(
+    () => {
+      if (typeof window === "undefined") return null;
+      return new URLSearchParams(window.location.search).get("error");
+    },
+  );
+
+  // Load GitHub integration status when the integrations tab is active
+  useEffect(() => {
+    if (!isSignedIn || activeTab !== "integrations") return;
+    const taskId = setTimeout(() => setIntegrationsLoading(true), 0);
+    fetch("/api/github/installations")
+      .finally(() => clearTimeout(taskId))
+      .then(async (r) => {
+        if (!r.ok) {
+          const text = await r.text();
+          let message = `GitHub API error (${r.status})`;
+          try {
+            const json = JSON.parse(text);
+            if (json.error) message = json.error;
+          } catch {
+            // keep status message
+          }
+          throw new Error(message);
+        }
+        return r.json();
+      })
+      .then((data) => {
+        setInstallations(data.installations || []);
+        setIntegrationsError(null);
+      })
+      .catch((err) => {
+        setIntegrationsError(
+          err instanceof Error ? err.message : "Failed to load GitHub status",
+        );
+      })
+      .finally(() => setIntegrationsLoading(false));
+  }, [isSignedIn, activeTab]);
 
   /* Profile state */
   const [name, setName] = useState(profile.displayName || "");
@@ -159,6 +210,26 @@ export default function SettingsPage() {
       .catch(() => {});
   }, [isSignedIn]);
 
+  /* Load remote preferences once */
+  useEffect(() => {
+    if (!isSignedIn) return;
+    fetch("/api/settings/preferences")
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data) => {
+        if (!data?.preferences) return;
+        const p = data.preferences;
+        setDiscordWebhook(p.notify_discord || "");
+        setAlexaEnabled(Boolean(p.notify_alexa));
+        setEmailDigest(Boolean(p.notify_email));
+        setAutoSaveDrafts(p.workspace_autosave ?? true);
+        setCompactMode(Boolean(p.workspace_compact));
+        setLivePreview(p.workspace_live_preview ?? true);
+        setShowTelemetry(Boolean(p.workspace_telemetry));
+        setDefaultWorkspace(p.workspace_default || "studio");
+      })
+      .catch(() => {});
+  }, [isSignedIn]);
+
   const saveProfile = useCallback(async () => {
     setProfileSaved(false);
     setProfileError(null);
@@ -204,22 +275,67 @@ export default function SettingsPage() {
     setTimeout(() => setKeysSaved(false), 2000);
   }, [keys]);
 
-  const saveNotifications = useCallback(() => {
+  const saveNotifications = useCallback(async () => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("litlabs-notify-discord", discordWebhook);
-    localStorage.setItem("litlabs-notify-alexa", String(alexaEnabled));
-    localStorage.setItem("litlabs-notify-email", String(emailDigest));
+    const payload = {
+      notify_discord: discordWebhook,
+      notify_alexa: alexaEnabled,
+      notify_email: emailDigest,
+    };
+    const fallback = () => {
+      localStorage.setItem("litlabs-notify-discord", discordWebhook);
+      localStorage.setItem("litlabs-notify-alexa", String(alexaEnabled));
+      localStorage.setItem("litlabs-notify-email", String(emailDigest));
+    };
+    try {
+      const res = await fetch("/api/settings/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) fallback();
+    } catch {
+      fallback();
+    }
     setNotifSaved(true);
     setTimeout(() => setNotifSaved(false), 2000);
   }, [discordWebhook, alexaEnabled, emailDigest]);
 
-  const saveWorkspace = useCallback(() => {
+  const saveWorkspace = useCallback(async () => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("litlabs-workspace-autosave", String(autoSaveDrafts));
-    localStorage.setItem("litlabs-workspace-compact", String(compactMode));
-    localStorage.setItem("litlabs-workspace-live-preview", String(livePreview));
-    localStorage.setItem("litlabs-workspace-telemetry", String(showTelemetry));
-    localStorage.setItem("litlabs-workspace-default", defaultWorkspace);
+    const payload = {
+      workspace_autosave: autoSaveDrafts,
+      workspace_compact: compactMode,
+      workspace_live_preview: livePreview,
+      workspace_telemetry: showTelemetry,
+      workspace_default: defaultWorkspace,
+    };
+    const fallback = () => {
+      localStorage.setItem(
+        "litlabs-workspace-autosave",
+        String(autoSaveDrafts),
+      );
+      localStorage.setItem("litlabs-workspace-compact", String(compactMode));
+      localStorage.setItem(
+        "litlabs-workspace-live-preview",
+        String(livePreview),
+      );
+      localStorage.setItem(
+        "litlabs-workspace-telemetry",
+        String(showTelemetry),
+      );
+      localStorage.setItem("litlabs-workspace-default", defaultWorkspace);
+    };
+    try {
+      const res = await fetch("/api/settings/preferences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      if (!res.ok) fallback();
+    } catch {
+      fallback();
+    }
     setWorkspaceSaved(true);
     setTimeout(() => setWorkspaceSaved(false), 2000);
   }, [
@@ -1175,6 +1291,140 @@ export default function SettingsPage() {
                   {keysSaved ? "Saved" : "Save Keys"}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Integrations Tab */}
+        {activeTab === "integrations" && (
+          <div className="space-y-6">
+            <div className="rounded-2xl border p-4 sm:p-6" style={cardStyle}>
+              <div className="flex items-start gap-3 mb-5">
+                <GitBranch size={20} style={{ color: T.accentColor }} />
+                <div>
+                  <h2
+                    className="text-lg font-black"
+                    style={{ color: T.headerColor }}
+                  >
+                    GitHub Integration
+                  </h2>
+                  <p
+                    className="text-xs opacity-70 max-w-2xl"
+                    style={{ color: T.textMuted }}
+                  >
+                    Connect a GitHub repository to create a real, isolated
+                    workspace. LiTT uses a GitHub App — you choose exactly which
+                    repos to access.
+                  </p>
+                </div>
+              </div>
+
+              {integrationsLoading ? (
+                <div
+                  className="flex items-center gap-2 text-sm"
+                  style={{ color: T.textMuted }}
+                >
+                  <Loader2 size={16} className="animate-spin" />
+                  Checking GitHub status…
+                </div>
+              ) : integrationsError ? (
+                <div
+                  className="rounded-xl border p-4 mb-4"
+                  style={{
+                    borderColor: "#ef444440",
+                    backgroundColor: "#ef444408",
+                  }}
+                >
+                  <div
+                    className="text-sm font-bold mb-1"
+                    style={{ color: T.textColor }}
+                  >
+                    GitHub integration is not ready
+                  </div>
+                  <p className="text-xs mb-3" style={{ color: T.textMuted }}>
+                    {integrationsError}
+                  </p>
+                  <p className="text-xs" style={{ color: T.textMuted }}>
+                    Ask the site owner to configure the GitHub App environment
+                    variables (GITHUB_APP_ID and GITHUB_PRIVATE_KEY) before
+                    connecting a repository.
+                  </p>
+                </div>
+              ) : (
+                <>
+                  {installations.length === 0 ? (
+                    <div
+                      className="rounded-xl border p-4 mb-4"
+                      style={{
+                        borderColor: `${T.borderColor}40`,
+                        backgroundColor: `${T.boxBg}80`,
+                      }}
+                    >
+                      <div
+                        className="text-sm font-bold mb-1"
+                        style={{ color: T.textColor }}
+                      >
+                        No GitHub account connected
+                      </div>
+                      <p
+                        className="text-xs mb-3"
+                        style={{ color: T.textMuted }}
+                      >
+                        Connect your GitHub account to choose repositories for
+                        LiTT workspaces.
+                      </p>
+                      <a
+                        href="/api/github/install"
+                        className="inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-bold transition-all hover:opacity-90"
+                        style={{
+                          backgroundColor: T.accentColor,
+                          color: T.bgColor,
+                        }}
+                      >
+                        <Plus size={14} /> Connect GitHub
+                      </a>
+                    </div>
+                  ) : (
+                    <div className="space-y-4">
+                      <div
+                        className="text-[10px] font-black uppercase tracking-widest"
+                        style={{ color: T.textMuted }}
+                      >
+                        Connected GitHub accounts
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {installations.map((i) => (
+                          <div
+                            key={String(i.id)}
+                            className="flex items-center gap-1.5 rounded-xl border px-3 py-1.5 text-xs font-bold"
+                            style={{
+                              borderColor: `${T.accentColor}25`,
+                              color: T.textColor,
+                              backgroundColor: `${T.accentColor}08`,
+                            }}
+                          >
+                            <GitBranch
+                              size={10}
+                              style={{ color: T.accentColor }}
+                            />
+                            {i.account ?? `Installation ${i.id}`}
+                          </div>
+                        ))}
+                      </div>
+                      <a
+                        href="/api/github/install"
+                        className="inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-xs font-bold border transition-all hover:opacity-80"
+                        style={{
+                          borderColor: `${T.borderColor}40`,
+                          color: T.textColor,
+                        }}
+                      >
+                        <Plus size={12} /> Connect another account
+                      </a>
+                    </div>
+                  )}
+                </>
+              )}
             </div>
           </div>
         )}
