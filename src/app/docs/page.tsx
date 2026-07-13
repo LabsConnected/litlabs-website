@@ -1,5 +1,11 @@
 import Link from "next/link";
-import { ArrowRight, Bot, GalleryVerticalEnd, Workflow, WandSparkles } from "lucide-react";
+import {
+  ArrowRight,
+  Bot,
+  GalleryVerticalEnd,
+  Workflow,
+  WandSparkles,
+} from "lucide-react";
 
 const DOC_SECTIONS = [
   {
@@ -30,21 +36,27 @@ const DOC_SECTIONS = [
 
 export const metadata = {
   title: "Docs",
-  description: "Quick-start documentation for LiTT Code.",
+  description: "Quick-start documentation for LiTTree-LabStudios.",
 };
 
 export default function DocsPage() {
   return (
-    <main className="min-h-screen px-4 py-16" style={{ backgroundColor: "#08080c", color: "#e2e2e9" }}>
+    <main
+      className="min-h-screen px-4 py-16"
+      style={{ backgroundColor: "#08080c", color: "#e2e2e9" }}
+    >
       <div className="mx-auto max-w-5xl">
         <div className="mb-10">
-          <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-cyan-300">Documentation</p>
+          <p className="mb-3 text-xs font-bold uppercase tracking-[0.28em] text-cyan-300">
+            Documentation
+          </p>
           <h1 className="mb-4 text-4xl font-black tracking-tight text-slate-50 md:text-6xl">
             Build, automate, publish.
           </h1>
           <p className="max-w-2xl text-base leading-relaxed opacity-65 md:text-lg">
-            LiTT Code is organized around one loop: choose an agent, create in Studio,
-            automate the repeatable parts, and ship the result to your audience or marketplace.
+            LiTTree-LabStudios is organized around one loop: choose an agent,
+            create in Studio, automate the repeatable parts, and ship the result
+            to your audience or marketplace.
           </p>
         </div>
 
@@ -61,10 +73,18 @@ export default function DocsPage() {
                 <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-300">
                   <Icon size={20} />
                 </div>
-                <h2 className="mb-2 text-lg font-black text-slate-50">{section.title}</h2>
-                <p className="mb-5 text-sm leading-relaxed opacity-60">{section.body}</p>
+                <h2 className="mb-2 text-lg font-black text-slate-50">
+                  {section.title}
+                </h2>
+                <p className="mb-5 text-sm leading-relaxed opacity-60">
+                  {section.body}
+                </p>
                 <span className="inline-flex items-center gap-2 text-sm font-bold text-cyan-300">
-                  Open <ArrowRight size={14} className="transition-transform group-hover:translate-x-1" />
+                  Open{" "}
+                  <ArrowRight
+                    size={14}
+                    className="transition-transform group-hover:translate-x-1"
+                  />
                 </span>
               </Link>
             );

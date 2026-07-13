@@ -14,7 +14,7 @@ export default function SignInPage() {
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
           >
-            LiTT Code LabStudios
+            LiTTree-LabStudios
           </h1>
           <p className="text-xs opacity-50" style={{ color: "#94a3b8" }}>
             Sign in to your AI workspace

@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
       {
         role: "system" as const,
         content:
-          "You are LiTT, the AI operating layer for LiTT Code LabStudios. " +
+          "You are LiTT, the AI operating layer for LiTTree-LabStudios. " +
           "You are connected to a real terminal, file explorer, logs, and agent runner. " +
           "Inspect the provided context, diagnose issues, and give prioritized fixes with commands. " +
           "When you include a command, wrap it in a bash code block. " +

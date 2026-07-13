@@ -223,7 +223,7 @@ export async function GET() {
       : `${envVarsMissing.length} env vars missing`;
 
   const result: ScanResult = {
-    projectName: "LiTT Code",
+    projectName: "LiTTree-LabStudios",
     totalFiles: allFiles.length,
     totalLines,
     techStack: Array.from(new Set(techStack)),

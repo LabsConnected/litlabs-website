@@ -201,7 +201,7 @@ export default function GamesPage() {
                 className="text-2xl md:text-4xl font-black mb-2"
                 style={{ color: T.headerColor }}
               >
-                LiTT Code Game Cloud
+                LiTTree Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
                 {GAME_LIBRARY.length} games & labs • HTML5 + emulators +
@@ -290,7 +290,7 @@ export default function GamesPage() {
                     </p>
                     <p className="text-xs opacity-60">
                       Emulators require ROMs or DOS files that you legally own.
-                      LiTT Code does not host copyrighted games.
+                      LiTTree-LabStudios does not host copyrighted games.
                     </p>
                     <div className="flex items-center justify-center gap-3">
                       <a
@@ -616,10 +616,10 @@ export default function GamesPage() {
           <Sparkles size={12} /> More places to play
         </div>
         <p className="text-sm opacity-70 max-w-3xl mb-4">
-          LiTT Code Game Cloud only hosts free, open-source, or embeddable
-          games. Emulators let you run your own legally owned ROMs. Discover
-          thousands more browser games on itch.io, Homegames, and open-source
-          retro communities.
+          LiTTree Game Cloud only hosts free, open-source, or embeddable games.
+          Emulators let you run your own legally owned ROMs. Discover thousands
+          more browser games on itch.io, Homegames, and open-source retro
+          communities.
         </p>
         <div className="flex flex-wrap gap-2">
           <a

@@ -45,15 +45,30 @@ export default function ProfilePage() {
         if (!res.ok) throw new Error(data.error || "Failed to save profile");
         if (typeof data.user === "object" && data.user) {
           updateProfile({
-            displayName: String((data.user as Record<string, unknown>).name || profile.displayName),
-            username: String((data.user as Record<string, unknown>).username || profile.username),
+            displayName: String(
+              (data.user as Record<string, unknown>).name ||
+                profile.displayName,
+            ),
+            username: String(
+              (data.user as Record<string, unknown>).username ||
+                profile.username,
+            ),
             avatarUrl:
               (data.user as Record<string, unknown>).avatar_url === undefined
                 ? profile.avatarUrl
-                : String((data.user as Record<string, unknown>).avatar_url || ""),
-            bio: String((data.user as Record<string, unknown>).bio || profile.bio),
-            website: String((data.user as Record<string, unknown>).website || profile.website),
-            location: String((data.user as Record<string, unknown>).location || profile.location),
+                : String(
+                    (data.user as Record<string, unknown>).avatar_url || "",
+                  ),
+            bio: String(
+              (data.user as Record<string, unknown>).bio || profile.bio,
+            ),
+            website: String(
+              (data.user as Record<string, unknown>).website || profile.website,
+            ),
+            location: String(
+              (data.user as Record<string, unknown>).location ||
+                profile.location,
+            ),
           });
         }
       } finally {
@@ -193,7 +208,11 @@ export default function ProfilePage() {
         style={{ borderColor: T.borderColor }}
       >
         <Image
-          src={coverPreview || profile.coverUrl || "https://placehold.co/1200x400/1a1a2e/ffffff?text=+"}
+          src={
+            coverPreview ||
+            profile.coverUrl ||
+            "https://placehold.co/1200x400/1a1a2e/ffffff?text=+"
+          }
           alt="Cover"
           fill
           className="object-cover"
@@ -225,19 +244,30 @@ export default function ProfilePage() {
             </span>
           </button>
         ) : (
-          <div className="absolute inset-0 flex items-center justify-center gap-3" style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+          <div
+            className="absolute inset-0 flex items-center justify-center gap-3"
+            style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+          >
             <button
               onClick={confirmCoverUpload}
               disabled={saving}
               className="px-4 py-2 text-xs font-bold uppercase tracking-widest border disabled:opacity-50"
-              style={{ backgroundColor: T.accentColor, color: "black", borderColor: T.borderColor }}
+              style={{
+                backgroundColor: T.accentColor,
+                color: "black",
+                borderColor: T.borderColor,
+              }}
             >
               {saving ? "Uploading..." : "Upload Cover"}
             </button>
             <button
               onClick={cancelCoverUpload}
               className="px-4 py-2 text-xs font-bold uppercase tracking-widest border"
-              style={{ backgroundColor: T.bgColor, color: T.textMuted, borderColor: T.borderColor }}
+              style={{
+                backgroundColor: T.bgColor,
+                color: T.textMuted,
+                borderColor: T.borderColor,
+              }}
             >
               Cancel
             </button>
@@ -270,7 +300,11 @@ export default function ProfilePage() {
               }}
             >
               <Image
-                src={avatarPreview || profile.avatarUrl || "https://placehold.co/128/1a1a2e/ffffff?text=+"}
+                src={
+                  avatarPreview ||
+                  profile.avatarUrl ||
+                  "https://placehold.co/128/1a1a2e/ffffff?text=+"
+                }
                 alt="Avatar"
                 fill
                 className="object-cover"
@@ -296,19 +330,30 @@ export default function ProfilePage() {
                   </span>
                 </button>
               ) : (
-                <div className="absolute inset-0 flex flex-col items-center justify-center gap-2" style={{ backgroundColor: "rgba(0,0,0,0.7)" }}>
+                <div
+                  className="absolute inset-0 flex flex-col items-center justify-center gap-2"
+                  style={{ backgroundColor: "rgba(0,0,0,0.7)" }}
+                >
                   <button
                     onClick={confirmAvatarUpload}
                     disabled={saving}
                     className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest border disabled:opacity-50"
-                    style={{ backgroundColor: T.accentColor, color: "black", borderColor: T.borderColor }}
+                    style={{
+                      backgroundColor: T.accentColor,
+                      color: "black",
+                      borderColor: T.borderColor,
+                    }}
                   >
                     {saving ? "Uploading..." : "Upload"}
                   </button>
                   <button
                     onClick={cancelAvatarUpload}
                     className="px-3 py-1 text-[10px] font-bold uppercase tracking-widest border"
-                    style={{ backgroundColor: T.bgColor, color: T.textMuted, borderColor: T.borderColor }}
+                    style={{
+                      backgroundColor: T.bgColor,
+                      color: T.textMuted,
+                      borderColor: T.borderColor,
+                    }}
                   >
                     Cancel
                   </button>
@@ -371,9 +416,7 @@ export default function ProfilePage() {
               </h2>
             )}
 
-            <p className="text-[10px] opacity-60 mt-0.5">
-              @{profile.username}
-            </p>
+            <p className="text-[10px] opacity-60 mt-0.5">@{profile.username}</p>
 
             {/* Mood - Editable */}
             <div
@@ -670,7 +713,10 @@ export default function ProfilePage() {
           >
             <div className="flex items-center gap-2">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              <p className="text-[11px] leading-relaxed" style={{ color: T.textMuted }}>
+              <p
+                className="text-[11px] leading-relaxed"
+                style={{ color: T.textMuted }}
+              >
                 <strong style={{ color: T.accentColor }}>
                   {profile.displayName}
                 </strong>{" "}
@@ -763,7 +809,11 @@ export default function ProfilePage() {
                 <div className="flex gap-2">
                   <button
                     onClick={() => {
-                      saveProfile({ bio: profile.bio, location: profile.location, website: profile.website });
+                      saveProfile({
+                        bio: profile.bio,
+                        location: profile.location,
+                        website: profile.website,
+                      });
                       setEditingSection(null);
                     }}
                     disabled={saving}
@@ -796,9 +846,7 @@ export default function ProfilePage() {
                   className="mt-3 pt-2 border-t border-dashed flex flex-wrap gap-4 text-[10px]"
                   style={{ borderColor: T.borderColor, color: T.accentColor }}
                 >
-                  <span className="font-bold">
-                    📍 {profile.location}
-                  </span>
+                  <span className="font-bold">📍 {profile.location}</span>
                   <span className="font-bold">
                     🌐{" "}
                     <a
@@ -1024,7 +1072,6 @@ export default function ProfilePage() {
               ))}
             </div>
           </div>
-
         </div>
       </div>
 
@@ -1032,7 +1079,7 @@ export default function ProfilePage() {
         className="border-t mt-8 p-6 text-center text-[10px]"
         style={{ borderColor: T.borderColor, color: T.textMuted }}
       >
-        © {new Date().getFullYear()} LiTT Code LabStudios
+        © {new Date().getFullYear()} LiTTree-LabStudios
       </div>
     </PageShell>
   );

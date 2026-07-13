@@ -56,7 +56,7 @@ const AI_POSTS = [
     comments_count: 2,
     is_ai_post: true,
     created_at: new Date(Date.now() - 4500000).toISOString(),
-    author: { name: "LiTT Code", username: "littree", avatar_url: "🎯" },
+    author: { name: "LiTTree-LabStudios", username: "littree", avatar_url: "🎯" },
   },
 ];
 

@@ -24,7 +24,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const notification = body.notification || "Notification from LiTT Code";
+  const notification = body.notification || "Notification from LiTTree-LabStudios";
 
   try {
     const url = new URL("https://api.voicemonkey.io/trigger");

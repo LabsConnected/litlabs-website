@@ -118,7 +118,10 @@ function loadHistory(): string[] {
 
 function saveHistory(history: string[]) {
   try {
-    localStorage.setItem(HISTORY_KEY, JSON.stringify(history.slice(-MAX_HISTORY)));
+    localStorage.setItem(
+      HISTORY_KEY,
+      JSON.stringify(history.slice(-MAX_HISTORY)),
+    );
   } catch {}
 }
 
@@ -138,13 +141,13 @@ export default function AdminTerminal() {
     {
       id: makeId(),
       type: "info",
-      text: "LiTT Code Admin Terminal — commands run as the server OS user.",
+      text: "LiTTree-LabStudios Admin Terminal — commands run as the server OS user.",
       ts: Date.now(),
     },
     {
       id: makeId(),
       type: "info",
-      text: 'Type a command and press Enter. Try: git status  |  git log -5  |  npm run lint',
+      text: "Type a command and press Enter. Try: git status  |  git log -5  |  npm run lint",
       ts: Date.now(),
     },
   ]);
@@ -256,7 +259,12 @@ export default function AdminTerminal() {
       if (!parsed) {
         setOutput((prev) => [
           ...prev,
-          { id: makeId(), type: "error", text: "Could not parse command.", ts: Date.now() },
+          {
+            id: makeId(),
+            type: "error",
+            text: "Could not parse command.",
+            ts: Date.now(),
+          },
         ]);
         return;
       }
@@ -332,7 +340,12 @@ export default function AdminTerminal() {
         if ((err as Error).name === "AbortError") {
           setOutput((prev) => [
             ...prev,
-            { id: makeId(), type: "info", text: "Command cancelled.", ts: Date.now() },
+            {
+              id: makeId(),
+              type: "info",
+              text: "Command cancelled.",
+              ts: Date.now(),
+            },
           ]);
         } else {
           setOutput((prev) => [
@@ -385,7 +398,11 @@ export default function AdminTerminal() {
         className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: T.bgColor }}
       >
-        <RefreshCw className="animate-spin" size={28} style={{ color: T.accentColor }} />
+        <RefreshCw
+          className="animate-spin"
+          size={28}
+          style={{ color: T.accentColor }}
+        />
       </div>
     );
   }
@@ -397,7 +414,11 @@ export default function AdminTerminal() {
         style={{ backgroundColor: T.bgColor }}
       >
         <div className="text-center">
-          <AlertTriangle size={48} className="mx-auto mb-4" style={{ color: T.warning }} />
+          <AlertTriangle
+            size={48}
+            className="mx-auto mb-4"
+            style={{ color: T.warning }}
+          />
           <p style={{ color: T.textMuted }}>Access Denied — Admin Only</p>
         </div>
       </div>
@@ -407,18 +428,27 @@ export default function AdminTerminal() {
   // ── Colour helpers for output lines ──────────────────────────────────────
   const lineColor = (type: OutputLine["type"]) => {
     switch (type) {
-      case "input":   return T.accentColor;
-      case "stdout":  return T.textColor;
-      case "stderr":  return T.warning;
-      case "error":   return "#ff5f56";
-      case "info":    return T.textMuted;
+      case "input":
+        return T.accentColor;
+      case "stdout":
+        return T.textColor;
+      case "stderr":
+        return T.warning;
+      case "error":
+        return "#ff5f56";
+      case "info":
+        return T.textMuted;
     }
   };
 
   return (
     <div
       className="min-h-screen flex flex-col"
-      style={{ backgroundColor: T.bgColor, color: T.textColor, fontFamily: "monospace" }}
+      style={{
+        backgroundColor: T.bgColor,
+        color: T.textColor,
+        fontFamily: "monospace",
+      }}
     >
       {/* ── Top bar ─────────────────────────────────────────────────── */}
       <div
@@ -431,17 +461,28 @@ export default function AdminTerminal() {
             Admin Terminal
           </span>
         </div>
-        <div className="flex items-center gap-3 text-xs" style={{ color: T.textMuted }}>
+        <div
+          className="flex items-center gap-3 text-xs"
+          style={{ color: T.textMuted }}
+        >
           <span
             className="px-2 py-1 rounded"
-            style={{ backgroundColor: T.warning + "22", color: T.warning, border: `1px solid ${T.warning}44` }}
+            style={{
+              backgroundColor: T.warning + "22",
+              color: T.warning,
+              border: `1px solid ${T.warning}44`,
+            }}
           >
             <AlertTriangle size={11} className="inline mr-1" />
             Commands run as the server OS user
           </span>
           <button
             className="ml-3 px-3 py-1 rounded text-xs transition-all hover:opacity-80"
-            style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}`, color: T.textMuted }}
+            style={{
+              backgroundColor: T.bgColor,
+              border: `1px solid ${T.borderColor}`,
+              color: T.textMuted,
+            }}
             onClick={() => router.push("/admin")}
           >
             ← Back to Admin
@@ -460,14 +501,20 @@ export default function AdminTerminal() {
             onClick={() => inputRef.current?.focus()}
           >
             {output.map((line) => (
-              <div key={line.id} className="whitespace-pre-wrap break-all mb-0.5">
+              <div
+                key={line.id}
+                className="whitespace-pre-wrap break-all mb-0.5"
+              >
                 <span style={{ color: lineColor(line.type) }}>
                   {ansiToSpans(line.text)}
                 </span>
               </div>
             ))}
             {running && (
-              <div className="flex items-center gap-2 mt-1" style={{ color: T.textMuted }}>
+              <div
+                className="flex items-center gap-2 mt-1"
+                style={{ color: T.textMuted }}
+              >
                 <RefreshCw size={12} className="animate-spin" />
                 <span className="text-xs">Running…</span>
               </div>
@@ -479,7 +526,10 @@ export default function AdminTerminal() {
             className="flex items-center gap-2 px-4 py-3 border-t"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
           >
-            <ChevronRight size={16} style={{ color: T.accentColor, flexShrink: 0 }} />
+            <ChevronRight
+              size={16}
+              style={{ color: T.accentColor, flexShrink: 0 }}
+            />
             <input
               ref={inputRef}
               value={input}
@@ -502,7 +552,11 @@ export default function AdminTerminal() {
                   setRunning(false);
                 }}
                 className="flex items-center gap-1 px-3 py-1 rounded text-xs transition-all hover:opacity-80"
-                style={{ backgroundColor: "#ff5f5620", color: "#ff5f56", border: "1px solid #ff5f5640" }}
+                style={{
+                  backgroundColor: "#ff5f5620",
+                  color: "#ff5f56",
+                  border: "1px solid #ff5f5640",
+                }}
               >
                 <X size={12} />
                 Cancel
@@ -513,22 +567,32 @@ export default function AdminTerminal() {
                   onClick={() => runCommand(input)}
                   disabled={!input.trim()}
                   className="px-3 py-1 rounded text-xs font-bold transition-all hover:opacity-80 disabled:opacity-40"
-                  style={{ backgroundColor: T.accentColor + "22", color: T.accentColor, border: `1px solid ${T.accentColor}44` }}
+                  style={{
+                    backgroundColor: T.accentColor + "22",
+                    color: T.accentColor,
+                    border: `1px solid ${T.accentColor}44`,
+                  }}
                 >
                   Run
                 </button>
                 <button
                   onClick={() => {
-                    setOutput([{
-                      id: makeId(),
-                      type: "info",
-                      text: "Terminal cleared.",
-                      ts: Date.now(),
-                    }]);
+                    setOutput([
+                      {
+                        id: makeId(),
+                        type: "info",
+                        text: "Terminal cleared.",
+                        ts: Date.now(),
+                      },
+                    ]);
                   }}
                   title="Clear output"
                   className="px-2 py-1 rounded text-xs transition-all hover:opacity-80"
-                  style={{ backgroundColor: T.bgColor, color: T.textMuted, border: `1px solid ${T.borderColor}` }}
+                  style={{
+                    backgroundColor: T.bgColor,
+                    color: T.textMuted,
+                    border: `1px solid ${T.borderColor}`,
+                  }}
                 >
                   <Trash2 size={12} />
                 </button>
@@ -546,7 +610,10 @@ export default function AdminTerminal() {
             className="flex items-center justify-between px-4 py-3 border-b"
             style={{ borderColor: T.borderColor }}
           >
-            <span className="text-xs font-bold uppercase tracking-wider" style={{ color: T.textMuted }}>
+            <span
+              className="text-xs font-bold uppercase tracking-wider"
+              style={{ color: T.textMuted }}
+            >
               Audit Log
             </span>
             <button
@@ -556,13 +623,19 @@ export default function AdminTerminal() {
               title="Refresh logs"
               style={{ color: T.textMuted }}
             >
-              <RefreshCw size={13} className={logsLoading ? "animate-spin" : ""} />
+              <RefreshCw
+                size={13}
+                className={logsLoading ? "animate-spin" : ""}
+              />
             </button>
           </div>
 
           <div className="flex-1 overflow-auto p-2 space-y-1">
             {cmdLogs.length === 0 ? (
-              <div className="text-xs text-center py-8" style={{ color: T.textMuted }}>
+              <div
+                className="text-xs text-center py-8"
+                style={{ color: T.textMuted }}
+              >
                 {logsLoading ? "Loading…" : "No command logs yet"}
               </div>
             ) : (
@@ -593,7 +666,10 @@ function AuditEntry({
   return (
     <div
       className="rounded-lg p-2 text-xs"
-      style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}` }}
+      style={{
+        backgroundColor: T.bgColor,
+        border: `1px solid ${T.borderColor}`,
+      }}
     >
       <div className="flex items-center gap-1.5 mb-1">
         {ok ? (
@@ -601,7 +677,10 @@ function AuditEntry({
         ) : (
           <XCircle size={11} style={{ color: "#ff5f56" }} />
         )}
-        <span className="font-mono flex-1 truncate" style={{ color: T.textColor }}>
+        <span
+          className="font-mono flex-1 truncate"
+          style={{ color: T.textColor }}
+        >
           {entry.metadata?.command
             ? `${entry.metadata.command} ${(entry.metadata.args ?? []).join(" ")}`.trim()
             : entry.message.replace("[cmd] ", "")}
@@ -613,9 +692,13 @@ function AuditEntry({
         {entry.metadata?.durationMs !== undefined && (
           <span>{entry.metadata.durationMs}ms</span>
         )}
-        {entry.metadata?.exitCode !== undefined && entry.metadata.exitCode !== null && entry.metadata.exitCode !== 0 && (
-          <span style={{ color: "#ff5f56" }}>exit {entry.metadata.exitCode}</span>
-        )}
+        {entry.metadata?.exitCode !== undefined &&
+          entry.metadata.exitCode !== null &&
+          entry.metadata.exitCode !== 0 && (
+            <span style={{ color: "#ff5f56" }}>
+              exit {entry.metadata.exitCode}
+            </span>
+          )}
       </div>
     </div>
   );

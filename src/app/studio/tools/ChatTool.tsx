@@ -184,7 +184,7 @@ export default function ChatTool() {
               <Bot size={42} />
             </div>
             <h1 className="font-mono text-xl font-black sm:text-2xl">
-              LiTT at the LiTT Code
+              LiTT at LiTTree-LabStudios
             </h1>
             <p className="mt-1 font-mono text-[10px] text-slate-400 sm:text-xs">
               Your visible AI companion for building, memory, agents, and
@@ -274,7 +274,7 @@ export default function ChatTool() {
           <input
             value={input}
             onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask LiTT Code to build, fix, design…"
+            placeholder="Ask LiTT to build, fix, design…"
             className="min-w-0 flex-1 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-slate-500"
           />
           <button

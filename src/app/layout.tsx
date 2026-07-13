@@ -32,7 +32,7 @@ export const viewport: Viewport = {
   themeColor: "#0d0d0d",
 };
 
-const META_TITLE = "LiTT Code — AI Agents for Creators";
+const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
 const META_DESC =
   "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
 
@@ -40,7 +40,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTT Code",
+    template: "%s | LiTTree-LabStudios",
   },
   description: META_DESC,
   keywords: [
@@ -53,13 +53,14 @@ export const metadata: Metadata = {
     "automation",
     "artificial intelligence",
     "NoCode",
+    "LiTTree-LabStudios",
     "LiTT Code",
     "LiTPage",
     "AI platform",
   ],
-  authors: [{ name: "LiTT Code", url: SITE_URL }],
-  creator: "LiTT Code",
-  publisher: "LiTT Code",
+  authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
+  creator: "LiTTree-LabStudios",
+  publisher: "LiTTree-LabStudios",
   robots: {
     index: true,
     follow: true,
@@ -69,7 +70,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTT Code",
+    siteName: "LiTTree-LabStudios",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -93,9 +94,7 @@ export const metadata: Metadata = {
       { url: "/logo.webp", sizes: "192x192", type: "image/webp" },
       { url: "/logo.webp", sizes: "512x512", type: "image/webp" },
     ],
-    apple: [
-      { url: "/logo.webp", sizes: "192x192", type: "image/webp" },
-    ],
+    apple: [{ url: "/logo.webp", sizes: "192x192", type: "image/webp" }],
   },
   manifest: "/manifest.json",
 };
