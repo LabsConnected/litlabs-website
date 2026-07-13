@@ -31,11 +31,6 @@ import {
   type NavGroup,
   type NavItem,
 } from "@/lib/navigation";
-import {
-  DirectorCard,
-  type DirectorMode,
-} from "@/components/litt-director/DirectorCard";
-import { DirectorDrawer } from "@/components/litt-director/DirectorDrawer";
 
 interface SidebarProps {
   open?: boolean;
@@ -312,8 +307,6 @@ function SidebarContent({
   );
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [plan, setPlan] = useState<string>("free");
-  const [directorOpen, setDirectorOpen] = useState(false);
-  const [directorMode, setDirectorMode] = useState<DirectorMode>("ask");
 
   useEffect(() => {
     if (!isSignedIn || !user?.id) return;
@@ -504,24 +497,8 @@ function SidebarContent({
         </div>
       )}
 
-      {/* Studio already owns the full Director experience. Keeping the global
-          card/drawer out of that route prevents two composers from stacking. */}
-      {!collapsed && pathname !== "/studio" && (
-        <>
-          <DirectorCard
-            onOpenAction={() => setDirectorOpen(true)}
-            onModeAction={(m) => {
-              setDirectorMode(m);
-              setDirectorOpen(true);
-            }}
-          />
-          <DirectorDrawer
-            open={directorOpen}
-            onCloseAction={() => setDirectorOpen(false)}
-            initialMode={directorMode}
-          />
-        </>
-      )}
+      {/* The global FloatingChat (in layout.tsx) handles the Director
+          experience now, so we no longer render the sidebar card/drawer. */}
 
       {/* Personalize panel */}
       {showPersonalize && !collapsed && (

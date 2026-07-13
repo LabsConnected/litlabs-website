@@ -1,5 +1,9 @@
 # AGENTS.md
 
+> Local-only project guide for human contributors. This file is gitignored
+> (see `.gitignore`) and **must not** be edited as ground truth — the canonical
+> rules for AI tooling live in `.clinerules` (Cline) and `.cursorrules` (Cursor).
+
 ## Stack
 
 - Next.js 16 + Turbopack + React 19 + Tailwind CSS v4
@@ -7,6 +11,7 @@
 - Clerk auth, Supabase DB, Stripe payments
 - AI: OpenRouter, Gemini, Together, Fal, MiniMax
 - Deployed on Vercel; Docker available for self-hosting
+- Local host: Windows 11 (cmd.exe) — not WSL2
 
 ## Commands
 
@@ -15,9 +20,9 @@ pnpm dev          # Start dev server with Turbopack on :3000
 pnpm dev:webpack  # Dev server with Webpack (rarely needed)
 pnpm build        # Production build
 pnpm lint         # ESLint (flat config, eslint-config-next)
+pnpm test         # Vitest (jsdom env) — see vitest.config.ts
+npx tsc --noEmit  # Type-check (no script in package.json yet)
 ```
-
-No test runner configured. No typecheck script — run `npx tsc --noEmit` manually if needed.
 
 ## Architecture
 
@@ -33,10 +38,13 @@ Multi-agent AI app ("LiTTree Lab Studios"). Key subsystems in `src/lib/`:
 - `agent-logger.ts` — logging for agent actions
 
 App routes in `src/app/` — standard Next.js App Router. API routes under `src/app/api/`.
+Route groups `(dashboard)` and `(auth)` are non-URL segments.
 
 ## Environment
 
-Runs in WSL2 Linux. Node 22+ required (CI uses Node 22).
+- Local development runs on Windows 11 (cmd.exe). Heavy builds (`/studio`,
+  image generation) belong in GitHub Codespaces — see `.devin-config.json`.
+- Node 22+ required (CI uses Node 22).
 
 Copy `.env.example` to `.env.local` and fill in secrets. Key groups:
 - Clerk: `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY`, `CLERK_SECRET_KEY`, `CLERK_WEBHOOK_SECRET`
@@ -50,14 +58,19 @@ Run `bash scripts/setup-env.sh` to configure Vercel environment variables intera
 ## Quirks
 
 - `ignore-scripts=true` in `.npmrc` — postinstall scripts are skipped
-- `cleanDistDir: false` in next.config.ts to avoid WSL2 EPERM errors on `.next/` cleanup
+- `cleanDistDir: false` in next.config.ts avoids Windows EPERM errors on `.next/` cleanup
 - `serverExternalPackages: ["jose"]` — jose must be externalized from middleware bundle
 - Turbopack root explicitly set to `__dirname` to suppress lockfile detection warning
-- `strict: false` in tsconfig — no strict type checking
-- Supabase migrations in `supabase/migrations/`
+- `strict: true` in tsconfig — full strict type checking (use `npx tsc --noEmit`)
+- Supabase migrations in `supabase/migrations/`; do not edit `supabase/schema.sql` directly
 - `chrome/` directory contains a local Chromium binary for Lighthouse/Playwright
-- `.cursorrules` exists with environment context — do not scaffold boilerplate
+- `.clinerules` and `.cursorrules` carry environment context — do not scaffold boilerplate
+- `lucide-react` is pinned to `^1.24.0` (very old); many modern icons may be missing —
+  fall back to inline SVG (see `src/app/(dashboard)/loading.tsx` for the pattern)
+- `litlabs/`, `litlabs-website/`, `Zoo-Code/`, `work/`, `meta/` are local artifacts
+  and are excluded from `tsconfig.json` — do not import from them
 
 ## CI
 
-Single workflow: `.github/workflows/lighthouse.yml` — runs Lighthouse on `litlabs.net` on push/PR to main. No build/test/lint CI steps.
+Single workflow: `.github/workflows/lighthouse.yml` — runs Lighthouse on `litlabs.net`
+on push/PR to main. No build/test/lint CI steps.
