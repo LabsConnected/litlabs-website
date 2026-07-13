@@ -124,7 +124,7 @@ class LiTT {
           inline: true,
         }))
         : [],
-      footer: { text: `LiTT Code \u2022 ${payload.priority.toUpperCase()}` },
+      footer: { text: `LiTT \u2022 ${payload.priority.toUpperCase()}` },
     };
 
     try {
@@ -222,7 +222,7 @@ class LiTT {
             <p>${payload.body}</p>
             ${payload.data ? `<pre>${JSON.stringify(payload.data, null, 2)}</pre>` : ""}
             <hr />
-            <p style="color: #888; font-size: 12px;">LiTT Code Notification System</p>
+            <p style="color: #888; font-size: 12px;">LiTT Notification System</p>
           `,
         }),
       });

@@ -128,7 +128,7 @@ async function persistMemory(
 }
 
 const PROJECT_CONTEXT = `
-You operate inside the LiTTree-LabStudios platform (also called LiTT Code for the agent layer). The current project is the litlab monorepo:
+You operate inside the LiTTree-LabStudios platform (also called LiTT for the agent layer). The current project is the litlab monorepo:
 - Stack: Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 + Turbopack
 - Backend: Supabase (Postgres), Clerk auth, Stripe payments, Cloudflare R2
 - AI providers: OpenRouter, Gemini, Together, Fal, MiniMax

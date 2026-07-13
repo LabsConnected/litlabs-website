@@ -204,10 +204,10 @@ async function generateViaGemini(
   const usageMd = result.response.usageMetadata;
   const usage: LLMUsage | undefined = usageMd
     ? {
-        prompt: usageMd.promptTokenCount ?? 0,
-        completion: usageMd.candidatesTokenCount ?? 0,
-        total: usageMd.totalTokenCount ?? 0,
-      }
+      prompt: usageMd.promptTokenCount ?? 0,
+      completion: usageMd.candidatesTokenCount ?? 0,
+      total: usageMd.totalTokenCount ?? 0,
+    }
     : undefined;
 
   return { text, usage, model: modelName };
@@ -246,7 +246,7 @@ async function generateViaOpenRouter(
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENROUTER_KEY}`,
         "HTTP-Referer": SITE_URL,
-        "X-Title": "LiTT Code",
+        "X-Title": "LiTT",
       },
       body: JSON.stringify(body),
     },
@@ -266,10 +266,10 @@ async function generateViaOpenRouter(
   const text: string = choice?.message?.content ?? "";
   const usage: LLMUsage | undefined = data.usage
     ? {
-        prompt: data.usage.prompt_tokens ?? 0,
-        completion: data.usage.completion_tokens ?? 0,
-        total: data.usage.total_tokens ?? 0,
-      }
+      prompt: data.usage.prompt_tokens ?? 0,
+      completion: data.usage.completion_tokens ?? 0,
+      total: data.usage.total_tokens ?? 0,
+    }
     : undefined;
   return { text, usage, model: data.model ?? modelName };
 }
@@ -345,8 +345,7 @@ export async function generateText(
     }
   }
   throw new Error(
-    `All LLM providers failed. Tried: ${[...failover].join(", ")}. Last error: ${
-      lastErr instanceof Error ? lastErr.message : String(lastErr)
+    `All LLM providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,
   );
 }
@@ -441,8 +440,7 @@ export async function streamText(
     }
   }
   throw new Error(
-    `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${
-      lastErr instanceof Error ? lastErr.message : String(lastErr)
+    `All LLM streaming providers failed. Tried: ${[...failover].join(", ")}. Last error: ${lastErr instanceof Error ? lastErr.message : String(lastErr)
     }`,
   );
 }
@@ -515,7 +513,7 @@ async function streamViaOpenRouter(
         "Content-Type": "application/json",
         Authorization: `Bearer ${OPENROUTER_KEY}`,
         "HTTP-Referer": SITE_URL,
-        "X-Title": "LiTT Code",
+        "X-Title": "LiTT",
       },
       body: JSON.stringify(body),
     },

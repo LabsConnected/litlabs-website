@@ -1,4 +1,4 @@
-// LiTT Codebase Scanner
+// LiTT's Codebase Scanner
 // Reads key project files and returns a structured summary
 
 import { NextResponse } from "next/server";

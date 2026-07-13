@@ -28,7 +28,7 @@ export type GalaxyNode = {
 const DEFAULT_NODES: GalaxyNode[] = [
   {
     id: "core",
-    label: "LiTT Code Core",
+    label: "LiTT Core",
     type: "system",
     status: "active",
     x: 0,

@@ -1,5 +1,5 @@
 /**
- * GitHub App helpers for LiTT Code.
+ * GitHub App helpers for LiTT.
  *
  * Required env vars:
  *   GITHUB_APP_ID

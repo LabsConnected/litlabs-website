@@ -49,9 +49,7 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-orange-600 text-xs font-black">
           L
         </div>
-        <div className="text-orange-500 font-black tracking-wide">
-          LiTT Code
-        </div>
+        <div className="text-orange-500 font-black tracking-wide">LiTT</div>
       </div>
 
       <nav className="flex-1 space-y-6 overflow-y-auto">

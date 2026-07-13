@@ -47,12 +47,12 @@ type BoardroomEntry = {
 const AGENTS: Agent[] = [
   {
     id: "director",
-    name: "LiTT Code",
+    name: "LiTT",
     icon: "🎯",
     role: "Core AI Copilot",
     desc: "Routes tasks, navigates the platform, and orchestrates the agent team.",
     systemPrompt:
-      "You are LiTT Code, the master orchestrator of LiTTree-LabStudios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.",
+      "You are LiTT, the master orchestrator of LiTTree-LabStudios. You help users plan AI strategies, design agent systems, and coordinate workflows. Be decisive, strategic, and concise. Give actionable plans.",
     color: "#22d3ee",
   },
   {

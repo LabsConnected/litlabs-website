@@ -164,7 +164,7 @@ export default function ChatTool() {
       <header className="relative flex items-center justify-between border-b border-white/10 px-3 py-2.5">
         <div className="flex items-center gap-2 text-[10px] font-black tracking-wider">
           <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_8px_#22d3ee]" />
-          <Bot size={13} className="text-cyan-300" /> LiTT Code Agent{" "}
+          <Bot size={13} className="text-cyan-300" /> LiTT Agent{" "}
           <span className="text-emerald-400">LIVE</span>
         </div>
         <div className="flex gap-2">
@@ -294,7 +294,7 @@ export default function ChatTool() {
           </button>
         </form>
         <div className="mt-2 flex items-center gap-2 font-mono text-[9px] text-slate-500">
-          <span className="text-cyan-300">• LiTT Code⌃</span>
+          <span className="text-cyan-300">• LiTT⌃</span>
           <span>♙ Gemini 2.5 Flash⌃</span>
         </div>
       </footer>
