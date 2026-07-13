@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   GitBranch,
   Plus,
+  BarChart3,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -54,6 +55,7 @@ const TABS = [
   { id: "integrations", label: "Integrations", icon: GitBranch },
   { id: "cli", label: "CLI Tools", icon: Terminal },
   { id: "keys", label: "BYOK", icon: Key },
+  { id: "usage", label: "Usage", icon: BarChart3 },
   { id: "notifications", label: "Notifications", icon: Bell },
 ] as const;
 
@@ -192,6 +194,27 @@ export default function SettingsPage() {
   const [workspaceSaved, setWorkspaceSaved] = useState(false);
   const [themeSaved, setThemeSaved] = useState(false);
 
+  /* Usage state */
+  type UsageDaily = {
+    date: string;
+    commands: number;
+    agentTasks: number;
+    generations: number;
+  };
+  type UsageSummary = {
+    totalCommands: number;
+    totalAgentTasks: number;
+    totalGenerations: number;
+    hourlyUsed: number;
+    hourlyLimit: number;
+    role: string;
+    plan: string;
+  };
+  const [usageDaily, setUsageDaily] = useState<UsageDaily[]>([]);
+  const [usageSummary, setUsageSummary] = useState<UsageSummary | null>(null);
+  const [usageLoading, setUsageLoading] = useState(false);
+  const [usageDemo, setUsageDemo] = useState(false);
+
   /* Load remote profile once */
   useEffect(() => {
     if (!isSignedIn) return;
@@ -229,6 +252,32 @@ export default function SettingsPage() {
       })
       .catch(() => {});
   }, [isSignedIn]);
+
+  /* Load usage stats when the usage tab is active */
+  useEffect(() => {
+    if (!isSignedIn || activeTab !== "usage") return;
+    let cancelled = false;
+    const id = setTimeout(() => {
+      if (cancelled) return;
+      setUsageLoading(true);
+      fetch("/api/usage/stats")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((data) => {
+          if (cancelled || !data) return;
+          setUsageDaily(data.daily || []);
+          setUsageSummary(data.summary || null);
+          setUsageDemo(Boolean(data.demo));
+        })
+        .catch(() => {})
+        .finally(() => {
+          if (!cancelled) setUsageLoading(false);
+        });
+    }, 0);
+    return () => {
+      cancelled = true;
+      clearTimeout(id);
+    };
+  }, [isSignedIn, activeTab]);
 
   const saveProfile = useCallback(async () => {
     setProfileSaved(false);
@@ -1426,6 +1475,274 @@ export default function SettingsPage() {
                 </>
               )}
             </div>
+          </div>
+        )}
+
+        {/* Usage Tab */}
+        {activeTab === "usage" && (
+          <div className="space-y-6">
+            {usageLoading ? (
+              <div
+                className="rounded-2xl border p-8 flex items-center justify-center"
+                style={cardStyle}
+              >
+                <Loader2
+                  className="animate-spin"
+                  style={{ color: T.accentColor }}
+                />
+              </div>
+            ) : usageSummary ? (
+              <>
+                {/* Summary cards */}
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                  {[
+                    {
+                      label: "Commands",
+                      value: usageSummary.totalCommands,
+                      color: "#22d3ee",
+                    },
+                    {
+                      label: "Agent Tasks",
+                      value: usageSummary.totalAgentTasks,
+                      color: "#34d399",
+                    },
+                    {
+                      label: "Generations",
+                      value: usageSummary.totalGenerations,
+                      color: "#a78bfa",
+                    },
+                    {
+                      label: "Hourly Quota",
+                      value: `${usageSummary.hourlyUsed}/${usageSummary.hourlyLimit === Infinity ? "∞" : usageSummary.hourlyLimit}`,
+                      color: "#f59e0b",
+                    },
+                  ].map((stat) => (
+                    <div
+                      key={stat.label}
+                      className="rounded-xl border p-4"
+                      style={cardStyle}
+                    >
+                      <div
+                        className="text-[10px] font-mono uppercase tracking-wider mb-1"
+                        style={{ color: T.textMuted }}
+                      >
+                        {stat.label}
+                      </div>
+                      <div
+                        className="text-2xl font-black"
+                        style={{ color: stat.color }}
+                      >
+                        {stat.value}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+
+                {/* Plan badge */}
+                <div
+                  className="flex items-center justify-between p-4 rounded-xl border"
+                  style={cardStyle}
+                >
+                  <div>
+                    <div
+                      className="text-sm font-bold"
+                      style={{ color: T.textColor }}
+                    >
+                      Plan: {usageSummary.plan}
+                    </div>
+                    <div
+                      className="text-[10px] opacity-70"
+                      style={{ color: T.textMuted }}
+                    >
+                      {usageSummary.role === "admin"
+                        ? "Unlimited usage — admin account"
+                        : `Hourly limit: ${usageSummary.hourlyLimit} commands`}
+                    </div>
+                  </div>
+                  <div
+                    className="px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-wider"
+                    style={{
+                      backgroundColor: `${T.accentColor}20`,
+                      color: T.accentColor,
+                      border: `1px solid ${T.accentColor}40`,
+                    }}
+                  >
+                    {usageSummary.role}
+                  </div>
+                </div>
+
+                {/* Chart */}
+                <div
+                  className="rounded-2xl border p-4 sm:p-6"
+                  style={cardStyle}
+                >
+                  <h2
+                    className="text-lg font-black mb-1"
+                    style={{ color: T.headerColor }}
+                  >
+                    14-Day Activity
+                  </h2>
+                  <p
+                    className="text-xs mb-5 opacity-70"
+                    style={{ color: T.textMuted }}
+                  >
+                    {usageDemo
+                      ? "Demo data — connect Supabase for real stats."
+                      : "Daily breakdown of your platform usage."}
+                  </p>
+
+                  {/* Stacked bar chart */}
+                  <div className="flex items-end gap-1 h-40 sm:h-48">
+                    {usageDaily.map((day) => {
+                      const maxVal = Math.max(
+                        ...usageDaily.map(
+                          (d) => d.commands + d.agentTasks + d.generations,
+                        ),
+                        1,
+                      );
+                      const total =
+                        day.commands + day.agentTasks + day.generations;
+                      const totalH = (total / maxVal) * 100;
+                      const cmdH =
+                        total > 0 ? (day.commands / total) * totalH : 0;
+                      const taskH =
+                        total > 0 ? (day.agentTasks / total) * totalH : 0;
+                      const genH =
+                        total > 0 ? (day.generations / total) * totalH : 0;
+                      return (
+                        <div
+                          key={day.date}
+                          className="flex-1 flex flex-col justify-end items-center group relative"
+                          style={{ minWidth: 8 }}
+                        >
+                          <div
+                            className="w-full rounded-t-sm overflow-hidden flex flex-col justify-end transition-all hover:opacity-80"
+                            style={{ height: `${totalH}%` }}
+                          >
+                            <div
+                              style={{
+                                height: `${genH}%`,
+                                backgroundColor: "#a78bfa",
+                              }}
+                            />
+                            <div
+                              style={{
+                                height: `${taskH}%`,
+                                backgroundColor: "#34d399",
+                              }}
+                            />
+                            <div
+                              style={{
+                                height: `${cmdH}%`,
+                                backgroundColor: "#22d3ee",
+                              }}
+                            />
+                          </div>
+                          {/* Tooltip */}
+                          <div
+                            className="absolute -top-16 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none rounded-lg px-2 py-1 text-[10px] font-mono whitespace-nowrap z-10"
+                            style={{
+                              backgroundColor: T.boxBg,
+                              border: `1px solid ${T.borderColor}60`,
+                              color: T.textColor,
+                            }}
+                          >
+                            <div style={{ color: T.textMuted }}>
+                              {day.date.slice(5)}
+                            </div>
+                            <div style={{ color: "#22d3ee" }}>
+                              Cmd: {day.commands}
+                            </div>
+                            <div style={{ color: "#34d399" }}>
+                              Tasks: {day.agentTasks}
+                            </div>
+                            <div style={{ color: "#a78bfa" }}>
+                              Gen: {day.generations}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  {/* Legend */}
+                  <div className="flex items-center gap-4 mt-4">
+                    {[
+                      { label: "Commands", color: "#22d3ee" },
+                      { label: "Agent Tasks", color: "#34d399" },
+                      { label: "Generations", color: "#a78bfa" },
+                    ].map((item) => (
+                      <div
+                        key={item.label}
+                        className="flex items-center gap-1.5"
+                      >
+                        <span
+                          className="w-2.5 h-2.5 rounded-sm"
+                          style={{ backgroundColor: item.color }}
+                        />
+                        <span
+                          className="text-[10px] font-bold uppercase tracking-wider"
+                          style={{ color: T.textMuted }}
+                        >
+                          {item.label}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Hourly quota bar */}
+                {usageSummary.hourlyLimit !== Infinity && (
+                  <div
+                    className="rounded-2xl border p-4 sm:p-6"
+                    style={cardStyle}
+                  >
+                    <h2
+                      className="text-sm font-black mb-3"
+                      style={{ color: T.headerColor }}
+                    >
+                      Hourly Command Quota
+                    </h2>
+                    <div
+                      className="w-full h-3 rounded-full overflow-hidden"
+                      style={{ backgroundColor: `${T.borderColor}40` }}
+                    >
+                      <div
+                        className="h-full rounded-full transition-all"
+                        style={{
+                          width: `${Math.min(
+                            100,
+                            (usageSummary.hourlyUsed /
+                              usageSummary.hourlyLimit) *
+                              100,
+                          )}%`,
+                          backgroundColor:
+                            usageSummary.hourlyUsed >= usageSummary.hourlyLimit
+                              ? "#ef4444"
+                              : T.accentColor,
+                        }}
+                      />
+                    </div>
+                    <div
+                      className="text-[10px] mt-2 font-mono"
+                      style={{ color: T.textMuted }}
+                    >
+                      {usageSummary.hourlyUsed} / {usageSummary.hourlyLimit}{" "}
+                      used this hour
+                    </div>
+                  </div>
+                )}
+              </>
+            ) : (
+              <div
+                className="rounded-2xl border p-8 text-center"
+                style={cardStyle}
+              >
+                <p className="text-sm" style={{ color: T.textMuted }}>
+                  Unable to load usage data. Try refreshing.
+                </p>
+              </div>
+            )}
           </div>
         )}
 
