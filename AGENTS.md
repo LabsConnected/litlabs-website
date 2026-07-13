@@ -11,7 +11,7 @@
 - Clerk auth, Supabase DB, Stripe payments
 - AI: OpenRouter, Gemini, Together, Fal, MiniMax
 - Deployed on Vercel; Docker available for self-hosting
-- Local host: Windows 11 (cmd.exe) — not WSL2
+- Local host: Windows 11 (cmd.exe) — NOT WSL2
 
 ## Commands
 
@@ -29,7 +29,7 @@ npx tsc --noEmit  # Type-check (no script in package.json yet)
 Multi-agent AI app ("LiTTree Lab Studios"). Key subsystems in `src/lib/`:
 
 - `AgentOrchestrator.ts`, `agents.ts`, `agent-profiles.ts` — agent orchestration matrix
-- `jarvis.ts` — main AI assistant logic
+- `litt.ts` — main LiT brain / assistant logic (NOT jarvis.ts — that file does not exist)
 - `director-graph.ts` — director agent graph
 - `llm.ts`, `llm-completion.ts`, `llm-executor.ts` — LLM abstraction layer
 - `supabase.ts`, `supabase-admin.ts`, `supabase-client.ts` — DB access (service role vs anon)
@@ -38,7 +38,8 @@ Multi-agent AI app ("LiTTree Lab Studios"). Key subsystems in `src/lib/`:
 - `agent-logger.ts` — logging for agent actions
 
 App routes in `src/app/` — standard Next.js App Router. API routes under `src/app/api/`.
-Route groups `(dashboard)` and `(auth)` are non-URL segments.
+Route group `(auth)` is a non-URL segment. (The `(dashboard)` group was removed — the
+AutonomicLoopBanner now lives directly in `DashboardView.tsx`.)
 
 ## Environment
 

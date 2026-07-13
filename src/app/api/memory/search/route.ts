@@ -30,14 +30,30 @@ export async function GET(req: NextRequest) {
     const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
 
     if (!q.trim()) {
-      const { data, error } = await supabaseAdmin
-        .from("memories")
-        .select("*")
-        .eq("owner_id", userId)
-        .order("created_at", { ascending: false })
-        .limit(limit);
-      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-      return NextResponse.json({ memories: data || [], count: (data || []).length, source: "supabase" });
+      try {
+        const { data, error } = await supabaseAdmin
+          .from("memories")
+          .select("*")
+          .eq("owner_id", userId)
+          .order("created_at", { ascending: false })
+          .limit(limit);
+        if (error) {
+          return NextResponse.json({
+            memories: [],
+            count: 0,
+            source: "supabase",
+            warning: "Memory table not initialized",
+          });
+        }
+        return NextResponse.json({ memories: data || [], count: (data || []).length, source: "supabase" });
+      } catch {
+        return NextResponse.json({
+          memories: [],
+          count: 0,
+          source: "none",
+          warning: "Memory storage not configured",
+        });
+      }
     }
 
     let rawHits: unknown[] = [];
@@ -117,6 +133,15 @@ export async function GET(req: NextRequest) {
     });
   } catch (error: unknown) {
     const message = error instanceof Error ? error.message : "Search failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    // Return 200 with empty results instead of 500 — DB may not be configured
+    return NextResponse.json({
+      query: "",
+      memories: [],
+      hits: [],
+      count: 0,
+      source: "none",
+      error: message,
+      warning: "Memory storage not configured",
+    });
   }
 }
