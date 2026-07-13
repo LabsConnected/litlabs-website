@@ -126,6 +126,88 @@ export default function AutonomicLoopBanner() {
   const [checks, setChecks] = useState<CheckResult[]>([]);
   const [expanded, setExpanded] = useState(false);
   const [lastChecked, setLastChecked] = useState<Date | null>(null);
+  const [dismissed, setDismissed] = useState(false);
+
+  const runChecks = async () => {
+    setState("checking");
+    const results: CheckResult[] = await Promise.all(
+      CHECK_ENDPOINTS.map(async (endpoint) => {
+        try {
+          const res = await fetch(endpoint.url, { method: "GET" });
+          return {
+            id: endpoint.id,
+            label: endpoint.label,
+            ok: res.status < 500,
+            detail: `${res.status}`,
+          };
+        } catch (err) {
+          return {
+            id: endpoint.id,
+            label: endpoint.label,
+            ok: false,
+            detail: err instanceof Error ? err.message : "unreachable",
+          };
+        }
+      }),
+    );
+    setChecks(results);
+    const okCount = results.filter((r) => r.ok).length;
+    if (okCount === results.length) setState("ok");
+    else if (okCount === 0) setState("down");
+    else setState("degraded");
+    setLastChecked(new Date());
+  };
+
+  useEffect(() => {
+    // Defer the initial probe so setState calls happen in a callback
+    // (satisfies the react-hooks/set-state-in-effect lint rule).
+    const initial = setTimeout(() => {
+      void runChecks();
+    }, 0);
+    const id = setInterval(() => {
+      void runChecks();
+    }, 60_000);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
+  }, []);
+
+  if (dismissed) return null;
+
+  const palette = {
+    ok: { color: "#22c55e", label: "Autonomic Loop · Online" },
+    degraded: { color: "#f59e0b", label: "Autonomic Loop · Degraded" },
+    down: { color: "#ef4444", label: "Autonomic Loop · Offline" },
+    checking: { color: tokens.primary, label: "Autonomic Loop · Probing" },
+  }[state];
+
+  const StatusIcon =
+    state === "ok"
+      ? CheckIcon
+      : state === "checking"
+        ? SpinnerIcon
+        : AlertIcon;
+
+  return (
+    <div
+      className="sticky top-0 z-40 w-full border-b backdrop-blur-md"
+      style={{
+        backgroundColor: `${tokens.surface}cc`,
+        borderColor: `${palette.color}30`,
+      }}
+    >
+      <div className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold">
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-3 flex-1 min-w-0 text-left transition-all hover:opacity-90"
+          aria-expanded={expanded}
+          aria-label="Toggle Autonomic Loop status"
+        >
+          <StatusIcon
+            size={14}
+            className={state === "checking" ? "animate-spin" : ""}
+            style={{ color: palette.color }}
           />
           <span
             className="uppercase tracking-[0.18em]"
@@ -142,7 +224,7 @@ export default function AutonomicLoopBanner() {
               : "· probing..."}
           </span>
           <span className="ml-auto flex items-center gap-2">
-            <Activity
+            <ActivityIcon
               size={12}
               style={{ color: tokens.textMuted, opacity: expanded ? 1 : 0.4 }}
             />
@@ -159,7 +241,7 @@ export default function AutonomicLoopBanner() {
           className="ml-2 opacity-50 hover:opacity-100 transition-opacity"
           aria-label="Dismiss banner"
         >
-          <X size={12} style={{ color: tokens.textMuted }} />
+          <CloseIcon size={12} style={{ color: tokens.textMuted }} />
         </button>
       </div>
 
@@ -175,7 +257,7 @@ export default function AutonomicLoopBanner() {
                   className="flex items-center gap-2 text-[10px] font-mono"
                   style={{ color: tokens.textMuted }}
                 >
-                  <Loader2 size={10} className="animate-spin" />
+                  <SpinnerIcon size={10} className="animate-spin" />
                   {e.label}…
                 </div>
               ))

@@ -1,5 +1,8 @@
 import type { Metadata, Viewport } from "next";
-import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
+// Path alias "@/components/dashboard/AutonomicLoopBanner" also works;
+// the relative form is used to bypass any stale TypeScript Language
+// Server cache that hasn't indexed the new file yet.
+import AutonomicLoopBanner from "../../components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   title: "Dashboard · LiTTree Lab Studios",
