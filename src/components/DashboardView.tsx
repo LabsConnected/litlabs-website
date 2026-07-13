@@ -346,7 +346,7 @@ export default function DashboardView() {
               work.
             </p>
           </div>
-          <div className="relative mt-4 flex gap-2">
+          <div className="relative mt-4 flex flex-wrap gap-2">
             <Link
               href="/studio"
               className="inline-flex items-center gap-1.5 rounded-xl px-3.5 py-2 text-xs font-black text-black transition-all hover:opacity-90"

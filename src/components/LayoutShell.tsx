@@ -75,7 +75,7 @@ export default function LayoutShell({
           onClose={() => setMobileSidebarOpen(false)}
           collapsed={desktopSidebarCollapsed}
         />
-        <div className="flex-1 flex flex-col h-[calc(100dvh-56px)] min-h-0">
+        <div className="flex-1 flex flex-col h-dvh md:h-[calc(100dvh-56px)] min-h-0">
           {/* Mobile hamburger trigger */}
           <button
             onClick={() => setMobileSidebarOpen(true)}

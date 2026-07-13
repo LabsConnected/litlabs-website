@@ -347,9 +347,9 @@ export function FloatingChat() {
       {/* Chat panel */}
       {open && (
         <div
-          className="fixed bottom-20 right-4 z-[9999] flex w-[calc(100vw-2rem)] max-w-sm flex-col rounded-2xl border border-neutral-700/50 shadow-2xl"
+          className="fixed bottom-36 left-4 right-4 z-[9999] flex flex-col rounded-2xl border border-neutral-700/50 shadow-2xl md:bottom-20 md:left-auto md:right-4 md:w-[calc(100vw-2rem)] md:max-w-sm"
           style={{
-            height: "min(70vh, 520px)",
+            height: "min(60vh, 420px)",
             backgroundColor: "#0f0f15",
             backdropFilter: "blur(12px)",
           }}
@@ -542,7 +542,7 @@ export function FloatingChat() {
       {/* Floating bubble */}
       <button
         onClick={() => setOpen((o) => !o)}
-        className="fixed bottom-4 right-4 z-[9999] flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95"
+        className="fixed bottom-28 left-4 z-[9999] flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 md:bottom-4 md:left-auto md:right-4"
         style={{
           background: "linear-gradient(135deg, #fbbf24, #f59e0b)",
           boxShadow: "0 4px 20px rgba(251, 191, 36, 0.3)",
