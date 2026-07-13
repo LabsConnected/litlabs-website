@@ -72,7 +72,7 @@ function PublicHeader() {
           href="/"
           className="flex items-center gap-2 text-sm font-black text-white"
         >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 to-fuchsia-500">
+          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 to-fuchsia-500">
             <Bot size={14} className="text-black" />
           </div>
           LiTT Labs
@@ -100,7 +100,7 @@ function PublicHeader() {
           </Link>
           <Link
             href="/sign-up"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
+            className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
           >
             Start building <ArrowRight size={11} />
           </Link>
@@ -154,7 +154,7 @@ function LandingPage() {
           <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
             <Link
               href="/sign-up"
-              className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-400 px-7 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.35)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.5)]"
+              className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-7 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.35)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.5)]"
             >
               Start building free <ArrowRight size={16} />
             </Link>
@@ -391,7 +391,7 @@ function LandingPage() {
 
       {/* Footer CTA */}
       <section className="relative z-10 border-t border-white/5 px-4 py-20">
-        <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-cyan-500/15 bg-gradient-to-br from-cyan-500/5 via-transparent to-fuchsia-500/5 p-10 text-center shadow-[0_0_80px_rgba(34,211,238,0.08)] md:p-14">
+        <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-cyan-500/15 bg-linear-to-br from-cyan-500/5 via-transparent to-fuchsia-500/5 p-10 text-center shadow-[0_0_80px_rgba(34,211,238,0.08)] md:p-14">
           <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/8 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
             <Sparkles size={9} /> Beta · Free to start
           </div>
@@ -403,7 +403,7 @@ function LandingPage() {
           </p>
           <Link
             href="/sign-up"
-            className="inline-flex items-center gap-2 rounded-xl bg-gradient-to-r from-cyan-500 to-cyan-400 px-8 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.6)]"
+            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-8 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.6)]"
           >
             Get started free <ArrowRight size={16} />
           </Link>
@@ -414,7 +414,7 @@ function LandingPage() {
       <footer className="relative z-10 border-t border-white/5 px-4 py-8">
         <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs text-neutral-600 md:flex-row">
           <div className="flex items-center gap-2 text-sm font-black text-white">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-fuchsia-500">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-cyan-400 to-fuchsia-500">
               <Bot size={11} className="text-black" />
             </div>
             LiTT Labs

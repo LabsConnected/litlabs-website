@@ -220,7 +220,7 @@ export default function ProfilePage() {
           sizes="100vw"
         />
         {!profile.coverUrl && !coverPreview && (
-          <div className="absolute inset-0 flex flex-col items-center justify-center bg-gradient-to-r from-purple-950/80 via-black/80 to-blue-950/80">
+          <div className="absolute inset-0 flex flex-col items-center justify-center bg-linear-to-r from-purple-950/80 via-black/80 to-blue-950/80">
             <span className="text-2xl font-bold tracking-widest text-white/50 animate-pulse">
               📷 Add Cover Image
             </span>

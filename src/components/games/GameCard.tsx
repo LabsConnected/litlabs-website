@@ -17,7 +17,7 @@ export default function GameCard({
       onClick={onClick}
       className={`rounded-2xl overflow-hidden bg-white/5 border border-white/10 hover:border-orange-500/50 transition-all hover:scale-[1.02] group ${onClick ? "cursor-pointer" : ""}`}
     >
-      <div className="aspect-video bg-gradient-to-br from-purple-900 to-orange-900 relative overflow-hidden">
+      <div className="aspect-video bg-linear-to-br from-purple-900 to-orange-900 relative overflow-hidden">
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img
           src={game.coverUrl}

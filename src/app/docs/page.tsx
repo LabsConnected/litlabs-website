@@ -67,7 +67,7 @@ export default function DocsPage() {
               <Link
                 key={section.title}
                 href={section.href}
-                className="group rounded-2xl border p-6 transition-all hover:-translate-y-1 hover:bg-white/[0.03]"
+                className="group rounded-2xl border p-6 transition-all hover:-translate-y-1 hover:bg-white/3"
                 style={{ backgroundColor: "#12121a", borderColor: "#26262e" }}
               >
                 <div className="mb-5 flex h-11 w-11 items-center justify-center rounded-xl bg-cyan-300/10 text-cyan-300">

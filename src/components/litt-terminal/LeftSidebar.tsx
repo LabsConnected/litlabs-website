@@ -109,7 +109,7 @@ export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
       <div className="mt-auto border-t border-neutral-900 pt-4">
         {isLoaded && user ? (
           <div className="flex items-center gap-3 rounded-lg bg-neutral-900/50 p-2">
-            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-orange-500 to-red-600 text-xs font-bold">
+            <div className="flex h-8 w-8 items-center justify-center rounded-full bg-linear-to-br from-orange-500 to-red-600 text-xs font-bold">
               {user.firstName?.[0] || user.username?.[0] || "U"}
             </div>
             <div className="flex-1 overflow-hidden">

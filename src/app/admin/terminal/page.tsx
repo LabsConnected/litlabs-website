@@ -603,7 +603,7 @@ export default function AdminTerminal() {
 
         {/* ── Audit log sidebar ────────────────────────────────────── */}
         <div
-          className="w-80 flex-shrink-0 flex flex-col border-l overflow-hidden"
+          className="w-80 shrink-0 flex flex-col border-l overflow-hidden"
           style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
         >
           <div
