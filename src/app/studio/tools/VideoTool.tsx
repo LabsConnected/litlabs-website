@@ -159,7 +159,7 @@ export default function VideoTool() {
           reason: `video_${model}`,
         }),
       });
-      const wdata = await wres.json();
+      await wres.json();
       refreshWallet().catch(() => {});
     } catch (err) {
       setError(err instanceof Error ? err.message : "Video generation failed");

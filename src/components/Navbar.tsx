@@ -24,15 +24,12 @@ import {
   ShoppingBag,
   Sparkles,
   Settings,
-  Music,
-  Gamepad2,
   Sun,
   Moon,
   ChevronDown,
   X,
   Menu,
   Bell,
-  MessageSquare,
   Coins,
   User,
   Code2,
@@ -373,7 +370,9 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                               {n.content}
                             </div>
                             <div className="text-[9px] opacity-40 mt-0.5">
-                              {n.created_at ? new Date(n.created_at).toLocaleDateString() : ""}
+                              {n.created_at
+                                ? new Date(n.created_at).toLocaleDateString()
+                                : ""}
                             </div>
                           </div>
                         </div>
@@ -615,9 +614,3 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
     </nav>
   );
 }
-
-
-
-
-
-

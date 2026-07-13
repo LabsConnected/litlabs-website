@@ -105,6 +105,7 @@ export function OutputPanel({
         {active === "preview" && artifact && artifact.type !== "file" && (
           <div className="flex h-full flex-col items-center justify-center gap-2">
             {artifact.type === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={artifact.url}
                 alt={artifact.title}
@@ -126,6 +127,7 @@ export function OutputPanel({
               {artifact.title}
             </div>
             {artifact.type === "image" ? (
+              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={artifact.url}
                 alt={artifact.title}

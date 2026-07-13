@@ -44,7 +44,7 @@ export class DirectorGraphPlanner {
       dependsOn: [researcherId],
     });
 
-    const validatorId = "task-validator";
+    const _validatorId = "task-validator";
     tasks.push({
       agentSlug: "forge",
       prompt: `Review and validate the plan for correctness, risks, and missing steps: ${normalized}`,

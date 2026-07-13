@@ -1,8 +1,15 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { AlertCircle, CheckCircle2, Clock, ShoppingCart, UserPlus, Users } from "lucide-react";
+import {
+  AlertCircle,
+  CheckCircle2,
+  Clock,
+  ShoppingCart,
+  UserPlus,
+  Users,
+} from "lucide-react";
 
 export type AdminEvent = {
   id: string;
@@ -13,10 +20,30 @@ export type AdminEvent = {
 };
 
 const DEFAULT_EVENTS: AdminEvent[] = [
-  { id: "1", type: "signup", message: "New user joined the platform", timestamp: new Date(Date.now() - 1000 * 60 * 2) },
-  { id: "2", type: "agent", message: "LiTT completed a command cycle", timestamp: new Date(Date.now() - 1000 * 60 * 4) },
-  { id: "3", type: "sale", message: "Code Champion purchased", timestamp: new Date(Date.now() - 1000 * 60 * 7) },
-  { id: "4", type: "system", message: "Provider health check passed", timestamp: new Date(Date.now() - 1000 * 60 * 10) },
+  {
+    id: "1",
+    type: "signup",
+    message: "New user joined the platform",
+    timestamp: new Date(Date.now() - 1000 * 60 * 2),
+  },
+  {
+    id: "2",
+    type: "agent",
+    message: "LiTT completed a command cycle",
+    timestamp: new Date(Date.now() - 1000 * 60 * 4),
+  },
+  {
+    id: "3",
+    type: "sale",
+    message: "Code Champion purchased",
+    timestamp: new Date(Date.now() - 1000 * 60 * 7),
+  },
+  {
+    id: "4",
+    type: "system",
+    message: "Provider health check passed",
+    timestamp: new Date(Date.now() - 1000 * 60 * 10),
+  },
 ];
 
 export default function EventStream({
@@ -34,23 +61,41 @@ export default function EventStream({
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <Clock size={14} style={{ color: T.accentColor }} />
-          <div className="text-xs font-bold uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>Live Events</div>
+          <div
+            className="text-xs font-bold uppercase tracking-[0.2em]"
+            style={{ color: T.textMuted }}
+          >
+            Live Events
+          </div>
         </div>
         {onClear && (
-          <button onClick={onClear} className="rounded-full border px-3 py-1 text-[10px] font-black uppercase" style={{ borderColor: T.borderColor + "30", color: T.textMuted, backgroundColor: T.boxBg + "60" }}>
+          <button
+            onClick={onClear}
+            className="rounded-full border px-3 py-1 text-[10px] font-black uppercase"
+            style={{
+              borderColor: T.borderColor + "30",
+              color: T.textMuted,
+              backgroundColor: T.boxBg + "60",
+            }}
+          >
             Clear
           </button>
         )}
       </div>
       <div className="space-y-2 max-h-[28rem] overflow-auto pr-1">
         {rows.length === 0 ? (
-          <div className="rounded-2xl border px-4 py-6 text-center text-sm" style={{ backgroundColor: T.boxBg + "60", borderColor: T.borderColor + "28", color: T.textMuted }}>
+          <div
+            className="rounded-2xl border px-4 py-6 text-center text-sm"
+            style={{
+              backgroundColor: T.boxBg + "60",
+              borderColor: T.borderColor + "28",
+              color: T.textMuted,
+            }}
+          >
             No recent activity
           </div>
         ) : (
-          rows.map((event) => (
-            <EventRow key={event.id} event={event} />
-          ))
+          rows.map((event) => <EventRow key={event.id} event={event} />)
         )}
       </div>
     </div>
@@ -73,12 +118,20 @@ function EventRow({ event }: { event: AdminEvent }) {
   const Icon = EVENT_ICONS[event.type] ?? Users;
 
   return (
-    <div className="flex items-start gap-3 rounded-2xl border p-3 transition-transform hover:scale-[1.01]" style={{ backgroundColor: T.boxBg + "60", borderColor: color + "26" }}>
-      <div className="rounded-xl p-2" style={{ backgroundColor: color + "18", color }}>
+    <div
+      className="flex items-start gap-3 rounded-2xl border p-3 transition-transform hover:scale-[1.01]"
+      style={{ backgroundColor: T.boxBg + "60", borderColor: color + "26" }}
+    >
+      <div
+        className="rounded-xl p-2"
+        style={{ backgroundColor: color + "18", color }}
+      >
         <Icon size={14} />
       </div>
       <div className="min-w-0 flex-1">
-        <div className="text-sm" style={{ color: T.textColor }}>{event.message}</div>
+        <div className="text-sm" style={{ color: T.textColor }}>
+          {event.message}
+        </div>
         <div className="mt-1 text-[10px]" style={{ color: T.textMuted }}>
           {formatTime(event.timestamp)}
         </div>
@@ -111,22 +164,5 @@ function getEventColor(type: AdminEvent["type"], fallback: string) {
       return fallback;
     default:
       return fallback;
-  }
-}
-
-function getEventIcon(type: AdminEvent["type"]) {
-  switch (type) {
-    case "signup":
-    case "user":
-      return UserPlus;
-    case "sale":
-      return ShoppingCart;
-    case "agent":
-    case "chat":
-      return CheckCircle2;
-    case "alert":
-      return AlertCircle;
-    default:
-      return Users;
   }
 }

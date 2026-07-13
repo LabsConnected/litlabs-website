@@ -1,4 +1,4 @@
-import { Agent, AgentTask, OrchestrationSession, AgentRole } from "@/types/agents";
+import { AgentTask, OrchestrationSession, AgentRole } from "@/types/agents";
 import { supabase } from "./supabase";
 
 export class AgentOrchestrator {

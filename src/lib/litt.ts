@@ -53,7 +53,7 @@ class LiTT {
     const results: boolean[] = [];
 
     try {
-      const { error } = await supabase.from("notifications").insert({
+      await supabase.from("notifications").insert({
         user_id: payload.userId || null,
         type: payload.type,
         priority: payload.priority,
@@ -63,7 +63,7 @@ class LiTT {
         channels: channels,
       });
       // DB error saving notification — continuing
-    } catch (err) {
+    } catch {
       // Error saving notification — continuing
     }
 
@@ -83,7 +83,7 @@ class LiTT {
             results.push(await this.sendEmail(payload));
             break;
         }
-      } catch (err) {
+      } catch {
         // Failed to send notification on this channel — continuing
         results.push(false);
       }
@@ -119,10 +119,10 @@ class LiTT {
       timestamp: new Date().toISOString(),
       fields: payload.data
         ? Object.entries(payload.data).map(([key, value]) => ({
-            name: key,
-            value: String(value).substring(0, 1000),
-            inline: true,
-          }))
+          name: key,
+          value: String(value).substring(0, 1000),
+          inline: true,
+        }))
         : [],
       footer: { text: `LiTT Code \u2022 ${payload.priority.toUpperCase()}` },
     };
