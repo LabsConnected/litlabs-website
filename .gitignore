@@ -94,6 +94,7 @@ litlabs-website/
 work/
 .codex-reference/
 Zoo-Code/
+OmniRoute/
 
 # Misc
 *.backup
