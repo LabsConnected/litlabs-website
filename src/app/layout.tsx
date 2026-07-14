@@ -6,7 +6,6 @@ import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
-import { FloatingChat } from "@/components/FloatingChat";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
@@ -109,19 +108,14 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // FloatingChat calls useProfile()/useClerkAuth() — it MUST live inside the
-  // provider tree, otherwise it throws on the homepage and the whole route
-  // returns 500 (see https://litlabs.net/ Lighthouse report, Jul 2026).
-  // We mount it as a sibling of {children} inside LayoutShell, behind all
-  // providers, so it always sees ProfileContext.
+  // FloatingChat is mounted inside LayoutShell which already has access to
+  // the provider tree via context. LayoutShell suppresses it on /studio so
+  // the Studio route manages its own voice/chat UI exclusively.
   const shell = (
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <LayoutShell>
-            {children}
-            <FloatingChat />
-          </LayoutShell>
+          <LayoutShell>{children}</LayoutShell>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>

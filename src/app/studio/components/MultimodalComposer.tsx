@@ -1,21 +1,24 @@
 "use client";
 
-import { FormEvent, useRef, useState } from "react";
+import { FormEvent, useEffect, useRef, useState } from "react";
 import {
   Camera,
   Mic,
+  MicOff,
   MonitorUp,
   Paperclip,
   Plus,
   Send,
-  Sparkles,
-  Wand2,
-  X,
+  Square,
+  Loader2,
 } from "lucide-react";
 import CameraSession from "./CameraSession";
-import VoiceSession from "./VoiceSession";
+import {
+  useVoiceSession,
+  type VoiceState,
+} from "@/app/studio/context/VoiceSessionContext";
 
-export type ComposerMode = "text" | "voice" | "camera";
+export type ComposerMode = "text" | "camera";
 
 interface MultimodalComposerProps {
   value: string;
@@ -23,6 +26,40 @@ interface MultimodalComposerProps {
   onSend: (value: string, attachments?: string[]) => Promise<string>;
   busy?: boolean;
   modelName?: string;
+}
+
+const STATUS_LABELS: Record<VoiceState, string> = {
+  idle: "",
+  requesting_permission: "Requesting microphone…",
+  connecting: "Connecting…",
+  listening: "Listening",
+  user_speaking: "You're speaking…",
+  processing: "Processing…",
+  assistant_speaking: "LiTT speaking",
+  muted: "Muted",
+  error: "",
+};
+
+function WaveformBars({ level, active }: { level: number; active: boolean }) {
+  const bars = [0.4, 0.7, 1.0, 0.7, 0.4];
+  return (
+    <div className="flex items-center gap-[2px] h-4">
+      {bars.map((h, i) => (
+        <div
+          key={i}
+          className="w-[3px] rounded-full transition-all duration-75"
+          style={{
+            height: active
+              ? `${Math.max(20, (h * level + 0.1) * 100)}%`
+              : "30%",
+            backgroundColor: active
+              ? `rgba(34,211,238,${0.5 + h * 0.5})`
+              : "rgba(255,255,255,0.2)",
+          }}
+        />
+      ))}
+    </div>
+  );
 }
 
 export default function MultimodalComposer({
@@ -36,6 +73,25 @@ export default function MultimodalComposer({
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  const {
+    voiceState,
+    micLevel,
+    isMuted,
+    startVoice,
+    stopVoice,
+    toggleMute,
+    interrupt,
+  } = useVoiceSession();
+
+  // Auto-resize textarea
+  useEffect(() => {
+    const ta = textareaRef.current;
+    if (!ta) return;
+    ta.style.height = "auto";
+    ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
+  }, [value]);
 
   const detectIntent = (text: string) => {
     const t = text.toLowerCase();
@@ -45,8 +101,6 @@ export default function MultimodalComposer({
       )
     )
       return "camera";
-    if (/\b(talk to me|voice mode|call me|speak to me|listen to me)\b/.test(t))
-      return "voice";
     if (
       /\b(generate an image|create an image|make an image|draw|image of)\b/.test(
         t,
@@ -66,11 +120,6 @@ export default function MultimodalComposer({
     const intent = detectIntent(value);
     if (intent === "camera") {
       setMode("camera");
-      onChange("");
-      return;
-    }
-    if (intent === "voice") {
-      setMode("voice");
       onChange("");
       return;
     }
@@ -97,6 +146,95 @@ export default function MultimodalComposer({
     reader.readAsDataURL(file);
   };
 
+  // Mic button state and click handler
+  const getMicButtonState = () => {
+    switch (voiceState) {
+      case "idle":
+        return {
+          icon: Mic,
+          color: "text-white/40",
+          disabled: false,
+          onClick: startVoice,
+        };
+      case "requesting_permission":
+        return {
+          icon: Loader2,
+          color: "text-white/60",
+          disabled: true,
+          onClick: undefined,
+        };
+      case "connecting":
+        return {
+          icon: Loader2,
+          color: "text-white/60",
+          disabled: true,
+          onClick: undefined,
+        };
+      case "listening":
+        return {
+          icon: Mic,
+          color: "text-cyan-400",
+          disabled: false,
+          onClick: stopVoice,
+        };
+      case "user_speaking":
+        return {
+          icon: Mic,
+          color: "text-cyan-400",
+          disabled: false,
+          onClick: stopVoice,
+        };
+      case "processing":
+        return {
+          icon: Loader2,
+          color: "text-cyan-400",
+          disabled: true,
+          onClick: undefined,
+        };
+      case "assistant_speaking":
+        return {
+          icon: Square,
+          color: "text-amber-400",
+          disabled: false,
+          onClick: interrupt,
+        };
+      case "muted":
+        return {
+          icon: MicOff,
+          color: "text-amber-400",
+          disabled: false,
+          onClick: toggleMute,
+        };
+      case "error":
+        return {
+          icon: MicOff,
+          color: "text-red-400",
+          disabled: false,
+          onClick: startVoice,
+        };
+      default:
+        return {
+          icon: Mic,
+          color: "text-white/40",
+          disabled: false,
+          onClick: startVoice,
+        };
+    }
+  };
+
+  const micButtonState = getMicButtonState();
+  const MicIcon = micButtonState.icon;
+
+  // Mic button styling with pulse effect for listening/speaking states
+  const getMicButtonStyle = () => {
+    if (voiceState === "listening" || voiceState === "user_speaking") {
+      return {
+        boxShadow: `0 0 0 ${2 + micLevel * 8}px rgba(34,211,238,${0.2 + micLevel * 0.4})`,
+      };
+    }
+    return {};
+  };
+
   return (
     <div className="relative flex flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5">
       {/* Mode panels */}
@@ -113,15 +251,45 @@ export default function MultimodalComposer({
           />
         </div>
       )}
-      {mode === "voice" && (
-        <div className="mb-2">
-          <VoiceSession
-            onSend={async (text) => {
-              const reply = await onSend(text);
-              return reply;
-            }}
-            onClose={() => setMode("text")}
-          />
+
+      {/* Voice status strip */}
+      {!["idle", "error"].includes(voiceState) && (
+        <div className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-t-xl border-x border-t border-white/10 bg-black/40 backdrop-blur-md">
+          {/* Left: waveform bars + status text */}
+          <div className="flex items-center gap-2">
+            <WaveformBars
+              level={micLevel}
+              active={
+                voiceState === "user_speaking" || voiceState === "listening"
+              }
+            />
+            <span className="text-[11px] font-bold text-white/80">
+              {STATUS_LABELS[voiceState]}
+            </span>
+          </div>
+          {/* Right: controls */}
+          <div className="flex items-center gap-1.5">
+            {voiceState === "assistant_speaking" && (
+              <button
+                onClick={interrupt}
+                className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-400/10"
+              >
+                Interrupt
+              </button>
+            )}
+            <button
+              onClick={toggleMute}
+              className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
+            >
+              {isMuted ? "Unmute" : "Mute"}
+            </button>
+            <button
+              onClick={stopVoice}
+              className="rounded-full border border-red-400/30 px-2.5 py-1 text-[10px] font-bold text-red-400 hover:bg-red-400/10"
+            >
+              Stop
+            </button>
+          </div>
         </div>
       )}
 
@@ -145,7 +313,7 @@ export default function MultimodalComposer({
                 }
                 className="absolute right-0 top-0 rounded-bl-lg bg-black/70 p-0.5 text-white"
               >
-                <X size={10} />
+                <Plus size={10} className="rotate-45" />
               </button>
             </div>
           ))}
@@ -156,34 +324,29 @@ export default function MultimodalComposer({
       <div className="mb-1 flex gap-1 overflow-x-auto pb-1">
         <button
           onClick={() => setShowAdd((v) => !v)}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-bold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
         >
           <Plus size={12} /> Add
         </button>
         <button
-          onClick={() => setMode(mode === "voice" ? "text" : "voice")}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-bold ${mode === "voice" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
-        >
-          <Mic size={12} /> Voice
-        </button>
-        <button
           onClick={() => setMode(mode === "camera" ? "text" : "camera")}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[10px] font-bold ${mode === "camera" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${mode === "camera" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
         >
           <Camera size={12} /> Camera
         </button>
         <button
           onClick={() => {
             setShowAdd(false);
-            alert("Screen share coming soon");
+            console.debug("Screen share coming soon");
           }}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[10px] font-bold text-slate-400 hover:text-cyan-300"
+          disabled
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 cursor-not-allowed"
         >
           <MonitorUp size={12} /> Screen
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[10px] font-bold text-slate-400 hover:text-cyan-300"
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-cyan-300"
         >
           <Paperclip size={12} /> Files
         </button>
@@ -191,7 +354,7 @@ export default function MultimodalComposer({
 
       {/* Add sheet */}
       {showAdd && (
-        <div className="mb-2 grid grid-cols-4 gap-2 rounded-2xl border border-white/10 bg-white/3 p-2">
+        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/3 p-2">
           <button
             onClick={() => {
               setMode("camera");
@@ -203,36 +366,19 @@ export default function MultimodalComposer({
           </button>
           <button
             onClick={() => {
-              setMode("voice");
               setShowAdd(false);
+              console.debug("Screen share coming soon");
             }}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
+            disabled
+            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-600 cursor-not-allowed"
           >
-            <Mic size={16} className="text-cyan-300" /> Voice
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd(false);
-              alert("Screen share coming soon");
-            }}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
-          >
-            <MonitorUp size={16} className="text-cyan-300" /> Screen
+            <MonitorUp size={16} className="text-slate-600" /> Screen
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
             className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
           >
             <Paperclip size={16} className="text-cyan-300" /> Files
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd(false);
-              alert("Tools coming soon");
-            }}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
-          >
-            <Wand2 size={16} className="text-cyan-300" /> Tools
           </button>
         </div>
       )}
@@ -247,38 +393,56 @@ export default function MultimodalComposer({
         onChange={(e) => {
           const file = e.target.files?.[0];
           if (file) handleFile(file);
-          setShowAdd(false);
         }}
       />
 
-      {/* Composer form */}
-      <form
-        onSubmit={submit}
-        className="flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-[#0c1225] p-1.5 shadow-[0_0_18px_rgba(34,211,238,.08)]"
-      >
-        <input
-          id="composer-message-input"
-          name="composer-message-input"
+      {/* Input row */}
+      <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/4 px-3 py-2">
+        <textarea
+          ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
-          placeholder="Ask LiTT to build, fix, design…"
-          className="min-w-0 flex-1 bg-transparent px-2 font-mono text-xs outline-none placeholder:text-slate-500"
+          onKeyDown={(e) => {
+            if (e.key === "Enter" && !e.shiftKey) {
+              e.preventDefault();
+              void submit(e);
+            }
+          }}
+          placeholder="Message LiTT..."
+          className="flex-1 resize-none bg-transparent text-sm text-white placeholder-white/40 outline-none"
+          style={{ minHeight: "44px", maxHeight: "160px" }}
+          rows={1}
         />
-        <button
-          disabled={(!value.trim() && snapshots.length === 0) || busy}
-          className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-cyan-300 text-slate-950 disabled:opacity-40"
-          title="Send"
-        >
-          <Send size={17} />
-        </button>
-      </form>
 
-      <div className="flex items-center justify-between px-1 font-mono text-[9px] text-slate-500">
-        <span className="flex items-center gap-1">
-          <Sparkles size={10} className="text-cyan-300" />
-          {modelName}
-        </span>
-        <span className="hidden sm:inline">• LiTT Director</span>
+        {/* Mic button */}
+        <button
+          onClick={micButtonState.onClick}
+          disabled={micButtonState.disabled}
+          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${micButtonState.color} ${
+            !micButtonState.disabled && "hover:bg-white/10"
+          } ${micButtonState.disabled && "cursor-not-allowed"}`}
+          style={getMicButtonStyle()}
+        >
+          <MicIcon
+            size={16}
+            className={
+              voiceState === "requesting_permission" ||
+              voiceState === "connecting" ||
+              voiceState === "processing"
+                ? "animate-spin"
+                : ""
+            }
+          />
+        </button>
+
+        {/* Send button */}
+        <button
+          onClick={submit}
+          disabled={busy || (!value.trim() && snapshots.length === 0)}
+          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+        >
+          <Send size={16} />
+        </button>
       </div>
     </div>
   );

@@ -10,13 +10,10 @@ import {
   Sparkles,
   Zap,
   Target,
-  Volume2,
   Copy,
   Check,
   RefreshCw,
   Menu,
-  Phone,
-  Camera,
   MoreHorizontal,
   Cpu,
   Rocket,
@@ -25,6 +22,7 @@ import {
   LayoutGrid,
   Map,
 } from "lucide-react";
+import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import ReactMarkdown from "react-markdown";
 import MultimodalComposer from "./MultimodalComposer";
 
@@ -146,10 +144,9 @@ export default function ChatShell({
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
+  const { speakText } = useVoiceSession();
   const [input, setInput] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const [speakingMsg, setSpeakingMsg] = useState<number | null>(null);
-  const audioRef = useRef<HTMLAudioElement | null>(null);
 
   const displayName = useMemo(
     () => profile?.displayName || "Creator",
@@ -166,52 +163,6 @@ export default function ChatShell({
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
   }, [messages, busy]);
-
-  const handleSpeak = async (text: string, index: number) => {
-    if (speakingMsg === index) {
-      audioRef.current?.pause();
-      window.speechSynthesis.cancel();
-      audioRef.current = null;
-      setSpeakingMsg(null);
-      return;
-    }
-    audioRef.current?.pause();
-    window.speechSynthesis.cancel();
-    setSpeakingMsg(index);
-
-    const fallback = () => {
-      if (!window.speechSynthesis) return false;
-      const u = new SpeechSynthesisUtterance(text);
-      u.rate = 1.05;
-      u.onend = () => setSpeakingMsg(null);
-      u.onerror = () => setSpeakingMsg(null);
-      window.speechSynthesis.speak(u);
-      return true;
-    };
-
-    try {
-      const res = await fetch("/api/media/generate-audio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, voice: "Puck" }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "TTS failed");
-      const src = data.audioBase64
-        ? `data:audio/mp3;base64,${data.audioBase64}`
-        : data.audioUrl;
-      if (!src) throw new Error("No audio source");
-      const audio = new Audio(src);
-      audioRef.current = audio;
-      audio.onended = () => setSpeakingMsg(null);
-      audio.onerror = () => {
-        fallback();
-      };
-      await audio.play();
-    } catch {
-      fallback();
-    }
-  };
 
   const isEmpty = messages.length === 0;
 
@@ -261,18 +212,6 @@ export default function ChatShell({
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold hover:bg-white/5"
           >
             <Zap size={12} style={{ color: T.accentColor }} /> New
-          </button>
-          <button
-            className="rounded-full border border-white/10 p-2 hover:bg-white/5"
-            title="Camera call"
-          >
-            <Camera size={14} style={{ color: T.accentColor }} />
-          </button>
-          <button
-            className="rounded-full border border-white/10 p-2 hover:bg-white/5"
-            title="Voice call"
-          >
-            <Phone size={14} style={{ color: T.success }} />
           </button>
           <button className="rounded-full border border-white/10 p-2 hover:bg-white/5">
             <MoreHorizontal size={14} style={{ color: T.textMuted }} />
@@ -415,20 +354,11 @@ export default function ChatShell({
                         <>
                           <CopyButton text={message.content} />
                           <button
-                            onClick={() => handleSpeak(message.content, index)}
+                            onClick={() => speakText(message.content)}
                             className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
-                            title={
-                              speakingMsg === index
-                                ? "Stop speaking"
-                                : "Read aloud"
-                            }
+                            title="Read aloud"
                           >
-                            {speakingMsg === index ? (
-                              <Zap size={10} />
-                            ) : (
-                              <Volume2 size={10} />
-                            )}
-                            {speakingMsg === index ? "Speaking" : "Speak"}
+                            <Zap size={10} /> Speak
                           </button>
                           {isLastAssistant && (
                             <button

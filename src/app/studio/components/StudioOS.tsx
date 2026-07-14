@@ -6,6 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StudioSidebar, { type StudioTool } from "./StudioSidebar";
 import StudioTopBar from "./StudioTopBar";
+import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 
 const StudioInspector = dynamic(() => import("./StudioInspector"), {
   ssr: false,
@@ -147,137 +148,60 @@ export default function StudioOS() {
   );
 
   return (
-    <div
-      className="flex h-full w-full flex-col overflow-hidden"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
-    >
-      <StudioTopBar
-        search={search}
-        onSearchChange={setSearch}
-        selectedModel={model}
-        onModelChange={setModel}
-        onInspectorToggle={() => setInspectorOpen((v) => !v)}
-        T={T}
-      />
-
-      <div className="flex flex-1 min-h-0">
-        <StudioSidebar
-          activeTool={activeTool}
-          onToolChange={handleToolChange}
+    <VoiceSessionProvider>
+      <div
+        className="flex h-full w-full flex-col overflow-hidden"
+        style={{ backgroundColor: T.bgColor, color: T.textColor }}
+      >
+        <StudioTopBar
           search={search}
+          onSearchChange={setSearch}
+          selectedModel={model}
+          onModelChange={setModel}
+          onInspectorToggle={() => setInspectorOpen((v) => !v)}
+          T={T}
         />
 
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Mode switcher strip */}
-          <ModeSwitcher
+        <div className="flex flex-1 min-h-0">
+          <StudioSidebar
             activeTool={activeTool}
             onToolChange={handleToolChange}
-            T={T}
+            search={search}
           />
 
-          <div
-            ref={scrollRef}
-            className="flex-1 min-h-0 overflow-auto p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
-          >
-            {activeTool === "chat" ? (
-              <ChatTool selectedModel={model} />
-            ) : (
-              <ActiveTool />
-            )}
-          </div>
-        </main>
+          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            <div
+              ref={scrollRef}
+              className="flex-1 min-h-0 overflow-auto p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
+            >
+              {activeTool === "chat" ? (
+                <ChatTool selectedModel={model} />
+              ) : (
+                <ActiveTool />
+              )}
+            </div>
+          </main>
 
-        <StudioInspector variant="aside" T={T} activeTool={activeTool} />
-      </div>
-
-      {inspectorOpen && (
-        <div className="fixed inset-0 z-10000 md:hidden">
-          <div
-            className="absolute inset-0 bg-black/60"
-            onClick={() => setInspectorOpen(false)}
-          />
-          <div className="absolute right-0 top-0 h-full w-[280px]">
-            <StudioInspector
-              variant="sheet"
-              onClose={() => setInspectorOpen(false)}
-              T={T}
-              activeTool={activeTool}
-            />
-          </div>
+          <StudioInspector variant="aside" T={T} activeTool={activeTool} />
         </div>
-      )}
-    </div>
-  );
-}
 
-/* ── ModeSwitcher strip — above the canvas ────────────────────── */
-const MODE_TABS: { id: StudioTool; label: string }[] = [
-  { id: "chat", label: "Chat" },
-  { id: "image", label: "Image" },
-  { id: "video", label: "Video" },
-  { id: "audio", label: "Audio" },
-  { id: "builder", label: "Build" },
-  { id: "canvas", label: "Code" },
-];
-
-function ModeSwitcher({
-  activeTool,
-  onToolChange,
-  T,
-}: {
-  activeTool: StudioTool;
-  onToolChange: (tool: StudioTool) => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  return (
-    <div
-      className="flex items-center gap-0.5 px-2 h-9 shrink-0 overflow-x-auto"
-      style={{
-        borderBottom: `1px solid ${T.borderColor}12`,
-        backgroundColor: T.boxBg + "40",
-      }}
-    >
-      {MODE_TABS.map((tab, i) => {
-        const isAuto = tab.label === "Auto";
-        const isActive = isAuto
-          ? activeTool === "chat"
-          : activeTool === tab.id && tab.label !== "Auto";
-        return (
-          <button
-            key={`${tab.label}-${i}`}
-            onClick={() => onToolChange(tab.id)}
-            className="px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all"
-            style={{
-              color: isActive ? T.accentColor : T.textMuted + "80",
-              backgroundColor: isActive ? T.accentColor + "12" : "transparent",
-              boxShadow: isActive
-                ? `inset 0 0 0 1px ${T.accentColor}25`
-                : "none",
-            }}
-          >
-            {tab.label}
-          </button>
-        );
-      })}
-      <div className="flex-1" />
-      {/* Canvas view tabs */}
-      {[
-        "Preview",
-        "Edit",
-        "Compare",
-        "Timeline",
-        "Code",
-        "Browser",
-        "Console",
-      ].map((v) => (
-        <button
-          key={v}
-          className="hidden lg:block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors hover:bg-white/5"
-          style={{ color: T.textMuted + "60" }}
-        >
-          {v}
-        </button>
-      ))}
-    </div>
+        {inspectorOpen && (
+          <div className="fixed inset-0 z-10000 md:hidden">
+            <div
+              className="absolute inset-0 bg-black/60"
+              onClick={() => setInspectorOpen(false)}
+            />
+            <div className="absolute right-0 top-0 h-full w-[280px]">
+              <StudioInspector
+                variant="sheet"
+                onClose={() => setInspectorOpen(false)}
+                T={T}
+                activeTool={activeTool}
+              />
+            </div>
+          </div>
+        )}
+      </div>
+    </VoiceSessionProvider>
   );
 }
