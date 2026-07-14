@@ -35,8 +35,10 @@ import {
   Trash2,
   Image as ImageIcon,
 } from "lucide-react";
-import PluginPanel from "./PluginPanel";
-import CameraSession from "./CameraSession";
+import dynamic from "next/dynamic";
+
+const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
+const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
 import {
   PersonaProvider,
   usePersona,
@@ -1109,16 +1111,16 @@ function LITTTerminalShellInner({
 
         {/* MAIN STAGE */}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-          {/* Ambient background */}
+          {/* Ambient background - simplified on mobile to reduce paint */}
           <div
-            className="pointer-events-none absolute inset-0 opacity-40"
+            className="pointer-events-none absolute inset-0 hidden opacity-40 sm:block"
             style={{
               backgroundImage:
                 "radial-gradient(circle at 50% 60%, rgba(34,211,238,0.10) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08) 0%, transparent 35%)",
             }}
           />
           <div
-            className="pointer-events-none absolute inset-0 opacity-[0.04]"
+            className="pointer-events-none absolute inset-0 hidden opacity-[0.04] sm:block"
             style={{
               backgroundImage:
                 "linear-gradient(rgba(34,211,238,0.4) 1px, transparent 1px), linear-gradient(90deg, rgba(34,211,238,0.4) 1px, transparent 1px)",
@@ -1179,7 +1181,7 @@ function LITTTerminalShellInner({
                 </div>
 
                 {/* Hero visualization */}
-                <div className="relative flex h-16 w-full max-w-xs items-center justify-center sm:h-40 sm:max-w-md">
+                <div className="relative hidden h-16 w-full max-w-xs items-center justify-center sm:flex sm:h-40 sm:max-w-md">
                   <div
                     className="absolute inset-0 rounded-full blur-2xl"
                     style={{

@@ -4,10 +4,14 @@ export const dynamic = "force-dynamic";
 
 import { Suspense } from "react";
 import Link from "next/link";
+import dynamicImport from "next/dynamic";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
-import StudioOS from "./components/StudioOS";
 import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
+
+const StudioOS = dynamicImport(() => import("./components/StudioOS"), {
+  ssr: false,
+});
 
 function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
@@ -19,12 +23,6 @@ function StudioHub() {
         className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
       >
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute left-1/2 top-1/2 h-64 w-64 -translate-x-1/2 -translate-y-1/2 rounded-full blur-[80px] opacity-20"
-            style={{ backgroundColor: tokens.primary }}
-          />
-        </div>
         <div className="relative flex flex-col items-center gap-4">
           <div className="relative">
             <div
@@ -72,16 +70,12 @@ function StudioHub() {
         className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
       >
-        <div className="pointer-events-none absolute inset-0">
-          <div
-            className="absolute left-1/4 top-1/4 h-64 w-64 rounded-full blur-[100px] opacity-10"
-            style={{ backgroundColor: tokens.primary }}
-          />
-          <div
-            className="absolute bottom-1/4 right-1/4 h-48 w-48 rounded-full blur-[80px] opacity-8"
-            style={{ backgroundColor: "#a855f7" }}
-          />
-        </div>
+        <div
+          className="absolute inset-0 opacity-30"
+          style={{
+            backgroundImage: `radial-gradient(circle at 30% 30%, ${tokens.primary}22 0%, transparent 45%), radial-gradient(circle at 70% 70%, #a855f722 0%, transparent 40%)`,
+          }}
+        />
         <div
           className="relative max-w-sm w-full rounded-2xl border p-8 text-center"
           style={{
@@ -112,7 +106,7 @@ function StudioHub() {
           </div>
           <Link
             href="/sign-in?redirect_url=/studio"
-            className="mb-3 flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
+            className="mb-3 flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black text-black transition hover:opacity-90 hover:scale-[1.02]"
             style={{
               backgroundColor: tokens.primary,
               boxShadow: `0 0 20px ${tokens.primary}40`,
@@ -122,7 +116,7 @@ function StudioHub() {
           </Link>
           <Link
             href="/sign-up"
-            className="flex items-center justify-center gap-1 rounded-xl border px-5 py-2.5 text-xs font-bold transition-all hover:opacity-70"
+            className="flex items-center justify-center gap-1 rounded-xl border px-5 py-2.5 text-xs font-bold transition hover:opacity-70"
             style={{ borderColor: tokens.border, color: tokens.textMuted }}
           >
             Create free account
