@@ -10,9 +10,9 @@ import {
   Loader2,
   X,
   Swords,
-  MessageSquare,
   ChevronRight,
   Zap,
+  Bot,
 } from "lucide-react";
 import { AGENT_AVATAR_META } from "@/lib/avatars";
 
@@ -849,19 +849,16 @@ export default function AgentTool() {
       )}
 
       {/* ── CENTER: CHAT ── */}
-      <div className="flex-1 flex flex-col min-w-0">
+      <div className="flex-1 flex flex-col min-w-0 bg-[#030308]">
         {/* Chat header */}
         <div
-          className="flex items-center justify-between px-4 h-11 border-b shrink-0"
-          style={{
-            borderColor: T.borderColor + "15",
-            backgroundColor: T.boxBg + "50",
-          }}
+          className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5"
+          style={{ backgroundColor: T.boxBg + "50" }}
         >
-          <div className="flex items-center gap-2.5">
+          <div className="flex items-center gap-3">
             <button
               onClick={() => setAgentDrawerOpen(true)}
-              className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 md:hidden"
+              className="flex items-center gap-1.5 rounded-md border border-white/10 bg-white/5 px-2 py-1 md:hidden"
               aria-label="Open agent drawer"
             >
               <span className="text-base">{selectedAvatar.emoji}</span>
@@ -872,78 +869,36 @@ export default function AgentTool() {
                 {selectedAgent.name}
               </span>
             </button>
-            <span className="text-xl hidden md:block">
-              {selectedAvatar.emoji}
-            </span>
+            <div className="hidden h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 md:flex">
+              <Bot size={16} className="text-cyan-400" />
+            </div>
             <div className="hidden md:block">
-              <div
-                className="text-xs font-bold leading-tight"
-                style={{ color: selectedAgent.color }}
-              >
-                {selectedAgent.name}
+              <div className="text-sm font-black tracking-wide text-white">
+                Agent Console
               </div>
-              <div
-                className="text-[9px] opacity-60"
-                style={{ color: T.textMuted }}
-              >
-                {selectedAgent.role} ·{" "}
-                {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ??
-                  "Gemini"}
+              <div className="text-[10px] text-neutral-500">
+                {selectedAgent.name} · {selectedAgent.role}
               </div>
             </div>
             <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse ml-1 hidden md:block"
+              className="ml-1 hidden h-1.5 w-1.5 rounded-full animate-pulse md:block"
               style={{ backgroundColor: selectedAgent.color }}
             />
           </div>
-          <div className="flex items-center gap-2">
-            {/* ActivePieces FLOW trigger — Director only */}
-            {selectedAgent.id === "director" && (
-              <button
-                onClick={triggerFlow}
-                disabled={!input.trim() || isLoading}
-                title="Send to ActivePieces multi-agent flow"
-                className="flex items-center gap-1 text-[9px] px-2 py-0.5 rounded font-bold transition-all disabled:opacity-30"
-                style={{
-                  backgroundColor: T.accentColor + "15",
-                  color: T.accentColor,
-                  border: `1px solid ${T.accentColor}40`,
-                }}
-              >
-                <Zap size={9} /> FLOW
-              </button>
-            )}
-            {/* Provider toggle */}
-            {PROVIDER_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() =>
-                  setProvider(opt.id as "gemini" | "openrouter-free")
-                }
-                title={opt.hint}
-                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
-                style={{
-                  backgroundColor:
-                    provider === opt.id ? T.accentColor + "20" : "transparent",
-                  color:
-                    provider === opt.id ? T.accentColor : T.textMuted + "60",
-                  border: `1px solid ${provider === opt.id ? T.accentColor + "40" : T.borderColor + "15"}`,
-                }}
-              >
-                {opt.label}
-              </button>
-            ))}
-            <span
-              className="text-[9px] font-mono hidden sm:block"
-              style={{ color: T.textMuted }}
-            >
-              <MessageSquare size={9} className="inline mr-1 opacity-50" />
-              {messages.length} msgs
+          <div className="flex items-center gap-3 text-[10px]">
+            <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-neutral-400">
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: selectedAgent.color }}
+              />
+              {selectedAgent.name.toUpperCase()} ACTIVE
+            </span>
+            <span className="hidden font-mono text-neutral-500 sm:inline">
+              {messages.length} MESSAGES
             </span>
             <button
               onClick={clearChat}
-              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border opacity-50 hover:opacity-100 transition-all"
-              style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
+              className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[9px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
             >
               <Trash2 size={9} /> Clear
             </button>
@@ -1129,63 +1084,86 @@ export default function AgentTool() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Input */}
-        <div
-          className="px-4 py-3 border-t shrink-0"
-          style={{
-            borderColor: T.borderColor + "15",
-            backgroundColor: T.boxBg + "40",
-          }}
-        >
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder={`Message ${selectedAgent.name}... (Enter to send)`}
-              rows={1}
-              disabled={isLoading}
-              className="flex-1 px-3 py-2 text-sm rounded-lg outline-none resize-none overflow-hidden disabled:opacity-50 transition-all"
-              style={{
-                backgroundColor: T.bgColor,
-                border: `1px solid ${T.borderColor}30`,
-                color: T.textColor,
-                minHeight: "44px",
-                maxHeight: "120px",
-              }}
-            />
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || isLoading}
-              className="px-3 py-2 rounded-lg font-bold disabled:opacity-30 transition-all hover:scale-105 shrink-0"
-              style={{
-                backgroundColor: selectedAgent.color,
-                color: "#0a0a0f",
-                minHeight: "38px",
-              }}
-            >
-              <Send size={13} />
-            </button>
-          </div>
-          <div className="flex items-center justify-between mt-1.5 px-0.5">
-            <span
-              className="text-[10px] opacity-70"
-              style={{ color: T.textMuted }}
-            >
-              Powered by{" "}
-              {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ??
-                "Gemini"}{" "}
-              · Shift+Enter for new line
-            </span>
-            {input.length > 0 && (
+        {/* Command bar */}
+        <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
+          <div className="mx-auto flex max-w-4xl flex-col gap-2">
+            <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:items-center">
+              <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
+                <textarea
+                  ref={textareaRef}
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  onKeyDown={handleKey}
+                  aria-label={`Message ${selectedAgent.name}`}
+                  placeholder={`Message ${selectedAgent.name}...`}
+                  rows={1}
+                  disabled={isLoading}
+                  className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                />
+                <button
+                  aria-label="Send message"
+                  onClick={() => sendMessage()}
+                  disabled={!input.trim() || isLoading}
+                  className="absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400 transition hover:bg-cyan-500/20 disabled:opacity-40 sm:bottom-2 sm:h-9 sm:w-9"
+                  style={{ color: selectedAgent.color }}
+                >
+                  <Send size={15} />
+                </button>
+              </div>
+
+              <button
+                aria-label="Clear chat"
+                onClick={clearChat}
+                className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
+              >
+                <Trash2 size={15} />
+              </button>
+            </div>
+
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
+                {PROVIDER_OPTIONS.map((opt) => (
+                  <button
+                    key={opt.id}
+                    onClick={() =>
+                      setProvider(opt.id as "gemini" | "openrouter-free")
+                    }
+                    title={opt.hint}
+                    className="shrink-0 rounded-md border border-white/5 px-2 py-1 text-[11px] font-bold transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    style={{
+                      backgroundColor:
+                        provider === opt.id
+                          ? selectedAgent.color + "15"
+                          : "transparent",
+                      color:
+                        provider === opt.id ? selectedAgent.color : "#737373",
+                      borderColor:
+                        provider === opt.id
+                          ? selectedAgent.color + "40"
+                          : undefined,
+                    }}
+                  >
+                    {opt.label}
+                  </button>
+                ))}
+                {selectedAgent.id === "director" && (
+                  <button
+                    onClick={triggerFlow}
+                    disabled={!input.trim() || isLoading}
+                    title="Send to ActivePieces multi-agent flow"
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-bold text-amber-300 transition disabled:opacity-30"
+                  >
+                    <Zap size={11} /> FLOW
+                  </button>
+                )}
+              </div>
               <span
-                className="text-[9px] font-mono opacity-40"
+                className="hidden text-[10px] opacity-70 sm:block"
                 style={{ color: T.textMuted }}
               >
-                {input.length}
+                Shift+Enter for new line
               </span>
-            )}
+            </div>
           </div>
         </div>
       </div>

@@ -399,40 +399,39 @@ export default function GalleryTool() {
   ];
 
   return (
-    <div className="h-full overflow-y-auto studio-scroll">
+    <div className="h-full overflow-y-auto bg-[#030308] studio-scroll">
       <div
-        className="sticky top-0 z-20 border-b px-4 py-3 backdrop-blur-md"
-        style={{
-          backgroundColor: T.bgColor + "ee",
-          borderColor: T.borderColor + "20",
-        }}
+        className="sticky top-0 z-20 border-b border-white/5 px-4 py-3 backdrop-blur-md"
+        style={{ backgroundColor: "rgba(3,3,8,0.95)" }}
       >
         <div className="flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <LayoutGrid size={16} style={{ color: T.accentColor }} />
-            <span
-              className="text-sm font-bold uppercase tracking-widest"
-              style={{ color: T.textMuted }}
-            >
-              Asset Bucket
-            </span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="text-xs opacity-80" style={{ color: T.textMuted }}>
-              {filteredItems.length} items
+          <div className="flex items-center gap-3">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
+              <LayoutGrid size={16} className="text-cyan-400" />
             </div>
+            <div>
+              <div className="text-sm font-black tracking-wide text-white">
+                Asset Bucket
+              </div>
+              <div className="hidden text-[10px] text-neutral-500 sm:block">
+                Your generated images, video, and audio
+              </div>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-[10px] text-neutral-400">
+              <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
+              {filteredItems.length} ASSETS
+            </span>
             <button
               onClick={() => setShowShare((v) => !v)}
-              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all"
-              style={{
-                backgroundColor: showShare
-                  ? T.accentColor
-                  : T.accentColor + "15",
-                color: showShare ? T.bgColor : T.accentColor,
-                border: `1px solid ${T.accentColor}40`,
-              }}
+              className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition ${
+                showShare
+                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                  : "border border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+              }`}
             >
-              <Plus size={12} /> Share Video
+              <Plus size={12} /> Share
             </button>
           </div>
         </div>
@@ -530,33 +529,28 @@ export default function GalleryTool() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="shrink-0 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+                className="shrink-0 rounded-md border border-white/5 px-3 py-1.5 text-xs font-bold transition hover:border-cyan-500/20 hover:text-cyan-300"
                 style={{
-                  border: `1px solid ${activeTab === tab.id ? T.accentColor + "40" : T.borderColor + "30"}`,
                   backgroundColor:
-                    activeTab === tab.id ? T.accentColor + "12" : "transparent",
-                  color:
-                    activeTab === tab.id ? T.accentColor : T.textColor + "80",
+                    activeTab === tab.id
+                      ? T.accentColor + "12"
+                      : "rgba(255,255,255,0.02)",
+                  color: activeTab === tab.id ? T.accentColor : "#a3a3a3",
+                  borderColor:
+                    activeTab === tab.id ? T.accentColor + "40" : undefined,
                 }}
               >
                 {tab.label}
               </button>
             ))}
           </div>
-          <div
-            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border sm:ml-auto"
-            style={{
-              borderColor: T.borderColor + "30",
-              backgroundColor: T.bgColor,
-            }}
-          >
-            <Search size={14} style={{ color: T.textMuted }} />
+          <div className="relative flex items-center sm:ml-auto">
+            <Search size={14} className="absolute left-3 text-neutral-500" />
             <input
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search assets..."
-              className="bg-transparent text-sm outline-none w-full sm:w-40"
-              style={{ color: T.textColor }}
+              className="w-full rounded-xl border border-white/10 bg-white/3 py-2 pl-9 pr-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:w-56"
             />
           </div>
         </div>
@@ -581,11 +575,7 @@ export default function GalleryTool() {
                     setSelectedItem(item);
                   }
                 }}
-                className="border rounded-xl overflow-hidden group cursor-pointer transition-all duration-200 hover:scale-[1.02]"
-                style={{
-                  borderColor: T.borderColor + "25",
-                  backgroundColor: T.boxBg + "80",
-                }}
+                className="group cursor-pointer overflow-hidden rounded-xl border border-white/5 bg-white/2 transition hover:scale-[1.02] hover:border-cyan-500/20 hover:bg-cyan-500/5"
               >
                 <div className="relative aspect-square overflow-hidden bg-black/40">
                   {item.imageUrl ? (
@@ -659,10 +649,7 @@ export default function GalleryTool() {
                   )}
                 </div>
                 <div className="px-2.5 py-2">
-                  <div
-                    className="text-[11px] font-bold truncate"
-                    style={{ color: T.headerColor }}
-                  >
+                  <div className="text-xs font-bold truncate text-white">
                     {item.title}
                   </div>
                   <div className="flex items-center justify-between mt-1">
