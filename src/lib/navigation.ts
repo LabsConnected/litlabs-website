@@ -165,6 +165,11 @@ export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Studio", href: "/studio", icon: Sparkles },
   { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Agents", href: "/agents", icon: Bot },
+  { label: "Gallery", href: "/gallery", icon: Image },
+  { label: "Market", href: "/marketplace", icon: Store },
+  { label: "Games", href: "/games", icon: Gamepad2 },
+  { label: "Social", href: "/social", icon: Users },
+  { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "More", href: "#menu", icon: Menu },
 ];
 

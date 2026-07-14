@@ -26,7 +26,7 @@ export default function MobileBottomNav() {
         style={{ borderColor: `${T.borderColor}20` }}
       >
         <div
-          className="flex items-center justify-around px-1 py-1"
+          className="flex items-center gap-1 overflow-x-auto px-2 py-1 scrollbar-hide"
           style={{ backgroundColor: `${T.bgColor}ee` }}
         >
           {MOBILE_BOTTOM_ITEMS.map((item) => {
@@ -45,7 +45,7 @@ export default function MobileBottomNav() {
                       }
                     : undefined
                 }
-                className="relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all"
+                className="relative flex min-w-[3.5rem] flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
                 style={{ color: active ? T.accentColor : T.textMuted }}
               >
                 {active && (
