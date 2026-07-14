@@ -77,7 +77,7 @@ const FEATURES: Array<{
 
 export function LandingFeatures() {
   return (
-    <section id="features" className="relative z-10 px-4 py-24 md:py-32">
+    <section id="features" className="relative z-10 px-4 py-16 md:py-32">
       <div className="mx-auto max-w-6xl">
         <div className="mb-14 text-center">
           <div className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">

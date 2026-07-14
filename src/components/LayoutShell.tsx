@@ -93,7 +93,7 @@ export default function LayoutShell({
       <>
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-        <main className="relative z-10 min-h-screen">{children}</main>
+        <main className="relative z-10 min-h-dvh">{children}</main>
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
@@ -103,13 +103,13 @@ export default function LayoutShell({
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className="relative z-10 flex min-h-screen">
+      <div className="relative z-10 flex min-h-dvh">
         <Sidebar
           open={false}
           onClose={() => {}}
           collapsed={desktopSidebarCollapsed}
         />
-        <div className="flex-1 flex flex-col min-h-screen">
+        <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper
             onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}

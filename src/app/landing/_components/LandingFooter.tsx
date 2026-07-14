@@ -101,7 +101,7 @@ const SOCIALS: Array<{
 
 export function LandingFooter() {
   return (
-    <footer className="relative z-10 border-t border-white/5 bg-[#06060e] px-6 py-16">
+    <footer className="relative z-10 border-t border-white/5 bg-[#06060e] px-4 py-12 sm:px-6 sm:py-16">
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-10 md:grid-cols-[1.4fr_3fr]">
           {/* Brand */}

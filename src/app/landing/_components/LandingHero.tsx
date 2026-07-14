@@ -44,7 +44,7 @@ export function LandingHero() {
         <p className="mb-3 text-lg font-bold text-neutral-400 md:text-xl">
           Stop chatting.
         </p>
-        <h1 className="mb-6 text-5xl font-black leading-[1.03] tracking-tight text-white md:text-7xl lg:text-[5.5rem]">
+        <h1 className="mb-6 text-4xl font-black leading-[1.03] tracking-tight text-white min-[390px]:text-5xl md:text-7xl lg:text-[5.5rem]">
           Start{" "}
           <span
             className="bg-clip-text text-transparent"
@@ -68,14 +68,14 @@ export function LandingHero() {
         <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
             href="/sign-up"
-            className="group inline-flex items-center gap-2.5 rounded-2xl bg-white px-8 py-3.5 text-sm font-black text-black shadow-[0_0_40px_rgba(255,255,255,0.18)] transition hover:shadow-[0_0_60px_rgba(255,255,255,0.32)]"
+            className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl bg-white px-5 py-3.5 text-sm font-black text-black shadow-[0_0_40px_rgba(255,255,255,0.18)] transition hover:shadow-[0_0_60px_rgba(255,255,255,0.32)] sm:w-auto sm:px-8"
           >
             Launch Studio free
             <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
           </Link>
           <Link
             href="/studio"
-            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/20 hover:bg-white/8"
+            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/20 hover:bg-white/8 sm:w-auto sm:px-7"
           >
             <Play size={13} className="text-orange-300" />
             Watch LiTT build

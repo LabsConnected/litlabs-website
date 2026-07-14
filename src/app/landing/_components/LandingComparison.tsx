@@ -20,7 +20,7 @@ const LITT_PROS = [
 
 export function LandingComparison() {
   return (
-    <section className="relative z-10 px-4 py-24 md:py-32">
+    <section className="relative z-10 px-4 py-16 md:py-32">
       <div className="mx-auto max-w-5xl">
         {/* Header */}
         <div className="mb-16 text-center">

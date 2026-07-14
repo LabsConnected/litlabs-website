@@ -143,7 +143,7 @@ export default function RootLayout({
       <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
       <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
-        className="antialiased min-h-screen"
+        className="min-h-dvh overflow-x-clip antialiased"
         style={{ backgroundColor: "#0d0a05" }}
       >
         {hasClerk ? (

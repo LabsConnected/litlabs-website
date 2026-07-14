@@ -5,6 +5,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import ReactMarkdown from "react-markdown";
+import { cn } from "@/lib/utils";
 import {
   Terminal,
   FolderKanban,
@@ -35,6 +36,7 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import PluginPanel from "./PluginPanel";
+import CameraSession from "./CameraSession";
 import {
   PersonaProvider,
   usePersona,
@@ -223,15 +225,15 @@ function TelemetryBar() {
     { label: "NET", value: 42, color: "#34d399" },
   ];
   return (
-    <div className="flex items-center gap-4 px-4 text-[10px] font-mono text-neutral-400">
+    <div className="flex min-w-0 items-center gap-2 px-3 text-[9px] font-mono text-neutral-400 sm:gap-4 sm:px-4 sm:text-[10px]">
       <div className="flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
         <span className="text-emerald-400">NEURAL LINK</span>
         <span>STABLE</span>
       </div>
-      <div className="h-3 w-px bg-white/10" />
+      <div className="hidden h-3 w-px bg-white/10 sm:block" />
       {metrics.map((m) => (
-        <div key={m.label} className="flex items-center gap-1.5">
+        <div key={m.label} className="hidden items-center gap-1.5 sm:flex">
           <span className="uppercase">{m.label}</span>
           <div className="h-1 w-16 overflow-hidden rounded-full bg-white/5">
             <div
@@ -242,7 +244,7 @@ function TelemetryBar() {
           <span style={{ color: m.color }}>{m.value}%</span>
         </div>
       ))}
-      <div className="ml-auto flex items-center gap-1.5">
+      <div className="ml-auto hidden items-center gap-1.5 md:flex">
         <Activity size={10} className="text-cyan-400" />
         <span>NET</span>
         <span className="text-cyan-400">42ms</span>
@@ -270,6 +272,68 @@ function LiveClock() {
     return () => clearInterval(id);
   }, []);
   return <span className="font-mono text-[10px] text-neutral-400">{time}</span>;
+}
+
+interface MobileToolRailProps {
+  activeTool?: string;
+  onToolChange?: (tool: string) => void;
+  onPluginsToggle?: () => void;
+  pluginsOpen?: boolean;
+}
+
+const MOBILE_TOOLS = [
+  { id: "chat", label: "Chat", icon: Terminal },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "pipeline", label: "Pipes", icon: GitBranch },
+  { id: "builder", label: "Build", icon: Rocket },
+  { id: "image", label: "Image", icon: ImageIcon },
+  { id: "gallery", label: "Assets", icon: FolderOpen },
+];
+
+function MobileToolRail({
+  activeTool,
+  onToolChange,
+  onPluginsToggle,
+  pluginsOpen,
+}: MobileToolRailProps) {
+  return (
+    <nav className="flex items-center gap-1 overflow-x-auto border-t border-white/5 bg-[#030308]/95 px-2 py-1.5 [scrollbar-width:none] md:hidden">
+      {MOBILE_TOOLS.map((item) => {
+        const Icon = item.icon;
+        const active = activeTool === item.id;
+        return (
+          <button
+            key={item.id}
+            onClick={() => {
+              if (item.id === "chat") return;
+              onToolChange?.(item.id);
+            }}
+            className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-2.5 py-1.5 transition ${
+              active
+                ? "bg-cyan-500/10 text-cyan-300"
+                : "text-neutral-500 hover:bg-white/5 hover:text-neutral-300"
+            }`}
+            title={item.label}
+          >
+            <Icon size={16} />
+            <span className="mt-0.5 text-[9px] font-bold">{item.label}</span>
+          </button>
+        );
+      })}
+      <button
+        onClick={() => onPluginsToggle?.()}
+        className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-2.5 py-1.5 transition ${
+          pluginsOpen
+            ? "bg-cyan-500/10 text-cyan-300"
+            : "text-neutral-500 hover:bg-white/5 hover:text-neutral-300"
+        }`}
+        title="Plugins"
+      >
+        <LayoutGrid size={16} />
+        <span className="mt-0.5 text-[9px] font-bold">Plugins</span>
+      </button>
+    </nav>
+  );
 }
 
 function ActiveCommandTabs({
@@ -378,13 +442,14 @@ function LITTTerminalShellInner({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activeTab, setActiveTab] = useState("terminal");
   const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [cameraOpen, setCameraOpen] = useState(false);
   const [activeCommands, setActiveCommands] = useState<
     { id: string; label: string }[]
   >([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
-  const textInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevPersonaRef = useRef(persona.id);
 
@@ -430,11 +495,11 @@ function LITTTerminalShellInner({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy]);
 
-  // Push voice transcripts into the input field (auto-send optional)
+  // Voice transcripts are finalised after a silence gap — auto-send them
   useEffect(() => {
     setOnTurn((text) => {
       if (!text) return;
-      setInput((prev) => (prev ? `${prev} ${text}` : text));
+      void send(text);
     });
     return () => setOnTurn(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -644,7 +709,7 @@ function LITTTerminalShellInner({
     void send(input);
   };
 
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -685,7 +750,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
       <style jsx>{`
@@ -729,7 +794,7 @@ function LITTTerminalShellInner({
       />
 
       {/* ── TOP BAR ── */}
-      <header className="flex h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md">
+      <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md md:flex">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
@@ -792,7 +857,7 @@ function LITTTerminalShellInner({
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* LEFT RAIL */}
-        <aside className="flex w-16 flex-col items-center gap-1 border-r border-white/5 bg-[#05050a]/80 py-3">
+        <aside className="hidden w-16 shrink-0 flex-col items-center gap-1 border-r border-white/5 bg-[#05050a]/80 py-3 md:flex">
           {RAIL_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeTool === item.tool || activeTab === item.id;
@@ -862,7 +927,7 @@ function LITTTerminalShellInner({
           />
 
           {/* Stage header */}
-          <div className="relative z-10 flex items-center justify-between px-6 pt-5">
+          <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:border-0 sm:px-6 sm:pt-5">
             <div className="flex items-center gap-3">
               <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
                 <Terminal size={16} className="text-cyan-400" />
@@ -871,7 +936,7 @@ function LITTTerminalShellInner({
                 <div className="text-sm font-black tracking-wide text-white">
                   LITT Terminal
                 </div>
-                <div className="text-[10px] text-neutral-500">
+                <div className="hidden text-[10px] text-neutral-500 sm:block">
                   Your intelligent workspace. One command away.
                 </div>
               </div>
@@ -881,24 +946,30 @@ function LITTTerminalShellInner({
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 SYSTEMS NOMINAL
               </span>
-              <span className="font-mono text-neutral-500">MEMORY 78%</span>
-              <span className="font-mono text-neutral-500">CONTEXT 128K</span>
-              <span className="font-mono text-neutral-500">TOKENS 1.2M</span>
+              <span className="hidden font-mono text-neutral-500 sm:inline">
+                MEMORY 78%
+              </span>
+              <span className="hidden font-mono text-neutral-500 md:inline">
+                CONTEXT 128K
+              </span>
+              <span className="hidden font-mono text-neutral-500 md:inline">
+                TOKENS 1.2M
+              </span>
             </div>
           </div>
 
           {/* Scrollable content */}
           <div
             ref={transcriptRef}
-            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-6 py-4"
+            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
             {isEmpty ? (
-              <div className="mx-auto flex h-full max-w-3xl flex-col items-center justify-center gap-6">
+              <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center gap-4 py-4 sm:gap-6 sm:py-6">
                 <div className="flex flex-col items-center gap-3 text-center">
                   <div className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
                     Welcome back, {displayName}.
                   </div>
-                  <h1 className="max-w-xl text-2xl font-light leading-tight sm:text-3xl">
+                  <h1 className="max-w-xl text-[1.65rem] font-light leading-tight sm:text-3xl">
                     What can I{" "}
                     <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400">
                       amplify
@@ -908,7 +979,7 @@ function LITTTerminalShellInner({
                 </div>
 
                 {/* Hero visualization */}
-                <div className="relative flex h-48 w-full max-w-md items-center justify-center">
+                <div className="relative flex h-28 w-full max-w-md items-center justify-center sm:h-48">
                   <div
                     className="absolute inset-0 rounded-full blur-2xl"
                     style={{
@@ -971,7 +1042,7 @@ function LITTTerminalShellInner({
                 </div>
 
                 {/* Action cards */}
-                <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
+                <div className="grid w-full grid-cols-1 gap-2 min-[390px]:grid-cols-2 sm:grid-cols-4 sm:gap-3">
                   {[
                     {
                       icon: Sparkles,
@@ -1001,7 +1072,7 @@ function LITTTerminalShellInner({
                           `Help me ${card.title.toLowerCase()} something`,
                         )
                       }
-                      className="group flex flex-col gap-2 rounded-xl border border-white/5 bg-white/[0.02] p-3 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5"
+                      className="group flex min-h-20 flex-col gap-1.5 rounded-xl border border-white/5 bg-white/[0.02] p-3 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:gap-2"
                     >
                       <div className="flex items-center justify-between">
                         <card.icon
@@ -1130,32 +1201,55 @@ function LITTTerminalShellInner({
             )}
           </div>
 
+          <MobileToolRail
+            activeTool={activeTool}
+            onToolChange={onToolChangeAction}
+            onPluginsToggle={() => setPluginsOpen((v) => !v)}
+            pluginsOpen={pluginsOpen}
+          />
+
           {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/90 px-6 py-3 backdrop-blur-md">
+          <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-2">
+              {cameraOpen && (
+                <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
+                  <CameraSession
+                    onSnapshot={(url) => {
+                      void send("Describe what you see.", [url]);
+                      setCameraOpen(false);
+                    }}
+                    onClose={() => setCameraOpen(false)}
+                    modelName={persona.name}
+                  />
+                </div>
+              )}
               <AttachmentStrip
                 attachments={attachments}
                 onRemove={removeAttachment}
               />
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:items-center">
                 <button
                   aria-label="Add attachment"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10"
+                  className="order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-8 sm:w-8"
                 >
                   <Plus size={16} />
                 </button>
                 <button
                   aria-label="Capture from camera"
-                  onClick={() => cameraInputRef.current?.click()}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10"
+                  onClick={() => setCameraOpen(true)}
+                  className={`order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-8 sm:w-8 ${
+                    cameraOpen
+                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                  }`}
                 >
                   <Camera size={16} />
                 </button>
                 <button
                   aria-label={micActive ? "Stop voice" : "Start voice"}
                   onClick={toggleMic}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition ${
+                  className={`order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-8 sm:w-8 ${
                     micActive
                       ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
@@ -1164,16 +1258,16 @@ function LITTTerminalShellInner({
                   {micActive ? <MicOff size={16} /> : <Mic size={16} />}
                 </button>
 
-                <div className="relative flex min-w-0 flex-1 items-center">
-                  <input
+                <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
+                  <textarea
                     ref={textInputRef}
-                    type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     aria-label="Message LITT"
                     placeholder="Ask LITT to build, inspect, debug, generate, or control this workspace..."
-                    className="h-11 w-full rounded-xl border border-white/10 bg-white/[0.03] pl-4 pr-12 text-xs text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/[0.05]"
+                    rows={1}
+                    className="max-h-32 min-h-12 w-full resize-none rounded-xl border border-white/10 bg-white/[0.03] py-3 pl-4 pr-12 text-base leading-6 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/[0.05] sm:min-h-11 sm:py-2.5 sm:text-xs sm:leading-5"
                   />
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
@@ -1181,7 +1275,7 @@ function LITTTerminalShellInner({
                     disabled={
                       !busy && !input.trim() && attachments.length === 0
                     }
-                    className={`absolute right-2 flex h-7 w-7 items-center justify-center rounded-lg transition disabled:opacity-40 ${
+                    className={`absolute bottom-1.5 right-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition disabled:opacity-40 sm:bottom-2 sm:h-7 sm:w-7 ${
                       busy
                         ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
                         : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
@@ -1194,13 +1288,13 @@ function LITTTerminalShellInner({
                 <button
                   aria-label="Attach file"
                   onClick={() => fileInputRef.current?.click()}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10"
+                  className="order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-8 sm:w-8"
                 >
                   <Paperclip size={16} />
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-1">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
@@ -1232,7 +1326,7 @@ function LITTTerminalShellInner({
           </div>
 
           {/* FOOTER TELEMETRY */}
-          <div className="relative z-20 flex h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">
+          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90 sm:flex">
             <TelemetryBar />
             <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-neutral-600">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>
@@ -1244,7 +1338,14 @@ function LITTTerminalShellInner({
         </main>
 
         {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
-        <aside className="hidden w-[300px] shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80 lg:flex">
+        <aside
+          className={cn(
+            "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
+            pluginsOpen
+              ? "fixed inset-0 z-50 flex w-full md:relative md:inset-auto md:w-[300px] lg:relative"
+              : "hidden w-[300px] lg:flex",
+          )}
+        >
           {pluginsOpen ? (
             <PluginPanel onClose={() => setPluginsOpen(false)} />
           ) : (

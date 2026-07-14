@@ -31,7 +31,7 @@ const STATS = [
 
 export function LandingStats() {
   return (
-    <section className="relative z-10 px-6 py-20">
+    <section className="relative z-10 px-4 py-16 sm:px-6 sm:py-20">
       <div className="mx-auto max-w-6xl">
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {STATS.map((s) => (

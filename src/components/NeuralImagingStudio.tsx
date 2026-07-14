@@ -398,7 +398,7 @@ export default function NeuralImagingStudio() {
               <h3 className="text-xs font-semibold text-zinc-400 mb-2">
                 Recent ({generatedImages.length})
               </h3>
-              <div className="grid grid-cols-6 gap-2">
+              <div className="grid grid-cols-3 gap-2 min-[420px]:grid-cols-6">
                 {generatedImages.map((img, idx) => (
                   <button
                     key={idx}

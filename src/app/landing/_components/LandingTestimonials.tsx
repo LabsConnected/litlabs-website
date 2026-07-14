@@ -27,7 +27,7 @@ const TESTIMONIALS = [
 
 export function LandingTestimonials() {
   return (
-    <section className="relative z-10 border-y border-white/5 bg-white/[0.01] px-6 py-24 md:py-32">
+    <section className="relative z-10 border-y border-white/5 bg-white/[0.01] px-4 py-16 sm:px-6 md:py-32">
       <div className="mx-auto max-w-6xl">
         <div className="mb-14 text-center">
           <div className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-amber-300">

@@ -69,7 +69,7 @@ export default function MobileBottomNav() {
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[80vh] overflow-y-auto rounded-t-3xl border-t shadow-2xl"
+          className="relative max-h-[80dvh] overflow-y-auto overscroll-contain rounded-t-3xl border-t shadow-2xl"
             style={{
               backgroundColor: `${T.bgColor}f8`,
               borderColor: `${T.accentColor}20`,
@@ -97,7 +97,7 @@ export default function MobileBottomNav() {
                 <X size={16} />
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2.5 p-5">
+            <div className="grid grid-cols-3 gap-2 p-4 min-[390px]:gap-2.5 min-[390px]:p-5">
               {MOBILE_MORE_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);

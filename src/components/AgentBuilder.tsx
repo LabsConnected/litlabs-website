@@ -415,7 +415,7 @@ export default function AgentBuilder({
             >
               Icon
             </label>
-            <div className="grid grid-cols-6 gap-2">
+            <div className="grid grid-cols-3 gap-2 min-[420px]:grid-cols-6">
               {AGENT_ICONS.map(({ id, icon: Icon }) => (
                 <button
                   key={id}
@@ -445,7 +445,7 @@ export default function AgentBuilder({
             >
               Accent Color
             </label>
-            <div className="grid grid-cols-5 gap-2">
+            <div className="grid grid-cols-3 gap-2 min-[420px]:grid-cols-5">
               {PRESET_COLORS.map((color) => (
                 <button
                   key={color}
