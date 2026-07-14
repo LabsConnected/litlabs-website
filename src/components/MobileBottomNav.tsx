@@ -45,7 +45,7 @@ export default function MobileBottomNav() {
                       }
                     : undefined
                 }
-                className="relative flex min-w-[3.5rem] flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
+                className="relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
                 style={{ color: active ? T.accentColor : T.textMuted }}
               >
                 {active && (
