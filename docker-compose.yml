@@ -1,4 +1,4 @@
-version: '3.8'
+# Note: top-level `version` key is obsolete in Docker Compose v2 (ignored if set)
 
 services:
   app:
