@@ -35,7 +35,7 @@ function Section({
     <div>
       <div
         className="text-[9px] font-black uppercase tracking-[0.2em] mb-2 px-0.5"
-        style={{ color: "rgba(255,255,255,0.3)" }}
+        style={{ color: "rgba(255,255,255,0.55)" }}
       >
         {title}
       </div>
@@ -55,12 +55,12 @@ function Row({
 }) {
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
-      <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.45)" }}>
+      <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.6)" }}>
         {label}
       </span>
       <span
         className="text-[11px] font-bold"
-        style={{ color: accent || "rgba(255,255,255,0.85)" }}
+        style={{ color: accent || "rgba(255,255,255,0.9)" }}
       >
         {value}
       </span>
@@ -150,7 +150,7 @@ function ImageInspector({
               </div>
               <div
                 className="text-[9px]"
-                style={{ color: "rgba(255,255,255,0.3)" }}
+                style={{ color: "rgba(255,255,255,0.55)" }}
               >
                 2 min ago · 1024×1024
               </div>
@@ -374,14 +374,14 @@ function SystemPanel({
             </span>
             <span
               className="text-[10px] font-bold"
-              style={{ color: "rgba(255,255,255,0.3)" }}
+              style={{ color: "rgba(255,255,255,0.55)" }}
             >
               LBC
             </span>
           </div>
           <div
             className="text-[10px] mt-1"
-            style={{ color: "rgba(255,255,255,0.35)" }}
+            style={{ color: "rgba(255,255,255,0.55)" }}
           >
             Daily claim ready · Refill in 6h
           </div>
@@ -419,7 +419,7 @@ function SystemPanel({
             </div>
             <span
               className="text-[10px] font-mono"
-              style={{ color: "rgba(255,255,255,0.3)" }}
+              style={{ color: "rgba(255,255,255,0.55)" }}
             >
               {s.latency}
             </span>
@@ -458,7 +458,7 @@ function SystemPanel({
               />
               <span
                 className="text-[8px] uppercase tracking-wider truncate w-full text-center"
-                style={{ color: "rgba(255,255,255,0.3)" }}
+                style={{ color: "rgba(255,255,255,0.55)" }}
               >
                 {theme.name}
               </span>
@@ -619,7 +619,7 @@ export default function StudioInspector({
               onClick={() => setTab(t.id)}
               className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-all"
               style={{
-                color: active ? T.accentColor : "rgba(255,255,255,0.3)",
+                color: active ? T.accentColor : "rgba(255,255,255,0.6)",
                 backgroundColor: active ? T.accentColor + "12" : "transparent",
                 borderBottom: active
                   ? `2px solid ${T.accentColor}`

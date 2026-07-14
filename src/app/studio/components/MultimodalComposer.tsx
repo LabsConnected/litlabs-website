@@ -83,7 +83,16 @@ export default function MultimodalComposer({
     stopVoice,
     toggleMute,
     interrupt,
+    setOnTurn,
+    errorMessage,
   } = useVoiceSession();
+
+  // Set turn handler for voice sessions
+  useEffect(() => {
+    setOnTurn((text) => {
+      void onSend(text);
+    });
+  }, [onSend, setOnTurn]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -236,7 +245,7 @@ export default function MultimodalComposer({
   };
 
   return (
-    <div className="relative flex flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5">
+    <div className="relative flex min-w-0 flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5">
       {/* Mode panels */}
       {mode === "camera" && (
         <div className="mb-2">
@@ -253,19 +262,33 @@ export default function MultimodalComposer({
       )}
 
       {/* Voice status strip */}
-      {!["idle", "error"].includes(voiceState) && (
-        <div className="flex items-center justify-between gap-3 px-3 py-1.5 rounded-t-xl border-x border-t border-white/10 bg-black/40 backdrop-blur-md">
+      {!["idle"].includes(voiceState) && (
+        <div
+          className={`flex items-center justify-between gap-3 rounded-t-xl border-x border-t px-3 py-1.5 backdrop-blur-md ${
+            voiceState === "error"
+              ? "border-red-500/20 bg-red-500/5"
+              : "border-white/10 bg-black/40"
+          }`}
+        >
           {/* Left: waveform bars + status text */}
           <div className="flex items-center gap-2">
-            <WaveformBars
-              level={micLevel}
-              active={
-                voiceState === "user_speaking" || voiceState === "listening"
-              }
-            />
-            <span className="text-[11px] font-bold text-white/80">
-              {STATUS_LABELS[voiceState]}
-            </span>
+            {voiceState !== "error" ? (
+              <>
+                <WaveformBars
+                  level={micLevel}
+                  active={
+                    voiceState === "user_speaking" || voiceState === "listening"
+                  }
+                />
+                <span className="text-[11px] font-bold text-white/80">
+                  {STATUS_LABELS[voiceState]}
+                </span>
+              </>
+            ) : (
+              <span className="text-[11px] font-bold text-red-400">
+                {errorMessage || "Voice session error"}
+              </span>
+            )}
           </div>
           {/* Right: controls */}
           <div className="flex items-center gap-1.5">
@@ -277,18 +300,29 @@ export default function MultimodalComposer({
                 Interrupt
               </button>
             )}
-            <button
-              onClick={toggleMute}
-              className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
-            >
-              {isMuted ? "Unmute" : "Mute"}
-            </button>
-            <button
-              onClick={stopVoice}
-              className="rounded-full border border-red-400/30 px-2.5 py-1 text-[10px] font-bold text-red-400 hover:bg-red-400/10"
-            >
-              Stop
-            </button>
+            {voiceState !== "error" ? (
+              <>
+                <button
+                  onClick={toggleMute}
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
+                >
+                  {isMuted ? "Unmute" : "Mute"}
+                </button>
+                <button
+                  onClick={stopVoice}
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
+                >
+                  Stop
+                </button>
+              </>
+            ) : (
+              <button
+                onClick={stopVoice}
+                className="rounded-full border border-red-500/30 px-2.5 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/10"
+              >
+                Dismiss
+              </button>
+            )}
           </div>
         </div>
       )}
@@ -312,6 +346,7 @@ export default function MultimodalComposer({
                   setSnapshots((prev) => prev.filter((_, idx) => idx !== i))
                 }
                 className="absolute right-0 top-0 rounded-bl-lg bg-black/70 p-0.5 text-white"
+                aria-label="Remove snapshot"
               >
                 <Plus size={10} className="rotate-45" />
               </button>
@@ -321,7 +356,7 @@ export default function MultimodalComposer({
       )}
 
       {/* Toolbar */}
-      <div className="mb-1 flex gap-1 overflow-x-auto pb-1">
+      <div className="scrollbar-hide mb-1 flex max-w-full gap-1 overflow-x-auto overscroll-x-contain pb-1">
         <button
           onClick={() => setShowAdd((v) => !v)}
           className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
@@ -422,6 +457,7 @@ export default function MultimodalComposer({
             !micButtonState.disabled && "hover:bg-white/10"
           } ${micButtonState.disabled && "cursor-not-allowed"}`}
           style={getMicButtonStyle()}
+          aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
         >
           <MicIcon
             size={16}
@@ -440,6 +476,7 @@ export default function MultimodalComposer({
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
           className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          aria-label="Send message"
         >
           <Send size={16} />
         </button>

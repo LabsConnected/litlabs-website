@@ -107,6 +107,7 @@ function ToolButton({
           : "none",
       }}
       title={collapsed ? `${tool.label} (Ctrl+${tool.shortcut})` : undefined}
+      aria-label={tool.label}
     >
       {/* Left accent bar when active */}
       {active && !collapsed && (
@@ -473,6 +474,7 @@ export default function StudioSidebar({
             className="p-1 rounded-md transition-all hover:bg-white/10 hover:scale-105 ml-auto"
             style={{ color: T.textMuted + "80" }}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
           >
             {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
           </button>
@@ -690,7 +692,7 @@ function MobileTabBar({
                 setDrawerOpen(false);
               }}
               className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-              style={{ color: active ? T.accentColor : T.textMuted + "80" }}
+              style={{ color: active ? T.accentColor : T.textMuted }}
             >
               {active && (
                 <span
@@ -714,7 +716,7 @@ function MobileTabBar({
           onClick={() => setDrawerOpen((v) => !v)}
           className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
           style={{
-            color: activeIsSecondary ? T.accentColor : T.textMuted + "80",
+            color: activeIsSecondary ? T.accentColor : T.textMuted,
           }}
         >
           {activeIsSecondary && (

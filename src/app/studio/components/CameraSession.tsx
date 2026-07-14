@@ -177,6 +177,7 @@ export default function CameraSession({
             onClick={flipCamera}
             className="rounded-full border border-white/20 p-2 text-slate-300 hover:bg-white/10"
             title="Flip camera"
+            aria-label="Flip camera"
           >
             <RefreshCw size={16} />
           </button>
@@ -184,6 +185,7 @@ export default function CameraSession({
             onClick={close}
             className="rounded-full border border-white/20 p-2 text-slate-300 hover:bg-white/10"
             title="Stop camera"
+            aria-label="Stop camera"
           >
             <X size={16} />
           </button>

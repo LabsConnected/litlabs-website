@@ -172,7 +172,9 @@ export default function StudioOS() {
           <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
             <div
               ref={scrollRef}
-              className="flex-1 min-h-0 overflow-auto p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
+              className={`min-h-0 flex-1 p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2 ${
+                activeTool === "chat" ? "overflow-hidden" : "overflow-auto"
+              }`}
             >
               {activeTool === "chat" ? (
                 <ChatTool selectedModel={model} />
@@ -187,9 +189,10 @@ export default function StudioOS() {
 
         {inspectorOpen && (
           <div className="fixed inset-0 z-10000 md:hidden">
-            <div
-              className="absolute inset-0 bg-black/60"
+            <button
+              className="absolute inset-0 w-full h-full bg-black/60 cursor-default"
               onClick={() => setInspectorOpen(false)}
+              aria-label="Close inspector"
             />
             <div className="absolute right-0 top-0 h-full w-[280px]">
               <StudioInspector

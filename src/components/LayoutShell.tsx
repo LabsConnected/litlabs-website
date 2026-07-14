@@ -66,7 +66,7 @@ export default function LayoutShell({
     return (
       <>
         <AnimatedBackgroundWrapper />
-        <div className="relative z-10 flex h-screen w-screen flex-col overflow-hidden">
+        <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper
             onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}

@@ -41,6 +41,7 @@ export interface VoiceSessionCtx {
   speakText: (text: string) => void;
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
+  setOnTurn: (handler: (text: string) => void) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -103,6 +104,7 @@ const defaultCtx: VoiceSessionCtx = {
   speakText: noop,
   stopSpeaking: noop,
   selectDevice: noop,
+  setOnTurn: noop,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -302,9 +304,7 @@ export function VoiceSessionProvider({
           noiseSuppression: true,
           autoGainControl: true,
           channelCount: 1,
-          ...(selectedDeviceId
-            ? { deviceId: { exact: selectedDeviceId } }
-            : {}),
+          ...(selectedDeviceId ? { deviceId: selectedDeviceId } : {}),
         },
       });
     } catch (err: unknown) {
@@ -344,6 +344,9 @@ export function VoiceSessionProvider({
     try {
       const ctx = new AudioContext();
       audioCtxRef.current = ctx;
+      if (ctx.state === "suspended") {
+        await ctx.resume();
+      }
       const analyser = ctx.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
@@ -420,7 +423,13 @@ export function VoiceSessionProvider({
 
       rec.onend = () => {
         console.debug("[Voice] recognition ended, active:", activeRef.current);
-        if (activeRef.current) {
+        const shouldRestart =
+          activeRef.current &&
+          voiceStateRef.current !== "assistant_speaking" &&
+          voiceStateRef.current !== "muted" &&
+          voiceStateRef.current !== "error";
+
+        if (shouldRestart) {
           setTimeout(() => {
             if (activeRef.current && recognitionRef.current === rec) {
               try {
@@ -510,6 +519,15 @@ export function VoiceSessionProvider({
       // Stop any current TTS first
       stopSpeaking();
 
+      // Pause recognition while speaking to avoid echo loops
+      if (recognitionRef.current) {
+        try {
+          recognitionRef.current.stop();
+        } catch {
+          // ignore
+        }
+      }
+
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
 
@@ -518,6 +536,12 @@ export function VoiceSessionProvider({
           setVoiceState("listening");
           voiceStateRef.current = "listening";
           startMicLevelLoop();
+          // Resume recognition after assistant finished speaking
+          try {
+            recognitionRef.current?.start();
+          } catch {
+            // ignore
+          }
         } else {
           setVoiceState("idle");
           voiceStateRef.current = "idle";
@@ -595,15 +619,12 @@ export function VoiceSessionProvider({
     if (activeRef.current) {
       setVoiceState("listening");
       voiceStateRef.current = "listening";
-      // Restart recognition if needed
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // may already be stopped
-        }
-      }
       startMicLevelLoop();
+      try {
+        recognitionRef.current?.start();
+      } catch {
+        // ignore
+      }
     }
   }, [stopSpeaking, startMicLevelLoop]);
 
@@ -624,6 +645,10 @@ export function VoiceSessionProvider({
     },
     [stopVoice, startVoice],
   );
+
+  const setOnTurn = useCallback((handler: (text: string) => void) => {
+    onTurnRef.current = handler;
+  }, []);
 
   // ---------------------------------------------------------------------------
   // Cleanup on unmount
@@ -657,6 +682,7 @@ export function VoiceSessionProvider({
       speakText,
       stopSpeaking,
       selectDevice,
+      setOnTurn,
     }),
     [
       voiceState,
@@ -673,6 +699,7 @@ export function VoiceSessionProvider({
       speakText,
       stopSpeaking,
       selectDevice,
+      setOnTurn,
     ],
   );
 

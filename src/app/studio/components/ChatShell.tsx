@@ -168,7 +168,7 @@ export default function ChatShell({
 
   return (
     <div
-      className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#0a0a0f]"
+      className="relative flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden bg-[#0a0a0f]"
       style={{ color: T.textColor }}
     >
       {/* Animated circuit background */}
@@ -184,7 +184,10 @@ export default function ChatShell({
       {/* Header */}
       <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#0a0a0f]/90 px-3 backdrop-blur-md">
         <div className="flex items-center gap-3">
-          <button className="rounded-lg p-2 hover:bg-white/5 md:hidden">
+          <button
+            className="rounded-lg p-2 hover:bg-white/5 md:hidden"
+            aria-label="Open sidebar"
+          >
             <Menu size={18} style={{ color: T.textMuted }} />
           </button>
           <div className="flex items-center gap-2.5">
@@ -210,10 +213,14 @@ export default function ChatShell({
           <button
             onClick={() => onNewChat?.()}
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold hover:bg-white/5"
+            aria-label="New chat"
           >
             <Zap size={12} style={{ color: T.accentColor }} /> New
           </button>
-          <button className="rounded-full border border-white/10 p-2 hover:bg-white/5">
+          <button
+            className="rounded-full border border-white/10 p-2 hover:bg-white/5"
+            aria-label="More options"
+          >
             <MoreHorizontal size={14} style={{ color: T.textMuted }} />
           </button>
         </div>
@@ -246,7 +253,7 @@ export default function ChatShell({
                 </span>
               </div>
               <h2
-                className="mb-1 text-sm font-bold"
+                className="mb-1 break-words text-sm font-bold"
                 style={{ color: T.textColor }}
               >
                 Active: {projectName}
@@ -291,7 +298,7 @@ export default function ChatShell({
             </div>
 
             {/* Starters */}
-            <div className="flex gap-2 overflow-x-auto pb-1">
+            <div className="scrollbar-hide flex max-w-full gap-2 overflow-x-auto overscroll-x-contain pb-1">
               {STARTERS.map((item) => (
                 <button
                   key={item}
