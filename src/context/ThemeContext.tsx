@@ -596,6 +596,25 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.style.setProperty("--border-color", colors.borderColor);
       root.style.setProperty("--accent-color", colors.accentColor);
       root.style.setProperty("--box-bg", colors.boxBg);
+      // Sync data-theme attribute so the :root[data-theme="light"]
+      // overrides in globals.css activate for legacy CSS-only components.
+      // Also handle the "system" mode by reading prefers-color-scheme.
+      const isLight =
+        theme.mode === "light" ||
+        (theme.mode === "system" &&
+          typeof window !== "undefined" &&
+          !!window.matchMedia &&
+          window.matchMedia("(prefers-color-scheme: light)").matches);
+      if (isLight) {
+        root.setAttribute("data-theme", "light");
+      } else {
+        root.removeAttribute("data-theme");
+      }
+      // Keep the browser chrome (mobile address bar, splash) in sync.
+      const meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) {
+        meta.setAttribute("content", colors.bgColor);
+      }
     }
   }, [theme, mounted]);
 

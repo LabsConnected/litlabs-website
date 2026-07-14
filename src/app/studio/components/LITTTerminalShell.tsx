@@ -1010,7 +1010,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-dvh md:h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1205,7 +1205,7 @@ function LITTTerminalShellInner({
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
             {isEmpty ? (
-              <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center gap-3 py-4 sm:gap-6 sm:py-6">
+              <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
                 <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
                   <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-400 sm:text-xs">
                     Welcome back, {displayName}.
@@ -1313,22 +1313,22 @@ function LITTTerminalShellInner({
                           `Help me ${card.title.toLowerCase()} something`,
                         )
                       }
-                      className="group flex min-h-18 flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2.5 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
+                      className="group flex min-h-[72px] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
                     >
                       <div className="flex items-center justify-between">
                         <card.icon
-                          size={15}
-                          className="text-cyan-400 transition group-hover:scale-110"
+                          size={14}
+                          className="text-cyan-400 transition group-hover:scale-110 sm:size-[15px]"
                         />
                         <ChevronRight
                           size={12}
-                          className="text-neutral-600 group-hover:text-cyan-400"
+                          className="text-neutral-500 group-hover:text-cyan-400"
                         />
                       </div>
                       <div className="text-xs font-bold sm:text-sm">
                         {card.title}
                       </div>
-                      <div className="text-[10px] leading-relaxed text-neutral-400">
+                      <div className="text-[10px] leading-relaxed text-neutral-300 sm:text-[11px]">
                         {card.desc}
                       </div>
                     </button>
@@ -1337,7 +1337,7 @@ function LITTTerminalShellInner({
 
                 <button
                   onClick={() => setPluginsOpen(true)}
-                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 transition hover:text-cyan-300 sm:text-xs"
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-300 sm:text-xs"
                 >
                   <LayoutGrid size={12} />
                   View all plugins

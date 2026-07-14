@@ -61,6 +61,21 @@
 
 /* html scroll-behavior removed - was causing scroll-to-bottom on page refresh */
 
+/* Reduce decorative motion on mobile and for users who prefer reduced motion */
+@media (max-width: 768px), (prefers-reduced-motion: reduce) {
+  .animate-pulse,
+  .animate-ping,
+  .animate-bounce,
+  .ambient-pulse,
+  .ambient-particle,
+  .floating-glow,
+  .animated-grid,
+  .card-shimmer,
+  .pulse-decoration {
+    animation: none !important;
+  }
+}
+
 body {
   background-color: var(--bg-color);
   color: var(--text-color);
@@ -2185,5 +2200,359 @@ main {
   }
   50% {
     opacity: 1;
+  }
+}
+
+/* ============================================================
+   LIGHT MODE OVERRIDES
+   Activated by ThemeContext setting data-theme="light" on <html>.
+   Mirrors the ThemeContext.lightSkins palette for CSS variables
+   so legacy CSS-only components (not using useTheme()) still
+   follow the active theme. Without this, components that rely
+   on --bg-color / --text-color / etc. stayed dark even when the
+   React theme switched — that's why light mode looked horrible.
+   ============================================================ */
+:root[data-theme="light"] {
+  /* Base palette (volcanic light, matches darkSkins[volcanic] default) */
+  --bg-color: #fff5f5;
+  --bg-elevated: #ffffff;
+  --bg-card: rgba(255, 255, 255, 0.95);
+  --bg-glass: rgba(0, 0, 0, 0.02);
+  --text-color: #1a1a2e;
+  --text-muted: #5f5f75;
+  --link-color: #dc2626;
+  --header-color: #b91c1c;
+  --border-color: #fecaca;
+  --accent-color: #ef4444;
+  --success: #16a34a;
+  --warning: #d97706;
+  --danger: #dc2626;
+  --grid-line: rgba(254, 202, 202, 0.4);
+  --shadow-glow: none;
+  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
+
+  /* IDE tokens for light mode */
+  --color-ide-bg: #ffffff;
+  --color-ide-surface: #f8f8fa;
+  --color-ide-surface-2: #eef0f4;
+  --color-ide-border: #d1d5db;
+}
+
+/* Body background follows the variable (was hard-coded #0d0a05) */
+:root[data-theme="light"] body {
+  background-color: var(--bg-color);
+  color: var(--text-color);
+}
+
+/* Grid backdrop: inverted to subtle dark dots on light bg */
+:root[data-theme="light"] body::before {
+  background-image:
+    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
+  opacity: 0.35;
+}
+
+/* Selection color flips for contrast on light */
+:root[data-theme="light"] ::selection {
+  background: rgba(220, 38, 38, 0.18);
+  color: #1a1a2e;
+}
+
+/* Scrollbars: dark thumbs on light track */
+:root[data-theme="light"] ::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.18);
+}
+:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.32);
+}
+
+/* Cards / glass panels that hard-coded white-on-dark in dark mode */
+:root[data-theme="light"] .card,
+:root[data-theme="light"] .glass-card,
+:root[data-theme="light"] .studio-card,
+:root[data-theme="light"] .studio-panel,
+:root[data-theme="light"] .lit-box,
+:root[data-theme="light"] .post,
+:root[data-theme="light"] .card-elevated {
+  background: var(--bg-card);
+  border-color: var(--border-color);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+:root[data-theme="light"] .card:hover,
+:root[data-theme="light"] .glass-card:hover,
+:root[data-theme="light"] .lit-box:hover,
+:root[data-theme="light"] .post:hover {
+  border-color: var(--accent-color);
+}
+
+:root[data-theme="light"] .card-header,
+:root[data-theme="light"] .post-actions,
+:root[data-theme="light"] .post-stats,
+:root[data-theme="light"] .post-comments,
+:root[data-theme="light"] .telemetry-row,
+:root[data-theme="light"] .ticker,
+:root[data-theme="light"] .divider {
+  border-color: var(--border-color);
+}
+
+:root[data-theme="light"] .post-comments,
+:root[data-theme="light"] .comment-bubble,
+:root[data-theme="light"] .chat-body,
+:root[data-theme="light"] .chat-input-row {
+  background: var(--bg-glass);
+}
+
+/* Inputs / textarea / select — dark default didn't work on light bg */
+:root[data-theme="light"] .input,
+:root[data-theme="light"] .textarea,
+:root[data-theme="light"] .select,
+:root[data-theme="light"] .chat-input,
+:root[data-theme="light"] .studio-input {
+  background: #ffffff;
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+:root[data-theme="light"] .input:focus,
+:root[data-theme="light"] .textarea:focus,
+:root[data-theme="light"] .select:focus,
+:root[data-theme="light"] .studio-input:focus,
+:root[data-theme="light"] .chat-input:focus {
+  background: #ffffff;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
+}
+:root[data-theme="light"] .input::placeholder,
+:root[data-theme="light"] .textarea::placeholder,
+:root[data-theme="light"] .chat-input::placeholder {
+  color: var(--text-muted);
+}
+
+/* Buttons — secondary used white-on-dark; needs dark text on light */
+:root[data-theme="light"] .btn {
+  color: var(--text-color);
+}
+:root[data-theme="light"] .btn-secondary {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+:root[data-theme="light"] .btn-secondary:hover {
+  background: rgba(0, 0, 0, 0.08);
+  border-color: var(--accent-color);
+}
+:root[data-theme="light"] .btn-primary {
+  color: #ffffff;
+}
+:root[data-theme="light"] .btn-ghost {
+  color: var(--text-muted);
+}
+:root[data-theme="light"] .btn-ghost:hover {
+  color: var(--text-color);
+  background: rgba(0, 0, 0, 0.04);
+}
+
+/* Badges — light bg needs light-tinted backgrounds */
+:root[data-theme="light"] .badge {
+  background: rgba(239, 68, 68, 0.08);
+  color: var(--accent-color);
+  border-color: rgba(239, 68, 68, 0.2);
+}
+:root[data-theme="light"] .badge-success {
+  background: rgba(22, 163, 74, 0.1);
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.25);
+}
+:root[data-theme="light"] .badge-warning {
+  background: rgba(217, 119, 6, 0.1);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.25);
+}
+:root[data-theme="light"] .badge-pink {
+  background: rgba(236, 72, 153, 0.1);
+  color: #be185d;
+  border-color: rgba(236, 72, 153, 0.25);
+}
+
+/* Chat bubbles — AI bubble used rgba(255,255,255,0.05) which is invisible on white */
+:root[data-theme="light"] .chat-bubble-ai {
+  background: rgba(0, 0, 0, 0.04);
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+:root[data-theme="light"] .chat-bubble-user {
+  color: #ffffff;
+}
+:root[data-theme="light"] .chat-msg.user {
+  background: #ffffff;
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+:root[data-theme="light"] .chat-msg.agent {
+  background: var(--bg-glass);
+  color: var(--text-color);
+  border-color: var(--border-color);
+}
+:root[data-theme="light"] .chat-send {
+  background: var(--accent-color);
+  color: #ffffff;
+  border-color: var(--accent-color);
+}
+:root[data-theme="light"] .chat-window,
+:root[data-theme="light"] .chat-header {
+  background: #ffffff;
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+
+/* Agent tiles / avatars — borders + bg need to flip */
+:root[data-theme="light"] .agent-tile {
+  background: rgba(0, 0, 0, 0.02);
+  border-color: var(--border-color);
+}
+:root[data-theme="light"] .agent-tile:hover {
+  background: rgba(0, 0, 0, 0.05);
+  border-color: var(--accent-color);
+}
+:root[data-theme="light"] .agent-avatar,
+:root[data-theme="light"] .post-avatar,
+:root[data-theme="light"] .comment-avatar {
+  background: var(--bg-elevated);
+  border-color: var(--border-color);
+  color: var(--text-color);
+}
+:root[data-theme="light"] .agent-online-ring::after {
+  border-color: var(--bg-color);
+}
+
+/* Stat badges — solid colors must stay legible */
+:root[data-theme="light"] .stat-badge-success {
+  background: rgba(22, 163, 74, 0.12);
+  color: #15803d;
+  border-color: rgba(22, 163, 74, 0.25);
+}
+:root[data-theme="light"] .stat-badge-warn {
+  background: rgba(217, 119, 6, 0.12);
+  color: #b45309;
+  border-color: rgba(217, 119, 6, 0.25);
+}
+:root[data-theme="light"] .stat-badge-info {
+  background: rgba(14, 165, 233, 0.12);
+  color: #0369a1;
+  border-color: rgba(14, 165, 233, 0.25);
+}
+:root[data-theme="light"] .stat-badge-accent {
+  background: rgba(168, 85, 247, 0.12);
+  color: #7e22ce;
+  border-color: rgba(168, 85, 247, 0.25);
+}
+
+/* Skeleton / shimmer — light variant for white bg */
+:root[data-theme="light"] .skeleton {
+  background: linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.04) 25%,
+    rgba(0, 0, 0, 0.08) 50%,
+    rgba(0, 0, 0, 0.04) 75%
+  );
+}
+:root[data-theme="light"] .shimmer {
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    rgba(0, 0, 0, 0.06) 50%,
+    transparent 100%
+  );
+}
+
+/* Lit-box header — gradient with dark text on light bg */
+:root[data-theme="light"] .lit-header {
+  background: linear-gradient(90deg, var(--link-color), var(--header-color));
+  color: #ffffff;
+}
+
+/* Toast — green/red error backgrounds stay but text gets darker */
+:root[data-theme="light"] .lit-toast.success {
+  background: rgba(220, 252, 231, 0.98);
+  color: #15803d;
+  border-color: #16a34a;
+}
+:root[data-theme="light"] .lit-toast.error {
+  background: rgba(254, 226, 226, 0.98);
+  color: #b91c1c;
+  border-color: #ef4444;
+}
+:root[data-theme="light"] .lit-toast.info {
+  background: rgba(219, 234, 254, 0.98);
+  color: #1d4ed8;
+  border-color: #3b82f6;
+}
+
+/* Ticker / marquee */
+:root[data-theme="light"] .ticker {
+  background: #ffffff;
+  border-color: var(--border-color);
+  color: var(--accent-color);
+}
+
+/* Glow effects — too bright on light, dial back */
+:root[data-theme="light"] .glow-box {
+  box-shadow:
+    0 0 20px rgba(220, 38, 38, 0.06),
+    0 0 60px rgba(220, 38, 38, 0.03);
+}
+:root[data-theme="light"] .glow-box:hover {
+  box-shadow:
+    0 0 30px rgba(220, 38, 38, 0.12),
+    0 0 80px rgba(220, 38, 38, 0.05);
+}
+:root[data-theme="light"] .glass-card {
+  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
+}
+:root[data-theme="light"] .glass-card:hover {
+  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
+}
+
+/* Hover-lift shadows */
+:root[data-theme="light"] .hover-lift:hover {
+  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
+}
+
+/* Sidebar scroll thumb (was hard-coded purple gradient) */
+:root[data-theme="light"] .sidebar-scroll {
+  scrollbar-color: rgba(220, 38, 38, 0.4) transparent;
+}
+:root[data-theme="light"] .sidebar-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(220, 38, 38, 0.6),
+    rgba(245, 158, 11, 0.4)
+  );
+}
+
+/* CRT overlay — was rgba(0,0,0,0.15) on dark; for light use light scanlines */
+:root[data-theme="light"] .crt-overlay {
+  background: repeating-linear-gradient(
+    0deg,
+    rgba(0, 0, 0, 0.05),
+    rgba(0, 0, 0, 0.05) 1px,
+    transparent 1px,
+    transparent 3px
+  );
+  mix-blend-mode: multiply;
+}
+
+/* LitToast, lit-toast — already covered above */
+
+/* ============================================================
+   SYSTEM PREFERENCE FALLBACK
+   When the user hasn't picked a theme yet (no data-theme attr on
+   <html>) AND the OS reports light, we still want a usable app
+   instead of the default-dark fallback.
+   ============================================================ */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme]) body {
+    background-color: #fff5f5;
+    color: #1a1a2e;
   }
 }

@@ -142,10 +142,7 @@ export default function RootLayout({
       <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
       <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
       <GoogleAnalytics gaId="G-0G4JPF3HXG" />
-      <body
-        className="min-h-dvh overflow-x-clip antialiased"
-        style={{ backgroundColor: "#0d0a05" }}
-      >
+      <body className="min-h-dvh overflow-x-clip antialiased">
         {hasClerk ? (
           <ClerkProvider
             publishableKey={clerkKey!}
