@@ -47,17 +47,6 @@ type Attachment = {
   type: string;
 };
 
-const MODEL_MAP: Record<string, { provider: string; model: string }> = {
-  adaptive: { provider: "gemini", model: "gemini-2.5-flash" },
-  "gemini-2.5-flash": { provider: "gemini", model: "gemini-2.5-flash" },
-  "gpt-4o": { provider: "openai", model: "gpt-4o" },
-  "claude-3.5-sonnet": {
-    provider: "anthropic",
-    model: "claude-3-5-sonnet-20241022",
-  },
-  "ollama-local": { provider: "ollama", model: "llama3" },
-};
-
 type RailItem = {
   id: string;
   label: string;
@@ -368,11 +357,9 @@ function AttachmentStrip({
 export default function LITTTerminalShell({
   activeTool = "chat",
   onToolChangeAction,
-  selectedModel = "adaptive",
 }: {
   activeTool?: string;
   onToolChangeAction?: (tool: string) => void;
-  selectedModel?: string;
 }) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -493,7 +480,6 @@ export default function LITTTerminalShell({
       setInput("");
       setAttachments((prev) => (attachmentsArg ? prev : []));
 
-      const modelConfig = MODEL_MAP[selectedModel] ?? MODEL_MAP.adaptive;
       const controller = new AbortController();
       abortRef.current = controller;
 
@@ -512,8 +498,6 @@ export default function LITTTerminalShell({
           body: JSON.stringify({
             mode: "llm",
             agentSlug: "littcode",
-            provider: modelConfig.provider,
-            model: modelConfig.model,
             message: text || "Describe what you see.",
             history: historyForApi,
             stream: true,
@@ -611,7 +595,7 @@ export default function LITTTerminalShell({
         abortRef.current = null;
       }
     },
-    [busy, messages, attachments, profile.displayName, selectedModel],
+    [busy, messages, attachments, profile.displayName],
   );
 
   const handleSend = () => {

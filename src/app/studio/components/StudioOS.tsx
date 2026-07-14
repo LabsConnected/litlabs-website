@@ -166,7 +166,6 @@ export default function StudioOS() {
         <LITTTerminalShell
           activeTool={activeTool}
           onToolChangeAction={terminalToolChange}
-          selectedModel={model}
         />
       ) : (
         <div

@@ -138,7 +138,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     agentSlug = DEFAULT_AGENT_SLUG,
     message,
     history = [],
-    provider = "gemini",
+    provider,
     stream = false,
   } = body;
 
@@ -165,11 +165,12 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   const prompt = buildPrompt(agent, message, history);
 
   if (!stream) {
-    const r = await generateText(
-      prompt,
-      { task: "chat", provider: llmProvider, maxTokens: 2048 },
-      undefined,
-    );
+    const llmOptions: { task: "chat"; provider?: LLMProvider; maxTokens: number } = {
+      task: "chat",
+      maxTokens: 2048,
+    };
+    if (provider && llmProvider) llmOptions.provider = llmProvider;
+    const r = await generateText(prompt, llmOptions, undefined);
     await logConversation(agent, userId, message, r.text);
     return NextResponse.json({
       response: r.text,
@@ -184,6 +185,11 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     async start(controller) {
       let assistantText = "";
       try {
+        const streamOptions: { task: "chat"; provider?: LLMProvider; maxTokens: number } = {
+          task: "chat",
+          maxTokens: 2048,
+        };
+        if (provider && llmProvider) streamOptions.provider = llmProvider;
         const r = await streamText(
           prompt,
           (chunk) => {
@@ -192,7 +198,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
               encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
             );
           },
-          { task: "chat", provider: llmProvider, maxTokens: 2048 },
+          streamOptions,
         );
         controller.enqueue(
           encoder.encode(
