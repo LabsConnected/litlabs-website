@@ -311,7 +311,8 @@ export function VoiceSessionProvider({
       const e = err as DOMException;
       let msg = "Microphone error.";
       if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
-        msg = "Microphone permission denied.";
+        msg =
+          "Microphone permission denied. Please allow access in browser settings and check for hardware privacy switches.";
       } else if (
         e.name === "NotFoundError" ||
         e.name === "DevicesNotFoundError"
