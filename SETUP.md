@@ -4,7 +4,7 @@ This adds a real browser-based terminal to `https://litlabs.net/litt-terminal`.
 
 ## Architecture
 
-```
+```text
 Browser (xterm.js)
   ↓ WebSocket / Socket.IO
 Next.js app (frontend)
