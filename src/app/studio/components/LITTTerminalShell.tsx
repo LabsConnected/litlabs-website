@@ -77,13 +77,21 @@ const RAIL_ITEMS: RailItem[] = [
 ];
 
 const SLASH_CHIPS = [
-  { id: "image", label: "/image", desc: "Generate Image" },
-  { id: "video", label: "/video", desc: "Generate Video" },
-  { id: "audio", label: "/audio", desc: "Generate Audio" },
-  { id: "build", label: "/build", desc: "Build Anything" },
+  { id: "image", label: "/image", desc: "Generate Image", tool: "image" },
+  { id: "video", label: "/video", desc: "Generate Video", tool: "video" },
+  { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
+  { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
   { id: "code", label: "/code", desc: "Generate Code" },
-  { id: "agent", label: "/agent", desc: "Run Agent" },
+  { id: "agent", label: "/agent", desc: "Run Agent", tool: "agents" },
 ];
+
+const SLASH_TO_TOOL: Record<string, string | undefined> = {
+  "/image": "image",
+  "/video": "video",
+  "/audio": "audio",
+  "/build": "builder",
+  "/agent": "agents",
+};
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
 
@@ -381,6 +389,7 @@ export default function LITTTerminalShell({
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const textInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
 
   const displayName = profile?.displayName || "Operator";
@@ -610,7 +619,17 @@ export default function LITTTerminalShell({
       cancel();
       return;
     }
-    if (!input.trim() && attachments.length === 0) return;
+    const trimmed = input.trim();
+    if (!trimmed && attachments.length === 0) return;
+
+    // Route explicit slash commands to their Studio tool when possible.
+    const firstToken = trimmed.split(/\s+/)[0];
+    const targetTool = SLASH_TO_TOOL[firstToken];
+    if (targetTool && onToolChangeAction) {
+      onToolChangeAction(targetTool);
+      return;
+    }
+
     void send(input);
   };
 
@@ -621,7 +640,11 @@ export default function LITTTerminalShell({
     }
   };
 
-  const handleChip = (chip: string) => {
+  const handleChip = (chip: string, tool?: string) => {
+    if (tool && onToolChangeAction) {
+      onToolChangeAction(tool);
+      return;
+    }
     setInput((prev) => {
       const base = prev.replace(/\s+/g, " ").trim();
       return base ? `${base} ${chip} ` : `${chip} `;
@@ -978,7 +1001,17 @@ export default function LITTTerminalShell({
                   ))}
                 </div>
 
-                <button className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-500 transition hover:text-cyan-300">
+                <button
+                  onClick={() => {
+                    setInput("/");
+                    textInputRef.current?.focus();
+                    textInputRef.current?.scrollIntoView({
+                      behavior: "smooth",
+                      block: "nearest",
+                    });
+                  }}
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-500 transition hover:text-cyan-300"
+                >
                   <LayoutGrid size={12} />
                   View all plugins
                   <ChevronRight size={10} />
@@ -1120,6 +1153,7 @@ export default function LITTTerminalShell({
 
                 <div className="relative flex min-w-0 flex-1 items-center">
                   <input
+                    ref={textInputRef}
                     type="text"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
@@ -1157,7 +1191,7 @@ export default function LITTTerminalShell({
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() => handleChip(chip.label)}
+                    onClick={() => handleChip(chip.label, chip.tool)}
                     className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                   >
                     <span className="text-cyan-500">{chip.label}</span>

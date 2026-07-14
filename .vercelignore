@@ -1,10 +1,122 @@
+# ============================================
+# LiTTree Lab Studios — Vercel ignore rules
+# Mirror .gitignore for any heavy / local-only artifacts.
+# ============================================
+
+# Dependencies
 node_modules
-lib/oracle-cli
-.next
+**/node_modules
+/.pnp
+.pnp.js
+.yarn/install-state.gz
+
+# Build artifacts
+.next/
+/out/
+/build
+terminal-server/dist/
+
+# Testing
+/coverage
+
+# Env / secrets (NEVER upload)
+.env
+.env.local
+.env*.local
+.env.vercel-production
+.env.vercel-secrets
+.sb_anon_key
+
+# TypeScript build cache
+*.tsbuildinfo
+next-env.d.ts
+
+# Vercel CLI internals
+.vercel
+
+# ============================================
+# Heavy local artifacts — DO NOT deploy
+# (These live on disk but are never in the build output.)
+# ============================================
 docs
 scripts
 tasks
 prompts
+prds
+outputs/
+plans/
+.tmp.driveupload/
+.vs/
+.tmp/
+.temp/
+
+# Large internal libs / virtualenvs / references
+lib/oracle-cli/
+litlabs/
+litlabs-website/
+work/
+.codex-reference/
+Zoo-Code/
+OmniRoute/
+meta/
+
+# Chrome browser binaries and profiles
+chrome/
+**/lighthouse.*/
+**/AppData/Local/lighthouse*/
+
+# Android / mobile
+android/
+src/mobile/
+
+# Python
+.venv
+__pycache__/
+*.pyc
+
+# OS / editor
+.DS_Store
+.vscode/
+.devcontainer/
+.idea/
+*.swp
+*.swo
+*.pem
+
+# Logs / debug / scratch
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+git_log.txt
+wsl_fix*.txt
+unimported-report.txt
+tsc_*.txt
+lint_output.txt
+git_status.txt
+git_status_*.txt
+build_output*.txt
+test-route.ps1
+fix_wsl.sh
+hermes-*.sh
+nuke-clean.ps1
+fix-ssh-admin.ps1
+fix-portproxy.ps1
+fix-ssh-complete.ps1
+reinstall-openssh.ps1
+use-wsl-ssh.ps1
+add-external-ssh.ps1
+RECOVERY_MANIFEST.md
+Modelfile
+AGENTS.md
+FACEBOOK_FOLLOWER_GROWTH_CHECKLIST.md
+
+# Lockfiles (Vercel uses pnpm)
+package-lock.json
 bun.lock
+
+# Backups
 *.backup
-tsconfig.tsbuildinfo
+.backup/
+.quadcodeai/
+.netlify
