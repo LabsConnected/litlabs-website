@@ -48,7 +48,7 @@ const EMULATOR_LABS = [
     description:
       "Your real, private ROM library with local storage, console detection, saves, controls, and a focused player.",
     systems: "NES · SNES · Genesis · GB · GBC · GBA",
-    image: "/showcase/retro-arcade-thumb.png",
+    image: "/showcase/retro-arcade-thumb.svg",
     href: "/games/retro",
     badge: "Chapter 01",
   },
