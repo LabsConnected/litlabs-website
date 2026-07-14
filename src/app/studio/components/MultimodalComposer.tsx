@@ -28,15 +28,26 @@ interface MultimodalComposerProps {
   modelName?: string;
 }
 
+// @voice-statuses
 const STATUS_LABELS: Record<VoiceState, string> = {
   idle: "",
   requesting_permission: "Requesting microphone…",
   connecting: "Connecting…",
   listening: "Listening",
-  user_speaking: "You're speaking…",
-  processing: "Processing…",
-  assistant_speaking: "LiTT speaking",
+  speech_detected: "You're speaking…",
+  transcribing: "Transcribing…",
+  sending: "Sending…",
+  thinking: "Thinking…",
+  using_tool: "Using tool…",
+  reading_files: "Reading files…",
+  writing_files: "Writing files…",
+  running_command: "Running command…",
+  testing: "Running tests…",
+  generating_response: "Generating response…",
+  speaking: "LiTT speaking",
   muted: "Muted",
+  paused: "Paused",
+  complete: "",
   error: "",
 };
 
@@ -180,27 +191,29 @@ export default function MultimodalComposer({
           onClick: undefined,
         };
       case "listening":
+      case "speech_detected":
         return {
           icon: Mic,
           color: "text-cyan-400",
           disabled: false,
           onClick: stopVoice,
         };
-      case "user_speaking":
-        return {
-          icon: Mic,
-          color: "text-cyan-400",
-          disabled: false,
-          onClick: stopVoice,
-        };
-      case "processing":
+      case "transcribing":
+      case "sending":
+      case "thinking":
+      case "using_tool":
+      case "reading_files":
+      case "writing_files":
+      case "running_command":
+      case "testing":
+      case "generating_response":
         return {
           icon: Loader2,
           color: "text-cyan-400",
           disabled: true,
           onClick: undefined,
         };
-      case "assistant_speaking":
+      case "speaking":
         return {
           icon: Square,
           color: "text-amber-400",
@@ -208,6 +221,7 @@ export default function MultimodalComposer({
           onClick: interrupt,
         };
       case "muted":
+      case "paused":
         return {
           icon: MicOff,
           color: "text-amber-400",
@@ -236,7 +250,7 @@ export default function MultimodalComposer({
 
   // Mic button styling with pulse effect for listening/speaking states
   const getMicButtonStyle = () => {
-    if (voiceState === "listening" || voiceState === "user_speaking") {
+    if (voiceState === "listening" || voiceState === "speech_detected") {
       return {
         boxShadow: `0 0 0 ${2 + micLevel * 8}px rgba(34,211,238,${0.2 + micLevel * 0.4})`,
       };
@@ -277,7 +291,8 @@ export default function MultimodalComposer({
                 <WaveformBars
                   level={micLevel}
                   active={
-                    voiceState === "user_speaking" || voiceState === "listening"
+                    voiceState === "speech_detected" ||
+                    voiceState === "listening"
                   }
                 />
                 <span className="text-[11px] font-bold text-white/80">
@@ -292,7 +307,7 @@ export default function MultimodalComposer({
           </div>
           {/* Right: controls */}
           <div className="flex items-center gap-1.5">
-            {voiceState === "assistant_speaking" && (
+            {voiceState === "speaking" && (
               <button
                 onClick={interrupt}
                 className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-400/10"
@@ -464,7 +479,15 @@ export default function MultimodalComposer({
             className={
               voiceState === "requesting_permission" ||
               voiceState === "connecting" ||
-              voiceState === "processing"
+              voiceState === "transcribing" ||
+              voiceState === "sending" ||
+              voiceState === "thinking" ||
+              voiceState === "using_tool" ||
+              voiceState === "reading_files" ||
+              voiceState === "writing_files" ||
+              voiceState === "running_command" ||
+              voiceState === "testing" ||
+              voiceState === "generating_response"
                 ? "animate-spin"
                 : ""
             }

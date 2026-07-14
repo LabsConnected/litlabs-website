@@ -369,8 +369,23 @@ function LITTTerminalShellInner({
 }) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
-  const { voiceState, speakText, startVoice, stopVoice, setOnTurn } =
-    useVoiceSession();
+  const {
+    voiceState,
+    interimTranscript,
+    micLevel,
+    errorMessage,
+    listeningDurationMs,
+    availableDevices,
+    selectedDeviceId,
+    speakText,
+    startVoice,
+    stopVoice,
+    interrupt,
+    stopSpeaking,
+    selectDevice,
+    setOnTurn,
+    setActivity,
+  } = useVoiceSession();
   const { persona } = usePersona();
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
@@ -391,7 +406,24 @@ function LITTTerminalShellInner({
 
   const displayName = profile?.displayName || "Operator";
   const isEmpty = messages.length === 0;
-  const micActive = voiceState !== "idle" && voiceState !== "error";
+  const micActive =
+    voiceState === "requesting_permission" ||
+    voiceState === "connecting" ||
+    voiceState === "listening" ||
+    voiceState === "speech_detected" ||
+    voiceState === "transcribing" ||
+    voiceState === "sending" ||
+    voiceState === "thinking" ||
+    voiceState === "using_tool" ||
+    voiceState === "reading_files" ||
+    voiceState === "writing_files" ||
+    voiceState === "running_command" ||
+    voiceState === "testing" ||
+    voiceState === "generating_response" ||
+    voiceState === "speaking" ||
+    voiceState === "muted" ||
+    voiceState === "paused" ||
+    voiceState === "error";
 
   useEffect(() => {
     const el = transcriptRef.current;
@@ -431,11 +463,13 @@ function LITTTerminalShellInner({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy]);
 
-  // Voice transcripts are finalised after a silence gap — auto-send them
+  // Voice transcripts are finalised after a silence gap — auto-send and speak reply
   useEffect(() => {
     setOnTurn((text) => {
       if (!text) return;
-      void send(text);
+      void send(text).then((reply) => {
+        if (reply) speakText(reply);
+      });
     });
     return () => setOnTurn(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -791,10 +825,12 @@ function LITTTerminalShellInner({
       setBusy(true);
       setInput("");
       setAttachments((prev) => (attachmentsArg ? prev : []));
+      setActivity({ type: "thinking" });
 
       // Handle slash commands inline before falling back to the chat API
       if (text && (await runSlashCommand(text))) {
         setBusy(false);
+        setActivity({ type: "idle" });
         return "";
       }
 
@@ -833,6 +869,7 @@ function LITTTerminalShellInner({
         const reader = response.body.getReader();
         const decoder = new TextDecoder();
         let buf = "";
+        setActivity({ type: "generating_response" });
         // Read the full stream
         for (;;) {
           const { done, value } = await reader.read();
@@ -911,6 +948,7 @@ function LITTTerminalShellInner({
       } finally {
         setBusy(false);
         abortRef.current = null;
+        setActivity({ type: "idle" });
       }
     },
     [
@@ -919,6 +957,7 @@ function LITTTerminalShellInner({
       attachments,
       profile.displayName,
       persona.id,
+      setActivity,
       runSlashCommand,
     ],
   );
@@ -1450,6 +1489,154 @@ function LITTTerminalShellInner({
                   />
                 </div>
               )}
+              {micActive && (
+                <div className="mb-1 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500/10">
+                        <Waveform
+                          active={
+                            voiceState === "listening" ||
+                            voiceState === "speech_detected" ||
+                            voiceState === "connecting"
+                          }
+                        />
+                        {(voiceState === "listening" ||
+                          voiceState === "speech_detected") && (
+                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#030308]" />
+                        )}
+                      </div>
+                      <div className="min-w-0">
+                        <div className="text-xs font-bold text-white truncate">
+                          {voiceState === "requesting_permission" &&
+                            "Allow microphone"}
+                          {voiceState === "connecting" && "Connecting..."}
+                          {voiceState === "listening" && "Listening"}
+                          {voiceState === "speech_detected" && "Hearing you"}
+                          {voiceState === "transcribing" && "Transcribing"}
+                          {voiceState === "sending" && "Sending"}
+                          {voiceState === "thinking" && "Thinking..."}
+                          {voiceState === "using_tool" && "Using tool..."}
+                          {voiceState === "reading_files" && "Reading files..."}
+                          {voiceState === "writing_files" && "Writing files..."}
+                          {voiceState === "running_command" &&
+                            "Running command..."}
+                          {voiceState === "testing" && "Running tests..."}
+                          {voiceState === "generating_response" &&
+                            "Generating response..."}
+                          {voiceState === "speaking" && "LiTT is speaking"}
+                          {voiceState === "muted" && "Paused"}
+                          {voiceState === "error" && "Voice error"}
+                        </div>
+                        <div className="text-[10px] text-neutral-400 truncate">
+                          {errorMessage
+                            ? errorMessage
+                            : interimTranscript ||
+                              `00:${Math.floor(listeningDurationMs / 1000)
+                                .toString()
+                                .padStart(2, "0")}`}
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex shrink-0 items-center gap-2">
+                      {voiceState === "speaking" && (
+                        <button
+                          onClick={interrupt}
+                          className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-neutral-300 transition hover:bg-white/10"
+                        >
+                          Interrupt
+                        </button>
+                      )}
+                      <button
+                        onClick={() =>
+                          voiceState === "speaking"
+                            ? stopSpeaking()
+                            : stopVoice()
+                        }
+                        className="rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-300 transition hover:bg-rose-500/20"
+                      >
+                        {voiceState === "speaking" ? "Stop" : "End"}
+                      </button>
+                    </div>
+                  </div>
+                  {(voiceState === "listening" ||
+                    voiceState === "speech_detected" ||
+                    voiceState === "connecting") && (
+                    <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/5">
+                      <div
+                        className="h-full bg-cyan-400 transition-all duration-100"
+                        style={{ width: `${Math.max(5, micLevel * 100)}%` }}
+                      />
+                    </div>
+                  )}
+                  {(voiceState === "speech_detected" ||
+                    voiceState === "transcribing" ||
+                    voiceState === "sending" ||
+                    voiceState === "thinking" ||
+                    voiceState === "using_tool" ||
+                    voiceState === "reading_files" ||
+                    voiceState === "writing_files" ||
+                    voiceState === "running_command" ||
+                    voiceState === "testing" ||
+                    voiceState === "generating_response" ||
+                    voiceState === "speaking") && (
+                    <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[10px] text-neutral-400 scrollbar-none">
+                      {[
+                        { key: "hear", label: "Heard", done: true },
+                        {
+                          key: "transcribe",
+                          label: "Transcribed",
+                          done: voiceState !== "speech_detected",
+                        },
+                        {
+                          key: "think",
+                          label: "Thinking",
+                          done: ["generating_response", "speaking"].includes(
+                            voiceState,
+                          ),
+                        },
+                        {
+                          key: "respond",
+                          label: "Responding",
+                          done: voiceState === "speaking",
+                        },
+                      ].map((step, idx, arr) => (
+                        <span
+                          key={step.key}
+                          className="flex shrink-0 items-center gap-1"
+                        >
+                          <span className={step.done ? "text-emerald-400" : ""}>
+                            {step.done ? "✓" : "○"}
+                          </span>
+                          <span className={step.done ? "text-neutral-300" : ""}>
+                            {step.label}
+                          </span>
+                          {idx < arr.length - 1 && (
+                            <span className="text-white/10">›</span>
+                          )}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {availableDevices.length > 1 && (
+                    <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
+                      <span className="text-[10px] text-neutral-500">Mic:</span>
+                      <select
+                        value={selectedDeviceId ?? ""}
+                        onChange={(e) => selectDevice(e.target.value)}
+                        className="max-w-[180px] rounded border border-white/10 bg-white/3 px-2 py-1 text-[10px] text-neutral-300 outline-none"
+                      >
+                        {availableDevices.map((d) => (
+                          <option key={d.deviceId} value={d.deviceId}>
+                            {d.label || "Microphone"}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <AttachmentStrip
                 attachments={attachments}
                 onRemove={removeAttachment}
