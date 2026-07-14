@@ -11,7 +11,9 @@ import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 const StudioInspector = dynamic(() => import("./StudioInspector"), {
   ssr: false,
 });
-const ChatTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
+const LITTTerminalShell = dynamic(() => import("./LITTTerminalShell"), {
+  ssr: false,
+});
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -37,8 +39,10 @@ const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), {
 });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 
-const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
-  chat: ChatTool,
+const TOOL_COMPONENTS: Record<
+  Exclude<StudioTool, "chat">,
+  React.ComponentType
+> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
@@ -136,7 +140,7 @@ export default function StudioOS() {
   }, [activeTool, model, pathname, router, searchParams]);
 
   const ActiveTool = useMemo(
-    () => TOOL_COMPONENTS[activeTool] || ChatTool,
+    () => (activeTool === "chat" ? null : TOOL_COMPONENTS[activeTool]),
     [activeTool],
   );
 
@@ -147,64 +151,75 @@ export default function StudioOS() {
     [setActiveTool],
   );
 
+  const terminalToolChange = useCallback(
+    (tool: string) => {
+      if (VALID_TOOLS.includes(tool as StudioTool)) {
+        setActiveTool(tool as StudioTool);
+      }
+    },
+    [setActiveTool],
+  );
+
   return (
     <VoiceSessionProvider>
-      <div
-        className="flex h-full w-full flex-col overflow-hidden"
-        style={{ backgroundColor: T.bgColor, color: T.textColor }}
-      >
-        <StudioTopBar
-          search={search}
-          onSearchChange={setSearch}
+      {activeTool === "chat" ? (
+        <LITTTerminalShell
+          activeTool={activeTool}
+          onToolChangeAction={terminalToolChange}
           selectedModel={model}
-          onModelChange={setModel}
-          onInspectorToggle={() => setInspectorOpen((v) => !v)}
-          T={T}
         />
-
-        <div className="flex flex-1 min-h-0">
-          <StudioSidebar
-            activeTool={activeTool}
-            onToolChange={handleToolChange}
+      ) : (
+        <div
+          className="flex h-full w-full flex-col overflow-hidden"
+          style={{ backgroundColor: T.bgColor, color: T.textColor }}
+        >
+          <StudioTopBar
             search={search}
+            onSearchChange={setSearch}
+            selectedModel={model}
+            onModelChange={setModel}
+            onInspectorToggle={() => setInspectorOpen((v) => !v)}
+            T={T}
           />
 
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
-            <div
-              ref={scrollRef}
-              className={`min-h-0 flex-1 p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2 ${
-                activeTool === "chat" ? "overflow-hidden" : "overflow-auto"
-              }`}
-            >
-              {activeTool === "chat" ? (
-                <ChatTool selectedModel={model} />
-              ) : (
-                <ActiveTool />
-              )}
-            </div>
-          </main>
-
-          <StudioInspector variant="aside" T={T} activeTool={activeTool} />
-        </div>
-
-        {inspectorOpen && (
-          <div className="fixed inset-0 z-10000 md:hidden">
-            <button
-              className="absolute inset-0 w-full h-full bg-black/60 cursor-default"
-              onClick={() => setInspectorOpen(false)}
-              aria-label="Close inspector"
+          <div className="flex flex-1 min-h-0">
+            <StudioSidebar
+              activeTool={activeTool}
+              onToolChange={handleToolChange}
+              search={search}
             />
-            <div className="absolute right-0 top-0 h-full w-[280px]">
-              <StudioInspector
-                variant="sheet"
-                onClose={() => setInspectorOpen(false)}
-                T={T}
-                activeTool={activeTool}
-              />
-            </div>
+
+            <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+              <div
+                ref={scrollRef}
+                className="min-h-0 flex-1 overflow-auto p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
+              >
+                {ActiveTool && <ActiveTool />}
+              </div>
+            </main>
+
+            <StudioInspector variant="aside" T={T} activeTool={activeTool} />
           </div>
-        )}
-      </div>
+
+          {inspectorOpen && (
+            <div className="fixed inset-0 z-10000 md:hidden">
+              <button
+                className="absolute inset-0 h-full w-full cursor-default bg-black/60"
+                onClick={() => setInspectorOpen(false)}
+                aria-label="Close inspector"
+              />
+              <div className="absolute right-0 top-0 h-full w-[280px]">
+                <StudioInspector
+                  variant="sheet"
+                  onClose={() => setInspectorOpen(false)}
+                  T={T}
+                  activeTool={activeTool}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
     </VoiceSessionProvider>
   );
 }
