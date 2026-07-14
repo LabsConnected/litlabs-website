@@ -35,6 +35,11 @@ import {
   Image as ImageIcon,
 } from "lucide-react";
 import PluginPanel from "./PluginPanel";
+import {
+  PersonaProvider,
+  usePersona,
+} from "@/components/terminal/PersonaContext";
+import { PersonaSwitcher } from "@/components/terminal/PersonaSwitcher";
 
 type Message = {
   role: "user" | "assistant";
@@ -355,7 +360,7 @@ function AttachmentStrip({
   );
 }
 
-export default function LITTTerminalShell({
+function LITTTerminalShellInner({
   activeTool = "chat",
   onToolChangeAction,
 }: {
@@ -366,6 +371,7 @@ export default function LITTTerminalShell({
   const { profile } = useProfile();
   const { voiceState, speakText, startVoice, stopVoice, setOnTurn } =
     useVoiceSession();
+  const { persona } = usePersona();
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
@@ -380,6 +386,7 @@ export default function LITTTerminalShell({
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLInputElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const prevPersonaRef = useRef(persona.id);
 
   const displayName = profile?.displayName || "Operator";
   const isEmpty = messages.length === 0;
@@ -391,6 +398,24 @@ export default function LITTTerminalShell({
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
   }, [messages, busy]);
+
+  // Insert a divider when the user switches persona
+  useEffect(() => {
+    if (prevPersonaRef.current === persona.id) return;
+    if (messages.length === 0) {
+      prevPersonaRef.current = persona.id;
+      return;
+    }
+    setMessages((prev) => [
+      ...prev,
+      {
+        role: "assistant",
+        content: `--- Switched to ${persona.name} ---`,
+        createdAt: Date.now(),
+      },
+    ]);
+    prevPersonaRef.current = persona.id;
+  }, [persona, messages.length]);
 
   // Esc cancels an in-flight request
   useEffect(() => {
@@ -499,7 +524,7 @@ export default function LITTTerminalShell({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mode: "llm",
-            agentSlug: "littcode",
+            agentSlug: persona.id,
             message: text || "Describe what you see.",
             history: historyForApi,
             stream: true,
@@ -597,7 +622,7 @@ export default function LITTTerminalShell({
         abortRef.current = null;
       }
     },
-    [busy, messages, attachments, profile.displayName],
+    [busy, messages, attachments, profile.displayName, persona.id],
   );
 
   const handleSend = () => {
@@ -803,6 +828,8 @@ export default function LITTTerminalShell({
               </button>
             );
           })}
+          <div className="w-full border-t border-white/5" />
+          <PersonaSwitcher />
           <div className="mt-auto flex flex-col items-center gap-2 py-2">
             <div className="text-center">
               <div className="text-[9px] font-black text-cyan-400">LITT OS</div>
@@ -1235,9 +1262,11 @@ export default function LITTTerminalShell({
               <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
                 <LiTTAvatar size={90} />
                 <div className="text-center">
-                  <div className="text-sm font-black text-white">LITT-Code</div>
+                  <div className="text-sm font-black text-white">
+                    {persona.name}
+                  </div>
                   <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-500">
-                    <span>v2.2</span>
+                    <span style={{ color: persona.color }}>{persona.tag}</span>
                     <span>·</span>
                     <span>Omni</span>
                     <span>·</span>
@@ -1248,8 +1277,11 @@ export default function LITTTerminalShell({
                   <span className="text-[10px] font-bold text-neutral-400">
                     Voice
                   </span>
-                  <span className="text-[10px] font-bold text-cyan-400">
-                    LITT-Code
+                  <span
+                    className="text-[10px] font-bold"
+                    style={{ color: persona.color }}
+                  >
+                    {persona.name}
                   </span>
                   <span className="flex items-center gap-1 text-[9px] text-emerald-400">
                     <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
@@ -1270,7 +1302,7 @@ export default function LITTTerminalShell({
                 <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/[0.02] p-3">
                   {messages.length === 0 ? (
                     <div className="text-[10px] leading-relaxed text-neutral-500">
-                      Hey, I am LITT-Code.
+                      Hey, I am {persona.name}.
                       <br />
                       Need help building something?
                       <br />
@@ -1315,5 +1347,16 @@ export default function LITTTerminalShell({
         </aside>
       </div>
     </div>
+  );
+}
+
+export default function LITTTerminalShell(props: {
+  activeTool?: string;
+  onToolChangeAction?: (tool: string) => void;
+}) {
+  return (
+    <PersonaProvider>
+      <LITTTerminalShellInner {...props} />
+    </PersonaProvider>
   );
 }
