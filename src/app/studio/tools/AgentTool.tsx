@@ -1088,7 +1088,7 @@ export default function AgentTool() {
         <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
           <div className="mx-auto flex max-w-4xl flex-col gap-2">
             <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:items-center">
-              <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
+              <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-0 sm:w-auto sm:items-center">
                 <textarea
                   ref={textareaRef}
                   value={input}
@@ -1114,7 +1114,7 @@ export default function AgentTool() {
               <button
                 aria-label="Clear chat"
                 onClick={clearChat}
-                className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
+                className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-0 sm:h-9 sm:w-9"
               >
                 <Trash2 size={15} />
               </button>
