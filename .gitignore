@@ -110,3 +110,4 @@ chrome/
 
 .vercel
 .env*
+lighthouse-mobile.json
