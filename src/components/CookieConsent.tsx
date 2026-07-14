@@ -3,11 +3,13 @@
 import { useState, useEffect } from "react";
 
 export default function CookieConsent() {
-  const [visible, setVisible] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return !localStorage.getItem("cookie-consent");
-  });
+  const [visible, setVisible] = useState(false);
   const [animateIn, setAnimateIn] = useState(false);
+
+  useEffect(() => {
+    const consented = localStorage.getItem("cookie-consent");
+    if (!consented) setVisible(true);
+  }, []);
 
   useEffect(() => {
     if (visible) {

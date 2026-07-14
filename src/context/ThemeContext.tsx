@@ -515,18 +515,7 @@ function mixMuted(hex: string): string {
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(() => {
-    if (typeof window === "undefined") return defaultTheme;
-    const stored = localStorage.getItem("litlabs-theme");
-    if (stored) {
-      try {
-        return JSON.parse(stored);
-      } catch {
-        /* ignore */
-      }
-    }
-    return defaultTheme;
-  });
+  const [theme, setTheme] = useState<Theme>(defaultTheme);
   const getResolvedColors = (t: Theme) => {
     // Get base skin based on mode
     const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
@@ -577,6 +566,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const id = requestAnimationFrame(() => setMounted(true));
     return () => cancelAnimationFrame(id);
+  }, []);
+
+  // Load stored theme after hydration to avoid server/client mismatch
+  useEffect(() => {
+    const stored = localStorage.getItem("litlabs-theme");
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as Theme;
+      if (parsed && typeof parsed === "object") {
+        setTheme((prev) => ({ ...prev, ...parsed }));
+      }
+    } catch {
+      // ignore corrupted stored theme
+    }
   }, []);
 
   // Save to localStorage on change

@@ -66,34 +66,28 @@ export default function StudioOS() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
-  const initialTool = (() => {
-    const fromUrl = searchParams.get("tool");
-    if (fromUrl && VALID_TOOLS.includes(fromUrl as StudioTool)) {
-      return fromUrl as StudioTool;
-    }
-    const fromStore =
-      typeof window === "undefined"
-        ? null
-        : localStorage.getItem("littree:studio:tool");
-    if (fromStore && VALID_TOOLS.includes(fromStore as StudioTool)) {
-      return fromStore as StudioTool;
-    }
-    return "chat";
-  })();
+  const urlTool = searchParams.get("tool");
+  const urlModel = searchParams.get("model");
 
-  const initialModel = (() => {
-    const fromUrl = searchParams.get("model");
-    if (fromUrl) return fromUrl;
-    const fromStore =
-      typeof window === "undefined"
-        ? null
-        : localStorage.getItem(MODEL_PREF_KEY);
-    return fromStore || "adaptive";
-  })();
+  const initialTool: StudioTool =
+    urlTool && VALID_TOOLS.includes(urlTool as StudioTool)
+      ? (urlTool as StudioTool)
+      : "chat";
+  const initialModel = urlModel || "adaptive";
 
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
   const [search, setSearch] = useState("");
   const [model, setModel] = useState(initialModel);
+
+  // Restore persisted tool/model preferences after hydration
+  useEffect(() => {
+    const storedTool = localStorage.getItem("littree:studio:tool");
+    if (storedTool && VALID_TOOLS.includes(storedTool as StudioTool)) {
+      setActiveTool(storedTool as StudioTool);
+    }
+    const storedModel = localStorage.getItem(MODEL_PREF_KEY);
+    if (storedModel) setModel(storedModel);
+  }, []);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
