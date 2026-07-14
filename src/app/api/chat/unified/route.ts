@@ -4,6 +4,8 @@ import { streamText, generateText, type LLMProvider } from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { recallPersonaMemory, savePersonaMemory } from "@/lib/agent-memory";
+import type { PersonaId } from "@/lib/persona";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -42,6 +44,7 @@ function buildPrompt(
   agent: Agent,
   message: string,
   history: HistoryEntry[],
+  memories: string[] = [],
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
   const transcript = recentHistory
@@ -52,9 +55,15 @@ function buildPrompt(
     )
     .join("\n");
 
+  const memoryBlock =
+    memories.length > 0
+      ? `--- Long-term memory (relevant past context) ---\n${memories.join("\n")}\n--- End memory ---\n`
+      : "";
+
   return [
     agent.systemPrompt,
     "",
+    memoryBlock,
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
     `User: ${message}`,
     "",
@@ -162,7 +171,28 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   const agent =
     AGENTS[agentSlug as keyof typeof AGENTS] ??
     AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
-  const prompt = buildPrompt(agent, message, history);
+
+  let memories: string[] = [];
+  if (userId) {
+    try {
+      const recalled = await recallPersonaMemory(userId, agentSlug as PersonaId, 5);
+      memories = recalled.map((m) => m.content).filter(Boolean);
+    } catch {
+      // Ignore memory recall failures; chat should still work.
+    }
+  }
+
+  const prompt = buildPrompt(agent, message, history, memories);
+
+  const saveMemory = async (responseText: string) => {
+    if (!userId) return;
+    try {
+      const content = `User: ${message.slice(0, 500)}\n${agent.name}: ${responseText.slice(0, 1000)}`;
+      await savePersonaMemory(userId, agentSlug as PersonaId, content, "terminal-chat");
+    } catch {
+      // Ignore memory save failures.
+    }
+  };
 
   if (!stream) {
     const llmOptions: { task: "chat"; provider?: LLMProvider; maxTokens: number } = {
@@ -172,6 +202,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     if (provider && llmProvider) llmOptions.provider = llmProvider;
     const r = await generateText(prompt, llmOptions, undefined);
     await logConversation(agent, userId, message, r.text);
+    await saveMemory(r.text);
     return NextResponse.json({
       response: r.text,
       provider: r.provider,
@@ -215,6 +246,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
         controller.close();
         if (assistantText) {
           await logConversation(agent, userId, message, assistantText);
+          await saveMemory(assistantText);
         }
       }
     },

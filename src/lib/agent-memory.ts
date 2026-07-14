@@ -6,6 +6,7 @@
 
 import { getAdminSupabase, isAdminSupabaseConfigured } from "./supabase-admin";
 import type { MemoryRecord, MemoryScope, UserAgent } from "./agent-user";
+import type { PersonaId } from "./persona";
 
 function getAdmin() {
   if (!isAdminSupabaseConfigured()) return null;
@@ -19,6 +20,7 @@ function getAdmin() {
 export type CreateMemoryInput = {
   ownerId: string;
   agentId?: string | null;
+  personaId?: PersonaId | null;
   content: string;
   scope: MemoryScope;
   source?: string;
@@ -40,6 +42,7 @@ export async function createMemory(input: CreateMemoryInput): Promise<MemoryReco
     .insert({
       owner_id: input.ownerId,
       agent_id: input.agentId ?? null,
+      persona_id: input.personaId ?? null,
       content: input.content,
       scope: input.scope,
       source: input.source ?? null,
@@ -79,6 +82,52 @@ export async function getMemoriesForOwner(
   return (data || []).map(mapMemoryRow);
 }
 
+export async function recallPersonaMemory(
+  ownerId: string,
+  personaId: PersonaId,
+  limit = 5,
+): Promise<MemoryRecord[]> {
+  const admin = getAdmin();
+  if (!admin) throw new Error("Supabase admin not available");
+
+  const { data, error } = await admin
+    .from("memories")
+    .select("*")
+    .eq("owner_id", ownerId)
+    .eq("persona_id", personaId)
+    .order("created_at", { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(error.message);
+  return (data || []).map(mapMemoryRow);
+}
+
+export async function savePersonaMemory(
+  ownerId: string,
+  personaId: PersonaId,
+  content: string,
+  source?: string,
+): Promise<MemoryRecord> {
+  const admin = getAdmin();
+  if (!admin) throw new Error("Supabase admin not available");
+
+  const { data, error } = await admin
+    .from("memories")
+    .insert({
+      owner_id: ownerId,
+      persona_id: personaId,
+      content,
+      scope: "conversation",
+      source: source ?? "terminal",
+      sync_status: "pending",
+    })
+    .select()
+    .single();
+
+  if (error || !data) throw new Error(error?.message || "Failed to save persona memory");
+  return mapMemoryRow(data);
+}
+
 export async function getMemoryById(id: string): Promise<MemoryRecord | null> {
   const admin = getAdmin();
   if (!admin) throw new Error("Supabase admin not available");
@@ -94,6 +143,7 @@ export async function updateMemory(id: string, input: UpdateMemoryInput): Promis
 
   const update: Record<string, unknown> = {};
   if (input.agentId !== undefined) update.agent_id = input.agentId ?? null;
+  if (input.personaId !== undefined) update.persona_id = input.personaId ?? null;
   if (input.content !== undefined) update.content = input.content;
   if (input.scope !== undefined) update.scope = input.scope;
   if (input.source !== undefined) update.source = input.source ?? null;
@@ -198,6 +248,7 @@ function mapMemoryRow(row: Record<string, unknown>): MemoryRecord {
     id: String(row.id),
     ownerId: String(row.owner_id),
     agentId: row.agent_id ? String(row.agent_id) : null,
+    personaId: row.persona_id ? String(row.persona_id) : null,
     content: String(row.content),
     scope: String(row.scope) as MemoryScope,
     source: row.source ? String(row.source) : undefined,

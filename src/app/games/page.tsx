@@ -45,14 +45,17 @@ const CATEGORIES: {
 const EMULATOR_LABS = [
   {
     name: "LiTT Retro Arcade",
-    description: "Your real, private ROM library with local storage, console detection, saves, controls, and a focused player.",
+    description:
+      "Your real, private ROM library with local storage, console detection, saves, controls, and a focused player.",
     systems: "NES · SNES · Genesis · GB · GBC · GBA",
+    image: "/showcase/retro-arcade-thumb.png",
     href: "/games/retro",
     badge: "Chapter 01",
   },
   {
     name: "DOS Lab",
-    description: "Open DOS programs and shareware bundles you are licensed to use, with local saves and gamepad support.",
+    description:
+      "Open DOS programs and shareware bundles you are licensed to use, with local saves and gamepad support.",
     systems: "DOS · Windows 9x",
     href: "https://js-dos.com/",
     badge: "js-dos",
@@ -60,8 +63,16 @@ const EMULATOR_LABS = [
 ];
 
 const FREE_DISCOVERY = [
-  { label: "Open-source games", detail: "1,300+ browser games", href: "https://itch.io/games/free/html5/tag-open-source" },
-  { label: "Homegames", detail: "Play, make, and share", href: "https://homegames.io/" },
+  {
+    label: "Open-source games",
+    detail: "1,300+ browser games",
+    href: "https://itch.io/games/free/html5/tag-open-source",
+  },
+  {
+    label: "Homegames",
+    detail: "Play, make, and share",
+    href: "https://homegames.io/",
+  },
 ];
 
 export default function GamesPage() {
@@ -116,11 +127,16 @@ export default function GamesPage() {
           }}
         >
           <div>
-            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-1" style={{ color: T.accentColor }}>
+            <div
+              className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-1"
+              style={{ color: T.accentColor }}
+            >
               <Sparkles size={12} /> Best build path
             </div>
             <p className="text-sm opacity-75 max-w-2xl">
-              Play instantly, discover creator-friendly games, or bring files you already have the right to use. Build original mini-games in Studio when you want something uniquely yours.
+              Play instantly, discover creator-friendly games, or bring files
+              you already have the right to use. Build original mini-games in
+              Studio when you want something uniquely yours.
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -177,7 +193,8 @@ export default function GamesPage() {
                 LiTT Code Game Cloud
               </h1>
               <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
-                {GAME_LIBRARY.length} instant games • {EMULATOR_LABS.length} emulator labs • no install
+                {GAME_LIBRARY.length} instant games • {EMULATOR_LABS.length}{" "}
+                emulator labs • no install
               </p>
             </div>
           </div>
@@ -193,30 +210,98 @@ export default function GamesPage() {
       )}
 
       {!selectedGame && (
-        <section className="py-6 border-b" style={{ borderColor: `${T.borderColor}50` }}>
+        <section
+          className="py-6 border-b"
+          style={{ borderColor: `${T.borderColor}50` }}
+        >
           <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 mb-4">
             <div>
-              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em]" style={{ color: T.accentColor }}>
+              <div
+                className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em]"
+                style={{ color: T.accentColor }}
+              >
                 <MonitorPlay size={14} /> Emulator labs
               </div>
-              <h2 className="text-xl sm:text-2xl font-black mt-1" style={{ color: T.headerColor }}>Bring your own games</h2>
-              <p className="text-sm opacity-60 mt-1 max-w-2xl">The emulator is free; commercial game files usually are not. LiTT does not provide copyrighted ROMs.</p>
+              <h2
+                className="text-xl sm:text-2xl font-black mt-1"
+                style={{ color: T.headerColor }}
+              >
+                Bring your own games
+              </h2>
+              <p className="text-sm opacity-60 mt-1 max-w-2xl">
+                The emulator is free; commercial game files usually are not.
+                LiTT does not provide copyrighted ROMs.
+              </p>
             </div>
-            <div className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-2 rounded-full border self-start" style={{ borderColor: `${T.accentColor}60`, color: T.accentColor }}>
+            <div
+              className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-2 rounded-full border self-start"
+              style={{
+                borderColor: `${T.accentColor}60`,
+                color: T.accentColor,
+              }}
+            >
               <ShieldCheck size={14} /> Legal-use guardrails
             </div>
           </div>
           <div className="grid md:grid-cols-2 gap-4">
             {EMULATOR_LABS.map((lab) => (
-              <a key={lab.name} href={lab.href} target={lab.href.startsWith("http") ? "_blank" : undefined} rel={lab.href.startsWith("http") ? "noopener noreferrer" : undefined} className="group rounded-2xl border p-5 transition-transform hover:-translate-y-0.5" style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}55` }}>
+              <a
+                key={lab.name}
+                href={lab.href}
+                target={lab.href.startsWith("http") ? "_blank" : undefined}
+                rel={
+                  lab.href.startsWith("http")
+                    ? "noopener noreferrer"
+                    : undefined
+                }
+                className="group rounded-2xl border p-5 transition-transform hover:-translate-y-0.5"
+                style={{
+                  backgroundColor: `${T.boxBg}b8`,
+                  borderColor: `${T.borderColor}55`,
+                }}
+              >
                 <div className="flex items-start justify-between gap-4">
-                  <div className="p-2.5 rounded-xl" style={{ backgroundColor: `${T.accentColor}16`, color: T.accentColor }}><Upload size={20} /></div>
-                  <ArrowUpRight size={18} className="opacity-40 group-hover:opacity-100" />
+                  <div
+                    className="p-2.5 rounded-xl"
+                    style={{
+                      backgroundColor: `${T.accentColor}16`,
+                      color: T.accentColor,
+                    }}
+                  >
+                    <Upload size={20} />
+                  </div>
+                  <ArrowUpRight
+                    size={18}
+                    className="opacity-40 group-hover:opacity-100"
+                  />
                 </div>
-                <div className="mt-4 text-[10px] font-black uppercase tracking-widest" style={{ color: T.accentColor }}>{lab.badge}</div>
-                <h3 className="font-black text-lg mt-1" style={{ color: T.headerColor }}>{lab.name}</h3>
-                <p className="text-sm opacity-65 mt-2 leading-relaxed">{lab.description}</p>
-                <p className="text-[10px] font-bold opacity-45 mt-4 uppercase tracking-wider">{lab.systems}</p>
+                <div
+                  className="mt-4 text-[10px] font-black uppercase tracking-widest"
+                  style={{ color: T.accentColor }}
+                >
+                  {lab.badge}
+                </div>
+                <h3
+                  className="font-black text-lg mt-1"
+                  style={{ color: T.headerColor }}
+                >
+                  {lab.name}
+                </h3>
+                <p className="text-sm opacity-65 mt-2 leading-relaxed">
+                  {lab.description}
+                </p>
+                {lab.image ? (
+                  // eslint-disable-next-line @next/next/no-img-element
+                  <img
+                    src={lab.image}
+                    alt={`${lab.name} systems`}
+                    className="mt-4 h-10 w-auto rounded-md object-contain object-left opacity-90"
+                  />
+                ) : (
+                  <p className="text-[10px] font-bold opacity-45 mt-4 uppercase tracking-wider">
+                    {lab.systems}
+                  </p>
+                )}
               </a>
             ))}
           </div>
@@ -224,17 +309,28 @@ export default function GamesPage() {
       )}
 
       {!selectedGame && (
-        <section className="py-6 border-b" style={{ borderColor: `${T.borderColor}50` }}>
+        <section
+          className="py-6 border-b"
+          style={{ borderColor: `${T.borderColor}50` }}
+        >
           <div className="mb-4 flex items-end justify-between gap-3">
             <div>
-              <div className="text-[10px] font-black uppercase tracking-[0.22em]" style={{ color: T.accentColor }}>
+              <div
+                className="text-[10px] font-black uppercase tracking-[0.22em]"
+                style={{ color: T.accentColor }}
+              >
                 Play next
               </div>
-              <h2 className="mt-1 text-xl font-black" style={{ color: T.headerColor }}>
+              <h2
+                className="mt-1 text-xl font-black"
+                style={{ color: T.headerColor }}
+              >
                 Scroll through the arcade
               </h2>
             </div>
-            <span className="text-[10px] font-bold opacity-45">Swipe or use your trackpad →</span>
+            <span className="text-[10px] font-bold opacity-45">
+              Swipe or use your trackpad →
+            </span>
           </div>
           <div
             className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3 scrollbar-hide"
@@ -246,16 +342,27 @@ export default function GamesPage() {
                 type="button"
                 onClick={() => launchGame(game)}
                 className="group relative aspect-[4/3] w-[230px] shrink-0 snap-start overflow-hidden rounded-2xl border text-left sm:w-[280px]"
-                style={{ borderColor: `${T.borderColor}55`, backgroundColor: T.boxBg }}
+                style={{
+                  borderColor: `${T.borderColor}55`,
+                  backgroundColor: T.boxBg,
+                }}
                 aria-label={`Play ${game.title}`}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img src={game.coverUrl} alt="" className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" />
+                <img
+                  src={game.coverUrl}
+                  alt=""
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
                 <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
                 <span className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
                   <span>
-                    <span className="block text-sm font-black text-white">{game.title}</span>
-                    <span className="mt-0.5 block text-[10px] font-bold uppercase tracking-wide text-white/60">{game.category} · {game.players}P</span>
+                    <span className="block text-sm font-black text-white">
+                      {game.title}
+                    </span>
+                    <span className="mt-0.5 block text-[10px] font-bold uppercase tracking-wide text-white/60">
+                      {game.category} · {game.players}P
+                    </span>
                   </span>
                   <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-lg">
                     <Play size={15} fill="currentColor" />
@@ -557,12 +664,32 @@ export default function GamesPage() {
                 <span>👤 {game.players}P</span>
                 <span>{game.year}</span>
               </div>
-              <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t" style={{ borderColor: `${T.borderColor}35` }}>
-                <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide" style={{ color: game.license === "open-source" ? "#34d399" : T.accentColor }}>
+              <div
+                className="flex items-center justify-between gap-2 mt-3 pt-3 border-t"
+                style={{ borderColor: `${T.borderColor}35` }}
+              >
+                <span
+                  className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide"
+                  style={{
+                    color:
+                      game.license === "open-source"
+                        ? "#34d399"
+                        : T.accentColor,
+                  }}
+                >
                   <ShieldCheck size={11} /> {game.licenseLabel}
                 </span>
                 {game.sourceUrl && (
-                  <a href={game.sourceUrl} target="_blank" rel="noopener noreferrer" onClick={(event) => event.stopPropagation()} aria-label={`View ${game.title} source`} className="opacity-45 hover:opacity-100"><Code2 size={13} /></a>
+                  <a
+                    href={game.sourceUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    onClick={(event) => event.stopPropagation()}
+                    aria-label={`View ${game.title} source`}
+                    className="opacity-45 hover:opacity-100"
+                  >
+                    <Code2 size={13} />
+                  </a>
                 )}
               </div>
             </div>
@@ -572,10 +699,10 @@ export default function GamesPage() {
 
       {/* Empty State */}
       {filteredGames.length === 0 && (
-          <div className="text-center py-16">
-            <div className="text-4xl mb-4">🔍</div>
-            <p className="opacity-60">No games found matching your search.</p>
-            <button
+        <div className="text-center py-16">
+          <div className="text-4xl mb-4">🔍</div>
+          <p className="opacity-60">No games found matching your search.</p>
+          <button
             onClick={() => {
               setSearchQuery("");
               setActiveCategory("all");
@@ -590,8 +717,23 @@ export default function GamesPage() {
 
       <section className="grid sm:grid-cols-2 gap-3 pb-8">
         {FREE_DISCOVERY.map((item) => (
-          <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer" className="flex items-center justify-between gap-3 rounded-xl border p-4 hover:opacity-80" style={{ borderColor: `${T.borderColor}45` }}>
-            <div><div className="text-sm font-bold" style={{ color: T.headerColor }}>{item.label}</div><div className="text-xs opacity-50 mt-0.5">{item.detail}</div></div>
+          <a
+            key={item.label}
+            href={item.href}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center justify-between gap-3 rounded-xl border p-4 hover:opacity-80"
+            style={{ borderColor: `${T.borderColor}45` }}
+          >
+            <div>
+              <div
+                className="text-sm font-bold"
+                style={{ color: T.headerColor }}
+              >
+                {item.label}
+              </div>
+              <div className="text-xs opacity-50 mt-0.5">{item.detail}</div>
+            </div>
             <ExternalLink size={15} className="opacity-45" />
           </a>
         ))}
