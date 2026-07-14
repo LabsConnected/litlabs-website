@@ -168,6 +168,13 @@ export default function StudioOS() {
         />
 
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          {/* Mode switcher strip */}
+          <ModeSwitcher
+            activeTool={activeTool}
+            onToolChange={handleToolChange}
+            T={T}
+          />
+
           <div
             ref={scrollRef}
             className="flex-1 min-h-0 overflow-auto p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
@@ -180,7 +187,7 @@ export default function StudioOS() {
           </div>
         </main>
 
-        <StudioInspector variant="aside" T={T} />
+        <StudioInspector variant="aside" T={T} activeTool={activeTool} />
       </div>
 
       {inspectorOpen && (
@@ -194,10 +201,83 @@ export default function StudioOS() {
               variant="sheet"
               onClose={() => setInspectorOpen(false)}
               T={T}
+              activeTool={activeTool}
             />
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+/* ── ModeSwitcher strip — above the canvas ────────────────────── */
+const MODE_TABS: { id: StudioTool; label: string }[] = [
+  { id: "chat", label: "Chat" },
+  { id: "image", label: "Image" },
+  { id: "video", label: "Video" },
+  { id: "audio", label: "Audio" },
+  { id: "builder", label: "Build" },
+  { id: "canvas", label: "Code" },
+];
+
+function ModeSwitcher({
+  activeTool,
+  onToolChange,
+  T,
+}: {
+  activeTool: StudioTool;
+  onToolChange: (tool: StudioTool) => void;
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+}) {
+  return (
+    <div
+      className="flex items-center gap-0.5 px-2 h-9 shrink-0 overflow-x-auto"
+      style={{
+        borderBottom: `1px solid ${T.borderColor}12`,
+        backgroundColor: T.boxBg + "40",
+      }}
+    >
+      {MODE_TABS.map((tab, i) => {
+        const isAuto = tab.label === "Auto";
+        const isActive = isAuto
+          ? activeTool === "chat"
+          : activeTool === tab.id && tab.label !== "Auto";
+        return (
+          <button
+            key={`${tab.label}-${i}`}
+            onClick={() => onToolChange(tab.id)}
+            className="px-3 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-all"
+            style={{
+              color: isActive ? T.accentColor : T.textMuted + "80",
+              backgroundColor: isActive ? T.accentColor + "12" : "transparent",
+              boxShadow: isActive
+                ? `inset 0 0 0 1px ${T.accentColor}25`
+                : "none",
+            }}
+          >
+            {tab.label}
+          </button>
+        );
+      })}
+      <div className="flex-1" />
+      {/* Canvas view tabs */}
+      {[
+        "Preview",
+        "Edit",
+        "Compare",
+        "Timeline",
+        "Code",
+        "Browser",
+        "Console",
+      ].map((v) => (
+        <button
+          key={v}
+          className="hidden lg:block px-2.5 py-1 rounded-md text-[10px] font-bold uppercase tracking-wider whitespace-nowrap transition-colors hover:bg-white/5"
+          style={{ color: T.textMuted + "60" }}
+        >
+          {v}
+        </button>
+      ))}
     </div>
   );
 }

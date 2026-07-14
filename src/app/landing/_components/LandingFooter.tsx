@@ -85,7 +85,11 @@ function DiscordIcon() {
   );
 }
 
-const SOCIALS: Array<{ label: string; href: string; Icon: () => React.JSX.Element }> = [
+const SOCIALS: Array<{
+  label: string;
+  href: string;
+  Icon: () => React.JSX.Element;
+}> = [
   {
     label: "GitHub",
     href: "https://github.com/LabsConnected/litlabs-website",
@@ -109,11 +113,11 @@ export function LandingFooter() {
               <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
                 <Sparkles size={15} className="text-black" />
               </div>
-              LiTTree <span className="text-neutral-500">/</span> LabStudios
+              LiTT <span className="text-neutral-500">/</span> Labs
             </Link>
             <p className="mt-4 max-w-sm text-sm leading-relaxed text-neutral-500">
-              A creator operating system powered by AI agents. Build, automate,
-              and ship — together.
+              The AI project operating system for creators, builders, and
+              independent teams. Stop chatting. Start shipping.
             </p>
             <div className="mt-5 flex items-center gap-2">
               {SOCIALS.map(({ label, href, Icon }) => (
@@ -154,9 +158,7 @@ export function LandingFooter() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/5 pt-6 text-xs text-neutral-500 sm:flex-row">
-          <div>
-            © {new Date().getFullYear()} LiTTree-LabStudios. All rights reserved.
-          </div>
+          <div>© {new Date().getFullYear()} LiTTree Labs. Built with LiTT.</div>
           <div className="flex items-center gap-2 font-mono text-neutral-600">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
             All systems normal · v1.0.0

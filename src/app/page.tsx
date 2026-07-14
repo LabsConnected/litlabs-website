@@ -438,15 +438,19 @@ function LandingPage() {
 }
 
 export default function HomePage() {
-  const { isSignedIn: clerkSignedIn } = useClerkAuth();
-  const { isSignedIn: supabaseSignedIn } = useSupabaseAuthHook();
+  const { isSignedIn: clerkSignedIn, isLoaded: clerkLoaded } =
+    useClerkAuth();
+  const { isSignedIn: supabaseSignedIn, loading: supabaseLoading } =
+    useSupabaseAuthHook();
   const router = useRouter();
 
   useEffect(() => {
+    if (!clerkLoaded || supabaseLoading) return;
+
     if (clerkSignedIn || supabaseSignedIn) {
-      router.replace("/dashboard");
+      router.replace("/studio");
     }
-  }, [clerkSignedIn, supabaseSignedIn, router]);
+  }, [clerkSignedIn, supabaseSignedIn, clerkLoaded, supabaseLoading, router]);
 
   return <LandingPage />;
 }

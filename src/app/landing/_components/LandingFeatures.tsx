@@ -3,11 +3,10 @@ import {
   Layers,
   Terminal,
   Image as ImageIcon,
-  Workflow,
-  Briefcase,
-  MessageSquare,
-  BarChart3,
   Brain,
+  Rocket,
+  Mic,
+  GitBranch,
   type LucideIcon,
 } from "lucide-react";
 
@@ -15,126 +14,125 @@ const FEATURES: Array<{
   icon: LucideIcon;
   title: string;
   desc: string;
-  accent: string;
+  bullets: string[];
+  color: string;
 }> = [
   {
     icon: Bot,
-    title: "AI Agent Crew",
-    desc: "Direct a team of specialized agents that plan, write, design, and ship — together.",
-    accent: "from-cyan-400 to-blue-500",
+    title: "AI Project Director",
+    desc: "Run complex missions through one conversational command center.",
+    bullets: ["Mission planning", "Agent assignment", "Approval checkpoints", "Failure recovery"],
+    color: "#a855f7",
   },
   {
     icon: Layers,
-    title: "Visual Builder",
-    desc: "Drag, drop, and compose interfaces, pipelines, and content without losing control.",
-    accent: "from-fuchsia-400 to-pink-500",
+    title: "Multi-Agent Crew",
+    desc: "Specialized agents instead of one overloaded assistant.",
+    bullets: ["Engineering (Forge)", "Design (Visionary)", "Research Beast", "QA Goblin"],
+    color: "#30e7ff",
   },
   {
     icon: Terminal,
-    title: "Smart Terminal",
-    desc: "Cloud IDE with AI assistance, live preview, and one-click deploy to Vercel.",
-    accent: "from-amber-400 to-orange-500",
+    title: "Live Builder Canvas",
+    desc: "See the work while it happens.",
+    bullets: ["Application preview", "Code editor", "File explorer", "Responsive views"],
+    color: "#f97316",
+  },
+  {
+    icon: GitBranch,
+    title: "Real Project Changes",
+    desc: "LiTT works against actual project files.",
+    bullets: ["File creation & edits", "Diff review", "Branch support", "Pull request prep"],
+    color: "#34d399",
+  },
+  {
+    icon: Mic,
+    title: "Voice & Holo Mode",
+    desc: "Talk naturally without leaving Studio.",
+    bullets: ["Live voice conversations", "Spoken agent responses", "Camera-assisted context", "Inline voice controls"],
+    color: "#f472b6",
   },
   {
     icon: ImageIcon,
-    title: "Generative Studio",
-    desc: "Image, video, audio, and code generation in a single creative canvas.",
-    accent: "from-violet-400 to-purple-500",
-  },
-  {
-    icon: Workflow,
-    title: "Pipeline Engine",
-    desc: "Chain agents into repeatable workflows that turn ideas into shipped artifacts.",
-    accent: "from-emerald-400 to-teal-500",
-  },
-  {
-    icon: Briefcase,
-    title: "Marketplace",
-    desc: "Publish agents, templates, and projects — and earn LBC for every install.",
-    accent: "from-rose-400 to-red-500",
-  },
-  {
-    icon: MessageSquare,
-    title: "Live Collaboration",
-    desc: "Co-build with your crew in real time. Comments, reviews, and approvals in one place.",
-    accent: "from-sky-400 to-indigo-500",
-  },
-  {
-    icon: BarChart3,
-    title: "Creator Analytics",
-    desc: "Track usage, latency, and earnings across every project and agent you operate.",
-    accent: "from-yellow-400 to-amber-500",
+    title: "Visual Creation",
+    desc: "Create production-ready visual assets inside the same mission.",
+    bullets: ["Images & brand assets", "Interface concepts", "Social graphics", "Product mockups"],
+    color: "#f59e0b",
   },
   {
     icon: Brain,
-    title: "Memory That Lasts",
-    desc: "Persistent context across sessions. Your agents remember your style, stack, and goals.",
-    accent: "from-pink-400 to-fuchsia-500",
+    title: "Project Memory",
+    desc: "LiTT remembers decisions, preferences, and approved outcomes.",
+    bullets: ["Persistent across sessions", "Per-project context", "Approved outcome history", "Zero restart friction"],
+    color: "#ec4899",
+  },
+  {
+    icon: Rocket,
+    title: "Deployment Control",
+    desc: "Connect the stack you already use.",
+    bullets: ["Vercel deployments", "GitHub PRs", "Supabase projects", "Build logs & previews"],
+    color: "#818cf8",
   },
 ];
 
 export function LandingFeatures() {
   return (
-    <section id="features" className="relative z-10 px-6 py-24 md:py-32">
+    <section id="features" className="relative z-10 px-4 py-24 md:py-32">
       <div className="mx-auto max-w-6xl">
         <div className="mb-14 text-center">
           <div className="mb-3 inline-flex items-center gap-2 text-[10px] font-bold uppercase tracking-[0.2em] text-cyan-300">
             <span className="h-px w-8 bg-cyan-400/40" />
-            Capabilities
+            Studio capabilities
             <span className="h-px w-8 bg-cyan-400/40" />
           </div>
           <h2 className="mb-4 text-3xl font-black tracking-tight text-white md:text-5xl">
-            Everything you need to ship.
+            One workspace.
             <br />
-            <span className="bg-gradient-to-r from-cyan-300 via-fuchsia-300 to-amber-300 bg-clip-text text-transparent">
-              In one workspace.
+            <span className="bg-gradient-to-r from-cyan-300 via-purple-300 to-orange-300 bg-clip-text text-transparent">
+              Every part of the build.
             </span>
           </h2>
-          <p className="mx-auto max-w-2xl text-base text-neutral-400">
-            Nine pillars. One platform. The agent crew, the visual tools, the
-            runtime, the marketplace — finally together.
+          <p className="mx-auto max-w-xl text-base text-neutral-400">
+            Not a chat wrapper. A full production environment where agents work inside your
+            actual project, in real time, with your approval at every critical step.
           </p>
         </div>
 
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {FEATURES.map(({ icon: Icon, title, desc, accent }) => (
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+          {FEATURES.map(({ icon: Icon, title, desc, bullets, color }) => (
             <div
               key={title}
-              className="group relative overflow-hidden rounded-2xl border border-white/8 bg-white/[0.02] p-6 transition hover:border-white/15 hover:bg-white/[0.04]"
+              className="group relative overflow-hidden rounded-2xl border border-white/8 p-6 transition-all duration-300 hover:border-white/15"
+              style={{
+                background: "linear-gradient(145deg, rgba(255,255,255,0.02), transparent)",
+              }}
             >
               <div
-                className={`pointer-events-none absolute -right-12 -top-12 h-32 w-32 rounded-full bg-gradient-to-br ${accent} opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-30`}
+                className="pointer-events-none absolute -right-10 -top-10 h-28 w-28 rounded-full opacity-0 blur-2xl transition-opacity duration-500 group-hover:opacity-40"
+                style={{ background: color }}
               />
 
               <div className="relative">
                 <div
-                  className={`mb-5 inline-flex h-11 w-11 items-center justify-center rounded-xl bg-gradient-to-br ${accent} shadow-lg`}
+                  className="mb-4 flex h-10 w-10 items-center justify-center rounded-xl shadow-lg"
+                  style={{ background: `${color}22`, border: `1px solid ${color}30` }}
                 >
-                  <Icon size={20} className="text-black" />
+                  <Icon size={18} style={{ color }} />
                 </div>
 
-                <h3 className="mb-2 text-base font-black tracking-tight text-white">
+                <h3 className="mb-1.5 text-sm font-black tracking-tight text-white">
                   {title}
                 </h3>
-                <p className="text-sm leading-relaxed text-neutral-400">
-                  {desc}
-                </p>
+                <p className="mb-3 text-xs leading-relaxed text-neutral-500">{desc}</p>
 
-                <div className="mt-5 flex items-center gap-1.5 text-xs font-bold text-neutral-300 opacity-0 transition group-hover:opacity-100">
-                  Learn more
-                  <svg
-                    width="11"
-                    height="11"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="3"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                  >
-                    <path d="M5 12h14M12 5l7 7-7 7" />
-                  </svg>
-                </div>
+                <ul className="space-y-1">
+                  {bullets.map((b) => (
+                    <li key={b} className="flex items-center gap-1.5 text-[11px] text-neutral-400">
+                      <span className="h-1 w-1 rounded-full shrink-0" style={{ background: color }} />
+                      {b}
+                    </li>
+                  ))}
+                </ul>
               </div>
             </div>
           ))}

@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
@@ -101,6 +102,7 @@ export const metadata: Metadata = {
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const hasClerk = !!clerkKey && clerkKey.length > 10;
 
 export default function RootLayout({
   children,
@@ -134,7 +136,7 @@ export default function RootLayout({
       />
       <link
         rel="preconnect"
-        href="https://eternal-chow-60.clerk.accounts.dev"
+        href="https://clerk.litlabs.net"
         crossOrigin="anonymous"
       />
       <link
@@ -143,19 +145,16 @@ export default function RootLayout({
         crossOrigin="anonymous"
       />
       <link rel="dns-prefetch" href="https://accounts.dev" />
-      <link
-        rel="dns-prefetch"
-        href="https://eternal-chow-60.clerk.accounts.dev"
-      />
+      <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
       <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
       <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#0d0a05" }}
       >
-        {clerkKey ? (
+        {hasClerk ? (
           <ClerkProvider
-            publishableKey={clerkKey}
+            publishableKey={clerkKey!}
             signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
             signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
             signInFallbackRedirectUrl={
@@ -195,10 +194,14 @@ export default function RootLayout({
               },
             }}
           >
-            {shell}
+            <ClerkAuthContextProvider clerkAvailable={true}>
+              {shell}
+            </ClerkAuthContextProvider>
           </ClerkProvider>
         ) : (
-          shell
+          <ClerkAuthContextProvider clerkAvailable={false}>
+            {shell}
+          </ClerkAuthContextProvider>
         )}
         <Analytics />
         <SpeedInsights />

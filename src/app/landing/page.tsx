@@ -2,18 +2,19 @@ import type { Metadata } from "next";
 import { LandingHeader } from "./_components/LandingHeader";
 import { LandingHero } from "./_components/LandingHero";
 import { LandingLogos } from "./_components/LandingLogos";
-import { LandingFeatures } from "./_components/LandingFeatures";
+import { LandingComparison } from "./_components/LandingComparison";
 import { LandingHowItWorks } from "./_components/LandingHowItWorks";
+import { LandingFeatures } from "./_components/LandingFeatures";
+import { LandingTreeOS } from "./_components/LandingTreeOS";
 import { LandingStats } from "./_components/LandingStats";
-import { LandingTestimonials } from "./_components/LandingTestimonials";
 import { LandingCTA } from "./_components/LandingCTA";
 import { LandingFooter } from "./_components/LandingFooter";
 import { LandingBackground } from "./_components/LandingBackground";
 
 export const metadata: Metadata = {
-  title: "LiTTree-LabStudios — Build with your AI crew",
+  title: "LiTT Labs — Stop chatting. Start shipping.",
   description:
-    "A modern creator operating system powered by AI agents. Build, automate, and ship digital products in one workspace.",
+    "LiTT Labs gives your project an AI crew that can see the work, change the files, test the result, and help you ship. Connect your repo, assign a mission, watch your agents work.",
 };
 
 export default function ModernLandingPage() {
@@ -24,10 +25,11 @@ export default function ModernLandingPage() {
       <main className="relative z-10">
         <LandingHero />
         <LandingLogos />
-        <LandingFeatures />
+        <LandingComparison />
         <LandingHowItWorks />
+        <LandingFeatures />
+        <LandingTreeOS />
         <LandingStats />
-        <LandingTestimonials />
         <LandingCTA />
       </main>
       <LandingFooter />

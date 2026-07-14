@@ -7,7 +7,6 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
 import {
   X,
   ChevronLeft,
@@ -288,8 +287,7 @@ function SidebarContent({
   const { resolvedColors: T } = useTheme();
   const { balance } = useWallet();
   const { profile } = useProfile();
-  const { isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { isSignedIn, userId, sessionClaims } = useClerkAuth();
 
   const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(
     () => {
@@ -301,7 +299,7 @@ function SidebarContent({
     },
   );
   const [pinned, setPinned] = useState<string[]>(() =>
-    loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]),
+    loadJson(PINNED_KEY, ["Dashboard", "Studio"]),
   );
   const [hidden, setHidden] = useState<string[]>(() =>
     loadJson(HIDDEN_KEY, []),
@@ -310,9 +308,9 @@ function SidebarContent({
   const [plan, setPlan] = useState<string>("free");
 
   useEffect(() => {
-    if (!isSignedIn || !user?.id) return;
+    if (!isSignedIn || !userId) return;
     let active = true;
-    fetch(`/api/users/${user.id}/plan`)
+    fetch(`/api/users/${userId}/plan`)
       .then((res) => (res.ok ? res.json() : { plan: "free" }))
       .then((data) => {
         if (active && data.plan) setPlan(data.plan);
@@ -321,7 +319,7 @@ function SidebarContent({
     return () => {
       active = false;
     };
-  }, [isSignedIn, user?.id]);
+  }, [isSignedIn, userId]);
 
   const isActive = useCallback(
     (href?: string) => {
@@ -370,14 +368,15 @@ function SidebarContent({
   };
 
   const orderedGroups = useMemo(() => {
-    const pinnedFirst = [...NAV_GROUPS].sort((a, b) => {
+    return [...NAV_GROUPS].sort((a, b) => {
+      if (a.label === "Dashboard") return -1;
+      if (b.label === "Dashboard") return 1;
       const aPinned = pinned.includes(a.label);
       const bPinned = pinned.includes(b.label);
       if (aPinned && !bPinned) return -1;
       if (!aPinned && bPinned) return 1;
       return 0;
     });
-    return pinnedFirst;
   }, [pinned]);
 
   return (
@@ -456,57 +455,105 @@ function SidebarContent({
       </div>
 
       {/* User profile card */}
-      {!collapsed && isSignedIn && user && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
-          <Link
-            href="/profile"
-            className="flex items-center gap-3 p-2 rounded-lg transition-colors hover:bg-white/5"
-          >
+      {!collapsed &&
+        isSignedIn &&
+        userId &&
+        (() => {
+          const avatarSrc = profile?.avatarUrl || null;
+          const displayName =
+            profile?.displayName ||
+            sessionClaims?.name ||
+            sessionClaims?.username ||
+            "Creator";
+          const username =
+            profile?.username || sessionClaims?.username || "litree";
+          const initial = displayName[0].toUpperCase();
+          return (
             <div
-              className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2"
-              style={{ borderColor: T.accentColor }}
+              className="px-3 pt-3 pb-2 border-b"
+              style={{ borderColor: `${T.borderColor}30` }}
             >
-              {user.imageUrl ? (
-                <NextImage
-                  src={user.imageUrl}
-                  alt="Profile"
-                  fill
-                  className="object-cover"
-                  sizes="40px"
-                />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center text-sm font-bold"
-                  style={{ backgroundColor: T.boxBg, color: T.accentColor }}
-                >
-                  {(
-                    user.firstName?.[0] ||
-                    user.username?.[0] ||
-                    "?"
-                  ).toUpperCase()}
-                </div>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div
-                className="text-sm font-bold truncate"
-                style={{ color: T.textColor }}
+              <Link
+                href="/profile"
+                className="flex items-center gap-3 p-2.5 rounded-xl transition-all hover:bg-white/5 group"
               >
-                {profile?.displayName ||
-                  user.firstName ||
-                  user.username ||
-                  "Creator"}
-              </div>
-              <div className="text-xs truncate" style={{ color: T.textMuted }}>
-                @{user.username || "litree"}
-              </div>
+                {/* Avatar with gradient ring */}
+                <div className="relative shrink-0">
+                  <div
+                    className="w-11 h-11 rounded-full p-[2px]"
+                    style={{
+                      background: `linear-gradient(135deg, ${T.accentColor}, #a855f7, #f472b6)`,
+                    }}
+                  >
+                    <div className="w-full h-full rounded-full overflow-hidden">
+                      {avatarSrc ? (
+                        <NextImage
+                          src={avatarSrc}
+                          alt="Profile"
+                          width={44}
+                          height={44}
+                          className="object-cover w-full h-full"
+                        />
+                      ) : (
+                        <div
+                          className="w-full h-full flex items-center justify-center text-sm font-black"
+                          style={{
+                            background: `linear-gradient(135deg, ${T.accentColor}30, #a855f730)`,
+                            color: T.accentColor,
+                          }}
+                        >
+                          {initial}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                  {/* Online dot */}
+                  <span
+                    className="absolute bottom-0 right-0 w-3 h-3 rounded-full border-2 bg-emerald-400"
+                    style={{ borderColor: T.bgColor }}
+                  />
+                </div>
+
+                <div className="flex-1 min-w-0">
+                  <div
+                    className="text-sm font-bold truncate leading-tight"
+                    style={{ color: T.textColor }}
+                  >
+                    {displayName}
+                  </div>
+                  <div
+                    className="text-[11px] truncate mt-0.5"
+                    style={{ color: T.textMuted }}
+                  >
+                    @{username}
+                  </div>
+                </div>
+
+                {/* Settings shortcut */}
+                <Link
+                  href="/settings?tab=profile"
+                  onClick={(e) => e.stopPropagation()}
+                  className="shrink-0 p-1.5 rounded-lg opacity-0 group-hover:opacity-100 transition-all hover:bg-white/10"
+                  style={{ color: T.textMuted }}
+                  title="Edit profile"
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2.5"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  >
+                    <path d="M12 20h9M16.5 3.5a2.121 2.121 0 013 3L7 19l-4 1 1-4L16.5 3.5z" />
+                  </svg>
+                </Link>
+              </Link>
             </div>
-          </Link>
-        </div>
-      )}
+          );
+        })()}
 
       {/* The global FloatingChat (in layout.tsx) handles the Director
           experience now, so we no longer render the sidebar card/drawer. */}

@@ -19,8 +19,8 @@ export async function POST(request: Request) {
     const planner = new DirectorGraphPlanner();
     const graph = planner.buildPlan(goal);
     const base = request.headers.get("x-forwarded-host")
-      ? "http://localhost:3000"
-      : "http://localhost:3000";
+      ? `https://${request.headers.get("x-forwarded-host")}`
+      : request.url.replace(/\/api\/director\/plan.*$/, "");
 
     const enqueuedTasks: Array<{ id?: string; taskId?: string }> = [];
 

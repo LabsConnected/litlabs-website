@@ -49,6 +49,26 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "img.youtube.com",
       },
+      {
+        protocol: "https",
+        hostname: "img.clerk.com",
+      },
+      {
+        protocol: "https",
+        hostname: "images.clerk.dev",
+      },
+      {
+        protocol: "https",
+        hostname: "**.r2.cloudflarestorage.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.googleusercontent.com",
+      },
+      {
+        protocol: "https",
+        hostname: "avatars.githubusercontent.com",
+      },
     ],
   },
 

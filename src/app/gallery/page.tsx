@@ -6,7 +6,6 @@ import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
@@ -81,8 +80,7 @@ type GalleryItem = {
 
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Gallery() {
-  const { isLoaded, isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { isLoaded, isSignedIn, sessionClaims } = useClerkAuth();
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);
@@ -175,7 +173,8 @@ export default function Gallery() {
         setIsMock(data.mock === true);
         if (data.items && data.items.length > 0) {
           // Mark items as owned by current user
-          const currentUserName = user?.fullName || user?.username;
+          const currentUserName =
+            sessionClaims?.name || sessionClaims?.username;
           const itemsWithOwnership = data.items.map((item) => ({
             ...item,
             isOwner: item.artist === currentUserName,
@@ -186,7 +185,7 @@ export default function Gallery() {
       .catch(() => {
         // silent fail — demo items still show
       });
-  }, [viewMode, selectedCategory, user]);
+  }, [viewMode, selectedCategory, sessionClaims]);
 
   useEffect(() => {
     if (isLoaded && !isSignedIn) {
