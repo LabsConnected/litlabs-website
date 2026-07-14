@@ -2,9 +2,8 @@ packages:
   - "."
   - "terminal-server"
 allowBuilds:
-  '@clerk/shared': set this to true or false
-  '@google/genai': set this to true or false
-  '@usejarvis/brain': set this to true or false
+  "@clerk/shared": set this to true or false
+  "@google/genai": set this to true or false
   cpu-features: set this to true or false
   esbuild: set this to true or false
   keytar: set this to true or false

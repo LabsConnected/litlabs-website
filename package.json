@@ -31,7 +31,6 @@
     "@stripe/stripe-js": "^5.10.0",
     "@supabase/ssr": "^0.5.0",
     "@supabase/supabase-js": "^2.110.2",
-    "@usejarvis/brain": "^0.8.0",
     "@vercel/analytics": "^2.0.1",
     "@vercel/speed-insights": "^2.0.0",
     "@xterm/addon-fit": "^0.11.0",

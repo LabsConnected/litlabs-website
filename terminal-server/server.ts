@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
-import { handleJarvisCommand } from "./jarvis-ai";
+import { handleLiTTBrainCommand } from "./littree-brain";
 import { bearerToken, verifyTerminalToken } from "./auth";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
@@ -253,15 +253,15 @@ io.on("connection", (socket) => {
     ptyProcess.write(data);
   });
 
-  socket.on("jarvis:command", async (input: string) => {
+  socket.on("brain:command", async (input: string) => {
     if (typeof input !== "string") return;
-    socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis is thinking...\x1b[0m\r\n");
+    socket.emit("terminal:output", "\r\n\x1b[36m� LiTT Brain is thinking...\x1b[0m\r\n");
     try {
-      const reply = await handleJarvisCommand(input);
-      socket.emit("terminal:output", "\r\n\x1b[36m🤖 Jarvis:\x1b[0m\r\n");
+      const reply = await handleLiTTBrainCommand(input);
+      socket.emit("terminal:output", "\r\n\x1b[36m� LiTT Brain:\x1b[0m\r\n");
       socket.emit("terminal:output", reply.replace(/\n/g, "\r\n") + "\r\n");
     } catch (err) {
-      const message = err instanceof Error ? err.message : "Jarvis failed";
+      const message = err instanceof Error ? err.message : "LiTT Brain failed";
       socket.emit("terminal:output", `\r\n\x1b[31m⚠ ${message}\x1b[0m\r\n`);
     }
   });

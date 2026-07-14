@@ -149,8 +149,8 @@ export const TerminalPanel = forwardRef<
             const cmd = commandBufferRef.current.trim();
             if (cmd) {
               onCommand?.(cmd);
-              if (cmd.startsWith("jarvis ")) {
-                connectedSocket.emit("jarvis:command", cmd);
+              if (cmd.startsWith("brain ")) {
+                connectedSocket.emit("brain:command", cmd);
                 commandBufferRef.current = "";
                 return;
               }

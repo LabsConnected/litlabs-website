@@ -16,8 +16,8 @@
   },
   "paths": {
     "primary": "/workspaces/litlabs-website",
-    "localWindows": "C:/Users/litbi/CascadeProjects/litlab",
-    "localAlternative": "/home/litbit/CascadeProjectsFast"
+    "localWindows": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo",
+    "localAlternative": "C:/Users/litbi/CascadeProjects/litlab"
   },
   "_note": "Legacy config kept for backward compatibility. Canonical source is .devin-config.json — keep both in sync."
 }

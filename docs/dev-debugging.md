@@ -1,46 +1,131 @@
-# Development debugging
+# 🛠 Dev Debugging Stack — LiTTree Lab Studios
 
-The recommended VS Code stack for this Next.js 16, TypeScript, and Node project is Console Ninja, Error Lens, the built-in JavaScript debugger, Playwright Test, REST Client, and GitLens.
+> **TL;DR — Best 3-tool setup for this codebase:**
+> **Console Ninja** + **Error Lens** + the **built-in VS Code JavaScript debugger**.
+> That's the whole stack. No more flipping between Devin, the terminal, and
+> browser DevTools for every bug.
 
-## Install the workspace recommendations
+---
 
-Open the Extensions view and run **Extensions: Show Recommended Extensions**, then install the workspace recommendations. The core debugging extension IDs are:
+## 1. Recommended VS Code extensions
 
-```text
-WallabyJs.console-ninja
-usernamehw.errorlens
-ms-playwright.playwright
-humao.rest-client
-eamodio.gitlens
-```
+These are listed in `.vscode/extensions.json`, so VS Code / Cursor will
+prompt to install them the first time you open the workspace.
 
-Console Ninja displays supported runtime logs and values near the source. Error Lens displays TypeScript and ESLint diagnostics inline. VS Code already includes the JavaScript debugger, so a separate Node or browser debugger extension is unnecessary.
+| Extension                       | Publisher / ID             | Why we use it                                                                               |
+| ------------------------------- | -------------------------- | ------------------------------------------------------------------------------------------- |
+| **Console Ninja**               | `WallabyJs.console-ninja`  | Inline `console.log` output + runtime values shown **next to** the line that produced them. |
+| **Error Lens**                  | `usernamehw.errorlens`     | TS / ESLint / build errors rendered inline at the end of the offending line.                |
+| **Playwright Test for VS Code** | `ms-playwright.playwright` | Runs / debugs Playwright tests in-editor with a real browser panel.                         |
+| **REST Client**                 | `humao.rest-client`        | Sends HTTP requests straight from `.http` files — perfect for testing Next.js API routes.   |
+| **GitLens**                     | `eamodio.gitlens`          | Inline blame, history explorer, and "which commit broke this line" search.                  |
 
-## Debug the app
+**You do NOT need** any third-party Node / Chrome / Edge debugger extension.
+VS Code's built-in `node` and `chrome` debuggers already cover breakpoints,
+call stacks, watches, source maps, and headless browser debugging.
 
-1. Open **Run and Debug** (`Ctrl+Shift+D`).
-2. Select **Next.js: debug full stack**.
-3. Press `F5`.
-4. Set breakpoints in server code, route handlers, React components, or browser code.
+### Guardrail: extensions we deliberately exclude
 
-The full-stack compound starts `pnpm dev` through a JavaScript Debug Terminal and launches a debugger-controlled Chromium window at `http://localhost:3000`. Use **Next.js: debug server (Webpack fallback)** if a Turbopack-specific issue prevents useful debugging.
+Also in `.vscode/extensions.json` under `unwantedRecommendations`:
 
-If the app was started separately with Node inspector enabled on port 9229, use **Node: attach to port 9229**. For example, from PowerShell:
+- `msjsdiag.debugger-for-chrome` — superseded by the built-in JS debugger.
+- `ms-vscode.vscode-js-debug` — bundled with VS Code since 1.46; not separate.
+- `formulahendry.code-runner` — noisy output, ignores our test runner scripts.
 
-```powershell
-$env:NODE_OPTIONS = "--inspect=9229"
-pnpm dev
-```
+---
 
-## Test API routes
+## 2. Debug configurations (`.vscode/launch.json`)
 
-Open `.vscode/api.http`, run **Rest Client: Switch Environment**, choose `local`, and select **Send Request** above a request. Replace the placeholder preview URL in `.vscode/settings.json` before choosing `preview`.
+The launch file ships with the following pre-wired configurations:
 
-The included sample targets `/api/ai-chat` and `/api/llm/health`. The chat request may still require configured provider credentials and application authentication.
+| Config name                                  | What it does                                                                                       |
+| -------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| **Next.js: debug server (pnpm dev)**         | Launches `pnpm dev` with `--inspect=9229`, waits for `Local: http://…`, then auto-attaches Chrome. |
+| **Next.js: debug webpack server (fallback)** | Same as above, but `pnpm dev:webpack` on port 9230. Use this if Turbopack is misbehaving.          |
+| **Next.js: attach to running process**       | Attaches the debugger to an already-running `pnpm dev` (port 9229).                                |
+| **Vitest: run current test file**            | Runs the open `*.test.ts(x)` file with Vitest.                                                     |
+| **Vitest: debug current test file**          | Same, with `--inspect-brk`, so breakpoints in tests actually pause.                                |
+| **Dev: full-stack (server + Chrome)**        | Compound launch — starts the server, then opens Chrome attached to it.                             |
 
-## UI and history debugging
+### Common debugging flows
 
-- Use the Playwright sidebar for Playwright tests once a Playwright configuration and tests are present. This repository does not currently define a Playwright test script.
-- Use GitLens file history or blame to trace a regression to the change that introduced it.
-- Use the existing `Build` and `Lint` workspace tasks for repeatable diagnostics.
+**Flow A — "Something broke on the server side"**
 
+1. `Ctrl+Shift+D` → pick **Next.js: debug server (pnpm dev)**.
+2. Set a breakpoint in `src/lib/litt.ts` (or any lib / route handler).
+3. Press `F5`. Console Ninja will show you runtime values **inline** as the
+   request hits the route.
+
+**Flow B — "A React component isn't rendering right"**
+
+1. Set a breakpoint in the component.
+2. Run the **Next.js: debug server** config (which auto-attaches Chrome).
+3. Step through — Error Lens keeps the type / lint errors visible at the
+   end of each line, so you see issues as you go.
+
+**Flow C — "The AI chat route is misbehaving"**
+
+1. Open `.vscode/api.http`.
+2. Pick the `local` environment in the REST Client status bar.
+3. Click **Send Request** above the `/api/ai-chat` block.
+4. Use the **Next.js: attach to running process** debug config to step
+   into the route handler.
+
+**Flow D — "A Playwright test is flaky"**
+
+1. Open the test (e.g. `tests/e2e/foo.spec.ts`).
+2. Use the **Testing** sidebar (`Ctrl+Shift+T` in Cursor) — Playwright
+   runs / debugs tests in a real browser without leaving the editor.
+
+---
+
+## 3. Why Console Ninja + Error Lens + built-in debugger is the right combo
+
+| Pain point                                           | Tool that solves it        |
+| ---------------------------------------------------- | -------------------------- |
+| "I want to see `console.log` without alt-tabbing"    | **Console Ninja**          |
+| "I want to know what `obj` is at this exact line"    | **Console Ninja** (inline) |
+| "I want lint / TS errors at the end of each line"    | **Error Lens**             |
+| "I want a real breakpoint with call stack & watches" | **Built-in Node debugger** |
+| "I want to know which commit broke this line"        | **GitLens**                |
+| "I want to test an API route without writing code"   | **REST Client**            |
+| "I want to fix a broken UI flow visually"            | **Playwright**             |
+
+That covers ~95% of the debugging situations that come up in this codebase.
+
+---
+
+## 4. Settings the workspace forces (`.vscode/settings.json`)
+
+The most relevant ones (all overridable in your user `settings.json` if you
+disagree):
+
+- `console-ninja.enabled: true` — auto-enables inline runtime values.
+- `errorLens.enabled: true`, font 13, monospace — readable on Win11 scaling.
+- `typescript.tsdk: node_modules/typescript/lib` — always uses the
+  workspace TS, which Next.js 16 + Turbopack require.
+- `editor.formatOnSave: true` + Prettier as default formatter.
+- `search.exclude` skips `litlabs/`, `litlabs-website/`, `Zoo-Code/`,
+  `chrome/`, `work/`, `meta/`, `codex-reference/` — these are the
+  large local artifacts from `.gitignore`; no point searching them.
+
+---
+
+## 5. Gotchas specific to this codebase
+
+- **Turbopack + `--inspect`**: the launch config passes `NODE_OPTIONS=--inspect=9229`
+  to the `pnpm dev` process. If you instead run `pnpm dev` in your own
+  terminal and want to attach, use the **attach** config — don't run two
+  `pnpm dev` instances on the same port.
+- **`lucide-react@1.24.0` is pinned** (very old). If Console Ninja shows
+  `Icon is not exported from lucide-react` errors, don't `pnpm add` modern
+  icons — copy the inline SVG pattern from
+  `src/components/dashboard/AutonomicLoopBanner.tsx`.
+- **Console Ninja + `--inspect-brk`**: if the dev server never finishes
+  starting (e.g. it sits on a breakpoint before the Turbopack compile
+  banner), check the **Terminal** panel for the compile progress — the
+  `serverReadyAction` only fires once Turbopack prints `Local: http://…`.
+
+---
+
+_Last verified: 2026-07-13._

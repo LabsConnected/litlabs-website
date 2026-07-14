@@ -1,25 +1,20 @@
-security: harden terminal/auth, wallet ledger, scanner/builder workflow
+refactor: remove Jarvis naming and dead dependency, reconcile agent guidance
 
-- Terminal server now requires signed `TERMINAL_AUTH_SECRET` tokens on all
-  `/files` HTTP routes and Socket.IO connections; userId is derived from the
-  token, not client input. Adds file-size, path-length, and JSON-body limits.
-- Production terminal sessions require `TERMINAL_USE_DOCKER=true`.
-- Wallet/credit mutations now use an immutable, idempotent transaction ledger
-  via `adjust_wallet_balance` RPC and `src/lib/wallet-ledger.ts`.
-- Close arbitrary-balance minting: only admins/internal services may credit
-  wallets; spending/daily claims remain authenticated but go through the ledger.
-- Add admin-only file-read endpoint at `/api/litt/file` with path allow-listing.
-- Rewrite `/api/litt/scan` to return real metadata, deduplicate files, and expose
-  health/checks metadata.
-- Rewrite `/api/litt/command` as an authenticated, admin-only action runner
-  (typecheck/lint/test/build/terminal-build).
-- Update BuilderPanel to send `{ action: "build" }` to `/api/litt/command`.
-- Add `/api/terminal/token` issuer and client helpers; terminal components now
-  send bearer tokens for file and shell operations.
-- Add auth to `/api/tracks` POST, `/api/ha/state` GET, and `/api/director/plan`
-  POST; remove SSRF-prone `x-forwarded-host` usage in director.
-- Drop accidentally committed build/output artifacts and ignore
-  `terminal-server/dist/`.
+- Remove dead `@usejarvis/brain` dependency and `src/lib/TaskRepository.ts`.
+- Rename `terminal-server/jarvis-ai.ts` → `littree-brain.ts` and replace the
+  `jarvis:command` socket event with `brain:command`. Update terminal UI to use
+  `brain <command>` and "LiTT Brain" labels.
+- Update `.clinerules` / `.cursorrules` / `.devin-config.json` / `devin.config.json`
+  to point to `reference-repo` as the canonical local checkout and document that
+  `src/lib/litt-context.ts` is the brain, while `src/lib/litt.ts` is the
+  notification dispatcher.
+- Update `SETUP.md` to reference the `brain` terminal command.
+- Rename future-dated `20261215_*` migrations to `20260714_*` to preserve
+  lexicographic ordering.
+- Fix remaining lint warnings: remove unused React Compiler suppression
+  directives and resolve the `Image` icon vs DOM `Image` ambiguity in the library
+  files page.
+- Import the workspace deep-dive and dev-debugging docs into `docs/`.
 
 Generated with [Devin](https://devin.ai)
 

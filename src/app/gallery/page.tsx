@@ -80,7 +80,10 @@ type GalleryItem = {
 
 function getArtifactIdentity(item: GalleryItem): string {
   const imageUrl = item.imageUrl.trim().toLowerCase().replace(/\/$/, "");
-  const mediaUrl = (item.videoUrl || imageUrl).trim().toLowerCase().replace(/\/$/, "");
+  const mediaUrl = (item.videoUrl || imageUrl)
+    .trim()
+    .toLowerCase()
+    .replace(/\/$/, "");
   return `${item.mediaType || "image"}:${mediaUrl}`;
 }
 
@@ -507,7 +510,11 @@ export default function Gallery() {
       {isMock && (
         <div
           className="w-full px-4 py-2 text-[10px] text-center"
-          style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
+          style={{
+            backgroundColor: T.accentColor + "20",
+            color: T.accentColor,
+            borderBottom: `1px solid ${T.accentColor}40`,
+          }}
         >
           🛠 Demo museum — connect Supabase to see real community artifacts.
         </div>
@@ -598,7 +605,9 @@ export default function Gallery() {
                     >
                       {featured.artist}
                     </span>
-                    <span className="text-[9px] sm:text-[10px] opacity-30">·</span>
+                    <span className="text-[9px] sm:text-[10px] opacity-30">
+                      ·
+                    </span>
                     <span
                       className="text-[9px] sm:text-[10px] opacity-40"
                       style={{ color: T.textColor }}
@@ -1039,6 +1048,7 @@ export default function Gallery() {
                       </div>
                     ) : uploadForm.imageUrl ? (
                       <div>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
                         <img
                           src={uploadForm.imageUrl}
                           alt="Preview"
@@ -1313,12 +1323,18 @@ export default function Gallery() {
       {/* ── Enhanced Masonry Gallery ── */}
       <div className="px-3 py-4 sm:px-4 sm:py-6 w-full">
         {galleryLoading && items.length === 0 && (
-          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Loading gallery">
+          <div
+            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            aria-label="Loading gallery"
+          >
             {[0, 1, 2, 3, 4, 5].map((index) => (
               <div
                 key={index}
                 className="aspect-[4/3] animate-pulse rounded-2xl border"
-                style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}30` }}
+                style={{
+                  backgroundColor: `${T.boxBg}b8`,
+                  borderColor: `${T.borderColor}30`,
+                }}
               />
             ))}
           </div>
@@ -1331,11 +1347,16 @@ export default function Gallery() {
               border: `1px solid ${T.borderColor}40`,
             }}
           >
-            <div className="mb-3 text-4xl" aria-hidden="true">🏛️</div>
+            <div className="mb-3 text-4xl" aria-hidden="true">
+              🏛️
+            </div>
             <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
               No artifacts in this wing yet
             </h2>
-            <p className="mt-2 text-xs opacity-60" style={{ color: T.textColor }}>
+            <p
+              className="mt-2 text-xs opacity-60"
+              style={{ color: T.textColor }}
+            >
               {searchQuery
                 ? `Nothing matches “${searchQuery}”. Try another search or clear the filters.`
                 : viewMode === "my-uploads"
@@ -1354,7 +1375,9 @@ export default function Gallery() {
               className="mt-5 rounded-lg px-4 py-2 text-xs font-bold"
               style={{ backgroundColor: T.accentColor, color: T.bgColor }}
             >
-              {searchQuery || selectedCategory !== "all" ? "Clear filters" : "Add an artifact"}
+              {searchQuery || selectedCategory !== "all"
+                ? "Clear filters"
+                : "Add an artifact"}
             </button>
           </div>
         )}
@@ -1544,15 +1567,19 @@ export default function Gallery() {
                 <div className="px-3 py-2.5 flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
                     {item.artistAvatar ? (
-                      <img
-                        src={item.artistAvatar}
-                        alt={item.artist}
-                        className="w-5 h-5 rounded-full object-cover shrink-0"
-                        onError={(e) => {
-                          // Fallback to initial on error
-                          (e.target as HTMLImageElement).style.display = "none";
-                        }}
-                      />
+                      <>
+                        {/* eslint-disable-next-line @next/next/no-img-element */}
+                        <img
+                          src={item.artistAvatar}
+                          alt={item.artist}
+                          className="w-5 h-5 rounded-full object-cover shrink-0"
+                          onError={(e) => {
+                            // Fallback to initial on error
+                            (e.target as HTMLImageElement).style.display =
+                              "none";
+                          }}
+                        />
+                      </>
                     ) : (
                       <div
                         className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black shrink-0"

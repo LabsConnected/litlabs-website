@@ -12,7 +12,7 @@ import {
   Download,
   Upload,
   Loader2,
-  Image,
+  Image as ImageIcon,
   Video,
   Music,
 } from "lucide-react";
@@ -78,7 +78,7 @@ export default function LibraryFilesPage() {
   const typeIcon = (type: string) => {
     if (type === "video") return Video;
     if (type === "audio") return Music;
-    return Image;
+    return ImageIcon;
   };
 
   return (
@@ -101,7 +101,7 @@ export default function LibraryFilesPage() {
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
             style={{ borderColor: T.borderColor + "40", color: T.textColor }}
           >
-            <Image size={16} /> Gallery
+            <ImageIcon size={16} /> Gallery
           </Link>
         </div>
 

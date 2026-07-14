@@ -50,7 +50,7 @@ export function CodeEditor({
   }, [filePath, wsUrl]);
 
   useEffect(() => {
-    loadFile(); // eslint-disable-line react-hooks/set-state-in-effect
+    loadFile();  
   }, [loadFile]);
 
   const saveFile = async () => {

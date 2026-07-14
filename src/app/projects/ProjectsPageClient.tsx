@@ -40,7 +40,7 @@ export default function ProjectsPageClient() {
 
   useEffect(() => {
     if (!isLoaded || !isSignedIn) {
-      setLoading(false); // eslint-disable-line react-hooks/set-state-in-effect
+      setLoading(false);  
       return;
     }
     const safeJson = async (r: Response) => {
