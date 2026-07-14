@@ -297,7 +297,7 @@ function MobileToolRail({
   pluginsOpen,
 }: MobileToolRailProps) {
   return (
-    <nav className="flex items-center gap-1 overflow-x-auto border-t border-white/5 bg-[#030308]/95 px-2 py-1.5 [scrollbar-width:none] md:hidden">
+    <nav className="flex items-center gap-1 overflow-x-auto border-t border-white/5 bg-[#030308]/95 px-2 py-1.5 scrollbar-none md:hidden">
       {MOBILE_TOOLS.map((item) => {
         const Icon = item.icon;
         const active = activeTool === item.id;
