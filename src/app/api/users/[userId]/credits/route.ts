@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { supabase } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
+import { canMutateBalances } from "@/lib/authz";
 
 /**
  * POST /api/users/[userId]/credits
@@ -46,18 +47,38 @@ export async function POST(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Only the user themselves or an admin can modify credits
-    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "")
-      .split(",")
-      .filter(Boolean);
-    const isSelf = clerkId === userId;
-    const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
-    if (!isSelf && !isAdmin) {
+    // Only admins or internal services can mutate credit balances.
+    const canMutate = await canMutateBalances(req);
+    if (!canMutate) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
     const body = await req.json();
     const amount = Number(body.amount) || 0;
+    const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+    const idempotencyKey =
+      typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+
+    if (!reason || reason.length < 3) {
+      return NextResponse.json(
+        { error: "A descriptive reason is required" },
+        { status: 400 },
+      );
+    }
+
+    if (!idempotencyKey || idempotencyKey.length < 8) {
+      return NextResponse.json(
+        { error: "An idempotencyKey is required" },
+        { status: 400 },
+      );
+    }
+
+    if (amount === 0) {
+      return NextResponse.json(
+        { error: "amount cannot be zero" },
+        { status: 400 },
+      );
+    }
 
     // Get current wallet
     const wallet = await getUserWallet(targetUser.clerk_id);
@@ -76,6 +97,8 @@ export async function POST(
       credits: updated.balance,
       previousBalance: wallet.balance,
       change: amount,
+      reason,
+      idempotencyKey,
     });
 
     response.headers.set("X-RateLimit-Limit", "50");

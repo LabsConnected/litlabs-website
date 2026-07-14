@@ -1,10 +1,16 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { DirectorGraphPlanner } from "@/lib/director-graph";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(request: Request) {
   try {
+    const { userId } = await auth();
+    if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
+
     const body = await request.json();
 
     const goal =
@@ -18,15 +24,13 @@ export async function POST(request: Request) {
 
     const planner = new DirectorGraphPlanner();
     const graph = planner.buildPlan(goal);
-    const base = request.headers.get("x-forwarded-host")
-      ? `https://${request.headers.get("x-forwarded-host")}`
-      : request.url.replace(/\/api\/director\/plan.*$/, "");
+    const origin = new URL(request.url).origin;
 
     const enqueuedTasks: Array<{ id?: string; taskId?: string }> = [];
 
     for (const step of graph.tasks) {
       try {
-        const res = await fetch(`${base}/api/agent-tasks`, {
+        const res = await fetch(`${origin}/api/agent-tasks`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

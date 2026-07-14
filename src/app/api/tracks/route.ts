@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseAdmin } from "@/lib/supabase";
+import { isAdmin } from "@/lib/roles";
 
 // Fallback tracks when Supabase is not configured
 const FALLBACK_TRACKS = [
@@ -106,6 +107,9 @@ export async function POST(req: NextRequest) {
   const supabase = getClient();
   if (!supabase) {
     return NextResponse.json({ error: "Service unavailable" }, { status: 503 });
+  }
+  if (!(await isAdmin())) {
+    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
   try {
     const body = await req.json();

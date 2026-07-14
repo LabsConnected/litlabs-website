@@ -6,6 +6,7 @@ import {
   claimDailyBonus,
 } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { canMutateBalances } from "@/lib/authz";
 
 /**
  * GET /api/wallet
@@ -115,8 +116,8 @@ async function postHandler(req: NextRequest) {
 
 /**
  * PUT /api/wallet
- * Updates wallet balance (for purchases, earnings, etc.)
- * Body: { amount: number } - positive for earnings, negative for purchases
+ * Adjusts a wallet balance for refunds, corrections, or earnings.
+ * Only admins and internal services may call this endpoint.
  */
 async function putHandler(req: NextRequest) {
   try {
@@ -125,11 +126,25 @@ async function putHandler(req: NextRequest) {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    if (!(await canMutateBalances(req))) {
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
+    }
+
     const body = await req.json().catch(() => null);
 
-    if (!body || typeof body.amount !== "number") {
+    if (
+      !body ||
+      typeof body.amount !== "number" ||
+      typeof body.reason !== "string" ||
+      !body.reason.trim() ||
+      typeof body.idempotencyKey !== "string" ||
+      !body.idempotencyKey.trim()
+    ) {
       return NextResponse.json(
-        { error: "Invalid request. amount (number) is required" },
+        {
+          error:
+            "Invalid request. amount (number), reason (string), and idempotencyKey (string) are required",
+        },
         { status: 400 },
       );
     }
@@ -159,6 +174,8 @@ async function putHandler(req: NextRequest) {
       balance: wallet.balance,
       previousBalance: currentWallet.balance,
       change: body.amount,
+      reason: body.reason.trim(),
+      idempotencyKey: body.idempotencyKey.trim(),
     });
   } catch {
     // Error updating wallet:
