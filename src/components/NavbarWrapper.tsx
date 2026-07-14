@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { Menu, Bell, Search } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { NavAuth } from "@/components/ClerkAuth";
 
 export default function NavbarWrapper({
   onMenuClick,
@@ -58,6 +59,8 @@ export default function NavbarWrapper({
         >
           <Bell size={18} />
         </button>
+        {/* Login / logout — matches the rest of the app */}
+        <NavAuth linkColor={T.accentColor} />
       </div>
     </header>
   );

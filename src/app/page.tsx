@@ -65,6 +65,12 @@ const PREVIEW_MESSAGES = [
 ];
 
 function PublicHeader() {
+  const { isSignedIn: clerkSignedIn, isLoaded: clerkLoaded } = useClerkAuth();
+  const { isSignedIn: supabaseSignedIn, loading: supabaseLoading } =
+    useSupabaseAuthHook();
+  const authLoaded = clerkLoaded || supabaseLoading === false;
+  const signedIn = clerkSignedIn || supabaseSignedIn;
+
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-white/5 bg-[#06060e]/90 backdrop-blur-xl">
       <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
@@ -92,18 +98,40 @@ function PublicHeader() {
           </Link>
         </nav>
         <div className="flex items-center gap-2">
-          <Link
-            href="/sign-in"
-            className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
-          >
-            Start building <ArrowRight size={11} />
-          </Link>
+          {!authLoaded ? (
+            <span className="h-7 w-16 animate-pulse rounded-lg bg-white/5" />
+          ) : signedIn ? (
+            <>
+              <Link
+                href="/dashboard"
+                className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
+              >
+                Dashboard
+              </Link>
+              <Link
+                href="/api/auth/logout"
+                prefetch={false}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white transition hover:border-white/20 hover:bg-white/10"
+              >
+                Sign out
+              </Link>
+            </>
+          ) : (
+            <>
+              <Link
+                href="/sign-in"
+                className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
+              >
+                Sign in
+              </Link>
+              <Link
+                href="/sign-up"
+                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
+              >
+                Start building <ArrowRight size={11} />
+              </Link>
+            </>
+          )}
         </div>
       </div>
     </header>

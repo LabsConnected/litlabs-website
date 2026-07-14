@@ -36,6 +36,7 @@ import {
   Wand2,
   Bot,
   BrainCircuit,
+  LogOut,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -495,6 +496,21 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                         </Link>
                       );
                     })}
+                    {/* Divider + Sign out — gives a guaranteed way to log out */}
+                    <div
+                      className="my-1 h-px mx-2"
+                      style={{ backgroundColor: resolvedColors.borderColor + "40" }}
+                    />
+                    <Link
+                      href="/api/auth/logout"
+                      prefetch={false}
+                      className="flex items-center gap-2 px-3 py-2 text-xs font-bold transition-colors hover:opacity-80"
+                      style={{ color: resolvedColors.headerColor }}
+                      onClick={() => setUserOpen(false)}
+                    >
+                      <LogOut size={13} />
+                      <span>Sign out</span>
+                    </Link>
                   </div>
                 )}
               </div>
