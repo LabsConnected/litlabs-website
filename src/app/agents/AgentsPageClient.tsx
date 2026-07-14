@@ -143,8 +143,9 @@ export default function AgentsPageClient() {
   const [missions] = useState<Mission[]>(MOCK_MISSIONS);
 
   const agents = Object.values(AGENTS).filter((a) => a.id !== "pixel-forge");
-  const littCode = agents.find((a) => a.id === "litt-code");
-  const littleBit = agents.find((a) => a.id === "little-bit");
+  // IDs in src/lib/agents.ts are "littcode" and "littlebit" (no hyphens)
+  const littCode = agents.find((a) => a.id === "littcode");
+  const littleBit = agents.find((a) => a.id === "littlebit");
 
   useEffect(() => {
     let alive = true;

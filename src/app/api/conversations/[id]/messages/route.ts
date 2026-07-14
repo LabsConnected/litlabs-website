@@ -43,8 +43,9 @@ export async function GET(
       );
     }
 
+    // Schema defines this table as `conversation_messages` (see supabase/schema.sql)
     const { data: messages, error } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .select("*")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: true });
@@ -107,9 +108,9 @@ export async function POST(
       );
     }
 
-    // Save user message
+    // Save user message (table is `conversation_messages` per schema)
     const { data: userMessage, error: msgError } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .insert({
         conversation_id: conversationId,
         role: "user",
@@ -122,9 +123,9 @@ export async function POST(
       // Error saving message:
     }
 
-    // Get recent conversation history
+    // Get recent conversation history (`conversation_messages` per schema)
     const { data: recentMessages } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .select("role, content")
       .eq("conversation_id", conversationId)
       .order("created_at", { ascending: false })
@@ -159,9 +160,9 @@ Respond as ${agent.name} in character. Be helpful, concise (1-3 sentences), and 
       aiResponse = `${agent.name} is temporarily unavailable. Please try again.`;
     }
 
-    // Save AI response
+    // Save AI response (`conversation_messages` per schema)
     const { data: assistantMessage, error: aiMsgError } = await supabaseAdmin
-      .from("messages")
+      .from("conversation_messages")
       .insert({
         conversation_id: conversationId,
         role: "assistant",
