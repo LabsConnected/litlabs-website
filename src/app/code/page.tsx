@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useRouter } from "next/navigation";
@@ -30,7 +30,9 @@ import {
   countFiles,
   searchFileTree,
   getFileByPath,
+  buildFileTree,
   type FileNode,
+  type ScannedFile,
 } from "@/lib/code-scanner";
 
 // Demo file content
@@ -320,12 +322,75 @@ export default function CodeScannerPage() {
     data: any | null; // eslint-disable-line @typescript-eslint/no-explicit-any
   }>({ loading: false, error: null, data: null });
 
-  const selectedFile = getFileByPath(DEMO_FILE_TREE, selectedPath);
+  const [fileContentCache, setFileContentCache] = useState<
+    Record<string, string>
+  >({});
+
+  const fileTree = useMemo(() => {
+    if (!scan.data || !Array.isArray(scan.data.files)) return null;
+    return buildFileTree(
+      scan.data.projectName || "project",
+      scan.data.files as ScannedFile[],
+    );
+  }, [scan.data]);
+
+  const displayTree = fileTree ?? DEMO_FILE_TREE;
+  const selectedFile = getFileByPath(displayTree, selectedPath);
   const fileContent =
-    DEMO_FILE_CONTENT[selectedPath] ||
-    "// File content not available in demo mode";
-  const totalFiles = countFiles(DEMO_FILE_TREE);
+    fileContentCache[selectedPath] ??
+    DEMO_FILE_CONTENT[selectedPath] ??
+    "// Select a file to view its contents";
+  const totalFiles = countFiles(displayTree);
   const errorCount = DEMO_ERRORS.length;
+
+  // Auto-select the first file when a real scan loads and the demo path is missing
+  useEffect(() => {
+    if (!fileTree || !selectedPath) return;
+    if (getFileByPath(fileTree, selectedPath)) return;
+    const firstFile = searchFileTree(fileTree, "").find(
+      (n) => n.type === "file",
+    );
+    if (firstFile) setSelectedPath(firstFile.path);
+  }, [fileTree, selectedPath]);
+
+  // Load file content from the server when a real file is selected
+  const cachedContent = fileContentCache[selectedPath];
+  useEffect(() => {
+    if (!selectedFile || selectedFile.type !== "file") return;
+    if (cachedContent) return;
+    if (/\.(png|jpg|jpeg|gif|svg|webp|ico)$/i.test(selectedPath)) {
+      setFileContentCache((prev) => ({
+        ...prev,
+        [selectedPath]: "// Image preview is not supported in the code scanner",
+      }));
+      return;
+    }
+
+    let alive = true;
+    fetch(`/api/litt/file?path=${encodeURIComponent(selectedPath)}`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error(`Load failed: ${res.status}`);
+        const data = await res.json();
+        if (alive) {
+          setFileContentCache((prev) => ({
+            ...prev,
+            [selectedPath]: data.content ?? "// Empty file",
+          }));
+        }
+      })
+      .catch(() => {
+        if (alive) {
+          setFileContentCache((prev) => ({
+            ...prev,
+            [selectedPath]: "// Could not load file content",
+          }));
+        }
+      });
+
+    return () => {
+      alive = false;
+    };
+  }, [selectedFile, selectedPath, cachedContent]);
 
   const runProjectScan = useCallback(async () => {
     setScan({ loading: true, error: null, data: null });
@@ -382,7 +447,7 @@ export default function CodeScannerPage() {
   );
 
   const searchResults = searchQuery
-    ? searchFileTree(DEMO_FILE_TREE, searchQuery)
+    ? searchFileTree(displayTree, searchQuery)
     : [];
 
   useEffect(() => {
@@ -546,7 +611,7 @@ export default function CodeScannerPage() {
             {sidebarView === "explorer" && (
               <div className="py-2">
                 <FileExplorer
-                  node={DEMO_FILE_TREE}
+                  node={displayTree}
                   selectedPath={selectedPath}
                   expandedPaths={expandedPaths}
                   onSelect={(node) => setSelectedPath(node.path)}

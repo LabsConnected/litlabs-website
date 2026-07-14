@@ -1,24 +1,11 @@
 {
+  // VS Code will prompt the user to install these when the workspace is opened.
+  // See: https://code.visualstudio.com/docs/editor/extension-marketplace#_workspace-recommended-extensions
   "recommendations": [
     "WallabyJs.console-ninja",
     "usernamehw.errorlens",
     "ms-playwright.playwright",
     "humao.rest-client",
-    "eamodio.gitlens",
-    "esbenp.prettier-vscode",
-    "dbaeumer.vscode-eslint",
-    "bradlc.vscode-tailwindcss",
-    "ms-python.python",
-    "ms-python.vscode-pylance",
-    "ms-vscode.vscode-typescript-next",
-    "formulahendry.auto-rename-tag",
-    "dsznajder.es7-react-js-snippets",
-    "github.copilot",
-    "github.vscode-pull-request-github",
-    "christian-kohler.path-intellisense",
-    "wix.vscode-import-cost",
-    "mikestead.dotenv",
-    "ms-vscode-remote.remote-wsl",
-    "PKief.material-icon-theme"
+    "eamodio.gitlens"
   ]
 }

@@ -414,3 +414,79 @@ export function getFileByPath(
   }
   return undefined;
 }
+
+export interface ScannedFile {
+  path: string;
+  type: string;
+  size: number;
+  lineCount: number;
+}
+
+export function buildFileTree(
+  projectName: string,
+  files: ScannedFile[],
+): FileNode {
+  const root: FileNode = {
+    path: "/",
+    name: projectName || "project",
+    type: "directory",
+    children: [],
+  };
+
+  for (const file of files) {
+    const parts = file.path.replace(/^\//, "").split("/");
+    if (parts.length === 0 || parts[0] === "") continue;
+
+    let current = root;
+    let currentPath = "";
+
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i];
+      currentPath = `${currentPath}/${part}`;
+      const isFile = i === parts.length - 1;
+
+      if (isFile) {
+        const extIndex = part.lastIndexOf(".");
+        const extension = extIndex > 0 ? part.slice(extIndex + 1) : undefined;
+        current.children = current.children || [];
+        current.children.push({
+          path: currentPath,
+          name: part,
+          type: "file",
+          extension,
+          size: file.size,
+        });
+      } else {
+        current.children = current.children || [];
+        let next = current.children.find(
+          (child) => child.type === "directory" && child.name === part,
+        );
+        if (!next) {
+          next = {
+            path: currentPath,
+            name: part,
+            type: "directory",
+            children: [],
+          };
+          current.children.push(next);
+        }
+        current = next;
+      }
+    }
+  }
+
+  // Sort directories first, then files, alphabetically
+  function sortNode(node: FileNode) {
+    if (!node.children) return;
+    node.children.sort((a, b) => {
+      if (a.type === "directory" && b.type !== "directory") return -1;
+      if (a.type !== "directory" && b.type === "directory") return 1;
+      return a.name.localeCompare(b.name);
+    });
+    node.children.forEach(sortNode);
+  }
+  sortNode(root);
+
+  return root;
+}
+

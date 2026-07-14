@@ -1,17 +1,45 @@
-### LiTTree AI chat (choose local or preview with "Rest Client: Switch Environment")
+# =============================================================================
+# LiTTree Lab Studios — API smoke tests
+# Used by the REST Client extension (humao.rest-client).
+# Variables come from .vscode/settings.json → rest-client.environmentVariables.
+#
+# How to use:
+#   1. Open this file in VS Code.
+#   2. Pick an environment ("local" or "preview") in the REST Client
+#      status-bar (bottom of the editor).
+#   3. Click "Send Request" above any ### block.
+# =============================================================================
+
+@baseUrl = {{baseUrl}}
+
+### ---------------------------------------------------------------------------
+### Health: 404 (we don't have a /api/health route, but this proves routing)
+GET {{baseUrl}}/api/health
+Accept: application/json
+
+### ---------------------------------------------------------------------------
+### AI chat: non-streaming completion
 POST {{baseUrl}}/api/ai-chat
-Content-Type: {{contentType}}
+Content-Type: application/json
+Authorization: Bearer {{supabaseAnonKey}}
 
 {
-  "model": "gemini-flash",
   "messages": [
-    {
-      "role": "user",
-      "content": "Reply with a short LiTTree API health confirmation."
-    }
+    { "role": "system", "content": "You are LiT, a concise coding assistant." },
+    { "role": "user",   "content": "Reply with the single word: pong" }
   ]
 }
 
-### LLM provider health
-GET {{baseUrl}}/api/llm/health
+### ---------------------------------------------------------------------------
+### AI chat: streaming completion (SSE)
+POST {{baseUrl}}/api/ai-chat
+Content-Type: application/json
+Authorization: Bearer {{supabaseAnonKey}}
+Accept: text/event-stream
 
+{
+  "stream": true,
+  "messages": [
+    { "role": "user", "content": "Count to 3, one number per line." }
+  ]
+}

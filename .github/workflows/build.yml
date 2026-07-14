@@ -46,3 +46,8 @@ jobs:
         run: pnpm build
         env:
           CI: true
+
+      - name: Terminal server type check
+        run: pnpm --filter terminal-server build
+        env:
+          CI: true

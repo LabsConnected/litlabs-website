@@ -2,7 +2,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import { auth } from "@clerk/nextjs/server";
 import { NextRequest, NextResponse } from "next/server";
-import { isAdmin } from "@/lib/roles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -27,9 +26,6 @@ export async function GET(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const requested = req.nextUrl.searchParams.get("path")?.replace(/^\/+/, "");

@@ -3,7 +3,6 @@ import { promises as fs } from "fs";
 import path from "path";
 import { auth } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { isAdmin } from "@/lib/roles";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -120,9 +119,6 @@ export async function GET() {
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
-  if (!(await isAdmin())) {
-    return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-  }
 
   const root = process.cwd();
   const [pageFiles, apiFiles, componentFiles, libFiles, toolFiles] =
@@ -172,8 +168,8 @@ export async function GET() {
   const agentsFile = await readFileSafe(path.join(root, "src/lib/agents.ts"));
   const agents = agentsFile
     ? [...agentsFile.matchAll(/name:\s*["']([^"']+)["']/g)].map(
-        (match) => match[1],
-      )
+      (match) => match[1],
+    )
     : [];
 
   return NextResponse.json(

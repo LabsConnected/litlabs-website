@@ -1,19 +1,21 @@
 {
+  // ---------------------------------------------------------------------------
+  // Workspace settings for LiTTree Lab Studios.
+  // These do NOT override user/global settings silently — they only take
+  // effect when this folder is opened as the workspace root.
+  // ---------------------------------------------------------------------------
+
+  // ---- Editor ----------------------------------------------------------------
   "editor.defaultFormatter": "esbenp.prettier-vscode",
   "editor.formatOnSave": true,
   "editor.tabSize": 2,
   "editor.codeActionsOnSave": {
     "source.fixAll.eslint": "explicit"
   },
-  "files.exclude": {
-    "**/.next": true,
-    "**/node_modules": true
-  },
-  "search.exclude": {
-    "**/.next": true,
-    "**/node_modules": true
-  },
-  "search.followSymlinks": false,
+  "editor.bracketPairColorization.enabled": true,
+  "editor.guides.bracketPairs": "active",
+  "editor.inlineSuggest.enabled": true,
+  "editor.minimap.enabled": true,
   "editor.quickSuggestions": {
     "other": true,
     "comments": false,
@@ -23,22 +25,103 @@
   "editor.wordWrap": "on",
   "files.autoSave": "afterDelay",
   "files.autoSaveDelay": 1000,
+
+  // ---- Error Lens ------------------------------------------------------------
+  "errorLens.enabled": true,
+  "errorLens.enabledDiagnosticLevels": ["error", "warning", "info"],
+  "errorLens.fontSize": "13",
+  "errorLens.fontFamily": "Cascadia Code, Consolas, monospace",
+  "errorLens.exclude": [
+    "**/node_modules/**",
+    "**/.next/**",
+    "**/dist/**",
+    "**/coverage/**"
+  ],
+  "errorLens.delay": 300,
+
+  // ---- ESLint ----------------------------------------------------------------
+  "eslint.useFlatConfig": true,
+  "eslint.format.enable": true,
+
+  // ---- TypeScript ------------------------------------------------------------
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
-  "errorLens.enabledDiagnosticLevels": [
-    "error",
-    "warning",
-    "info"
-  ],
+  "javascript.preferences.importModuleSpecifier": "non-relative",
+
+  // ---- Files / Search --------------------------------------------------------
+  "files.exclude": {
+    "**/.next": true,
+    "**/.turbo": true,
+    "**/node_modules": true,
+    "**/coverage": true,
+    "**/playwright-report": true,
+    "**/test-results": true,
+    "**/dist": true
+  },
+  "search.exclude": {
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/.turbo": true,
+    "**/coverage": true,
+    "**/dist": true,
+    "**/litlabs": true,
+    "**/litlabs-website": true,
+    "**/Zoo-Code": true,
+    "**/chrome": true,
+    "**/work": true,
+    "**/meta": true,
+    "**/codex-reference": true
+  },
+  "search.followSymlinks": false,
+
+  // ---- File associations for REST Client .http files -------------------------
+  "files.associations": {
+    "*.http": "http",
+    "*.rest": "http"
+  },
+
+  // ---- REST Client -----------------------------------------------------------
   "rest-client.environmentVariables": {
     "$shared": {
       "contentType": "application/json"
     },
     "local": {
-      "baseUrl": "http://localhost:3000"
+      "baseUrl": "http://localhost:3000",
+      "supabaseAnonKey": "${env:SUPABASE_ANON_KEY}"
     },
     "preview": {
-      "baseUrl": "https://your-preview-url.vercel.app"
+      "baseUrl": "https://litlabs-website.vercel.app"
     }
+  },
+  "rest-client.defaultHeaders": {
+    "Content-Type": "application/json"
+  },
+  "rest-client.previewResponseInUntitledFile": true,
+
+  // ---- Playwright ------------------------------------------------------------
+  "playwright.reuseBrowser": true,
+  "playwright.headless": false,
+  "playwright.traceDir": "${workspaceFolder}/playwright-traces",
+
+  // ---- Terminal --------------------------------------------------------------
+  "terminal.integrated.defaultProfile.windows": "PowerShell",
+  "terminal.integrated.profiles.windows": {
+    "PowerShell": {
+      "source": "PowerShell",
+      "icon": "terminal-powershell"
+    },
+    "Command Prompt": {
+      "path": "${env:ComSpec}",
+      "icon": "terminal-cmd"
+    }
+  },
+  "terminal.integrated.shellIntegration.enabled": true,
+  "terminal.integrated.enablePersistentSessions": true,
+  "terminal.integrated.cwd": "${workspaceFolder}",
+
+  // ---- Trust the workspace ---------------------------------------------------
+  "security.workspace.trust.enabled": true,
+  "[powershell]": {
+    "editor.defaultFormatter": "ms-vscode.powershell"
   }
 }

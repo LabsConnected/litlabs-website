@@ -1,24 +1,21 @@
-const BLOCKED_PATTERNS = [
-  "rm -rf /",
-  "rm -rf /*",
-  "mkfs",
-  ":(){ :|:& };:",
-  "shutdown",
-  "reboot",
-  "halt",
-  "dd if=/dev/zero",
-  "chmod -R 777 /",
-  "chown -R 0:0 /",
-  "> /dev/sda",
-  "curl | bash",
-  "wget | bash",
-  "curl | sh",
-  "wget | sh",
+const BLOCKED_PATTERNS: RegExp[] = [
+  /rm\s+-rf\s+\/(?!\w)/,
+  /mkfs\b/,
+  /:\(\)\s*\{\s*:\|\:\&\s*\}\s*;\s*:/,
+  /\bshutdown\b/,
+  /\breboot\b/,
+  /\bhalt\b/,
+  /dd\s+if=\/dev\/zero/,
+  /chmod\s+-R\s+777\s+\//,
+  /chown\s+-R\s+0:0\s+\//,
+  />\s*\/dev\/sda\b/,
+  /curl\b.*\|\s*(bash|sh)\b/,
+  /wget\b.*\|\s*(bash|sh)\b/,
 ];
 
 export function isBlockedCommand(input: string): boolean {
   const normalized = input.toLowerCase();
-  return BLOCKED_PATTERNS.some((pattern) => normalized.includes(pattern.toLowerCase()));
+  return BLOCKED_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function sanitizeEnv(value: string): string {
