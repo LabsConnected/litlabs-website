@@ -21,6 +21,7 @@ export default function MobileBottomNav() {
   return (
     <>
       <nav
+        aria-label="Mobile navigation"
         className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-[100] border-t backdrop-blur-xl"
         style={{ borderColor: `${T.borderColor}20` }}
       >
@@ -69,7 +70,7 @@ export default function MobileBottomNav() {
             onClick={() => setMoreOpen(false)}
           />
           <div
-          className="relative max-h-[80dvh] overflow-y-auto overscroll-contain rounded-t-3xl border-t shadow-2xl"
+            className="relative max-h-[80dvh] overflow-y-auto overscroll-contain rounded-t-3xl border-t shadow-2xl"
             style={{
               backgroundColor: `${T.bgColor}f8`,
               borderColor: `${T.accentColor}20`,
@@ -91,6 +92,7 @@ export default function MobileBottomNav() {
               </span>
               <button
                 onClick={() => setMoreOpen(false)}
+                aria-label="Close menu"
                 className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
                 style={{ color: T.textMuted }}
               >

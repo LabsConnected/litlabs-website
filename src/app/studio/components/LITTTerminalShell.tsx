@@ -354,6 +354,7 @@ function ActiveCommandTabs({
           {tab.label}
           <button
             onClick={() => onClose(tab.id)}
+            aria-label={`Close ${tab.label}`}
             className="opacity-60 transition hover:opacity-100"
           >
             <X size={10} />
@@ -753,27 +754,7 @@ function LITTTerminalShellInner({
       className="flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
-      <style jsx>{`
-        @keyframes spin {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes pulse-glow {
-          0%,
-          100% {
-            opacity: 0.6;
-          }
-          50% {
-            opacity: 1;
-          }
-        }
-      `}</style>
-
-      {/* Hidden file inputs — driven by the toolbar buttons */}
+      {/* Hidden file input — driven by the toolbar buttons */}
       <input
         ref={fileInputRef}
         type="file"
@@ -865,6 +846,7 @@ function LITTTerminalShellInner({
               <button
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
+                aria-label={item.label}
                 className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-all ${
                   active ? "bg-cyan-500/10" : "hover:bg-white/5"
                 }`}
@@ -1094,7 +1076,7 @@ function LITTTerminalShellInner({
 
                 <button
                   onClick={() => setPluginsOpen(true)}
-                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-500 transition hover:text-cyan-300"
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 transition hover:text-cyan-300"
                 >
                   <LayoutGrid size={12} />
                   View all plugins
@@ -1294,7 +1276,7 @@ function LITTTerminalShellInner({
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
@@ -1310,12 +1292,17 @@ function LITTTerminalShellInner({
                     <button
                       key={plugin}
                       onClick={() => handleChip(`/${plugin}`)}
-                      className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-mono text-neutral-600 transition hover:text-neutral-300"
+                      aria-label={`/${plugin} plugin command`}
+                      className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-mono text-neutral-500 transition hover:text-neutral-300"
                     >
                       /{plugin}
                     </button>
                   ))}
-                  <button className="shrink-0 rounded-md px-1.5 py-1 text-[10px] text-neutral-600 transition hover:text-neutral-300">
+                  <button
+                    disabled
+                    aria-label="More plugins coming soon"
+                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[10px] text-neutral-500 opacity-40"
+                  >
                     +8
                   </button>
                 </div>

@@ -2167,3 +2167,23 @@ main {
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 92, 246, 0.85);
 }
+
+/* LiTT Terminal shell keyframes */
+@keyframes spin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    opacity: 0.6;
+  }
+  50% {
+    opacity: 1;
+  }
+}
