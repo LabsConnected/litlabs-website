@@ -1,0 +1,17 @@
+### LiTTree AI chat (choose local or preview with "Rest Client: Switch Environment")
+POST {{baseUrl}}/api/ai-chat
+Content-Type: {{contentType}}
+
+{
+  "model": "gemini-flash",
+  "messages": [
+    {
+      "role": "user",
+      "content": "Reply with a short LiTTree API health confirmation."
+    }
+  ]
+}
+
+### LLM provider health
+GET {{baseUrl}}/api/llm/health
+

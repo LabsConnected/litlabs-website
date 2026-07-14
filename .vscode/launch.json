@@ -2,30 +2,45 @@
   "version": "0.2.0",
   "configurations": [
     {
-      "name": "Open localhost:3000",
-      "type": "chrome",
+      "name": "Next.js: debug browser",
+      "type": "pwa-chrome",
       "request": "launch",
       "url": "http://localhost:3000",
-      "webRoot": "${workspaceFolder}/src"
+      "webRoot": "${workspaceFolder}",
+      "sourceMaps": true
     },
     {
-      "name": "Next.js: Server + Browser",
+      "name": "Next.js: debug server (Turbopack)",
       "type": "node-terminal",
       "request": "launch",
       "command": "pnpm dev",
-      "cwd": "${workspaceFolder}",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Next.js: debug server (Webpack fallback)",
+      "type": "node-terminal",
+      "request": "launch",
+      "command": "pnpm dev:webpack",
+      "cwd": "${workspaceFolder}"
+    },
+    {
+      "name": "Node: attach to port 9229",
+      "type": "pwa-node",
+      "request": "attach",
+      "port": 9229,
+      "restart": true,
       "skipFiles": ["<node_internals>/**"],
-      "serverReadyAction": {
-        "pattern": "- Local:.+(http://localhost:\\d+)",
-        "uriFormat": "%s",
-        "action": "openExternally"
-      }
+      "sourceMaps": true
     }
   ],
   "compounds": [
     {
-      "name": "Debug Full Stack",
-      "configurations": ["Next.js: Server + Browser", "Open localhost:3000"]
+      "name": "Next.js: debug full stack",
+      "configurations": [
+        "Next.js: debug server (Turbopack)",
+        "Next.js: debug browser"
+      ],
+      "stopAll": true
     }
   ]
 }

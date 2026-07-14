@@ -1,5 +1,10 @@
 {
   "recommendations": [
+    "WallabyJs.console-ninja",
+    "usernamehw.errorlens",
+    "ms-playwright.playwright",
+    "humao.rest-client",
+    "eamodio.gitlens",
     "esbenp.prettier-vscode",
     "dbaeumer.vscode-eslint",
     "bradlc.vscode-tailwindcss",
@@ -10,9 +15,7 @@
     "dsznajder.es7-react-js-snippets",
     "github.copilot",
     "github.vscode-pull-request-github",
-    "eamodio.gitlens",
     "christian-kohler.path-intellisense",
-    "usernamehw.errorlens",
     "wix.vscode-import-cost",
     "mikestead.dotenv",
     "ms-vscode-remote.remote-wsl",
