@@ -65,12 +65,6 @@ const ORGANIZE_TOOLS: ToolItem[] = [
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
 ];
 
-/* All tools flat — used for mobile bottom bar */
-const ALL_TOOLS: ToolItem[] = [...CREATE_TOOLS, ...AI_TOOLS, ...ORGANIZE_TOOLS];
-
-/* Primary 5 shown in mobile bottom bar — Create, Canvas, Assets, Agents, More */
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "gallery", "agents"];
-
 type GroupDef = { title: string; tools: ToolItem[] };
 const GROUPS: GroupDef[] = [
   { title: "Create", tools: CREATE_TOOLS },
@@ -435,10 +429,10 @@ export default function StudioSidebar({
   return (
     <>
       {/* ═══════════════════════════════════════════════════════════
-          DESKTOP sidebar — hidden on mobile (md+)
+          DESKTOP sidebar — hidden on tablet/mobile (lg+)
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden md:flex flex-col h-full shrink-0 transition-all duration-300 ease-out"
+        className="hidden lg:flex flex-col h-full shrink-0 transition-all duration-300 ease-out"
         style={{
           width: collapsed ? "60px" : "240px",
           backgroundColor: T.boxBg + "70",
@@ -569,182 +563,6 @@ export default function StudioSidebar({
           )}
         </div>
       </aside>
-
-      {/* ═══════════════════════════════════════════════════════════
-          MOBILE bottom tab bar — visible only below md
-          Shows the 5 primary tools as icon+label tabs.
-          "More" opens a compact drawer for the rest.
-      ═══════════════════════════════════════════════════════════ */}
-      <MobileTabBar activeTool={activeTool} onToolChange={onToolChange} T={T} />
-    </>
-  );
-}
-
-const MOBILE_LABELS: Partial<Record<StudioTool, string>> = {
-  chat: "Create",
-  image: "Canvas",
-  gallery: "Assets",
-  agents: "Agents",
-};
-
-/* ── Mobile bottom tab bar ───────────────────────────────────────── */
-function MobileTabBar({
-  activeTool,
-  onToolChange,
-  T,
-}: {
-  activeTool: StudioTool;
-  onToolChange: (t: StudioTool) => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  const [drawerOpen, setDrawerOpen] = useState(false);
-
-  const primaryTools = ALL_TOOLS.filter((t) => MOBILE_PRIMARY.includes(t.id));
-  const secondaryTools = ALL_TOOLS.filter(
-    (t) => !MOBILE_PRIMARY.includes(t.id),
-  );
-  const activeIsSecondary = secondaryTools.some((t) => t.id === activeTool);
-
-  return (
-    <>
-      {/* Scrim for secondary drawer */}
-      {drawerOpen && (
-        <div
-          className="fixed inset-0 z-[10000] md:hidden"
-          style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
-          onClick={() => setDrawerOpen(false)}
-        />
-      )}
-
-      {/* Secondary tools drawer — slides up above tab bar */}
-      {drawerOpen && (
-        <div
-          className="fixed bottom-[56px] left-0 right-0 z-[10000] md:hidden rounded-t-2xl border-t px-3 pt-3 pb-2"
-          style={{
-            backgroundColor: T.bgColor,
-            borderColor: T.borderColor + "30",
-            boxShadow: `0 -8px 32px rgba(0,0,0,0.5)`,
-          }}
-        >
-          <div
-            className="text-[9px] font-bold uppercase tracking-widest mb-2 opacity-50"
-            style={{ color: T.textMuted }}
-          >
-            More Tools
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {secondaryTools.map((tool) => {
-              const Icon = tool.icon;
-              const active = activeTool === tool.id;
-              return (
-                <button
-                  key={tool.id}
-                  onClick={() => {
-                    onToolChange(tool.id);
-                    setDrawerOpen(false);
-                  }}
-                  className="flex flex-col items-center gap-1 py-2 rounded-xl transition-all"
-                  style={{
-                    backgroundColor: active
-                      ? T.accentColor + "20"
-                      : T.boxBg + "80",
-                    border: `1px solid ${active ? T.accentColor + "50" : T.borderColor + "20"}`,
-                  }}
-                >
-                  <Icon
-                    size={18}
-                    strokeWidth={active ? 2.5 : 1.8}
-                    style={{
-                      color: active ? T.accentColor : T.textColor + "99",
-                    }}
-                  />
-                  <span
-                    className="text-[9px] font-bold"
-                    style={{ color: active ? T.accentColor : T.textMuted }}
-                  >
-                    {tool.label}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-
-      {/* Bottom tab bar */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-[10000] md:hidden flex items-stretch h-14"
-        style={{
-          backgroundColor: T.bgColor + "f5",
-          backdropFilter: "blur(20px) saturate(180%)",
-          borderTop: `1px solid ${T.borderColor}30`,
-          boxShadow: `0 -4px 24px rgba(0,0,0,0.4)`,
-        }}
-      >
-        {primaryTools.map((tool) => {
-          const Icon = tool.icon;
-          const active = activeTool === tool.id;
-          return (
-            <button
-              key={tool.id}
-              onClick={() => {
-                onToolChange(tool.id);
-                setDrawerOpen(false);
-              }}
-              className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-              style={{ color: active ? T.accentColor : T.textMuted }}
-            >
-              {active && (
-                <span
-                  className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[2px] rounded-b-full"
-                  style={{
-                    backgroundColor: T.accentColor,
-                    boxShadow: `0 0 8px ${T.accentColor}`,
-                  }}
-                />
-              )}
-              <Icon size={19} strokeWidth={active ? 2.5 : 1.8} />
-              <span className="text-[9px] font-bold">
-                {MOBILE_LABELS[tool.id] || tool.label}
-              </span>
-            </button>
-          );
-        })}
-
-        {/* More button */}
-        <button
-          onClick={() => setDrawerOpen((v) => !v)}
-          className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-          style={{
-            color: activeIsSecondary ? T.accentColor : T.textMuted,
-          }}
-        >
-          {activeIsSecondary && (
-            <span
-              className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-[2px] rounded-b-full"
-              style={{
-                backgroundColor: T.accentColor,
-                boxShadow: `0 0 8px ${T.accentColor}`,
-              }}
-            />
-          )}
-          <div className="flex gap-[3px] items-center">
-            <span
-              className="w-1 h-1 rounded-full"
-              style={{ backgroundColor: "currentColor" }}
-            />
-            <span
-              className="w-1 h-1 rounded-full"
-              style={{ backgroundColor: "currentColor" }}
-            />
-            <span
-              className="w-1 h-1 rounded-full"
-              style={{ backgroundColor: "currentColor" }}
-            />
-          </div>
-          <span className="text-[9px] font-bold">More</span>
-        </button>
-      </div>
     </>
   );
 }
