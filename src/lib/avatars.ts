@@ -14,6 +14,18 @@ export const AGENT_AVATAR_META: Record<string, AgentAvatarMeta> = {
     color: "#00ffff",
     bg: "rgba(0,255,255,0.12)",
   },
+  littcode: {
+    emoji: "💻",
+    initials: "LC",
+    color: "#22d3ee",
+    bg: "rgba(34,211,238,0.12)",
+  },
+  littlebit: {
+    emoji: "🎯",
+    initials: "LB",
+    color: "#e879f9",
+    bg: "rgba(232,121,249,0.12)",
+  },
   champion: {
     emoji: "🏆",
     initials: "C",

@@ -1,27 +1,24 @@
 import { Supermemory } from "supermemory";
-import { createOpenAI } from "@ai-sdk/openai";
-import { streamText } from "ai";
+import { generateText } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
-import { auth } from "@clerk/nextjs/server";
+import { auth } from "@/lib/auth";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
-  if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
-  return new Supermemory({ apiKey: key });
-}
-
-function getOpenRouter() {
-  const key = process.env.OPENROUTER_API_KEY;
-  if (!key) throw new Error("OPENROUTER_API_KEY is not configured");
-  return createOpenAI({ baseURL: "https://openrouter.ai/api/v1", apiKey: key });
+  if (!key) return null;
+  try {
+    return new Supermemory({ apiKey: key });
+  } catch {
+    return null;
+  }
 }
 
 const MODELS: Record<string, string> = {
-  "gemini-flash": "google/gemini-2.5-flash",
-  "llama-nemotron": "nvidia/llama-3.1-nemotron-70b-instruct",
-  "gpt-4o": "openai/gpt-4o",
-  "claude-sonnet": "anthropic/claude-sonnet-4",
-  "qwen-coder": "qwen/qwen3-coder",
+  "gemini-flash": "gemini",
+  "llama-nemotron": "openrouter-llama",
+  "gpt-4o": "openrouter-free",
+  "claude-sonnet": "openrouter-free",
+  "qwen-coder": "openrouter-qwen",
 };
 
 export async function POST(req: NextRequest) {
@@ -30,49 +27,72 @@ export async function POST(req: NextRequest) {
     const uid = userId || "anonymous";
 
     const { messages, model = "gemini-flash" } = await req.json();
+    if (!messages || !messages.length) {
+      return NextResponse.json({ error: "Messages required" }, { status: 400 });
+    }
+
     const lastMessage = messages[messages.length - 1]?.content || "";
+    const history = messages.slice(0, -1).map((m: any) => ({
+      role: m.role === "user" ? "user" : "assistant",
+      content: m.content,
+    }));
 
-    const memoryResults = await getSupermemory().search.memories({
-      q: lastMessage,
-      containerTag: uid,
-      limit: 8,
-    });
+    let memoryContext = "";
+    const sm = getSupermemory();
+    if (sm) {
+      try {
+        const memoryResults = await sm.search.memories({
+          q: lastMessage,
+          containerTag: uid,
+          limit: 8,
+        });
+        memoryContext = (memoryResults.results || [])
+          .map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk)
+          .filter(Boolean)
+          .join("\n");
+      } catch {
+        // non-fatal
+      }
+    }
 
-    const memoryContext = memoryResults.results
-      .map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk)
-      .filter(Boolean)
-      .join("\n");
+    const systemPrompt = `You are a helpful code builder assistant. Generate clean, working code.
+Always wrap code in triple backticks with the language specified.
+If generating HTML, make it a complete standalone file.
+If multiple files, use comments like // filename.ext before each code block.
 
-    const systemPrompt = `You are a helpful assistant with long-term memory about this user.
-Use the following memories to personalize your responses when relevant.
+${memoryContext ? `Relevant context from memory:\n${memoryContext}` : ""}
 
-${memoryContext ? `Relevant memories:\n${memoryContext}` : "No relevant memories yet."}
+Be direct, professional, and code-focused.`;
 
-Be concise, helpful, and natural.`;
+    const selectedProvider = (MODELS[model] || "gemini") as any;
 
-    const selectedModel = MODELS[model] || MODELS["gemini-flash"];
-
-    const result = streamText({
-      model: getOpenRouter()(selectedModel),
-      system: systemPrompt,
-      messages,
-      temperature: 0.7,
-      maxOutputTokens: 2048,
-      onFinish: async ({ text }) => {
-        try {
-          await getSupermemory().add({
-            content: `User: ${lastMessage}\nAssistant: ${text}`,
-            containerTag: uid,
-            metadata: { type: "chat", model },
-          });
-        } catch {
-          // non-fatal
-        }
+    const result = await generateText(
+      lastMessage,
+      {
+        task: "code",
+        provider: selectedProvider,
+        systemPrompt,
+        maxTokens: 4096,
       },
-    });
+      history
+    );
 
-    return result.toTextStreamResponse();
+    // Async save to memory
+    if (sm) {
+      sm.add({
+        content: `User: ${lastMessage}\nAssistant: ${result.text}`,
+        containerTag: uid,
+        metadata: { type: "canvas-build", model },
+      }).catch(() => { });
+    }
+
+    return NextResponse.json({
+      text: result.text,
+      provider: result.provider,
+      model: result.model,
+    });
   } catch (error: unknown) {
+    console.error("[ai-chat] Error:", error);
     const message = error instanceof Error ? error.message : "Chat failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }

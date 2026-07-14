@@ -1,6 +1,6 @@
 export default function GameHero() {
   return (
-    <section className="relative overflow-hidden rounded-3xl border border-orange-500/20 bg-gradient-to-br from-purple-950 via-slate-950 to-orange-950 p-6 min-h-[260px]">
+    <section className="relative overflow-hidden rounded-3xl border border-orange-500/20 bg-linear-to-br from-purple-950 via-slate-950 to-orange-950 p-6 min-h-[260px]">
       <div className="relative z-10 max-w-sm">
         <p className="text-xs text-purple-300 font-black">THIS WEEK</p>
         <h2 className="text-4xl font-black mt-3 leading-tight text-white">

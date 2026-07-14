@@ -154,7 +154,7 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
     {
       icon: Bot,
       label: "Try the AI agent",
-      href: "/litt-terminal",
+      href: "/studio",
       color: "#00f0ff",
     },
     {
@@ -184,7 +184,7 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
       <div className="flex items-center gap-2 mb-3">
         <Sparkles size={16} style={{ color: T.accentColor }} />
         <span className="text-sm font-black" style={{ color: T.headerColor }}>
-          Welcome to LiTT Code, {displayName} 👋
+          Welcome to LiTTree-LabStudios, {displayName} 👋
         </span>
       </div>
       <p className="text-xs mb-4" style={{ color: T.textMuted }}>

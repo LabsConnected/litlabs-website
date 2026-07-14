@@ -1,8 +1,15 @@
 "use client";
 
-import { useState, useRef, useEffect, useLayoutEffect, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useLayoutEffect,
+  useCallback,
+} from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
+import { useProfile } from "@/context/ProfileContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
 import {
   Terminal,
@@ -206,13 +213,13 @@ function AudioBars() {
   );
 }
 
-function buildBootLogs(): LogEntry[] {
+function buildBootLogs(userName = "Creator"): LogEntry[] {
   const bootLogs: LogEntry[] = [
     {
       id: uid(),
       timestamp: getTimestamp(),
       type: "system",
-      text: "INITIALIZING LiTT Code CORE v3.0-MAD...",
+      text: "INITIALIZING LiTT CORE v3.0-MAD...",
     },
     {
       id: uid(),
@@ -246,14 +253,17 @@ function buildBootLogs(): LogEntry[] {
     id: uid(),
     timestamp: getTimestamp(),
     type: "success",
-    text: "WELCOME BACK, OVERLORD. ALL AGENTS NOMINAL. AWAITING COMMAND.",
+    text: `WELCOME BACK, ${userName.toUpperCase()}. ALL AGENTS NOMINAL. AWAITING COMMAND.`,
   });
   return bootLogs;
 }
 
 export default function LiTTTerminal() {
   const { resolvedColors: T } = useTheme();
-  const [logs, setLogs] = useState<LogEntry[]>(buildBootLogs);
+  const { profile } = useProfile();
+  const [logs, setLogs] = useState<LogEntry[]>(() =>
+    buildBootLogs(profile.displayName || "Creator"),
+  );
   const [input, setInput] = useState("");
   const [isProcessing, setIsProcessing] = useState(false);
   const [isListening, setIsListening] = useState(false);
@@ -268,13 +278,17 @@ export default function LiTTTerminal() {
   const [wakeWordEnabled, setWakeWordEnabled] = useState(false);
   const [showAgents, setShowAgents] = useState(false);
   const [alexaOutEnabled, setAlexaOutEnabled] = useState(false);
-  const conversationHistory = useRef<{ role: "user" | "assistant"; content: string }[]>([]);
+  const conversationHistory = useRef<
+    { role: "user" | "assistant"; content: string }[]
+  >([]);
   const [availableVoices, setAvailableVoices] = useState<
     SpeechSynthesisVoice[]
   >([]);
   const [selectedVoiceURI, setSelectedVoiceURI] = useState<string>("");
   const [showVoicePicker, setShowVoicePicker] = useState(false);
-  const [voicePickerStyle, setVoicePickerStyle] = useState<Record<string, string | number | undefined>>({});
+  const [voicePickerStyle, setVoicePickerStyle] = useState<
+    Record<string, string | number | undefined>
+  >({});
   const [micPermission, setMicPermission] = useState<
     "prompt" | "granted" | "denied" | "unknown"
   >("unknown");
@@ -334,7 +348,9 @@ export default function LiTTTerminal() {
         position: "fixed",
         right: String(Math.max(8, window.innerWidth - rect.right)),
         top: placeAbove ? undefined : String(rect.bottom + 6),
-        bottom: placeAbove ? String(window.innerHeight - rect.top + 6) : undefined,
+        bottom: placeAbove
+          ? String(window.innerHeight - rect.top + 6)
+          : undefined,
         width: String(Math.min(320, window.innerWidth - 16)),
         maxHeight: "240",
         overflowY: "auto",

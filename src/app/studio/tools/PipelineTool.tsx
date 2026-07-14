@@ -194,7 +194,7 @@ function defaultConfig(
 
 function toYAML(nodes: PipelineNode[]): string {
   const lines: string[] = [
-    "# LiTT Code Pipeline Protocol",
+    "# LiTTree-LabStudios Pipeline Protocol",
     `# Generated: ${new Date().toISOString()}`,
     `# ${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}`,
     "",
@@ -1126,7 +1126,7 @@ export default function PipelineTool() {
       {/* ── YAML Export Modal ── */}
       {showYaml && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
           onClick={() => setShowYaml(false)}
         >

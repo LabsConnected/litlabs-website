@@ -20,7 +20,7 @@ export class DirectorGraphPlanner {
 
     const rootId = "root";
     tasks.push({
-      agentSlug: "director",
+      agentSlug: "littlebit",
       prompt: `Decompose and coordinate the following goal: ${normalized}`,
       provider: "openrouter",
       model: targetModel,
@@ -28,7 +28,7 @@ export class DirectorGraphPlanner {
 
     const researcherId = "task-researcher";
     tasks.push({
-      agentSlug: "director",
+      agentSlug: "littlebit",
       prompt: `Research background, constraints, and existing solutions for: ${normalized}`,
       provider: "openrouter",
       model: targetModel,
@@ -37,16 +37,15 @@ export class DirectorGraphPlanner {
 
     const builderId = "task-builder";
     tasks.push({
-      agentSlug: "visionary",
+      agentSlug: "littcode",
       prompt: `Draft an implementation or content plan for: ${normalized}`,
       provider: "openrouter",
       model: targetModel,
       dependsOn: [researcherId],
     });
 
-    const validatorId = "task-validator";
     tasks.push({
-      agentSlug: "forge",
+      agentSlug: "littlebit",
       prompt: `Review and validate the plan for correctness, risks, and missing steps: ${normalized}`,
       provider: "openrouter",
       model: targetModel,

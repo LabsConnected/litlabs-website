@@ -1,11 +1,5 @@
-import { Metadata } from "next";
-import { LiTTTerminalPage } from "@/components/litt-terminal/LiTTTerminalPage";
-
-export const metadata: Metadata = {
-  title: "LiTT Terminal | LiTT Code",
-  description: "AI-powered browser terminal for LiTT Code.",
-};
+import { redirect } from "next/navigation";
 
 export default function LiTTPage() {
-  return <LiTTTerminalPage />;
+  redirect("/studio");
 }

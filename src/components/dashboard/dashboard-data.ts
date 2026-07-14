@@ -78,7 +78,7 @@ export const APPS = [
 
 export const AGENTS = [
   {
-    name: "LiTT Code",
+    name: "LiTT",
     status: "online" as const,
     task: "Orchestration",
     color: "#22d3ee",
@@ -182,13 +182,13 @@ export const GAMES = [
 export const WATCH = [
   {
     title: "Agent Setup Guide",
-    channel: "LiTT Code",
+    channel: "LiTT",
     views: "12k",
     color: "#ff00a0",
   },
   {
     title: "Studio Deep Dive",
-    channel: "LiTT Code",
+    channel: "LiTT",
     views: "8.5k",
     color: "#00f0ff",
   },

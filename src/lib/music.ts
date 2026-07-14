@@ -1,5 +1,5 @@
 /**
- * Music System for LiTT Code
+ * Music System for LiTT
  * Provides background music capabilities with user preferences
  */
 

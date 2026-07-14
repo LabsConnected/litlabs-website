@@ -115,6 +115,7 @@ export default function SpaceTool() {
           style={{ border: `1px solid ${T.borderColor}20` }}
         >
           {result.startsWith("http") ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={result}
               alt="Generated space"

@@ -601,7 +601,7 @@ export function CenterStage({
         <div className="space-y-6 md:space-y-8">
           <HeroCard
             title={`Welcome back, ${displayName}`}
-            subtitle="Your LiTT Code workspace is live. Ship something today."
+            subtitle="Your LiTT workspace is live. Ship something today."
             color={T.accentColor}
           />
 
@@ -689,7 +689,7 @@ export function CenterStage({
 /* ------------------------------------------------------------------ */
 const MUSIC_TABS = [
   { id: "spotify", label: "Spotify", color: "#1DB954" },
-  { id: "player", label: "LiTT Code Player", color: "#ff00a0" },
+  { id: "player", label: "LiTT Player", color: "#ff00a0" },
   { id: "radio", label: "Radio", color: "#00f0ff" },
   { id: "tools", label: "Audio Tools", color: "#8b5cf6" },
 ] as const;

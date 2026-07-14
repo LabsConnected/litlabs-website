@@ -4,15 +4,6 @@ import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { supabase } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
 
-async function resolveDbUserId(clerkId: string): Promise<string | null> {
-  const { data: user } = await supabase
-    .from("users")
-    .select("id")
-    .eq("clerk_id", clerkId)
-    .single();
-  return user?.id ?? null;
-}
-
 /**
  * POST /api/users/[userId]/credits
  * Updates user credits (LiTBit Coins) - Admin or system use

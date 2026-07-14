@@ -55,6 +55,17 @@ export const THEMES: StudioTheme[] = [
     muted: "#80a79a",
     border: "#22473a",
   },
+  {
+    id: "honeycomb",
+    name: "Honeycomb",
+    bg: "#0d0a05",
+    surface: "#1a1510",
+    accent: "#f59e0b",
+    linkColor: "#fbbf24",
+    text: "#f5e6c8",
+    muted: "#a8916b",
+    border: "#3d3220",
+  },
 ];
 
 export function getThemeById(id: string) {

@@ -27,7 +27,8 @@ export type SkinPreset =
   | "neon"
   | "blood"
   | "cosmic"
-  | "miami";
+  | "miami"
+  | "honeycomb";
 
 // Theme mode
 export type ThemeMode = "dark" | "light" | "system";
@@ -217,6 +218,15 @@ const darkSkins: Record<
     accentColor: "#14b8a6",
     boxBg: "#15252a",
   },
+  honeycomb: {
+    bgColor: "#0d0a05",
+    textColor: "#f5e6c8",
+    linkColor: "#fbbf24",
+    headerColor: "#fcd34d",
+    borderColor: "#3d3220",
+    accentColor: "#f59e0b",
+    boxBg: "#1a1510",
+  },
 };
 
 // Light mode variants — deep navy text for crisp daytime contrast
@@ -376,6 +386,15 @@ const lightSkins: Record<
     accentColor: "#14b8a6",
     boxBg: "#ffffff",
   },
+  honeycomb: {
+    bgColor: "#fefce8",
+    textColor: "#1a1510",
+    linkColor: "#d97706",
+    headerColor: "#b45309",
+    borderColor: "#fde68a",
+    accentColor: "#f59e0b",
+    boxBg: "#ffffff",
+  },
 };
 
 // Accent color overrides
@@ -448,6 +467,21 @@ interface ThemeContextType {
     success: string;
     warning: string;
   };
+  tokens: {
+    background: string;
+    surface: string;
+    surfaceElevated: string;
+    border: string;
+    text: string;
+    textMuted: string;
+    textInverse: string;
+    primary: string;
+    secondary: string;
+    success: string;
+    warning: string;
+    danger: string;
+    focus: string;
+  };
   setMode: (mode: ThemeMode) => void;
   setSkin: (skin: SkinPreset) => void;
   setAccent: (accent: AccentColor) => void;
@@ -462,6 +496,20 @@ interface ThemeContextType {
     boxBg?: string;
   }) => void;
   resetTheme: () => void;
+}
+
+// Helper: produce a muted variant with safe contrast for small text.
+// We lighten the base text color toward white so it never drops below ~4.5:1
+// on the matching dark background.
+function mixMuted(hex: string): string {
+  const c = hex.replace("#", "");
+  if (c.length !== 6) return "#c4c4d4";
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const mix = (v: number) => Math.round(v + (235 - v) * 0.45);
+  const to2 = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -493,7 +541,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return {
       bgColor: custom.bgColor || skinColors.bgColor,
       textColor: custom.textColor || skinColors.textColor,
-      textMuted: "#a8a8c0",
+      textMuted: mixMuted(custom.textColor || skinColors.textColor),
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor:
         accent?.headerColor || custom.headerColor || skinColors.headerColor,
@@ -507,6 +555,22 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
   };
 
   const resolvedColors = getResolvedColors(theme);
+  const semanticTokens = {
+    background: resolvedColors.bgColor,
+    surface: resolvedColors.boxBg,
+    surfaceElevated: resolvedColors.boxBg,
+    border: resolvedColors.borderColor,
+    text: resolvedColors.textColor,
+    textMuted: resolvedColors.textMuted,
+    textInverse: resolvedColors.bgColor,
+    primary: resolvedColors.accentColor,
+    secondary: resolvedColors.linkColor,
+    success: resolvedColors.success,
+    warning: resolvedColors.warning,
+    danger: "#ef4444",
+    focus: resolvedColors.accentColor,
+  };
+  const tokens = { ...resolvedColors, ...semanticTokens };
 
   const [mounted, setMounted] = useState(false);
 
@@ -572,6 +636,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       value={{
         theme,
         resolvedColors,
+        tokens,
         setMode,
         setSkin,
         setAccent,

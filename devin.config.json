@@ -1,6 +1,6 @@
 {
   "project": "LiTTree LabStudios",
-  "repository": "https://github.com/Litree-Ceo/litlabs-website",
+  "repository": "https://github.com/LabsConnected/litlabs-website",
   "codespace": "https://turbo-space-spork-wv5jqrjgg59h6q.github.dev/",
   "environment": "github-codespaces",
   "branch": "main",
@@ -11,11 +11,13 @@
   "instructions": {
     "setup": "Use GitHub Codespaces environment. Do not use local WSL for heavy builds.",
     "workflow": "Work from main branch. Create PRs for changes.",
-    "localRole": "Use local PC only for small edits, testing /jarvis, reviewing changes, and emergency fixes.",
+    "localRole": "Use local PC only for small edits, testing /litt, reviewing changes, and emergency fixes.",
     "heavyBuilds": "Use Codespaces for /studio page and other heavy builds."
   },
   "paths": {
     "primary": "/workspaces/litlabs-website",
+    "localWindows": "C:/Users/litbi/CascadeProjects/litlab",
     "localAlternative": "/home/litbit/CascadeProjectsFast"
-  }
+  },
+  "_note": "Legacy config kept for backward compatibility. Canonical source is .devin-config.json — keep both in sync."
 }

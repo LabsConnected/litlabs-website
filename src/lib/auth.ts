@@ -1,31 +1,28 @@
-import { createServerClient } from "@supabase/ssr";
-import { cookies } from "next/headers";
+import { auth as clerkAuth } from "@clerk/nextjs/server";
 
-export async function auth() {
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
-  const key = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ?? "";
+export interface AuthResult {
+  userId: string | null;
+  clerkId: string | null;
+}
 
-  // Build-safe: if Supabase isn't configured, treat as anonymous
-  if (!url || !key || url.length < 10 || key.length < 10) {
-    return { userId: null };
+/**
+ * Returns the authenticated Clerk user ID.
+ *
+ * In production this always requires a Clerk session.
+ * In local dev you can set ALLOW_ANONYMOUS_DEV=true to test routes without
+ * signing in; the returned userId will be "anonymous-dev" and callers must
+ * decide whether to accept that.
+ */
+export async function auth(): Promise<AuthResult> {
+  const { userId: clerkId } = await clerkAuth();
+
+  if (clerkId) {
+    return { userId: clerkId, clerkId };
   }
 
-  const cookieStore = await cookies();
-  const supabase = createServerClient(url, key, {
-    cookies: {
-      getAll() {
-        return cookieStore.getAll();
-      },
-      setAll(cookiesToSet: { name: string; value: string; options: Record<string, unknown> }[]) {
-        try {
-          for (const { name, value, options } of cookiesToSet) {
-            cookieStore.set(name, value, options);
-          }
-        } catch {}
-      },
-    },
-  });
-  const { data: { session } } = await supabase.auth.getSession();
-  const userId = session?.user?.id ?? null;
-  return { userId };
+  if (process.env.ALLOW_ANONYMOUS_DEV === "true") {
+    return { userId: "anonymous-dev", clerkId: null };
+  }
+
+  return { userId: null, clerkId: null };
 }

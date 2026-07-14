@@ -1,10 +1,11 @@
 // Beautiful AI-generated style wallpapers using CSS only
 // Each wallpaper is designed to look like AI art
 
-export type WallpaperId = 
+export type WallpaperId =
   | 'default' | 'gradient' | 'mesh' | 'dark' | 'custom'
   | 'nebula' | 'cyberpunk' | 'aurora' | 'matrix' | 'sunset'
-  | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass';
+  | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass'
+  | 'lava' | 'crystal' | 'tokyo' | 'solar' | 'honeycomb';
 
 export interface Wallpaper {
   id: WallpaperId;
@@ -193,6 +194,81 @@ export const WALLPAPERS: Wallpaper[] = [
         linear-gradient(135deg, rgba(255,255,255,0.03) 0%, rgba(255,255,255,0.01) 100%),
         linear-gradient(225deg, rgba(167,139,250,0.15) 0%, rgba(129,140,248,0.15) 50%, rgba(251,191,36,0.1) 100%),
         #0a0a12
+      `
+    }
+  },
+  {
+    id: 'lava',
+    name: 'Lava Flow',
+    description: 'Molten red and orange rivers',
+    category: 'nature',
+    preview: 'radial-gradient(ellipse at 50% 100%, #dc262630, transparent), linear-gradient(180deg, #1a0a0a 0%, #2d1212 100%)',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 30% 100%, #dc262640 0%, transparent 50%),
+        radial-gradient(ellipse at 70% 80%, #f9731640 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, #7f1d1d20 0%, transparent 60%),
+        linear-gradient(180deg, #1a0a0a 0%, #2d1212 100%)
+      `
+    }
+  },
+  {
+    id: 'crystal',
+    name: 'Crystal Cave',
+    description: 'Icy blue and teal geometric depths',
+    category: 'nature',
+    preview: 'linear-gradient(135deg, #0c1f2d 0%, #0a2f3f 50%, #0c1f2d 100%)',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 20% 30%, #22d3ee30 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 70%, #2dd4bf30 0%, transparent 50%),
+        radial-gradient(ellipse at 50% 50%, #0891b220 0%, transparent 60%),
+        linear-gradient(135deg, #0c1f2d 0%, #0a2f3f 50%, #0c1f2d 100%)
+      `
+    }
+  },
+  {
+    id: 'tokyo',
+    name: 'Tokyo Night',
+    description: 'Dark purple with neon pink highlights',
+    category: 'tech',
+    preview: 'repeating-linear-gradient(90deg, #1a0a2e, #1a0a2e 20px, #2d1b4e 20px, #2d1b4e 21px), #1a0a2e',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 80% 20%, #ec489940 0%, transparent 50%),
+        radial-gradient(ellipse at 20% 80%, #a855f740 0%, transparent 50%),
+        repeating-linear-gradient(90deg, transparent, transparent 60px, rgba(236,72,153,0.06) 60px, rgba(236,72,153,0.06) 61px),
+        linear-gradient(180deg, #1a0a2e 0%, #120522 100%)
+      `
+    }
+  },
+  {
+    id: 'solar',
+    name: 'Solar Flare',
+    description: 'Bright yellow and orange energy burst',
+    category: 'abstract',
+    preview: 'radial-gradient(circle at 50% 50%, #fbbf2420, transparent), linear-gradient(135deg, #2a1a0a 0%, #3d1f0a 100%)',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 50% 50%, #fbbf2440 0%, transparent 40%),
+        radial-gradient(ellipse at 40% 60%, #f9731630 0%, transparent 50%),
+        radial-gradient(ellipse at 60% 40%, #f59e0b30 0%, transparent 50%),
+        linear-gradient(135deg, #2a1a0a 0%, #3d1f0a 100%)
+      `
+    }
+  },
+  {
+    id: 'honeycomb',
+    name: 'Honeycomb Drip',
+    description: 'Hexagonal honeycomb pattern with amber glow',
+    category: 'abstract',
+    preview: 'repeating-conic-gradient(from 30deg at 50% 50%, #f59e0b10 0deg 60deg, transparent 60deg 120deg), #0d0a05',
+    fullStyle: {
+      background: `
+        radial-gradient(ellipse at 50% 50%, #fbbf2415 0%, transparent 60%),
+        radial-gradient(ellipse at 20% 80%, #f59e0b12 0%, transparent 50%),
+        radial-gradient(ellipse at 80% 20%, #d9770612 0%, transparent 50%),
+        linear-gradient(180deg, #0d0a05 0%, #1a1510 100%)
       `
     }
   },

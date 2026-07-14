@@ -14,7 +14,7 @@ async function getHandler(req: NextRequest) {
     let query = supabaseAdmin
       .from("agents")
       .select(
-        "id, slug, display_name, description, role, system_prompt, model, is_core, owner_id, created_at, updated_at",
+        "id, slug, display_name, description, role, system_prompt, personality, model, is_core, is_public, is_featured, owner_id, avatar_url, features, price_cents, rating, installs, created_at, updated_at",
       )
       .order("is_core", { ascending: false })
       .order("created_at", { ascending: false });
@@ -53,13 +53,15 @@ async function getHandler(req: NextRequest) {
       name: a.display_name,
       description: a.description ?? "",
       category: a.role ?? "general",
-      avatar_url: "",
+      avatar_url: a.avatar_url ?? "",
       system_prompt: a.system_prompt ?? "",
-      personality: "",
-      price_cents: 0,
-      is_public: true,
-      is_featured: a.is_core ?? false,
-      features: [],
+      personality: a.personality ?? "",
+      price_cents: a.price_cents ?? 0,
+      is_public: a.is_public ?? true,
+      is_featured: a.is_featured ?? a.is_core ?? false,
+      features: Array.isArray(a.features) ? (a.features as string[]) : [],
+      rating: a.rating ? Number(a.rating) : undefined,
+      installs: a.installs ?? undefined,
       model: a.model,
       created_at: a.created_at,
     }));

@@ -20,13 +20,13 @@ export default function MobileBottomNav() {
 
   return (
     <>
-      <nav className="md:hidden fixed bottom-0 left-0 right-0 z-40 border-t backdrop-blur-lg">
+      <nav
+        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-[100] border-t backdrop-blur-xl"
+        style={{ borderColor: `${T.borderColor}20` }}
+      >
         <div
-          className="flex items-center justify-around py-2"
-          style={{
-            backgroundColor: `${T.bgColor}f0`,
-            borderColor: `${T.borderColor}30`,
-          }}
+          className="flex items-center justify-around px-1 py-1"
+          style={{ backgroundColor: `${T.bgColor}ee` }}
         >
           {MOBILE_BOTTOM_ITEMS.map((item) => {
             const Icon = item.icon;
@@ -36,21 +36,25 @@ export default function MobileBottomNav() {
               <Link
                 key={item.label}
                 href={isMore ? "#" : item.href}
-                onClick={isMore ? (e) => { e.preventDefault(); setMoreOpen(true); } : undefined}
-                className="flex flex-col items-center gap-0.5 px-3 py-1.5 rounded-lg transition-all"
-                style={{
-                  color: active ? T.accentColor : T.textMuted,
-                }}
+                onClick={
+                  isMore
+                    ? (e) => {
+                        e.preventDefault();
+                        setMoreOpen(true);
+                      }
+                    : undefined
+                }
+                className="relative flex flex-col items-center gap-0.5 px-3 py-2 rounded-xl transition-all"
+                style={{ color: active ? T.accentColor : T.textMuted }}
               >
-                <div className="relative">
-                  <Icon size={20} />
-                  {item.badge && (
-                    <span className="absolute -top-1 -right-1 min-w-[14px] h-[14px] flex items-center justify-center text-[8px] font-bold rounded-full bg-[#ff00a0] text-white px-1">
-                      {item.badge > 9 ? "9+" : item.badge}
-                    </span>
-                  )}
-                </div>
-                <span className="text-[9px] font-bold">{item.label}</span>
+                {active && (
+                  <span
+                    className="absolute inset-0 rounded-xl opacity-15"
+                    style={{ backgroundColor: T.accentColor }}
+                  />
+                )}
+                <Icon size={20} />
+                <span className="text-[9px] font-black">{item.label}</span>
               </Link>
             );
           })}
@@ -59,29 +63,41 @@ export default function MobileBottomNav() {
 
       {/* More menu slide-up */}
       {moreOpen && (
-        <div className="md:hidden fixed inset-0 z-50 flex flex-col justify-end">
+        <div className="md:hidden fixed inset-0 z-[10000] flex flex-col justify-end">
           <div
             className="absolute inset-0 bg-black/60 backdrop-blur-sm"
             onClick={() => setMoreOpen(false)}
           />
           <div
-            className="relative max-h-[80vh] overflow-y-auto rounded-t-2xl border-t shadow-2xl"
+            className="relative max-h-[80vh] overflow-y-auto rounded-t-3xl border-t shadow-2xl"
             style={{
-              backgroundColor: `${T.bgColor}f0`,
-              borderColor: `${T.borderColor}30`,
+              backgroundColor: `${T.bgColor}f8`,
+              borderColor: `${T.accentColor}20`,
             }}
           >
-            <div className="flex items-center justify-between px-4 py-3 border-b" style={{ borderColor: `${T.borderColor}30` }}>
-              <span className="text-sm font-bold" style={{ color: T.textColor }}>More</span>
+            <div
+              className="mx-auto mt-3 h-1 w-10 rounded-full opacity-30"
+              style={{ backgroundColor: T.borderColor }}
+            />
+            <div
+              className="flex items-center justify-between px-5 py-3 border-b"
+              style={{ borderColor: `${T.borderColor}20` }}
+            >
+              <span
+                className="text-sm font-black"
+                style={{ color: T.textColor }}
+              >
+                More
+              </span>
               <button
                 onClick={() => setMoreOpen(false)}
-                className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
+                className="flex h-7 w-7 items-center justify-center rounded-lg transition-colors hover:bg-white/10"
                 style={{ color: T.textMuted }}
               >
-                <X size={18} />
+                <X size={16} />
               </button>
             </div>
-            <div className="grid grid-cols-3 gap-2 p-4">
+            <div className="grid grid-cols-3 gap-2.5 p-5">
               {MOBILE_MORE_ITEMS.map((item) => {
                 const Icon = item.icon;
                 const active = isActive(item.href);
@@ -90,19 +106,27 @@ export default function MobileBottomNav() {
                     key={item.label}
                     href={item.href}
                     onClick={() => setMoreOpen(false)}
-                    className="flex flex-col items-center gap-1.5 p-3 rounded-xl transition-all"
+                    className="flex flex-col items-center gap-2 p-3.5 rounded-2xl transition-all hover:scale-[1.02]"
                     style={{
-                      backgroundColor: active ? `${T.accentColor}12` : `${T.boxBg}60`,
-                      border: `1px solid ${active ? T.accentColor : T.borderColor}30`,
+                      backgroundColor: active
+                        ? `${T.accentColor}15`
+                        : `${T.boxBg}80`,
+                      border: `1px solid ${active ? T.accentColor : T.borderColor}25`,
                       color: active ? T.accentColor : T.textMuted,
+                      boxShadow: active
+                        ? `0 0 16px ${T.accentColor}20`
+                        : undefined,
                     }}
                   >
                     <Icon size={22} />
-                    <span className="text-[10px] font-bold text-center">{item.label}</span>
+                    <span className="text-[10px] font-black text-center leading-tight">
+                      {item.label}
+                    </span>
                   </Link>
                 );
               })}
             </div>
+            <div className="pb-safe px-5 pb-6" />
           </div>
         </div>
       )}

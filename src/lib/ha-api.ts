@@ -1,6 +1,6 @@
 /**
  * Home Assistant API Bridge
- * Universal HA client for LiTT Code LabStudios agents to interact with smart home devices.
+ * Universal HA client for LiTTree-LabStudios agents to interact with smart home devices.
  *
  * When running inside HA Supervisor:
  *   - Reads SUPERVISOR_TOKEN from env
@@ -263,7 +263,7 @@ export async function playMedia(entityId: string, url: string): Promise<HAServic
   return callService("media_player", "play_media", { entity_id: entityId, media_content_id: url, media_content_type: "audio/mp3" });
 }
 
-export async function notify(message: string, title = "LiTT Code LabStudios", target?: string): Promise<HAServiceResponse> {
+export async function notify(message: string, title = "LiTTree-LabStudios", target?: string): Promise<HAServiceResponse> {
   return callService("notify", target || "persistent_notification", { message, title });
 }
 

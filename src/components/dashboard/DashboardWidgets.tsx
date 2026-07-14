@@ -9,6 +9,7 @@ import {
   Plus,
   Monitor,
   Check,
+  Flame,
 } from "lucide-react";
 import GlassCard from "@/components/GlassCard";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
@@ -312,6 +313,35 @@ export default function DashboardWidgets({
           ))}
         </div>
       </GlassCard>
+
+      {/* Facebook Growth */}
+      <Link href="/resources/facebook-growth" className="block">
+        <GlassCard variant="flat" padding="sm" radius="lg" className="transition-opacity hover:opacity-90">
+          <div className="flex items-center gap-3">
+            <div
+              className="w-10 h-10 rounded-xl flex items-center justify-center shrink-0"
+              style={{
+                background: `linear-gradient(135deg, ${T.accentColor}25, ${T.accentColor}10)`,
+                border: `1px solid ${T.accentColor}40`,
+                color: T.accentColor,
+              }}
+            >
+              <Flame size={18} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold" style={{ color: T.textColor }}>
+                Facebook Growth
+              </div>
+              <div className="text-[10px]" style={{ color: T.textMuted }}>
+                125 / 500 followers
+              </div>
+              <div className="mt-1 text-[10px] font-bold" style={{ color: T.accentColor }}>
+                Open checklist
+              </div>
+            </div>
+          </div>
+        </GlassCard>
+      </Link>
 
       {/* Stats + System */}
       <div className="grid grid-cols-2 gap-3">

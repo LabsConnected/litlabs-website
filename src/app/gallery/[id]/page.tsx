@@ -15,10 +15,10 @@ interface Message {
 const GALLERY_AGENTS = [
   {
     id: "director",
-    name: "LiTT Code",
+    name: "LiTT",
     avatar: AGENT_AVATARS.director,
     greeting:
-      "LiTT Code online. I coordinate the agent team and help you navigate the platform. What's your goal today?",
+      "LiTT online for LiTTree-LabStudios. I coordinate the agent team and help you navigate the platform. What's your goal today?",
   },
   {
     id: "forge",

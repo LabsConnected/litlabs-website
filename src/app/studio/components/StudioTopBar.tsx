@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -90,6 +91,8 @@ export default function StudioTopBar({
           className="absolute left-2.5 top-1/2 -translate-y-1/2 pointer-events-none"
         />
         <input
+          id="studio-search-input"
+          name="studio-search-input"
           value={search}
           onChange={(e) => onSearchChange(e.target.value)}
           placeholder="Search tools, agents, projects…"
@@ -159,7 +162,11 @@ export default function StudioTopBar({
             style={{ backgroundColor: "#ff3a3a", boxShadow: "0 0 4px #ff3a3a" }}
           />
         </button>
-        {notifOpen && <NotifPanel onClose={() => setNotifOpen(false)} T={T} />}
+        {notifOpen &&
+          createPortal(
+            <NotifPanel onClose={() => setNotifOpen(false)} T={T} />,
+            document.body,
+          )}
       </div>
 
       <ProfileChip isSignedIn={isSignedIn} profile={profile} T={T} />
@@ -277,9 +284,9 @@ function NotifPanel({
   ];
   return (
     <>
-      <div className="fixed inset-0 z-30" onClick={onClose} aria-hidden />
+      <div className="fixed inset-0 z-10000" onClick={onClose} aria-hidden />
       <div
-        className="absolute right-0 top-full mt-1 w-72 rounded-2xl border p-3 shadow-2xl z-40"
+        className="fixed right-4 top-14 z-10001 w-72 rounded-2xl border p-3 shadow-2xl"
         style={{
           backgroundColor: T.boxBg,
           borderColor: T.borderColor + "30",

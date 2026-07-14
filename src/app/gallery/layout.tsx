@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Gallery",
-  description: "Explore AI-generated images, videos, and art from the LiTT Code community.",
+  description:
+    "Explore AI-generated images, videos, and art from the LiTTree-LabStudios community.",
 };
 
 export default function GalleryLayout({

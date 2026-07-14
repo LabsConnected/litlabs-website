@@ -10,7 +10,9 @@ const webhookUrl =
   process.env.DISCORD_ALERTS_WEBHOOK || process.env.DISCORD_SYSTEM_WEBHOOK;
 
 if (!supabaseUrl || !serviceKey) {
-  console.error("Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY");
+  console.error(
+    "Missing NEXT_PUBLIC_SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY",
+  );
   process.exit(1);
 }
 
@@ -59,11 +61,11 @@ async function main() {
   );
 
   const statusLines = Object.entries(byStatus)
-    .filter(([_, count]) => count > 0)
+    .filter(([, count]) => count > 0)
     .map(([status, count]) => `• ${status}: ${count}`)
     .join("\n");
   const envLines = Object.entries(byEnvironment)
-    .filter(([_, count]) => count > 0)
+    .filter(([, count]) => count > 0)
     .map(([env, count]) => `• ${env}: ${count}`)
     .join("\n");
 

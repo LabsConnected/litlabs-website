@@ -668,7 +668,7 @@ export default function GalleryTool() {
       {selectedItem && (
         <div
           onClick={() => setSelectedItem(null)}
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.92)" }}
         >
           <div

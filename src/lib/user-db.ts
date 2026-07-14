@@ -7,7 +7,6 @@ let _admin: SupabaseClient | null = null;
 let _anon: SupabaseClient | null = null;
 
 function getDb(): SupabaseClient | null {
-  // Server-side: try admin first
   if (typeof window === "undefined") {
     try {
       const { getAdminSupabase } =
@@ -28,7 +27,6 @@ function getDb(): SupabaseClient | null {
       return null;
     }
   }
-  // Browser-side: use anon client
   try {
     const { getSupabase } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -55,13 +53,21 @@ export type UserProfile = {
   updated_at: string;
 };
 
-export type UserPreferences = {
+export type UserPreferenceRow = {
   id: string;
   user_id: string;
   theme_mode: string;
   theme_skin: string;
   theme_accent: string;
   crt_enabled: boolean;
+  notify_discord: string | null;
+  notify_alexa: boolean | null;
+  notify_email: boolean | null;
+  workspace_autosave: boolean | null;
+  workspace_compact: boolean | null;
+  workspace_live_preview: boolean | null;
+  workspace_telemetry: boolean | null;
+  workspace_default: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -155,7 +161,7 @@ export async function updateUserProfile(
 /** Get user preferences */
 export async function getUserPreferences(
   clerkId: string,
-): Promise<UserPreferences | null> {
+): Promise<UserPreferenceRow | null> {
   const db = getDb();
   if (!db) return null;
   const user = await getUserByClerkId(clerkId);
@@ -166,31 +172,36 @@ export async function getUserPreferences(
     .eq("user_id", user.id)
     .single();
   if (error || !data) return null;
-  return data as UserPreferences;
+  return data as UserPreferenceRow;
 }
 
-/** Update user preferences */
-export async function updateUserPreferences(
-  clerkId: string,
+/** Upsert user preferences */
+export async function upsertUserPreferences(
+  userId: string,
   updates: Partial<
-    Omit<UserPreferences, "id" | "user_id" | "created_at" | "updated_at">
+    Omit<
+      UserPreferenceRow,
+      "id" | "user_id" | "created_at" | "updated_at"
+    >
   >,
 ) {
   const db = getDb();
-  if (!db) throw new Error("Database not configured");
-  const user = await getUserByClerkId(clerkId);
-  if (!user) throw new Error("User not found");
+  if (!db)
+    throw new Error("Database not configured");
   const { data, error } = await db
     .from("user_preferences")
     .upsert({
-      user_id: user.id,
+      user_id: userId,
       ...updates,
       updated_at: new Date().toISOString(),
     })
     .select()
     .single();
-  if (error) throw new Error(`Failed to update preferences: ${error.message}`);
-  return data as UserPreferences;
+  if (error)
+    throw new Error(
+      `Failed to update preferences: ${error.message}`,
+    );
+  return data as UserPreferenceRow;
 }
 
 /** Get user wallet — auto-creates with 500 coins if missing. Returns synthetic wallet on ANY failure. */

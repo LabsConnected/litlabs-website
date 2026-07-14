@@ -34,6 +34,11 @@ function getVideoThumbnailUrl(rawUrl: string): string | null {
   return null;
 }
 
+function pollinationsUrl(prompt: string, width = 1600, height = 1200): string {
+  const encoded = encodeURIComponent(prompt);
+  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
+}
+
 // Demo gallery items when DB is not configured
 const DEMO_GALLERY = [
   {
@@ -41,8 +46,7 @@ const DEMO_GALLERY = [
     title: "Neon Cyber City",
     artist: "Pixel Forge",
     category: "360-worlds",
-    imageUrl:
-      "/api/artwork/neon-city",
+    imageUrl: pollinationsUrl("Neon cyberpunk city street at night with neon signs and rain reflections, cinematic"),
     likes: 234,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -52,8 +56,7 @@ const DEMO_GALLERY = [
     title: "Ethereal Dreamscape",
     artist: "DreamWeaver",
     category: "abstract",
-    imageUrl:
-      "/api/artwork/dreamscape",
+    imageUrl: pollinationsUrl("Ethereal dreamscape with floating islands and soft pastel clouds, surreal art"),
     likes: 189,
     createdAt: "2026-06-02",
     mediaType: "image" as const,
@@ -63,8 +66,7 @@ const DEMO_GALLERY = [
     title: "Lost Temple Ruins",
     artist: "Explorer-X",
     category: "landscape",
-    imageUrl:
-      "/api/artwork/lost-temple",
+    imageUrl: pollinationsUrl("Ancient lost temple ruins in a misty jungle with dramatic sunlight beams"),
     likes: 312,
     createdAt: "2026-05-28",
     mediaType: "image" as const,
@@ -74,8 +76,7 @@ const DEMO_GALLERY = [
     title: "Quantum Warrior",
     artist: "Pixel Forge",
     category: "character",
-    imageUrl:
-      "/api/artwork/quantum-warrior",
+    imageUrl: pollinationsUrl("Quantum warrior futuristic samurai in glowing armor, digital art"),
     likes: 156,
     createdAt: "2026-06-03",
     mediaType: "image" as const,
@@ -85,8 +86,7 @@ const DEMO_GALLERY = [
     title: "Crystal Cavern",
     artist: "GeoMancer",
     category: "360-worlds",
-    imageUrl:
-      "/api/artwork/crystal-cavern",
+    imageUrl: pollinationsUrl("Crystal cavern interior with glowing crystals and an underground lake"),
     likes: 278,
     createdAt: "2026-05-30",
     mediaType: "image" as const,
@@ -96,8 +96,7 @@ const DEMO_GALLERY = [
     title: "Void Entity",
     artist: "ShadowNet",
     category: "character",
-    imageUrl:
-      "/api/artwork/void-entity",
+    imageUrl: pollinationsUrl("Void entity abstract dark cosmic creature with glowing eyes, horror sci-fi"),
     likes: 421,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -107,8 +106,7 @@ const DEMO_GALLERY = [
     title: "Sunset Megacity",
     artist: "Pixel Forge",
     category: "landscape",
-    imageUrl:
-      "/api/artwork/neon-city",
+    imageUrl: pollinationsUrl("Sunset megacity skyline with towering skyscrapers and orange sky"),
     likes: 198,
     createdAt: "2026-05-25",
     mediaType: "image" as const,
@@ -118,8 +116,7 @@ const DEMO_GALLERY = [
     title: "Fractal Mind",
     artist: "DreamWeaver",
     category: "abstract",
-    imageUrl:
-      "/api/artwork/dreamscape",
+    imageUrl: pollinationsUrl("Fractal mind abstract colorful geometric patterns swirling, psychedelic art"),
     likes: 267,
     createdAt: "2026-05-29",
     mediaType: "image" as const,
@@ -129,8 +126,7 @@ const DEMO_GALLERY = [
     title: "Underwater Utopia",
     artist: "AquaBot",
     category: "360-worlds",
-    imageUrl:
-      "/api/artwork/underwater",
+    imageUrl: pollinationsUrl("Underwater utopia with coral reefs and bioluminescent sea creatures"),
     likes: 345,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -140,8 +136,7 @@ const DEMO_GALLERY = [
     title: "Cyber Samurai",
     artist: "Pixel Forge",
     category: "character",
-    imageUrl:
-      "/api/artwork/quantum-warrior",
+    imageUrl: pollinationsUrl("Cyber samurai with katana and neon armor in a futuristic dojo"),
     likes: 189,
     createdAt: "2026-05-27",
     mediaType: "image" as const,
@@ -151,8 +146,7 @@ const DEMO_GALLERY = [
     title: "Starfield Station",
     artist: "StarWalker",
     category: "landscape",
-    imageUrl:
-      "/api/artwork/starfield",
+    imageUrl: pollinationsUrl("Starfield station space station orbiting a purple nebula, sci-fi"),
     likes: 567,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -162,8 +156,7 @@ const DEMO_GALLERY = [
     title: "Neural Network",
     artist: "DataMancer",
     category: "abstract",
-    imageUrl:
-      "/api/artwork/void-entity",
+    imageUrl: pollinationsUrl("Neural network visualization glowing nodes and synapses, dark background"),
     likes: 234,
     createdAt: "2026-05-26",
     mediaType: "image" as const,

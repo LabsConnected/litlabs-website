@@ -1,98 +1,130 @@
 "use client";
 
 import { useState, useEffect } from "react";
+import { usePathname } from "next/navigation";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import FooterWrapper from "@/components/FooterWrapper";
 import Sidebar from "@/components/Sidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import CreateFAB from "@/components/CreateFAB";
+import { FloatingChat } from "@/components/FloatingChat";
 import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
-import { Menu } from "lucide-react";
-import { useTheme } from "@/context/ThemeContext";
-import { usePathname } from "next/navigation";
 
-const WORKSPACE_ROUTES = [
-  "/studio",
-  "/code",
-  "/console",
-  "/agent-chat",
-  "/litt-terminal",
-  "/builder",
+const PUBLIC_PATHS = [
+  "/",
+  "/login",
+  "/sign-in",
+  "/sign-up",
+  "/privacy",
+  "/terms",
+  "/cookies",
+  "/docs",
 ];
 
-export default function LayoutShell({ children }: { children: React.ReactNode }) {
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return WORKSPACE_ROUTES.some(
-      (route) =>
-        window.location.pathname === route ||
-        window.location.pathname.startsWith(`${route}/`),
-    );
-  });
-  const { resolvedColors: T } = useTheme();
-  const pathname = usePathname();
-  const isWorkspace = WORKSPACE_ROUTES.some(
-    (route) => pathname === route || pathname.startsWith(`${route}/`),
+// Routes that render their own bottom navigation / floating chrome
+const SELF_CONTAINED_CHROME = ["/games/cloud"];
+
+function isPublicPath(path: string) {
+  return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
+}
+
+function hasOwnChrome(path: string) {
+  return SELF_CONTAINED_CHROME.some(
+    (p) => path === p || path.startsWith(`${p}/`),
   );
+}
+
+export default function LayoutShell({
+  children,
+}: {
+  children: React.ReactNode;
+}) {
+  const pathname = usePathname();
+  const publicPage = isPublicPath(pathname || "/");
+  const isStudio = pathname === "/studio";
+  const ownChrome = hasOwnChrome(pathname || "/");
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
+    useState(isStudio);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setMobileSidebarOpen(false);
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
-        if (window.innerWidth < 1024) setMobileSidebarOpen((v) => !v);
+        if (window.innerWidth >= 1024) {
+          setDesktopSidebarCollapsed((v) => !v);
+        }
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
+  if (isStudio) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+          <NavbarWrapper
+            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+          />
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <Sidebar
+              open={false}
+              onClose={() => {}}
+              collapsed={desktopSidebarCollapsed}
+            />
+            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden">
+              {children}
+            </main>
+          </div>
+        </div>
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+      </>
+    );
+  }
+
+  if (publicPage) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+        <main className="relative z-10 min-h-screen">{children}</main>
+        <CookieConsent />
+        <ServiceWorkerRegistration />
+      </>
+    );
+  }
+
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div
-        className={`relative z-10 flex ${isWorkspace ? "h-dvh overflow-hidden" : "min-h-screen"}`}
-      >
+      <div className="relative z-10 flex min-h-screen">
         <Sidebar
-          open={mobileSidebarOpen}
-          onClose={() => setMobileSidebarOpen(false)}
+          open={false}
+          onClose={() => {}}
           collapsed={desktopSidebarCollapsed}
-          onCollapseChange={() => setDesktopSidebarCollapsed((value) => !value)}
         />
-        <div
-          className={`flex min-w-0 flex-1 flex-col ${isWorkspace ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen"}`}
-        >
-          {/* Mobile hamburger trigger */}
-          <button
-            onClick={() => setMobileSidebarOpen(true)}
-            className="md:hidden fixed top-3 left-3 z-40 p-2 rounded-lg backdrop-blur-md border"
-            style={{
-              backgroundColor: `${T.bgColor}e0`,
-              borderColor: `${T.borderColor}30`,
-              color: T.textMuted,
-            }}
-            aria-label="Open navigation"
-          >
-            <Menu size={20} />
-          </button>
+        <div className="flex-1 flex flex-col min-h-screen">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)} />
+          <NavbarWrapper
+            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+          />
           <main
-            className={`min-h-0 min-w-0 flex-1 w-full max-w-full ${
-              isWorkspace
-                ? "overflow-hidden pb-16 md:pb-0"
-                : "overflow-x-hidden pb-16 md:pb-0"
+            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
+              ownChrome ? "pb-0" : "pb-[calc(72px+env(safe-area-inset-bottom))]"
             }`}
           >
             {children}
           </main>
-          <MobileBottomNav />
-          {!isWorkspace && <CreateFAB />}
-          {!isWorkspace && <FooterWrapper />}
+          {!ownChrome && <MobileBottomNav />}
+          {!ownChrome && <CreateFAB />}
+          <FloatingChat />
+          <FooterWrapper />
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>

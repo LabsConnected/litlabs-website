@@ -45,7 +45,7 @@ export class AgentWorkerMatrix {
 
     // Verify connection/keys immediately on startup
     try {
-      const _testClient = this.supabase;
+      void this.supabase;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       console.error(

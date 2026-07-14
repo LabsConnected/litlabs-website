@@ -18,49 +18,19 @@ import {
 } from "lucide-react";
 
 const VOICES = [
-  { id: "nova", label: "Nova", desc: "Warm & clear" },
-  { id: "alloy", label: "Alloy", desc: "Neutral & balanced" },
-  { id: "echo", label: "Echo", desc: "Deep & resonant" },
-  { id: "fable", label: "Fable", desc: "British & refined" },
-  { id: "onyx", label: "Onyx", desc: "Authoritative" },
-  { id: "shimmer", label: "Shimmer", desc: "Bright & optimistic" },
+  { id: "Kore", label: "Kore", desc: "Warm & clear" },
+  { id: "Fenrir", label: "Fenrir", desc: "Neutral & balanced" },
+  { id: "Leda", label: "Leda", desc: "Deep & resonant" },
+  { id: "Orus", label: "Orus", desc: "British & refined" },
+  { id: "Zeph", label: "Zeph", desc: "Authoritative" },
 ];
 
 const MUSIC_MODELS = [
   {
-    id: "elevenmusic",
-    label: "ElevenMusic",
+    id: "lyria-3-clip-preview",
+    label: "Lyria",
     desc: "Full music generation",
-    cost: 2,
-  },
-  { id: "ace", label: "AceStep", desc: "Electronic beats", cost: 1 },
-];
-
-// Sample royalty-free music tracks
-const SAMPLE_TRACKS = [
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3",
-    title: "Synthwave Dreams",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-2.mp3",
-    title: "Neon Nights",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-3.mp3",
-    title: "Cyber Pulse",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-4.mp3",
-    title: "Digital Horizon",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-8.mp3",
-    title: "Electric Sky",
-  },
-  {
-    url: "https://www.soundhelix.com/examples/mp3/SoundHelix-Song-10.mp3",
-    title: "Future City",
+    cost: 3,
   },
 ];
 
@@ -84,8 +54,8 @@ export default function AudioTool() {
   const { resolvedColors: T } = useTheme();
   const [mode, setMode] = useState<"tts" | "music">("music");
   const [text, setText] = useState("");
-  const [voice, setVoice] = useState("nova");
-  const [musicModel, setMusicModel] = useState("elevenmusic");
+  const [voice, setVoice] = useState("Kore");
+  const [musicModel, setMusicModel] = useState("lyria-3-clip-preview");
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<AudioGen | null>(null);
@@ -105,13 +75,13 @@ export default function AudioTool() {
 
   const cost =
     mode === "tts"
-      ? 1
-      : MUSIC_MODELS.find((m) => m.id === musicModel)?.cost || 2;
+      ? 2
+      : MUSIC_MODELS.find((m) => m.id === musicModel)?.cost || 3;
   const canAfford = coinBalance === null || coinBalance >= cost;
 
   useEffect(() => {
     refreshWallet();
-  }, []);
+  }, [refreshWallet]);
 
   useEffect(() => {
     if (history.length > 0)
@@ -120,40 +90,6 @@ export default function AudioTool() {
         JSON.stringify(history.slice(0, MAX_HISTORY)),
       );
   }, [history]);
-
-  // Browser TTS synthesis (plays directly, no download for now)
-  const playBrowserTTS = (text: string, voiceId: string) => {
-    const utterance = new SpeechSynthesisUtterance(text);
-    const voices = window.speechSynthesis.getVoices();
-
-    // Map our voice IDs to browser voices
-    const voiceMap: Record<string, string[]> = {
-      nova: ["Google US English", "Samantha", "Victoria"],
-      alloy: ["Google UK English", "Daniel", "Alex"],
-      echo: ["Google UK English Male", "Fred", "Bruce"],
-      fable: ["Google UK English Female", "Kate", "Serena"],
-      onyx: ["Microsoft David", "Tom", "Fred"],
-      shimmer: ["Google US English", "Samantha", "Karen"],
-    };
-
-    const preferredNames = voiceMap[voiceId] || voiceMap.nova;
-    const matchedVoice =
-      voices.find((v) =>
-        preferredNames.some((name) => v.name.includes(name)),
-      ) ||
-      voices.find((v) => v.lang.startsWith("en")) ||
-      voices[0];
-
-    if (matchedVoice) utterance.voice = matchedVoice;
-    utterance.rate = 0.95;
-    utterance.pitch = 1;
-    window.speechSynthesis.speak(utterance);
-
-    return new Promise<void>((resolve) => {
-      utterance.onend = () => resolve();
-      utterance.onerror = () => resolve();
-    });
-  };
 
   const handleGenerate = useCallback(async () => {
     if (!text.trim() || text.trim().length < 3) {
@@ -181,47 +117,38 @@ export default function AudioTool() {
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
 
     try {
-      let audioUrl: string;
+      const endpoint =
+        mode === "tts"
+          ? "/api/media/generate-audio"
+          : "/api/media/generate-music";
+      const body: Record<string, unknown> =
+        mode === "tts"
+          ? { prompt: text.trim(), voice }
+          : { prompt: text.trim(), model: musicModel };
 
-      if (mode === "tts") {
-        // For TTS, we use browser synthesis and generate a placeholder audio URL
-        // since browser TTS can't be captured easily without a backend
-        await playBrowserTTS(text.trim(), voice);
-        // Return a data URI with a simple tone as placeholder
-        audioUrl =
-          "data:audio/wav;base64,UklGRnoGAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQoGAACBhYqFbF1fdJivrJBhNjVgodDbq2EcBj+a2/LDciUFLIHO8tiJNwgZaLvt559NEAxQp+PwtmMcBjiR1/LMeSwFJHfH8N2QQAoUXrTp66hVFApGn+DyvmwhBTGH0fPTgjMGHm7A7+OZSA0PVanu87plHQUuh9Dz2YU2Bhxqv+zplkcODVGm5O+4ZSAEMYrO89GFNwYdcfDr4ZdJDQtPp+XysWUeBjiS1/LNfi0GI33R8tOENAcdcO+zmm0hDQxPpOXyxmHMM";
-      } else {
-        // Music mode - use sample tracks with prompt-based selection
-        await new Promise((r) => setTimeout(r, 1500)); // Simulate generation time
-        const hash = text
-          .split("")
-          .reduce((a, b) => (a << 5) - a + b.charCodeAt(0), 0);
-        const track = SAMPLE_TRACKS[Math.abs(hash) % SAMPLE_TRACKS.length];
-        audioUrl = track.url;
-      }
+      const res = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Audio generation failed");
+      if (!data.audioBase64) throw new Error("No audio returned");
 
       setCurrent((prev) =>
-        prev?.id === id ? { ...prev, status: "succeeded", audioUrl } : prev,
+        prev?.id === id
+          ? { ...prev, status: "succeeded", audioUrl: data.audioBase64 }
+          : prev,
       );
       setHistory((prev) =>
         prev.map((g) =>
-          g.id === id ? { ...g, status: "succeeded", audioUrl } : g,
+          g.id === id
+            ? { ...g, status: "succeeded", audioUrl: data.audioBase64 }
+            : g,
         ),
       );
 
-      // Deduct coins
-      const wres = await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "spend",
-          amount: cost,
-          reason: `audio_${mode}`,
-        }),
-      });
-      const wdata = await wres.json();
-      if (typeof wdata.balance === "number") {
-        // WalletContext updates via its periodic refresh; call refresh to sync immediately
+      if (typeof data.balance === "number") {
         refreshWallet().catch(() => {});
       }
     } catch (err) {
@@ -249,7 +176,7 @@ export default function AudioTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [text, voice, musicModel, mode, cost, canAfford]);
+  }, [text, voice, musicModel, mode, cost, canAfford, refreshWallet]);
 
   const togglePlay = (id: string, url: string) => {
     if (playingId === id) {
@@ -622,7 +549,9 @@ export default function AudioTool() {
                           onClick={() => togglePlay(g.id, g.audioUrl!)}
                           className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.accentColor }}
-                          aria-label={playingId === g.id ? "Pause audio" : "Play audio"}
+                          aria-label={
+                            playingId === g.id ? "Pause audio" : "Play audio"
+                          }
                         >
                           {playingId === g.id ? (
                             <Pause size={14} />

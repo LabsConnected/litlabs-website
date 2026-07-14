@@ -1,7 +1,15 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Clock, DollarSign, Search, Sparkles, Star, Zap } from "lucide-react";
+import {
+  ChevronDown,
+  Clock,
+  DollarSign,
+  Search,
+  Sparkles,
+  Star,
+  Zap,
+} from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { CHAT_ROOMS } from "@/lib/chatRooms";
 
@@ -16,12 +24,55 @@ type Model = {
 };
 
 const MODELS: Model[] = [
-  { id: "adaptive", name: "Adaptive", provider: "Auto", cost: "hybrid", speed: "fast", recommended: true, icon: "🧠" },
-  { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash", provider: "Google", cost: "free", speed: "fast", icon: "⚡" },
-  { id: "gpt-4o", name: "GPT-4o", provider: "OpenAI", cost: "paid", speed: "fast", icon: "🔮" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet", provider: "Anthropic", cost: "paid", speed: "medium", icon: "🎯" },
-  { id: "gpt-4o-mini", name: "GPT-4o Mini", provider: "OpenAI", cost: "free", speed: "fast", icon: "⚡" },
-  { id: "ollama-local", name: "Local Ollama", provider: "Local", cost: "free", speed: "medium", icon: "🖥️" },
+  {
+    id: "adaptive",
+    name: "Adaptive",
+    provider: "Auto",
+    cost: "hybrid",
+    speed: "fast",
+    recommended: true,
+    icon: "🧠",
+  },
+  {
+    id: "gemini-2.5-flash",
+    name: "Gemini 2.5 Flash",
+    provider: "Google",
+    cost: "free",
+    speed: "fast",
+    icon: "⚡",
+  },
+  {
+    id: "gpt-4o",
+    name: "GPT-4o",
+    provider: "OpenAI",
+    cost: "paid",
+    speed: "fast",
+    icon: "🔮",
+  },
+  {
+    id: "claude-3.5-sonnet",
+    name: "Claude 3.5 Sonnet",
+    provider: "Anthropic",
+    cost: "paid",
+    speed: "medium",
+    icon: "🎯",
+  },
+  {
+    id: "gpt-4o-mini",
+    name: "GPT-4o Mini",
+    provider: "OpenAI",
+    cost: "free",
+    speed: "fast",
+    icon: "⚡",
+  },
+  {
+    id: "ollama-local",
+    name: "Local Ollama",
+    provider: "Local",
+    cost: "free",
+    speed: "medium",
+    icon: "🖥️",
+  },
 ];
 
 export default function ModelPicker({
@@ -41,17 +92,27 @@ export default function ModelPicker({
   const filtered = useMemo(() => {
     if (!query) return MODELS;
     const q = query.toLowerCase();
-    return MODELS.filter((m) => `${m.name} ${m.provider}`.toLowerCase().includes(q));
+    return MODELS.filter((m) =>
+      `${m.name} ${m.provider}`.toLowerCase().includes(q),
+    );
   }, [query]);
 
   const recent = useMemo(
-    () => recentModels.map((id) => MODELS.find((m) => m.id === id)).filter(Boolean) as Model[],
+    () =>
+      recentModels
+        .map((id) => MODELS.find((m) => m.id === id))
+        .filter(Boolean) as Model[],
     [recentModels],
   );
 
   const relatedRoom = CHAT_ROOMS.find((room) => room.modelId === selected.id);
   const badgeColor =
-    selected.cost === "free" ? "#34d399" : selected.cost === "paid" ? "#f59e0b" : T.accentColor;
+    selected.cost === "free"
+      ? "#34d399"
+      : selected.cost === "paid"
+        ? "#f59e0b"
+        : T.accentColor;
+  const badgeTextColor = selected.cost === "hybrid" ? T.textColor : badgeColor;
 
   return (
     <div className="relative">
@@ -66,14 +127,19 @@ export default function ModelPicker({
       >
         <span className="text-lg">{selected.icon}</span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-sm font-bold">{selected.name}</span>
-          <span className="block text-[10px] uppercase tracking-[0.2em]" style={{ color: T.textMuted }}>
+          <span className="block truncate text-sm font-bold">
+            {selected.name}
+          </span>
+          <span
+            className="block text-[10px] uppercase tracking-[0.2em]"
+            style={{ color: T.textMuted }}
+          >
             {relatedRoom?.label ?? selected.provider}
           </span>
         </span>
         <span
           className="rounded-full px-2 py-1 text-[10px] font-black uppercase"
-          style={{ backgroundColor: badgeColor + "18", color: badgeColor }}
+          style={{ backgroundColor: badgeColor + "22", color: badgeTextColor }}
         >
           {selected.cost}
         </span>
@@ -88,7 +154,10 @@ export default function ModelPicker({
             borderColor: T.borderColor + "28",
           }}
         >
-          <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+          <div
+            className="border-b p-3"
+            style={{ borderColor: T.borderColor + "18" }}
+          >
             <div
               className="flex items-center gap-2 rounded-2xl border px-3 py-2"
               style={{
@@ -98,6 +167,8 @@ export default function ModelPicker({
             >
               <Search size={14} style={{ color: T.textMuted }} />
               <input
+                id="model-picker-search"
+                name="model-picker-search"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Search models..."
@@ -108,7 +179,10 @@ export default function ModelPicker({
           </div>
 
           {!query && recent.length > 0 && (
-            <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+            <div
+              className="border-b p-3"
+              style={{ borderColor: T.borderColor + "18" }}
+            >
               <div
                 className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.18em]"
                 style={{ color: T.textMuted }}
@@ -127,8 +201,13 @@ export default function ModelPicker({
                   >
                     <span className="text-lg">{model.icon}</span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-sm font-bold">{model.name}</span>
-                      <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                      <span className="block text-sm font-bold">
+                        {model.name}
+                      </span>
+                      <span
+                        className="block text-[10px]"
+                        style={{ color: T.textMuted }}
+                      >
                         {model.provider}
                       </span>
                     </span>
@@ -139,7 +218,10 @@ export default function ModelPicker({
           )}
 
           {!query && (
-            <div className="border-b p-3" style={{ borderColor: T.borderColor + "18" }}>
+            <div
+              className="border-b p-3"
+              style={{ borderColor: T.borderColor + "18" }}
+            >
               <div
                 className="mb-2 flex items-center gap-1 text-[10px] font-black uppercase tracking-[0.18em]"
                 style={{ color: T.textMuted }}
@@ -157,8 +239,13 @@ export default function ModelPicker({
                 >
                   <span className="text-lg">{model.icon}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold">{model.name}</span>
-                    <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                    <span className="block text-sm font-bold">
+                      {model.name}
+                    </span>
+                    <span
+                      className="block text-[10px]"
+                      style={{ color: T.textMuted }}
+                    >
                       {model.provider}
                     </span>
                   </span>
@@ -185,14 +272,25 @@ export default function ModelPicker({
                   }}
                   className="flex w-full items-center gap-3 rounded-2xl border px-3 py-2 text-left transition-all hover:scale-[1.01]"
                   style={{
-                    backgroundColor: selectedModel === model.id ? T.accentColor + "16" : "transparent",
-                    borderColor: selectedModel === model.id ? T.accentColor + "30" : "transparent",
+                    backgroundColor:
+                      selectedModel === model.id
+                        ? T.accentColor + "16"
+                        : "transparent",
+                    borderColor:
+                      selectedModel === model.id
+                        ? T.accentColor + "30"
+                        : "transparent",
                   }}
                 >
                   <span className="text-lg">{model.icon}</span>
                   <span className="min-w-0 flex-1">
-                    <span className="block text-sm font-bold">{model.name}</span>
-                    <span className="block text-[10px]" style={{ color: T.textMuted }}>
+                    <span className="block text-sm font-bold">
+                      {model.name}
+                    </span>
+                    <span
+                      className="block text-[10px]"
+                      style={{ color: T.textMuted }}
+                    >
                       {model.provider}
                     </span>
                   </span>

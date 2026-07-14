@@ -867,6 +867,7 @@ export default function ImageTool() {
     inferenceSteps,
     sampler,
     strength,
+    refreshWallet,
   ]);
 
   const handleSaveToGallery = useCallback(
@@ -943,7 +944,7 @@ export default function ImageTool() {
     } finally {
       setClaiming(false);
     }
-  }, []);
+  }, [refreshWallet]);
 
   /* ─── Shared style helpers ─────────────────────────────────────────── */
 
@@ -1161,7 +1162,7 @@ export default function ImageTool() {
         {/* Mobile backdrop */}
         {(mobileLeftOpen || mobileRightOpen) && (
           <div
-            className="fixed inset-0 bg-black/40 z-20 md:hidden"
+            className="fixed inset-0 bg-black/40 z-[10000] md:hidden"
             onClick={() => {
               setMobileLeftOpen(false);
               setMobileRightOpen(false);
@@ -1171,7 +1172,7 @@ export default function ImageTool() {
 
         {/* ── LEFT PANEL: Controls ──────────────────────────────────── */}
         <div
-          className={`shrink-0 flex flex-col overflow-y-auto transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-30 ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`shrink-0 flex flex-col overflow-y-auto transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-[10000] ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{
             width: leftWidth,
             borderRight: `1px solid ${T.borderColor}18`,
@@ -2624,7 +2625,7 @@ export default function ImageTool() {
 
             {/* History sidebar (right) */}
             <div
-              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-30 ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
+              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-[10000] ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
               style={{
                 width: rightWidth,
                 borderLeft: `1px solid ${T.borderColor}15`,

@@ -3,14 +3,42 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { Plus, X, Image as ImageIcon, Music, Video, Bot, Workflow } from "lucide-react";
+import {
+  Plus,
+  X,
+  Image as ImageIcon,
+  Music,
+  Video,
+  Bot,
+  Workflow,
+} from "lucide-react";
 
 const CREATE_OPTIONS = [
-  { label: "Create Image", icon: ImageIcon, href: "/studio?tool=image", color: "#ff00a0" },
-  { label: "Create Music", icon: Music, href: "/studio?tool=audio", color: "#8b5cf6" },
-  { label: "Create Video", icon: Video, href: "/studio?tool=video", color: "#00f0ff" },
+  {
+    label: "Create Image",
+    icon: ImageIcon,
+    href: "/studio?tool=image",
+    color: "#ff00a0",
+  },
+  {
+    label: "Create Music",
+    icon: Music,
+    href: "/studio?tool=audio",
+    color: "#8b5cf6",
+  },
+  {
+    label: "Create Video",
+    icon: Video,
+    href: "/studio?tool=video",
+    color: "#00f0ff",
+  },
   { label: "New Agent", icon: Bot, href: "/agents", color: "#ff9ff3" },
-  { label: "Run Workflow", icon: Workflow, href: "/studio?tool=pipeline", color: "#22c55e" },
+  {
+    label: "Run Workflow",
+    icon: Workflow,
+    href: "/studio?tool=pipeline",
+    color: "#22c55e",
+  },
 ];
 
 export default function CreateFAB() {
@@ -23,7 +51,7 @@ export default function CreateFAB() {
       {/* FAB Button */}
       <button
         onClick={() => setOpen(!open)}
-        className="md:hidden fixed bottom-20 right-4 z-40 flex items-center justify-center w-14 h-14 rounded-full shadow-lg transition-all active:scale-95"
+        className="create-fab md:hidden fixed bottom-20 right-4 z-[200] flex items-center justify-center w-14 h-14 rounded-full shadow-lg transition-all active:scale-95"
         style={{
           backgroundColor: T.accentColor,
           color: T.bgColor,
@@ -36,14 +64,15 @@ export default function CreateFAB() {
       {/* Menu Overlay */}
       {open && (
         <div
-          className="md:hidden fixed inset-0 z-30 bg-black/60 backdrop-blur-sm"
+          className="md:hidden fixed inset-0 z-[10000] bg-black/60 backdrop-blur-sm"
           onClick={() => setOpen(false)}
         />
       )}
 
       {/* Menu */}
       {open && (
-        <div className="md:hidden fixed bottom-36 right-4 z-40 w-56 rounded-xl border shadow-2xl overflow-hidden"
+        <div
+          className="md:hidden fixed bottom-36 right-4 z-[10001] w-56 rounded-xl border shadow-2xl overflow-hidden"
           style={{
             backgroundColor: T.boxBg,
             borderColor: T.borderColor + "30",

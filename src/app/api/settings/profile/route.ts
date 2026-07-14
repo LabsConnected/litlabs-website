@@ -22,30 +22,48 @@ async function getHandler() {
 
     // Auto-create user if not exists (first time sign in)
     if (!user) {
-      // Get user info from Clerk
-      const clerkRes = await fetch(
-        `https://api.clerk.dev/v1/users/${clerkId}`,
-        {
-          headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
-        },
-      );
+      const dbUrl = process.env.NEXT_PUBLIC_SUPABASE_URL ?? "";
+      const dbConfigured = !!dbUrl && !dbUrl.includes("your-project");
 
-      if (!clerkRes.ok) {
-        return NextResponse.json(
-          { error: "Failed to fetch user from Clerk" },
-          { status: 500 },
+      if (dbConfigured && process.env.CLERK_SECRET_KEY) {
+        const clerkRes = await fetch(
+          `https://api.clerk.dev/v1/users/${clerkId}`,
+          {
+            headers: { Authorization: `Bearer ${process.env.CLERK_SECRET_KEY}` },
+          },
         );
+
+        if (clerkRes.ok) {
+          const clerkUser = await clerkRes.json();
+          const email = clerkUser.email_addresses?.[0]?.email_address || "";
+          const name =
+            clerkUser.first_name && clerkUser.last_name
+              ? `${clerkUser.first_name} ${clerkUser.last_name}`
+              : clerkUser.first_name || email.split("@")[0];
+          const result = await getOrCreateUser(clerkId, email, name);
+          user = result.user;
+        }
       }
 
-      const clerkUser = await clerkRes.json();
-      const email = clerkUser.email_addresses?.[0]?.email_address || "";
-      const name =
-        clerkUser.first_name && clerkUser.last_name
-          ? `${clerkUser.first_name} ${clerkUser.last_name}`
-          : clerkUser.first_name || email.split("@")[0];
-
-      const result = await getOrCreateUser(clerkId, email, name);
-      user = result.user;
+      // If DB is unavailable or Clerk lookup failed, return a synthetic profile
+      // so the UI never gets a 500/503 just for loading the user header.
+      if (!user) {
+        return NextResponse.json({
+          user: {
+            id: clerkId,
+            clerk_id: clerkId,
+            email: "",
+            name: "Creator",
+            username: null,
+            avatar_url: null,
+            cover_url: null,
+            bio: null,
+            website: null,
+            location: null,
+            created_at: new Date().toISOString(),
+          },
+        });
+      }
     }
 
     return NextResponse.json({
@@ -63,8 +81,8 @@ async function getHandler() {
         created_at: user.created_at,
       },
     });
-  } catch {
-    // Error fetching profile:
+  } catch (err) {
+    console.error("[api/settings/profile] GET error:", err);
     return NextResponse.json(
       { error: "Failed to fetch profile" },
       { status: 500 },

@@ -1,4 +1,4 @@
-// LiTT Codebase Scanner
+// LiTT's Codebase Scanner
 // Reads key project files and returns a structured summary
 
 import { NextResponse } from "next/server";
@@ -25,6 +25,7 @@ interface ScanResult {
   apiEndpoints: string[];
   agents: string[];
   recentChanges: string[];
+  files: FileSummary[];
   health: {
     envVarsConfigured: number;
     envVarsMissing: string[];
@@ -223,7 +224,7 @@ export async function GET() {
       : `${envVarsMissing.length} env vars missing`;
 
   const result: ScanResult = {
-    projectName: "LiTT Code",
+    projectName: "LiTTree-LabStudios",
     totalFiles: allFiles.length,
     totalLines,
     techStack: Array.from(new Set(techStack)),
@@ -238,6 +239,7 @@ export async function GET() {
     apiEndpoints: apiEndpoints.slice(0, 20),
     agents: agents.slice(0, 10),
     recentChanges,
+    files: allFiles,
     health: {
       envVarsConfigured,
       envVarsMissing,

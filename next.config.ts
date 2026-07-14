@@ -49,6 +49,26 @@ const nextConfig: NextConfig = {
         protocol: "https",
         hostname: "img.youtube.com",
       },
+      {
+        protocol: "https",
+        hostname: "img.clerk.com",
+      },
+      {
+        protocol: "https",
+        hostname: "images.clerk.dev",
+      },
+      {
+        protocol: "https",
+        hostname: "**.r2.cloudflarestorage.com",
+      },
+      {
+        protocol: "https",
+        hostname: "**.googleusercontent.com",
+      },
+      {
+        protocol: "https",
+        hostname: "avatars.githubusercontent.com",
+      },
     ],
   },
 
@@ -81,7 +101,7 @@ const nextConfig: NextConfig = {
           {
             key: "Permissions-Policy",
             value:
-              "geolocation=(), microphone=(), camera=(), payment=(), usb=(), interest-cohort=()",
+              "geolocation=(), microphone=(self), camera=(self), payment=(self), usb=(), interest-cohort=()",
           },
           {
             key: "Cross-Origin-Opener-Policy",
@@ -101,8 +121,8 @@ const nextConfig: NextConfig = {
               "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org",
               "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live https://cdn.emulatorjs.org",
               "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org",
-              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://cdn.emulatorjs.org",
-              "frame-src 'self' https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
+              "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org",
+              "frame-src 'self' https: http: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
               "worker-src 'self' blob: https://litlabs.net",
               "media-src 'self' blob:",
               "object-src 'none'",
@@ -114,16 +134,6 @@ const nextConfig: NextConfig = {
           {
             key: "Strict-Transport-Security",
             value: "max-age=63072000; includeSubDomains; preload",
-          },
-        ],
-      },
-      // Allow browser caching but force revalidation (enables bfcache)
-      {
-        source: "/:path*",
-        headers: [
-          {
-            key: "Cache-Control",
-            value: "no-cache, must-revalidate",
           },
         ],
       },

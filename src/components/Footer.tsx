@@ -58,8 +58,8 @@ export default function Footer() {
               Ready to turn an idea into a live product?
             </div>
             <p className="text-sm opacity-65" style={{ color: C.textColor }}>
-              Start in Studio, browse agents, or jump into the marketplace. Keep
-              the path short and obvious.
+              Start in Studio and jump into the marketplace. Keep the path short
+              and obvious.
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
@@ -69,13 +69,6 @@ export default function Footer() {
               style={{ backgroundColor: C.accentColor, color: C.bgColor }}
             >
               Launch Studio <ArrowUpRight size={14} />
-            </Link>
-            <Link
-              href="/agents"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border transition-all hover:bg-white/5"
-              style={{ borderColor: `${C.borderColor}40`, color: C.textColor }}
-            >
-              Browse Agents
             </Link>
           </div>
         </div>
@@ -173,7 +166,7 @@ export default function Footer() {
               className="text-sm font-black"
               style={{ color: C.headerColor }}
             >
-              LiTT Code
+              LiTTree-LabStudios
             </span>
             <span className="text-xs opacity-60">© 2026</span>
           </div>

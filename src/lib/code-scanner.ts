@@ -1,5 +1,5 @@
 /**
- * Code Scanner System for LiTT Code
+ * Code Scanner System for LiTT
  * VS Code-style codebase analysis and exploration
  */
 

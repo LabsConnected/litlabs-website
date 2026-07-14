@@ -1,12 +1,13 @@
 import type { Metadata, Viewport } from "next";
 import { Inter, JetBrains_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
+import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
-import { GoogleTagManager } from "@next/third-parties/google";
+import { GoogleAnalytics } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./globals.css";
@@ -29,10 +30,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#0d0d0d",
+  themeColor: "#0d0a05",
 };
 
-const META_TITLE = "LiTT Code — AI Agents for Creators";
+const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
 const META_DESC =
   "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
 
@@ -40,7 +41,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTT Code",
+    template: "%s | LiTTree-LabStudios",
   },
   description: META_DESC,
   keywords: [
@@ -53,13 +54,14 @@ export const metadata: Metadata = {
     "automation",
     "artificial intelligence",
     "NoCode",
-    "LiTT Code",
-    "LiTPage",
+    "LiTTree-LabStudios",
+    "LiTLabs",
+    "litlabs.net",
     "AI platform",
   ],
-  authors: [{ name: "LiTT Code", url: SITE_URL }],
-  creator: "LiTT Code",
-  publisher: "LiTT Code",
+  authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
+  creator: "LiTTree-LabStudios",
+  publisher: "LiTTree-LabStudios",
   robots: {
     index: true,
     follow: true,
@@ -69,7 +71,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTT Code",
+    siteName: "LiTTree-LabStudios",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -93,20 +95,22 @@ export const metadata: Metadata = {
       { url: "/logo.webp", sizes: "192x192", type: "image/webp" },
       { url: "/logo.webp", sizes: "512x512", type: "image/webp" },
     ],
-    apple: [
-      { url: "/logo.webp", sizes: "192x192", type: "image/webp" },
-    ],
+    apple: [{ url: "/logo.webp", sizes: "192x192", type: "image/webp" }],
   },
   manifest: "/manifest.json",
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const hasClerk = !!clerkKey && clerkKey.length > 10;
 
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // FloatingChat is mounted inside LayoutShell which already has access to
+  // the provider tree via context. LayoutShell suppresses it on /studio so
+  // the Studio route manages its own voice/chat UI exclusively.
   const shell = (
     <ThemeProvider>
       <ProfileProvider>
@@ -119,14 +123,32 @@ export default function RootLayout({
 
   return (
     <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
-      <GoogleTagManager gtmId="G-0G4JPF3HXG" />
+      <link
+        rel="preconnect"
+        href="https://accounts.dev"
+        crossOrigin="anonymous"
+      />
+      <link
+        rel="preconnect"
+        href="https://clerk.litlabs.net"
+        crossOrigin="anonymous"
+      />
+      <link
+        rel="preconnect"
+        href="https://static.cloudflareinsights.com"
+        crossOrigin="anonymous"
+      />
+      <link rel="dns-prefetch" href="https://accounts.dev" />
+      <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
+      <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
+      <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
-        style={{ backgroundColor: "#0a0a0f" }}
+        style={{ backgroundColor: "#0d0a05" }}
       >
-        {clerkKey ? (
+        {hasClerk ? (
           <ClerkProvider
-            publishableKey={clerkKey}
+            publishableKey={clerkKey!}
             signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
             signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
             signInFallbackRedirectUrl={
@@ -137,39 +159,43 @@ export default function RootLayout({
             }
             appearance={{
               variables: {
-                colorPrimary: "#00f0ff",
-                colorBackground: "#0a0a12",
-                colorText: "#e0e0ff",
-                colorTextSecondary: "#8888aa",
-                colorDanger: "#ff00a0",
-                colorSuccess: "#00ff41",
+                colorPrimary: "#fbbf24",
+                colorBackground: "#0a0a0f",
+                colorText: "#f5e6c8",
+                colorTextSecondary: "#a8916b",
+                colorDanger: "#ef4444",
+                colorSuccess: "#22c55e",
                 borderRadius: "8px",
               },
               elements: {
                 card: {
-                  backgroundColor: "#151520",
-                  border: "1px solid #2a2a45",
-                  boxShadow: "0 4px 20px rgba(0,240,255,0.1)",
+                  backgroundColor: "#1a1510",
+                  border: "1px solid #3d3220",
+                  boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
                 },
                 userButtonPopoverCard: {
-                  backgroundColor: "#151520",
-                  border: "1px solid #2a2a45",
+                  backgroundColor: "#1a1510",
+                  border: "1px solid #3d3220",
                 },
                 userButtonPopoverActionButton: {
                   "&:hover": {
-                    backgroundColor: "rgba(0,240,255,0.1)",
+                    backgroundColor: "rgba(251,191,36,0.1)",
                   },
                 },
                 badge: {
-                  backgroundColor: "#ff00a0",
+                  backgroundColor: "#f59e0b",
                 },
               },
             }}
           >
-            {shell}
+            <ClerkAuthContextProvider clerkAvailable={true}>
+              {shell}
+            </ClerkAuthContextProvider>
           </ClerkProvider>
         ) : (
-          shell
+          <ClerkAuthContextProvider clerkAvailable={false}>
+            {shell}
+          </ClerkAuthContextProvider>
         )}
         <Analytics />
         <SpeedInsights />
