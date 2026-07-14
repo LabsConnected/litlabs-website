@@ -1272,7 +1272,7 @@ function LITTTerminalShellInner({
                           `Help me ${card.title.toLowerCase()} something`,
                         )
                       }
-                      className="group flex min-h-[4.5rem] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2.5 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
+                      className="group flex min-h-18 flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2.5 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
                     >
                       <div className="flex items-center justify-between">
                         <card.icon
