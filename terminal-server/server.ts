@@ -5,22 +5,32 @@ import cors from "cors";
 import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
-import { resolve, normalize } from "path";
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync } from "fs";
+import { isAbsolute, relative, resolve } from "path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "fs";
+import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleJarvisCommand } from "./jarvis-ai";
+import { bearerToken, verifyTerminalToken } from "./auth";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
 const WORKSPACE_ROOT = process.env.TERMINAL_WORKSPACE_ROOT || resolve("/tmp/littree-workspaces");
 const USE_DOCKER = process.env.TERMINAL_USE_DOCKER === "true";
 
+const MAX_READ_SIZE = 2 * 1024 * 1024;
+const MAX_WRITE_SIZE = 1 * 1024 * 1024;
+const MAX_PATH_LENGTH = 4096;
+
+if (process.env.NODE_ENV === "production" && !USE_DOCKER) {
+  throw new Error("TERMINAL_USE_DOCKER=true is required in production");
+}
+
 mkdirSync(WORKSPACE_ROOT, { recursive: true });
 
 const app = express();
 app.use(cors({ origin: ALLOWED_ORIGIN, credentials: true }));
-app.use(express.json());
+app.use(express.json({ limit: "1mb" }));
 
 const server = http.createServer(app);
 
@@ -44,23 +54,10 @@ interface Session {
 const sessions = new Map<string, Session>();
 
 app.get("/health", (_req, res) => {
-  const entries = existsSync(WORKSPACE_ROOT) ? readdirSync(WORKSPACE_ROOT, { withFileTypes: true }) : [];
-  const repoRoot = entries.find((entry) => entry.isDirectory())?.name;
-  const workspace = repoRoot ? resolve(WORKSPACE_ROOT, repoRoot) : WORKSPACE_ROOT;
   res.json({
     ok: true,
-    sessions: sessions.size,
     docker: USE_DOCKER,
-    clerk: Boolean(process.env.CLERK_SECRET_KEY),
-    supabase: Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SERVICE_ROLE_KEY),
-    shells: { ubuntu: process.platform !== "win32", powershell: process.platform === "win32" },
-    workspace: {
-      root: WORKSPACE_ROOT,
-      exists: existsSync(WORKSPACE_ROOT),
-      repoCloned: existsSync(resolve(workspace, ".git")),
-      packageJson: existsSync(resolve(workspace, "package.json")),
-      nodeModules: existsSync(resolve(workspace, "node_modules")),
-    },
+    authConfigured: (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32,
   });
 });
 
@@ -71,16 +68,39 @@ function getUserWorkspace(userId: string) {
 }
 
 function safePath(userId: string, filePath: string) {
+  if (filePath.length > MAX_PATH_LENGTH) {
+    throw new Error("Path too long");
+  }
   const workspace = getUserWorkspace(userId);
-  const target = normalize(resolve(workspace, filePath));
-  if (!target.startsWith(workspace)) {
+  const target = resolve(workspace, filePath);
+  const pathFromWorkspace = relative(workspace, target);
+  if (pathFromWorkspace.startsWith("..") || isAbsolute(pathFromWorkspace)) {
     throw new Error("Invalid path");
   }
   return target;
 }
 
-app.get("/files", (req, res) => {
-  const userId = String(req.query.userId || "dev-user");
+type AuthenticatedRequest = Request & { terminalUserId?: string };
+
+function requireTerminalAuth(
+  req: AuthenticatedRequest,
+  res: Response,
+  next: NextFunction,
+) {
+  try {
+    req.terminalUserId = verifyTerminalToken(
+      bearerToken(req.headers.authorization),
+    ).sub;
+    next();
+  } catch {
+    res.status(401).json({ error: "Unauthorized" });
+  }
+}
+
+app.use("/files", requireTerminalAuth);
+
+app.get("/files", (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
   const dirPath = String(req.query.path || ".");
   try {
     const target = safePath(userId, dirPath);
@@ -94,11 +114,20 @@ app.get("/files", (req, res) => {
   }
 });
 
-app.post("/files/read", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/files/read", (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
   const filePath = String(req.body.path || "");
   try {
     const target = safePath(userId, filePath);
+    const stats = statSync(target);
+    if (!stats.isFile()) {
+      return res.status(400).json({ error: "Not a file" });
+    }
+    if (stats.size > MAX_READ_SIZE) {
+      return res
+        .status(413)
+        .json({ error: `File exceeds maximum read size of ${MAX_READ_SIZE} bytes` });
+    }
     const content = readFileSync(target, "utf-8");
     res.json({ content });
   } catch (err) {
@@ -106,10 +135,15 @@ app.post("/files/read", (req, res) => {
   }
 });
 
-app.post("/files/write", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/files/write", (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
   const filePath = String(req.body.path || "");
   const content = String(req.body.content || "");
+  if (Buffer.byteLength(content, "utf8") > MAX_WRITE_SIZE) {
+    return res
+      .status(413)
+      .json({ error: `Content exceeds maximum write size of ${MAX_WRITE_SIZE} bytes` });
+  }
   try {
     const target = safePath(userId, filePath);
     mkdirSync(resolve(target, ".."), { recursive: true });
@@ -120,9 +154,12 @@ app.post("/files/write", (req, res) => {
   }
 });
 
-app.post("/files/delete", (req, res) => {
-  const userId = String(req.body.userId || "dev-user");
+app.post("/files/delete", (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
   const filePath = String(req.body.path || "");
+  if (!filePath || filePath === ".") {
+    return res.status(400).json({ error: "Refusing to delete workspace root" });
+  }
   try {
     const target = safePath(userId, filePath);
     rmSync(target, { recursive: true, force: true });
@@ -132,9 +169,18 @@ app.post("/files/delete", (req, res) => {
   }
 });
 
+io.use((socket, next) => {
+  try {
+    socket.data.userId = verifyTerminalToken(socket.handshake.auth?.token).sub;
+    next();
+  } catch {
+    next(new Error("Unauthorized"));
+  }
+});
+
 io.on("connection", (socket) => {
-  const userId = String(socket.handshake.auth?.userId || "dev-user");
-  const sessionId = String(socket.handshake.auth?.sessionId || randomUUID());
+  const userId = String(socket.data.userId);
+  const sessionId = randomUUID();
 
   console.log("[Terminal] Connected:", { userId, sessionId });
 

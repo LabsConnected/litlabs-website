@@ -148,6 +148,42 @@ export default function SettingsPage() {
   );
   const [workspaceSaved, setWorkspaceSaved] = useState(false);
   const [themeSaved, setThemeSaved] = useState(false);
+  const [preferenceError, setPreferenceError] = useState<string | null>(null);
+
+  const savePreferences = useCallback(async (updates: Record<string, unknown>) => {
+    setPreferenceError(null);
+    const response = await fetch("/api/settings/preferences", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(updates),
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => ({}));
+      throw new Error(data.error || "Failed to save preferences");
+    }
+  }, []);
+
+  /* Load server preferences for signed-in users; localStorage remains an offline fallback. */
+  useEffect(() => {
+    if (!isSignedIn) return;
+    fetch("/api/settings/preferences")
+      .then((response) => (response.ok ? response.json() : null))
+      .then((data) => {
+        const prefs = data?.preferences;
+        if (!prefs) return;
+        if (typeof prefs.notify_discord === "string") setDiscordWebhook(prefs.notify_discord);
+        if (typeof prefs.notify_alexa === "boolean") setAlexaEnabled(prefs.notify_alexa);
+        if (typeof prefs.notify_email === "boolean") setEmailDigest(prefs.notify_email);
+        if (typeof prefs.workspace_autosave === "boolean") setAutoSaveDrafts(prefs.workspace_autosave);
+        if (typeof prefs.workspace_compact === "boolean") setCompactMode(prefs.workspace_compact);
+        if (typeof prefs.workspace_live_preview === "boolean") setLivePreview(prefs.workspace_live_preview);
+        if (typeof prefs.workspace_telemetry === "boolean") setShowTelemetry(prefs.workspace_telemetry);
+        if (typeof prefs.workspace_default === "string") setDefaultWorkspace(prefs.workspace_default);
+      })
+      .catch(() => {
+        // Keep the localStorage-seeded values when the database is unavailable.
+      });
+  }, [isSignedIn]);
 
   /* Load remote profile once */
   useEffect(() => {
@@ -212,25 +248,45 @@ export default function SettingsPage() {
     setTimeout(() => setKeysSaved(false), 2000);
   }, [keys]);
 
-  const saveNotifications = useCallback(() => {
+  const saveNotifications = useCallback(async () => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("litlabs-notify-discord", discordWebhook);
-    localStorage.setItem("litlabs-notify-alexa", String(alexaEnabled));
-    localStorage.setItem("litlabs-notify-email", String(emailDigest));
-    setNotifSaved(true);
-    setTimeout(() => setNotifSaved(false), 2000);
-  }, [discordWebhook, alexaEnabled, emailDigest]);
+    try {
+      await savePreferences({
+        notify_discord: discordWebhook,
+        notify_alexa: alexaEnabled,
+        notify_email: emailDigest,
+      });
+      localStorage.setItem("litlabs-notify-discord", discordWebhook);
+      localStorage.setItem("litlabs-notify-alexa", String(alexaEnabled));
+      localStorage.setItem("litlabs-notify-email", String(emailDigest));
+      setNotifSaved(true);
+      setTimeout(() => setNotifSaved(false), 2000);
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : "Failed to save notifications");
+    }
+  }, [discordWebhook, alexaEnabled, emailDigest, savePreferences]);
 
-  const saveWorkspace = useCallback(() => {
+  const saveWorkspace = useCallback(async () => {
     if (typeof window === "undefined") return;
-    localStorage.setItem("litlabs-workspace-autosave", String(autoSaveDrafts));
-    localStorage.setItem("litlabs-workspace-compact", String(compactMode));
-    localStorage.setItem("litlabs-workspace-live-preview", String(livePreview));
-    localStorage.setItem("litlabs-workspace-telemetry", String(showTelemetry));
-    localStorage.setItem("litlabs-workspace-default", defaultWorkspace);
-    setWorkspaceSaved(true);
-    setTimeout(() => setWorkspaceSaved(false), 2000);
-  }, [autoSaveDrafts, compactMode, livePreview, showTelemetry, defaultWorkspace]);
+    try {
+      await savePreferences({
+        workspace_autosave: autoSaveDrafts,
+        workspace_compact: compactMode,
+        workspace_live_preview: livePreview,
+        workspace_telemetry: showTelemetry,
+        workspace_default: defaultWorkspace,
+      });
+      localStorage.setItem("litlabs-workspace-autosave", String(autoSaveDrafts));
+      localStorage.setItem("litlabs-workspace-compact", String(compactMode));
+      localStorage.setItem("litlabs-workspace-live-preview", String(livePreview));
+      localStorage.setItem("litlabs-workspace-telemetry", String(showTelemetry));
+      localStorage.setItem("litlabs-workspace-default", defaultWorkspace);
+      setWorkspaceSaved(true);
+      setTimeout(() => setWorkspaceSaved(false), 2000);
+    } catch (error) {
+      setPreferenceError(error instanceof Error ? error.message : "Failed to save workspace preferences");
+    }
+  }, [autoSaveDrafts, compactMode, livePreview, showTelemetry, defaultWorkspace, savePreferences]);
 
   const inputStyle = {
     backgroundColor: `${T.boxBg}80`,
@@ -279,6 +335,15 @@ export default function SettingsPage() {
       icon="⚙️"
     >
       <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 py-6">
+        {preferenceError && (
+          <div
+            role="alert"
+            className="mb-4 rounded-lg border px-3 py-2 text-sm"
+            style={{ color: "#fca5a5", borderColor: "#ef444466", backgroundColor: "#7f1d1d33" }}
+          >
+            {preferenceError}
+          </div>
+        )}
         {/* Wallet strip */}
         <div
           className="mb-6 flex flex-wrap items-center gap-3 p-3 rounded-xl border text-sm"

@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
-import { supabase } from "@/lib/supabase";
+import { getUserWallet } from "@/lib/user-db";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { rateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
+import { isAdmin } from "@/lib/roles";
+import { adjustWalletBalance } from "@/lib/wallet-ledger";
 
 /**
  * POST /api/users/[userId]/credits
@@ -28,16 +30,23 @@ export async function POST(
   }
 
   try {
-    // Verify authentication
     const { userId: clerkId } = await auth();
-    if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    const canMutate = await canMutateBalances(req);
+    if (!canMutate) {
+      return NextResponse.json(
+        { error: clerkId ? "Forbidden" : "Unauthorized" },
+        { status: clerkId ? 403 : 401 },
+      );
     }
 
     const { userId } = await params;
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: "Wallet service unavailable" }, { status: 503 });
+    }
 
     // Resolve the target user's DB ID (userId param could be clerk_id or uuid)
-    const { data: targetUser } = await supabase
+    const { data: targetUser } = await admin
       .from("users")
       .select("id, clerk_id")
       .or(`id.eq.${userId},clerk_id.eq.${userId}`)
@@ -47,14 +56,8 @@ export async function POST(
       return NextResponse.json({ error: "User not found" }, { status: 404 });
     }
 
-    // Only admins or internal services can mutate credit balances.
-    const canMutate = await canMutateBalances(req);
-    if (!canMutate) {
-      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
-    }
-
     const body = await req.json();
-    const amount = Number(body.amount) || 0;
+    const amount = Number(body.amount);
     const reason = typeof body.reason === "string" ? body.reason.trim() : "";
     const idempotencyKey =
       typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
@@ -73,32 +76,29 @@ export async function POST(
       );
     }
 
-    if (amount === 0) {
+    if (!Number.isSafeInteger(amount) || amount === 0 || Math.abs(amount) > 1_000_000) {
       return NextResponse.json(
-        { error: "amount cannot be zero" },
+        { error: "amount must be a non-zero safe integer within allowed limits" },
         { status: 400 },
       );
     }
 
-    // Get current wallet
-    const wallet = await getUserWallet(targetUser.clerk_id);
-    const newBalance = wallet.balance + amount;
-    if (newBalance < 0) {
-      return NextResponse.json(
-        { error: "Insufficient balance", currentBalance: wallet.balance },
-        { status: 400 },
-      );
-    }
-
-    const updated = await updateWalletBalance(targetUser.clerk_id, newBalance);
+    const updated = await adjustWalletBalance({
+      clerkId: targetUser.clerk_id,
+      amount,
+      type: amount > 0 ? "correction" : "spend",
+      reason,
+      idempotencyKey,
+    });
 
     const response = NextResponse.json({
       ok: true,
       credits: updated.balance,
-      previousBalance: wallet.balance,
+      previousBalance: updated.previousBalance,
       change: amount,
       reason,
       idempotencyKey,
+      replayed: updated.replayed,
     });
 
     response.headers.set("X-RateLimit-Limit", "50");
@@ -146,7 +146,11 @@ export async function GET(
     const { userId } = await params;
 
     // Resolve the target user — param could be clerk_id or uuid
-    const { data: targetUser } = await supabase
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: "Wallet service unavailable" }, { status: 503 });
+    }
+    const { data: targetUser } = await admin
       .from("users")
       .select("id, clerk_id")
       .or(`id.eq.${userId},clerk_id.eq.${userId}`)
@@ -157,10 +161,8 @@ export async function GET(
     }
 
     // Only the user themselves or an admin can view credits
-    const ADMIN_CLERK_IDS = (process.env.ADMIN_CLERK_IDS || "").split(",").filter(Boolean);
     const isSelf = clerkId === targetUser.clerk_id;
-    const isAdmin = ADMIN_CLERK_IDS.includes(clerkId);
-    if (!isSelf && !isAdmin) {
+    if (!isSelf && !(await isAdmin())) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 

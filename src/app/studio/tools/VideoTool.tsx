@@ -166,6 +166,7 @@ export default function VideoTool() {
           type: "spend",
           amount: cost,
           reason: `video_${model}`,
+          idempotencyKey: `video:${id}`,
         }),
       });
       await wres.json();

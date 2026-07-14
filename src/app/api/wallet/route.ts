@@ -1,12 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import {
-  getUserWallet,
-  updateWalletBalance,
-  claimDailyBonus,
-} from "@/lib/user-db";
+import { getUserWallet } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
+import { adjustWalletBalance } from "@/lib/wallet-ledger";
 
 /**
  * GET /api/wallet
@@ -59,28 +56,34 @@ async function postHandler(req: NextRequest) {
     /* Spend coins */
     if (body.type === "spend") {
       const amount = typeof body.amount === "number" ? body.amount : 0;
-      if (amount <= 0) {
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      const idempotencyKey =
+        typeof body.idempotencyKey === "string" ? body.idempotencyKey.trim() : "";
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 1_000_000) {
         return NextResponse.json(
           { error: "amount must be a positive number" },
           { status: 400 },
         );
       }
-      const currentWallet = await getUserWallet(clerkId);
-      const newBalance = currentWallet.balance - amount;
-      if (newBalance < 0) {
+      if (reason.length < 3 || idempotencyKey.length < 8) {
         return NextResponse.json(
-          { error: "Insufficient balance", balance: currentWallet.balance },
+          { error: "reason and idempotencyKey are required" },
           { status: 400 },
         );
       }
-      const wallet = await updateWalletBalance(clerkId, newBalance, {
-        absolute: true,
+      const wallet = await adjustWalletBalance({
+        clerkId,
+        amount: -amount,
+        type: "spend",
+        reason,
+        idempotencyKey,
       });
       return NextResponse.json({
         message: `${amount} LiTBit Coins spent`,
         balance: wallet.balance,
         spent: amount,
-        reason: body.reason || "spend",
+        reason,
+        replayed: wallet.replayed,
       });
     }
 
@@ -91,11 +94,21 @@ async function postHandler(req: NextRequest) {
       );
     }
 
-    const claimed = await claimDailyBonus(clerkId, 50);
+    const today = new Date().toISOString().slice(0, 10);
+    const claimed = await adjustWalletBalance({
+      clerkId,
+      amount: 50,
+      type: "earn",
+      reason: "Daily bonus",
+      idempotencyKey: `daily:${clerkId}:${today}`,
+    });
     return NextResponse.json({
-      message: "Daily bonus claimed! +50 LiTBit Coins",
+      message: claimed.replayed
+        ? "Daily bonus already claimed today"
+        : "Daily bonus claimed! +50 LiTBit Coins",
       balance: claimed.balance,
-      last_claim_date: claimed.last_claim_date,
+      last_claim_date: today,
+      replayed: claimed.replayed,
     });
   } catch (error: unknown) {
     if (
@@ -149,21 +162,12 @@ async function putHandler(req: NextRequest) {
       );
     }
 
-    const currentWallet = await getUserWallet(clerkId);
-    const newBalance = currentWallet.balance + body.amount;
-
-    if (newBalance < 0) {
-      return NextResponse.json(
-        {
-          error: "Insufficient balance",
-          currentBalance: currentWallet.balance,
-        },
-        { status: 400 },
-      );
-    }
-
-    const wallet = await updateWalletBalance(clerkId, newBalance, {
-      absolute: true,
+    const wallet = await adjustWalletBalance({
+      clerkId,
+      amount: body.amount,
+      type: "correction",
+      reason: body.reason.trim(),
+      idempotencyKey: body.idempotencyKey.trim(),
     });
 
     return NextResponse.json({
@@ -172,10 +176,11 @@ async function putHandler(req: NextRequest) {
           ? `+${body.amount} LiTBit Coins added`
           : `${Math.abs(body.amount)} LiTBit Coins deducted`,
       balance: wallet.balance,
-      previousBalance: currentWallet.balance,
+      previousBalance: wallet.previousBalance,
       change: body.amount,
       reason: body.reason.trim(),
       idempotencyKey: body.idempotencyKey.trim(),
+      replayed: wallet.replayed,
     });
   } catch {
     // Error updating wallet:

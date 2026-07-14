@@ -10,7 +10,8 @@ import {
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
-import { useAppUser } from "@/hooks/useClerkAuth";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { getTerminalToken } from "@/lib/terminal-client";
 import { Maximize2, Minimize2, RotateCcw, Trash2 } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
@@ -41,12 +42,11 @@ export const TerminalPanel = forwardRef<
   const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
-  const { user, isLoaded } = useAppUser();
-  const userId = user?.id ?? "anonymous";
-  const [sessionId] = useState(() => `session-${Date.now()}`);
+  const { isLoaded, isSignedIn } = useClerkAuth();
 
   useEffect(() => {
-    if (!containerRef.current || !isLoaded) return;
+    if (!containerRef.current || !isLoaded || !isSignedIn) return;
+    let disposed = false;
 
     const term = new Terminal({
       cursorBlink: true,
@@ -91,93 +91,102 @@ export const TerminalPanel = forwardRef<
 
     const wsUrl =
       process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
-    const socket = io(wsUrl, {
-      auth: {
-        userId,
-        sessionId,
-      },
-      transports: ["websocket", "polling"],
-      reconnectionAttempts: 5,
-    });
-
-    socketRef.current = socket;
-
-    socket.on("connect", () => {
-      setConnected(true);
-      onConnectionChange?.(true);
-      term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
-      onLog?.("[WS] Connected to terminal server");
-    });
-
-    socket.on("disconnect", (reason) => {
-      setConnected(false);
-      onConnectionChange?.(false);
-      term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
-      onLog?.(`[WS] Disconnected: ${reason}`);
-    });
-
-    socket.on("session:ready", ({ sessionId: sid }) => {
-      term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
-      onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
-    });
-
-    socket.on("terminal:output", (data: string) => {
-      term.write(data);
-      outputBufferRef.current += data;
-      if (outputBufferRef.current.length > 4000) {
-        outputBufferRef.current = outputBufferRef.current.slice(-4000);
-      }
-      onTerminalOutput?.(outputBufferRef.current);
-    });
-
-    socket.on("terminal:error", (msg: string) => {
-      term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
-      outputBufferRef.current += `\n⚠ ${msg}`;
-      onLog?.(`[ERROR] ${msg}`);
-    });
-
-    term.onData((data) => {
-      if (data === "\r") {
-        const cmd = commandBufferRef.current.trim();
-        if (cmd) {
-          onCommand?.(cmd);
-          if (cmd.startsWith("jarvis ")) {
-            socket.emit("jarvis:command", cmd);
-            commandBufferRef.current = "";
-            return;
-          }
-        }
-        commandBufferRef.current = "";
-      } else if (data === "\u007f") {
-        commandBufferRef.current = commandBufferRef.current.slice(0, -1);
-      } else if (data === "\u0003") {
-        commandBufferRef.current = "";
-      } else {
-        commandBufferRef.current += data;
-      }
-      socket.emit("terminal:input", data);
-    });
-
     const resize = () => {
       fit.fit();
-      socket.emit("terminal:resize", {
+      socketRef.current?.emit("terminal:resize", {
         cols: term.cols,
         rows: term.rows,
       });
     };
 
-    window.addEventListener("resize", resize);
-    resize();
+    void getTerminalToken()
+      .then((token) => {
+        if (disposed) return;
+        const connectedSocket = io(wsUrl, {
+          auth: { token },
+          transports: ["websocket", "polling"],
+          reconnectionAttempts: 5,
+        });
+
+        socketRef.current = connectedSocket;
+
+        connectedSocket.on("connect", () => {
+          setConnected(true);
+          onConnectionChange?.(true);
+          term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+          onLog?.("[WS] Connected to terminal server");
+        });
+
+        connectedSocket.on("disconnect", (reason) => {
+          setConnected(false);
+          onConnectionChange?.(false);
+          term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
+          onLog?.(`[WS] Disconnected: ${reason}`);
+        });
+
+        connectedSocket.on("session:ready", ({ sessionId: sid }) => {
+          term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
+          onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
+        });
+
+        connectedSocket.on("terminal:output", (data: string) => {
+          term.write(data);
+          outputBufferRef.current += data;
+          if (outputBufferRef.current.length > 4000) {
+            outputBufferRef.current = outputBufferRef.current.slice(-4000);
+          }
+          onTerminalOutput?.(outputBufferRef.current);
+        });
+
+        connectedSocket.on("terminal:error", (msg: string) => {
+          term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
+          outputBufferRef.current += `\n⚠ ${msg}`;
+          onLog?.(`[ERROR] ${msg}`);
+        });
+
+        term.onData((data) => {
+          if (data === "\r") {
+            const cmd = commandBufferRef.current.trim();
+            if (cmd) {
+              onCommand?.(cmd);
+              if (cmd.startsWith("jarvis ")) {
+                connectedSocket.emit("jarvis:command", cmd);
+                commandBufferRef.current = "";
+                return;
+              }
+            }
+            commandBufferRef.current = "";
+          } else if (data === "\u007f") {
+            commandBufferRef.current = commandBufferRef.current.slice(0, -1);
+          } else if (data === "\u0003") {
+            commandBufferRef.current = "";
+          } else {
+            commandBufferRef.current += data;
+          }
+          socketRef.current?.emit("terminal:input", data);
+        });
+
+        window.addEventListener("resize", resize);
+        resize();
+      })
+      .catch((error) => {
+        const message =
+          error instanceof Error
+            ? error.message
+            : "Terminal authentication failed";
+        term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
+        onLog?.(`[AUTH] ${message}`);
+      });
 
     return () => {
+      disposed = true;
       window.removeEventListener("resize", resize);
-      socket.disconnect();
+      socketRef.current?.disconnect();
       term.dispose();
     };
   }, [
     isLoaded,
-    userId,
-    sessionId,
+    isSignedIn,
     onLog,
     onCommand,
     onConnectionChange,

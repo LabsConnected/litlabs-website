@@ -520,12 +520,18 @@ function MarketplaceInner() {
     (a) => !newArrivals.find((n) => n.id === a.id),
   );
 
-  const syncWallet = async (amount: number) => {
+  const spendWallet = async (amount: number, reason: string) => {
+    if (amount <= 0) return null;
     try {
       const res = await fetch("/api/wallet", {
-        method: "PUT",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ amount }),
+        body: JSON.stringify({
+          type: "spend",
+          amount,
+          reason,
+          idempotencyKey: `marketplace:${crypto.randomUUID()}`,
+        }),
       });
       const data = await res.json();
       if (res.ok && typeof data.balance === "number") {
@@ -636,15 +642,9 @@ function MarketplaceInner() {
   );
 
   const listForSale = useCallback(async (agentId: string, price: number) => {
-    const earned = Math.floor(price * 0.1);
-    const newBal = await syncWallet(earned);
-    if (newBal === null) {
-      showToast("Listing failed. Could not credit bonus. Try again.", "error");
-      return;
-    }
     setListedAgents((prev) => new Set([...prev, agentId]));
     showToast(
-      `🏪 Agent listed! You earned ${earned} 🪙 listing bonus.`,
+      `🏪 Agent listed at ${formatLbc(price)}. Listing rewards require server verification.`,
       "info",
     );
     setSellModalAgent(null);
@@ -1813,7 +1813,10 @@ function MarketplaceInner() {
                           );
                           return;
                         }
-                        const newBal = await syncWallet(-feat.cost);
+                        const newBal = await spendWallet(
+                          feat.cost,
+                          `marketplace_feature:${feat.title}`,
+                        );
                         if (newBal === null) {
                           showToast(
                             "Transaction failed. Could not deduct coins.",

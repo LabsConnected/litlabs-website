@@ -43,15 +43,19 @@ export function BuilderPanel({
   const [scan, setScan] = useState<ScanData | null>(null);
   const [scanning, setScanning] = useState(false);
   const [building, setBuilding] = useState(false);
+  const [buildOutput, setBuildOutput] = useState<string[]>([]);
+  const [error, setError] = useState<string | null>(null);
 
   const runScan = async () => {
     setScanning(true);
+    setError(null);
     try {
       const res = await fetch("/api/litt/scan");
       const data = await res.json();
+      if (!res.ok) throw new Error(data.error || "Scan failed");
       setScan(data);
-    } catch {
-      // silent
+    } catch (scanError) {
+      setError(scanError instanceof Error ? scanError.message : "Scan failed");
     } finally {
       setScanning(false);
     }
@@ -59,15 +63,29 @@ export function BuilderPanel({
 
   const runBuild = async () => {
     setBuilding(true);
+    setError(null);
+    setBuildOutput(["Starting production build…"]);
     try {
       const res = await fetch("/api/litt/command", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ command: "pnpm build" }),
+        body: JSON.stringify({ action: "build" }),
       });
-      await res.json();
-    } catch {
-      // silent
+      const data = (await res.json()) as {
+        output?: string;
+        error?: string;
+        durationMs?: number;
+      };
+      const output = data.output?.split(/\r?\n/).filter(Boolean) ?? [];
+      setBuildOutput([
+        ...output,
+        res.ok
+          ? `Build passed in ${Math.round((data.durationMs ?? 0) / 1000)}s`
+          : data.error || "Build failed",
+      ]);
+      if (!res.ok) throw new Error(data.error || "Build failed");
+    } catch (buildError) {
+      setError(buildError instanceof Error ? buildError.message : "Build failed");
     } finally {
       setBuilding(false);
     }
@@ -81,6 +99,12 @@ export function BuilderPanel({
           Builder
         </span>
       </div>
+
+      {error ? (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/10 px-2 py-1.5 text-[10px] text-red-300">
+          {error}
+        </div>
+      ) : null}
 
       {/* Quick actions */}
       <div className="grid grid-cols-3 gap-2">
@@ -193,10 +217,10 @@ export function BuilderPanel({
           Build log
         </div>
         <div className="flex-1 min-h-0 space-y-1 overflow-y-auto rounded-xl border border-neutral-800/60 bg-neutral-950 p-2 font-mono text-[9px] text-neutral-300">
-          {logs.length === 0 ? (
+          {logs.length === 0 && buildOutput.length === 0 ? (
             <div className="text-neutral-500">No build output yet.</div>
           ) : (
-            logs.slice(-12).map((log, i) => (
+            [...logs, ...buildOutput].slice(-12).map((log, i) => (
               <div key={i} className="break-all">
                 {log}
               </div>

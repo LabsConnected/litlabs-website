@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useAppUser } from "@/hooks/useClerkAuth";
+import { terminalAuthHeaders } from "@/lib/terminal-client";
 import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
 
 interface FileNode {
@@ -17,16 +17,19 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({ onOpenFile }: FileExplorerProps) {
-  const { user } = useAppUser();
-  const userId = user?.id ?? "anonymous";
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+  const wsUrl =
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+    "http://localhost:4001";
 
   const fetchEntries = useCallback(
     async (path: string) => {
-      const res = await fetch(`${wsUrl}/files?userId=${encodeURIComponent(userId)}&path=${encodeURIComponent(path)}`);
+      const res = await fetch(`${wsUrl}/files?path=${encodeURIComponent(path)}`, {
+        headers: await terminalAuthHeaders(),
+      });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
       return (data.entries as { name: string; type: "folder" | "file" }[]).map((entry) => ({
@@ -34,7 +37,7 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
         path: `${path === "." ? "" : path}/${entry.name}`.replace(/^\//, ""),
       }));
     },
-    [userId, wsUrl]
+    [wsUrl]
   );
 
   const loadRoot = useCallback(async () => {
@@ -103,8 +106,8 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
     try {
       const res = await fetch(`${wsUrl}/files/write`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, path: name, content: "" }),
+        headers: await terminalAuthHeaders(),
+        body: JSON.stringify({ path: name, content: "" }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -119,8 +122,8 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
     try {
       const res = await fetch(`${wsUrl}/files/delete`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, path }),
+        headers: await terminalAuthHeaders(),
+        body: JSON.stringify({ path }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);

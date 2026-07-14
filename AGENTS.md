@@ -73,5 +73,6 @@ Run `bash scripts/setup-env.sh` to configure Vercel environment variables intera
 
 ## CI
 
-Single workflow: `.github/workflows/lighthouse.yml` — runs Lighthouse on `litlabs.net`
-on push/PR to main. No build/test/lint CI steps.
+GitHub Actions includes build/type-check, terminal deployment, and Lighthouse workflows.
+The build workflow is the required quality gate for pull requests and should run lint and
+tests in addition to TypeScript and the production build.

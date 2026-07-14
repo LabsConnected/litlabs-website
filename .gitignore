@@ -19,8 +19,9 @@
 /.next/
 /out/
 
-# Production
+# Build artifacts
 /build
+terminal-server/dist/
 
 # Misc
 .DS_Store

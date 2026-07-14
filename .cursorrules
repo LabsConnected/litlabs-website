@@ -10,7 +10,7 @@
 
 [PROJECT_TRUTH]
 - This is a multi-agent AI app: LiTTree Lab Studios.
-- Core subsystems live in src/lib/ — see `jarvis.ts`, `AgentOrchestrator.ts`,
+- Core subsystems live in src/lib/ — see `litt.ts`, `AgentOrchestrator.ts`,
   `director-graph.ts`, `agent-logger.ts`, and the `supabase*.ts` files. Do not invent
   files that don't exist.
 - Git remote: https://github.com/LabsConnected/litlabs-website
@@ -21,7 +21,7 @@
 2. `pnpm` is the only allowed package manager (see `packageManager` in package.json).
 3. The TypeScript language server can lag behind new files. If a freshly created
    file is not yet indexed, prefer relative imports to bypass stale `@/...` alias
-   resolution — see `src/app/(dashboard)/layout.tsx` for the pattern.
+   resolution.
 4. Composer / Agent chat should answer questions with concrete `dir` / `Get-ChildItem`
    evidence, not assumptions.
 

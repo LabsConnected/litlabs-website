@@ -11,7 +11,7 @@
   "instructions": {
     "setup": "Use GitHub Codespaces environment. Do not use local WSL for heavy builds.",
     "workflow": "Work from main branch. Create PRs for changes.",
-    "localRole": "Use local PC only for small edits, testing /jarvis, reviewing changes, and emergency fixes.",
+    "localRole": "Use local PC only for small edits, testing /litt, reviewing changes, and emergency fixes.",
     "heavyBuilds": "Use Codespaces for /studio page and other heavy builds."
   },
   "paths": {

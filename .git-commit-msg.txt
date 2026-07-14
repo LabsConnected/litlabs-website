@@ -1,12 +1,25 @@
-security(api): close credit-minting and add auth to admin/state/director routes
+security: harden terminal/auth, wallet ledger, scanner/builder workflow
 
-- Restrict credit/wallet balance mutation to admins and internal services
-  via new `canMutateBalances` helper (`src/lib/authz.ts`).
-- Require `reason` and `idempotencyKey` for all credit/wallet adjustments.
-- Enforce admin-only access on `POST /api/tracks`.
-- Require signed-in user on `GET /api/ha/state`.
-- Authenticate `POST /api/director/plan` and replace `x-forwarded-host` SSRF
-  vector with `URL.origin` from the incoming request.
+- Terminal server now requires signed `TERMINAL_AUTH_SECRET` tokens on all
+  `/files` HTTP routes and Socket.IO connections; userId is derived from the
+  token, not client input. Adds file-size, path-length, and JSON-body limits.
+- Production terminal sessions require `TERMINAL_USE_DOCKER=true`.
+- Wallet/credit mutations now use an immutable, idempotent transaction ledger
+  via `adjust_wallet_balance` RPC and `src/lib/wallet-ledger.ts`.
+- Close arbitrary-balance minting: only admins/internal services may credit
+  wallets; spending/daily claims remain authenticated but go through the ledger.
+- Add admin-only file-read endpoint at `/api/litt/file` with path allow-listing.
+- Rewrite `/api/litt/scan` to return real metadata, deduplicate files, and expose
+  health/checks metadata.
+- Rewrite `/api/litt/command` as an authenticated, admin-only action runner
+  (typecheck/lint/test/build/terminal-build).
+- Update BuilderPanel to send `{ action: "build" }` to `/api/litt/command`.
+- Add `/api/terminal/token` issuer and client helpers; terminal components now
+  send bearer tokens for file and shell operations.
+- Add auth to `/api/tracks` POST, `/api/ha/state` GET, and `/api/director/plan`
+  POST; remove SSRF-prone `x-forwarded-host` usage in director.
+- Drop accidentally committed build/output artifacts and ignore
+  `terminal-server/dist/`.
 
 Generated with [Devin](https://devin.ai)
 

@@ -2,7 +2,7 @@
 
 import { startTransition, useState, useEffect, useCallback } from "react";
 import Editor from "@monaco-editor/react";
-import { useUser } from "@clerk/nextjs";
+import { terminalAuthHeaders } from "@/lib/terminal-client";
 import { Save, FileCode, X, Loader2 } from "lucide-react";
 
 interface CodeEditorProps {
@@ -16,15 +16,15 @@ export function CodeEditor({
   onClose,
   onContentChange,
 }: CodeEditorProps) {
-  const { user } = useUser();
-  const userId = user?.id ?? "anonymous";
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState("");
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const wsUrl =
-    process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+    "http://localhost:4001";
 
   const loadFile = useCallback(async () => {
     if (!filePath) return;
@@ -35,8 +35,8 @@ export function CodeEditor({
     try {
       const res = await fetch(`${wsUrl}/files/read`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, path: filePath }),
+        headers: await terminalAuthHeaders(),
+        body: JSON.stringify({ path: filePath }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
@@ -47,7 +47,7 @@ export function CodeEditor({
     } finally {
       setLoading(false);
     }
-  }, [filePath, userId, wsUrl]);
+  }, [filePath, wsUrl]);
 
   useEffect(() => {
     loadFile(); // eslint-disable-line react-hooks/set-state-in-effect
@@ -60,8 +60,8 @@ export function CodeEditor({
     try {
       const res = await fetch(`${wsUrl}/files/write`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, path: filePath, content }),
+        headers: await terminalAuthHeaders(),
+        body: JSON.stringify({ path: filePath, content }),
       });
       const data = await res.json();
       if (data.error) throw new Error(data.error);
