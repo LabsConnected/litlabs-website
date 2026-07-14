@@ -155,7 +155,7 @@ services:
 - **Phase 1-4 (done):** xterm UI, WebSocket backend, node-pty, auth guard.
 - **Phase 5 (done):** Command history persistence via `/api/terminal/history`.
 - **Phase 6 (done):** Docker sandboxing files and scripts.
-- **Phase 7 (done):** LiTT AI helper with `brain <command>` terminal commands.
+- **Phase 7 (done):** LiTT AI helper with `litt-code <command>` terminal commands.
 - **Phase 8 (done):** File explorer + Monaco editor.
 - **Phase 9 (done):** Deploy button + agent runner.
 - **Phase 10 (done):** Admin roles + usage limits.

@@ -1,0 +1,13 @@
+refactor(terminal): align terminal AI naming with litt-code and add jarvis shim
+
+- Rename `terminal-server/littree-brain.ts` → `terminal-server/litt-code.ts`.
+- Update socket event from `brain:command` to `litt-code:command` and UI label
+  from "LiTT Brain" to "LiTT-Code".
+- Update `TerminalPanel` to emit `litt-code:command` for `litt-code <command>`.
+- Re-add `terminal-server/jarvis-ai.ts` as a compatibility shim that re-exports
+  the LiTT-Code helpers under the legacy Jarvis names.
+- Update `SETUP.md` to reference the `litt-code <command>` terminal command.
+
+Generated with [Devin](https://devin.ai)
+
+Co-Authored-By: Devin <158243242+devin-ai-integration[bot]@users.noreply.github.com>
