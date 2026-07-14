@@ -384,7 +384,7 @@ function AttachmentStrip({
         return (
           <div
             key={`${att.name}-${idx}`}
-            className="group relative flex items-center gap-2 overflow-hidden rounded-lg border border-white/10 bg-white/[0.03] pr-7"
+            className="group relative flex items-center gap-2 overflow-hidden rounded-lg border border-white/10 bg-white/3 pr-7"
           >
             {isImage ? (
               // eslint-disable-next-line @next/next/no-img-element
@@ -1076,7 +1076,7 @@ function LITTTerminalShellInner({
             <button
               onClick={clearChat}
               title="Start a new chat"
-              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/[0.02] px-2 py-1 text-[10px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
+              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/2 px-2 py-1 text-[10px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
             >
               <Trash2 size={10} />
               New Chat
@@ -1334,7 +1334,7 @@ function LITTTerminalShellInner({
                           `Help me ${card.title.toLowerCase()} something`,
                         )
                       }
-                      className="group flex min-h-20 flex-col gap-1.5 rounded-xl border border-white/5 bg-white/[0.02] p-3 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:gap-2"
+                      className="group flex min-h-20 flex-col gap-1.5 rounded-xl border border-white/5 bg-white/2 p-3 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:gap-2"
                     >
                       <div className="flex items-center justify-between">
                         <card.icon
@@ -1396,7 +1396,7 @@ function LITTTerminalShellInner({
                           isUser ? "items-end" : "items-start"
                         }`}
                       >
-                        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
+                        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
                           {isUser ? (
                             message.content
                           ) : message.type === "image" && message.mediaUrl ? (
@@ -1480,7 +1480,7 @@ function LITTTerminalShellInner({
                     LiTT is thinking…
                     <button
                       onClick={cancel}
-                      className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/[0.02] px-1.5 py-0.5 text-[9px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
+                      className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
                       title="Cancel (Esc)"
                     >
                       <Square size={8} /> Stop
@@ -1557,7 +1557,7 @@ function LITTTerminalShellInner({
                     aria-label="Message LITT"
                     placeholder="Ask LITT to build, inspect, debug, generate, or control this workspace..."
                     rows={1}
-                    className="max-h-32 min-h-12 w-full resize-none rounded-xl border border-white/10 bg-white/[0.03] py-3 pl-4 pr-12 text-base leading-6 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/[0.05] sm:min-h-11 sm:py-2.5 sm:text-xs sm:leading-5"
+                    className="max-h-32 min-h-12 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-3 pl-4 pr-12 text-base leading-6 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/[0.05] sm:min-h-11 sm:py-2.5 sm:text-xs sm:leading-5"
                   />
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
@@ -1589,7 +1589,7 @@ function LITTTerminalShellInner({
                   <button
                     key={chip.id}
                     onClick={() => handleChip(chip.label)}
-                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
                     <span className="text-neutral-600">{chip.desc}</span>
@@ -1669,7 +1669,7 @@ function LITTTerminalShellInner({
                     <span>128K Context</span>
                   </div>
                 </div>
-                <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+                <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2">
                   <span className="text-[10px] font-bold text-neutral-400">
                     Voice
                   </span>
@@ -1695,7 +1695,7 @@ function LITTTerminalShellInner({
                 <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
                   Recent Transcript
                 </div>
-                <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/2 p-3">
                   {messages.length === 0 ? (
                     <div className="text-[10px] leading-relaxed text-neutral-500">
                       Hey, I am {persona.name}.
@@ -1731,7 +1731,7 @@ function LITTTerminalShellInner({
                     <button
                       key={q}
                       onClick={() => void send(q)}
-                      className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                      className="rounded-full border border-white/10 bg-white/3 px-2.5 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                     >
                       {q}
                     </button>
