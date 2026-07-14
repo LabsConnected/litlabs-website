@@ -168,7 +168,7 @@ export default function ChatShell({
 
   return (
     <div
-      className="relative flex h-[100dvh] w-full flex-col overflow-hidden bg-[#0a0a0f]"
+      className="relative flex h-dvh w-full flex-col overflow-hidden bg-[#0a0a0f]"
       style={{ color: T.textColor }}
     >
       {/* Animated circuit background */}
@@ -227,7 +227,7 @@ export default function ChatShell({
         {isEmpty ? (
           <div className="mx-auto flex h-full max-w-2xl flex-col justify-center gap-5">
             {/* Mission HUD */}
-            <div className="rounded-2xl border border-white/10 bg-white/[0.03] p-4 backdrop-blur-sm">
+            <div className="rounded-2xl border border-white/10 bg-white/3 p-4 backdrop-blur-sm">
               <div className="mb-3 flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Target size={14} style={{ color: T.accentColor }} />
@@ -263,7 +263,7 @@ export default function ChatShell({
                   <button
                     key={s.label}
                     onClick={() => void onSend(s.label)}
-                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.03] px-2.5 py-2 text-[10px] font-bold transition hover:bg-white/5"
+                    className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/3 px-2.5 py-2 text-[10px] font-bold transition hover:bg-white/5"
                   >
                     <s.icon size={12} style={{ color: T.accentColor }} />
                     {s.label}
@@ -277,7 +277,7 @@ export default function ChatShell({
               {COMPANIONS.map((c) => (
                 <div
                   key={c.name}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] p-2.5"
+                  className="rounded-xl border border-white/10 bg-white/3 p-2.5"
                 >
                   <div className="mb-2 flex items-center gap-2">
                     <c.icon size={15} style={{ color: c.color }} />
@@ -296,7 +296,7 @@ export default function ChatShell({
                 <button
                   key={item}
                   onClick={() => void onSend(item)}
-                  className="shrink-0 rounded-full border border-white/10 bg-white/[0.03] px-3 py-2 text-[10px] font-medium transition hover:bg-white/5"
+                  className="shrink-0 rounded-full border border-white/10 bg-white/3 px-3 py-2 text-[10px] font-medium transition hover:bg-white/5"
                 >
                   {item}
                 </button>
