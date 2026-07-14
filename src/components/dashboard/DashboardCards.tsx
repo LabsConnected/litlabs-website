@@ -7,8 +7,9 @@ import { Gamepad2, Clapperboard, Play, ExternalLink } from "lucide-react";
 import { GAMES, WATCH, TOOLS, type IconComponent } from "./dashboard-data";
 import dynamic from "next/dynamic";
 import { useState } from "react";
-import SocialFeed from "@/components/SocialFeed";
 import MusicPlayer from "./MusicPlayer";
+import { OwnerStats } from "./OwnerStats";
+import { FacebookFeed } from "./FacebookFeed";
 import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
 
@@ -674,10 +675,26 @@ export function CenterStage({
                 className="text-xs font-black uppercase tracking-widest"
                 style={{ color: T.textMuted }}
               >
-                Community Feed
+                Realtime Stats
               </span>
             </div>
-            <SocialFeed embedded />
+            <OwnerStats />
+          </div>
+
+          <div>
+            <div className="flex items-center gap-2 mb-3">
+              <div
+                className="w-1 h-4 rounded-full"
+                style={{ backgroundColor: T.accentColor }}
+              />
+              <span
+                className="text-xs font-black uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
+                Facebook Feed
+              </span>
+            </div>
+            <FacebookFeed />
           </div>
         </div>
       );
