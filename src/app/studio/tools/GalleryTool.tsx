@@ -399,271 +399,286 @@ export default function GalleryTool() {
   ];
 
   return (
-    <div className="p-4 h-full overflow-y-auto studio-scroll">
-      <div className="flex items-center justify-between mb-3">
-        <div className="flex items-center gap-2">
-          <LayoutGrid size={14} style={{ color: T.accentColor }} />
-          <span
-            className="text-xs font-bold uppercase tracking-widest"
-            style={{ color: T.textMuted }}
-          >
-            Asset Bucket
-          </span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div
-            className="text-[10px] opacity-60"
-            style={{ color: T.textMuted }}
-          >
-            {filteredItems.length} items
+    <div className="h-full overflow-y-auto studio-scroll">
+      <div
+        className="sticky top-0 z-20 border-b px-4 py-3 backdrop-blur-md"
+        style={{
+          backgroundColor: T.bgColor + "ee",
+          borderColor: T.borderColor + "20",
+        }}
+      >
+        <div className="flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <LayoutGrid size={16} style={{ color: T.accentColor }} />
+            <span
+              className="text-sm font-bold uppercase tracking-widest"
+              style={{ color: T.textMuted }}
+            >
+              Asset Bucket
+            </span>
           </div>
-          <button
-            onClick={() => setShowShare((v) => !v)}
-            className="flex items-center gap-1 px-2.5 py-1 rounded-md text-[10px] font-bold transition-all"
+          <div className="flex items-center gap-2">
+            <div className="text-xs opacity-80" style={{ color: T.textMuted }}>
+              {filteredItems.length} items
+            </div>
+            <button
+              onClick={() => setShowShare((v) => !v)}
+              className="flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-bold transition-all"
+              style={{
+                backgroundColor: showShare
+                  ? T.accentColor
+                  : T.accentColor + "15",
+                color: showShare ? T.bgColor : T.accentColor,
+                border: `1px solid ${T.accentColor}40`,
+              }}
+            >
+              <Plus size={12} /> Share Video
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <div className="px-4 pb-24 pt-3">
+        {showShare && (
+          <div
+            className="mb-4 p-3 rounded-xl border"
             style={{
-              backgroundColor: showShare ? T.accentColor : T.accentColor + "15",
-              color: showShare ? T.bgColor : T.accentColor,
-              border: `1px solid ${T.accentColor}40`,
+              borderColor: T.accentColor + "30",
+              backgroundColor: T.accentColor + "08",
             }}
           >
-            <Plus size={10} /> Share Video
-          </button>
-        </div>
-      </div>
-
-      {showShare && (
-        <div
-          className="mb-4 p-3 rounded-xl border"
-          style={{
-            borderColor: T.accentColor + "30",
-            backgroundColor: T.accentColor + "08",
-          }}
-        >
-          <div
-            className="text-[10px] font-bold uppercase tracking-widest mb-2"
-            style={{ color: T.accentColor }}
-          >
-            Share a Video
-          </div>
-          <div className="flex flex-col gap-2">
-            <input
-              value={shareForm.videoUrl}
-              onChange={(e) =>
-                setShareForm((f) => ({ ...f, videoUrl: e.target.value }))
-              }
-              placeholder="YouTube URL  (e.g. https://youtu.be/...)"
-              className="w-full px-2.5 py-1.5 rounded-md text-xs outline-none"
-              style={{
-                backgroundColor: T.bgColor,
-                border: `1px solid ${T.borderColor}40`,
-                color: T.textColor,
-              }}
-            />
-            <div className="flex gap-2">
-              <input
-                value={shareForm.title}
-                onChange={(e) =>
-                  setShareForm((f) => ({ ...f, title: e.target.value }))
-                }
-                placeholder="Title (optional)"
-                className="flex-1 px-2.5 py-1.5 rounded-md text-xs outline-none"
-                style={{
-                  backgroundColor: T.bgColor,
-                  border: `1px solid ${T.borderColor}40`,
-                  color: T.textColor,
-                }}
-              />
-              <input
-                value={shareForm.artist}
-                onChange={(e) =>
-                  setShareForm((f) => ({ ...f, artist: e.target.value }))
-                }
-                placeholder="Your name"
-                className="flex-1 px-2.5 py-1.5 rounded-md text-xs outline-none"
-                style={{
-                  backgroundColor: T.bgColor,
-                  border: `1px solid ${T.borderColor}40`,
-                  color: T.textColor,
-                }}
-              />
-            </div>
-            <div className="flex gap-2 justify-end">
-              <button
-                onClick={() => setShowShare(false)}
-                className="px-3 py-1 rounded-md text-[10px]"
-                style={{
-                  color: T.textMuted,
-                  border: `1px solid ${T.borderColor}30`,
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                onClick={handleShareVideo}
-                disabled={!shareForm.videoUrl.trim() || isSharing}
-                className="flex items-center gap-1 px-3 py-1 rounded-md text-[10px] font-bold disabled:opacity-40"
-                style={{ backgroundColor: T.accentColor, color: T.bgColor }}
-              >
-                {isSharing ? (
-                  <Loader2 size={10} className="animate-spin" />
-                ) : (
-                  <Film size={10} />
-                )}{" "}
-                Share
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      <div className="flex flex-wrap items-center gap-2 mb-4">
-        <div className="flex gap-1 flex-wrap">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className="px-2.5 py-1 rounded-md text-[10px] font-bold transition-all"
-              style={{
-                border: `1px solid ${activeTab === tab.id ? T.accentColor + "40" : T.borderColor + "30"}`,
-                backgroundColor:
-                  activeTab === tab.id ? T.accentColor + "12" : "transparent",
-                color:
-                  activeTab === tab.id ? T.accentColor : T.textColor + "80",
-              }}
-            >
-              {tab.label}
-            </button>
-          ))}
-        </div>
-        <div
-          className="flex items-center gap-1.5 px-2 py-1 rounded-md border ml-auto"
-          style={{
-            borderColor: T.borderColor + "30",
-            backgroundColor: T.bgColor,
-          }}
-        >
-          <Search size={12} style={{ color: T.textMuted }} />
-          <input
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            placeholder="Search assets..."
-            className="bg-transparent text-xs outline-none w-28"
-            style={{ color: T.textColor }}
-          />
-        </div>
-      </div>
-
-      {filteredItems.length === 0 ? (
-        <div className="text-center py-16 opacity-40">
-          <div className="text-3xl mb-3">🪣</div>
-          <div className="text-xs">Your bucket is empty.</div>
-          <div className="text-[10px] mt-1" style={{ color: T.textMuted }}>
-            Generate images, video, or audio to fill it.
-          </div>
-        </div>
-      ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
-          {filteredItems.map((item) => (
             <div
-              key={item.id}
-              onClick={() => {
-                if (item.videoUrl) {
-                  window.open(item.videoUrl, "_blank", "noopener,noreferrer");
-                } else {
-                  setSelectedItem(item);
-                }
-              }}
-              className="border rounded-xl overflow-hidden group cursor-pointer transition-all duration-200 hover:scale-[1.02]"
-              style={{
-                borderColor: T.borderColor + "25",
-                backgroundColor: T.boxBg + "80",
-              }}
+              className="text-[10px] font-bold uppercase tracking-widest mb-2"
+              style={{ color: T.accentColor }}
             >
-              <div className="relative aspect-square overflow-hidden bg-black/40">
-                {item.imageUrl ? (
-                  <>
-                    {/* eslint-disable-next-line @next/next/no-img-element */}
-                    <img
-                      src={item.imageUrl}
-                      alt={item.title}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  </>
-                ) : item.videoUrl ? (
-                  <video
-                    src={item.videoUrl}
-                    className="w-full h-full object-cover"
-                    muted
-                  />
-                ) : item.audioUrl ? (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <Music
-                      size={24}
-                      style={{ color: sourceColor(item.source), opacity: 0.5 }}
-                    />
-                  </div>
-                ) : (
-                  <div className="w-full h-full flex items-center justify-center">
-                    <ImageIcon
-                      size={24}
-                      style={{ color: sourceColor(item.source), opacity: 0.5 }}
-                    />
-                  </div>
-                )}
-                {item.videoUrl && (
-                  <div
-                    className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
-                  >
-                    <ExternalLink size={22} style={{ color: "#fff" }} />
-                  </div>
-                )}
-                <div
-                  className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+              Share a Video
+            </div>
+            <div className="flex flex-col gap-2">
+              <input
+                value={shareForm.videoUrl}
+                onChange={(e) =>
+                  setShareForm((f) => ({ ...f, videoUrl: e.target.value }))
+                }
+                placeholder="YouTube URL  (e.g. https://youtu.be/...)"
+                className="w-full px-2.5 py-1.5 rounded-md text-xs outline-none"
+                style={{
+                  backgroundColor: T.bgColor,
+                  border: `1px solid ${T.borderColor}40`,
+                  color: T.textColor,
+                }}
+              />
+              <div className="flex gap-2">
+                <input
+                  value={shareForm.title}
+                  onChange={(e) =>
+                    setShareForm((f) => ({ ...f, title: e.target.value }))
+                  }
+                  placeholder="Title (optional)"
+                  className="flex-1 px-2.5 py-1.5 rounded-md text-xs outline-none"
                   style={{
-                    backgroundColor: "rgba(0,0,0,0.7)",
-                    color: sourceColor(item.source),
+                    backgroundColor: T.bgColor,
+                    border: `1px solid ${T.borderColor}40`,
+                    color: T.textColor,
+                  }}
+                />
+                <input
+                  value={shareForm.artist}
+                  onChange={(e) =>
+                    setShareForm((f) => ({ ...f, artist: e.target.value }))
+                  }
+                  placeholder="Your name"
+                  className="flex-1 px-2.5 py-1.5 rounded-md text-xs outline-none"
+                  style={{
+                    backgroundColor: T.bgColor,
+                    border: `1px solid ${T.borderColor}40`,
+                    color: T.textColor,
+                  }}
+                />
+              </div>
+              <div className="flex gap-2 justify-end">
+                <button
+                  onClick={() => setShowShare(false)}
+                  className="px-3 py-1 rounded-md text-[10px]"
+                  style={{
+                    color: T.textMuted,
+                    border: `1px solid ${T.borderColor}30`,
                   }}
                 >
-                  {sourceIcon(item.source)}{" "}
-                  {item.videoUrl ? "video" : item.source}
-                </div>
-                {(item.source === "image" ||
-                  item.source === "video" ||
-                  item.source === "audio") && (
-                  <button
-                    onClick={(e) => handleDelete(item.id, e)}
-                    className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
-                    style={{
-                      backgroundColor: "rgba(255,0,0,0.7)",
-                      color: "white",
-                    }}
-                  >
-                    <Trash2 size={10} />
-                  </button>
-                )}
-              </div>
-              <div className="px-2.5 py-2">
-                <div
-                  className="text-[11px] font-bold truncate"
-                  style={{ color: T.headerColor }}
+                  Cancel
+                </button>
+                <button
+                  onClick={handleShareVideo}
+                  disabled={!shareForm.videoUrl.trim() || isSharing}
+                  className="flex items-center gap-1 px-3 py-1 rounded-md text-[10px] font-bold disabled:opacity-40"
+                  style={{ backgroundColor: T.accentColor, color: T.bgColor }}
                 >
-                  {item.title}
-                </div>
-                <div className="flex items-center justify-between mt-1">
-                  <span
-                    className="text-[9px] opacity-50"
-                    style={{ color: T.textMuted }}
-                  >
-                    {item.artist} · {item.createdAt}
-                  </span>
-                </div>
+                  {isSharing ? (
+                    <Loader2 size={10} className="animate-spin" />
+                  ) : (
+                    <Film size={10} />
+                  )}{" "}
+                  Share
+                </button>
               </div>
             </div>
-          ))}
+          </div>
+        )}
+
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2 mb-4">
+          <div className="flex gap-1.5 overflow-x-auto scrollbar-none pb-1 sm:pb-0">
+            {tabs.map((tab) => (
+              <button
+                key={tab.id}
+                onClick={() => setActiveTab(tab.id)}
+                className="shrink-0 px-3 py-1.5 rounded-md text-xs font-bold transition-all"
+                style={{
+                  border: `1px solid ${activeTab === tab.id ? T.accentColor + "40" : T.borderColor + "30"}`,
+                  backgroundColor:
+                    activeTab === tab.id ? T.accentColor + "12" : "transparent",
+                  color:
+                    activeTab === tab.id ? T.accentColor : T.textColor + "80",
+                }}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+          <div
+            className="flex items-center gap-1.5 px-3 py-1.5 rounded-md border sm:ml-auto"
+            style={{
+              borderColor: T.borderColor + "30",
+              backgroundColor: T.bgColor,
+            }}
+          >
+            <Search size={14} style={{ color: T.textMuted }} />
+            <input
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              placeholder="Search assets..."
+              className="bg-transparent text-sm outline-none w-full sm:w-40"
+              style={{ color: T.textColor }}
+            />
+          </div>
         </div>
-      )}
+
+        {filteredItems.length === 0 ? (
+          <div className="text-center py-16 opacity-80">
+            <div className="text-3xl mb-3">🪣</div>
+            <div className="text-sm font-bold">Your bucket is empty.</div>
+            <div className="text-xs mt-1" style={{ color: T.textMuted }}>
+              Generate images, video, or audio to fill it.
+            </div>
+          </div>
+        ) : (
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 gap-3">
+            {filteredItems.map((item) => (
+              <div
+                key={item.id}
+                onClick={() => {
+                  if (item.videoUrl) {
+                    window.open(item.videoUrl, "_blank", "noopener,noreferrer");
+                  } else {
+                    setSelectedItem(item);
+                  }
+                }}
+                className="border rounded-xl overflow-hidden group cursor-pointer transition-all duration-200 hover:scale-[1.02]"
+                style={{
+                  borderColor: T.borderColor + "25",
+                  backgroundColor: T.boxBg + "80",
+                }}
+              >
+                <div className="relative aspect-square overflow-hidden bg-black/40">
+                  {item.imageUrl ? (
+                    <>
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.imageUrl}
+                        alt={item.title}
+                        className="w-full h-full object-cover"
+                        loading="lazy"
+                      />
+                    </>
+                  ) : item.videoUrl ? (
+                    <video
+                      src={item.videoUrl}
+                      className="w-full h-full object-cover"
+                      muted
+                    />
+                  ) : item.audioUrl ? (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <Music
+                        size={24}
+                        style={{
+                          color: sourceColor(item.source),
+                          opacity: 0.5,
+                        }}
+                      />
+                    </div>
+                  ) : (
+                    <div className="w-full h-full flex items-center justify-center">
+                      <ImageIcon
+                        size={24}
+                        style={{
+                          color: sourceColor(item.source),
+                          opacity: 0.5,
+                        }}
+                      />
+                    </div>
+                  )}
+                  {item.videoUrl && (
+                    <div
+                      className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
+                    >
+                      <ExternalLink size={22} style={{ color: "#fff" }} />
+                    </div>
+                  )}
+                  <div
+                    className="absolute top-2 left-2 flex items-center gap-1 px-1.5 py-0.5 rounded text-[8px] font-bold uppercase"
+                    style={{
+                      backgroundColor: "rgba(0,0,0,0.7)",
+                      color: sourceColor(item.source),
+                    }}
+                  >
+                    {sourceIcon(item.source)}{" "}
+                    {item.videoUrl ? "video" : item.source}
+                  </div>
+                  {(item.source === "image" ||
+                    item.source === "video" ||
+                    item.source === "audio") && (
+                    <button
+                      onClick={(e) => handleDelete(item.id, e)}
+                      className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                      style={{
+                        backgroundColor: "rgba(255,0,0,0.7)",
+                        color: "white",
+                      }}
+                    >
+                      <Trash2 size={10} />
+                    </button>
+                  )}
+                </div>
+                <div className="px-2.5 py-2">
+                  <div
+                    className="text-[11px] font-bold truncate"
+                    style={{ color: T.headerColor }}
+                  >
+                    {item.title}
+                  </div>
+                  <div className="flex items-center justify-between mt-1">
+                    <span
+                      className="text-[10px] opacity-80"
+                      style={{ color: T.textMuted }}
+                    >
+                      {item.artist} · {item.createdAt}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
 
       {selectedItem && (
         <div

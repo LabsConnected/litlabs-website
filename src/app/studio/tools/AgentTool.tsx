@@ -310,6 +310,7 @@ export default function AgentTool() {
   /* Panels */
   const [showCreate, setShowCreate] = useState(false);
   const [showBoardroom, setShowBoardroom] = useState(false);
+  const [agentDrawerOpen, setAgentDrawerOpen] = useState(false);
 
   /* Create form */
   const [createForm, setCreateForm] = useState({
@@ -702,7 +703,11 @@ export default function AgentTool() {
     <div className="flex h-full overflow-hidden select-none">
       {/* ── LEFT SIDEBAR ── */}
       <div
-        className="w-[210px] shrink-0 flex flex-col border-r"
+        className={`shrink-0 flex-col border-r md:flex md:w-[210px] ${
+          agentDrawerOpen
+            ? "fixed inset-y-0 left-0 z-50 flex w-[260px]"
+            : "hidden"
+        }`}
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: T.boxBg + "90",
@@ -763,7 +768,10 @@ export default function AgentTool() {
             return (
               <button
                 key={a.id}
-                onClick={() => switchAgent(a)}
+                onClick={() => {
+                  switchAgent(a);
+                  setAgentDrawerOpen(false);
+                }}
                 className="w-full text-left rounded-lg px-2.5 py-2 transition-all group"
                 style={{
                   backgroundColor: isActive ? a.color + "12" : "transparent",
@@ -831,6 +839,15 @@ export default function AgentTool() {
         </div>
       </div>
 
+      {/* Mobile drawer backdrop */}
+      {agentDrawerOpen && (
+        <button
+          className="fixed inset-0 z-40 bg-black/60 md:hidden"
+          onClick={() => setAgentDrawerOpen(false)}
+          aria-label="Close agent drawer"
+        />
+      )}
+
       {/* ── CENTER: CHAT ── */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* Chat header */}
@@ -842,8 +859,23 @@ export default function AgentTool() {
           }}
         >
           <div className="flex items-center gap-2.5">
-            <span className="text-xl">{selectedAvatar.emoji}</span>
-            <div>
+            <button
+              onClick={() => setAgentDrawerOpen(true)}
+              className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 md:hidden"
+              aria-label="Open agent drawer"
+            >
+              <span className="text-base">{selectedAvatar.emoji}</span>
+              <span
+                className="text-[10px] font-bold"
+                style={{ color: selectedAgent.color }}
+              >
+                {selectedAgent.name}
+              </span>
+            </button>
+            <span className="text-xl hidden md:block">
+              {selectedAvatar.emoji}
+            </span>
+            <div className="hidden md:block">
               <div
                 className="text-xs font-bold leading-tight"
                 style={{ color: selectedAgent.color }}
@@ -860,7 +892,7 @@ export default function AgentTool() {
               </div>
             </div>
             <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse ml-1"
+              className="w-1.5 h-1.5 rounded-full animate-pulse ml-1 hidden md:block"
               style={{ backgroundColor: selectedAgent.color }}
             />
           </div>
@@ -921,8 +953,8 @@ export default function AgentTool() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && !streaming && (
-            <div className="flex flex-col items-center justify-center h-full pb-8 text-center">
-              <div className="text-5xl mb-3 opacity-90">
+            <div className="flex flex-col items-center justify-center h-full px-4 pb-8 text-center">
+              <div className="text-4xl mb-2 opacity-90 sm:text-5xl sm:mb-3">
                 {selectedAvatar.emoji}
               </div>
               <div
@@ -932,27 +964,27 @@ export default function AgentTool() {
                 {selectedAgent.name}
               </div>
               <div
-                className="text-xs mb-1 opacity-50"
+                className="text-xs mb-1 opacity-70"
                 style={{ color: T.textMuted }}
               >
                 {selectedAgent.role}
               </div>
               <div
-                className="text-xs max-w-sm mx-auto mb-5 opacity-60 leading-relaxed"
+                className="text-xs max-w-sm mx-auto mb-4 opacity-80 leading-relaxed sm:mb-5"
                 style={{ color: T.textMuted }}
               >
                 {selectedAgent.desc}
               </div>
-              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-                {(QUICK[selectedAgent.id] || []).map((q) => (
+              <div className="grid grid-cols-1 gap-2 w-full max-w-xs sm:grid-cols-2 sm:max-w-lg">
+                {(QUICK[selectedAgent.id] || []).slice(0, 3).map((q) => (
                   <button
                     key={q}
                     onClick={() => sendMessage(q)}
-                    className="px-3 py-1.5 text-[10px] rounded-full border transition-all hover:scale-105"
+                    className="rounded-xl border p-3 text-left text-sm transition-all hover:scale-[1.02] sm:text-xs"
                     style={{
                       borderColor: selectedAgent.color + "40",
                       color: selectedAgent.color,
-                      backgroundColor: selectedAgent.color + "08",
+                      backgroundColor: selectedAgent.color + "10",
                     }}
                   >
                     {q}
@@ -1114,12 +1146,12 @@ export default function AgentTool() {
               placeholder={`Message ${selectedAgent.name}... (Enter to send)`}
               rows={1}
               disabled={isLoading}
-              className="flex-1 px-3 py-2 text-xs rounded-lg outline-none resize-none overflow-hidden disabled:opacity-50 transition-all"
+              className="flex-1 px-3 py-2 text-sm rounded-lg outline-none resize-none overflow-hidden disabled:opacity-50 transition-all"
               style={{
                 backgroundColor: T.bgColor,
                 border: `1px solid ${T.borderColor}30`,
                 color: T.textColor,
-                minHeight: "38px",
+                minHeight: "44px",
                 maxHeight: "120px",
               }}
             />
@@ -1138,7 +1170,7 @@ export default function AgentTool() {
           </div>
           <div className="flex items-center justify-between mt-1.5 px-0.5">
             <span
-              className="text-[9px] opacity-30"
+              className="text-[10px] opacity-70"
               style={{ color: T.textMuted }}
             >
               Powered by{" "}

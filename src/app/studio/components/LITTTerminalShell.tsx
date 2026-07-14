@@ -269,68 +269,6 @@ function LiveClock() {
   return <span className="font-mono text-[10px] text-neutral-400">{time}</span>;
 }
 
-interface MobileToolRailProps {
-  activeTool?: string;
-  onToolChange?: (tool: string) => void;
-  onPluginsToggle?: () => void;
-  pluginsOpen?: boolean;
-}
-
-const MOBILE_TOOLS = [
-  { id: "chat", label: "Chat", icon: Terminal },
-  { id: "agents", label: "Agents", icon: Bot },
-  { id: "pipeline", label: "Pipes", icon: GitBranch },
-  { id: "builder", label: "Build", icon: Rocket },
-  { id: "image", label: "Image", icon: ImageIcon },
-  { id: "gallery", label: "Assets", icon: FolderOpen },
-];
-
-function MobileToolRail({
-  activeTool,
-  onToolChange,
-  onPluginsToggle,
-  pluginsOpen,
-}: MobileToolRailProps) {
-  return (
-    <nav className="flex items-center gap-1 overflow-x-auto border-t border-white/5 bg-[#030308]/95 px-2 py-1.5 scrollbar-none md:hidden">
-      {MOBILE_TOOLS.map((item) => {
-        const Icon = item.icon;
-        const active = activeTool === item.id;
-        return (
-          <button
-            key={item.id}
-            onClick={() => {
-              if (item.id === "chat") return;
-              onToolChange?.(item.id);
-            }}
-            className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-2.5 py-1.5 transition ${
-              active
-                ? "bg-cyan-500/10 text-cyan-300"
-                : "text-neutral-500 hover:bg-white/5 hover:text-neutral-300"
-            }`}
-            title={item.label}
-          >
-            <Icon size={16} />
-            <span className="mt-0.5 text-[9px] font-bold">{item.label}</span>
-          </button>
-        );
-      })}
-      <button
-        onClick={() => onPluginsToggle?.()}
-        className={`flex shrink-0 flex-col items-center justify-center rounded-xl px-2.5 py-1.5 transition ${
-          pluginsOpen
-            ? "bg-cyan-500/10 text-cyan-300"
-            : "text-neutral-500 hover:bg-white/5 hover:text-neutral-300"
-        }`}
-        title="Plugins"
-      >
-        <LayoutGrid size={16} />
-        <span className="mt-0.5 text-[9px] font-bold">Plugins</span>
-      </button>
-    </nav>
-  );
-}
-
 function ActiveCommandTabs({
   tabs,
   onClose,
@@ -1031,7 +969,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-[100dvh] min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1226,12 +1164,12 @@ function LITTTerminalShellInner({
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
             {isEmpty ? (
-              <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center gap-4 py-4 sm:gap-6 sm:py-6">
-                <div className="flex flex-col items-center gap-3 text-center">
-                  <div className="text-xs font-bold uppercase tracking-[0.2em] text-cyan-400">
+              <div className="mx-auto flex min-h-full max-w-3xl flex-col items-center justify-center gap-3 py-4 sm:gap-6 sm:py-6">
+                <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
+                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-400 sm:text-xs">
                     Welcome back, {displayName}.
                   </div>
-                  <h1 className="max-w-xl text-[1.65rem] font-light leading-tight sm:text-3xl">
+                  <h1 className="max-w-xl text-lg font-light leading-tight sm:text-3xl">
                     What can I{" "}
                     <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400">
                       amplify
@@ -1241,7 +1179,7 @@ function LITTTerminalShellInner({
                 </div>
 
                 {/* Hero visualization */}
-                <div className="relative flex h-28 w-full max-w-md items-center justify-center sm:h-48">
+                <div className="relative flex h-16 w-full max-w-xs items-center justify-center sm:h-40 sm:max-w-md">
                   <div
                     className="absolute inset-0 rounded-full blur-2xl"
                     style={{
@@ -1304,22 +1242,22 @@ function LITTTerminalShellInner({
                 </div>
 
                 {/* Action cards */}
-                <div className="grid w-full grid-cols-1 gap-2 min-[390px]:grid-cols-2 sm:grid-cols-4 sm:gap-3">
+                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
                   {[
                     {
                       icon: Sparkles,
                       title: "Create",
-                      desc: "Scaffold apps, services, pipelines, and more.",
+                      desc: "Scaffold apps, services, and pipelines.",
                     },
                     {
                       icon: Activity,
                       title: "Analyze",
-                      desc: "Inspect logs, data, infra, and system health.",
+                      desc: "Inspect logs, data, and system health.",
                     },
                     {
                       icon: Rocket,
                       title: "Build",
-                      desc: "Generate code, infra, and documentation.",
+                      desc: "Generate code, infra, and docs.",
                     },
                     {
                       icon: Zap,
@@ -1334,19 +1272,21 @@ function LITTTerminalShellInner({
                           `Help me ${card.title.toLowerCase()} something`,
                         )
                       }
-                      className="group flex min-h-20 flex-col gap-1.5 rounded-xl border border-white/5 bg-white/2 p-3 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:gap-2"
+                      className="group flex min-h-[4.5rem] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2.5 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
                     >
                       <div className="flex items-center justify-between">
                         <card.icon
-                          size={16}
-                          className="text-cyan-400 group-hover:scale-110 transition"
+                          size={15}
+                          className="text-cyan-400 transition group-hover:scale-110"
                         />
                         <ChevronRight
                           size={12}
                           className="text-neutral-600 group-hover:text-cyan-400"
                         />
                       </div>
-                      <div className="text-sm font-bold">{card.title}</div>
+                      <div className="text-xs font-bold sm:text-sm">
+                        {card.title}
+                      </div>
                       <div className="text-[10px] leading-relaxed text-neutral-500">
                         {card.desc}
                       </div>
@@ -1356,7 +1296,7 @@ function LITTTerminalShellInner({
 
                 <button
                   onClick={() => setPluginsOpen(true)}
-                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 transition hover:text-cyan-300"
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-400 transition hover:text-cyan-300 sm:text-xs"
                 >
                   <LayoutGrid size={12} />
                   View all plugins
@@ -1491,12 +1431,7 @@ function LITTTerminalShellInner({
             )}
           </div>
 
-          <MobileToolRail
-            activeTool={activeTool}
-            onToolChange={onToolChangeAction}
-            onPluginsToggle={() => setPluginsOpen((v) => !v)}
-            pluginsOpen={pluginsOpen}
-          />
+          {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
           {/* COMMAND BAR */}
           <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
@@ -1521,31 +1456,31 @@ function LITTTerminalShellInner({
                 <button
                   aria-label="Add attachment"
                   onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-8 sm:w-8"
+                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
                 >
-                  <Plus size={16} />
+                  <Plus size={15} />
                 </button>
                 <button
                   aria-label="Capture from camera"
                   onClick={() => setCameraOpen(true)}
-                  className={`order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-8 sm:w-8 ${
+                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
                     cameraOpen
                       ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  <Camera size={16} />
+                  <Camera size={15} />
                 </button>
                 <button
                   aria-label={micActive ? "Stop voice" : "Start voice"}
                   onClick={toggleMic}
-                  className={`order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-8 sm:w-8 ${
+                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
                     micActive
                       ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  {micActive ? <MicOff size={16} /> : <Mic size={16} />}
+                  {micActive ? <MicOff size={15} /> : <Mic size={15} />}
                 </button>
 
                 <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
@@ -1555,9 +1490,9 @@ function LITTTerminalShellInner({
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     aria-label="Message LITT"
-                    placeholder="Ask LITT to build, inspect, debug, generate, or control this workspace..."
+                    placeholder="Ask LiTT..."
                     rows={1}
-                    className="max-h-32 min-h-12 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-3 pl-4 pr-12 text-base leading-6 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/[0.05] sm:min-h-11 sm:py-2.5 sm:text-xs sm:leading-5"
+                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
@@ -1565,43 +1500,45 @@ function LITTTerminalShellInner({
                     disabled={
                       !busy && !input.trim() && attachments.length === 0
                     }
-                    className={`absolute bottom-1.5 right-1.5 flex h-9 w-9 items-center justify-center rounded-lg transition disabled:opacity-40 sm:bottom-2 sm:h-7 sm:w-7 ${
+                    className={`absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg transition disabled:opacity-40 sm:bottom-2 sm:h-9 sm:w-9 ${
                       busy
                         ? "bg-rose-500/15 text-rose-300 hover:bg-rose-500/25"
                         : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
                     }`}
                   >
-                    {busy ? <Square size={12} /> : <Send size={14} />}
+                    {busy ? <Square size={12} /> : <Send size={15} />}
                   </button>
                 </div>
 
                 <button
                   aria-label="Attach file"
                   onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-8 sm:w-8"
+                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
                 >
-                  <Paperclip size={16} />
+                  <Paperclip size={15} />
                 </button>
               </div>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
                     onClick={() => handleChip(chip.label)}
-                    className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
-                    <span className="text-neutral-600">{chip.desc}</span>
+                    <span className="hidden text-neutral-600 sm:inline">
+                      {chip.desc}
+                    </span>
                   </button>
                 ))}
-                <div className="flex items-center gap-1 pl-2">
-                  {PLUGINS.map((plugin) => (
+                <div className="flex items-center gap-1 pl-1 sm:pl-2">
+                  {PLUGINS.slice(0, 4).map((plugin) => (
                     <button
                       key={plugin}
                       onClick={() => handleChip(`/${plugin}`)}
                       aria-label={`/${plugin} plugin command`}
-                      className="shrink-0 rounded-md px-1.5 py-1 text-[10px] font-mono text-neutral-500 transition hover:text-neutral-300"
+                      className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-mono text-neutral-500 transition hover:text-neutral-300"
                     >
                       /{plugin}
                     </button>
@@ -1609,7 +1546,7 @@ function LITTTerminalShellInner({
                   <button
                     disabled
                     aria-label="More plugins coming soon"
-                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[10px] text-neutral-500 opacity-40"
+                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-neutral-500 opacity-40"
                   >
                     +8
                   </button>
