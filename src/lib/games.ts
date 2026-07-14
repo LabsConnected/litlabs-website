@@ -4,7 +4,7 @@
  */
 
 export type GameCategory = "retro" | "arcade" | "puzzle" | "multiplayer";
-export type GamePlatform = "html5";
+export type GamePlatform = "html5" | "browser" | "emulator" | "dos";
 
 export interface Game {
   id: string;
@@ -14,6 +14,7 @@ export interface Game {
   platform: GamePlatform;
   coverUrl: string;
   html5Url?: string;
+  externalUrl?: string;
   sourceUrl?: string;
   license: "open-source" | "free-to-play" | "public-domain";
   licenseLabel: string;

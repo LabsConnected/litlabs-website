@@ -314,11 +314,10 @@ export default function CodeScannerPage() {
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
 
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [scan, setScan] = useState<{
     loading: boolean;
     error: string | null;
-    data: any | null;
+    data: any | null; // eslint-disable-line @typescript-eslint/no-explicit-any
   }>({ loading: false, error: null, data: null });
 
   const selectedFile = getFileByPath(DEMO_FILE_TREE, selectedPath);

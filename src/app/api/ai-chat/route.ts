@@ -1,5 +1,5 @@
 import { Supermemory } from "supermemory";
-import { generateText } from "@/lib/llm";
+import { generateText, type LLMProvider } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 
@@ -32,10 +32,6 @@ export async function POST(req: NextRequest) {
     }
 
     const lastMessage = messages[messages.length - 1]?.content || "";
-    const history = messages.slice(0, -1).map((m: any) => ({
-      role: m.role === "user" ? "user" : "assistant",
-      content: m.content,
-    }));
 
     let memoryContext = "";
     const sm = getSupermemory();
@@ -64,17 +60,12 @@ ${memoryContext ? `Relevant context from memory:\n${memoryContext}` : ""}
 
 Be direct, professional, and code-focused.`;
 
-    const selectedProvider = (MODELS[model] || "gemini") as any;
+    const selectedProvider = (MODELS[model] || "gemini") as LLMProvider;
 
     const result = await generateText(
       lastMessage,
-      {
-        task: "code",
-        provider: selectedProvider,
-        systemPrompt,
-        maxTokens: 4096,
-      },
-      history
+      { task: "code", provider: selectedProvider, maxTokens: 4096 },
+      systemPrompt,
     );
 
     // Async save to memory
