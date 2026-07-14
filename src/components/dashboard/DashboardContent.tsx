@@ -17,9 +17,11 @@ import {
   Loader2,
   Users,
   ImageIcon,
+  Film,
   Music,
   Terminal,
-  Wallet,
+  Hammer,
+  FolderOpen,
   UserPlus,
   Send,
   X,
@@ -379,22 +381,34 @@ export default function DashboardContent() {
 
   const quickLinks = [
     {
-      href: "/studio?tool=agents",
-      label: "Agent Chat",
+      href: "/studio?tool=chat",
+      label: "Chat",
       icon: Bot,
-      desc: "Talk to any AI agent",
+      desc: "Ask LiTT anything",
     },
     {
       href: "/studio?tool=image",
-      label: "Imaging Lab",
+      label: "Image",
       icon: ImageIcon,
       desc: "Generate images & art",
     },
     {
+      href: "/studio?tool=video",
+      label: "Video",
+      icon: Film,
+      desc: "Generate AI video",
+    },
+    {
       href: "/studio?tool=audio",
-      label: "Music Studio",
+      label: "Audio",
       icon: Music,
       desc: "Create AI music",
+    },
+    {
+      href: "/studio?tool=builder",
+      label: "Build",
+      icon: Hammer,
+      desc: "Build anything",
     },
     {
       href: "/studio?tool=terminal",
@@ -403,16 +417,16 @@ export default function DashboardContent() {
       desc: "Agent dev console",
     },
     {
-      href: "/marketplace",
-      label: "Marketplace",
-      icon: Wallet,
-      desc: "Buy & sell agents",
+      href: "/studio?tool=agents",
+      label: "Agents",
+      icon: Bot,
+      desc: "Talk to any AI agent",
     },
     {
-      href: "/social",
-      label: "Neural Social",
-      icon: MessageSquare,
-      desc: "Community feed",
+      href: "/studio?tool=gallery",
+      label: "Assets",
+      icon: FolderOpen,
+      desc: "Your generated media",
     },
   ];
 
@@ -543,35 +557,18 @@ export default function DashboardContent() {
             >
               Quick Access
             </div>
-            <div className="space-y-1">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
               {quickLinks.map((a) => (
                 <Link
                   key={a.href}
                   href={a.href}
-                  className="flex items-center gap-2.5 rounded-lg px-2.5 py-2 transition-all hover:scale-[1.01] group"
-                  style={{ backgroundColor: T.bgColor + "40" }}
+                  className="group flex flex-col items-center justify-center gap-1.5 rounded-xl border border-white/5 bg-white/2 p-3 text-center transition hover:border-cyan-500/20 hover:bg-cyan-500/5"
                 >
-                  <div
-                    className="w-6 h-6 rounded flex items-center justify-center shrink-0"
-                    style={{ backgroundColor: T.accentColor + "12" }}
-                  >
-                    <a.icon size={11} style={{ color: T.accentColor }} />
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 transition group-hover:scale-110">
+                    <a.icon size={16} className="text-cyan-400" />
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div
-                      className="text-[11px] font-bold leading-none"
-                      style={{ color: T.headerColor }}
-                    >
-                      {a.label}
-                    </div>
-                    <div className="text-[10px] opacity-40 truncate mt-0.5">
-                      {a.desc}
-                    </div>
-                  </div>
-                  <ArrowRight
-                    size={10}
-                    className="opacity-0 group-hover:opacity-40 transition-opacity"
-                  />
+                  <div className="text-xs font-bold text-white">{a.label}</div>
+                  <div className="text-[9px] text-neutral-500">{a.desc}</div>
                 </Link>
               ))}
             </div>
