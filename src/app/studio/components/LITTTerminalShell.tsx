@@ -34,6 +34,7 @@ import {
   Trash2,
   Image as ImageIcon,
 } from "lucide-react";
+import PluginPanel from "./PluginPanel";
 
 type Message = {
   role: "user" | "assistant";
@@ -370,6 +371,7 @@ export default function LITTTerminalShell({
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [activeTab, setActiveTab] = useState("terminal");
+  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [activeCommands, setActiveCommands] = useState<
     { id: string; label: string }[]
   >([]);
@@ -732,6 +734,18 @@ export default function LITTTerminalShell({
         </div>
 
         <div className="flex items-center gap-4">
+          <button
+            onClick={() => setPluginsOpen((v) => !v)}
+            aria-label="Toggle plugin registry"
+            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition ${
+              pluginsOpen
+                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
+                : "border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-300"
+            }`}
+          >
+            <LayoutGrid size={12} />
+            Plugins
+          </button>
           <div className="flex items-center gap-1.5 text-cyan-400">
             <Camera size={12} />
             <span className="text-[9px] font-bold uppercase tracking-wider">
@@ -981,14 +995,7 @@ export default function LITTTerminalShell({
                 </div>
 
                 <button
-                  onClick={() => {
-                    setInput("/");
-                    textInputRef.current?.focus();
-                    textInputRef.current?.scrollIntoView({
-                      behavior: "smooth",
-                      block: "nearest",
-                    });
-                  }}
+                  onClick={() => setPluginsOpen(true)}
                   className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-500 transition hover:text-cyan-300"
                 >
                   <LayoutGrid size={12} />
@@ -1209,94 +1216,102 @@ export default function LITTTerminalShell({
           </div>
         </main>
 
-        {/* RIGHT PRESENCE PANEL */}
+        {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
         <aside className="hidden w-[300px] shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80 lg:flex">
-          <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-            <span className="text-xs font-black uppercase tracking-[0.18em] text-neutral-400">
-              LITT Presence
-            </span>
-            <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-              <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-              ONLINE
-            </div>
-          </div>
-
-          <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
-            <LiTTAvatar size={90} />
-            <div className="text-center">
-              <div className="text-sm font-black text-white">LITT-Code</div>
-              <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-500">
-                <span>v2.2</span>
-                <span>·</span>
-                <span>Omni</span>
-                <span>·</span>
-                <span>128K Context</span>
-              </div>
-            </div>
-            <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
-              <span className="text-[10px] font-bold text-neutral-400">
-                Voice
-              </span>
-              <span className="text-[10px] font-bold text-cyan-400">
-                LITT-Code
-              </span>
-              <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                {micActive ? "Listening" : "Live"}
-              </span>
-            </div>
-          </div>
-
-          <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
-              Speaking Now
-            </div>
-            <Waveform active={busy || micActive} />
-
-            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
-              Recent Transcript
-            </div>
-            <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/[0.02] p-3">
-              {messages.length === 0 ? (
-                <div className="text-[10px] leading-relaxed text-neutral-500">
-                  Hey, I am LITT-Code.
-                  <br />
-                  Need help building something?
-                  <br />
-                  <br />I can see your workspace and talk you through it.
+          {pluginsOpen ? (
+            <PluginPanel onClose={() => setPluginsOpen(false)} />
+          ) : (
+            <>
+              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+                <span className="text-xs font-black uppercase tracking-[0.18em] text-neutral-400">
+                  LITT Presence
+                </span>
+                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  ONLINE
                 </div>
-              ) : (
-                messages.slice(-6).map((m, i) => (
-                  <div
-                    key={i}
-                    className={`flex items-start gap-2 text-[10px] ${
-                      m.role === "user" ? "text-neutral-400" : "text-cyan-300"
-                    }`}
-                  >
-                    <span className="mt-0.5 shrink-0 text-[8px] opacity-60">
-                      {m.role === "user" ? "You" : "LITT"}
-                    </span>
-                    <span className="line-clamp-3">{m.content}</span>
-                  </div>
-                ))
-              )}
-            </div>
+              </div>
 
-            <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
-              Quick Replies
-            </div>
-            <div className="flex flex-wrap gap-2">
-              {QUICK_START.map((q) => (
-                <button
-                  key={q}
-                  onClick={() => void send(q)}
-                  className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
-                >
-                  {q}
-                </button>
-              ))}
-            </div>
-          </div>
+              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
+                <LiTTAvatar size={90} />
+                <div className="text-center">
+                  <div className="text-sm font-black text-white">LITT-Code</div>
+                  <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-500">
+                    <span>v2.2</span>
+                    <span>·</span>
+                    <span>Omni</span>
+                    <span>·</span>
+                    <span>128K Context</span>
+                  </div>
+                </div>
+                <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/[0.02] px-3 py-2">
+                  <span className="text-[10px] font-bold text-neutral-400">
+                    Voice
+                  </span>
+                  <span className="text-[10px] font-bold text-cyan-400">
+                    LITT-Code
+                  </span>
+                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
+                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
+                    {micActive ? "Listening" : "Live"}
+                  </span>
+                </div>
+              </div>
+
+              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                  Speaking Now
+                </div>
+                <Waveform active={busy || micActive} />
+
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                  Recent Transcript
+                </div>
+                <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/[0.02] p-3">
+                  {messages.length === 0 ? (
+                    <div className="text-[10px] leading-relaxed text-neutral-500">
+                      Hey, I am LITT-Code.
+                      <br />
+                      Need help building something?
+                      <br />
+                      <br />I can see your workspace and talk you through it.
+                    </div>
+                  ) : (
+                    messages.slice(-6).map((m, i) => (
+                      <div
+                        key={i}
+                        className={`flex items-start gap-2 text-[10px] ${
+                          m.role === "user"
+                            ? "text-neutral-400"
+                            : "text-cyan-300"
+                        }`}
+                      >
+                        <span className="mt-0.5 shrink-0 text-[8px] opacity-60">
+                          {m.role === "user" ? "You" : "LITT"}
+                        </span>
+                        <span className="line-clamp-3">{m.content}</span>
+                      </div>
+                    ))
+                  )}
+                </div>
+
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                  Quick Replies
+                </div>
+                <div className="flex flex-wrap gap-2">
+                  {QUICK_START.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => void send(q)}
+                      className="rounded-full border border-white/10 bg-white/[0.03] px-2.5 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    >
+                      {q}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
         </aside>
       </div>
     </div>
