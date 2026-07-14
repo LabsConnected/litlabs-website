@@ -314,6 +314,7 @@ export default function CodeScannerPage() {
   const [sidebarWidth, setSidebarWidth] = useState(240);
   const [isResizing, setIsResizing] = useState(false);
 
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const [scan, setScan] = useState<{
     loading: boolean;
     error: string | null;
@@ -335,7 +336,11 @@ export default function CodeScannerPage() {
       const data = await res.json();
       setScan({ loading: false, error: null, data });
     } catch (err) {
-      setScan({ loading: false, error: err instanceof Error ? err.message : "Scan failed", data: null });
+      setScan({
+        loading: false,
+        error: err instanceof Error ? err.message : "Scan failed",
+        data: null,
+      });
     }
   }, []);
 
@@ -531,7 +536,9 @@ export default function CodeScannerPage() {
             </span>
             <span className="opacity-50" style={{ color: T.textMuted }}>
               {sidebarView === "explorer" && `${totalFiles} files`}
-              {sidebarView === "scan" && scan.data ? `${scan.data.totalFiles} files` : ""}
+              {sidebarView === "scan" && scan.data
+                ? `${scan.data.totalFiles} files`
+                : ""}
             </span>
           </div>
 
@@ -680,13 +687,20 @@ export default function CodeScannerPage() {
                   <div className="space-y-3 text-xs">
                     <div
                       className="p-2 rounded-lg border"
-                      style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+                      style={{
+                        borderColor: T.borderColor,
+                        backgroundColor: T.boxBg,
+                      }}
                     >
-                      <div className="font-bold mb-1" style={{ color: T.accentColor }}>
+                      <div
+                        className="font-bold mb-1"
+                        style={{ color: T.accentColor }}
+                      >
                         {scan.data.projectName}
                       </div>
                       <div style={{ color: T.textMuted }}>
-                        {scan.data.totalFiles} files · {scan.data.totalLines.toLocaleString()} lines
+                        {scan.data.totalFiles} files ·{" "}
+                        {scan.data.totalLines.toLocaleString()} lines
                       </div>
                       <div style={{ color: T.textMuted }}>
                         {scan.data.health.buildStatus}
@@ -694,7 +708,10 @@ export default function CodeScannerPage() {
                     </div>
 
                     <div>
-                      <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                      <div
+                        className="font-bold mb-1 uppercase tracking-wider"
+                        style={{ color: T.textMuted }}
+                      >
                         Tech Stack
                       </div>
                       <div className="flex flex-wrap gap-1">
@@ -702,7 +719,10 @@ export default function CodeScannerPage() {
                           <span
                             key={tech}
                             className="px-2 py-0.5 rounded-full text-[10px] font-bold"
-                            style={{ backgroundColor: T.accentColor + "20", color: T.accentColor }}
+                            style={{
+                              backgroundColor: T.accentColor + "20",
+                              color: T.accentColor,
+                            }}
                           >
                             {tech}
                           </span>
@@ -711,16 +731,21 @@ export default function CodeScannerPage() {
                     </div>
 
                     <div>
-                      <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                      <div
+                        className="font-bold mb-1 uppercase tracking-wider"
+                        style={{ color: T.textMuted }}
+                      >
                         Features
                       </div>
                       <div className="space-y-1" style={{ color: T.textColor }}>
-                        {scan.data.keyFeatures.map((feature: string, i: number) => (
-                          <div key={i} className="flex items-center gap-2">
-                            <span style={{ color: T.accentColor }}>•</span>
-                            {feature}
-                          </div>
-                        ))}
+                        {scan.data.keyFeatures.map(
+                          (feature: string, i: number) => (
+                            <div key={i} className="flex items-center gap-2">
+                              <span style={{ color: T.accentColor }}>•</span>
+                              {feature}
+                            </div>
+                          ),
+                        )}
                       </div>
                     </div>
 
@@ -730,24 +755,36 @@ export default function CodeScannerPage() {
                           Missing Env Vars
                         </div>
                         <div className="space-y-1">
-                          {scan.data.health.envVarsMissing.map((env: string) => (
-                            <div key={env} style={{ color: T.textMuted }}>
-                              {env}
-                            </div>
-                          ))}
+                          {scan.data.health.envVarsMissing.map(
+                            (env: string) => (
+                              <div key={env} style={{ color: T.textMuted }}>
+                                {env}
+                              </div>
+                            ),
+                          )}
                         </div>
                       </div>
                     )}
 
                     {scan.data.recentChanges.length > 0 && (
                       <div>
-                        <div className="font-bold mb-1 uppercase tracking-wider" style={{ color: T.textMuted }}>
+                        <div
+                          className="font-bold mb-1 uppercase tracking-wider"
+                          style={{ color: T.textMuted }}
+                        >
                           Recent Commits
                         </div>
-                        <div className="space-y-1" style={{ color: T.textColor }}>
-                          {scan.data.recentChanges.slice(0, 5).map((change: string, i: number) => (
-                            <div key={i} className="truncate">{change}</div>
-                          ))}
+                        <div
+                          className="space-y-1"
+                          style={{ color: T.textColor }}
+                        >
+                          {scan.data.recentChanges
+                            .slice(0, 5)
+                            .map((change: string, i: number) => (
+                              <div key={i} className="truncate">
+                                {change}
+                              </div>
+                            ))}
                         </div>
                       </div>
                     )}

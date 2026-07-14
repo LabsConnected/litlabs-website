@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { THEMES } from "@/lib/themes";
 import {
   Activity,
   Bot,
+  Camera,
   CircleDollarSign,
   Coins,
   HeartPulse,
@@ -17,6 +18,10 @@ import {
   TerminalSquare,
   Wrench,
   Zap,
+  Eye,
+  EyeOff,
+  Radio,
+  Sparkles,
 } from "lucide-react";
 
 export type InspectorTab = "health" | "credits" | "logs" | "tools";
@@ -33,10 +38,20 @@ export type InspectorTab = "health" | "credits" | "logs" | "tools";
 export default function StudioInspector({
   variant = "aside",
   onClose,
+  cameraStream,
+  screenStream,
+  cameraError,
+  onCameraToggle,
+  onScreenToggle,
   T,
 }: {
   variant?: "aside" | "sheet";
   onClose?: () => void;
+  cameraStream?: MediaStream | null;
+  screenStream?: MediaStream | null;
+  cameraError?: string | null;
+  onCameraToggle?: () => void;
+  onScreenToggle?: () => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const [tab, setTab] = useState<InspectorTab>("health");
@@ -93,6 +108,15 @@ export default function StudioInspector({
         )}
       </div>
 
+      <LiTTCompanion
+        cameraStream={cameraStream ?? null}
+        screenStream={screenStream ?? null}
+        cameraError={cameraError ?? null}
+        onCameraToggle={onCameraToggle}
+        onScreenToggle={onScreenToggle}
+        T={T}
+      />
+
       {/* Tabs */}
       <div
         className="flex items-stretch shrink-0"
@@ -129,6 +153,161 @@ export default function StudioInspector({
         {tab === "tools" && <ToolsTab T={T} />}
       </div>
     </div>
+  );
+}
+
+function LiTTCompanion({
+  cameraStream,
+  screenStream,
+  cameraError,
+  onCameraToggle,
+  onScreenToggle,
+  T,
+}: {
+  cameraStream: MediaStream | null;
+  screenStream: MediaStream | null;
+  cameraError: string | null;
+  onCameraToggle?: () => void;
+  onScreenToggle?: () => void;
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+}) {
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const [phrase, setPhrase] = useState(0);
+  const [visionNote, setVisionNote] = useState<string | null>(null);
+  const [analyzing, setAnalyzing] = useState(false);
+  const [hour] = useState(() => new Date().getHours());
+  const visualStream = screenStream ?? cameraStream;
+  const welcome = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
+  const phrases = screenStream
+    ? [
+        "Screen vision is active. Show me what needs fixing.",
+        "I’m watching the workspace, not recording it.",
+        "I can compare this view with the next change.",
+      ]
+    : cameraStream
+    ? [
+        "Vision is online. I can follow the session with you.",
+        "I’m here, Creator. Show me what we’re improving.",
+        "Workspace context is active. Tell me where to focus.",
+      ]
+    : [
+        `${welcome}, Creator. What are we building?`,
+        "One terminal. Your tools are ready below.",
+        "Say it, type it, or turn on vision. I’m with you.",
+      ];
+
+  useEffect(() => {
+    if (videoRef.current) videoRef.current.srcObject = visualStream;
+  }, [visualStream]);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setPhrase((current) => current + 1), 7000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  const inspectView = async () => {
+    const video = videoRef.current;
+    if (!video || !visualStream || video.videoWidth === 0) return;
+    setAnalyzing(true);
+    try {
+      const canvas = document.createElement("canvas");
+      const maxWidth = 960;
+      const scale = Math.min(1, maxWidth / video.videoWidth);
+      canvas.width = Math.round(video.videoWidth * scale);
+      canvas.height = Math.round(video.videoHeight * scale);
+      canvas.getContext("2d")?.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const encoded = canvas.toDataURL("image/jpeg", 0.72).split(",")[1];
+      const response = await fetch("/api/media/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBytes: encoded,
+          mimeType: "image/jpeg",
+          prompt: screenStream
+            ? "Inspect this shared screen. Identify the visible interface issue or current work state and suggest the single best next action. Be concise."
+            : "A user explicitly shared this camera frame with LiTT. Respond naturally and helpfully without inferring sensitive personal traits. If no work object is visible, simply confirm presence and ask what to inspect.",
+        }),
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "Vision analysis failed");
+      setVisionNote(data.text);
+    } catch (error) {
+      setVisionNote(error instanceof Error ? error.message : "Vision analysis failed");
+    } finally {
+      setAnalyzing(false);
+    }
+  };
+
+  return (
+    <section className="shrink-0 p-2.5" style={{ borderBottom: `1px solid ${T.borderColor}18` }}>
+      <div
+        className="relative overflow-hidden rounded-2xl border p-2.5"
+        style={{
+          background: `radial-gradient(circle at 24% 30%, ${T.accentColor}25, transparent 30%), linear-gradient(145deg, ${T.bgColor}, ${T.boxBg})`,
+          borderColor: `${T.accentColor}38`,
+          boxShadow: `inset 0 0 28px ${T.accentColor}08, 0 0 22px ${T.accentColor}08`,
+        }}
+      >
+        <div className="pointer-events-none absolute inset-0 opacity-20" style={{ backgroundImage: `repeating-linear-gradient(0deg, transparent 0 5px, ${T.accentColor} 6px)` }} />
+        <div className="relative flex items-center gap-2.5">
+          <div className="relative grid h-14 w-14 shrink-0 place-items-center">
+            <span className="absolute inset-1 animate-pulse rounded-full border" style={{ borderColor: `${T.accentColor}80`, boxShadow: `0 0 22px ${T.accentColor}55, inset 0 0 18px ${T.linkColor}35` }} />
+            <span className="absolute inset-0 animate-[spin_9s_linear_infinite] rounded-full border border-dashed" style={{ borderColor: `${T.linkColor}55` }} />
+            <span className="absolute h-10 w-10 rounded-full blur-md" style={{ backgroundColor: `${T.accentColor}35` }} />
+            <Bot size={23} className="relative z-10" style={{ color: T.accentColor, filter: `drop-shadow(0 0 7px ${T.accentColor})` }} />
+          </div>
+          <div className="min-w-0 flex-1">
+            <div className="flex items-center gap-1.5">
+              <Sparkles size={10} style={{ color: T.accentColor }} />
+              <b className="text-[10px] uppercase tracking-[.18em]" style={{ color: T.headerColor }}>LiTT-Code</b>
+              <span className="ml-auto flex items-center gap-1 text-[8px] font-bold" style={{ color: T.success }}><Radio size={8} /> LIVE</span>
+            </div>
+            <p className="mt-1 min-h-8 text-[9px] leading-relaxed transition-opacity" style={{ color: T.textMuted }}>
+              {phrases[phrase % phrases.length]}
+            </p>
+          </div>
+        </div>
+
+        <button
+          onClick={screenStream ? onScreenToggle : onCameraToggle}
+          className="relative mt-2 block w-full overflow-hidden rounded-xl border text-left"
+          style={{ borderColor: cameraStream ? `${T.success}55` : `${T.borderColor}25`, backgroundColor: `${T.bgColor}bb` }}
+        >
+          {visualStream ? (
+            <div className="relative aspect-video">
+              <video ref={videoRef} autoPlay muted playsInline className={`h-full w-full object-cover ${screenStream ? "" : "[transform:scaleX(-1)]"}`} />
+              <div className="absolute inset-x-0 top-0 flex items-center justify-between bg-gradient-to-b from-black/70 to-transparent px-2 py-1.5">
+                <span className="flex items-center gap-1 text-[8px] font-black text-white"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-red-500" /> {screenStream ? "SCREEN LIVE" : "VISION LIVE"}</span>
+                <span className="text-[8px] text-emerald-300">{screenStream ? "Workspace context" : "LiTT can see"}</span>
+              </div>
+              <span className="absolute bottom-1.5 right-1.5 rounded-md bg-black/65 p-1 text-white"><EyeOff size={11} /></span>
+            </div>
+          ) : (
+            <div className="flex items-center gap-2 px-2.5 py-2">
+              <span className="grid h-7 w-7 place-items-center rounded-lg" style={{ backgroundColor: `${T.accentColor}15`, color: T.accentColor }}><Camera size={13} /></span>
+              <span className="min-w-0 flex-1"><b className="block text-[9px]" style={{ color: T.textColor }}>Turn on LiTT Vision</b><span className="block truncate text-[8px]" style={{ color: cameraError ? "#fb7185" : T.textMuted }}>{cameraError || "Camera stays compact in this rail"}</span></span>
+              <Eye size={12} style={{ color: T.textMuted }} />
+            </div>
+          )}
+        </button>
+        {visualStream && (
+          <div className="relative mt-1.5 rounded-xl border p-2" style={{ borderColor: `${T.borderColor}20`, backgroundColor: `${T.bgColor}aa` }}>
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-[8px] font-bold uppercase tracking-[.16em]" style={{ color: T.textMuted }}>Explicit vision check</span>
+              <button
+                onClick={() => void inspectView()}
+                disabled={analyzing}
+                className="rounded-lg px-2 py-1 text-[8px] font-black disabled:opacity-50"
+                style={{ backgroundColor: `${T.accentColor}20`, color: T.accentColor }}
+              >
+                {analyzing ? "Inspecting…" : "Ask LiTT what it sees"}
+              </button>
+            </div>
+            {visionNote && <p className="mt-1.5 text-[9px] leading-relaxed" style={{ color: T.textColor }}>{visionNote}</p>}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 

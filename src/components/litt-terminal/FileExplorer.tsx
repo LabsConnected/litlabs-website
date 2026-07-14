@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useEffect, useCallback } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import { Folder, FileCode, ChevronRight, ChevronDown, RefreshCw, Plus, Trash2 } from "lucide-react";
 
 interface FileNode {
@@ -17,7 +17,7 @@ interface FileExplorerProps {
 }
 
 export function FileExplorer({ onOpenFile }: FileExplorerProps) {
-  const { user } = useUser();
+  const { user } = useAppUser();
   const userId = user?.id ?? "anonymous";
   const [tree, setTree] = useState<FileNode[]>([]);
   const [loading, setLoading] = useState(false);

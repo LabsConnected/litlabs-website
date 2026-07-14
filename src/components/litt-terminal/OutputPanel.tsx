@@ -1,36 +1,54 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import {
   Eye,
-  Code,
   FileText,
-  Globe,
   Image as ImageIcon,
   Terminal,
   Layers,
+  GitCompareArrows,
+  Download,
+  ExternalLink,
 } from "lucide-react";
 
-type OutputType = "preview" | "code" | "files" | "logs" | "browser";
+export type WorkspaceArtifact = {
+  id: string;
+  type: "image";
+  name: string;
+  url: string;
+  prompt: string;
+  provider: string;
+  width?: number;
+  height?: number;
+};
+
+type OutputType = "preview" | "artifact" | "files" | "changes" | "logs";
 
 const OUTPUTS = [
   { id: "preview" as const, label: "Preview", icon: Eye },
-  { id: "code" as const, label: "Code", icon: Code },
+  { id: "artifact" as const, label: "Artifact", icon: ImageIcon },
   { id: "files" as const, label: "Files", icon: FileText },
+  { id: "changes" as const, label: "Changes", icon: GitCompareArrows },
   { id: "logs" as const, label: "Logs", icon: Terminal },
-  { id: "browser" as const, label: "Browser", icon: Globe },
 ];
 
 export function OutputPanel({
   logs,
   selectedFile,
   files = [],
+  artifact,
 }: {
   logs: string[];
   selectedFile: string | null;
   files?: string[];
+  artifact?: WorkspaceArtifact | null;
 }) {
   const [active, setActive] = useState<OutputType>("preview");
+
+  useEffect(() => {
+    if (artifact) setActive("artifact");
+  }, [artifact]);
 
   return (
     <div className="flex h-full flex-col rounded-2xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm overflow-hidden">
@@ -63,7 +81,7 @@ export function OutputPanel({
       </div>
 
       <div className="flex-1 min-h-0 p-3 overflow-y-auto">
-        {active === "preview" && (
+        {active === "preview" && !artifact && (
           <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800/60 bg-neutral-900/20 text-neutral-500">
             <ImageIcon
               size={28}
@@ -77,21 +95,30 @@ export function OutputPanel({
           </div>
         )}
 
-        {active === "code" && (
-          <div className="rounded-xl border border-neutral-800/60 bg-neutral-950 p-3 font-mono text-[10px] text-neutral-300 space-y-1">
-            <div className="text-neutral-500">
-              {"// Generated code will appear here"}
-            </div>
-            <div>
-              <span className="text-cyan-400">export default</span>{" "}
-              <span className="text-fuchsia-400">function</span>{" "}
-              <span className="text-yellow-300">App</span>() {"{"}
-            </div>
-            <div className="pl-3 text-neutral-400">
-              return &lt;div&gt;Hello LiTT&lt;/div&gt;;
-            </div>
-            <div>{"}"}</div>
+        {active === "preview" && artifact && (
+          <div className="flex h-full items-center justify-center overflow-hidden rounded-xl border border-neutral-800/60 bg-neutral-950">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={artifact.url} alt={artifact.prompt} className="h-full w-full object-contain" />
           </div>
+        )}
+
+        {active === "artifact" && (
+          artifact ? (
+            <div className="overflow-hidden rounded-xl border border-fuchsia-500/25 bg-neutral-950">
+              <div className="aspect-square bg-black">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={artifact.url} alt={artifact.prompt} className="h-full w-full object-contain" />
+              </div>
+              <div className="space-y-3 p-3">
+                <div><div className="text-sm font-bold text-white">{artifact.name}</div><div className="text-[10px] text-neutral-500">{artifact.width || 1024} × {artifact.height || 1024} • {artifact.provider}</div></div>
+                <p className="line-clamp-2 text-[10px] text-neutral-400">{artifact.prompt}</p>
+                <div className="grid grid-cols-2 gap-2">
+                  <a href={artifact.url} download={`${artifact.name}.png`} className="flex items-center justify-center gap-1 rounded-lg bg-cyan-500/15 px-2 py-2 text-[10px] font-bold text-cyan-300"><Download size={12} /> Download</a>
+                  <a href={artifact.url} target="_blank" rel="noopener noreferrer" className="flex items-center justify-center gap-1 rounded-lg bg-fuchsia-500/15 px-2 py-2 text-[10px] font-bold text-fuchsia-300"><ExternalLink size={12} /> Open full size</a>
+                </div>
+              </div>
+            </div>
+          ) : <div className="text-[10px] text-neutral-500">No artifact selected.</div>
         )}
 
         {active === "files" && (
@@ -139,24 +166,11 @@ export function OutputPanel({
           </div>
         )}
 
-        {active === "browser" && (
-          <div className="flex h-full flex-col rounded-xl border border-neutral-800/60 bg-neutral-900/20">
-            <div className="flex items-center gap-2 border-b border-neutral-800/40 px-2 py-1.5">
-              <div className="flex gap-1">
-                <span className="h-2 w-2 rounded-full bg-red-500/60" />
-                <span className="h-2 w-2 rounded-full bg-amber-500/60" />
-                <span className="h-2 w-2 rounded-full bg-green-500/60" />
-              </div>
-              <div className="flex-1 rounded-md bg-neutral-900/60 px-2 py-0.5 text-[9px] text-neutral-500">
-                https://localhost:3000
-              </div>
-            </div>
-            <div className="flex flex-1 items-center justify-center text-neutral-500">
-              <div className="text-center">
-                <Globe size={24} className="mx-auto mb-2 opacity-40" />
-                <div className="text-[10px]">Live browser preview</div>
-              </div>
-            </div>
+        {active === "changes" && (
+          <div className="flex h-full flex-col items-center justify-center rounded-xl border border-dashed border-neutral-800/60 bg-neutral-900/20 text-center">
+            <GitCompareArrows size={24} className="mb-2 text-neutral-600" />
+            <div className="text-xs font-semibold text-neutral-400">No file changes yet</div>
+            <div className="mt-1 max-w-48 text-[10px] text-neutral-600">Generated project edits will appear here for review before commit.</div>
           </div>
         )}
       </div>

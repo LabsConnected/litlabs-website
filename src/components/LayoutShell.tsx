@@ -12,11 +12,32 @@ import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
 import { Menu } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { usePathname } from "next/navigation";
+
+const WORKSPACE_ROUTES = [
+  "/studio",
+  "/code",
+  "/console",
+  "/agent-chat",
+  "/litt-terminal",
+  "/builder",
+];
 
 export default function LayoutShell({ children }: { children: React.ReactNode }) {
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return WORKSPACE_ROUTES.some(
+      (route) =>
+        window.location.pathname === route ||
+        window.location.pathname.startsWith(`${route}/`),
+    );
+  });
   const { resolvedColors: T } = useTheme();
+  const pathname = usePathname();
+  const isWorkspace = WORKSPACE_ROUTES.some(
+    (route) => pathname === route || pathname.startsWith(`${route}/`),
+  );
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
@@ -33,13 +54,18 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className="relative z-10 flex min-h-screen">
+      <div
+        className={`relative z-10 flex ${isWorkspace ? "h-dvh overflow-hidden" : "min-h-screen"}`}
+      >
         <Sidebar
           open={mobileSidebarOpen}
           onClose={() => setMobileSidebarOpen(false)}
           collapsed={desktopSidebarCollapsed}
+          onCollapseChange={() => setDesktopSidebarCollapsed((value) => !value)}
         />
-        <div className="flex-1 flex flex-col min-h-screen">
+        <div
+          className={`flex min-w-0 flex-1 flex-col ${isWorkspace ? "h-dvh min-h-0 overflow-hidden" : "min-h-screen"}`}
+        >
           {/* Mobile hamburger trigger */}
           <button
             onClick={() => setMobileSidebarOpen(true)}
@@ -55,12 +81,18 @@ export default function LayoutShell({ children }: { children: React.ReactNode })
           </button>
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)} />
-          <main className="flex-1 w-full max-w-full overflow-x-hidden pb-16 md:pb-0">
+          <main
+            className={`min-h-0 min-w-0 flex-1 w-full max-w-full ${
+              isWorkspace
+                ? "overflow-hidden pb-16 md:pb-0"
+                : "overflow-x-hidden pb-16 md:pb-0"
+            }`}
+          >
             {children}
           </main>
           <MobileBottomNav />
-          <CreateFAB />
-          <FooterWrapper />
+          {!isWorkspace && <CreateFAB />}
+          {!isWorkspace && <FooterWrapper />}
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>

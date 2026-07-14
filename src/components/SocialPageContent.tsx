@@ -211,7 +211,7 @@ export default function SocialPageContent() {
   }
 
   return (
-    <div className="pb-24" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+    <div className="min-h-full pb-8" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
       {/* Toast */}
       {toast && (
         <div
@@ -226,10 +226,10 @@ export default function SocialPageContent() {
         </div>
       )}
 
-      <div className="relative z-10 w-full px-3 pt-4">
+      <div className="relative z-10 mx-auto w-full max-w-[1500px] px-3 pt-4 sm:px-5 lg:px-6">
         {/* Header */}
         <div
-          className="mb-4 p-3 flex items-center justify-between border-2"
+          className="mb-4 flex items-center justify-between rounded-xl border p-3"
           style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
         >
           <div className="flex items-center gap-2 sm:gap-3">
@@ -268,7 +268,7 @@ export default function SocialPageContent() {
 
         {isMock && (
           <div
-            className="w-full px-4 py-2 text-[10px] text-center"
+            className="mb-4 w-full rounded-lg px-4 py-2 text-center text-[10px]"
             style={{ backgroundColor: C.accentColor + "20", color: C.accentColor, borderBottom: `1px solid ${C.accentColor}40` }}
           >
             🛠 Demo feed — connect Supabase to see real community posts.
@@ -276,9 +276,10 @@ export default function SocialPageContent() {
         )}
 
         {/* Three Column Layout */}
-        <div className="grid grid-cols-1 md:grid-cols-[200px_1fr_240px] lg:grid-cols-[260px_1fr_300px] xl:grid-cols-[280px_1fr_320px] gap-4">
-          {/* LEFT COLUMN - Hidden on mobile */}
-          <aside className="hidden md:block space-y-4 min-w-0">
+        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_320px]">
+          {/* The global product sidebar owns navigation. Keep this legacy rail
+              out of the layout so the feed gets the same focus as Dashboard. */}
+          <aside className="hidden">
             {isSignedIn && profile && (
               <div
                 className="border-2 p-4"

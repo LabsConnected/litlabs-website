@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, type ElementType } from "react";
 import {
   MessageSquare,
   Terminal as TerminalIcon,
@@ -10,8 +10,16 @@ import {
   Sparkles,
   Volume2,
   VolumeX,
+  Image as ImageIcon,
+  Hammer,
+  Code2,
+  Bot,
+  Rocket,
+  Search,
 } from "lucide-react";
 import { TerminalPanel, TerminalPanelHandle } from "./TerminalPanel";
+import type { WorkspaceArtifact } from "./OutputPanel";
+import { HoloDirector, type HoloState } from "./HoloDirector";
 
 type ChatMessage = {
   id: string;
@@ -20,6 +28,24 @@ type ChatMessage = {
   agent?: string;
 };
 
+function normalizeAgentResponse(value: string) {
+  const sections = value
+    .split(/\n\s*\n/)
+    .map((part) => part.trim())
+    .filter(Boolean);
+  return sections
+    .filter((part, index) => sections.indexOf(part) === index)
+    .join("\n\n");
+}
+
+function generateRunId(counter: number) {
+  return `run_${Date.now()}_${counter}`;
+}
+
+function generateArtifactId() {
+  return `image_${Date.now()}`;
+}
+
 const SUGGESTED = [
   "Build me a landing page",
   "Generate hero image for my startup",
@@ -27,22 +53,49 @@ const SUGGESTED = [
   "Deploy current project",
 ];
 
+type WorkMode = "ask" | "image" | "build" | "code" | "agent" | "deploy";
+
+const WORK_MODES = [
+  { id: "ask" as const, label: "Ask", icon: MessageSquare },
+  { id: "image" as const, label: "Image", icon: ImageIcon },
+  { id: "build" as const, label: "Build", icon: Hammer },
+  { id: "code" as const, label: "Code", icon: Code2 },
+  { id: "agent" as const, label: "Agent", icon: Bot },
+  { id: "deploy" as const, label: "Deploy", icon: Rocket },
+];
+
+const STARTER_ACTIONS: { label: string; icon: ElementType; mode: WorkMode }[] =
+  [
+    { label: "Generate Image", icon: ImageIcon, mode: "image" },
+    { label: "Build Page", icon: Hammer, mode: "build" },
+    { label: "Fix Code", icon: Code2, mode: "code" },
+    { label: "Research", icon: Search, mode: "ask" },
+    { label: "Create Agent", icon: Bot, mode: "agent" },
+    { label: "Deploy Preview", icon: Rocket, mode: "deploy" },
+  ];
+
 export function ChatTerminal({
   onLogAction,
   onCommandAction,
   onConnectionChangeAction,
   onTerminalOutputAction,
+  onArtifactAction,
   agentId = "director",
 }: {
   onLogAction: (entry: string) => void;
   onCommandAction: (cmd: string) => void;
   onConnectionChangeAction: (connected: boolean) => void;
   onTerminalOutputAction: (output: string) => void;
+  onArtifactAction?: (artifact: WorkspaceArtifact) => void;
   agentId?: string;
 }) {
   const [mode, setMode] = useState<"chat" | "terminal">("chat");
+  const [workMode, setWorkMode] = useState<WorkMode>("ask");
+  const [aspectRatio, setAspectRatio] = useState("1:1");
+  const [imageStyle, setImageStyle] = useState("Auto");
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
+  const [holoState, setHoloState] = useState<HoloState>("idle");
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       id: "welcome",
@@ -53,12 +106,9 @@ export function ChatTerminal({
     },
   ]);
   const terminalRef = useRef<TerminalPanelHandle>(null);
+  const abortRef = useRef<AbortController | null>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
   const idCounter = useRef(0);
-  const nextId = () => {
-    idCounter.current += 1;
-    return `${idCounter.current}`;
-  };
   const [speakEnabled, setSpeakEnabled] = useState(false);
   const [listening, setListening] = useState(false);
   const spokenRef = useRef<Set<string>>(new Set());
@@ -107,6 +157,8 @@ export function ChatTerminal({
       voices.find((v) => v.lang.startsWith("en")) ||
       null;
     if (preferred) utter.voice = preferred;
+    utter.onstart = () => setHoloState("speaking");
+    utter.onend = () => setHoloState("complete");
     window.speechSynthesis.speak(utter);
   };
 
@@ -123,7 +175,7 @@ export function ChatTerminal({
   }, []);
 
   useEffect(() => {
-    if (!speakEnabled) return;
+    if (!speakEnabled || loading) return;
     messages.forEach((m) => {
       if (m.role === "agent" && !spokenRef.current.has(m.id)) {
         spokenRef.current.add(m.id);
@@ -131,7 +183,7 @@ export function ChatTerminal({
       }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [messages, speakEnabled]);
+  }, [messages, speakEnabled, loading]);
 
   const getSpeechRecognitionAPI = () => {
     if (typeof window === "undefined") return null;
@@ -148,6 +200,7 @@ export function ChatTerminal({
     recognitionRef.current?.stop();
     recognitionRef.current = null;
     setListening(false);
+    setHoloState("idle");
   };
 
   const startListening = () => {
@@ -194,6 +247,7 @@ export function ChatTerminal({
       setInput("");
       rec.start();
       setListening(true);
+      setHoloState("listening");
     } catch (err) {
       const errorMsg = err instanceof Error ? err.message : "Unknown error";
       onLogAction(`[VOICE] Could not start microphone: ${errorMsg}`);
@@ -216,48 +270,155 @@ export function ChatTerminal({
   }, [messages, mode]);
 
   const sendChat = async (text: string) => {
-    if (!text.trim()) return;
+    if (!text.trim() || loading) return;
+    idCounter.current += 1;
+    const runId = generateRunId(idCounter.current);
     const userMsg: ChatMessage = {
-      id: `u_${nextId()}`,
+      id: `u_${runId}`,
       role: "user",
       content: text,
     };
     setMessages((prev) => [...prev, userMsg]);
     setInput("");
     setLoading(true);
+    setHoloState(workMode === "image" ? "working" : "planning");
     onLogAction(`[CHAT] User: ${text}`);
 
     try {
-      const res = await fetch("/api/agents/chat", {
+      if (workMode === "image") {
+        onLogAction("[IMAGE] Visionary started generation");
+        const imagePrompt =
+          imageStyle === "Auto" ? text : `${text}. Style: ${imageStyle}`;
+        const imageRes = await fetch("/api/studio/generate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            prompt: imagePrompt,
+            aspectRatio,
+            batchSize: 1,
+          }),
+        });
+        const imageData = await imageRes.json();
+        if (!imageRes.ok || !imageData.images?.[0]?.url) {
+          throw new Error(imageData.error || "Image generation failed");
+        }
+        const image = imageData.images[0];
+        const artifact: WorkspaceArtifact = {
+          id: generateArtifactId(),
+          type: "image",
+          name: text.trim().slice(0, 42) || "Generated image",
+          url: image.url,
+          prompt: image.prompt || imagePrompt,
+          provider: image.provider || imageData.provider || "Visionary",
+        };
+        onArtifactAction?.(artifact);
+        setMessages((prev) => [
+          ...prev,
+          {
+            id: `a_${runId}`,
+            role: "agent",
+            content:
+              "Your image is ready. I opened it in the Artifact panel so you can review, download, or add it to the project.",
+            agent: "Visionary",
+          },
+        ]);
+        onLogAction("[IMAGE] Image generated successfully");
+        onLogAction(`[ARTIFACT] ${artifact.id} saved`);
+        setHoloState("complete");
+        return;
+      }
+
+      const assistantId = `a_${runId}`;
+      setMessages((prev) => [
+        ...prev,
+        { id: assistantId, role: "agent", content: "", agent: "Director" },
+      ]);
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setHoloState("working");
+      const history = messages
+        .filter((message) => message.id !== "welcome")
+        .slice(-10)
+        .map((message) => ({
+          role: message.role === "agent" ? "assistant" : "user",
+          content: message.content,
+        }));
+      const res = await fetch("/api/chat/unified", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId, message: text }),
+        signal: controller.signal,
+        body: JSON.stringify({
+          mode: "llm",
+          agentSlug: agentId,
+          message: `[${workMode.toUpperCase()}] ${text}`,
+          history,
+          stream: true,
+        }),
       });
-      const data = await res.json();
-      const answer =
-        data.response || data.answer || data.error || "LiTT is thinking...";
-      const agentMsg: ChatMessage = {
-        id: `a_${nextId()}`,
-        role: "agent",
-        content: answer,
-        agent: "Director",
-      };
-      setMessages((prev) => [...prev, agentMsg]);
-      onLogAction(`[CHAT] Director: ${answer.slice(0, 120)}`);
+      if (!res.ok || !res.body)
+        throw new Error(`Conversation failed (${res.status})`);
+
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let answer = "";
+      while (true) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split("\n\n");
+        buffer = events.pop() || "";
+        for (const event of events) {
+          for (const line of event.split("\n")) {
+            if (!line.startsWith("data:")) continue;
+            const raw = line.slice(5).trim();
+            if (!raw || raw === "[DONE]") continue;
+            const payload = JSON.parse(raw) as {
+              text?: string;
+              error?: string;
+            };
+            if (payload.error) throw new Error(payload.error);
+            if (payload.text) {
+              answer += payload.text;
+              const visible = normalizeAgentResponse(answer);
+              setMessages((prev) =>
+                prev.map((message) =>
+                  message.id === assistantId
+                    ? { ...message, content: visible }
+                    : message,
+                ),
+              );
+            }
+          }
+        }
+      }
+      setHoloState(speakEnabled ? "speaking" : "complete");
+      onLogAction(
+        `[CHAT] Director completed response (${answer.length} chars)`,
+      );
     } catch (err) {
+      if (err instanceof DOMException && err.name === "AbortError") {
+        setHoloState("idle");
+        onLogAction("[CHAT] Run stopped by user");
+        return;
+      }
       const errorMsg = err instanceof Error ? err.message : "Request failed";
       const agentMsg: ChatMessage = {
-        id: `a_${nextId()}`,
+        id: `error_${runId}`,
         role: "agent",
         content: `Error: ${errorMsg}`,
         agent: "Director",
       };
       setMessages((prev) => [...prev, agentMsg]);
       onLogAction(`[CHAT] Error: ${errorMsg}`);
+      setHoloState("error");
     } finally {
+      abortRef.current = null;
       setLoading(false);
     }
   };
+
+  const stopRun = () => abortRef.current?.abort();
 
   const runAsCommand = () => {
     if (!input.trim()) return;
@@ -273,7 +434,7 @@ export function ChatTerminal({
   };
 
   return (
-    <div className="flex h-full min-w-0 flex-col overflow-hidden rounded-xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm sm:rounded-2xl">
+    <div className="flex h-full min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-neutral-800/60 bg-black/40 backdrop-blur-sm sm:rounded-2xl">
       {/* Header tabs */}
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b border-neutral-800/60 px-3 py-2.5 sm:px-4 sm:py-3">
         <div className="flex min-w-0 items-center gap-2">
@@ -329,38 +490,88 @@ export function ChatTerminal({
             ref={scrollRef}
             className="absolute inset-0 space-y-3 overflow-y-auto p-3 sm:p-4"
           >
-            {messages.map((m) => (
-              <div
-                key={m.id}
-                className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
-              >
-                <div
-                  className={`max-w-[min(85%,calc(100vw-48px))] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm break-words ${
-                    m.role === "user"
-                      ? "bg-cyan-500/15 border border-cyan-500/25 text-cyan-100"
-                      : "bg-neutral-900/60 border border-neutral-800/60 text-neutral-200"
-                  }`}
-                >
-                  {m.role === "agent" && m.agent ? (
-                    <div
-                      className="mb-1 text-[10px] font-black uppercase tracking-wider"
-                      style={{ color: "#22d3ee" }}
-                    >
-                      {m.agent}
+            {messages.length === 1 && (
+              <div className="mx-auto grid min-h-full max-w-3xl content-start gap-4 py-3 sm:content-center sm:py-6">
+                <div className="grid gap-4 md:grid-cols-[minmax(240px,.8fr)_1.2fr] md:items-center">
+                  <div className="md:hidden">
+                    <HoloDirector state={holoState} compact />
+                  </div>
+                  <div className="hidden md:block">
+                    <HoloDirector state={holoState} />
+                  </div>
+                  <div>
+                    <div className="text-[10px] font-black uppercase tracking-[0.3em] text-cyan-400">
+                      Active project
                     </div>
-                  ) : null}
-                  {m.content}
-                </div>
-              </div>
-            ))}
-            {loading && (
-              <div className="flex justify-start">
-                <div className="flex items-center gap-2 rounded-2xl bg-neutral-900/60 border border-neutral-800/60 px-3.5 py-2.5 text-sm text-neutral-300">
-                  <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-                  <span className="text-xs">LiTT is thinking...</span>
+                    <h2 className="mt-2 text-2xl font-black text-white">
+                      What should LiTT make next?
+                    </h2>
+                    <p className="mt-1 text-sm text-neutral-500">
+                      Start a mission and the canvas will show the plan,
+                      progress, and result.
+                    </p>
+                    <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
+                      {STARTER_ACTIONS.map(
+                        ({ label, icon: Icon, mode: target }) => (
+                          <button
+                            key={label}
+                            onClick={() => setWorkMode(target)}
+                            className="rounded-xl border border-neutral-800/60 bg-neutral-900/35 p-4 text-left transition hover:border-cyan-500/30 hover:bg-cyan-500/5"
+                          >
+                            <Icon size={18} className="mb-3 text-cyan-400" />
+                            <div className="text-xs font-bold text-neutral-200">
+                              {label}
+                            </div>
+                          </button>
+                        ),
+                      )}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}
+            {messages.length > 1 && <HoloDirector state={holoState} compact />}
+            {messages.length > 1 &&
+              messages
+                .filter((message) => message.content)
+                .map((m, index) => (
+                  <div
+                    key={m.id}
+                    className={`relative flex ${m.role === "user" ? "justify-end" : "justify-start"}`}
+                  >
+                    {index > 0 && (
+                      <span className="absolute -top-3 left-1/2 h-3 w-px bg-neutral-800" />
+                    )}
+                    <div
+                      className={`max-w-[min(85%,calc(100vw-48px))] overflow-hidden rounded-2xl px-3.5 py-2.5 text-sm break-words ${
+                        m.role === "user"
+                          ? "bg-cyan-500/15 border border-cyan-500/25 text-cyan-100"
+                          : "bg-neutral-900/60 border border-neutral-800/60 text-neutral-200"
+                      }`}
+                    >
+                      {m.role === "agent" && m.agent ? (
+                        <div
+                          className="mb-1 text-[10px] font-black uppercase tracking-wider"
+                          style={{ color: "#22d3ee" }}
+                        >
+                          {m.agent}
+                        </div>
+                      ) : null}
+                      {m.content}
+                    </div>
+                  </div>
+                ))}
+            {loading &&
+              !messages.some(
+                (message) => message.id.startsWith("a_run_") && message.content,
+              ) && (
+                <div className="flex justify-start">
+                  <div className="flex items-center gap-2 rounded-2xl bg-neutral-900/60 border border-neutral-800/60 px-3.5 py-2.5 text-sm text-neutral-300">
+                    <span className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+                    <span className="text-xs">LiTT is thinking...</span>
+                  </div>
+                </div>
+              )}
           </div>
         ) : (
           <div className="absolute inset-0 p-2">
@@ -376,7 +587,7 @@ export function ChatTerminal({
       </div>
 
       {/* Composer */}
-      <div className="border-t border-neutral-800/60 p-2.5 sm:p-3">
+      <div className="shrink-0 border-t border-neutral-800/60 bg-black/90 px-2.5 pt-2.5 pb-[max(10px,env(safe-area-inset-bottom))] sm:p-3">
         {mode === "chat" && messages.length < 3 ? (
           <div className="mb-2 flex max-w-full gap-1.5 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
             {SUGGESTED.map((s) => (
@@ -392,6 +603,49 @@ export function ChatTerminal({
           </div>
         ) : null}
 
+        {mode === "chat" && (
+          <div className="mb-2 flex gap-1 overflow-x-auto pb-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
+            {WORK_MODES.map((item) => {
+              const Icon = item.icon;
+              return (
+                <button
+                  key={item.id}
+                  onClick={() => setWorkMode(item.id)}
+                  className={`flex shrink-0 items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold ${workMode === item.id ? "border-cyan-500/40 bg-cyan-500/15 text-cyan-300" : "border-neutral-800/60 text-neutral-500 hover:text-neutral-300"}`}
+                >
+                  <Icon size={11} /> {item.label}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        {mode === "chat" && workMode === "image" && (
+          <div className="mb-2 flex gap-2 overflow-x-auto text-[10px]">
+            <select
+              value={imageStyle}
+              onChange={(event) => setImageStyle(event.target.value)}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-neutral-300"
+            >
+              <option>Auto</option>
+              <option>Logo</option>
+              <option>Photoreal</option>
+              <option>Illustration</option>
+              <option>3D Render</option>
+            </select>
+            <select
+              value={aspectRatio}
+              onChange={(event) => setAspectRatio(event.target.value)}
+              className="rounded-lg border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-neutral-300"
+            >
+              <option>1:1</option>
+              <option>16:9</option>
+              <option>9:16</option>
+              <option>4:3</option>
+            </select>
+          </div>
+        )}
+
         <div className="flex min-w-0 items-center gap-1.5 rounded-xl border border-neutral-800/60 bg-neutral-900/60 px-2 py-2 transition-all focus-within:border-cyan-500/40 focus-within:shadow-[0_0_12px_rgba(34,211,238,0.12)] sm:gap-2 sm:px-3">
           <button
             className="text-neutral-500 hover:text-neutral-300"
@@ -399,7 +653,8 @@ export function ChatTerminal({
           >
             <Paperclip size={16} />
           </button>
-          <input
+          <textarea
+            rows={1}
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => {
@@ -414,17 +669,33 @@ export function ChatTerminal({
             }}
             placeholder={
               mode === "chat"
-                ? "What do you want to build?"
+                ? workMode === "image"
+                  ? "Describe your image…"
+                  : workMode === "code"
+                    ? "What code should LiTT inspect or change?"
+                    : workMode === "build"
+                      ? "Describe what you want to build…"
+                      : `Tell LiTT what to ${workMode}…`
                 : "Type command and press Enter..."
             }
-            className="min-w-0 flex-1 bg-transparent text-sm text-neutral-100 outline-none placeholder:text-neutral-500"
+            className="max-h-32 min-h-10 min-w-0 flex-1 resize-none bg-transparent py-2 text-base text-neutral-100 outline-none placeholder:text-neutral-500 sm:text-sm"
           />
           <button
-            onClick={() => (mode === "chat" ? sendChat(input) : runAsCommand())}
-            className="rounded-lg bg-cyan-500/15 p-2 text-cyan-300 hover:bg-cyan-500/25 transition"
-            aria-label="Send"
+            onClick={() =>
+              loading
+                ? stopRun()
+                : mode === "chat"
+                  ? sendChat(input)
+                  : runAsCommand()
+            }
+            className={`rounded-lg p-2 transition ${loading ? "bg-red-500/15 text-red-300" : "bg-cyan-500/15 text-cyan-300 hover:bg-cyan-500/25"}`}
+            aria-label={loading ? "Stop" : "Send"}
           >
-            <Send size={16} />
+            {loading ? (
+              <span className="block h-3.5 w-3.5 rounded-sm bg-current" />
+            ) : (
+              <Send size={16} />
+            )}
           </button>
           <button
             onClick={toggleListening}

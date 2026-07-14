@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from "re
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import { Maximize2, Minimize2, RotateCcw, Trash2 } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
@@ -32,7 +32,7 @@ export const TerminalPanel = forwardRef<TerminalPanelHandle, TerminalPanelProps>
   const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useAppUser();
   const userId = user?.id ?? "anonymous";
   const [sessionId] = useState(() => `session-${Date.now()}`);
 

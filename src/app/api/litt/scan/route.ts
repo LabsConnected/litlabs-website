@@ -30,6 +30,7 @@ interface ScanResult {
     envVarsMissing: string[];
     buildStatus: string;
   };
+  files: FileSummary[];
 }
 
 async function readFileSafe(
@@ -242,6 +243,7 @@ export async function GET() {
       envVarsMissing,
       buildStatus,
     },
+    files: allFiles,
   };
 
   return NextResponse.json(result);

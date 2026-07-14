@@ -21,12 +21,8 @@ const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const clerkSecretKey = process.env.CLERK_SECRET_KEY;
 const isClerkConfigured = !!(clerkKey && clerkSecretKey);
 
-export default clerkMiddleware(async (auth, req) => {
-  // If Clerk is not configured, just pass through
-  if (!isClerkConfigured) {
-    return NextResponse.next();
-  }
-
+const configuredMiddleware = isClerkConfigured
+  ? clerkMiddleware(async (auth, req) => {
   let userId: string | null = null;
   try {
     const authResult = await auth();
@@ -53,7 +49,12 @@ export default clerkMiddleware(async (auth, req) => {
   }
 
   return response;
-});
+    })
+  : null;
+
+// clerkMiddleware validates its keys before its callback runs, so choose the
+// pass-through handler before constructing it in local/custom-auth mode.
+export default configuredMiddleware ?? (() => NextResponse.next());
 
 export const config = {
   matcher: [

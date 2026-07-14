@@ -1,14 +1,14 @@
 "use client";
 
 import { useState } from "react";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
 import { APPS } from "@/components/dashboard/dashboard-data";
 import { CenterStage } from "@/components/dashboard/DashboardCards";
 
 export default function DashboardView() {
-  const { user } = useUser();
+  const { user } = useAppUser();
   const { profile } = useProfile();
   const { resolvedColors: T } = useTheme();
   const [activeApp, setActiveApp] = useState("home");
@@ -59,5 +59,4 @@ export default function DashboardView() {
     </div>
   );
 }
-
 

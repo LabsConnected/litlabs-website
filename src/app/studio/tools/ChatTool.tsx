@@ -1,121 +1,107 @@
 "use client";
 
-import { FormEvent, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Bot,
   Brain,
-  Camera,
   Hammer,
   Loader2,
-  Mic,
-  MicOff,
-  Send,
   Sparkles,
 } from "lucide-react";
+import {
+  buildStudioActionPrompt,
+  STUDIO_ACTIONS,
+  type StudioActionContext,
+  type StudioActionId,
+} from "@/lib/studio-actions";
 
 type Message = { role: "user" | "assistant"; content: string };
 
-type SpeechRecognitionResult = { transcript: string }[];
-type SpeechRecognitionEvent = {
-  resultIndex: number;
-  results: (SpeechRecognitionResult & { isFinal: boolean })[];
-};
-type SpeechRec = {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  maxAlternatives: number;
-  onresult: ((event: SpeechRecognitionEvent) => void) | null;
-  onerror: ((event: { error?: string }) => void) | null;
-  onend: (() => void) | null;
-  start(): void;
-  stop(): void;
-};
-
-const starters = [
-  "Audit this mobile view",
-  "Make LiTT smarter",
-  "Design inline",
-  "Create a motion",
-  "Map the idea",
-  "Improve the app",
-];
-const actions = [
-  "Find root cause",
-  "Patch plan",
-  "Run mobile regression",
-  "Check deploy health",
-  "Summarize changes",
-];
-
 export default function ChatTool() {
-  const [input, setInput] = useState("");
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
-  const [listening, setListening] = useState(false);
-  const recognitionRef = useRef<SpeechRec | null>(null);
+  const browserErrorsRef = useRef<string[]>([]);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    const SpeechRecognitionAPI =
-      (window as unknown as { SpeechRecognition?: new () => SpeechRec })
-        .SpeechRecognition ||
-      (window as unknown as { webkitSpeechRecognition?: new () => SpeechRec })
-        .webkitSpeechRecognition;
-    if (!SpeechRecognitionAPI) return;
-    const rec = new SpeechRecognitionAPI();
-    rec.continuous = false;
-    rec.interimResults = true;
-    rec.lang = "en-US";
-    rec.maxAlternatives = 1;
-    let finalTranscript = "";
-    rec.onresult = (event) => {
-      let interim = "";
-      for (let i = event.resultIndex; i < event.results.length; i++) {
-        const transcript = event.results[i][0].transcript;
-        if (event.results[i].isFinal) finalTranscript += transcript;
-        else interim += transcript;
-      }
-      setInput((finalTranscript + (interim ? " " + interim : "")).trim());
+    const recordError = (message: string) => {
+      browserErrorsRef.current = [message, ...browserErrorsRef.current].slice(0, 8);
     };
-    rec.onerror = () => setListening(false);
-    rec.onend = () => {
-      const text = finalTranscript.trim();
-      if (text) setInput(text);
-      setListening(false);
+    const onError = (event: ErrorEvent) => recordError(event.message || "Browser error");
+    const onRejection = (event: PromiseRejectionEvent) =>
+      recordError(event.reason instanceof Error ? event.reason.message : String(event.reason));
+    window.addEventListener("error", onError);
+    window.addEventListener("unhandledrejection", onRejection);
+    return () => {
+      window.removeEventListener("error", onError);
+      window.removeEventListener("unhandledrejection", onRejection);
     };
-    recognitionRef.current = rec;
-    return () => rec.stop();
   }, []);
 
-  const toggleListening = () => {
-    const rec = recognitionRef.current;
-    if (!rec) return;
-    if (listening) {
-      rec.stop();
-      setListening(false);
-    } else {
-      setInput("");
-      rec.start();
-      setListening(true);
-    }
-  };
+  const collectContext = useCallback((userGoal?: string): StudioActionContext => {
+    const width = window.innerWidth;
+    const selectedNode = document.querySelector<HTMLElement>("[data-studio-selected='true']");
+    const visibleText = Array.from(
+      new Set(
+        (document.querySelector("main")?.textContent ?? "")
+          .split("\n")
+          .map((line) => line.trim())
+          .filter((line) => line.length >= 3 && line.length <= 120),
+      ),
+    ).slice(0, 30);
+    const route = `${window.location.pathname}${window.location.search}`;
+    const relatedFiles = window.location.pathname.startsWith("/studio")
+      ? [
+          "src/app/studio/page.tsx",
+          "src/app/studio/tools/ChatTool.tsx",
+          "src/app/studio/components/StudioCommandDock.tsx",
+        ]
+      : [];
+    return {
+      route,
+      projectId: window.localStorage.getItem("litlabs-active-project") || "litlabs-website",
+      viewport: {
+        width,
+        height: window.innerHeight,
+        device: width < 640 ? "mobile" : width < 1024 ? "tablet" : "desktop",
+      },
+      selectedElement: selectedNode
+        ? {
+            label:
+              selectedNode.getAttribute("aria-label") ||
+              selectedNode.dataset.studioLabel ||
+              selectedNode.textContent?.trim().slice(0, 80) ||
+              "selected interface element",
+            componentName: selectedNode.dataset.component,
+            sourceFile: selectedNode.dataset.sourceFile,
+          }
+        : undefined,
+      visibleText,
+      consoleErrors: browserErrorsRef.current,
+      relatedFiles,
+      activeAgent: "LiTT-Code",
+      userGoal,
+    };
+  }, []);
 
-  const send = async (value = input) => {
+  const send = useCallback(async (
+    value: string,
+    requestedAgent: "auto" | "litt-code" | "little-bit" = "auto",
+    displayValue = value,
+  ) => {
     const text = value.trim();
     if (!text || busy) return;
-    const next = [...messages, { role: "user" as const, content: text }];
+    const next = [...messages, { role: "user" as const, content: displayValue }];
     setMessages(next);
-    setInput("");
     setBusy(true);
     try {
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: "littree",
+          agentSlug: requestedAgent === "litt-code" ? "forge" : "director",
           provider: "gemini",
-          history: next,
+          message: text,
+          history: messages,
           stream: false,
         }),
       });
@@ -126,6 +112,7 @@ export default function ChatTool() {
         {
           role: "assistant",
           content:
+            data.response ||
             data.text ||
             data.message ||
             data.content ||
@@ -144,12 +131,21 @@ export default function ChatTool() {
     } finally {
       setBusy(false);
     }
+  }, [busy, messages]);
+
+  const runStudioAction = (actionId: StudioActionId, label: string) => {
+    const prompt = buildStudioActionPrompt(actionId, collectContext(label));
+    void send(prompt, "litt-code", label);
   };
 
-  const submit = (event: FormEvent) => {
-    event.preventDefault();
-    void send();
-  };
+  useEffect(() => {
+    const handleCommand = (event: Event) => {
+      const detail = (event as CustomEvent<{ text?: string; agent?: "auto" | "litt-code" | "little-bit" }>).detail;
+      if (detail?.text) void send(detail.text, detail.agent);
+    };
+    window.addEventListener("litt:studio-command", handleCommand);
+    return () => window.removeEventListener("litt:studio-command", handleCommand);
+  }, [send]);
 
   return (
     <div className="relative mx-auto flex min-h-full w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-cyan-400/10 bg-[#050914] text-slate-100 shadow-2xl">
@@ -217,14 +213,19 @@ export default function ChatTool() {
                 );
               })}
             </div>
-            <div className="mt-3 flex gap-2 overflow-x-auto pb-1">
-              {starters.map((item) => (
+            <div className="mt-4 grid grid-cols-1 gap-2 text-left sm:grid-cols-2">
+              {STUDIO_ACTIONS.map((action) => (
                 <button
-                  key={item}
-                  onClick={() => void send(item)}
-                  className="shrink-0 rounded-full border border-white/10 px-3 py-2 font-mono text-[9px] text-slate-300"
+                  key={action.id}
+                  onClick={() => runStudioAction(action.id, action.label)}
+                  className="group rounded-xl border border-white/10 bg-white/[.025] px-3 py-2.5 text-left transition-all hover:border-cyan-300/35 hover:bg-cyan-300/[.05]"
                 >
-                  {item}
+                  <span className="block font-mono text-[10px] font-black text-slate-200 group-hover:text-cyan-200">
+                    {action.label}
+                  </span>
+                  <span className="mt-0.5 block font-mono text-[8px] leading-relaxed text-slate-500">
+                    {action.shortDescription}
+                  </span>
                 </button>
               ))}
             </div>
@@ -248,56 +249,6 @@ export default function ChatTool() {
         )}
       </main>
 
-      <footer className="relative border-t border-white/10 bg-[#060a16]/95 p-2.5">
-        <div className="mb-2 flex gap-2 overflow-x-auto">
-          {actions.map((action) => (
-            <button
-              key={action}
-              onClick={() => setInput(action)}
-              className="shrink-0 rounded-full border border-white/10 px-3 py-1.5 font-mono text-[9px] text-slate-400"
-            >
-              {action}
-            </button>
-          ))}
-        </div>
-        <form
-          onSubmit={submit}
-          className="flex items-center gap-2 rounded-2xl border border-cyan-400/40 bg-[#0c1225] p-1.5 shadow-[0_0_18px_rgba(34,211,238,.08)]"
-        >
-          <button
-            type="button"
-            className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-slate-400"
-            title="Attach image"
-          >
-            <Camera size={16} />
-          </button>
-          <input
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            placeholder="Ask LiTT Code to build, fix, design…"
-            className="min-w-0 flex-1 bg-transparent px-1 font-mono text-xs outline-none placeholder:text-slate-500"
-          />
-          <button
-            type="button"
-            onClick={toggleListening}
-            className={`grid h-9 w-9 shrink-0 place-items-center rounded-full border ${listening ? "border-red-400/60 text-red-300 animate-pulse" : "border-cyan-400/60 text-cyan-300"}`}
-            title={listening ? "Listening..." : "Voice"}
-          >
-            {listening ? <MicOff size={16} /> : <Mic size={16} />}
-          </button>
-          <button
-            disabled={!input.trim() || busy}
-            className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-cyan-300 text-slate-950 disabled:opacity-40"
-            title="Send"
-          >
-            <Send size={17} />
-          </button>
-        </form>
-        <div className="mt-2 flex items-center gap-2 font-mono text-[9px] text-slate-500">
-          <span className="text-cyan-300">• LiTT Code⌃</span>
-          <span>♙ Gemini 2.5 Flash⌃</span>
-        </div>
-      </footer>
     </div>
   );
 }

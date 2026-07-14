@@ -14,6 +14,10 @@ export interface Game {
   platform: GamePlatform;
   coverUrl: string;
   html5Url?: string;
+  sourceUrl?: string;
+  license: "open-source" | "free-to-play" | "public-domain";
+  licenseLabel: string;
+  launchMode: "embedded" | "new-tab";
   year: number;
   developer: string;
   players: number;
@@ -63,8 +67,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "retro",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/retro%20arcade%20pong%20game%20cover%20neon%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=101",
+      "/api/artwork/pong",
     html5Url: "https://sethclydesdale.github.io/browser-pong/",
+    sourceUrl: "https://github.com/SethClydesdale/browser-pong",
+    license: "open-source",
+    licenseLabel: "Open source",
+    launchMode: "embedded",
     year: 1972,
     developer: "Atari",
     players: 2,
@@ -79,8 +87,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/2048%20puzzle%20game%20cover%20numbered%20tiles%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=202",
+      "/api/artwork/2048",
     html5Url: "https://gabrielecirulli.github.io/2048/",
+    sourceUrl: "https://github.com/gabrielecirulli/2048",
+    license: "open-source",
+    licenseLabel: "MIT",
+    launchMode: "embedded",
     year: 2014,
     developer: "Gabriele Cirulli",
     players: 1,
@@ -95,8 +107,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/hextris%20hexagon%20stacking%20puzzle%20game%20cover%20colorful%20neon%20dark%20background?width=400&height=250&nologo=true&seed=303",
+      "/api/artwork/hextris",
     html5Url: "https://hextris.github.io/hextris/",
+    sourceUrl: "https://github.com/Hextris/hextris",
+    license: "open-source",
+    licenseLabel: "GPL-3.0",
+    launchMode: "new-tab",
     year: 2014,
     developer: "Logan Engstrom",
     players: 1,
@@ -111,8 +127,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/tetris%20block%20puzzle%20game%20cover%20retro%20neon%20falling%20blocks%20dark%20background?width=400&height=250&nologo=true&seed=404",
+      "/api/artwork/tetris",
     html5Url: "https://chvin.github.io/react-tetris/",
+    sourceUrl: "https://github.com/chvin/react-tetris",
+    license: "open-source",
+    licenseLabel: "MIT",
+    launchMode: "embedded",
     year: 1984,
     developer: "Alexey Pajitnov",
     players: 1,
@@ -127,8 +147,11 @@ export const GAME_LIBRARY: Game[] = [
     category: "arcade",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/pacman%20arcade%20maze%20game%20cover%20neon%20yellow%20character%20dark%20background?width=400&height=250&nologo=true&seed=505",
+      "/api/artwork/pacman",
     html5Url: "https://pacman.platzh1rsch.ch/",
+    license: "free-to-play",
+    licenseLabel: "Community web edition",
+    launchMode: "new-tab",
     year: 1980,
     developer: "Namco",
     players: 1,
@@ -143,8 +166,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "arcade",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/retro%20snake%20arcade%20game%20cover%20neon%20green%20pixel%20snake%20dark%20background?width=400&height=250&nologo=true&seed=606",
+      "/api/artwork/snake",
     html5Url: "https://alfredang.github.io/snake-game/",
+    sourceUrl: "https://github.com/alfredang/snake-game",
+    license: "open-source",
+    licenseLabel: "Source available",
+    launchMode: "embedded",
     year: 1976,
     developer: "Various",
     players: 1,
@@ -159,8 +186,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/sudoku%20puzzle%20game%20cover%20numbers%20grid%20dark%20background%20minimal?width=400&height=250&nologo=true&seed=707",
-    html5Url: "https://www.sudoku100.com/embed/interactive",
+      "/api/artwork/sudoku",
+    html5Url: "https://aduh95.github.io/web-sudoku/",
+    sourceUrl: "https://github.com/aduh95/web-sudoku",
+    license: "open-source",
+    licenseLabel: "Open source",
+    launchMode: "new-tab",
     year: 2004,
     developer: "Various",
     players: 1,
@@ -175,8 +206,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "arcade",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/flappy%20bird%20arcade%20game%20cover%20pixel%20art%20bird%20pipes%20dark%20background?width=400&height=250&nologo=true&seed=808",
+      "/api/artwork/flappy",
     html5Url: "https://chaping.github.io/game/flappy-bird/",
+    sourceUrl: "https://github.com/chaping/game",
+    license: "open-source",
+    licenseLabel: "Source available",
+    launchMode: "new-tab",
     year: 2013,
     developer: "Dong Nguyen",
     players: 1,
@@ -191,8 +226,12 @@ export const GAME_LIBRARY: Game[] = [
     category: "puzzle",
     platform: "html5",
     coverUrl:
-      "https://image.pollinations.ai/prompt/minesweeper%20puzzle%20game%20cover%20retro%20mines%20grid%20dark%20background?width=400&height=250&nologo=true&seed=909",
+      "/api/artwork/minesweeper",
     html5Url: "https://minesweeper.github.io/",
+    sourceUrl: "https://github.com/minesweeper/minesweeper",
+    license: "open-source",
+    licenseLabel: "Open source",
+    launchMode: "embedded",
     year: 1990,
     developer: "Microsoft",
     players: 1,

@@ -1,12 +1,11 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
@@ -79,10 +78,43 @@ type GalleryItem = {
   videoUrl?: string;
 };
 
+function getArtifactIdentity(item: GalleryItem): string {
+  const imageUrl = item.imageUrl.trim().toLowerCase().replace(/\/$/, "");
+  const mediaUrl = (item.videoUrl || imageUrl).trim().toLowerCase().replace(/\/$/, "");
+  return `${item.mediaType || "image"}:${mediaUrl}`;
+}
+
+function dedupeArtifacts(items: GalleryItem[]): GalleryItem[] {
+  const byId = new Map<string, GalleryItem>();
+  const identityToId = new Map<string, string>();
+
+  for (const item of items) {
+    const identity = getArtifactIdentity(item);
+    const existingId = byId.has(item.id) ? item.id : identityToId.get(identity);
+
+    if (existingId) {
+      const existing = byId.get(existingId)!;
+      byId.set(existingId, {
+        ...item,
+        ...existing,
+        isOwner: existing.isOwner || item.isOwner,
+        isPublic: existing.isPublic ?? item.isPublic,
+        likes: Math.max(existing.likes || 0, item.likes || 0),
+      });
+      continue;
+    }
+
+    byId.set(item.id, item);
+    identityToId.set(identity, item.id);
+  }
+
+  return Array.from(byId.values());
+}
+
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Gallery() {
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { user } = useAppUser();
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);
@@ -126,16 +158,19 @@ export default function Gallery() {
   } | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [isMock, setIsMock] = useState(false);
+  const [galleryError, setGalleryError] = useState<string | null>(null);
+  const [galleryLoading, setGalleryLoading] = useState(true);
 
   // Real API items first; fall back to user items only when API returns nothing
-  const baseItems =
-    apiItems.length > 0
-      ? [...apiItems, ...userItems]
-      : [...userItems];
-  const items = baseItems.map((item) => ({
-    ...item,
-    likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
-  }));
+  const items = useMemo(
+    () =>
+      dedupeArtifacts([...apiItems, ...userItems]).map((item) => ({
+        ...item,
+        likes:
+          likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
+      })),
+    [apiItems, userItems, likeCounts],
+  );
 
   // Memoized Lightbox navigation handlers to prevent infinite loops
   const handleLightboxNext = useCallback(() => {
@@ -165,17 +200,23 @@ export default function Gallery() {
 
   // Fetch gallery items when view mode or category changes
   useEffect(() => {
+    const controller = new AbortController();
     const params = new URLSearchParams();
     params.set("view", viewMode);
     if (selectedCategory !== "all") {
       params.set("category", selectedCategory);
     }
 
-    fetch(`/api/gallery?${params.toString()}`)
-      .then((r) => r.json())
+    fetch(`/api/gallery?${params.toString()}`, { signal: controller.signal })
+      .then(async (r) => {
+        const data = await r.json();
+        if (!r.ok) throw new Error(data?.error || "Gallery refresh failed");
+        return data;
+      })
       .then((data: { items?: GalleryItem[]; mock?: boolean }) => {
+        setGalleryError(null);
         setIsMock(data.mock === true);
-        if (data.items && data.items.length > 0) {
+        if (data.items) {
           // Mark items as owned by current user
           const currentUserName = user?.fullName || user?.username;
           const itemsWithOwnership = data.items.map((item) => ({
@@ -183,17 +224,28 @@ export default function Gallery() {
             isOwner: item.artist === currentUserName,
           }));
           setApiItems(itemsWithOwnership);
+        } else {
+          setApiItems([]);
         }
       })
-      .catch(() => {
-        // silent fail — demo items still show
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        setGalleryError(
+          error instanceof Error ? error.message : "Gallery refresh failed",
+        );
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setGalleryLoading(false);
       });
+    return () => controller.abort();
   }, [viewMode, selectedCategory, user]);
 
-  useEffect(() => {
+  const openUpload = useCallback(() => {
     if (isLoaded && !isSignedIn) {
       router.push("/sign-in?redirect_url=/gallery");
+      return;
     }
+    setShowUpload(true);
   }, [isLoaded, isSignedIn, router]);
 
   const toggleLike = useCallback(
@@ -233,26 +285,6 @@ export default function Gallery() {
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: "32px", marginBottom: "16px" }}>⏳</div>
           <div>Loading gallery...</div>
-        </div>
-      </div>
-    );
-  }
-
-  if (!isLoaded || !isSignedIn) {
-    return (
-      <div
-        style={{
-          backgroundColor: T?.bgColor || "#0f0f14",
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: T?.textColor || "#e2e8f0",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "32px", marginBottom: "16px" }}>🔒</div>
-          <div>Sign in to view the gallery</div>
         </div>
       </div>
     );
@@ -455,8 +487,8 @@ export default function Gallery() {
 
   return (
     <PageShell
-      title="Gallery"
-      subtitle="AI-generated art, worlds, and creative works"
+      title="Artifact Museum"
+      subtitle="A living archive of AI-made images, worlds, and creative work"
     >
       {/* Retro Ticker */}
       <div
@@ -464,7 +496,7 @@ export default function Gallery() {
         style={{ borderColor: T.borderColor, color: T.accentColor }}
       >
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>🎨 AI GALLERY RENDERS ONLINE // SECTOR 9 IMAGING SECTOR</span>
+          <span>🏛️ ARTIFACT MUSEUM ONLINE // LITLABS CREATIVE ARCHIVE</span>
           <span>⚡ PIXEL FORGE MODELS LIVE GENERATING 360° SPHERES DAILY</span>
           <span>
             🪐 IMMERSIVE AI IMAGE GENERATION ACROSS MULTIPLE PROVIDERS
@@ -477,7 +509,17 @@ export default function Gallery() {
           className="w-full px-4 py-2 text-[10px] text-center"
           style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
         >
-          🛠 Demo gallery — connect Supabase to see real community uploads.
+          🛠 Demo museum — connect Supabase to see real community artifacts.
+        </div>
+      )}
+
+      {galleryError && (
+        <div
+          role="status"
+          className="w-full px-4 py-2 text-center text-[11px] font-bold"
+          style={{ backgroundColor: "#f59e0b18", color: "#fbbf24" }}
+        >
+          Showing the last available collection. Refresh later to sync new work.
         </div>
       )}
 
@@ -856,7 +898,7 @@ export default function Gallery() {
             ))}
           </select>
           <button
-            onClick={() => setShowUpload(!showUpload)}
+            onClick={() => (showUpload ? setShowUpload(false) : openUpload())}
             className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90"
             style={{ backgroundColor: T.accentColor, color: T.bgColor }}
           >
@@ -1270,6 +1312,52 @@ export default function Gallery() {
 
       {/* ── Enhanced Masonry Gallery ── */}
       <div className="px-3 py-4 sm:px-4 sm:py-6 w-full">
+        {galleryLoading && items.length === 0 && (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3" aria-label="Loading gallery">
+            {[0, 1, 2, 3, 4, 5].map((index) => (
+              <div
+                key={index}
+                className="aspect-[4/3] animate-pulse rounded-2xl border"
+                style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}30` }}
+              />
+            ))}
+          </div>
+        )}
+        {!galleryLoading && filteredItems.length === 0 && (
+          <div
+            className="mx-auto my-12 max-w-lg rounded-2xl px-6 py-10 text-center"
+            style={{
+              backgroundColor: T.boxBg,
+              border: `1px solid ${T.borderColor}40`,
+            }}
+          >
+            <div className="mb-3 text-4xl" aria-hidden="true">🏛️</div>
+            <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
+              No artifacts in this wing yet
+            </h2>
+            <p className="mt-2 text-xs opacity-60" style={{ color: T.textColor }}>
+              {searchQuery
+                ? `Nothing matches “${searchQuery}”. Try another search or clear the filters.`
+                : viewMode === "my-uploads"
+                  ? "Upload your first creation to start a personal collection."
+                  : "Be the first artist to add a creation to this collection."}
+            </p>
+            <button
+              onClick={() => {
+                if (searchQuery || selectedCategory !== "all") {
+                  setSearchQuery("");
+                  setSelectedCategory("all");
+                } else {
+                  openUpload();
+                }
+              }}
+              className="mt-5 rounded-lg px-4 py-2 text-xs font-bold"
+              style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+            >
+              {searchQuery || selectedCategory !== "all" ? "Clear filters" : "Add an artifact"}
+            </button>
+          </div>
+        )}
         <div className="gallery-masonry">
           {filteredItems.map((item) => {
             // Calculate actual aspect ratio from image URL dimensions

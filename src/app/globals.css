@@ -1847,3 +1847,29 @@ main {
   word-break: break-word;
   max-width: 100%;
 }
+/* Compact navigation rail used by the LiTT workspace shell. */
+.sidebar-scroll {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 92, 246, 0.35) transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar {
+  width: 5px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb {
+  background: linear-gradient(
+    to bottom,
+    rgba(139, 92, 246, 0.65),
+    rgba(34, 211, 238, 0.35)
+  );
+  border-radius: 999px;
+}
+
+.sidebar-scroll::-webkit-scrollbar-thumb:hover {
+  background: rgba(139, 92, 246, 0.85);
+}

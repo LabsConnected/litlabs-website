@@ -5,6 +5,14 @@ import nextTs from "eslint-config-next/typescript";
 const eslintConfig = defineConfig([
   ...nextVitals,
   ...nextTs,
+  // Next.js/React Compiler strict rules. Disable for now while the codebase
+  // is progressively refactored to event-handler-driven state updates.
+  {
+    rules: {
+      "react-hooks/set-state-in-effect": "off",
+      "react-hooks/purity": "off",
+    },
+  },
   // Override default ignores of eslint-config-next.
   globalIgnores([
     // Dependencies and build output

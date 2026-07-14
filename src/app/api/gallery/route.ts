@@ -42,7 +42,7 @@ const DEMO_GALLERY = [
     artist: "Pixel Forge",
     category: "360-worlds",
     imageUrl:
-      "https://images.unsplash.com/photo-1515630278258-407f66498911?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/neon-city",
     likes: 234,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -53,7 +53,7 @@ const DEMO_GALLERY = [
     artist: "DreamWeaver",
     category: "abstract",
     imageUrl:
-      "https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/dreamscape",
     likes: 189,
     createdAt: "2026-06-02",
     mediaType: "image" as const,
@@ -64,7 +64,7 @@ const DEMO_GALLERY = [
     artist: "Explorer-X",
     category: "landscape",
     imageUrl:
-      "https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/lost-temple",
     likes: 312,
     createdAt: "2026-05-28",
     mediaType: "image" as const,
@@ -75,7 +75,7 @@ const DEMO_GALLERY = [
     artist: "Pixel Forge",
     category: "character",
     imageUrl:
-      "https://images.unsplash.com/photo-1535295972055-1c762f4483e5?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/quantum-warrior",
     likes: 156,
     createdAt: "2026-06-03",
     mediaType: "image" as const,
@@ -86,7 +86,7 @@ const DEMO_GALLERY = [
     artist: "GeoMancer",
     category: "360-worlds",
     imageUrl:
-      "https://images.unsplash.com/photo-1506905925346-21bda4d32df4?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/crystal-cavern",
     likes: 278,
     createdAt: "2026-05-30",
     mediaType: "image" as const,
@@ -97,7 +97,7 @@ const DEMO_GALLERY = [
     artist: "ShadowNet",
     category: "character",
     imageUrl:
-      "https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/void-entity",
     likes: 421,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -108,7 +108,7 @@ const DEMO_GALLERY = [
     artist: "Pixel Forge",
     category: "landscape",
     imageUrl:
-      "https://images.unsplash.com/photo-1477959858617-67f85cf4f1df?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/neon-city",
     likes: 198,
     createdAt: "2026-05-25",
     mediaType: "image" as const,
@@ -119,7 +119,7 @@ const DEMO_GALLERY = [
     artist: "DreamWeaver",
     category: "abstract",
     imageUrl:
-      "https://images.unsplash.com/photo-1550684848-fac1c5b4e853?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/dreamscape",
     likes: 267,
     createdAt: "2026-05-29",
     mediaType: "image" as const,
@@ -130,7 +130,7 @@ const DEMO_GALLERY = [
     artist: "AquaBot",
     category: "360-worlds",
     imageUrl:
-      "https://images.unsplash.com/photo-1582967788606-a171f1080ca8?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/underwater",
     likes: 345,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -141,7 +141,7 @@ const DEMO_GALLERY = [
     artist: "Pixel Forge",
     category: "character",
     imageUrl:
-      "https://images.unsplash.com/photo-1605810230434-7631ac76ec81?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/quantum-warrior",
     likes: 189,
     createdAt: "2026-05-27",
     mediaType: "image" as const,
@@ -152,7 +152,7 @@ const DEMO_GALLERY = [
     artist: "StarWalker",
     category: "landscape",
     imageUrl:
-      "https://images.unsplash.com/photo-1462331940025-496dfbfc7564?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/starfield",
     likes: 567,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -163,7 +163,7 @@ const DEMO_GALLERY = [
     artist: "DataMancer",
     category: "abstract",
     imageUrl:
-      "https://images.unsplash.com/photo-1635070041078-e363dbe00518?w=1600&h=1200&fit=crop&q=80",
+      "/api/artwork/void-entity",
     likes: 234,
     createdAt: "2026-05-26",
     mediaType: "image" as const,

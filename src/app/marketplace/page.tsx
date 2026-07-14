@@ -517,7 +517,9 @@ function MarketplaceInner() {
   const [sellModalAgent, setSellModalAgent] = useState<Agent | null>(null);
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<"agents" | "coins">("agents");
+  const [activeTab, setActiveTab] = useState<"agents" | "coins">(() =>
+    searchParams.get("tab") === "coins" ? "coins" : "agents",
+  );
   const [currentPlan, setCurrentPlan] = useState<string>("free");
 
   const showToast = (

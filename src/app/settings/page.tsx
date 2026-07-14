@@ -56,6 +56,10 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
+function isTabId(value: string | null): value is TabId {
+  return !!value && TABS.some((tab) => tab.id === value);
+}
+
 export default function SettingsPage() {
   const { theme, resolvedColors: T, setMode, setSkin, setAccent, setBackgroundMode } = useTheme();
   const { profile, updateProfile } = useProfile();
@@ -63,6 +67,20 @@ export default function SettingsPage() {
   const { crtEnabled, toggleCrt } = useCrtToggle();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const [activeTab, setActiveTab] = useState<TabId>("profile");
+
+  useEffect(() => {
+    const requestedTab = new URLSearchParams(window.location.search).get("tab");
+    if (!isTabId(requestedTab)) return;
+    const timeout = window.setTimeout(() => setActiveTab(requestedTab), 0);
+    return () => window.clearTimeout(timeout);
+  }, []);
+
+  const changeTab = useCallback((tab: TabId) => {
+    setActiveTab(tab);
+    const url = new URL(window.location.href);
+    url.searchParams.set("tab", tab);
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   /* Profile state */
   const [name, setName] = useState(profile.displayName || "");
@@ -285,7 +303,7 @@ export default function SettingsPage() {
             return (
               <button
                 key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
+                onClick={() => changeTab(tab.id)}
                 className="flex items-center gap-2 px-4 py-2 rounded-lg text-xs sm:text-sm font-bold whitespace-nowrap transition-all"
                 style={{
                   backgroundColor: active

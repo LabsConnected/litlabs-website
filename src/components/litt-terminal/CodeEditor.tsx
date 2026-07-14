@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import Editor from "@monaco-editor/react";
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import { Save, FileCode, X, Loader2 } from "lucide-react";
 
 interface CodeEditorProps {
@@ -12,7 +12,7 @@ interface CodeEditorProps {
 }
 
 export function CodeEditor({ filePath, onClose, onContentChange }: CodeEditorProps) {
-  const { user } = useUser();
+  const { user } = useAppUser();
   const userId = user?.id ?? "anonymous";
   const [content, setContent] = useState("");
   const [original, setOriginal] = useState("");

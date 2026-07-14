@@ -9,6 +9,8 @@ type NavAuthProps = {
   linkColor?: string;
 };
 
+const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
 /* Error boundary catches Clerk hook errors when ClerkProvider is absent */
 class ClerkBoundary extends Component<{ fallback: ReactNode; children: ReactNode }> {
   state = { hasError: false };
@@ -113,6 +115,10 @@ function AuthInner({ linkColor }: NavAuthProps) {
 }
 
 export function NavAuth({ linkColor = "#6366f1" }: NavAuthProps) {
+  if (!clerkConfigured) {
+    return <CustomAuthFallback linkColor={linkColor} />;
+  }
+
   return (
     <ClerkBoundary
       fallback={<CustomAuthFallback linkColor={linkColor} />}

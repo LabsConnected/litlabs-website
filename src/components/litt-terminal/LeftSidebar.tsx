@@ -1,6 +1,6 @@
 "use client";
 
-import { useUser } from "@clerk/nextjs";
+import { useAppUser } from "@/hooks/useClerkAuth";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import {
@@ -36,7 +36,7 @@ const systemItems = [
 ];
 
 export function LeftSidebar({ mobileOpen }: { mobileOpen?: boolean }) {
-  const { user, isLoaded } = useUser();
+  const { user, isLoaded } = useAppUser();
   const pathname = usePathname();
 
   return (

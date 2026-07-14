@@ -1,761 +1,250 @@
 "use client";
 
 import Link from "next/link";
-import NextImage from "next/image";
 import { usePathname, useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useState } from "react";
+import {
+  Bot,
+  ChevronRight,
+  Coins,
+  Crown,
+  Film,
+  FolderOpen,
+  Hammer,
+  Image as ImageIcon,
+  MessageSquare,
+  Music2,
+  PanelLeftClose,
+  PanelLeftOpen,
+  ShieldCheck,
+  Sparkles,
+  TerminalSquare,
+  X,
+  Zap,
+} from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
-import { useProfile } from "@/context/ProfileContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
-import {
-  X,
-  ChevronLeft,
-  ChevronRight,
-  ChevronDown,
-  ChevronUp,
-  Bot,
-  Coins,
-  Pin,
-  EyeOff,
-  Send,
-  MoreHorizontal,
-  CrownIcon,
-  Home,
-} from "lucide-react";
-import { useState, useCallback, useMemo, useEffect } from "react";
-import {
-  NAV_GROUPS,
-  AI_SUGGESTIONS,
-  CREATOR_MODES,
-  COLLAPSED_KEY,
-  GROUP_EXPANDED_KEY,
-  PINNED_KEY,
-  HIDDEN_KEY,
-  MODE_KEY,
-  type NavGroup,
-  type NavItem,
-} from "@/lib/navigation";
+import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
+import { COLLAPSED_KEY, NAV_GROUPS, type NavGroup } from "@/lib/navigation";
 
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
   collapsed?: boolean;
+  onCollapseChange?: () => void;
 }
 
-function loadJson<T>(key: string, fallback: T): T {
-  if (typeof window === "undefined") return fallback;
-  try {
-    const raw = localStorage.getItem(key);
-    return raw ? (JSON.parse(raw) as T) : fallback;
-  } catch {
-    return fallback;
-  }
-}
-
-function saveJson<T>(key: string, value: T) {
-  if (typeof window === "undefined") return;
-  localStorage.setItem(key, JSON.stringify(value));
-}
-
-function NavItemRow({
-  item,
-  accent,
-  onClose,
-  collapsed,
-  isActive,
-  depth = 0,
-  onToggleExpand,
-  expanded,
-  hidden = false,
-}: {
-  item: NavItem;
-  accent: string;
-  onClose?: () => void;
-  collapsed: boolean;
-  isActive: (href?: string) => boolean;
-  depth?: number;
-  onToggleExpand?: () => void;
-  expanded?: boolean;
-  hidden?: boolean;
-}) {
-  const { resolvedColors: T } = useTheme();
-  const active = isActive(item.href);
-  const hasChildren = !!item.children?.length;
-  const isChildActive = useMemo(
-    () => hasChildren && item.children?.some((c) => isActive(c.href)),
-    [hasChildren, item.children, isActive],
-  );
-  const groupActive = active || isChildActive;
-
-  const iconColor = groupActive ? accent : T.textMuted;
-  const baseClasses =
-    "relative flex items-center gap-3 px-3 py-2 rounded-lg text-sm font-medium transition-all duration-200 group select-none hover:bg-white/5";
-  const style = {
-    backgroundColor: groupActive ? `${accent}14` : "transparent",
-    color: groupActive ? accent : T.textMuted,
-    paddingLeft: collapsed ? undefined : `${12 + depth * 8}px`,
-    boxShadow: groupActive ? `inset 2px 0 0 0 ${accent}` : "none",
-  };
-
-  const icon = (
-    <div className="relative shrink-0">
-      <item.icon size={17} style={{ color: iconColor }} />
-      {item.online && !collapsed && (
-        <span className="absolute -top-0.5 -right-0.5 w-2 h-2 rounded-full bg-green-500 ring-1 ring-[#0a0b14]" />
-      )}
-    </div>
-  );
-
-  const label = !collapsed ? (
-    <span className="truncate">{item.label}</span>
-  ) : null;
-
-  const badge =
-    !collapsed && item.badge ? (
-      <span
-        className="ml-auto text-[10px] font-bold px-1.5 py-0.5 rounded-full"
-        style={{ backgroundColor: accent, color: "#0a0b14" }}
-      >
-        {item.badge > 99 ? "99+" : item.badge}
-      </span>
-    ) : null;
-
-  if (hidden) return null;
-
-  if (hasChildren) {
-    return (
-      <div className="space-y-0.5">
-        <button
-          onClick={onToggleExpand}
-          className={baseClasses}
-          style={style}
-          type="button"
-        >
-          {icon}
-          {label}
-          {badge}
-          {!collapsed && (
-            <ChevronDown
-              size={14}
-              className="ml-auto shrink-0 transition-transform"
-              style={{
-                transform: expanded ? "rotate(180deg)" : "rotate(0deg)",
-                color: iconColor,
-              }}
-            />
-          )}
-        </button>
-        {expanded && !collapsed && (
-          <div className="space-y-0.5 overflow-hidden transition-all duration-200">
-            {item.children?.map((child) => (
-              <NavItemRow
-                key={child.href || child.label}
-                item={child}
-                accent={accent}
-                onClose={onClose}
-                collapsed={collapsed}
-                isActive={isActive}
-                depth={depth + 1}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    );
-  }
-
-  return (
-    <Link href={item.href || "#"} onClick={onClose} className="block">
-      <div className={baseClasses} style={style}>
-        {icon}
-        {label}
-        {badge}
-      </div>
-    </Link>
-  );
-}
-
-function GroupSection({
-  group,
-  collapsed,
-  onClose,
-  isActive,
-  expanded,
-  onToggle,
-  hidden,
-  isPinned,
-}: {
-  group: NavGroup;
-  collapsed: boolean;
-  onClose?: () => void;
-  isActive: (href?: string) => boolean;
-  expanded: boolean;
-  onToggle: () => void;
-  hidden: boolean;
-  isPinned: boolean;
-}) {
-  if (hidden) return null;
-
-  return (
-    <div
-      className={`group-section ${group.label === "System" ? "pt-2 mt-2 border-t" : ""}`}
-      style={{
-        borderColor: group.label === "System" ? `${group.accent}20` : undefined,
-      }}
-    >
-      {!collapsed && (
-        <button
-          onClick={onToggle}
-          className="w-full flex items-center justify-between px-3 py-1.5 mb-2 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all"
-          style={{
-            color: group.accent,
-            backgroundColor: `${group.accent}12`,
-          }}
-          type="button"
-        >
-          <span className="flex items-center gap-1.5">
-            <group.icon size={12} />
-            {group.label}
-          </span>
-          <span className="flex items-center gap-1 opacity-70">
-            {expanded ? <ChevronUp size={10} /> : <ChevronDown size={10} />}
-          </span>
-        </button>
-      )}
-      {collapsed && (
-        <div className="flex justify-center mb-2">
-          <group.icon size={16} style={{ color: group.accent }} />
-        </div>
-      )}
-
-      {!collapsed && expanded && (
-        <div className="space-y-0.5">
-          {group.items.map((item) => (
-            <NavItemRow
-              key={item.href || item.label}
-              item={item}
-              accent={group.accent}
-              onClose={onClose}
-              collapsed={collapsed}
-              isActive={isActive}
-            />
-          ))}
-        </div>
-      )}
-
-      {!collapsed && !expanded && isPinned && (
-        <div className="space-y-0.5">
-          {group.items
-            .filter((i) => !i.children)
-            .slice(0, 3)
-            .map((item) => (
-              <NavItemRow
-                key={item.href || item.label}
-                item={item}
-                accent={group.accent}
-                onClose={onClose}
-                collapsed={collapsed}
-                isActive={isActive}
-              />
-            ))}
-        </div>
-      )}
-
-      {collapsed && (
-        <div className="flex flex-col items-center gap-1">
-          {group.items
-            .filter((i) => !i.children)
-            .map((item) => {
-              const active = isActive(item.href);
-              return (
-                <Link
-                  key={item.href || item.label}
-                  href={item.href || "#"}
-                  onClick={onClose}
-                  title={item.label}
-                  aria-label={item.label}
-                  className="flex items-center justify-center w-10 h-10 rounded-lg transition-colors hover:opacity-100"
-                  style={{
-                    backgroundColor: active
-                      ? `${group.accent}20`
-                      : "transparent",
-                    color: active ? group.accent : `${group.accent}80`,
-                  }}
-                >
-                  <item.icon size={18} />
-                </Link>
-              );
-            })}
-        </div>
-      )}
-    </div>
-  );
-}
+const QUICK_TOOLS = [
+  { label: "Chat", href: "/studio?tool=chat", icon: MessageSquare, color: "#22d3ee" },
+  { label: "Image", href: "/studio?tool=image", icon: ImageIcon, color: "#a78bfa" },
+  { label: "Video", href: "/studio?tool=video", icon: Film, color: "#f472b6" },
+  { label: "Audio", href: "/studio?tool=audio", icon: Music2, color: "#e879f9" },
+  { label: "Build", href: "/studio?tool=builder", icon: Hammer, color: "#fb923c" },
+  { label: "Terminal", href: "/studio?tool=terminal", icon: TerminalSquare, color: "#34d399" },
+  { label: "Agents", href: "/agents", icon: Bot, color: "#c084fc" },
+  { label: "Assets", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
+] as const;
 
 function SidebarContent({
-  onClose,
   collapsed,
+  onClose,
   onToggleCollapse,
 }: {
-  onClose?: () => void;
   collapsed: boolean;
+  onClose?: () => void;
   onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { balance } = useWallet();
-  const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
-  const { user } = useUser();
-
-  const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(
-    () => {
-      const saved = loadJson<Record<string, boolean>>(GROUP_EXPANDED_KEY, {});
-      const defaults = Object.fromEntries(
-        NAV_GROUPS.map((g) => [g.label, true]),
-      );
-      return { ...defaults, ...saved };
-    },
-  );
-  const [pinned, setPinned] = useState<string[]>(() =>
-    loadJson(PINNED_KEY, ["Home", "Social", "Gaming"]),
-  );
-  const [hidden, setHidden] = useState<string[]>(() =>
-    loadJson(HIDDEN_KEY, []),
-  );
-  const [mode, setMode] = useState<string>(() => {
-    if (typeof window === "undefined") return "creator";
-    return localStorage.getItem(MODE_KEY) || "creator";
-  });
-  const [showPersonalize, setShowPersonalize] = useState(false);
-  const [aiQuery, setAiQuery] = useState("");
-  const [jarvisFocused, setJarvisFocused] = useState(false);
-  const [plan, setPlan] = useState<string>("free");
+  const { user } = useAppUser();
+  const [plan, setPlan] = useState("free");
 
   useEffect(() => {
     if (!isSignedIn || !user?.id) return;
-    let active = true;
+    let current = true;
     fetch(`/api/users/${user.id}/plan`)
-      .then((res) => (res.ok ? res.json() : { plan: "free" }))
+      .then((response) => (response.ok ? response.json() : { plan: "free" }))
       .then((data) => {
-        if (active && data.plan) setPlan(data.plan);
+        if (current && data.plan) setPlan(data.plan);
       })
       .catch(() => {});
     return () => {
-      active = false;
+      current = false;
     };
   }, [isSignedIn, user?.id]);
 
-  const isActive = useCallback(
-    (href?: string) => {
-      if (!href) return false;
+  const activeHref = useCallback(
+    (href: string) => {
       const [path, query] = href.split("?");
-      const hrefParams = query
-        ? new URLSearchParams(query)
-        : new URLSearchParams();
-      if (query) {
-        const searchMatch = Array.from(hrefParams.entries()).every(
-          ([key, value]) => searchParams.get(key) === value,
-        );
-        return pathname === path && searchMatch;
-      }
-      return pathname?.startsWith(path) ?? false;
+      if (pathname !== path) return false;
+      if (!query) return true;
+      const params = new URLSearchParams(query);
+      return Array.from(params.entries()).every(
+        ([key, value]) => searchParams.get(key) === value,
+      );
     },
     [pathname, searchParams],
   );
 
-  const toggleGroup = (label: string) => {
-    setGroupExpanded((prev) => {
-      const next = { ...prev, [label]: !prev[label] };
-      saveJson(GROUP_EXPANDED_KEY, next);
-      return next;
-    });
-  };
-
-  const togglePin = (label: string) => {
-    setPinned((prev) => {
-      const next = prev.includes(label)
-        ? prev.filter((l) => l !== label)
-        : [label, ...prev];
-      saveJson(PINNED_KEY, next);
-      return next;
-    });
-  };
-
-  const toggleHidden = (label: string) => {
-    setHidden((prev) => {
-      const next = prev.includes(label)
-        ? prev.filter((l) => l !== label)
-        : [...prev, label];
-      saveJson(HIDDEN_KEY, next);
-      return next;
-    });
-  };
-
-  const setCreatorMode = (value: string) => {
-    setMode(value);
-    if (typeof window !== "undefined") localStorage.setItem(MODE_KEY, value);
-  };
-
-  const orderedGroups = useMemo(() => {
-    const pinnedFirst = [...NAV_GROUPS].sort((a, b) => {
-      const aPinned = pinned.includes(a.label);
-      const bPinned = pinned.includes(b.label);
-      if (aPinned && !bPinned) return -1;
-      if (!aPinned && bPinned) return 1;
-      return 0;
-    });
-    return pinnedFirst;
-  }, [pinned]);
-
-  const handleJarvisSubmit = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!aiQuery.trim()) return;
-    // Best-effort navigation: search all nav items and match label
-    const match = NAV_GROUPS.flatMap((g) => g.items).find(
-      (i) =>
-        i.label.toLowerCase().includes(aiQuery.toLowerCase()) ||
-        aiQuery.toLowerCase().includes(i.label.toLowerCase()),
+  const activeGroup = (group: NavGroup) =>
+    pathname === group.href ||
+    (group.href !== "/dashboard" && pathname.startsWith(`${group.href}/`)) ||
+    group.items.some(
+      (item) =>
+        item.href &&
+        (group.label === "Studio" || !item.href.startsWith("/studio")) &&
+        activeHref(item.href),
     );
-    if (match?.href) window.location.href = match.href;
-    else window.location.href = `/agents?query=${encodeURIComponent(aiQuery)}`;
-  };
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Header */}
-      <div
-        className="flex items-center justify-between px-3 py-3 border-b"
-        style={{ borderColor: `${T.borderColor}30` }}
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <header
+        className="flex h-14 shrink-0 items-center border-b px-3"
+        style={{ borderColor: `${T.borderColor}22` }}
       >
-        {onClose && (
+        <Link href="/dashboard" onClick={onClose} className="flex min-w-0 flex-1 items-center gap-2.5">
           <span
-            className="text-xs font-bold uppercase tracking-widest"
-            style={{ color: T.textMuted }}
+            className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border"
+            style={{ backgroundColor: `${T.accentColor}14`, borderColor: `${T.accentColor}35`, color: T.accentColor, boxShadow: `inset 0 0 18px ${T.accentColor}20` }}
           >
-            Menu
+            <Zap size={17} />
           </span>
-        )}
-        {!onClose && (
-          <Link href="/dashboard" className="flex items-center gap-2">
-            {!collapsed && (
-              <span
-                className="text-xs font-bold uppercase tracking-widest"
-                style={{ color: T.accentColor }}
-              >
-                LiTT Code
-              </span>
-            )}
-            {collapsed && <Home size={16} style={{ color: T.accentColor }} />}
-          </Link>
-        )}
-        <div className="flex items-center gap-1">
           {!collapsed && (
-            <button
-              onClick={() => setShowPersonalize((v) => !v)}
-              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-              style={{ color: T.textMuted }}
-              title="Personalize sidebar"
-            >
-              <MoreHorizontal size={16} />
-            </button>
+            <span className="min-w-0">
+              <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">LiTT</b>
+              <span className="block text-[8px] font-bold uppercase tracking-[.22em]" style={{ color: T.textMuted }}>Lab Studios</span>
+            </span>
           )}
-          {onToggleCollapse && !onClose && (
-            <button
-              onClick={onToggleCollapse}
-              className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-              style={{ color: T.textMuted }}
-              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            >
-              {collapsed ? (
-                <ChevronRight size={16} />
-              ) : (
-                <ChevronLeft size={16} />
-              )}
-            </button>
-          )}
-        </div>
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="p-1.5 rounded-lg hover:bg-white/10 transition-colors"
-            style={{ color: T.textMuted }}
-          >
-            <X size={16} />
+        </Link>
+        {onToggleCollapse && !onClose && (
+          <button onClick={onToggleCollapse} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
+            {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
           </button>
         )}
-      </div>
+        {onClose && (
+          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label="Close navigation"><X size={16} /></button>
+        )}
+      </header>
 
-      {/* User profile card */}
-      {!collapsed && isSignedIn && user && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
-          <Link
-            href="/profile"
-            className="flex items-center gap-3 p-2 rounded-lg transition-colors hover:bg-white/5"
-          >
-            <div
-              className="relative shrink-0 w-10 h-10 rounded-full overflow-hidden border-2"
-              style={{ borderColor: T.accentColor }}
-            >
-              {user.imageUrl ? (
-                <NextImage
-                  src={user.imageUrl}
-                  alt="Profile"
-                  fill
-                  className="object-cover"
-                  sizes="40px"
-                />
-              ) : (
-                <div
-                  className="w-full h-full flex items-center justify-center text-sm font-bold"
-                  style={{ backgroundColor: T.boxBg, color: T.accentColor }}
-                >
-                  {(
-                    user.firstName?.[0] ||
-                    user.username?.[0] ||
-                    "?"
-                  ).toUpperCase()}
-                </div>
-              )}
-            </div>
-            <div className="flex-1 min-w-0">
-              <div
-                className="text-sm font-bold truncate"
-                style={{ color: T.textColor }}
-              >
-                {profile?.displayName ||
-                  user.firstName ||
-                  user.username ||
-                  "Creator"}
-              </div>
-              <div className="text-xs truncate" style={{ color: T.textMuted }}>
-                @{user.username || "litree"}
-              </div>
-            </div>
-          </Link>
-        </div>
-      )}
+      <div className="sidebar-scroll flex-1 overflow-y-auto px-2.5 pb-3">
+        {!collapsed && <LiTTAgentCard onClose={onClose} T={T} />}
 
-      {/* LiTT / AI assistant */}
-      {!collapsed && (
-        <div
-          className="px-3 py-3 border-b"
-          style={{ borderColor: `${T.borderColor}30` }}
-        >
-          <form onSubmit={handleJarvisSubmit} className="relative">
-            <div
-              className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all"
-              style={{
-                backgroundColor: T.boxBg,
-                borderColor: jarvisFocused
-                  ? T.accentColor
-                  : `${T.borderColor}30`,
-                color: T.textMuted,
-              }}
-            >
-              <Bot size={16} style={{ color: T.accentColor }} />
-              <input
-                value={aiQuery}
-                onChange={(e) => setAiQuery(e.target.value)}
-                onFocus={() => setJarvisFocused(true)}
-                onBlur={() => setJarvisFocused(false)}
-                placeholder="Ask LiTT..."
-                className="bg-transparent border-none outline-none flex-1 min-w-0 text-xs"
-                style={{ color: T.textColor }}
-              />
-              <button
-                type="submit"
-                aria-label="Submit LiTT query"
-                className="p-1 rounded hover:bg-white/10"
-                style={{ color: T.accentColor }}
-              >
-                <Send size={14} />
-              </button>
-            </div>
-            {jarvisFocused && (
-              <div
-                className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border shadow-xl p-2 space-y-1"
+        <SectionLabel collapsed={collapsed}>Quick access</SectionLabel>
+        <div className={collapsed ? "grid gap-1.5" : "grid grid-cols-4 gap-1.5"}>
+          {QUICK_TOOLS.map((tool) => {
+            const Icon = tool.icon;
+            const active = activeHref(tool.href);
+            return (
+              <Link
+                key={tool.label}
+                href={tool.href}
+                onClick={onClose}
+                title={tool.label}
+                className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-all hover:-translate-y-px ${collapsed ? "mx-auto w-11" : ""}`}
                 style={{
-                  backgroundColor: T.boxBg,
-                  borderColor: `${T.borderColor}30`,
+                  backgroundColor: active ? `${tool.color}18` : `${T.boxBg}70`,
+                  borderColor: active ? `${tool.color}60` : `${T.borderColor}18`,
+                  color: tool.color,
+                  boxShadow: active ? `0 0 18px ${tool.color}20` : "none",
                 }}
               >
-                {AI_SUGGESTIONS.slice(0, 4).map((s) => (
-                  <button
-                    key={s}
-                    type="button"
-                    onMouseDown={() => setAiQuery(s)}
-                    className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-white/5 truncate"
-                    style={{ color: T.textMuted }}
-                  >
-                    {s}
-                  </button>
-                ))}
-              </div>
-            )}
-          </form>
+                <Icon size={15} />
+                {!collapsed && <span className="mt-1 truncate text-[7px] font-bold" style={{ color: T.textMuted }}>{tool.label}</span>}
+              </Link>
+            );
+          })}
         </div>
-      )}
 
-      {/* Personalize panel */}
-      {showPersonalize && !collapsed && (
-        <div
-          className="px-3 py-3 border-b space-y-3"
-          style={{
-            borderColor: `${T.borderColor}30`,
-            backgroundColor: `${T.bgColor}60`,
-          }}
-        >
-          <div className="space-y-1.5">
-            <div
-              className="text-[10px] font-bold uppercase tracking-wider"
-              style={{ color: T.textMuted }}
-            >
-              Mode
-            </div>
-            <div className="grid grid-cols-2 gap-1.5">
-              {CREATOR_MODES.map((m) => (
-                <button
-                  key={m.value}
-                  onClick={() => setCreatorMode(m.value)}
-                  className="flex items-center gap-1.5 px-2 py-1.5 rounded text-[10px] font-bold transition-colors"
-                  style={{
-                    backgroundColor:
-                      mode === m.value ? `${T.accentColor}20` : `${T.boxBg}60`,
-                    color: mode === m.value ? T.accentColor : T.textMuted,
-                    border: `1px solid ${mode === m.value ? T.accentColor : T.borderColor}30`,
-                  }}
-                >
-                  <m.icon size={12} />
-                  {m.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <div
-              className="text-[10px] font-bold uppercase tracking-wider"
-              style={{ color: T.textMuted }}
-            >
-              Sections
-            </div>
-            <div className="flex flex-wrap gap-1">
-              {NAV_GROUPS.map((g) => (
-                <div
-                  key={g.label}
-                  className="flex items-center gap-1 px-2 py-1 rounded text-[10px] font-bold"
-                  style={{
-                    backgroundColor: hidden.includes(g.label)
-                      ? `${T.borderColor}20`
-                      : `${g.accent}20`,
-                    border: `1px solid ${hidden.includes(g.label) ? T.borderColor : g.accent}40`,
-                  }}
-                >
-                  <span
-                    style={{
-                      color: hidden.includes(g.label) ? T.textMuted : g.accent,
-                    }}
-                  >
-                    {g.label}
-                  </span>
-                  <button
-                    onClick={() => togglePin(g.label)}
-                    className="p-0.5 rounded hover:bg-white/10"
-                    title={pinned.includes(g.label) ? "Unpin" : "Pin to top"}
-                    style={{
-                      color: pinned.includes(g.label) ? g.accent : T.textMuted,
-                    }}
-                  >
-                    <Pin
-                      size={10}
-                      style={{
-                        fill: pinned.includes(g.label) ? g.accent : "none",
-                      }}
-                    />
-                  </button>
-                  <button
-                    onClick={() => toggleHidden(g.label)}
-                    className="p-0.5 rounded hover:bg-white/10"
-                    title={hidden.includes(g.label) ? "Show" : "Hide"}
-                    style={{
-                      color: hidden.includes(g.label) ? g.accent : T.textMuted,
-                    }}
-                  >
-                    <EyeOff size={10} />
-                  </button>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Navigation groups */}
-      <nav className="flex-1 overflow-y-auto py-4 px-2 space-y-4">
-        {orderedGroups.map((group) => (
-          <GroupSection
-            key={group.label}
-            group={group}
-            collapsed={collapsed}
-            onClose={onClose}
-            isActive={isActive}
-            expanded={!!groupExpanded[group.label]}
-            onToggle={() => toggleGroup(group.label)}
-            hidden={hidden.includes(group.label)}
-            isPinned={pinned.includes(group.label)}
-          />
-        ))}
-      </nav>
-
-      {/* Footer */}
-      <div
-        className="px-3 py-3 border-t"
-        style={{ borderColor: `${T.borderColor}30` }}
-      >
-        {!collapsed && (
-          <div className="space-y-1.5">
-            <div
-              className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
-              style={{
-                backgroundColor: T.bgColor + "30",
-                border: `1px solid ${T.borderColor}20`,
-              }}
-            >
-              <span
-                className="flex items-center gap-1"
-                style={{ color: "#fbbf24" }}
+        <SectionLabel collapsed={collapsed}>Main navigation</SectionLabel>
+        <nav className="space-y-1">
+          {NAV_GROUPS.map((group) => {
+            const active = activeGroup(group);
+            return (
+              <Link
+                key={group.label}
+                href={group.href}
+                onClick={onClose}
+                title={group.label}
+                className={`group relative flex h-10 items-center rounded-xl border transition-all ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
+                style={{
+                  background: active ? `linear-gradient(90deg, ${group.accent}28, ${group.accent}08, transparent)` : "transparent",
+                  borderColor: active ? `${group.accent}38` : "transparent",
+                  color: active ? T.textColor : T.textMuted,
+                  boxShadow: active ? `inset 2px 0 0 ${group.accent}` : "none",
+                }}
               >
-                <Coins size={10} /> Balance
-              </span>
-              <span style={{ color: T.textColor }}>
-                {balance.toLocaleString()} LBC
-              </span>
-            </div>
-            <div
-              className="flex items-center justify-between px-3 py-2 rounded-lg text-[10px] font-bold"
-              style={{
-                backgroundColor: T.bgColor + "30",
-                border: `1px solid ${T.borderColor}20`,
-              }}
-            >
-              <span
-                className="flex items-center gap-1"
-                style={{ color: T.accentColor }}
-              >
-                <CrownIcon size={10} /> Plan
-              </span>
-              <span style={{ color: T.textColor }}>
-                {plan.charAt(0).toUpperCase() + plan.slice(1)}
-              </span>
-            </div>
-          </div>
-        )}
+                <group.icon size={16} style={{ color: group.accent }} />
+                {!collapsed && (
+                  <>
+                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold">{group.label}</span>
+                    {group.label === "Marketplace" && <span className="rounded-full border px-1.5 py-0.5 text-[7px] font-black" style={{ borderColor: `${group.accent}35`, color: group.accent }}>NEW</span>}
+                    <ChevronRight size={12} className="opacity-25 transition-transform group-hover:translate-x-0.5 group-hover:opacity-70" />
+                  </>
+                )}
+              </Link>
+            );
+          })}
+        </nav>
+
+        {!collapsed && <CreditsCard balance={balance} plan={plan} T={T} />}
       </div>
+
+      <SystemStatus collapsed={collapsed} T={T} />
+    </div>
+  );
+}
+
+function LiTTAgentCard({ onClose, T }: { onClose?: () => void; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  return (
+    <section className="relative mt-3 overflow-hidden rounded-2xl border p-2" style={{ borderColor: `${T.accentColor}38`, backgroundColor: `${T.boxBg}bb` }}>
+      <div className="relative h-24 overflow-hidden rounded-xl border bg-cover bg-center" style={{ borderColor: `${T.borderColor}20`, backgroundImage: "linear-gradient(to top, rgba(5,6,12,.95), rgba(5,6,12,.08)), url('/api/artwork/void-entity')" }}>
+        <span className="absolute left-2 top-2 rounded-full border bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wider text-violet-200" style={{ borderColor: `${T.accentColor}45` }}>LiTT-Code</span>
+        <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-emerald-400/25 bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> Online</span>
+        <div className="absolute inset-x-2 bottom-2">
+          <b className="block text-[10px] text-white">Your AI building partner</b>
+          <span className="text-[7px] text-white/55">Project-aware · voice · vision · code</span>
+        </div>
+      </div>
+      <div className="mt-2 flex h-5 items-end gap-[2px] overflow-hidden rounded-lg border bg-black/25 px-2 py-1" style={{ borderColor: `${T.borderColor}18` }}>
+        {Array.from({ length: 30 }).map((_, index) => (
+          <span key={index} className="w-[2px] rounded-full" style={{ height: `${22 + ((index * 19) % 72)}%`, opacity: 0.45 + ((index * 7) % 45) / 100, background: `linear-gradient(${T.accentColor}, ${T.linkColor})` }} />
+        ))}
+      </div>
+      <Link href="/studio?tool=chat" onClick={onClose} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[8px] font-black uppercase tracking-[.12em] transition-colors hover:bg-white/5" style={{ borderColor: `${T.accentColor}35`, backgroundColor: `${T.accentColor}12`, color: T.headerColor }}>
+        <Sparkles size={10} /> Ask LiTT anything
+      </Link>
+    </section>
+  );
+}
+
+function SectionLabel({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
+  return <div className={`mb-1.5 mt-4 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1"}`} style={{ color: "rgba(255,255,255,.32)" }}>{collapsed ? "•••" : children}</div>;
+}
+
+function CreditsCard({ balance, plan, T }: { balance: number; plan: string; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  return (
+    <section className="relative mt-4 overflow-hidden rounded-2xl border p-3" style={{ borderColor: `${T.accentColor}35`, background: `radial-gradient(circle at 90% 20%, ${T.accentColor}24, transparent 35%), ${T.boxBg}` }}>
+      <div className="text-[8px] font-black uppercase tracking-[.18em]" style={{ color: T.textMuted }}>Credits & plan</div>
+      <div className="mt-2 flex items-end justify-between">
+        <div><b className="text-lg text-white">{balance.toLocaleString()} <span className="text-[10px]" style={{ color: T.accentColor }}>LBC</span></b><div className="text-[8px] capitalize" style={{ color: T.textMuted }}>{plan} plan</div></div>
+        <Coins size={24} style={{ color: `${T.accentColor}bb` }} />
+      </div>
+      <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/5"><div className="h-full w-[72%] rounded-full" style={{ background: `linear-gradient(90deg, ${T.accentColor}, ${T.linkColor})` }} /></div>
+      <Link href="/wallet" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-[9px] font-black" style={{ borderColor: `${T.accentColor}35`, backgroundColor: `${T.accentColor}14`, color: T.headerColor }}><Crown size={11} /> Manage credits</Link>
+    </section>
+  );
+}
+
+function SystemStatus({ collapsed, T }: { collapsed: boolean; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  return (
+    <div className="shrink-0 border-t p-2.5" style={{ borderColor: `${T.borderColor}20` }}>
+      <Link href="/settings" className={`flex items-center rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] ${collapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"}`}>
+        <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10"><ShieldCheck size={14} className="text-emerald-400" /><span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-[#080910] bg-emerald-400" /></span>
+        {!collapsed && <span className="min-w-0"><b className="block text-[8px] uppercase tracking-wider" style={{ color: T.textMuted }}>System status</b><span className="block truncate text-[8px] font-bold text-emerald-400">All systems operational</span></span>}
+      </Link>
     </div>
   );
 }
@@ -764,54 +253,37 @@ export default function Sidebar({
   open = false,
   onClose,
   collapsed: externalCollapsed,
+  onCollapseChange,
 }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [internalCollapsed, setInternalCollapsed] = useState(() => {
-    if (typeof window === "undefined") return false;
-    return localStorage.getItem(COLLAPSED_KEY) === "true";
-  });
-
+  const [internalCollapsed, setInternalCollapsed] = useState(() =>
+    typeof window !== "undefined" && localStorage.getItem(COLLAPSED_KEY) === "true",
+  );
   const collapsed = externalCollapsed ?? internalCollapsed;
-
-  const toggleCollapse = useCallback(() => {
-    setInternalCollapsed((v) => {
-      const next = !v;
-      if (typeof window !== "undefined")
-        localStorage.setItem(COLLAPSED_KEY, String(next));
+  const toggleCollapse = () => {
+    if (onCollapseChange) return onCollapseChange();
+    setInternalCollapsed((current) => {
+      const next = !current;
+      localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;
     });
-  }, []);
-
-  const sidebarBase = {
-    backgroundColor: `${T.bgColor}f0`,
-    borderColor: `${T.borderColor}30`,
+  };
+  const shellStyle = {
+    background: `linear-gradient(180deg, ${T.bgColor}fc, #07060d 60%, ${T.bgColor}fc)`,
+    borderColor: `${T.borderColor}24`,
+    boxShadow: "18px 0 60px rgba(0,0,0,.28)",
   };
 
   return (
     <>
-      <aside
-        className={`hidden md:flex flex-col h-screen sticky top-0 border-r shrink-0 transition-all duration-300 ${
-          collapsed ? "w-16" : "w-72"
-        }`}
-        style={sidebarBase}
-      >
-        <SidebarContent
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-        />
+      <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`} style={shellStyle}>
+        <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
       </aside>
-
       {open && (
-        <div className="fixed inset-0 z-50 md:hidden flex">
-          <div
-            className="absolute inset-0 bg-black/60 backdrop-blur-sm"
-            onClick={onClose}
-          />
-          <aside
-            className="relative flex flex-col w-80 h-full border-r shadow-2xl"
-            style={sidebarBase}
-          >
-            <SidebarContent onClose={onClose} collapsed={false} />
+        <div className="fixed inset-0 z-50 flex md:hidden">
+          <button className="absolute inset-0 bg-black/70 backdrop-blur-sm" onClick={onClose} aria-label="Close navigation overlay" />
+          <aside className="relative flex h-full w-[min(19rem,calc(100vw-1.5rem))] flex-col border-r shadow-2xl" style={shellStyle}>
+            <SidebarContent collapsed={false} onClose={onClose} />
           </aside>
         </div>
       )}
