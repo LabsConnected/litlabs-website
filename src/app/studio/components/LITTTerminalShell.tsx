@@ -55,13 +55,13 @@ type RailItem = {
 };
 
 const RAIL_ITEMS: RailItem[] = [
-  { id: "terminal", label: "Terminal", icon: Terminal, tool: "chat" },
-  { id: "projects", label: "Projects", icon: FolderKanban, tool: "builder" },
-  { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
-  { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
-  { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, tool: "space" },
-  { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
+  { id: "terminal", label: "Terminal", icon: Terminal },
+  { id: "projects", label: "Projects", icon: FolderKanban },
+  { id: "pipelines", label: "Pipelines", icon: GitBranch },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "assets", label: "Assets", icon: FolderOpen },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen },
+  { id: "spaces", label: "Spaces", icon: Boxes },
   { id: "settings", label: "Settings", icon: Settings },
 ];
 
@@ -760,12 +760,7 @@ export default function LITTTerminalShell({
             return (
               <button
                 key={item.id}
-                onClick={() => {
-                  if (item.tool && onToolChangeAction) {
-                    onToolChangeAction(item.tool);
-                  }
-                  setActiveTab(item.id);
-                }}
+                onClick={() => setActiveTab(item.id)}
                 className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-all ${
                   active ? "bg-cyan-500/10" : "hover:bg-white/5"
                 }`}
