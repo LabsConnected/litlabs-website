@@ -1067,7 +1067,7 @@ function LITTTerminalShellInner({
                 key={item.id}
                 onClick={() => setActiveTab(item.id)}
                 aria-label={item.label}
-                className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-all ${
+                className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors ${
                   active ? "bg-cyan-500/10" : "hover:bg-white/5"
                 }`}
                 title={item.label}
@@ -1087,7 +1087,7 @@ function LITTTerminalShellInner({
                   className={`text-[8px] font-bold ${
                     active
                       ? "text-cyan-300"
-                      : "text-neutral-600 group-hover:text-neutral-400"
+                      : "text-neutral-400 group-hover:text-neutral-200"
                   }`}
                 >
                   {item.label}
@@ -1100,7 +1100,7 @@ function LITTTerminalShellInner({
           <div className="mt-auto flex flex-col items-center gap-2 py-2">
             <div className="text-center">
               <div className="text-[9px] font-black text-cyan-400">LITT OS</div>
-              <div className="text-[8px] text-neutral-600">v2.2.0</div>
+              <div className="text-[8px] text-neutral-400">v2.2.0</div>
             </div>
             <div className="flex items-center gap-1 text-[8px] text-emerald-400">
               <span className="h-1 w-1 rounded-full bg-emerald-400" />
@@ -1289,7 +1289,7 @@ function LITTTerminalShellInner({
                       <div className="text-xs font-bold sm:text-sm">
                         {card.title}
                       </div>
-                      <div className="text-[10px] leading-relaxed text-neutral-500">
+                      <div className="text-[10px] leading-relaxed text-neutral-400">
                         {card.desc}
                       </div>
                     </button>
@@ -1626,17 +1626,17 @@ function LITTTerminalShellInner({
               </div>
 
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
                   Speaking Now
                 </div>
                 <Waveform active={busy || micActive} />
 
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
                   Recent Transcript
                 </div>
                 <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/2 p-3">
                   {messages.length === 0 ? (
-                    <div className="text-[10px] leading-relaxed text-neutral-500">
+                    <div className="text-[10px] leading-relaxed text-neutral-400">
                       Hey, I am {persona.name}.
                       <br />
                       Need help building something?
@@ -1662,7 +1662,7 @@ function LITTTerminalShellInner({
                   )}
                 </div>
 
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-500">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
                   Quick Replies
                 </div>
                 <div className="flex flex-wrap gap-2">

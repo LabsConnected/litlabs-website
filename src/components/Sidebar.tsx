@@ -133,6 +133,7 @@ function SidebarContent({
         <Link
           href="/dashboard"
           onClick={onClose}
+          aria-label="Go to Dashboard"
           className="flex min-w-0 flex-1 items-center gap-2.5"
         >
           <span
@@ -151,10 +152,7 @@ function SidebarContent({
               <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
                 LiTT
               </b>
-              <span
-                className="block text-[8px] font-bold uppercase tracking-[.22em]"
-                style={{ color: T.textMuted }}
-              >
+              <span className="block text-[8px] font-bold uppercase tracking-[.22em] text-neutral-400">
                 Lab Studios
               </span>
             </span>
@@ -202,7 +200,7 @@ function SidebarContent({
                 href={tool.href}
                 onClick={onClose}
                 title={tool.label}
-                className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-all hover:-translate-y-px ${collapsed ? "mx-auto w-11" : ""}`}
+                className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-transform hover:-translate-y-px ${collapsed ? "mx-auto w-11" : ""}`}
                 style={{
                   backgroundColor: active ? `${tool.color}18` : `${T.boxBg}70`,
                   borderColor: active
@@ -236,7 +234,7 @@ function SidebarContent({
                 href={group.href}
                 onClick={onClose}
                 title={group.label}
-                className={`group relative flex h-10 items-center rounded-xl border transition-all ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
+                className={`group relative flex h-10 items-center rounded-xl border transition-colors ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
                 style={{
                   background: active
                     ? `linear-gradient(90deg, ${group.accent}28, ${group.accent}08, transparent)`
@@ -447,6 +445,7 @@ function SystemStatus({
     >
       <Link
         href="/settings"
+        aria-label="System status and settings"
         className={`flex items-center rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] ${collapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"}`}
       >
         <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10">
@@ -455,10 +454,7 @@ function SystemStatus({
         </span>
         {!collapsed && (
           <span className="min-w-0">
-            <b
-              className="block text-[8px] uppercase tracking-wider"
-              style={{ color: T.textMuted }}
-            >
+            <b className="block text-[8px] uppercase tracking-wider text-neutral-400">
               System status
             </b>
             <span className="block truncate text-[8px] font-bold text-emerald-400">

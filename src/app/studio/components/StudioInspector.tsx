@@ -55,7 +55,7 @@ function Row({
 }) {
   return (
     <div className="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
-      <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.6)" }}>
+      <span className="text-[11px]" style={{ color: "rgba(255,255,255,0.75)" }}>
         {label}
       </span>
       <span
@@ -164,11 +164,11 @@ function ImageInspector({
             (a) => (
               <button
                 key={a}
-                className="py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all hover:bg-white/8 text-left"
+                className="py-1.5 px-2 rounded-lg text-[10px] font-bold transition-colors hover:bg-white/8 text-left"
                 style={{
                   background: "rgba(255,255,255,0.04)",
                   border: "1px solid rgba(255,255,255,0.08)",
-                  color: "rgba(255,255,255,0.6)",
+                  color: "rgba(255,255,255,0.75)",
                 }}
               >
                 {a}
@@ -436,7 +436,7 @@ function SystemPanel({
           <button
             key={label}
             className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
-            style={{ color: "rgba(255,255,255,0.6)" }}
+            style={{ color: "rgba(255,255,255,0.75)" }}
           >
             <Icon size={11} style={{ color: T.accentColor }} />
             <span className="text-[11px] font-bold">{label}</span>
@@ -448,7 +448,7 @@ function SystemPanel({
           {THEMES.slice(0, 8).map((theme) => (
             <div
               key={theme.id}
-              className="rounded-lg p-2 flex flex-col items-center gap-1 cursor-pointer transition-all hover:scale-105"
+              className="rounded-lg p-2 flex flex-col items-center gap-1 cursor-pointer transition-transform hover:scale-105"
               style={{ background: "rgba(255,255,255,0.04)" }}
               title={theme.name}
             >
@@ -580,7 +580,7 @@ export default function StudioInspector({
           <Settings2 size={13} style={{ color: T.accentColor }} />
           <span
             className="text-[11px] font-black uppercase tracking-[0.18em] truncate"
-            style={{ color: "rgba(255,255,255,0.6)" }}
+            style={{ color: "rgba(255,255,255,0.75)" }}
           >
             Inspector
           </span>
@@ -617,9 +617,9 @@ export default function StudioInspector({
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-all"
+              className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
               style={{
-                color: active ? T.accentColor : "rgba(255,255,255,0.6)",
+                color: active ? T.accentColor : "rgba(255,255,255,0.75)",
                 backgroundColor: active ? T.accentColor + "12" : "transparent",
                 borderBottom: active
                   ? `2px solid ${T.accentColor}`
@@ -651,7 +651,7 @@ export default function StudioInspector({
                 <FolderOpen size={11} style={{ color: T.accentColor }} />
                 <span
                   className="text-[10px] font-mono truncate"
-                  style={{ color: "rgba(255,255,255,0.6)" }}
+                  style={{ color: "rgba(255,255,255,0.75)" }}
                 >
                   {f}
                 </span>

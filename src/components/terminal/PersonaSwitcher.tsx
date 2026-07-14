@@ -15,7 +15,7 @@ export function PersonaSwitcher() {
 
   return (
     <div className="flex flex-col gap-2 px-2 py-3">
-      <span className="px-1 text-[9px] font-black uppercase tracking-[0.18em] text-neutral-500">
+      <span className="px-1 text-[9px] font-black uppercase tracking-[0.18em] text-neutral-400">
         Persona
       </span>
       <div className="flex flex-col gap-1">
@@ -29,7 +29,7 @@ export function PersonaSwitcher() {
               key={id}
               onClick={() => switchPersona(id)}
               className={cn(
-                "group flex items-center gap-2 rounded-lg px-2 py-2 text-left transition-all",
+                "group flex items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
                 isActive ? "bg-white/5" : "hover:bg-white/3",
               )}
               title={`Switch to ${p.name}`}
@@ -56,7 +56,7 @@ export function PersonaSwitcher() {
                 >
                   {p.name}
                 </span>
-                <span className="text-[9px] text-neutral-600 truncate leading-tight">
+                <span className="text-[9px] text-neutral-400 truncate leading-tight">
                   {p.description}
                 </span>
               </div>
@@ -72,7 +72,7 @@ export function PersonaSwitcher() {
           );
         })}
       </div>
-      <div className="px-1 text-[9px] text-neutral-600">
+      <div className="px-1 text-[9px] text-neutral-400">
         Active: <span style={{ color: persona.color }}>{persona.name}</span>
       </div>
     </div>

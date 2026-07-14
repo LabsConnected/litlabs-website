@@ -208,7 +208,7 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-4 text-[10px] leading-relaxed text-neutral-500">
+        <div className="mb-4 text-[10px] leading-relaxed text-neutral-400">
           Connect live services so LiTT can read your project state, open
           issues, deploy, and act on your behalf.
         </div>

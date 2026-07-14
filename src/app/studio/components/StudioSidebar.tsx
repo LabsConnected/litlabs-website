@@ -90,7 +90,7 @@ function ToolButton({
   return (
     <button
       onClick={onClick}
-      className={`group relative w-full flex items-center rounded-lg transition-all duration-200 ${
+      className={`group relative w-full flex items-center rounded-lg transition-colors duration-200 ${
         collapsed ? "justify-center px-2 py-2.5" : "gap-2.5 px-2.5 py-2"
       } ${active ? "" : "hover:bg-white/5"}`}
       style={{
@@ -191,7 +191,7 @@ function ModeConfigPanel({
           T={T}
         />
         <button
-          className="w-full py-2 rounded-lg text-[11px] font-black transition-all hover:opacity-90"
+          className="w-full py-2 rounded-lg text-[11px] font-black transition-opacity hover:opacity-90"
           style={{ background: T.accentColor, color: "#000" }}
         >
           Generate
@@ -234,7 +234,7 @@ function ModeConfigPanel({
           T={T}
         />
         <button
-          className="w-full py-2 rounded-lg text-[11px] font-black transition-all hover:opacity-90"
+          className="w-full py-2 rounded-lg text-[11px] font-black transition-opacity hover:opacity-90"
           style={{ background: T.accentColor, color: "#000" }}
         >
           Generate
@@ -277,7 +277,7 @@ function ModeConfigPanel({
           T={T}
         />
         <button
-          className="w-full py-2 rounded-lg text-[11px] font-black transition-all hover:opacity-90"
+          className="w-full py-2 rounded-lg text-[11px] font-black transition-opacity hover:opacity-90"
           style={{ background: T.accentColor, color: "#000" }}
         >
           Generate
@@ -432,7 +432,7 @@ export default function StudioSidebar({
           DESKTOP sidebar — hidden on tablet/mobile (lg+)
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden lg:flex flex-col h-full shrink-0 transition-all duration-300 ease-out"
+        className="hidden lg:flex flex-col h-full shrink-0 transition-[width] duration-300 ease-out"
         style={{
           width: collapsed ? "60px" : "240px",
           backgroundColor: T.boxBg + "70",
@@ -465,7 +465,7 @@ export default function StudioSidebar({
           )}
           <button
             onClick={() => setCollapsed((v) => !v)}
-            className="p-1 rounded-md transition-all hover:bg-white/10 hover:scale-105 ml-auto"
+            className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
             style={{ color: T.textMuted + "80" }}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
