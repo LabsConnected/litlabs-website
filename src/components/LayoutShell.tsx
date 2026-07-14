@@ -109,13 +109,13 @@ export default function LayoutShell({
           onClose={() => {}}
           collapsed={desktopSidebarCollapsed}
         />
-        <div className="flex-1 flex flex-col h-dvh md:h-[calc(100dvh-56px)] min-h-0">
+        <div className="flex-1 flex flex-col min-h-screen">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper
             onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
           />
           <main
-            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden overflow-y-auto md:pb-0 ${
+            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
               ownChrome ? "pb-0" : "pb-[calc(72px+env(safe-area-inset-bottom))]"
             }`}
           >
