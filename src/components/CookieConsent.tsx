@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useEffect } from "react";
 
 export default function CookieConsent() {
@@ -101,7 +102,7 @@ export default function CookieConsent() {
             >
               ESSENTIAL ONLY
             </button>
-            <a
+            <Link
               href="/cookies"
               className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform inline-block"
               style={{
@@ -112,7 +113,7 @@ export default function CookieConsent() {
               }}
             >
               DETAILS
-            </a>
+            </Link>
           </div>
         </div>
       </div>

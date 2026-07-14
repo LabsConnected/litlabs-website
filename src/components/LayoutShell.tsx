@@ -8,7 +8,10 @@ import Sidebar from "@/components/Sidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
 import CreateFAB from "@/components/CreateFAB";
 import { FloatingChat } from "@/components/FloatingChat";
-import CookieConsent from "@/components/CookieConsent";
+import dynamic from "next/dynamic";
+const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
+  ssr: false,
+});
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
