@@ -47,6 +47,9 @@ type Message = {
   role: "user" | "assistant";
   content: string;
   createdAt?: number;
+  type?: "text" | "image" | "video" | "audio" | "error";
+  mediaUrl?: string;
+  status?: string;
 };
 
 type Attachment = {
@@ -74,21 +77,13 @@ const RAIL_ITEMS: RailItem[] = [
 ];
 
 const SLASH_CHIPS = [
-  { id: "image", label: "/image", desc: "Generate Image", tool: "image" },
-  { id: "video", label: "/video", desc: "Generate Video", tool: "video" },
-  { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
-  { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
+  { id: "image", label: "/image", desc: "Generate Image" },
+  { id: "video", label: "/video", desc: "Generate Video" },
+  { id: "audio", label: "/audio", desc: "Generate Audio" },
+  { id: "build", label: "/build", desc: "Build Anything" },
   { id: "code", label: "/code", desc: "Generate Code" },
-  { id: "agent", label: "/agent", desc: "Run Agent", tool: "agents" },
+  { id: "agent", label: "/agent", desc: "Run Agent" },
 ];
-
-const SLASH_TO_TOOL: Record<string, string | undefined> = {
-  "/image": "image",
-  "/video": "video",
-  "/audio": "audio",
-  "/build": "builder",
-  "/agent": "agents",
-};
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
 
@@ -550,6 +545,290 @@ function LITTTerminalShellInner({
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
+  // Run slash commands like /image, /audio, /video inline in the chat
+  const runSlashCommand = useCallback(
+    async (text: string) => {
+      const match = text.match(
+        /^\/(image|audio|video|build|code|agent)\s*(.*)/i,
+      );
+      if (!match) return false;
+      const [, cmd, raw] = match;
+      const prompt = raw.trim();
+
+      const placeholderIndex = messages.length + 1;
+
+      if (cmd === "image") {
+        if (!prompt) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "Add a prompt after `/image`, e.g. `/image a futuristic city at sunset`.",
+              createdAt: Date.now(),
+            },
+          ]);
+          return true;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Generating image: “${prompt}”…`,
+            createdAt: Date.now(),
+            type: "image",
+            status: "pending",
+          },
+        ]);
+        try {
+          const res = await fetch("/api/media/generate", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              format: "image",
+              providerId: "gemini",
+              width: 1024,
+              height: 1024,
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Image generation failed");
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content: `Generated image: ${prompt}`,
+              mediaUrl: data.downloadUrl,
+              status: "complete",
+            };
+            return next;
+          });
+        } catch (err) {
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content:
+                err instanceof Error ? err.message : "Image generation failed",
+              type: "error",
+              status: "error",
+            };
+            return next;
+          });
+        }
+        return true;
+      }
+
+      if (cmd === "audio") {
+        if (!prompt) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "Add a prompt after `/audio`, e.g. `/audio a cinematic sci-fi trailer voiceover`.",
+              createdAt: Date.now(),
+            },
+          ]);
+          return true;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Generating audio: “${prompt}”…`,
+            createdAt: Date.now(),
+            type: "audio",
+            status: "pending",
+          },
+        ]);
+        try {
+          const res = await fetch("/api/media/generate-audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Audio generation failed");
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content: `Generated audio: ${prompt}`,
+              mediaUrl: data.audioBase64,
+              status: "complete",
+            };
+            return next;
+          });
+        } catch (err) {
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content:
+                err instanceof Error ? err.message : "Audio generation failed",
+              type: "error",
+              status: "error",
+            };
+            return next;
+          });
+        }
+        return true;
+      }
+
+      if (cmd === "video") {
+        if (!prompt) {
+          setMessages((prev) => [
+            ...prev,
+            {
+              role: "assistant",
+              content:
+                "Add a prompt after `/video`, e.g. `/video a drone flying over a neon city`.",
+              createdAt: Date.now(),
+            },
+          ]);
+          return true;
+        }
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: `Starting video generation: “${prompt}”…`,
+            createdAt: Date.now(),
+            type: "video",
+            status: "pending",
+          },
+        ]);
+        try {
+          const res = await fetch("/api/media/generate-video", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              prompt,
+              aspectRatio: "16:9",
+              resolution: "720p",
+            }),
+          });
+          const data = await res.json().catch(() => ({}));
+          if (!res.ok) throw new Error(data.error || "Video generation failed");
+
+          const poll = async () => {
+            const start = Date.now();
+            while (Date.now() - start < 300_000) {
+              await new Promise((r) => setTimeout(r, 4000));
+              const pollRes = await fetch("/api/media/video-status", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ operationName: data.operationName }),
+              });
+              const pollData = await pollRes.json().catch(() => ({}));
+              if (pollData.error) throw new Error(pollData.error);
+              if (pollData.done && pollData.videoUri) {
+                setMessages((current) => {
+                  if (placeholderIndex >= current.length) return current;
+                  const next = current.slice();
+                  next[placeholderIndex] = {
+                    ...next[placeholderIndex],
+                    content: `Generated video: ${prompt}`,
+                    mediaUrl: pollData.videoUri,
+                    status: "complete",
+                  };
+                  return next;
+                });
+                return;
+              }
+            }
+            throw new Error("Video generation timed out");
+          };
+
+          void poll().catch((err) => {
+            setMessages((current) => {
+              if (placeholderIndex >= current.length) return current;
+              const next = current.slice();
+              next[placeholderIndex] = {
+                ...next[placeholderIndex],
+                content:
+                  err instanceof Error
+                    ? err.message
+                    : "Video generation failed",
+                type: "error",
+                status: "error",
+              };
+              return next;
+            });
+          });
+        } catch (err) {
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content:
+                err instanceof Error ? err.message : "Video generation failed",
+              type: "error",
+              status: "error",
+            };
+            return next;
+          });
+        }
+        return true;
+      }
+
+      if (cmd === "build") {
+        onToolChangeAction?.("builder");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: prompt
+              ? `Switched to the Build tool. Use it to build: ${prompt}`
+              : "Switched to the Build tool.",
+            createdAt: Date.now(),
+          },
+        ]);
+        return true;
+      }
+
+      if (cmd === "code") {
+        onToolChangeAction?.("terminal");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: prompt
+              ? `Switched to the Code Terminal. Prompt: ${prompt}`
+              : "Switched to the Code Terminal.",
+            createdAt: Date.now(),
+          },
+        ]);
+        return true;
+      }
+
+      if (cmd === "agent") {
+        onToolChangeAction?.("agent");
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant",
+            content: prompt
+              ? `Switched to the Agent tool. Task: ${prompt}`
+              : "Switched to the Agent tool.",
+            createdAt: Date.now(),
+          },
+        ]);
+        return true;
+      }
+
+      return false;
+    },
+    [messages.length, onToolChangeAction],
+  );
+
   const send = useCallback(
     async (value: string, attachmentsArg?: string[]) => {
       const text = value.trim();
@@ -572,6 +851,12 @@ function LITTTerminalShellInner({
       setBusy(true);
       setInput("");
       setAttachments((prev) => (attachmentsArg ? prev : []));
+
+      // Handle slash commands inline before falling back to the chat API
+      if (text && (await runSlashCommand(text))) {
+        setBusy(false);
+        return "";
+      }
 
       const controller = new AbortController();
       abortRef.current = controller;
@@ -688,7 +973,14 @@ function LITTTerminalShellInner({
         abortRef.current = null;
       }
     },
-    [busy, messages, attachments, profile.displayName, persona.id],
+    [
+      busy,
+      messages,
+      attachments,
+      profile.displayName,
+      persona.id,
+      runSlashCommand,
+    ],
   );
 
   const handleSend = () => {
@@ -698,14 +990,6 @@ function LITTTerminalShellInner({
     }
     const trimmed = input.trim();
     if (!trimmed && attachments.length === 0) return;
-
-    // Route explicit slash commands to their Studio tool when possible.
-    const firstToken = trimmed.split(/\s+/)[0];
-    const targetTool = SLASH_TO_TOOL[firstToken];
-    if (targetTool && onToolChangeAction) {
-      onToolChangeAction(targetTool);
-      return;
-    }
 
     void send(input);
   };
@@ -717,11 +1001,7 @@ function LITTTerminalShellInner({
     }
   };
 
-  const handleChip = (chip: string, tool?: string) => {
-    if (tool && onToolChangeAction) {
-      onToolChangeAction(tool);
-      return;
-    }
+  const handleChip = (chip: string) => {
     setInput((prev) => {
       const base = prev.replace(/\s+/g, " ").trim();
       return base ? `${base} ${chip} ` : `${chip} `;
@@ -1119,6 +1399,32 @@ function LITTTerminalShellInner({
                         <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/[0.03] px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
                           {isUser ? (
                             message.content
+                          ) : message.type === "image" && message.mediaUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={message.mediaUrl}
+                              alt={message.content}
+                              className="max-w-full rounded-xl border border-white/10"
+                              loading="lazy"
+                            />
+                          ) : message.type === "audio" && message.mediaUrl ? (
+                            <audio
+                              src={message.mediaUrl}
+                              controls
+                              className="w-full min-w-[240px]"
+                              preload="metadata"
+                            />
+                          ) : message.type === "video" && message.mediaUrl ? (
+                            <video
+                              src={message.mediaUrl}
+                              controls
+                              className="max-w-full rounded-xl border border-white/10"
+                              preload="metadata"
+                            />
+                          ) : message.type === "error" ? (
+                            <div className="text-xs leading-relaxed text-rose-300">
+                              {message.content}
+                            </div>
                           ) : (
                             <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
                               <ReactMarkdown>{message.content}</ReactMarkdown>
@@ -1137,26 +1443,28 @@ function LITTTerminalShellInner({
                                 )
                               : ""}
                           </span>
-                          {!isUser && message.content && (
-                            <>
-                              <CopyButton text={message.content} />
-                              <button
-                                onClick={() => speakText(message.content)}
-                                className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300"
-                              >
-                                <Zap size={10} /> Speak
-                              </button>
-                              {isLastAssistant && (
+                          {!isUser &&
+                            (!message.type || message.type === "text") &&
+                            message.content && (
+                              <>
+                                <CopyButton text={message.content} />
                                 <button
-                                  onClick={regenerate}
-                                  disabled={busy}
-                                  className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300 disabled:opacity-40"
+                                  onClick={() => speakText(message.content)}
+                                  className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300"
                                 >
-                                  <RefreshCw size={10} /> Regen
+                                  <Zap size={10} /> Speak
                                 </button>
-                              )}
-                            </>
-                          )}
+                                {isLastAssistant && (
+                                  <button
+                                    onClick={regenerate}
+                                    disabled={busy}
+                                    className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300 disabled:opacity-40"
+                                  >
+                                    <RefreshCw size={10} /> Regen
+                                  </button>
+                                )}
+                              </>
+                            )}
                         </div>
                       </div>
                     </div>
@@ -1280,7 +1588,7 @@ function LITTTerminalShellInner({
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() => handleChip(chip.label, chip.tool)}
+                    onClick={() => handleChip(chip.label)}
                     className="flex shrink-0 items-center gap-1.5 rounded-md border border-white/5 bg-white/[0.02] px-2 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
