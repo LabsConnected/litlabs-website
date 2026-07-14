@@ -89,14 +89,14 @@ export default function CanvasTool() {
   // Load memories from Supermemory on mount
   useEffect(() => {
     fetch("/api/memory/search?q=canvas+code+build&limit=5")
-      .then((r) => r.json())
+      .then((r) => (r.ok ? r.json() : null))
       .then((data) => {
-        if (data.results) {
+        if (data?.memories) {
           setMemories(
-            data.results
+            data.memories
               .map(
-                (m: { memory?: string; chunk?: string }) =>
-                  m.memory || m.chunk || "",
+                (m: { content?: string; memory?: string; chunk?: string }) =>
+                  m.content || m.memory || m.chunk || "",
               )
               .filter(Boolean),
           );
