@@ -22,13 +22,12 @@ import {
   Zap,
   Star,
   Receipt,
-  Menu,
-  Paintbrush,
   Brain,
   Database,
   Code2,
   Workflow,
   FolderKanban,
+  Menu,
 } from "lucide-react";
 
 export type NavItem = {
@@ -163,26 +162,12 @@ type MobileNavItem = {
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Chat", href: "/litt", icon: MessagesSquare },
   { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Market", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games", icon: Gamepad2 },
-  { label: "Social", href: "/social", icon: Users },
-  { label: "Wallet", href: "/wallet", icon: Wallet },
-  { label: "More", href: "#menu", icon: Menu },
-];
-
-export const MOBILE_MORE_ITEMS: MobileNavItem[] = [
-  { label: "Profile", href: "/profile", icon: User },
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Studio", href: "/studio", icon: Paintbrush },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Agents", href: "/agents", icon: Bot },
-  { label: "Gallery", href: "/gallery", icon: Image },
-  { label: "Marketplace", href: "/marketplace", icon: Store },
-  { label: "Games", href: "/games", icon: Gamepad2 },
-  { label: "Social", href: "/social", icon: Users },
   { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "Settings", href: "/settings", icon: Settings },
 ];

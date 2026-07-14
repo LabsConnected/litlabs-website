@@ -4,9 +4,9 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, ChevronRight, Gamepad2, HardDrive, Heart, Library, LockKeyhole, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import PageShell from "@/components/PageShell";
-import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getRetroSystem, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
+import { addRetroGame, deleteRetroGame, detectRetroSystem, detectSatellaview, formatRomSize, getRetroSystem, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
 
-type PendingUpload = { file: File; title: string; system: RetroSystemId; legal: boolean };
+type PendingUpload = { file: File; title: string; system: RetroSystemId; legal: boolean; bsx: boolean };
 
 export default function RetroArcadePage() {
   const inputRef = useRef<HTMLInputElement>(null);
@@ -35,11 +35,17 @@ export default function RetroArcadePage() {
     if (!file) return;
     const detected = detectRetroSystem(file.name);
     if (!detected) {
-      setMessage("That file type is not supported yet. Use NES, SFC/SMC, GB, GBC, GBA, GEN, MD, or SMD files.");
+      setMessage("That file type is not supported yet. Use NES, SFC/SMC/SWC/BS/FIG, GB, GBC, GBA, GEN, MD, or SMD files.");
       return;
     }
     setMessage(null);
-    setPending({ file, title: titleFromFileName(file.name), system: detected, legal: false });
+    setPending({
+      file,
+      title: titleFromFileName(file.name),
+      system: detected,
+      legal: false,
+      bsx: detected === "snes" && detectSatellaview(file.name),
+    });
   }
 
   async function importGame() {
@@ -59,7 +65,7 @@ export default function RetroArcadePage() {
 
   async function toggleFavorite(game: RetroGameRecord) {
     const updated = await updateRetroGame(game.id, { favorite: !game.favorite });
-    setGames((current) => current.map((item) => item.id === updated.id ? updated : item));
+    setGames((current) => current.map((item) => item.id === updated.id ? item : item));
   }
 
   async function removeGame(game: RetroGameRecord) {
@@ -78,7 +84,7 @@ export default function RetroArcadePage() {
               <div><div className="text-[10px] font-black uppercase tracking-[.3em] text-fuchsia-400">Game Cloud · Chapter 01</div><h1 className="text-xl font-black tracking-tight sm:text-2xl">LiTT Retro Arcade</h1></div>
             </div>
             <button onClick={() => inputRef.current?.click()} className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-600 px-4 py-2.5 text-sm font-black shadow-[0_0_30px_rgba(217,70,239,.25)] transition hover:scale-[1.02]"><Upload size={16} /> Add your game</button>
-            <input ref={inputRef} type="file" className="hidden" accept=".nes,.sfc,.smc,.gb,.gbc,.gba,.gen,.md,.smd" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
+            <input ref={inputRef} type="file" className="hidden" accept=".nes,.sfc,.smc,.swc,.bs,.bsa,.fig,.gb,.gbc,.gba,.gen,.md,.smd" onChange={(event) => { chooseFile(event.target.files?.[0]); event.target.value = ""; }} />
           </div>
         </header>
 
@@ -90,7 +96,7 @@ export default function RetroArcadePage() {
               {RETRO_SYSTEMS.map((system) => <button key={system.id} onClick={() => setSystemFilter(system.id)} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === system.id ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/5 hover:text-white"}`}><span className="flex items-center gap-2"><i className="h-2 w-2 rounded-full" style={{ background: system.color, boxShadow: `0 0 10px ${system.color}` }} />{system.shortName}</span><span>{games.filter((game) => game.system === system.id).length}</span></button>)}
             </section>
             <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-4">
-              <ShieldCheck className="mb-2 text-emerald-300" size={20}/><h2 className="text-sm font-black">Private by default</h2><p className="mt-1 text-xs leading-5 text-white/45">ROM files stay in this browser&apos;s IndexedDB. LiTT does not upload or provide copyrighted games.</p>
+              <ShieldCheck className="mb-2 text-emerald-300" size={20}/><h2 className="text-sm font-black">Private by default</h2><p className="mt-1 text-xs leading-5 text-white/45">ROM files stay in this browser's IndexedDB. LiTT does not upload or provide copyrighted games.</p>
             </section>
           </aside>
 
@@ -120,11 +126,11 @@ export default function RetroArcadePage() {
             <section className="rounded-2xl border border-white/10 bg-white/[.035] p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-black">Arcade progress</h2><span className="text-xs text-white/35">{[games.length > 0, games.some((g) => g.launches > 0), systemsOwned >= 3].filter(Boolean).length}/3</span></div><div className="mt-4 space-y-3">{[
               ["First cartridge", "Add one game", games.length > 0], ["Power on", "Launch a game", games.some((game) => game.launches > 0)], ["System hopper", "Collect three systems", systemsOwned >= 3]
             ].map(([title, detail, done]) => <div key={String(title)} className="flex items-center gap-3"><span className={`flex h-8 w-8 items-center justify-center rounded-full ${done ? "bg-emerald-400/15 text-emerald-300" : "bg-white/5 text-white/20"}`}>{done ? <Check size={15}/> : <LockKeyhole size={13}/>}</span><div><div className="text-xs font-bold">{title}</div><div className="text-[11px] text-white/35">{detail}</div></div></div>)}</div></section>
-            <section className="rounded-2xl border border-white/10 bg-white/[.025] p-5"><HardDrive size={18} className="mb-2 text-cyan-300"/><h2 className="text-sm font-black">Supported now</h2><p className="mt-2 text-xs leading-5 text-white/40">NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, and Genesis / Mega Drive.</p><button onClick={() => inputRef.current?.click()} className="mt-4 flex items-center gap-1 text-xs font-black text-cyan-300">Import a game <ChevronRight size={13}/></button></section>
+            <section className="rounded-2xl border border-white/10 bg-white/[.025] p-5"><HardDrive size={18} className="mb-2 text-cyan-300"/><h2 className="text-sm font-black">Supported now</h2><p className="mt-2 text-xs leading-5 text-white/40">NES, SNES (including Satellaview / BS‑X), Game Boy, Game Boy Color, Game Boy Advance, and Genesis / Mega Drive.</p><button onClick={() => inputRef.current?.click()} className="mt-4 flex items-center gap-1 text-xs font-black text-cyan-300">Import a game <ChevronRight size={13}/></button></section>
           </aside>
         </div>
 
-        {pending && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"><div className="w-full max-w-lg rounded-3xl border border-white/15 bg-[#111119] p-6 shadow-2xl"><div className="flex items-start justify-between"><div><div className="text-[10px] font-black uppercase tracking-[.25em] text-fuchsia-300">Add to local arcade</div><h2 className="mt-1 text-2xl font-black">Confirm your game</h2></div><button onClick={() => setPending(null)} className="rounded-lg p-2 text-white/40 hover:bg-white/10 hover:text-white"><X size={18}/></button></div><div className="mt-6 space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-white/50">Display title</span><input value={pending.title} onChange={(event) => setPending({ ...pending, title: event.target.value })} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 outline-none focus:border-fuchsia-400/50"/></label><label className="block"><span className="mb-2 block text-xs font-bold text-white/50">Detected system</span><select value={pending.system} onChange={(event) => setPending({ ...pending, system: event.target.value as RetroSystemId })} className="w-full rounded-xl border border-white/10 bg-[#0b0b10] px-4 py-3 outline-none">{RETRO_SYSTEMS.map((system) => <option key={system.id} value={system.id}>{system.name}</option>)}</select></label><div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/45"><b className="text-white/75">{pending.file.name}</b><br/>{formatRomSize(pending.file.size)} · stored only in this browser</div><label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><input type="checkbox" checked={pending.legal} onChange={(event) => setPending({ ...pending, legal: event.target.checked })} className="mt-0.5 h-4 w-4 accent-fuchsia-500"/><span className="text-xs leading-5 text-white/60">I confirm I have the legal right to use this ROM. LiTT does not supply copyrighted game files.</span></label></div><button disabled={!pending.legal || busy || !pending.title.trim()} onClick={importGame} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-600 py-3 font-black disabled:cursor-not-allowed disabled:opacity-30"><Gamepad2 size={17}/>{busy ? "Saving locally…" : "Add to my arcade"}</button></div></div>}
+        {pending && <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 backdrop-blur-md"><div className="w-full max-w-lg rounded-3xl border border-white/15 bg-[#111119] p-6 shadow-2xl"><div className="flex items-start justify-between"><div><div className="text-[10px] font-black uppercase tracking-[.25em] text-fuchsia-300">Add to local arcade</div><h2 className="mt-1 text-2xl font-black">Confirm your game</h2></div><button onClick={() => setPending(null)} className="rounded-lg p-2 text-white/40 hover:bg-white/10 hover:text-white"><X size={18}/></button></div><div className="mt-6 space-y-4"><label className="block"><span className="mb-2 block text-xs font-bold text-white/50">Display title</span><input value={pending.title} onChange={(event) => setPending({ ...pending, title: event.target.value })} className="w-full rounded-xl border border-white/10 bg-black/30 px-4 py-3 outline-none focus:border-fuchsia-400/50"/></label><label className="block"><span className="mb-2 block text-xs font-bold text-white/50">Detected system</span><select value={pending.system} onChange={(event) => setPending({ ...pending, system: event.target.value as RetroSystemId })} className="w-full rounded-xl border border-white/10 bg-[#0b0b10] px-4 py-3 outline-none">{RETRO_SYSTEMS.map((system) => <option key={system.id} value={system.id}>{system.name}</option>)}</select></label><div className="rounded-xl border border-white/10 bg-black/20 p-3 text-xs text-white/45"><b className="text-white/75">{pending.file.name}</b><br/>{formatRomSize(pending.file.size)} · stored only in this browser{pending.bsx && <div className="mt-2 rounded-lg border border-cyan-400/20 bg-cyan-400/10 px-2 py-1 text-[10px] font-bold text-cyan-200">Satellaview / BS‑X detected — supply a BS‑X BIOS on the play page to boot.</div>}</div><label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4"><input type="checkbox" checked={pending.legal} onChange={(event) => setPending({ ...pending, legal: event.target.checked })} className="mt-0.5 h-4 w-4 accent-fuchsia-500"/><span className="text-xs leading-5 text-white/60">I confirm I have the legal right to use this ROM. LiTT does not supply copyrighted game files.</span></label></div><button disabled={!pending.legal || busy || !pending.title.trim()} onClick={importGame} className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-600 py-3 font-black disabled:cursor-not-allowed disabled:opacity-30"><Gamepad2 size={17}/>{busy ? "Saving locally…" : "Add to my arcade"}</button></div></div>}
       </main>
     </PageShell>
   );
