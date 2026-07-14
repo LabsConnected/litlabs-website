@@ -2120,7 +2120,7 @@ main {
 /* Mobile chat launcher — sits above bottom nav, below open chat panel */
 .chat-launcher {
   position: fixed;
-  left: 16px;
+  right: 16px;
   bottom: calc(88px + env(safe-area-inset-bottom));
   z-index: 9998;
 }

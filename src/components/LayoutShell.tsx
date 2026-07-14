@@ -6,7 +6,6 @@ import NavbarWrapper from "@/components/NavbarWrapper";
 import FooterWrapper from "@/components/FooterWrapper";
 import Sidebar from "@/components/Sidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
-import CreateFAB from "@/components/CreateFAB";
 import { FloatingChat } from "@/components/FloatingChat";
 import dynamic from "next/dynamic";
 const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
@@ -126,7 +125,6 @@ export default function LayoutShell({
             {children}
           </main>
           {!ownChrome && <MobileBottomNav />}
-          {!ownChrome && <CreateFAB />}
           <FloatingChat />
           <FooterWrapper />
           <CookieConsent />

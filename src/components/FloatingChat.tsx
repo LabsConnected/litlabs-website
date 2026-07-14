@@ -739,21 +739,15 @@ export function FloatingChat() {
       {mounted && chatPanel && createPortal(chatPanel, document.body)}
       <button
         onClick={() => setChatOpen(true)}
-        className="chat-launcher flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95"
+        className="chat-launcher flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-all hover:scale-110 active:scale-95"
         style={{
           background: tokens.primary,
           color: "#0a0a0f",
-          boxShadow: `0 4px 20px ${tokens.primary}40`,
+          boxShadow: `0 3px 12px ${tokens.primary}30`,
         }}
         aria-label="Open chat"
       >
-        <MessageCircle size={22} />
-        {!chatOpen && (
-          <span className="absolute -top-1 -right-1 flex h-3 w-3">
-            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
-            <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
-          </span>
-        )}
+        <MessageCircle size={18} />
       </button>
     </>
   );
