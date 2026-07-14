@@ -111,3 +111,5 @@ chrome/
 .vercel
 .env*
 lighthouse-mobile.json
+lighthouse-*.json
+eslint-full.txt
