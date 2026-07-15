@@ -85,7 +85,12 @@ export function FloatingChat() {
   const [transcribing, setTranscribing] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
   const [voiceMenuOpen, setVoiceMenuOpen] = useState(false);
-  const [autoSpeak, setAutoSpeak] = useState(true);
+  // Spoken replies are opt-in. Persist the user's choice, but never surprise
+  // a returning visitor with audio when no preference has been saved.
+  const [autoSpeak, setAutoSpeak] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.localStorage.getItem("litlabs-auto-speak") === "true";
+  });
   const [voicePreviewLoading, setVoicePreviewLoading] = useState(false);
   const [voicePreviewError, setVoicePreviewError] = useState<string | null>(
     null,
@@ -148,6 +153,16 @@ export function FloatingChat() {
       cameraStreamRef.current = null;
     };
   }, []);
+
+  useEffect(() => {
+    window.localStorage.setItem("litlabs-auto-speak", String(autoSpeak));
+    if (!autoSpeak) {
+      audioRef.current?.pause();
+      audioRef.current = null;
+      window.speechSynthesis?.cancel();
+      setSpeaking(null);
+    }
+  }, [autoSpeak]);
 
   const closeCamera = useCallback(() => {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
@@ -423,7 +438,9 @@ export function FloatingChat() {
       if (!res.ok || data.error)
         throw new Error(data.error || "Transcription failed");
       const text = data.text?.trim();
-      if (text) {
+      const hasTranscript =
+        text && text.toLowerCase() !== "no transcription detected.";
+      if (hasTranscript) {
         setInput(text);
         setVoiceMode(false);
         setChatOpen(true);
