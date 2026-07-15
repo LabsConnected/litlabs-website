@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import styles from "./ChatShell.module.css";
 
@@ -15,8 +15,9 @@ type Props = {
   messages: StudioMessage[];
   sending?: boolean;
   systemLines?: string[];
-  onSend: (text: string) => void | Promise<void>;
+  onSend: (text: string) => string | Promise<string | void>;
   embedded?: boolean;
+  hideDock?: boolean;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
@@ -35,20 +36,47 @@ export function ChatShell({
   systemLines = [],
   onSend,
   embedded = false,
+  hideDock = false,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
-  const { state, speakText, stopSpeaking } = useVoiceSession();
+  const {
+    voiceState,
+    state,
+    startVoice,
+    stopVoice,
+    speakText,
+    stopSpeaking,
+    setOnTurn,
+  } = useVoiceSession();
   const voiceLabel =
-    state === "speaking"
+    voiceState === "speaking"
       ? "Speaking"
-      : state === "loading"
-        ? "Preparing voice"
-        : "Voice ready";
+      : voiceState === "listening" || voiceState === "speech_detected"
+        ? "Listening"
+        : voiceState === "transcribing"
+          ? "Transcribing"
+          : voiceState === "sending" || voiceState === "thinking"
+            ? "Thinking"
+            : voiceState === "error"
+              ? "Voice error"
+              : "Voice ready";
   const visibleMessages = useMemo(
     () => messages.filter((m) => m.role !== "system"),
     [messages],
   );
+  const voiceActive =
+    voiceState !== "idle" &&
+    voiceState !== "error" &&
+    voiceState !== "complete";
+
+  useEffect(() => {
+    setOnTurn(async (text) => {
+      const reply = await onSend(text);
+      if (typeof reply === "string") speakText(reply);
+    });
+    return () => setOnTurn(() => {});
+  }, [onSend, setOnTurn, speakText]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -150,51 +178,56 @@ export function ChatShell({
         )}
       </section>
 
-      <footer className={styles.dock}>
-        <div className={styles.quickActions} aria-label="Quick commands">
-          {actions.map((action) => (
-            <button key={action} onClick={() => setDraft(`${action} `)}>
-              {action}
+      {!hideDock && (
+        <footer className={styles.dock}>
+          <div className={styles.quickActions} aria-label="Quick commands">
+            {actions.map((action) => (
+              <button key={action} onClick={() => setDraft(`${action} `)}>
+                {action}
+              </button>
+            ))}
+          </div>
+          <div className={styles.voiceStatus} role="status" aria-live="polite">
+            <i /> {voiceLabel} · clean speech
+          </div>
+          <form className={styles.composer} onSubmit={submit}>
+            <button type="button" aria-label="Attach file" title="Attach file">
+              ⌕
             </button>
-          ))}
-        </div>
-        <div className={styles.voiceStatus} role="status" aria-live="polite">
-          <i /> {voiceLabel} · clean speech
-        </div>
-        <form className={styles.composer} onSubmit={submit}>
-          <button type="button" aria-label="Attach file" title="Attach file">
-            ⌕
-          </button>
-          <textarea
-            value={draft}
-            onChange={(e) => setDraft(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                e.currentTarget.form?.requestSubmit();
+            <textarea
+              value={draft}
+              onChange={(e) => setDraft(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey) {
+                  e.preventDefault();
+                  e.currentTarget.form?.requestSubmit();
+                }
+              }}
+              placeholder="Ask LiTT to build, fix, or create…"
+              rows={1}
+            />
+            <button
+              type="button"
+              className={styles.mic}
+              aria-label={
+                voiceActive ? "Stop voice input" : "Start voice input"
               }
-            }}
-            placeholder="Ask LiTT to build, fix, or create…"
-            rows={1}
-          />
-          <button
-            type="button"
-            className={styles.mic}
-            aria-label="Start voice input"
-            title="Voice input"
-          >
-            🎙
-          </button>
-          <button
-            className={styles.send}
-            disabled={!draft.trim() || sending}
-            aria-label="Send message"
-            title="Send"
-          >
-            ➤
-          </button>
-        </form>
-      </footer>
+              title={voiceActive ? "Stop voice" : "Voice input"}
+              onClick={voiceActive ? stopVoice : startVoice}
+            >
+              🎙
+            </button>
+            <button
+              className={styles.send}
+              disabled={!draft.trim() || sending}
+              aria-label="Send message"
+              title="Send"
+            >
+              ➤
+            </button>
+          </form>
+        </footer>
+      )}
     </main>
   );
 }

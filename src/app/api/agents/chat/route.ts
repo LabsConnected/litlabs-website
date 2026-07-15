@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { orchestrator } from "@/lib/agents";
+import { orchestrator, type ProjectContext } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
+import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { Supermemory } from "supermemory";
 import { sanitizeProviderError } from "@/lib/provider-error";
 
@@ -129,27 +130,18 @@ async function persistMemory(
   }
 }
 
-const PROJECT_CONTEXT = `
-You operate inside the LiTTree-LabStudios platform (also called LiTT for the agent layer). The current project is the litlab monorepo:
-- Stack: Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 + Turbopack
-- Backend: Supabase (Postgres), Clerk auth, Stripe payments, Cloudflare R2
-- AI providers: OpenRouter, Gemini, Together, Fal, MiniMax
-- Key surfaces: Studio (AI workspace with LiTT Director), Dashboard, Projects/Deployments (GitHub-backed), Game Cloud, Marketplace, Social feed, Gallery
-- Agent team: LiTT Director (you), Forge (code), Visionary (image/media), Pulse (growth/content), Nexus (automations/integrations)
-- Current repository: LabsConnected/litlabs-website on GitHub, deployed on Vercel
-- You already have access to project files via scan, memory, and agent tools. When the user asks what you're building or what you know, reference this context.`;
-
 function buildDirectorPrompt(userName: string): string {
   const name = userName || "the user";
   return `You are LiTT Director — ${name}'s personal AI crew chief inside LiTTree-LabStudios.
 
+=== PROJECT CONTEXT (repo files, docs, schema) ===
 ${PROJECT_CONTEXT}
 
 Personality: sharp, confident, concise, occasionally sardonic. You address ${name} by their name (${name}). You do not over-explain.
 
 Job: understand ${name}'s intent, plan the work, delegate to specialist agents when useful, and present results clearly. Always explain what you did in plain terms before showing artifacts or code.
 
-When asked to generate images, describe what you are going to create and then confirm it is ready. Never dump base64 or internal system details in conversation.
+When asked to generate images, do NOT ask the user for a description. Infer the image prompt from the project context, file names, and conversation. If no clear direction exists, generate a sensible default image for the project and state the prompt you are using. Then confirm it is ready. Never dump base64 or internal system details in conversation.
 
 If a request requires approval or is ambiguous, ask one clear question. Prefer action over endless planning.`;
 }
@@ -176,6 +168,14 @@ export async function POST(req: NextRequest) {
     const userProfile = await getUserByClerkId(userId);
     const userName = userProfile?.name || "";
     const directorPrompt = buildDirectorPrompt(userName);
+
+    const projectContext: ProjectContext = {
+      name: "LiTTree-LabStudios",
+      description: "litlabs.net / LiTTree-LabStudios multi-agent creative workspace",
+      stack: "Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 + Turbopack",
+      repoUrl: "https://github.com/LabsConnected/litlabs-website",
+      customInstructions: PROJECT_CONTEXT,
+    };
 
     const agent = orchestrator.getAgent(resolvedId);
     const recalled = await recallMemories(userId, message, 5);
@@ -218,6 +218,7 @@ export async function POST(req: NextRequest) {
       resolvedId,
       message,
       memoryContext,
+      projectContext,
     );
     orchestrator.addToMemory(resolvedId, `I replied: ${response}`);
 

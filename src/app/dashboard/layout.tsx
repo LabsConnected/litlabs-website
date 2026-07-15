@@ -1,10 +1,5 @@
 import type { Metadata } from "next";
-import dynamic from "next/dynamic";
-
-const AutonomicLoopBanner = dynamic(
-  () => import("@/components/dashboard/AutonomicLoopBanner"),
-  { ssr: false },
-);
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   title: "Dashboard",

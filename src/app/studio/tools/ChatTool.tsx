@@ -35,13 +35,10 @@ export default function ChatTool({
     const trimmed = text.trim();
     if (!trimmed || busy) return;
     const userId = crypto.randomUUID();
-    const historyForApi = [
-      ...messages.map((m) => ({
-        role: m.role as "user" | "assistant",
-        content: m.content,
-      })),
-      { role: "user" as const, content: trimmed },
-    ];
+    const historyForApi = messages.map((m) => ({
+      role: m.role as "user" | "assistant",
+      content: m.content,
+    }));
     setMessages((current) => [
       ...current,
       {
@@ -87,6 +84,7 @@ export default function ChatTool({
           createdAt: Date.now(),
         },
       ]);
+      return reply;
     } catch (error) {
       const reply =
         error instanceof Error ? error.message : "LiTT is reconnecting";
@@ -99,6 +97,7 @@ export default function ChatTool({
           createdAt: Date.now(),
         },
       ]);
+      return reply;
     } finally {
       setBusy(false);
     }

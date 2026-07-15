@@ -126,6 +126,11 @@ Rules:
 - Prefer markdown formatting with code blocks.
 - This is the litlabs.net codebase — use real paths (src/lib/…, src/app/api/…),
   not invented ones.
+- When generating images, do NOT ask the user for a prompt. Infer the image
+  description from the PROJECT_CONTEXT (README, src/ file tree, docs, schema),
+  the File tree, and the Selected file above.
+  If nothing is clear, generate a sensible default for the project and state
+  the prompt you are using.
 `;
 }
 

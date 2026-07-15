@@ -5,9 +5,6 @@
   --orange: #ff7a1a;
   --muted: #a0a9b8;
 }
-* {
-  box-sizing: border-box;
-}
 .shell {
   min-height: 100dvh;
   max-width: 760px;
@@ -310,7 +307,8 @@
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  * {
+  .shell,
+  .shell :global(*) {
     animation: none !important;
     scroll-behavior: auto !important;
   }

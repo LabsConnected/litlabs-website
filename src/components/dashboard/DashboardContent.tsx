@@ -6,26 +6,18 @@ import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Zap,
-  Activity,
   Bot,
-  Clock,
   MessageSquare,
   Heart,
   TrendingUp,
   ArrowRight,
   RefreshCw,
   Loader2,
-  Users,
-  ImageIcon,
-  Film,
-  Music,
-  Terminal,
-  Hammer,
-  FolderOpen,
   UserPlus,
   Send,
   X,
   Sparkles,
+  Image as ImageIcon,
 } from "lucide-react";
 
 type Stats = {
@@ -177,11 +169,11 @@ function OnboardingBanner({ displayName }: { displayName: string }) {
     >
       <button
         onClick={dismiss}
-        className="absolute top-3 right-3 p-1 rounded-lg opacity-50 hover:opacity-100 transition-opacity"
+        className="absolute top-3 right-3 p-1 rounded-lg opacity-70 hover:opacity-100 transition-opacity"
         style={{ color: T.textMuted }}
-        aria-label="Dismiss"
+        aria-label="Dismiss welcome banner"
       >
-        <X size={14} />
+        <X size={14} aria-hidden="true" />
       </button>
       <div className="flex items-center gap-2 mb-3">
         <Sparkles size={16} style={{ color: T.accentColor }} />
@@ -270,23 +262,10 @@ export default function DashboardContent() {
   const { resolvedColors: T } = useTheme();
   const [stats, setStats] = useState<Stats | null>(null);
   const [posts, setPosts] = useState<Post[]>([]);
-  const [loadingStats, setLoadingStats] = useState(true);
   const [loadingPosts, setLoadingPosts] = useState(true);
   const [feedError, setFeedError] = useState(false);
   const [likedPosts, setLikedPosts] = useState<Set<string>>(new Set());
   const [telemetryIdx, setTelemetryIdx] = useState(0);
-
-  const fetchStats = async () => {
-    try {
-      const res = await fetch("/api/stats");
-      if (!res.ok) throw new Error();
-      setStats(await res.json());
-    } catch {
-      setStats(DEMO_STATS);
-    } finally {
-      setLoadingStats(false);
-    }
-  };
 
   const fetchPosts = async () => {
     try {
@@ -306,7 +285,13 @@ export default function DashboardContent() {
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      fetchStats();
+      // Lightweight stats fetch for the online agents pill only.
+      fetch("/api/stats")
+        .then((r) => (r.ok ? r.json() : null))
+        .then((s) => {
+          if (s) setStats(s);
+        })
+        .catch(() => setStats(DEMO_STATS));
       fetchPosts();
     });
     return () => cancelAnimationFrame(id);
@@ -352,84 +337,6 @@ export default function DashboardContent() {
     (sessionClaims?.username as string) ||
     "Builder";
 
-  const statCards = [
-    {
-      label: "Active Nodes",
-      value: stats?.activeNodes ?? 0,
-      icon: Activity,
-      color: T.accentColor,
-    },
-    {
-      label: "Agents",
-      value: stats?.agents ?? 0,
-      icon: Bot,
-      color: T.linkColor,
-    },
-    {
-      label: "Users",
-      value: stats?.totalUsers ?? 0,
-      icon: Users,
-      color: T.headerColor,
-    },
-    {
-      label: "Uptime",
-      value: stats?.uptime ?? "99.9%",
-      icon: Clock,
-      color: T.accentColor,
-    },
-  ];
-
-  const quickLinks = [
-    {
-      href: "/studio",
-      label: "Open Studio",
-      icon: Bot,
-      desc: "Talk to any AI agent",
-    },
-    {
-      href: "/studio?tool=image",
-      label: "Image",
-      icon: ImageIcon,
-      desc: "Generate images & art",
-    },
-    {
-      href: "/studio?tool=video",
-      label: "Video",
-      icon: Film,
-      desc: "Generate AI video",
-    },
-    {
-      href: "/studio?tool=audio",
-      label: "Audio",
-      icon: Music,
-      desc: "Create AI music",
-    },
-    {
-      href: "/studio?tool=builder",
-      label: "Build",
-      icon: Hammer,
-      desc: "Build anything",
-    },
-    {
-      href: "/studio?tool=terminal",
-      label: "Terminal",
-      icon: Terminal,
-      desc: "Agent dev console",
-    },
-    {
-      href: "/studio?tool=agents",
-      label: "Agents",
-      icon: Bot,
-      desc: "Talk to any AI agent",
-    },
-    {
-      href: "/studio?tool=gallery",
-      label: "Assets",
-      icon: FolderOpen,
-      desc: "Your generated media",
-    },
-  ];
-
   const tl = TELEMETRY_LINES[telemetryIdx];
 
   return (
@@ -454,7 +361,7 @@ export default function DashboardContent() {
                 {displayName}
               </h1>
               <p
-                className="text-[10px] mt-0.5 font-bold uppercase tracking-widest opacity-50"
+                className="text-[10px] mt-0.5 font-bold uppercase tracking-widest"
                 style={{ color: T.textMuted }}
               >
                 Architect
@@ -467,7 +374,7 @@ export default function DashboardContent() {
             <div
               className="hidden sm:flex items-center gap-2 px-3 py-1.5 rounded-lg text-[9px] font-mono border"
               style={{
-                borderColor: T.borderColor + "20",
+                borderColor: T.borderColor + "30",
                 backgroundColor: T.boxBg,
                 color: T.textMuted,
               }}
@@ -500,80 +407,6 @@ export default function DashboardContent() {
       <div className="w-full px-4 py-5 grid lg:grid-cols-4 gap-5">
         {/* ── LEFT SIDEBAR ── */}
         <div className="lg:col-span-1 space-y-4">
-          {/* Stats grid */}
-          <div
-            className="rounded-xl border p-3"
-            style={{
-              borderColor: T.borderColor + "25",
-              backgroundColor: T.boxBg,
-            }}
-          >
-            <div
-              className="text-[10px] font-bold uppercase tracking-widest mb-3 opacity-40"
-              style={{ color: T.textMuted }}
-            >
-              Network Telemetry
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              {statCards.map((s) => (
-                <div
-                  key={s.label}
-                  className="rounded-lg p-2.5 border"
-                  style={{
-                    borderColor: T.borderColor + "15",
-                    backgroundColor: T.bgColor + "60",
-                  }}
-                >
-                  <s.icon
-                    size={10}
-                    style={{ color: s.color }}
-                    className="mb-1"
-                  />
-                  <div
-                    className="text-xl font-black leading-none"
-                    style={{ color: s.color }}
-                  >
-                    {loadingStats ? "—" : s.value}
-                  </div>
-                  <div className="text-[10px] opacity-40 mt-0.5 uppercase tracking-wider">
-                    {s.label}
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Quick links */}
-          <div
-            className="rounded-xl border p-3"
-            style={{
-              borderColor: T.borderColor + "25",
-              backgroundColor: T.boxBg,
-            }}
-          >
-            <div
-              className="text-[10px] font-bold uppercase tracking-widest mb-3 opacity-40"
-              style={{ color: T.textMuted }}
-            >
-              Quick Access
-            </div>
-            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {quickLinks.map((a) => (
-                <Link
-                  key={a.href}
-                  href={a.href}
-                  className="group flex flex-col items-center justify-center gap-1.5 rounded-xl border border-white/5 bg-white/2 p-3 text-center transition hover:border-cyan-500/20 hover:bg-cyan-500/5"
-                >
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 transition group-hover:scale-110">
-                    <a.icon size={16} className="text-cyan-400" />
-                  </div>
-                  <div className="text-xs font-bold text-white">{a.label}</div>
-                  <div className="text-[9px] text-neutral-500">{a.desc}</div>
-                </Link>
-              ))}
-            </div>
-          </div>
-
           {/* Suggested agents */}
           <div
             className="rounded-xl border p-3"
@@ -583,7 +416,7 @@ export default function DashboardContent() {
             }}
           >
             <div
-              className="text-[10px] font-bold uppercase tracking-widest mb-3 opacity-40"
+              className="text-[10px] font-bold uppercase tracking-widest mb-3"
               style={{ color: T.textMuted }}
             >
               Architect Discovery
@@ -599,7 +432,9 @@ export default function DashboardContent() {
                     >
                       {a.handle}
                     </div>
-                    <div className="text-[10px] opacity-40">{a.role}</div>
+                    <div className="text-[10px]" style={{ color: T.textMuted }}>
+                      {a.role}
+                    </div>
                   </div>
                   <Link
                     href="/agents"
@@ -607,10 +442,11 @@ export default function DashboardContent() {
                     style={{
                       borderColor: T.accentColor + "40",
                       color: T.accentColor,
-                      backgroundColor: T.accentColor + "08",
+                      backgroundColor: T.accentColor + "15",
                     }}
+                    aria-label={`Connect with ${a.label}`}
                   >
-                    <UserPlus size={10} /> Connect
+                    <UserPlus size={10} aria-hidden="true" /> Connect
                   </Link>
                 </div>
               ))}
@@ -639,9 +475,10 @@ export default function DashboardContent() {
                 className="flex-1 px-3 py-2 rounded-lg text-sm cursor-pointer outline-none"
                 style={{
                   backgroundColor: T.bgColor,
-                  border: `1px solid ${T.borderColor}20`,
-                  color: T.textMuted,
+                  border: `1px solid ${T.borderColor}30`,
+                  color: T.textColor,
                 }}
+                aria-label="Neural broadcast — click to create a post"
               />
             </div>
             <div className="flex items-center justify-between">
@@ -655,9 +492,9 @@ export default function DashboardContent() {
                     onClick={() => (window.location.href = "/social")}
                     className="px-2.5 py-1 rounded text-[10px] font-bold border transition-all hover:scale-105"
                     style={{
-                      borderColor: b.color + "30",
+                      borderColor: b.color + "50",
                       color: b.color,
-                      backgroundColor: b.color + "08",
+                      backgroundColor: b.color + "15",
                     }}
                   >
                     {b.label}
@@ -668,8 +505,9 @@ export default function DashboardContent() {
                 href="/social"
                 className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-black transition-all hover:scale-105"
                 style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+                aria-label="Post to social feed"
               >
-                <Send size={10} /> Post
+                <Send size={10} aria-hidden="true" /> Post
               </Link>
             </div>
           </div>
@@ -711,8 +549,9 @@ export default function DashboardContent() {
                 onClick={fetchPosts}
                 className="p-1.5 rounded transition-all hover:rotate-180 duration-300"
                 style={{ color: T.textMuted }}
+                aria-label="Refresh feed"
               >
-                <RefreshCw size={12} />
+                <RefreshCw size={12} aria-hidden="true" />
               </button>
             </div>
 
@@ -740,7 +579,10 @@ export default function DashboardContent() {
                           >
                             {post.author?.name || "Anonymous"}
                           </span>
-                          <span className="text-[9px] opacity-40">
+                          <span
+                            className="text-[9px]"
+                            style={{ color: T.textMuted }}
+                          >
                             @{post.author?.username || "user"} ·{" "}
                             {formatTime(post.created_at)}
                           </span>
@@ -791,9 +633,15 @@ export default function DashboardContent() {
                                 ? "#f85149"
                                 : T.textMuted,
                             }}
+                            aria-label={
+                              likedPosts.has(post.id)
+                                ? `Unlike post by ${post.author?.name || "Anonymous"}`
+                                : `Like post by ${post.author?.name || "Anonymous"}`
+                            }
                           >
                             <Heart
                               size={11}
+                              aria-hidden="true"
                               fill={
                                 likedPosts.has(post.id) ? "#f85149" : "none"
                               }
@@ -805,8 +653,10 @@ export default function DashboardContent() {
                             href="/social"
                             className="flex items-center gap-1.5 text-[10px] font-bold transition-all hover:scale-110"
                             style={{ color: T.textMuted }}
+                            aria-label={`View ${post.comments_count} comments on post by ${post.author?.name || "Anonymous"}`}
                           >
-                            <MessageSquare size={11} /> {post.comments_count}
+                            <MessageSquare size={11} aria-hidden="true" />{" "}
+                            {post.comments_count}
                           </Link>
                         </div>
                       </div>
@@ -825,11 +675,11 @@ export default function DashboardContent() {
                 className="flex items-center justify-center gap-1 text-[10px] font-bold w-full py-1.5 rounded-lg transition-all hover:opacity-80"
                 style={{
                   color: T.linkColor,
-                  backgroundColor: T.linkColor + "08",
-                  border: `1px solid ${T.linkColor}20`,
+                  backgroundColor: T.linkColor + "10",
+                  border: `1px solid ${T.linkColor}30`,
                 }}
               >
-                View full feed <ArrowRight size={10} />
+                View full feed <ArrowRight size={10} aria-hidden="true" />
               </Link>
             </div>
           </div>
@@ -846,7 +696,7 @@ export default function DashboardContent() {
             }}
           >
             <div
-              className="text-[9px] font-bold uppercase tracking-widest mb-3 opacity-40"
+              className="text-[9px] font-bold uppercase tracking-widest mb-3"
               style={{ color: T.textMuted }}
             >
               Live Telemetry
@@ -883,7 +733,10 @@ export default function DashboardContent() {
                         {line.agent}
                       </span>
                     </div>
-                    <p className="text-[8px] opacity-50 leading-relaxed pl-3">
+                    <p
+                      className="text-[8px] leading-relaxed pl-3"
+                      style={{ color: T.textMuted }}
+                    >
                       {line.msg}
                     </p>
                   </div>
@@ -906,7 +759,10 @@ export default function DashboardContent() {
             >
               Your AI Social Network
             </div>
-            <p className="text-[9px] opacity-50 mb-3 leading-relaxed">
+            <p
+              className="text-[9px] mb-3 leading-relaxed"
+              style={{ color: T.textMuted }}
+            >
               Real agents. Real data. Real connections across the grid.
             </p>
             <div className="space-y-2">
@@ -919,17 +775,17 @@ export default function DashboardContent() {
                   boxShadow: `0 0 16px ${T.accentColor}30`,
                 }}
               >
-                <Zap size={11} /> Join the Grid
+                <Zap size={11} aria-hidden="true" /> Join the Grid
               </Link>
               <Link
                 href="/agents"
                 className="flex items-center justify-center gap-1.5 w-full py-2 rounded-lg text-[10px] font-bold border transition-all hover:scale-[1.02]"
                 style={{
-                  borderColor: T.borderColor + "30",
+                  borderColor: T.borderColor + "40",
                   color: T.textColor,
                 }}
               >
-                <Bot size={11} /> Explore Agents
+                <Bot size={11} aria-hidden="true" /> Explore Agents
               </Link>
             </div>
           </div>
@@ -943,7 +799,7 @@ export default function DashboardContent() {
             }}
           >
             <div
-              className="text-[9px] font-bold uppercase tracking-widest mb-3 opacity-40"
+              className="text-[9px] font-bold uppercase tracking-widest mb-3"
               style={{ color: T.textMuted }}
             >
               System Status

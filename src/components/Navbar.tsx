@@ -194,14 +194,18 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
       <div className="w-full px-4">
         <div className="flex items-center justify-between h-14">
           {/* Logo */}
-          <Link href="/" className="flex items-center gap-2.5 group shrink-0">
+          <Link
+            href="/"
+            className="flex items-center gap-2.5 group shrink-0"
+            aria-label="LiTree Labs — home"
+          >
             <div
               className="relative w-8 h-8 rounded-lg overflow-hidden transition-transform duration-300 group-hover:scale-105"
               style={{ border: `1px solid ${resolvedColors.accentColor}40` }}
             >
               <Image
                 src="/logo.png"
-                alt="LiTree Lab Studios"
+                alt=""
                 fill
                 className="object-contain p-0.5"
                 unoptimized
@@ -266,7 +270,11 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   title={link.label}
                   aria-label={link.label}
                 >
-                  <Icon size={12} strokeWidth={active ? 2.5 : 2} />
+                  <Icon
+                    size={12}
+                    strokeWidth={active ? 2.5 : 2}
+                    aria-hidden="true"
+                  />
                   <span className="hidden xl:inline">{link.label}</span>
                 </Link>
               );
@@ -304,6 +312,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               <AgentsIcon
                 size={17}
                 strokeWidth={isActive(agentsLink.href) ? 2.5 : 2}
+                aria-hidden="true"
               />
             </Link>
 
@@ -321,8 +330,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   backgroundColor: resolvedColors.accentColor + "08",
                 }}
                 title="Notifications"
+                aria-label={
+                  unreadCount > 0
+                    ? `Notifications (${unreadCount} unread)`
+                    : "Notifications"
+                }
+                aria-expanded={notifOpen}
               >
-                <Bell size={16} />
+                <Bell size={16} aria-hidden="true" />
                 {unreadCount > 0 && (
                   <span
                     className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full flex items-center justify-center text-[8px] font-black px-1"
@@ -499,7 +514,9 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                     {/* Divider + Sign out — gives a guaranteed way to log out */}
                     <div
                       className="my-1 h-px mx-2"
-                      style={{ backgroundColor: resolvedColors.borderColor + "40" }}
+                      style={{
+                        backgroundColor: resolvedColors.borderColor + "40",
+                      }}
                     />
                     <Link
                       href="/api/auth/logout"

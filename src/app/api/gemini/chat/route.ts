@@ -4,6 +4,7 @@ import { sanitizeProviderError } from "@/lib/provider-error";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
+import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 
@@ -99,6 +100,7 @@ function buildPrompt(
   history: HistoryEntry[],
   memoryContext: string,
   userName?: string,
+  projectContext = PROJECT_CONTEXT,
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
 
@@ -114,6 +116,9 @@ function buildPrompt(
   const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
 
   return [
+    "=== PROJECT CONTEXT (repo files, docs, schema) ===",
+    projectContext,
+    "",
     systemPrompt,
     memoryContext,
     "",

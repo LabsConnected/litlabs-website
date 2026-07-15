@@ -617,18 +617,6 @@ function LITTTerminalShellInner({
     return () => window.removeEventListener("keydown", onKey);
   }, [busy]);
 
-  // Voice transcripts are finalised after a silence gap — auto-send and speak reply
-  useEffect(() => {
-    setOnTurn((text) => {
-      if (!text) return;
-      void send(text).then((reply) => {
-        if (reply) speakText(reply);
-      });
-    });
-    return () => setOnTurn(() => {});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
   // Auto-scroll agent conversation
   useEffect(() => {
     const el = transcriptRef.current;
@@ -1053,17 +1041,81 @@ function LITTTerminalShellInner({
       }
 
       const userMessage = text || "(image attachment)";
-      const historyForApi = [
-        ...messages,
-        { role: "user" as const, content: userMessage },
-      ];
+
+      // Multimodal snapshots go through the Gemini image-chat path because the
+      // unified streaming endpoint does not accept image data yet.
+      if (attachList.length > 0) {
+        const historyForApi = messages.map((m) => ({
+          role: m.role as "user" | "assistant",
+          content: m.content,
+        }));
+        setMessages((current) => [
+          ...current,
+          {
+            role: "user" as const,
+            content: userMessage,
+            createdAt: Date.now(),
+          },
+        ]);
+        setBusy(true);
+        setInput("");
+        setAttachments((prev) => (attachmentsArg ? prev : []));
+        setActivity({ type: "thinking" });
+
+        try {
+          const response = await fetch("/api/gemini/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentSlug: persona.id,
+              message: userMessage,
+              history: historyForApi,
+              images: attachList,
+              userName: profile.displayName || "Creator",
+            }),
+          });
+          if (!response.ok) {
+            const err = await response.json().catch(() => ({}));
+            throw new Error(err.detail || err.error || "Image chat failed");
+          }
+          const data = (await response.json()) as { response?: string };
+          const reply =
+            data.response ||
+            "I\u2019m ready. Tell me what we\u2019re building.";
+          setMessages((current) => [
+            ...current,
+            {
+              role: "assistant" as const,
+              content: reply,
+              createdAt: Date.now(),
+            },
+          ]);
+          return reply;
+        } catch (error) {
+          const reply =
+            error instanceof Error ? error.message : "LiTT is reconnecting";
+          setMessages((current) => [
+            ...current,
+            {
+              role: "assistant" as const,
+              content: reply,
+              createdAt: Date.now(),
+            },
+          ]);
+          return reply;
+        } finally {
+          setBusy(false);
+          setActivity({ type: "idle" });
+        }
+      }
+
+      const historyForApi = messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      }));
       setMessages((current) => [
         ...current,
-        {
-          role: "user" as const,
-          content: userMessage,
-          createdAt: Date.now(),
-        },
+        { role: "user" as const, content: userMessage, createdAt: Date.now() },
       ]);
       setBusy(true);
       setInput("");
@@ -1228,9 +1280,20 @@ function LITTTerminalShellInner({
     ],
   );
 
+  // Voice transcripts are finalised after a silence gap — auto-send and speak reply
+  useEffect(() => {
+    setOnTurn((text) => {
+      if (!text) return;
+      void send(text).then((reply) => {
+        if (reply) speakText(reply);
+      });
+    });
+    return () => setOnTurn(() => {});
+  }, [send, speakText, setOnTurn]);
+
   const handleChatSend = useCallback(
     async (text: string) => {
-      await send(text);
+      return send(text);
     },
     [send],
   );
@@ -1635,6 +1698,7 @@ function LITTTerminalShellInner({
             {activeTool === "chat" ? (
               <ChatShell
                 embedded
+                hideDock
                 messages={chatMessages}
                 sending={busy}
                 systemLines={[]}
@@ -1786,7 +1850,14 @@ function LITTTerminalShellInner({
                 <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
                   <CameraSession
                     onSnapshot={(url) => {
-                      void send("Describe what you see.", [url]);
+                      if (activeTool !== "chat") {
+                        onToolChangeAction?.("chat");
+                      }
+                      void send("Describe what you see.", [url]).then(
+                        (reply) => {
+                          if (reply) speakText(reply);
+                        },
+                      );
                       setCameraOpen(false);
                     }}
                     onClose={() => setCameraOpen(false)}

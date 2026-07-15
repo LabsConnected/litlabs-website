@@ -229,10 +229,10 @@ export default function AutonomicLoopBanner() {
   if (dismissed) return null;
 
   const palette = {
-    ok: { color: "#22c55e", label: "Autonomic Loop · Online" },
-    degraded: { color: "#f59e0b", label: "Autonomic Loop · Degraded" },
-    down: { color: "#ef4444", label: "Autonomic Loop · Offline" },
-    checking: { color: tokens.primary, label: "Autonomic Loop · Probing" },
+    ok: { color: "#22c55e", label: "Systems Online" },
+    degraded: { color: "#f59e0b", label: "Partial" },
+    down: { color: "#ef4444", label: "Offline" },
+    checking: { color: tokens.primary, label: "Checking" },
   }[state];
 
   const StatusIcon =
@@ -243,23 +243,24 @@ export default function AutonomicLoopBanner() {
       className="sticky top-0 z-40 w-full border-b backdrop-blur-md"
       style={{
         backgroundColor: `${tokens.surface}cc`,
-        borderColor: `${palette.color}30`,
+        borderColor: `${palette.color}20`,
       }}
     >
-      <div className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold">
+      <div className="w-full flex items-center gap-2 px-4 py-1.5 text-xs font-bold">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-3 flex-1 min-w-0 text-left transition-all hover:opacity-90"
+          className="flex items-center gap-2 flex-1 min-w-0 text-left transition-all hover:opacity-90"
           aria-expanded={expanded}
-          aria-label="Toggle Autonomic Loop status"
+          aria-label={`Autonomic Loop status: ${palette.label}. ${expanded ? "Hide" : "Show"} details`}
         >
           <StatusIcon
-            size={14}
+            size={12}
             className={state === "checking" ? "animate-spin" : ""}
             style={{ color: palette.color }}
+            aria-hidden="true"
           />
           <span
-            className="uppercase tracking-[0.18em]"
+            className="uppercase tracking-[0.15em] text-[10px]"
             style={{ color: palette.color }}
           >
             {palette.label}

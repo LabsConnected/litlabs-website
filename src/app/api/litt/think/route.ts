@@ -12,6 +12,7 @@ import {
   parseLiTTActions,
 } from "@/lib/litt-context";
 import { loadProjectContext } from "@/lib/project-context";
+import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { integrationStatusBlock, getProjectHealth } from "@/lib/integrations";
 import { recallPersonaMemory, savePersonaMemory } from "@/lib/agent-memory";
 import type { MemoryRecord } from "@/lib/agent-user";
@@ -128,6 +129,8 @@ async function handler(req: NextRequest) {
 
     const systemPrompt =
       buildLiTTSystemPrompt(project) +
+      "\n\n=== PROJECT CONTEXT (repo files, docs, schema) ===\n" +
+      PROJECT_CONTEXT +
       "\n\n" +
       `LIVE INTEGRATION STATE (auto-detected from process.env):\n${integrationStatusBlock()}\n` +
       `\nTIME OF DAY: ${tod} — adjust tone and suggestions accordingly. ${tod === "morning" ? "Lead with what's most important to ship today." : tod === "evening" ? "User is winding down; suggest wrap-up tasks and what's left for tomorrow." : tod === "night" ? "User is in deep-work mode; be terse and avoid drive-by questions." : "Steady afternoon — propose one concrete next step, not a menu."}\n` +
@@ -147,6 +150,13 @@ async function handler(req: NextRequest) {
       "Be ANTICIPATORY: if you see the user is on /litt and has high-priority open goals, " +
       "reference the top one without being asked. " +
       "Do not ask vague follow-up questions unless absolutely necessary. " +
+      "\n\n" +
+      "IMAGE GENERATION RULE: " +
+      "When the user asks to generate/create/make/draw an image, do NOT ask them for a description. " +
+      "Infer the image prompt from the project context, the README description above, the file tree, the selected file, and the conversation. " +
+      "If there is no clear direction, use your best judgment and generate a sensible default image for the project (e.g. a futuristic LiTTree-LabStudios / litlabs.net multi-agent creative workspace, dark theme, neon cyan and purple accents, high detail). " +
+      "State the prompt you are using and confirm the image is ready; do not dump base64 or internal system details. " +
+      "Only mention missing integrations if the user explicitly asks about setup/status." +
       "\n\n" +
       "HARD RULES — DO NOT HALLUCINATE: " +
       "(1) NEVER pretend to execute shell commands, read files, or run tools. " +

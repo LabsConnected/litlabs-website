@@ -569,8 +569,9 @@ export default function FileGalaxy() {
                 color: T.textColor,
               }}
               title="Zoom out"
+              aria-label="Zoom out"
             >
-              <ZoomOut size={13} />
+              <ZoomOut size={13} aria-hidden="true" />
             </button>
             <button
               onClick={() => {
@@ -585,8 +586,9 @@ export default function FileGalaxy() {
                 color: T.textColor,
               }}
               title="Reset view"
+              aria-label="Reset view"
             >
-              <Maximize2 size={13} />
+              <Maximize2 size={13} aria-hidden="true" />
             </button>
             <button
               onClick={() => setZoom((z) => Math.min(4, z + 0.15))}
@@ -597,8 +599,9 @@ export default function FileGalaxy() {
                 color: T.textColor,
               }}
               title="Zoom in"
+              aria-label="Zoom in"
             >
-              <ZoomIn size={13} />
+              <ZoomIn size={13} aria-hidden="true" />
             </button>
             <button
               onClick={() => setRotation((r) => r + 15)}
@@ -609,8 +612,9 @@ export default function FileGalaxy() {
                 color: T.textColor,
               }}
               title="Rotate"
+              aria-label="Rotate view 15 degrees"
             >
-              <RotateCw size={13} />
+              <RotateCw size={13} aria-hidden="true" />
             </button>
             <button
               onClick={() => void load()}
@@ -621,8 +625,9 @@ export default function FileGalaxy() {
                 color: T.textColor,
               }}
               title="Refresh data"
+              aria-label="Refresh data"
             >
-              <RefreshCw size={13} />
+              <RefreshCw size={13} aria-hidden="true" />
             </button>
           </div>
 

@@ -10,6 +10,7 @@ import {
 } from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
+import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { recallPersonaMemory, savePersonaMemory } from "@/lib/agent-memory";
 import { AGENT_TOOL_SCHEMAS, executeAgentTool } from "@/lib/agent-tools";
@@ -55,6 +56,7 @@ function buildPrompt(
   message: string,
   history: HistoryEntry[],
   memories: string[] = [],
+  projectContext = PROJECT_CONTEXT,
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
   const transcript = recentHistory
@@ -71,6 +73,9 @@ function buildPrompt(
       : "";
 
   return [
+    "=== PROJECT CONTEXT (repo files, docs, schema) ===",
+    projectContext,
+    "",
     agent.systemPrompt,
     "",
     memoryBlock,
@@ -242,7 +247,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   // We re-use withLittIdentity so the identity block lands in front, same as
   // every other LLM call.
   const systemPrompt = withLittIdentity(
-    [agent.systemPrompt, memories.length > 0
+    [PROJECT_CONTEXT, agent.systemPrompt, memories.length > 0
       ? `--- Long-term memory (relevant past context) ---\n${memories.join("\n")}\n--- End memory ---`
       : ""].join("\n\n"),
   );
