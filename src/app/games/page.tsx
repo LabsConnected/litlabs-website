@@ -174,7 +174,7 @@ export default function GamesPage() {
       {/* Featured Game Hero */}
       {!selectedGame && (
         <div
-          className="relative h-[300px] md:h-[400px] overflow-hidden border-b-2"
+          className="relative h-[40vh] min-h-[280px] md:h-[50vh] md:min-h-[360px] overflow-hidden border-b-2"
           style={{ borderColor: T.borderColor }}
         >
           <div

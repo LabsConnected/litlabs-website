@@ -718,29 +718,12 @@ function MarketplaceInner() {
           min-height: 100dvh;
           overflow-x: hidden;
         }
-        .marketplace-hero-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-          gap: 20px;
-          align-items: stretch;
-        }
         .marketplace-tab-row {
           overflow-x: auto;
           scrollbar-width: none;
         }
         .marketplace-tab-row::-webkit-scrollbar {
           display: none;
-        }
-        .marketplace-tier-grid {
-          display: grid !important;
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-          gap: 18px !important;
-          align-items: stretch;
-        }
-        .marketplace-spend-grid {
-          display: grid !important;
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-          gap: 16px !important;
         }
         .marketplace-tier-card,
         .marketplace-spend-card {
@@ -751,30 +734,7 @@ function MarketplaceInner() {
           font-variant-numeric: tabular-nums;
           letter-spacing: -0.01em;
         }
-        @media (max-width: 900px) {
-          .marketplace-hero-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .marketplace-tier-grid,
-          .marketplace-spend-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
         @media (max-width: 640px) {
-          .marketplace-page [style*="padding: 24px"] {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-          }
-          .marketplace-tier-grid,
-          .marketplace-spend-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .marketplace-tier-card {
-            padding: 28px 18px 18px !important;
-          }
-          .marketplace-spend-card {
-            padding: 16px !important;
-          }
           .marketplace-tab-row {
             justify-content: flex-start !important;
             padding-inline: 16px;
@@ -820,9 +780,11 @@ function MarketplaceInner() {
       )}
 
       <div
+        className="px-4 sm:px-6"
         style={{
           borderBottom: "1px solid " + T.borderColor,
-          padding: "28px 24px 20px",
+          paddingTop: "28px",
+          paddingBottom: "20px",
           background:
             "linear-gradient(180deg, " +
             T.boxBg +
@@ -832,15 +794,7 @@ function MarketplaceInner() {
         }}
       >
         <div className="mx-auto max-w-6xl">
-          <div
-            className="marketplace-hero-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.15fr 0.85fr",
-              gap: "20px",
-              alignItems: "stretch",
-            }}
-          >
+          <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5 items-stretch">
             <div
               style={{
                 textAlign: "left",
@@ -1031,13 +985,7 @@ function MarketplaceInner() {
                 </button>
               </div>
             </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-              }}
-            >
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
               {MARKETPLACE_SHOWCASE.map((item, idx) => (
                 <div
                   key={item.title}
@@ -1173,26 +1121,15 @@ function MarketplaceInner() {
       {activeTab === "agents" && (
         <div className="flex-1 flex flex-col">
           <div
+            className="px-4 sm:px-6 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between"
             style={{
-              padding: "16px 24px",
+              paddingTop: "16px",
+              paddingBottom: "16px",
               borderBottom: "1px solid " + T.borderColor,
-              display: "flex",
-              gap: "12px",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
               backgroundColor: T.boxBg,
             }}
           >
-            <div
-              style={{
-                display: "flex",
-                gap: "6px",
-                flexWrap: "wrap",
-                flex: 1,
-                alignItems: "center",
-              }}
-            >
+            <div className="flex flex-wrap gap-1.5 items-center flex-1">
               <button
                 onClick={() => setSelectedCategory("")}
                 style={{
@@ -1248,7 +1185,7 @@ function MarketplaceInner() {
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
               <input
                 id="marketplace-search"
                 name="marketplaceSearch"
@@ -1256,6 +1193,7 @@ function MarketplaceInner() {
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search agents..."
+                className="w-full sm:w-[200px] min-w-0"
                 style={{
                   padding: "8px 14px",
                   backgroundColor: T.bgColor,
@@ -1264,7 +1202,6 @@ function MarketplaceInner() {
                   color: "#e0e0e0",
                   fontSize: "12px",
                   fontFamily: "monospace",
-                  width: "200px",
                   outline: "none",
                 }}
               />
@@ -1311,9 +1248,10 @@ function MarketplaceInner() {
           </div>
 
           <div
-            className="flex-1"
+            className="flex-1 px-4 sm:px-6"
             style={{
-              padding: "24px",
+              paddingTop: "24px",
+              paddingBottom: "24px",
               maxWidth: "1200px",
               margin: "0 auto",
               width: "100%",
@@ -1332,14 +1270,7 @@ function MarketplaceInner() {
                 >
                   ⭐ FEATURED AGENTS
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fill, minmax(260px, 1fr))",
-                    gap: "16px",
-                  }}
-                >
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {featuredAgents.map((agent) => (
                     <AgentCard
                       key={agent.id}
@@ -1382,14 +1313,7 @@ function MarketplaceInner() {
                     Just Added
                   </span>
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fill, minmax(260px, 1fr))",
-                    gap: "16px",
-                  }}
-                >
+                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                   {newArrivals.map((agent) => (
                     <AgentCard
                       key={agent.id}
@@ -1430,13 +1354,7 @@ function MarketplaceInner() {
                   ({filteredAgents.length})
                 </span>
               </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: "16px",
-                }}
-              >
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                 {(searchQuery ? filteredAgents : regularAgents).map((agent) => (
                   <AgentCard
                     key={agent.id}
@@ -1477,9 +1395,10 @@ function MarketplaceInner() {
 
       {activeTab === "coins" && (
         <div
-          className="flex-1"
+          className="flex-1 px-4 sm:px-6"
           style={{
-            padding: "24px",
+            paddingTop: "24px",
+            paddingBottom: "24px",
             maxWidth: "1200px",
             margin: "0 auto",
             width: "100%",
@@ -1519,7 +1438,7 @@ function MarketplaceInner() {
                   </strong>
                 </p>
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div className="flex flex-wrap gap-2">
                 <button
                   onClick={earnCoins}
                   disabled={claimLoading}
@@ -1540,14 +1459,7 @@ function MarketplaceInner() {
               </div>
             </div>
 
-            <div
-              className="marketplace-tier-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "16px",
-              }}
-            >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
               {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
                 const isCurrent = currentPlan === tier.tier;
                 const missingPrice = !tier.priceId && tier.price > 0;
@@ -1806,14 +1718,7 @@ function MarketplaceInner() {
             >
               💎 SPEND YOUR COINS
             </div>
-            <div
-              className="marketplace-spend-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "16px",
-              }}
-            >
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {SPEND_FEATURES.map((feat) => (
                 <div
                   key={feat.id}
@@ -2060,7 +1965,7 @@ function MarketplaceInner() {
                   {formatPrice(previewAgent.price_cents)}
                 </span>
               </div>
-              <div style={{ display: "flex", gap: "8px" }}>
+              <div className="flex flex-wrap gap-2">
                 {installedAgents.has(previewAgent.id) ? (
                   <>
                     <button
@@ -2255,7 +2160,7 @@ function MarketplaceInner() {
                 </p>
               )}
             </div>
-            <div style={{ display: "flex", gap: "8px" }}>
+            <div className="flex flex-wrap gap-2">
               <button
                 onClick={() => {
                   if (sellPrice && Number(sellPrice) > 0)

@@ -72,11 +72,11 @@ export default function SpaceTool() {
         <textarea
           id="space-tool-prompt"
           name="spaceToolPrompt"
-          rows={4}
+          rows={2}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Describe a space scene, skybox, or 3D environment…"
-          className="w-full bg-transparent resize-none text-sm outline-none placeholder:opacity-40"
+          className="w-full bg-transparent resize-none text-sm outline-none placeholder:opacity-40 sm:min-h-[8rem]"
           style={{ color: T.textColor }}
         />
         <button

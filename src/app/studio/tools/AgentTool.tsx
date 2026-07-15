@@ -880,6 +880,19 @@ export default function AgentTool() {
                 {selectedAgent.name} · {selectedAgent.role}
               </div>
             </div>
+            <details className="group md:hidden">
+              <summary className="flex cursor-pointer list-none items-center gap-1">
+                <span className="text-sm font-black tracking-wide text-white">
+                  Agent Console
+                </span>
+                <span className="text-[10px] text-neutral-500 transition group-open:rotate-180">
+                  ▼
+                </span>
+              </summary>
+              <div className="pt-1 text-[10px] text-neutral-500">
+                {selectedAgent.name} · {selectedAgent.role}
+              </div>
+            </details>
             <span
               className="ml-1 hidden h-1.5 w-1.5 rounded-full animate-pulse md:block"
               style={{ backgroundColor: selectedAgent.color }}
