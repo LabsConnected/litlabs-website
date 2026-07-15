@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { getCoreAgents } from "@/lib/core-agents";
 
 async function getHandler(req: NextRequest) {
   try {
@@ -47,7 +48,13 @@ async function getHandler(req: NextRequest) {
       );
     }
 
-    const agents = (rows || []).map((a) => ({
+    const dbRows = rows || [];
+    // If no core agents exist in the database yet, serve the built-in core
+    // agents so the marketplace is never empty.
+    const fallbackRows = dbRows.length === 0 ? getCoreAgents() : [];
+    const combinedRows = [...dbRows, ...fallbackRows];
+
+    const agents = combinedRows.map((a) => ({
       id: a.id,
       slug: a.slug,
       name: a.display_name,

@@ -290,7 +290,7 @@ function MarketplaceInner() {
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"agents" | "coins">(() =>
-    searchParams.get("tab") === "coins" ? "coins" : "agents",
+    searchParams.get("tab") === "agents" ? "agents" : "coins",
   );
   const [currentPlan, setCurrentPlan] = useState<string>("free");
 
@@ -909,9 +909,9 @@ function MarketplaceInner() {
                   lineHeight: 1.6,
                 }}
               >
-                Discover, install, and deploy AI agents to your workspace. Free
-                agents install instantly, pro agents unlock with your tier, and
-                premium listings are priced in LiTBit Coins.
+                Choose your membership, unlock LiTBit Coins, and install core AI
+                agents. Director handles planning, Builder ships code — both
+                free for members.
               </p>
               <div
                 style={{
@@ -921,7 +921,7 @@ function MarketplaceInner() {
                   marginBottom: "18px",
                 }}
               >
-                <span className="badge badge-pink">Marketplace</span>
+                <span className="badge badge-pink">Membership</span>
                 <span className="badge">Stable rules</span>
                 <span className="badge badge-success">
                   Server-side installs
@@ -1174,7 +1174,7 @@ function MarketplaceInner() {
                 gap: "8px",
               }}
             >
-              <span>🪙</span> LiTBit Coins
+              <span>🪙</span> Membership
             </button>
           </div>
         </div>
@@ -1712,6 +1712,84 @@ function MarketplaceInner() {
                   </div>
                 );
               })}
+            </div>
+          </div>
+
+          {/* POWERSHELL 7 CLI */}
+          <div
+            style={{
+              borderTop: "2px solid " + T.borderColor,
+              paddingTop: "32px",
+              marginBottom: "32px",
+            }}
+          >
+            <div
+              style={{
+                color: T.accentColor,
+                fontSize: "14px",
+                letterSpacing: "2px",
+                marginBottom: "12px",
+                fontWeight: "bold",
+              }}
+            >
+              🖥️ INSTALL IN POWERSHELL 7
+            </div>
+            <p
+              style={{
+                color: T.textColor,
+                fontSize: "12px",
+                opacity: 0.7,
+                marginBottom: "16px",
+                maxWidth: "620px",
+              }}
+            >
+              Run Director and Builder from your terminal. Requires PowerShell 7
+              (or later). The module is free and installs in seconds.
+            </p>
+            <div
+              style={{
+                backgroundColor: "#0a0a0f",
+                border: `1px solid ${T.borderColor}40`,
+                borderRadius: "10px",
+                padding: "16px",
+                fontFamily: "monospace",
+                fontSize: "12px",
+                color: "#e2e8f0",
+                marginBottom: "12px",
+                overflowX: "auto",
+              }}
+            >
+              <div style={{ opacity: 0.5 }}># Install</div>
+              <div>
+                irm
+                https://raw.githubusercontent.com/LabsConnected/litlabs-website/main/cli/install.ps1
+                | iex
+              </div>
+              <div style={{ opacity: 0.5, marginTop: "12px" }}># Use</div>
+              <div>Import-Module LiTTree -Force</div>
+              <div>Invoke-Director &quot;Plan a React dashboard&quot;</div>
+              <div>
+                Invoke-Builder &quot;Write a PowerShell function that lists git
+                commits&quot;
+              </div>
+            </div>
+            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
+              <a
+                href="https://github.com/LabsConnected/litlabs-website/tree/main/cli"
+                target="_blank"
+                rel="noopener noreferrer"
+                style={{
+                  padding: "8px 14px",
+                  borderRadius: "6px",
+                  border: `1px solid ${T.borderColor}40`,
+                  color: T.textColor,
+                  fontSize: "11px",
+                  fontWeight: "bold",
+                  textDecoration: "none",
+                }}
+              >
+                View CLI source →
+              </a>
             </div>
           </div>
 
