@@ -1,12 +1,22 @@
 "use client";
 
-import { useState, useRef, useEffect, useCallback } from "react";
+import {
+  useState,
+  useRef,
+  useEffect,
+  useCallback,
+  useMemo,
+  type ComponentType,
+} from "react";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
+import { AGENTS } from "@/lib/agents";
+import { AGENT_AVATAR_META } from "@/lib/avatars";
+import type { StudioTool } from "./StudioSidebar";
 import {
   Terminal,
   FolderKanban,
@@ -34,7 +44,15 @@ import {
   RefreshCw,
   Square,
   Trash2,
+  Loader2,
+  MessageSquare,
   Image as ImageIcon,
+  Film,
+  Music,
+  Palette,
+  Hammer,
+  Code,
+  Shell,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -56,6 +74,31 @@ import {
   usePersona,
 } from "@/components/terminal/PersonaContext";
 
+const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
+const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
+const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
+const BuilderTool = dynamic(() => import("../tools/BuilderTool"), {
+  ssr: false,
+});
+const PipelineTool = dynamic(() => import("../tools/PipelineTool"), {
+  ssr: false,
+});
+const GalleryTool = dynamic(() => import("../tools/GalleryTool"), {
+  ssr: false,
+});
+const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
+const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
+  ssr: false,
+});
+const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), {
+  ssr: false,
+});
+const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
+const AgentsTerminalTool = dynamic(
+  () => import("../tools/AgentsTerminalTool"),
+  { ssr: false },
+);
+
 type Message = {
   role: "user" | "assistant";
   content: string;
@@ -71,26 +114,39 @@ type Attachment = {
   type: string;
 };
 
-type RailItem = {
+type ToolRailItem = {
   id: string;
   label: string;
   icon: typeof Terminal;
-  tool?: string;
+  tool?: StudioTool;
   href?: string;
 };
 
-const RAIL_ITEMS: RailItem[] = [
-  { id: "terminal", label: "Terminal", icon: Terminal },
+const TOOL_RAIL: ToolRailItem[] = [
+  { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
+  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
   { id: "projects", label: "Projects", icon: FolderKanban, href: "/projects" },
   { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
   { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
+  { id: "image", label: "Image", icon: ImageIcon, tool: "image" },
+  { id: "video", label: "Video", icon: Film, tool: "video" },
+  { id: "audio", label: "Audio", icon: Music, tool: "audio" },
+  { id: "builder", label: "Build", icon: Hammer, tool: "builder" },
+  { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
+  { id: "color", label: "Color", icon: Palette, tool: "color" },
+  { id: "clibridge", label: "CLI", icon: Shell, tool: "clibridge" },
   { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/docs" },
   { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
 
-const SLASH_CHIPS = [
+const SLASH_CHIPS: {
+  id: string;
+  label: string;
+  desc: string;
+  tool: StudioTool;
+}[] = [
   { id: "image", label: "/image", desc: "Generate Image", tool: "image" },
   { id: "video", label: "/video", desc: "Generate Video", tool: "video" },
   { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
@@ -100,6 +156,40 @@ const SLASH_CHIPS = [
 ];
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
+
+const AGENT_QUICK: Record<string, string[]> = {
+  littcode: [
+    "Write a React component for a chat interface",
+    "Debug: TypeError cannot read property of undefined",
+    "Explain async/await vs Promises",
+  ],
+  littlebit: [
+    "Build me an agent system for my business",
+    "Create a 30-day AI roadmap for me",
+    "Write 5 viral Twitter threads about AI",
+    "Generate a prompt for album cover art",
+    "Create a brand color palette for a tech startup",
+    "Set up an automation: lights on at sunset",
+    "Create a webhook integration for my app",
+  ],
+};
+
+const TOOL_COMPONENTS: Record<
+  Exclude<StudioTool, "chat" | "agents">,
+  ComponentType
+> = {
+  image: ImageTool,
+  video: VideoTool,
+  audio: AudioTool,
+  builder: BuilderTool,
+  terminal: AgentsTerminalTool,
+  pipeline: PipelineTool,
+  gallery: GalleryTool,
+  canvas: CanvasTool,
+  clibridge: CLIBridgeTool,
+  color: ColorByNumberTool,
+  space: SpaceTool,
+};
 
 const PLUGINS = [
   "git",
@@ -288,7 +378,12 @@ function ActiveCommandTabs({
   onClose,
   onActivate,
 }: {
-  tabs: { id: string; label: string; tool?: string; payload?: Record<string, unknown> }[];
+  tabs: {
+    id: string;
+    label: string;
+    tool?: string;
+    payload?: Record<string, unknown>;
+  }[];
   onClose: (id: string) => void;
   /**
    * Fired when the user clicks the chip body (not the close X). The
@@ -332,7 +427,6 @@ function ActiveCommandTabs({
     </div>
   );
 }
-
 
 /* ------------------------------------------------------------------ */
 /*  Attachment previews — shown above the input row                    */
@@ -392,8 +486,8 @@ function LITTTerminalShellInner({
   activeTool = "chat",
   onToolChangeAction,
 }: {
-  activeTool?: string;
-  onToolChangeAction?: (tool: string) => void;
+  activeTool?: StudioTool;
+  onToolChangeAction?: (tool: StudioTool) => void;
 }) {
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
@@ -420,7 +514,6 @@ function LITTTerminalShellInner({
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [activeTab, setActiveTab] = useState("terminal");
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   type ActiveCommand = {
@@ -430,6 +523,9 @@ function LITTTerminalShellInner({
     payload?: Record<string, unknown>;
   };
   const [activeCommands, setActiveCommands] = useState<ActiveCommand[]>([]);
+  const [agentId, setAgentId] = useState<keyof typeof AGENTS>("littcode");
+  const [agentChats, setAgentChats] = useState<Record<string, Message[]>>({});
+  const [pendingAgentQuery, setPendingAgentQuery] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -439,6 +535,24 @@ function LITTTerminalShellInner({
 
   const displayName = profile?.displayName || "Operator";
   const isEmpty = messages.length === 0;
+  const agentList = useMemo(() => Object.values(AGENTS), []);
+  const activeAgent = useMemo(
+    () => AGENTS[agentId] || AGENTS.littcode,
+    [agentId],
+  );
+  const activeAgentAvatar = useMemo(
+    () => AGENT_AVATAR_META[agentId] || AGENT_AVATAR_META.littcode,
+    [agentId],
+  );
+  const ActiveTool = useMemo<ComponentType | null>(() => {
+    if (activeTool === "chat" || activeTool === "agents") return null;
+    return TOOL_COMPONENTS[activeTool];
+  }, [activeTool]);
+  const agentMessages = useMemo(
+    () => agentChats[activeAgent.id] || [],
+    [agentChats, activeAgent.id],
+  );
+  const isAgentEmpty = agentMessages.length === 0;
   const micActive =
     voiceState === "requesting_permission" ||
     voiceState === "connecting" ||
@@ -508,6 +622,14 @@ function LITTTerminalShellInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Auto-scroll agent conversation
+  useEffect(() => {
+    const el = transcriptRef.current;
+    if (el) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    }
+  }, [agentMessages, busy]);
+
   const cancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
@@ -561,6 +683,13 @@ function LITTTerminalShellInner({
       if (!match) return false;
       const [, cmd, raw] = match;
       const prompt = raw.trim();
+
+      if (cmd === "agent") {
+        if (activeTool === "agents") return false;
+        setPendingAgentQuery(prompt);
+        onToolChangeAction?.("agents");
+        return true;
+      }
 
       const placeholderIndex = messages.length + 1;
 
@@ -802,29 +931,14 @@ function LITTTerminalShellInner({
       }
 
       if (cmd === "code") {
-        onToolChangeAction?.("terminal");
+        onToolChangeAction?.("canvas");
         setMessages((prev) => [
           ...prev,
           {
             role: "assistant",
             content: prompt
-              ? `Switched to the Code Terminal. Prompt: ${prompt}`
-              : "Switched to the Code Terminal.",
-            createdAt: Date.now(),
-          },
-        ]);
-        return true;
-      }
-
-      if (cmd === "agent") {
-        onToolChangeAction?.("agent");
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: prompt
-              ? `Switched to the Agent tool. Task: ${prompt}`
-              : "Switched to the Agent tool.",
+              ? `Switched to the Code tool. Prompt: ${prompt}`
+              : "Switched to the Code tool.",
             createdAt: Date.now(),
           },
         ]);
@@ -833,8 +947,78 @@ function LITTTerminalShellInner({
 
       return false;
     },
-    [messages.length, onToolChangeAction],
+    [activeTool, messages.length, onToolChangeAction],
   );
+
+  const sendAgent = useCallback(
+    async (value: string) => {
+      const text = value.trim();
+      const agent = activeAgent;
+      const userMessage: Message = {
+        role: "user",
+        content: text || "(image attachment)",
+        createdAt: Date.now(),
+      };
+      setAgentChats((prev) => ({
+        ...prev,
+        [agent.id]: [...(prev[agent.id] || []), userMessage],
+      }));
+      setBusy(true);
+      setActivity({ type: "thinking" });
+
+      try {
+        const res = await fetch("/api/agents/chat", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            agentId: agent.id,
+            message: text || "Describe what you see.",
+          }),
+        });
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}));
+          throw new Error(err.error || err.detail || "Agent service error");
+        }
+        const data = (await res.json()) as {
+          response?: string;
+          agent?: { name?: string };
+        };
+        const reply = data.response || "I'm on it.";
+        setAgentChats((prev) => ({
+          ...prev,
+          [agent.id]: [
+            ...(prev[agent.id] || []),
+            { role: "assistant", content: reply, createdAt: Date.now() },
+          ],
+        }));
+        return reply;
+      } catch (err) {
+        const reply =
+          err instanceof Error ? err.message : "Agent service unavailable";
+        setAgentChats((prev) => ({
+          ...prev,
+          [agent.id]: [
+            ...(prev[agent.id] || []),
+            { role: "assistant", content: reply, createdAt: Date.now() },
+          ],
+        }));
+        return reply;
+      } finally {
+        setBusy(false);
+        setActivity({ type: "idle" });
+      }
+    },
+    [activeAgent, setActivity],
+  );
+
+  // Route a pending /agent query once the shell switches to agent mode
+  useEffect(() => {
+    if (activeTool === "agents" && pendingAgentQuery) {
+      const query = pendingAgentQuery;
+      setPendingAgentQuery("");
+      void sendAgent(query || "...");
+    }
+  }, [activeTool, pendingAgentQuery, sendAgent]);
 
   const send = useCallback(
     async (value: string, attachmentsArg?: string[]) => {
@@ -842,6 +1026,25 @@ function LITTTerminalShellInner({
       const attachList =
         attachmentsArg ?? attachments.map((a) => a.url).filter(Boolean);
       if ((!text && !attachList.length) || busy) return "";
+
+      if (activeTool === "agents") {
+        setBusy(true);
+        setInput("");
+        setAttachments((prev) => (attachmentsArg ? prev : []));
+        setActivity({ type: "thinking" });
+
+        // Handle slash commands inline before falling back to the agent API
+        if (text && (await runSlashCommand(text))) {
+          setBusy(false);
+          setActivity({ type: "idle" });
+          return "";
+        }
+
+        const agentText = text.replace(/^\/agent\s*/i, "").trim();
+        const reply = await sendAgent(agentText || "(image attachment)");
+        return reply;
+      }
+
       const userMessage = text || "(image attachment)";
       const historyForApi = [
         ...messages,
@@ -1009,6 +1212,8 @@ function LITTTerminalShellInner({
       busy,
       messages,
       attachments,
+      activeTool,
+      sendAgent,
       profile.displayName,
       persona.id,
       setActivity,
@@ -1090,9 +1295,10 @@ function LITTTerminalShellInner({
       const isDestructive =
         (chip.tool && destructive.has(chip.tool)) || hasCommand;
       if (isDestructive) {
-        const desc = hasCommand && cmdText
-          ? `This will run: \`${cmdText}\``
-          : `This will run: ${chip.label}`;
+        const desc =
+          hasCommand && cmdText
+            ? `This will run: \`${cmdText}\``
+            : `This will run: ${chip.label}`;
 
         if (
           typeof window !== "undefined" &&
@@ -1108,7 +1314,6 @@ function LITTTerminalShellInner({
     },
     [activeCommands, send],
   );
-
 
   return (
     <div
@@ -1203,10 +1408,15 @@ function LITTTerminalShellInner({
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* LEFT RAIL */}
-        <aside className="hidden w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 md:flex">
-          {RAIL_ITEMS.map((item) => {
+        <aside
+          className={cn(
+            "hidden shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 md:flex",
+            activeTool === "agents" ? "w-44" : "w-16",
+          )}
+        >
+          {TOOL_RAIL.map((item) => {
             const Icon = item.icon;
-            const active = activeTool === item.tool || activeTab === item.id;
+            const active = activeTool === item.tool;
             return (
               <button
                 key={item.id}
@@ -1215,39 +1425,117 @@ function LITTTerminalShellInner({
                     router.push(item.href);
                   } else if (item.tool) {
                     onToolChangeAction?.(item.tool);
-                  } else {
-                    setActiveTab(item.id);
                   }
                 }}
                 aria-label={item.label}
-                className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors ${
-                  active ? "bg-cyan-500/10" : "hover:bg-white/5"
-                }`}
+                className={cn(
+                  "group relative flex flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors",
+                  activeTool === "agents" ? "w-full px-2" : "w-11",
+                  active ? "bg-cyan-500/10" : "hover:bg-white/5",
+                )}
                 title={item.label}
               >
                 {active && (
                   <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
                 )}
-                <Icon
-                  size={18}
-                  className={
-                    active
-                      ? "text-cyan-400"
-                      : "text-gray-300 group-hover:text-white"
-                  }
-                />
-                <span
-                  className={`text-[8px] font-bold ${
-                    active
-                      ? "text-cyan-400"
-                      : "text-gray-300 group-hover:text-neutral-200"
-                  }`}
+                <div
+                  className={cn(
+                    "flex items-center gap-2",
+                    activeTool === "agents" ? "w-full px-2" : "",
+                  )}
                 >
-                  {item.label}
-                </span>
+                  <Icon
+                    size={activeTool === "agents" ? 16 : 18}
+                    className={
+                      active
+                        ? "text-cyan-400"
+                        : "text-gray-300 group-hover:text-white"
+                    }
+                  />
+                  <span
+                    className={cn(
+                      "text-[8px] font-bold",
+                      active ? "text-cyan-400" : "text-gray-300",
+                      activeTool === "agents" ? "inline" : "hidden",
+                    )}
+                  >
+                    {item.label}
+                  </span>
+                </div>
               </button>
             );
           })}
+
+          {activeTool === "agents" && (
+            <>
+              <div className="w-full border-t border-white/5" />
+              <div className="flex w-full flex-col gap-1 px-2">
+                <div className="px-1 text-[8px] font-bold uppercase tracking-widest text-gray-500">
+                  Agents
+                </div>
+                {agentList.map((agent) => {
+                  const avatar =
+                    AGENT_AVATAR_META[agent.id] || AGENT_AVATAR_META.littcode;
+                  const isActive = activeAgent.id === agent.id;
+                  return (
+                    <button
+                      key={agent.id}
+                      onClick={() =>
+                        setAgentId(agent.id as keyof typeof AGENTS)
+                      }
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
+                        isActive ? "bg-cyan-500/10" : "hover:bg-white/5",
+                      )}
+                    >
+                      <span className="text-base">{avatar.emoji}</span>
+                      <span
+                        className={cn(
+                          "text-[10px] font-bold",
+                          isActive ? "text-cyan-400" : "text-gray-300",
+                        )}
+                      >
+                        {agent.name}
+                      </span>
+                      <span
+                        className="ml-auto h-1.5 w-1.5 rounded-full"
+                        style={{
+                          backgroundColor: agent.color,
+                          opacity: isActive ? 1 : 0.4,
+                        }}
+                      />
+                    </button>
+                  );
+                })}
+                <div className="px-1 pt-2 text-[8px] font-bold uppercase tracking-widest text-gray-500">
+                  Sessions
+                </div>
+                {Object.keys(agentChats).length === 0 && (
+                  <div className="px-1 text-[9px] text-gray-500">
+                    No sessions yet
+                  </div>
+                )}
+                {Object.keys(agentChats).map((id) => {
+                  const agent = AGENTS[id] || activeAgent;
+                  return (
+                    <button
+                      key={id}
+                      onClick={() => setAgentId(id as keyof typeof AGENTS)}
+                      className={cn(
+                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/5",
+                        activeAgent.id === id ? "bg-cyan-500/5" : "",
+                      )}
+                    >
+                      <span className="text-[10px] text-gray-300">
+                        {agent.name} ({agentChats[id]?.length || 0})
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
           <div className="w-full border-t border-white/5" />
           <PersonaSwitcher />
           <div className="mt-auto flex flex-col items-center gap-2 py-2">
@@ -1284,15 +1572,36 @@ function LITTTerminalShellInner({
           {/* Stage header */}
           <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:border-0 sm:px-6 sm:pt-5">
             <div className="flex items-center gap-3">
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
-                <Terminal size={16} className="text-cyan-400" />
+              <div
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10"
+                style={
+                  activeTool === "agents"
+                    ? {
+                        borderColor: `${activeAgent.color}40`,
+                        backgroundColor: `${activeAgent.color}10`,
+                      }
+                    : {}
+                }
+              >
+                {activeTool === "agents" ? (
+                  <span className="text-base">{activeAgentAvatar.emoji}</span>
+                ) : (
+                  <Terminal size={16} className="text-cyan-400" />
+                )}
               </div>
               <div>
                 <div className="text-sm font-black tracking-wide text-white">
-                  LITT Terminal
+                  {activeTool === "agents"
+                    ? "Agent Console"
+                    : activeTool === "chat"
+                      ? "LITT Terminal"
+                      : activeTool.charAt(0).toUpperCase() +
+                        activeTool.slice(1)}
                 </div>
                 <div className="hidden text-[10px] text-gray-300 sm:block">
-                  Your intelligent workspace. One command away.
+                  {activeTool === "agents"
+                    ? `${activeAgent.name} · ${activeAgent.role}`
+                    : "Your intelligent workspace. One command away."}
                 </div>
               </div>
             </div>
@@ -1318,229 +1627,374 @@ function LITTTerminalShellInner({
             ref={transcriptRef}
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
-            {isEmpty ? (
-              <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
-                <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
-                  <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-400 sm:text-xs">
-                    Welcome back, {displayName}.
+            {activeTool === "chat" ? (
+              isEmpty ? (
+                <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
+                  <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
+                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-400 sm:text-xs">
+                      Welcome back, {displayName}.
+                    </div>
+                    <h1 className="max-w-xl text-lg font-light leading-tight sm:text-3xl">
+                      What can I{" "}
+                      <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400">
+                        amplify
+                      </span>{" "}
+                      in your mission today?
+                    </h1>
                   </div>
-                  <h1 className="max-w-xl text-lg font-light leading-tight sm:text-3xl">
-                    What can I{" "}
-                    <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400">
-                      amplify
-                    </span>{" "}
-                    in your mission today?
-                  </h1>
-                </div>
 
-                {/* Hero visualization */}
-                <div className="relative hidden h-16 w-full max-w-xs items-center justify-center sm:flex sm:h-40 sm:max-w-md">
-                  <div
-                    className="absolute inset-0 rounded-full blur-2xl"
-                    style={{
-                      background:
-                        "radial-gradient(circle, rgba(34,211,238,0.12) 0%, transparent 70%)",
-                    }}
-                  />
-                  <svg
-                    viewBox="0 0 400 200"
-                    className="h-full w-full"
-                    style={{ opacity: 0.7 }}
-                  >
-                    <defs>
-                      <linearGradient
-                        id="lineGrad"
-                        x1="0%"
-                        y1="0%"
-                        x2="100%"
-                        y2="0%"
-                      >
-                        <stop offset="0%" stopColor="rgba(34,211,238,0)" />
-                        <stop offset="50%" stopColor="rgba(34,211,238,0.6)" />
-                        <stop offset="100%" stopColor="rgba(34,211,238,0)" />
-                      </linearGradient>
-                    </defs>
-                    <path
-                      d="M0,150 Q100,180 200,100 T400,150"
-                      fill="none"
-                      stroke="url(#lineGrad)"
-                      strokeWidth="1.5"
-                    />
-                    <path
-                      d="M0,120 Q100,60 200,120 T400,80"
-                      fill="none"
-                      stroke="url(#lineGrad)"
-                      strokeWidth="1"
-                      opacity="0.5"
-                    />
-                    <path
-                      d="M0,170 Q120,140 220,160 T400,120"
-                      fill="none"
-                      stroke="url(#lineGrad)"
-                      strokeWidth="1"
-                      opacity="0.3"
-                    />
-                    {[...Array(24)].map((_, i) => {
-                      const x = (i / 23) * 360 + 20;
-                      const y = 100 + Math.sin(i * 0.7) * 30;
-                      return (
-                        <circle
-                          key={i}
-                          cx={x}
-                          cy={y}
-                          r={1.5}
-                          fill="rgba(34,211,238,0.7)"
-                        />
-                      );
-                    })}
-                  </svg>
-                </div>
-
-                {/* Action cards */}
-                <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-                  {[
-                    {
-                      icon: Sparkles,
-                      title: "Create",
-                      desc: "Scaffold apps, services, and pipelines.",
-                    },
-                    {
-                      icon: Activity,
-                      title: "Analyze",
-                      desc: "Inspect logs, data, and system health.",
-                    },
-                    {
-                      icon: Rocket,
-                      title: "Build",
-                      desc: "Generate code, infra, and docs.",
-                    },
-                    {
-                      icon: Zap,
-                      title: "Automate",
-                      desc: "Design workflows and integrations.",
-                    },
-                  ].map((card) => (
-                    <button
-                      key={card.title}
-                      onClick={() =>
-                        void send(
-                          `Help me ${card.title.toLowerCase()} something`,
-                        )
-                      }
-                      className="group flex min-h-[72px] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
-                    >
-                      <div className="flex items-center justify-between">
-                        <card.icon
-                          size={14}
-                          className="text-cyan-400 transition group-hover:scale-110 sm:size-[15px]"
-                        />
-                        <ChevronRight
-                          size={12}
-                          className="text-gray-300 group-hover:text-cyan-400"
-                        />
-                      </div>
-                      <div className="text-xs font-bold sm:text-sm">
-                        {card.title}
-                      </div>
-                      <div className="text-[10px] leading-relaxed text-neutral-300 sm:text-[11px]">
-                        {card.desc}
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                <button
-                  onClick={() => setPluginsOpen(true)}
-                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-400 sm:text-xs"
-                >
-                  <LayoutGrid size={12} />
-                  View all plugins
-                  <ChevronRight size={10} />
-                </button>
-              </div>
-            ) : (
-              <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                {messages.map((message, index) => {
-                  const isUser = message.role === "user";
-                  const isLastAssistant =
-                    !isUser && index === messages.length - 1 && !busy;
-                  return (
+                  {/* Hero visualization */}
+                  <div className="relative hidden h-16 w-full max-w-xs items-center justify-center sm:flex sm:h-40 sm:max-w-md">
                     <div
-                      key={index}
-                      className={`flex gap-3 ${
-                        isUser ? "flex-row-reverse" : "flex-row"
-                      }`}
+                      className="absolute inset-0 rounded-full blur-2xl"
+                      style={{
+                        background:
+                          "radial-gradient(circle, rgba(34,211,238,0.12) 0%, transparent 70%)",
+                      }}
+                    />
+                    <svg
+                      viewBox="0 0 400 200"
+                      className="h-full w-full"
+                      style={{ opacity: 0.7 }}
                     >
+                      <defs>
+                        <linearGradient
+                          id="lineGrad"
+                          x1="0%"
+                          y1="0%"
+                          x2="100%"
+                          y2="0%"
+                        >
+                          <stop offset="0%" stopColor="rgba(34,211,238,0)" />
+                          <stop offset="50%" stopColor="rgba(34,211,238,0.6)" />
+                          <stop offset="100%" stopColor="rgba(34,211,238,0)" />
+                        </linearGradient>
+                      </defs>
+                      <path
+                        d="M0,150 Q100,180 200,100 T400,150"
+                        fill="none"
+                        stroke="url(#lineGrad)"
+                        strokeWidth="1.5"
+                      />
+                      <path
+                        d="M0,120 Q100,60 200,120 T400,80"
+                        fill="none"
+                        stroke="url(#lineGrad)"
+                        strokeWidth="1"
+                        opacity="0.5"
+                      />
+                      <path
+                        d="M0,170 Q120,140 220,160 T400,120"
+                        fill="none"
+                        stroke="url(#lineGrad)"
+                        strokeWidth="1"
+                        opacity="0.3"
+                      />
+                      {[...Array(24)].map((_, i) => {
+                        const x = (i / 23) * 360 + 20;
+                        const y = 100 + Math.sin(i * 0.7) * 30;
+                        return (
+                          <circle
+                            key={i}
+                            cx={x}
+                            cy={y}
+                            r={1.5}
+                            fill="rgba(34,211,238,0.7)"
+                          />
+                        );
+                      })}
+                    </svg>
+                  </div>
+
+                  {/* Action cards */}
+                  <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
+                    {[
+                      {
+                        icon: Sparkles,
+                        title: "Create",
+                        desc: "Scaffold apps, services, and pipelines.",
+                      },
+                      {
+                        icon: Activity,
+                        title: "Analyze",
+                        desc: "Inspect logs, data, and system health.",
+                      },
+                      {
+                        icon: Rocket,
+                        title: "Build",
+                        desc: "Generate code, infra, and docs.",
+                      },
+                      {
+                        icon: Zap,
+                        title: "Automate",
+                        desc: "Design workflows and integrations.",
+                      },
+                    ].map((card) => (
+                      <button
+                        key={card.title}
+                        onClick={() =>
+                          void send(
+                            `Help me ${card.title.toLowerCase()} something`,
+                          )
+                        }
+                        className="group flex min-h-[72px] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
+                      >
+                        <div className="flex items-center justify-between">
+                          <card.icon
+                            size={14}
+                            className="text-cyan-400 transition group-hover:scale-110 sm:size-[15px]"
+                          />
+                          <ChevronRight
+                            size={12}
+                            className="text-gray-300 group-hover:text-cyan-400"
+                          />
+                        </div>
+                        <div className="text-xs font-bold sm:text-sm">
+                          {card.title}
+                        </div>
+                        <div className="text-[10px] leading-relaxed text-neutral-300 sm:text-[11px]">
+                          {card.desc}
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+
+                  <button
+                    onClick={() => setPluginsOpen(true)}
+                    className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-400 sm:text-xs"
+                  >
+                    <LayoutGrid size={12} />
+                    View all plugins
+                    <ChevronRight size={10} />
+                  </button>
+                </div>
+              ) : (
+                <div className="mx-auto flex max-w-3xl flex-col gap-4">
+                  {messages.map((message, index) => {
+                    const isUser = message.role === "user";
+                    const isLastAssistant =
+                      !isUser && index === messages.length - 1 && !busy;
+                    return (
                       <div
-                        className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                          isUser
-                            ? "border border-orange-500/20 bg-orange-500/10"
-                            : "border border-cyan-500/20 bg-cyan-500/10"
+                        key={index}
+                        className={`flex gap-3 ${
+                          isUser ? "flex-row-reverse" : "flex-row"
                         }`}
                       >
-                        {isUser ? (
-                          <span className="text-[10px] font-bold text-orange-400">
-                            {displayName.slice(0, 1).toUpperCase()}
-                          </span>
-                        ) : (
-                          <Bot size={14} className="text-cyan-400" />
-                        )}
-                      </div>
-                      <div
-                        className={`flex max-w-[85%] flex-col ${
-                          isUser ? "items-end" : "items-start"
-                        }`}
-                      >
-                        <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
+                        <div
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                            isUser
+                              ? "border border-orange-500/20 bg-orange-500/10"
+                              : "border border-cyan-500/20 bg-cyan-500/10"
+                          }`}
+                        >
                           {isUser ? (
-                            message.content
-                          ) : message.type === "image" && message.mediaUrl ? (
-                            // eslint-disable-next-line @next/next/no-img-element
-                            <img
-                              src={message.mediaUrl}
-                              alt={message.content}
-                              className="max-w-full rounded-xl border border-white/10"
-                              loading="lazy"
-                            />
-                          ) : message.type === "audio" && message.mediaUrl ? (
-                            <audio
-                              src={message.mediaUrl}
-                              controls
-                              className="w-full min-w-[240px]"
-                              preload="metadata"
-                            />
-                          ) : message.type === "video" && message.mediaUrl ? (
-                            <video
-                              src={message.mediaUrl}
-                              controls
-                              className="max-w-full rounded-xl border border-white/10"
-                              preload="metadata"
-                            />
-                          ) : message.type === "error" ? (
-                            <div className="text-xs leading-relaxed text-rose-300">
-                              {message.content}
-                            </div>
+                            <span className="text-[10px] font-bold text-orange-400">
+                              {displayName.slice(0, 1).toUpperCase()}
+                            </span>
                           ) : (
-                            <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
-                              <ReactMarkdown>{message.content}</ReactMarkdown>
-                            </div>
+                            <Bot size={14} className="text-cyan-400" />
                           )}
                         </div>
-                        <div className="mt-1 flex items-center gap-2 px-1">
-                          <span className="text-[9px] text-gray-300">
-                            {message.createdAt
-                              ? new Date(message.createdAt).toLocaleTimeString(
-                                  [],
-                                  {
+                        <div
+                          className={`flex max-w-[85%] flex-col ${
+                            isUser ? "items-end" : "items-start"
+                          }`}
+                        >
+                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
+                            {isUser ? (
+                              message.content
+                            ) : message.type === "image" && message.mediaUrl ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img
+                                src={message.mediaUrl}
+                                alt={message.content}
+                                className="max-w-full rounded-xl border border-white/10"
+                                loading="lazy"
+                              />
+                            ) : message.type === "audio" && message.mediaUrl ? (
+                              <audio
+                                src={message.mediaUrl}
+                                controls
+                                className="w-full min-w-[240px]"
+                                preload="metadata"
+                              />
+                            ) : message.type === "video" && message.mediaUrl ? (
+                              <video
+                                src={message.mediaUrl}
+                                controls
+                                className="max-w-full rounded-xl border border-white/10"
+                                preload="metadata"
+                              />
+                            ) : message.type === "error" ? (
+                              <div className="text-xs leading-relaxed text-rose-300">
+                                {message.content}
+                              </div>
+                            ) : (
+                              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
+                                <ReactMarkdown>{message.content}</ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 px-1">
+                            <span className="text-[9px] text-gray-300">
+                              {message.createdAt
+                                ? new Date(
+                                    message.createdAt,
+                                  ).toLocaleTimeString([], {
                                     hour: "2-digit",
                                     minute: "2-digit",
-                                  },
-                                )
-                              : ""}
-                          </span>
-                          {!isUser &&
-                            (!message.type || message.type === "text") &&
-                            message.content && (
+                                  })
+                                : ""}
+                            </span>
+                            {!isUser &&
+                              (!message.type || message.type === "text") &&
+                              message.content && (
+                                <>
+                                  <CopyButton text={message.content} />
+                                  <button
+                                    onClick={() => speakText(message.content)}
+                                    className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
+                                  >
+                                    <Zap size={10} /> Speak
+                                  </button>
+                                  {isLastAssistant && (
+                                    <button
+                                      onClick={regenerate}
+                                      disabled={busy}
+                                      className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400 disabled:opacity-40"
+                                    >
+                                      <RefreshCw size={10} /> Regen
+                                    </button>
+                                  )}
+                                </>
+                              )}
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                  {busy && (
+                    <div className="flex items-center gap-2 text-[10px] text-cyan-400">
+                      <span className="flex gap-0.5">
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.1s]" />
+                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.2s]" />
+                      </span>
+                      LiTT is thinking…
+                      <button
+                        onClick={cancel}
+                        className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
+                        title="Cancel (Esc)"
+                      >
+                        <Square size={8} /> Stop
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )
+            ) : activeTool === "agents" ? (
+              isAgentEmpty ? (
+                <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
+                  <div className="text-4xl sm:text-5xl">
+                    {activeAgentAvatar.emoji}
+                  </div>
+                  <div
+                    className="text-sm font-bold"
+                    style={{ color: activeAgent.color }}
+                  >
+                    {activeAgent.name}
+                  </div>
+                  <div className="text-xs text-gray-300">
+                    {activeAgent.role}
+                  </div>
+                  <div className="text-xs max-w-sm text-center text-gray-400">
+                    {activeAgent.personality}
+                  </div>
+                  <div className="grid w-full max-w-xs grid-cols-1 gap-2 sm:max-w-lg sm:grid-cols-2">
+                    {(AGENT_QUICK[activeAgent.id] || [])
+                      .slice(0, 3)
+                      .map((q) => (
+                        <button
+                          key={q}
+                          onClick={() => void send(q)}
+                          className="rounded-xl border p-3 text-left text-sm transition-all hover:scale-[1.02] sm:text-xs"
+                          style={{
+                            borderColor: activeAgent.color + "40",
+                            color: activeAgent.color,
+                            backgroundColor: activeAgent.color + "10",
+                          }}
+                        >
+                          {q}
+                        </button>
+                      ))}
+                  </div>
+                </div>
+              ) : (
+                <div className="mx-auto flex max-w-3xl flex-col gap-4">
+                  {agentMessages.map((message, index) => {
+                    const isUser = message.role === "user";
+                    return (
+                      <div
+                        key={index}
+                        className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
+                      >
+                        <div
+                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
+                            isUser
+                              ? "border border-orange-500/20 bg-orange-500/10"
+                              : "border border-cyan-500/20 bg-cyan-500/10"
+                          }`}
+                          style={
+                            !isUser
+                              ? {
+                                  borderColor: activeAgent.color + "40",
+                                  backgroundColor: activeAgent.color + "10",
+                                }
+                              : undefined
+                          }
+                        >
+                          {isUser ? (
+                            <span className="text-[10px] font-bold text-orange-400">
+                              {displayName.slice(0, 1).toUpperCase()}
+                            </span>
+                          ) : (
+                            <span
+                              className="text-[10px] font-bold"
+                              style={{ color: activeAgent.color }}
+                            >
+                              {activeAgentAvatar.initials}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className={`flex max-w-[85%] flex-col ${
+                            isUser ? "items-end" : "items-start"
+                          }`}
+                        >
+                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
+                            {message.type === "error" ? (
+                              <div className="text-xs leading-relaxed text-rose-300">
+                                {message.content}
+                              </div>
+                            ) : (
+                              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
+                                <ReactMarkdown>{message.content}</ReactMarkdown>
+                              </div>
+                            )}
+                          </div>
+                          <div className="mt-1 flex items-center gap-2 px-1">
+                            <span className="text-[9px] text-gray-300">
+                              {message.createdAt
+                                ? new Date(
+                                    message.createdAt,
+                                  ).toLocaleTimeString([], {
+                                    hour: "2-digit",
+                                    minute: "2-digit",
+                                  })
+                                : ""}
+                            </span>
+                            {!isUser && message.content && (
                               <>
                                 <CopyButton text={message.content} />
                                 <button
@@ -1549,39 +2003,29 @@ function LITTTerminalShellInner({
                                 >
                                   <Zap size={10} /> Speak
                                 </button>
-                                {isLastAssistant && (
-                                  <button
-                                    onClick={regenerate}
-                                    disabled={busy}
-                                    className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400 disabled:opacity-40"
-                                  >
-                                    <RefreshCw size={10} /> Regen
-                                  </button>
-                                )}
                               </>
                             )}
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  );
-                })}
-                {busy && (
-                  <div className="flex items-center gap-2 text-[10px] text-cyan-400">
-                    <span className="flex gap-0.5">
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.1s]" />
-                      <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.2s]" />
-                    </span>
-                    LiTT is thinking…
-                    <button
-                      onClick={cancel}
-                      className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
-                      title="Cancel (Esc)"
+                    );
+                  })}
+                  {busy && (
+                    <div
+                      className="flex items-center gap-2 text-[10px]"
+                      style={{ color: activeAgent.color }}
                     >
-                      <Square size={8} /> Stop
-                    </button>
-                  </div>
-                )}
+                      <Loader2 size={12} className="animate-spin" />
+                      {activeAgent.name} is thinking…
+                    </div>
+                  )}
+                </div>
+              )
+            ) : ActiveTool ? (
+              <ActiveTool />
+            ) : (
+              <div className="flex h-full items-center justify-center text-xs text-gray-300">
+                Tool not available
               </div>
             )}
           </div>
@@ -1843,6 +2287,26 @@ function LITTTerminalShellInner({
                     </span>
                   </button>
                 ))}
+                {activeTool === "agents" && (
+                  <button
+                    onClick={() =>
+                      setAgentId(
+                        activeAgent.id === "littcode"
+                          ? "littlebit"
+                          : "littcode",
+                      )
+                    }
+                    className="flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition"
+                    style={{
+                      borderColor: activeAgent.color + "40",
+                      backgroundColor: activeAgent.color + "10",
+                      color: activeAgent.color,
+                    }}
+                  >
+                    <span>{activeAgentAvatar.emoji}</span>
+                    <span>{activeAgent.name}</span>
+                  </button>
+                )}
                 <div className="flex items-center gap-1 pl-1 sm:pl-2">
                   {PLUGINS.slice(0, 4).map((plugin) => (
                     <button
@@ -1869,7 +2333,6 @@ function LITTTerminalShellInner({
               onClose={closeCommand}
               onActivate={activateCommand}
             />
-
           </div>
 
           {/* FOOTER TELEMETRY */}
@@ -1902,6 +2365,77 @@ function LITTTerminalShellInner({
         >
           {pluginsOpen ? (
             <PluginPanel onClose={() => setPluginsOpen(false)} />
+          ) : activeTool === "agents" ? (
+            <div className="flex h-full flex-col overflow-y-auto">
+              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
+                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
+                  Agent Details
+                </span>
+                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
+                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                  ONLINE
+                </div>
+              </div>
+
+              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
+                <div className="text-5xl">{activeAgentAvatar.emoji}</div>
+                <div className="text-center">
+                  <div className="text-sm font-black text-white">
+                    {activeAgent.name}
+                  </div>
+                  <div className="text-[10px] text-gray-300">
+                    {activeAgent.role}
+                  </div>
+                </div>
+                <div className="text-center text-[10px] text-gray-400">
+                  {activeAgent.personality}
+                </div>
+                <div className="flex w-full flex-wrap justify-center gap-1">
+                  {activeAgent.domains.slice(0, 6).map((domain) => (
+                    <span
+                      key={domain}
+                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300"
+                    >
+                      {domain}
+                    </span>
+                  ))}
+                </div>
+              </div>
+
+              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
+                  Activity
+                </div>
+                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-300">
+                  {busy
+                    ? `${activeAgent.name} is thinking…`
+                    : `Last active ${activeAgent.lastActivity || "just now"}`}
+                  <div className="mt-2 flex items-center gap-2 text-[9px] text-gray-400">
+                    <span>{agentMessages.length} messages</span>
+                    <span>·</span>
+                    <span>
+                      {activeAgent.memory.length > 0
+                        ? "Memory attached"
+                        : "No memory"}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
+                  Runs
+                </div>
+                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
+                  No active runs
+                </div>
+
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
+                  Artifacts
+                </div>
+                <div className="flex flex-1 rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
+                  Agent artifacts will appear here
+                </div>
+              </div>
+            </div>
           ) : (
             <>
               <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
@@ -2004,8 +2538,8 @@ function LITTTerminalShellInner({
 }
 
 export default function LITTTerminalShell(props: {
-  activeTool?: string;
-  onToolChangeAction?: (tool: string) => void;
+  activeTool?: StudioTool;
+  onToolChangeAction?: (tool: StudioTool) => void;
 }) {
   return (
     <PersonaProvider>
