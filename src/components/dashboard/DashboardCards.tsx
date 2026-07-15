@@ -8,20 +8,11 @@ import { GAMES, WATCH, TOOLS, type IconComponent } from "./dashboard-data";
 import dynamic from "next/dynamic";
 import { useState, useEffect } from "react";
 import MusicPlayer from "./MusicPlayer";
-import { OwnerStats } from "./OwnerStats";
-import { FacebookFeed } from "./FacebookFeed";
 import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
+import DashboardCommandCenter from "./DashboardCommandCenter";
 
 const SpotifyPlayer = dynamic(() => import("./SpotifyPlayer"), { ssr: false });
-
-/* Lazy-load heavy dashboard panes so the initial dashboard bundle stays small */
-const DashboardContent = dynamic(() => import("./DashboardContent"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-48 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
-  ),
-});
 const SocialPageContent = dynamic(
   () => import("@/components/SocialPageContent"),
   {
@@ -198,15 +189,7 @@ export function GlossyCard({
 /* ------------------------------------------------------------------ */
 /*  Center Stage — switches based on active app                        */
 /* ------------------------------------------------------------------ */
-import {
-  Zap,
-  ShoppingBag,
-  Send,
-  Image as ImageIcon,
-  Video,
-  Mic,
-  Plus,
-} from "lucide-react";
+import { Zap, Send, Image as ImageIcon, Video, Mic, Plus } from "lucide-react";
 
 export function CenterStage({
   activeApp,
@@ -579,80 +562,7 @@ export function CenterStage({
       );
     }
     default:
-      return (
-        <div className="space-y-4 md:space-y-6">
-          <HeroCard
-            title={`Welcome back, ${displayName}`}
-            subtitle="Your LiTT workspace is live. Ship something today."
-            color={T.accentColor}
-          />
-
-          <section>
-            <div className="flex items-center gap-2 mb-2">
-              <div
-                className="w-1 h-4 rounded-full"
-                style={{ backgroundColor: T.accentColor }}
-              />
-              <span
-                className="text-xs font-black uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Quick Actions
-              </span>
-            </div>
-            <QuickActionGrid
-              actions={[
-                {
-                  label: "New Post",
-                  icon: Send,
-                  color: "#00f0ff",
-                  href: "/social",
-                },
-                {
-                  label: "Image Gen",
-                  icon: ImageIcon,
-                  color: "#ff00a0",
-                  href: "/studio?tool=image",
-                },
-                {
-                  label: "Open Studio",
-                  icon: Zap,
-                  color: "#8b5cf6",
-                  href: "/studio",
-                },
-                {
-                  label: "Marketplace",
-                  icon: ShoppingBag,
-                  color: "#ff9ff3",
-                  href: "/marketplace",
-                },
-              ]}
-            />
-          </section>
-
-          <section>
-            <DashboardContent />
-          </section>
-
-          <section>
-            <div className="flex items-center gap-2 mb-2">
-              <div
-                className="w-1 h-4 rounded-full"
-                style={{ backgroundColor: T.accentColor }}
-              />
-              <span
-                className="text-xs font-black uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Realtime Stats
-              </span>
-            </div>
-            <OwnerStats />
-          </section>
-
-          <FacebookFeed />
-        </div>
-      );
+      return <DashboardCommandCenter />;
   }
 }
 

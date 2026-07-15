@@ -34,13 +34,20 @@ export default function MobileBottomNav() {
         >
           {primary.map((item) => {
             const Icon = item.icon;
-            const active = isActive(item.href);
+            const active = item.href !== "#" && isActive(item.href);
+            const isCreate = item.label === "Create";
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                className="relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
-                style={{ color: active ? T.accentColor : T.textMuted }}
+                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isCreate ? "-mt-3" : ""}`}
+                style={{
+                  color: active
+                    ? T.accentColor
+                    : isCreate
+                      ? T.bgColor
+                      : T.textMuted,
+                }}
               >
                 {active && (
                   <span
@@ -48,7 +55,19 @@ export default function MobileBottomNav() {
                     style={{ backgroundColor: T.accentColor }}
                   />
                 )}
-                <Icon size={20} />
+                {isCreate ? (
+                  <span
+                    className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      boxShadow: `0 0 18px ${T.accentColor}60`,
+                    }}
+                  >
+                    <Icon size={22} aria-hidden="true" />
+                  </span>
+                ) : (
+                  <Icon size={20} aria-hidden="true" />
+                )}
                 <span className="text-[9px] font-black">{item.label}</span>
               </Link>
             );
