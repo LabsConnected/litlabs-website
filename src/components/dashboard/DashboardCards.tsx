@@ -715,7 +715,7 @@ type MusicTab = (typeof MUSIC_TABS)[number]["id"];
 
 function MusicHub() {
   const { resolvedColors: T } = useTheme();
-  const [tab, setTab] = useState<MusicTab>("spotify");
+  const [tab, setTab] = useState<MusicTab>("player");
 
   return (
     <div className="space-y-4">
