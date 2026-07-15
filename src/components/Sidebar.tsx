@@ -67,7 +67,7 @@ const QUICK_TOOLS = [
     color: "#34d399",
   },
   { label: "Agents", href: "/agents", icon: Bot, color: "#c084fc" },
-  { label: "Assets", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
+  { label: "Gallery", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
 ] as const;
 
 function SidebarContent({

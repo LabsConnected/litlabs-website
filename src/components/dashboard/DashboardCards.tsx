@@ -6,7 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { Gamepad2, Clapperboard, Play, ExternalLink } from "lucide-react";
 import { GAMES, WATCH, TOOLS, type IconComponent } from "./dashboard-data";
 import dynamic from "next/dynamic";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import MusicPlayer from "./MusicPlayer";
 import { OwnerStats } from "./OwnerStats";
 import { FacebookFeed } from "./FacebookFeed";
@@ -37,12 +37,7 @@ const LiTTTerminal = dynamic(() => import("./LiTTTerminal"), {
     <div className="flex-1 min-h-0 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
   ),
 });
-const GalleryTool = dynamic(() => import("@/app/studio/tools/GalleryTool"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-96 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
-  ),
-});
+
 const MarketplacePreview = dynamic(() => import("./MarketplacePreview"), {
   ssr: false,
   loading: () => (
@@ -231,6 +226,12 @@ export function CenterStage({
   const router = useRouter();
   void onAppChange;
 
+  useEffect(() => {
+    if (activeApp === "gallery") {
+      router.replace("/gallery");
+    }
+  }, [activeApp, router]);
+
   switch (activeApp) {
     case "studio":
       return (
@@ -403,17 +404,6 @@ export function CenterStage({
       );
     case "social":
       return <SocialPageContent />;
-    case "gallery":
-      return (
-        <div className="space-y-6">
-          <HeroCard
-            title="Gallery"
-            subtitle="Your creations and community drops."
-            color="#ff00a0"
-          />
-          <GalleryTool />
-        </div>
-      );
     case "marketplace":
       return (
         <div className="space-y-6">
