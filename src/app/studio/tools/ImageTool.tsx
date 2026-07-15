@@ -1052,7 +1052,7 @@ export default function ImageTool() {
                     aria-label="Workspace name"
                     title="Workspace name"
                     placeholder="Workspace name"
-                    className="h-6 px-2 text-[10px] font-bold rounded outline-none w-20 placeholder:text-[var(--text-muted)]"
+                    className="h-6 px-2 text-[10px] font-bold rounded outline-none w-20 placeholder:text-(--text-muted)"
                     style={{
                       backgroundColor: T.bgColor,
                       border: `1px solid ${T.accentColor}`,
@@ -1276,7 +1276,7 @@ export default function ImageTool() {
                   placeholder="Describe what you want to forge..."
                   rows={5}
                   disabled={isWorking}
-                  className="w-full px-3 py-2.5 text-[12px] rounded-lg outline-none resize-none disabled:opacity-50 transition-all focus:ring-1 placeholder:text-[var(--text-muted)]"
+                  className="w-full px-3 py-2.5 text-[12px] rounded-lg outline-none resize-none disabled:opacity-50 transition-all focus:ring-1 placeholder:text-(--text-muted)"
                   style={{
                     backgroundColor: T.bgColor,
                     border: `1px solid ${T.borderColor}40`,
@@ -1318,7 +1318,7 @@ export default function ImageTool() {
                       onChange={(e) => setNegativePrompt(e.target.value)}
                       placeholder="blurry, low quality, distorted..."
                       disabled={isWorking}
-                      className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-50 placeholder:text-[var(--text-muted)]"
+                      className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-50 placeholder:text-(--text-muted)"
                       style={{
                         backgroundColor: T.bgColor,
                         border: `1px solid ${T.borderColor}40`,
@@ -2291,7 +2291,7 @@ export default function ImageTool() {
                     aria-label="Seed for reproducible generation"
                     title="Seed for reproducible generation"
                     placeholder="0"
-                    className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40 placeholder:text-[var(--text-muted)]"
+                    className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40 placeholder:text-(--text-muted)"
                     style={{
                       backgroundColor: T.bgColor,
                       border: `1px solid ${T.borderColor}40`,

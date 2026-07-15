@@ -54,7 +54,7 @@ const NODE_META: Record<
 > = {
   trigger: {
     label: "Trigger",
-    color: "text-[var(--warning)]",
+    color: "text-(--warning)",
     bg: "bg-amber-500/10",
     border: "border-amber-500/30",
     ring: "ring-amber-500/40",
@@ -68,7 +68,7 @@ const NODE_META: Record<
   },
   action: {
     label: "Action",
-    color: "text-[var(--success)]",
+    color: "text-(--success)",
     bg: "bg-emerald-500/10",
     border: "border-emerald-500/30",
     ring: "ring-emerald-500/40",
@@ -573,7 +573,7 @@ export default function PipelineTool() {
             <button
               onClick={runPipeline}
               disabled={isRunning || nodes.length === 0}
-              className="px-3 py-1.5 bg-emerald-500/20 text-[var(--success)] hover:bg-emerald-500/30 border border-emerald-500/50 disabled:opacity-50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
+              className="px-3 py-1.5 bg-emerald-500/20 text-(--success) hover:bg-emerald-500/30 border border-emerald-500/50 disabled:opacity-50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
             >
               {isRunning ? (
                 <RefreshCw className="w-3 h-3 animate-spin" />
@@ -632,9 +632,9 @@ export default function PipelineTool() {
                       status === "running"
                         ? "bg-fuchsia-900/80 text-(--accent-color) border-fuchsia-500/40 animate-pulse"
                         : status === "completed"
-                          ? "bg-emerald-900/80 text-[var(--success)] border-emerald-500/40"
+                          ? "bg-emerald-900/80 text-(--success) border-emerald-500/40"
                           : status === "error"
-                            ? "bg-red-900/80 text-[var(--warning)] border-red-500/40"
+                            ? "bg-red-900/80 text-(--warning) border-red-500/40"
                             : "bg-slate-800 text-(--text-muted) border-slate-600/30"
                     }`}
                     >
@@ -675,7 +675,7 @@ export default function PipelineTool() {
                       </div>
                       <button
                         onClick={(e) => deleteNode(node.id, e)}
-                        className="p-1.5 text-(--text-muted) hover:text-[var(--warning)] hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1.5 text-(--text-muted) hover:text-(--warning) hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
@@ -750,7 +750,7 @@ export default function PipelineTool() {
                   Configuration
                 </h2>
                 <span
-                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-(--accent-color)" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-[var(--success)]" : "bg-slate-800 text-(--text-muted)"}`}
+                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-(--accent-color)" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-(--success)" : "bg-slate-800 text-(--text-muted)"}`}
                 >
                   {selectedNode.status || "idle"}
                 </span>
@@ -811,7 +811,7 @@ export default function PipelineTool() {
                           onClick={() =>
                             updateConfig(selectedNode.id, "method", m)
                           }
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
+                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-(--warning) border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
                         >
                           {m}
                         </button>
@@ -856,7 +856,7 @@ export default function PipelineTool() {
                             updateConfig(selectedNode.id, "preset", p.id);
                             updateConfig(selectedNode.id, "cron", p.cron);
                           }}
-                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
+                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-(--warning) border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
                         >
                           {p.label}
                         </button>
@@ -1149,10 +1149,10 @@ export default function PipelineTool() {
           >
             {terminalLogs.map((log, i) => {
               let cls = "text-(--text-muted)";
-              if (log.includes("[OK]")) cls = "text-[var(--success)]";
+              if (log.includes("[OK]")) cls = "text-(--success)";
               if (log.includes("[SYS]")) cls = "text-(--accent-color)";
-              if (log.includes("[WRN]")) cls = "text-[var(--warning)]";
-              if (log.includes("[ERR]")) cls = "text-[var(--warning)]";
+              if (log.includes("[WRN]")) cls = "text-(--warning)";
+              if (log.includes("[ERR]")) cls = "text-(--warning)";
               if (log.includes("[ADD]") || log.includes("[DEL]"))
                 cls = "text-[var(--link-color)]";
               if (log.includes("[EXEC]")) cls = "text-foreground font-bold";
