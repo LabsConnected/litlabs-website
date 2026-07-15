@@ -162,7 +162,6 @@ type MobileNavItem = {
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Chat", href: "/litt", icon: MessagesSquare },
   { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
