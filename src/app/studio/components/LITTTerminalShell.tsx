@@ -1780,11 +1780,18 @@ function LITTTerminalShellInner({
         </main>
 
         {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
+        {pluginsOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            onClick={() => setPluginsOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         <aside
           className={cn(
             "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
             pluginsOpen
-              ? "fixed inset-0 z-50 flex w-full md:relative md:inset-auto md:w-[300px] lg:relative"
+              ? "fixed inset-y-0 right-0 z-50 flex w-[85%] md:relative md:inset-auto md:w-[300px] lg:relative"
               : "hidden w-[300px] lg:flex",
           )}
         >

@@ -135,7 +135,7 @@ export default function StudioTopBar({
       <HealthPulse T={T} />
 
       <div
-        className="hidden sm:flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold"
+        className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold"
         title="LiTBit Coins balance"
         style={{
           backgroundColor: T.bgColor + "60",
@@ -147,7 +147,7 @@ export default function StudioTopBar({
         <span style={{ color: T.accentColor }}>
           {walletLoading ? "—" : balance.toLocaleString()}
         </span>
-        <span className="opacity-50 text-[9px] uppercase tracking-wider">
+        <span className="hidden sm:inline opacity-50 text-[9px] uppercase tracking-wider">
           LBC
         </span>
       </div>

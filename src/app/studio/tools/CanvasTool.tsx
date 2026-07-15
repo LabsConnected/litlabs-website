@@ -19,6 +19,7 @@ import {
   Minimize2,
   Play,
   Brain,
+  MessageSquare,
 } from "lucide-react";
 
 type Message = {
@@ -73,6 +74,7 @@ export default function CanvasTool() {
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [activeFile, setActiveFile] = useState<string>("");
   const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
+  const [mobilePanel, setMobilePanel] = useState<"chat" | "code">("chat");
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [memories, setMemories] = useState<string[]>([]);
@@ -312,10 +314,44 @@ export default function CanvasTool() {
         </div>
       </div>
 
+      {/* Mobile panel tabs */}
+      <div
+        className="md:hidden flex items-center gap-1 px-3 py-2 border-b shrink-0"
+        style={{
+          borderColor: T.borderColor + "20",
+          backgroundColor: T.boxBg,
+        }}
+      >
+        <button
+          onClick={() => setMobilePanel("chat")}
+          className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition-all"
+          style={{
+            backgroundColor:
+              mobilePanel === "chat" ? T.accentColor + "15" : "transparent",
+            color: mobilePanel === "chat" ? T.accentColor : T.textMuted,
+            border: `1px solid ${mobilePanel === "chat" ? T.accentColor + "30" : "transparent"}`,
+          }}
+        >
+          <MessageSquare size={12} /> Chat
+        </button>
+        <button
+          onClick={() => setMobilePanel("code")}
+          className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition-all"
+          style={{
+            backgroundColor:
+              mobilePanel === "code" ? T.accentColor + "15" : "transparent",
+            color: mobilePanel === "code" ? T.accentColor : T.textMuted,
+            border: `1px solid ${mobilePanel === "code" ? T.accentColor + "30" : "transparent"}`,
+          }}
+        >
+          <Code size={12} /> Code
+        </button>
+      </div>
+
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat Panel */}
         <div
-          className="flex flex-col border-r w-full md:w-1/2 lg:w-[42%] shrink-0"
+          className={`flex-col border-r w-full md:w-1/2 lg:w-[42%] shrink-0 ${mobilePanel === "chat" ? "flex" : "hidden md:flex"}`}
           style={{ borderColor: T.borderColor + "20" }}
         >
           {/* Messages */}
@@ -419,6 +455,7 @@ export default function CanvasTool() {
                         if (file) {
                           setActiveFile(file.name);
                           setPreviewMode("code");
+                          setMobilePanel("code");
                         }
                       }}
                       className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all hover:scale-105"
@@ -514,7 +551,9 @@ export default function CanvasTool() {
         </div>
 
         {/* Code/Preview Panel */}
-        <div className="hidden md:flex flex-col flex-1 min-w-0">
+        <div
+          className={`flex-col flex-1 min-w-0 ${mobilePanel === "code" ? "flex" : "hidden md:flex"}`}
+        >
           {/* Panel Header */}
           <div
             className="flex items-center justify-between px-3 py-2 border-b shrink-0"
