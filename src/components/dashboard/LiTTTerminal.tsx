@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
+import type { JarvisAction, JarvisThinkResponse } from "@/lib/litt-context";
 import {
   Terminal,
   Mic,
@@ -314,6 +315,10 @@ export default function LiTTTerminal() {
     "/clear",
     "/help",
     "/tts",
+    "/tour",
+    "/goals",
+    "/anticipate",
+    "/integrations",
   ];
 
   const ghostText = (() => {
@@ -526,51 +531,77 @@ export default function LiTTTerminal() {
       ];
 
       try {
-        const res = await fetch("/api/gemini/chat", {
+        const res = await fetch("/api/litt/think", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            agentSlug: selectedAgent,
             message: msg,
-            history: historySnapshot,
-            provider: "gemini",
-            stream: true,
+            context: {
+              route: "/studio/litt",
+              terminalOutput: logs
+                .slice(-20)
+                .map((l) => l.text)
+                .join("\n"),
+              commandHistory: logs
+                .filter((l) => l.type === "user")
+                .map((l) => l.text),
+              logs: logs.slice(-20).map((l) => `[${l.type}] ${l.text}`),
+              fileTree: [],
+              agents: Object.entries(REAL_AGENTS).map(([slug, a]) => ({
+                name: a.name,
+                status: a.status === "online" ? "online" : "idle",
+              })),
+              websocketStatus: "offline",
+            },
+            timeOfDay:
+              new Date().getHours() < 5
+                ? "night"
+                : new Date().getHours() < 12
+                  ? "morning"
+                  : new Date().getHours() < 18
+                    ? "afternoon"
+                    : new Date().getHours() < 22
+                      ? "evening"
+                      : "night",
           }),
         });
-        if (!res.ok || !res.body) throw new Error(`HTTP ${res.status}`);
-        const reader = res.body.getReader();
-        const decoder = new TextDecoder();
-        let fullText = "";
-        while (true) {
-          const { done, value } = await reader.read();
-          if (done) break;
-          const chunk = decoder.decode(value, { stream: true });
-          const lines = chunk.split("\n").filter((l) => l.trim());
-          for (const line of lines) {
-            if (!line.startsWith("data: ")) continue;
-            try {
-              const data = JSON.parse(line.slice(6));
-              const text = data.text || "";
-              if (text) {
-                fullText += text;
-                setBrainText(fullText);
-              }
-            } catch {
-              /* ignore malformed SSE */
-            }
-          }
-        }
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        const data = (await res.json()) as JarvisThinkResponse & {
+          error?: string;
+        };
+        if (data.error) throw new Error(data.error);
+
+        const fullText = data.answer || "No response received.";
+        const actions = data.actions || [];
+
         // Commit assistant turn to history (keep last 20 turns to avoid token bloat)
         conversationHistory.current = [
           ...conversationHistory.current,
           { role: "assistant" as const, content: fullText },
         ].slice(-20);
 
+        setBrainText(fullText);
         addLog({
           type: "brain",
-          text: fullText || "No response received.",
+          text: fullText,
           agentName: "LiTT",
         });
+
+        // Surface any returned actions as clickable log hints
+        if (actions.length > 0) {
+          const actionLines = actions
+            .map((a: JarvisAction, i: number) =>
+              a.type === "insert_command" || a.type === "run_command"
+                ? `  ${i + 1}. [${a.type}] ${a.label}: ${a.command}`
+                : `  ${i + 1}. [${a.type}] ${a.label}`,
+            )
+            .join("\n");
+          addLog({
+            type: "system",
+            text: `Actions:\n${actionLines}`,
+          });
+        }
+
         speak(fullText);
       } catch (err) {
         // Roll back the optimistic user turn on error
@@ -585,7 +616,7 @@ export default function LiTTTerminal() {
         setIsProcessing(false);
       }
     },
-    [selectedAgent, addLog, speak],
+    [addLog, speak, logs],
   );
 
   const triggerAlexa = useCallback(
@@ -633,7 +664,7 @@ export default function LiTTTerminal() {
         case "help":
           addLog({
             type: "success",
-            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route LiTT speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey LiTT' to activate",
+            text: "Available commands:\n  /scan              - Analyze your codebase\n  /status            - Check system health\n  /tour              - Show project state and integrations\n  /goals             - View / manage your goal list\n  /anticipate        - Suggest the next move\n  /integrations      - Full integration status table\n  /image <prompt>    - Open image generator\n  /code <prompt>     - Open code agent\n  /agent <name>      - Switch active agent\n  /voice [n]         - List or switch TTS voice\n  /alexa <cmd>       - Trigger Alexa via Voice Monkey\n  /clear             - Clear terminal\n  /tts               - Toggle voice output\n\nButtons:\n  ALEXA  - Route LiTT speech to your Alexa speaker\n  ● Continuous - Auto-restart mic after response\n  ● Wake Word  - Say 'Hey LiTT' to activate",
           });
           setIsProcessing(false);
           return;
@@ -806,6 +837,12 @@ export default function LiTTTerminal() {
           setIsProcessing(false);
           return;
         }
+        case "tour":
+        case "goals":
+        case "anticipate":
+        case "integrations":
+          // Let the new LiTT brain handle these natively
+          break;
         default:
           addLog({
             type: "error",
@@ -1266,6 +1303,10 @@ export default function LiTTTerminal() {
             {[
               "/scan",
               "/status",
+              "/tour",
+              "/goals",
+              "/anticipate",
+              "/integrations",
               "/image",
               "/code",
               "/agent",
