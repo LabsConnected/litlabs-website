@@ -1,6 +1,9 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
+import type { StudioTool } from "./StudioSidebar";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import styles from "./ChatShell.module.css";
 
@@ -16,6 +19,7 @@ type Props = {
   sending?: boolean;
   systemLines?: string[];
   onSend: (text: string) => string | Promise<string | void>;
+  onToolSelect?: (tool: StudioTool) => void;
   embedded?: boolean;
   hideDock?: boolean;
 };
@@ -35,6 +39,7 @@ export function ChatShell({
   sending = false,
   systemLines = [],
   onSend,
+  onToolSelect,
   embedded = false,
   hideDock = false,
 }: Props) {
@@ -128,6 +133,63 @@ export function ChatShell({
       )}
 
       <section className={styles.messages} aria-live="polite">
+        {visibleMessages.length === 0 && !sending && (
+          <div className={styles.home}>
+            <div className={styles.heroMark} aria-hidden="true">
+              <Sparkles size={22} />
+            </div>
+            <p className={styles.eyebrow}>LiTT is ready</p>
+            <h1>What do you want to create?</h1>
+            <p className={styles.intro}>
+              Start with an idea. Your AI crew will help you make it real.
+            </p>
+
+            <div className={styles.createGrid}>
+              <button onClick={() => onToolSelect?.("image")}>
+                <span className={styles.actionIcon}><ImageIcon size={21} /></span>
+                <span><b>Create an image</b><small>Generate art, ads, and product visuals</small></span>
+                <ArrowRight size={17} aria-hidden="true" />
+              </button>
+              <button onClick={() => onToolSelect?.("builder")}>
+                <span className={styles.actionIcon}><Code2 size={21} /></span>
+                <span><b>Build an app</b><small>Turn a plain-English idea into working code</small></span>
+                <ArrowRight size={17} aria-hidden="true" />
+              </button>
+              <button onClick={() => onToolSelect?.("agents")}>
+                <span className={styles.actionIcon}><Bot size={21} /></span>
+                <span><b>Launch an agent</b><small>Delegate research, coding, and repeat work</small></span>
+                <ArrowRight size={17} aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className={styles.homeGrid}>
+              <section className={styles.homePanel}>
+                <div className={styles.panelHeading}>
+                  <span>Recent projects</span>
+                  <Link href="/projects">View all</Link>
+                </div>
+                <Link href="/projects" className={styles.projectRow}>
+                  <span className={styles.projectBadge}>LL</span>
+                  <span><b>LiTTree Lab Studios</b><small>Updated today</small></span>
+                  <ArrowRight size={15} aria-hidden="true" />
+                </Link>
+              </section>
+
+              <section className={styles.homePanel}>
+                <div className={styles.panelHeading}><span>Your AI crew</span><i>Online</i></div>
+                <div className={styles.agentRow}>
+                  <span className={styles.agentAvatar}>Li</span>
+                  <span><b>LiTT</b><small>Director · ready to help</small></span>
+                  <span className={styles.statusDot} aria-label="Online" />
+                </div>
+              </section>
+            </div>
+
+            <button className={styles.askButton} onClick={() => setDraft("Help me create ")}>
+              <Sparkles size={15} aria-hidden="true" /> Ask LiTT anything
+            </button>
+          </div>
+        )}
         {visibleMessages.map((message, index) => (
           <article
             key={message.id ?? index}

@@ -1706,6 +1706,7 @@ function LITTTerminalShellInner({
                 sending={busy}
                 systemLines={[]}
                 onSend={handleChatSend}
+                onToolSelect={onToolChangeAction}
               />
             ) : activeTool === "agents" ? (
               isAgentEmpty ? (
