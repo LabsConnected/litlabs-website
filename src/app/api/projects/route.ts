@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 export async function GET() {
   const { userId } = await auth();
@@ -20,8 +21,10 @@ export async function GET() {
     }
 
     return NextResponse.json({ projects: data || [] });
-  } catch {
-    return NextResponse.json({ projects: [] }, { status: 200 });
+  } catch (error) {
+    console.error("[api/projects] GET error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }
 

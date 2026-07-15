@@ -658,6 +658,16 @@ function MarketplaceInner() {
     }
   }, [isLoaded, isSignedIn, router]);
 
+  // Close Sell modal on Escape
+  useEffect(() => {
+    if (!sellModalAgent) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSellModalAgent(null);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sellModalAgent]);
+
   // Require authentication (after all hooks to respect Rules of Hooks)
   if (!isLoaded) {
     return (

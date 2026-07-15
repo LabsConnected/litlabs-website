@@ -1,11 +1,17 @@
 // API Route: LLM provider health + chain config — useful for the admin UI
 // and for agents that want to know which provider to prefer.
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { llmHealth, DEFAULT_MODELS } from "@/lib/llm";
 
 export const runtime = "nodejs";
 
 export async function GET() {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
   try {
     const health = llmHealth();
     // Build list of free models available (no key required = truly free)

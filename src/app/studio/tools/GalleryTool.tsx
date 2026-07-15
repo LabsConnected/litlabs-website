@@ -646,7 +646,7 @@ export default function GalleryTool() {
                     item.source === "audio") && (
                     <button
                       onClick={(e) => handleDelete(item.id, e)}
-                      className="absolute top-2 right-2 p-1 rounded opacity-0 group-hover:opacity-100 transition-opacity"
+                      className="absolute top-2 right-2 p-2 rounded opacity-0 group-hover:opacity-100 transition-opacity"
                       style={{
                         backgroundColor: "rgba(255,0,0,0.7)",
                         color: "white",

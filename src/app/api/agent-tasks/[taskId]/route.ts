@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { logAgentEvent } from "@/lib/agent-logger";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -27,9 +28,10 @@ export async function GET(
     return NextResponse.json({ task });
   } catch (error) {
     console.error("Task fetch failed:", error);
+    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
-      { error: "Internal error" },
-      { status: 500 },
+      { error: message },
+      { status },
     );
   }
 }
@@ -94,19 +96,15 @@ export async function PATCH(
         sessionId: task.session_id,
         previousStatus: body.previousStatus,
       },
-    ).catch(() => {});
+    ).catch(() => { });
 
     return NextResponse.json({ ok: true, task });
   } catch (error) {
     console.error("Critical Task Update Exception:", error);
+    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Internal Execution Interruption",
-      },
-      { status: 500 },
+      { error: message },
+      { status },
     );
   }
 }

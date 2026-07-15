@@ -214,14 +214,14 @@ export default function PromptComposer({
                   <div className="flex items-center gap-1">
                     <button
                       onClick={() => copyToClipboard(entry.prompt)}
-                      className="p-1 rounded transition-all hover:scale-110"
+                      className="p-2 rounded transition-all hover:scale-110"
                       style={{ color: T.textMuted }}
                     >
                       <Copy size={10} />
                     </button>
                     <button
                       onClick={() => deleteFromHistory(entry.id)}
-                      className="p-1 rounded transition-all hover:scale-110"
+                      className="p-2 rounded transition-all hover:scale-110"
                       style={{ color: "#ef4444" }}
                     >
                       <Trash2 size={10} />

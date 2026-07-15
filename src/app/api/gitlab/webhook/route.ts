@@ -7,6 +7,7 @@ import {
   upsertDeploymentByPipeline,
 } from "@/lib/deployments";
 import { notifyDeployment } from "@/lib/discord";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -110,10 +111,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, deployment }, { status: 200 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[api/gitlab/webhook] error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
       { error: "Failed to process webhook", message },
-      { status: 500 },
+      { status },
     );
   }
 }

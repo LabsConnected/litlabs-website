@@ -231,7 +231,7 @@ function AudioResultPlayer({
       <div className="flex items-center gap-2">
         <button
           onClick={stop}
-          className="p-1 rounded hover:bg-white/10 transition-all"
+          className="p-2 rounded hover:bg-white/10 transition-all"
           style={{ color: T.textMuted }}
           title="Stop"
         >
@@ -246,7 +246,7 @@ function AudioResultPlayer({
         </button>
         <button
           onClick={toggleMute}
-          className="p-1 rounded hover:bg-white/10 transition-all"
+          className="p-2 rounded hover:bg-white/10 transition-all"
           style={{ color: T.textMuted }}
         >
           {state.muted ? <VolumeX size={11} /> : <Volume2 size={11} />}

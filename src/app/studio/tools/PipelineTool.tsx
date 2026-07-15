@@ -261,6 +261,15 @@ export default function PipelineTool() {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [terminalLogs]);
 
+  useEffect(() => {
+    if (!showYaml) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setShowYaml(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [showYaml]);
+
   const log = useCallback((msg: string) => {
     const ts = new Date().toISOString().split("T")[1].slice(0, 8);
     setTerminalLogs((prev) => [...prev, `[${ts}] ${msg}`]);

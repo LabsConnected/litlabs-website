@@ -31,9 +31,11 @@ interface BridgeMessage {
 
 export async function GET(req: Request) {
   const { userId } = await auth();
-
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId) {
     return new Response("Unauthorized", { status: 401 });
+  }
+  if (userId !== ADMIN_USER_ID) {
+    return new Response("Forbidden", { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -208,9 +210,11 @@ export async function GET(req: Request) {
 // POST endpoint to send input to running CLI session
 export async function POST(req: Request) {
   const { userId } = await auth();
-
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (userId !== ADMIN_USER_ID) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   try {
@@ -249,9 +253,11 @@ export async function POST(req: Request) {
 // DELETE endpoint to kill session
 export async function DELETE(req: Request) {
   const { userId } = await auth();
-
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (userId !== ADMIN_USER_ID) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const { searchParams } = new URL(req.url);
@@ -273,9 +279,11 @@ export async function DELETE(req: Request) {
 // GET sessions list
 export async function PATCH() {
   const { userId } = await auth();
-
-  if (!userId || userId !== ADMIN_USER_ID) {
+  if (!userId) {
     return Response.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  if (userId !== ADMIN_USER_ID) {
+    return Response.json({ error: "Forbidden" }, { status: 403 });
   }
 
   const sessions = Array.from(activeSessions.entries())

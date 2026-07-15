@@ -621,7 +621,7 @@ export default function AdminTerminal() {
             <button
               onClick={fetchLogs}
               disabled={logsLoading}
-              className="p-1 rounded transition-all hover:opacity-70"
+              className="p-2 rounded transition-all hover:opacity-70"
               title="Refresh logs"
               style={{ color: T.textMuted }}
             >

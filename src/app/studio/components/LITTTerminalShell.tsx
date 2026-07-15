@@ -1764,13 +1764,12 @@ function LITTTerminalShellInner({
                       /{plugin}
                     </button>
                   ))}
-                  <button
-                    disabled
-                    aria-label="More plugins coming soon"
+                  <span
+                    title="More plugins coming soon"
                     className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-neutral-500 opacity-40"
                   >
                     +8
-                  </button>
+                  </span>
                 </div>
               </div>
             </div>

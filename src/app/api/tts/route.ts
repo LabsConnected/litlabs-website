@@ -21,6 +21,8 @@
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeProviderError } from "@/lib/provider-error";
 import { PREMIUM_VOICES, getVoiceById, type VoiceDescriptor } from "@/lib/voices";
 
 export const runtime = "nodejs";
@@ -32,7 +34,7 @@ interface TtsRequest {
   voice?: string;
 }
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -98,29 +100,22 @@ export async function POST(req: NextRequest) {
         },
       });
     } catch (err) {
-      const raw = err instanceof Error ? err.message : String(err);
-      const lower = raw.toLowerCase();
-      if (lower.includes("429") || lower.includes("quota") || lower.includes("resource_exhausted")) {
-        return NextResponse.json(
-          { error: "Voice service rate limit reached. Please try again shortly." },
-          { status: 429 },
-        );
-      }
+      console.error("[api/tts] Gemini TTS error:", err);
+      const { status, error: message, retryAfter } = sanitizeProviderError(err);
       return NextResponse.json(
-        { error: "TTS synthesis failed", detail: raw },
-        { status: 500 },
+        { error: message, retryAfter },
+        { status },
       );
     }
   }
 
   return NextResponse.json(
-    {
-      error:
-        "No TTS provider configured. Set GEMINI_API_KEY or ELEVENLABS_API_KEY.",
-    },
+    { error: "Service unavailable" },
     { status: 503 },
   );
 }
+
+export const POST = withRateLimit(handler, 20, 60);
 
 /* ------------------------------------------------------------------ */
 /*  ElevenLabs                                                         */

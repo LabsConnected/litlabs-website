@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeProviderError } from "@/lib/provider-error";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
@@ -64,7 +65,7 @@ async function generateWithImages(
 ): Promise<{ text: string; provider: string; model: string; latencyMs: number }> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  if (!key) throw new Error("Gemini API key not configured");
+  if (!key) throw new Error("Service unavailable");
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({
     model: modelName,
@@ -262,7 +263,7 @@ async function handler(req: NextRequest) {
           );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (err) {
-          const msg = err instanceof Error ? err.message : "stream error";
+          const { error: msg } = sanitizeProviderError(err);
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
           );
@@ -288,9 +289,10 @@ async function handler(req: NextRequest) {
   } catch (err) {
     // LLM chat route error:
     console.error("[api/gemini/chat] error:", err);
+    const { status, error: message, retryAfter } = sanitizeProviderError(err);
     return NextResponse.json(
-      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { error: message, retryAfter },
+      { status },
     );
   }
 }

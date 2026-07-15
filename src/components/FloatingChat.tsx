@@ -472,7 +472,7 @@ export function FloatingChat() {
           {/* Desktop expand/collapse toggle */}
           <button
             onClick={() => setDesktopExpanded((v) => !v)}
-            className="hidden rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 md:block"
+            className="hidden rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200 md:block"
             aria-label={desktopExpanded ? "Collapse chat" : "Expand chat"}
             title={desktopExpanded ? "Collapse chat" : "Expand chat"}
           >
@@ -485,7 +485,7 @@ export function FloatingChat() {
 
           <button
             onClick={() => setChatOpen(false)}
-            className="rounded-lg p-1.5 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
+            className="rounded-lg p-2 text-neutral-400 transition hover:bg-neutral-800 hover:text-neutral-200"
             aria-label="Close chat"
           >
             <X size={16} />
@@ -538,10 +538,14 @@ export function FloatingChat() {
                         </span>
                       )}
                     </span>
-                    <span className="text-[9px] opacity-60">{v.desc} · {v.style}</span>
+                    <span className="text-[9px] opacity-60">
+                      {v.desc} · {v.style}
+                    </span>
                   </div>
                   {voice.id === v.id && (
-                    <span className="text-[9px] font-bold uppercase tracking-wider">Active</span>
+                    <span className="text-[9px] font-bold uppercase tracking-wider">
+                      Active
+                    </span>
                   )}
                 </button>
               ))}

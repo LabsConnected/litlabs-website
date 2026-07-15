@@ -5,7 +5,6 @@ import {
   Camera,
   Mic,
   MicOff,
-  MonitorUp,
   Paperclip,
   Plus,
   Send,
@@ -396,16 +395,6 @@ export default function MultimodalComposer({
           <Camera size={12} /> Camera
         </button>
         <button
-          onClick={() => {
-            setShowAdd(false);
-            console.debug("Screen share coming soon");
-          }}
-          disabled
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-600 cursor-not-allowed"
-        >
-          <MonitorUp size={12} /> Screen
-        </button>
-        <button
           onClick={() => fileInputRef.current?.click()}
           className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-cyan-300"
         >
@@ -424,16 +413,6 @@ export default function MultimodalComposer({
             className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
           >
             <Camera size={16} className="text-cyan-300" /> Camera
-          </button>
-          <button
-            onClick={() => {
-              setShowAdd(false);
-              console.debug("Screen share coming soon");
-            }}
-            disabled
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-600 cursor-not-allowed"
-          >
-            <MonitorUp size={16} className="text-slate-600" /> Screen
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
@@ -524,7 +503,7 @@ export default function MultimodalComposer({
           <button
             key={chip.tool}
             onClick={() => onToolChange?.(chip.tool)}
-            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
             aria-label={`Switch to ${chip.tool} tool`}
           >
             <span className="text-cyan-400">{chip.label}</span>

@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeProviderError } from "@/lib/provider-error";
 import { streamText, generateText, type LLMProvider } from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
@@ -238,7 +239,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
         );
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
-        const msg = err instanceof Error ? err.message : "stream error";
+        const { error: msg } = sanitizeProviderError(err);
         controller.enqueue(
           encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
         );
@@ -322,9 +323,10 @@ async function handler(req: NextRequest) {
     }
   } catch (err) {
     console.error("[api/chat/unified] error:", err);
+    const { status, error: message, retryAfter } = sanitizeProviderError(err);
     return NextResponse.json(
-      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
-      { status: 500 },
+      { error: message, retryAfter },
+      { status },
     );
   }
 }

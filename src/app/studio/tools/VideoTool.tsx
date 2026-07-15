@@ -778,7 +778,7 @@ export default function VideoTool() {
                 <button
                   onClick={handleClearImage}
                   disabled={isGenerating}
-                  className="absolute top-1 right-1 p-1 rounded border text-[9px] font-bold disabled:opacity-50"
+                  className="absolute top-1 right-1 p-2 rounded border text-[9px] font-bold disabled:opacity-50"
                   style={{
                     borderColor: T.borderColor,
                     color: T.textColor,

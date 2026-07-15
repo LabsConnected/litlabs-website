@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { withRateLimit } from "@/lib/rate-limiter";
 
-export async function POST(request: NextRequest) {
+async function handler(request: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -132,7 +133,7 @@ export async function POST(request: NextRequest) {
       free: true,
       note:
         provider !== "pollinations"
-          ? "API key not configured, using free fallback"
+          ? "Service unavailable"
           : undefined,
     });
   } catch {
@@ -142,6 +143,8 @@ export async function POST(request: NextRequest) {
     );
   }
 }
+
+export const POST = withRateLimit(handler, 10, 60);
 
 // Also handle GET for health check
 export async function GET() {

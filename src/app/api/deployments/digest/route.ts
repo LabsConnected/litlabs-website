@@ -2,6 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { buildDeployDigest } from "@/lib/deployments";
 import { sendDiscordMessage } from "@/lib/discord";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -27,19 +28,19 @@ export async function POST(req: NextRequest) {
 
     const failedSection = digest.failed.length
       ? `**Failed deploys (${digest.failed.length}):**\n${digest.failed
-          .map(
-            (d) =>
-              `• ${d.branch} → ${d.environment} at ${new Date(
-                d.updated_at,
-              ).toLocaleString()}`,
-          )
-          .join("\n")}`
+        .map(
+          (d) =>
+            `• ${d.branch} → ${d.environment} at ${new Date(
+              d.updated_at,
+            ).toLocaleString()}`,
+        )
+        .join("\n")}`
       : "";
 
     const pendingSection = digest.pending.length
       ? `**Pending deploys (${digest.pending.length}):**\n${digest.pending
-          .map((d) => `• ${d.branch} → ${d.environment} (${d.status})`)
-          .join("\n")}`
+        .map((d) => `• ${d.branch} → ${d.environment} (${d.status})`)
+        .join("\n")}`
       : "";
 
     const summary =
@@ -71,10 +72,11 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ success: true, digest }, { status: 200 });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[api/deployments/digest] POST error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
       { error: "Failed to build digest", message },
-      { status: 500 },
+      { status },
     );
   }
 }
@@ -89,10 +91,11 @@ export async function GET(req: NextRequest) {
     const digest = await buildDeployDigest(hours);
     return NextResponse.json(digest);
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
+    console.error("[api/deployments/digest] GET error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
       { error: "Failed to build digest", message },
-      { status: 500 },
+      { status },
     );
   }
 }

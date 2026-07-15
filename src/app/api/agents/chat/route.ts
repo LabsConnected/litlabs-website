@@ -5,10 +5,11 @@ import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
-  if (!key) throw new Error("SUPERMEMORY_API_KEY is not configured");
+  if (!key) throw new Error("Service unavailable");
   return new Supermemory({ apiKey: key });
 }
 
@@ -240,7 +241,8 @@ export async function POST(req: NextRequest) {
       userName,
     });
   } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown error";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[api/agents/chat] error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeProviderError } from "@/lib/provider-error";
 import { GoogleGenAI, Modality } from "@google/genai";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -13,8 +14,8 @@ async function handler(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   if (!GEMINI_API_KEY)
     return NextResponse.json(
-      { error: "Gemini API key not configured" },
-      { status: 500 },
+      { error: "Service unavailable" },
+      { status: 503 },
     );
 
   const wallet = await getUserWallet(userId);
@@ -64,11 +65,13 @@ async function handler(req: NextRequest) {
       balance: newBalance,
     });
   } catch (err: unknown) {
+    console.error("[api/media/generate-music] error:", err);
+    const { status, error: message, retryAfter } = sanitizeProviderError(err);
     return NextResponse.json(
-      { error: err instanceof Error ? err.message : "Music generation failed" },
-      { status: 500 },
+      { error: message, retryAfter },
+      { status },
     );
   }
 }
 
-export const POST = withRateLimit(handler, 60, 60);
+export const POST = withRateLimit(handler, 5, 60);

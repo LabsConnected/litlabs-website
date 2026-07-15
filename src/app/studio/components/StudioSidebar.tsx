@@ -457,7 +457,7 @@ export default function StudioSidebar({
           {onClose ? (
             <button
               onClick={onClose}
-              className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
+              className="p-2 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
               style={{ color: T.textMuted + "80" }}
               aria-label="Close menu"
               title="Close menu"
@@ -467,7 +467,7 @@ export default function StudioSidebar({
           ) : (
             <button
               onClick={() => setCollapsed((v) => !v)}
-              className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
+              className="p-2 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
               style={{ color: T.textMuted + "80" }}
               title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
               aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}

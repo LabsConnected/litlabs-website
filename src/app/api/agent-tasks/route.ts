@@ -6,6 +6,7 @@ import {
   checkPromptSafety,
 } from "@/lib/agent-validation";
 import { logAgentEvent } from "@/lib/agent-logger";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -105,7 +106,7 @@ export async function POST(request: Request) {
         assignedTo,
         meta,
       },
-    ).catch(() => {});
+    ).catch(() => { });
 
     return NextResponse.json(
       {
@@ -116,14 +117,11 @@ export async function POST(request: Request) {
     );
   } catch (error: unknown) {
     console.error("Critical Gateway Router Exception:", error);
+    const { status, error: message, retryAfter } =
+      sanitizeProviderError(error);
     return NextResponse.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "Internal Execution Interruption",
-      },
-      { status: 500 },
+      { error: message, retryAfter },
+      { status },
     );
   }
 }

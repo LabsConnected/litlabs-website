@@ -306,7 +306,7 @@ function NotifPanel({
           </span>
           <button
             onClick={onClose}
-            className="p-1 rounded hover:bg-white/10"
+            className="p-2 rounded hover:bg-white/10"
             style={{ color: T.textMuted }}
             aria-label="Close notifications"
             title="Close"

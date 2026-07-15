@@ -2,11 +2,12 @@ import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
   if (!key) {
-    throw new Error("SUPERMEMORY_API_KEY is not configured");
+    throw new Error("Service unavailable");
   }
   return new Supermemory({ apiKey: key });
 }
@@ -124,8 +125,9 @@ export async function POST(req: NextRequest) {
       supermemory: supermemoryResult,
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to add memory";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[api/memory] POST error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -192,7 +194,7 @@ export async function GET(req: NextRequest) {
           limit,
         })) as { memories?: unknown[]; results?: unknown[] };
       } catch (err) {
-        supermemoryError = err instanceof Error ? err.message : "Supermemory search failed";
+        supermemoryError = "Service unavailable";
         console.error("Supermemory search failed:", err);
         source = "supabase";
       }
@@ -257,8 +259,9 @@ export async function GET(req: NextRequest) {
       source,
     });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to search memories";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[api/memory] GET error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -309,8 +312,9 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ deleted: id });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to forget memory";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[api/memory] DELETE error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }
 
@@ -367,7 +371,8 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ memory: data });
   } catch (error: unknown) {
-    const message = error instanceof Error ? error.message : "Failed to update memory";
-    return NextResponse.json({ error: message }, { status: 500 });
+    console.error("[api/memory] PATCH error:", error);
+    const { status, error: message } = sanitizeProviderError(error);
+    return NextResponse.json({ error: message }, { status });
   }
 }

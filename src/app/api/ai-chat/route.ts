@@ -2,6 +2,8 @@ import { Supermemory } from "supermemory";
 import { generateText, type LLMProvider } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
+import { withRateLimit } from "@/lib/rate-limiter";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -21,7 +23,7 @@ const MODELS: Record<string, string> = {
   "qwen-coder": "openrouter-qwen",
 };
 
-export async function POST(req: NextRequest) {
+async function handler(req: NextRequest) {
   try {
     const { userId } = await auth();
     const uid = userId || "anonymous";
@@ -84,7 +86,13 @@ Be direct, professional, and code-focused.`;
     });
   } catch (error: unknown) {
     console.error("[ai-chat] Error:", error);
-    const message = error instanceof Error ? error.message : "Chat failed";
-    return NextResponse.json({ error: message }, { status: 500 });
+    const { status, error: errorMessage, retryAfter } =
+      sanitizeProviderError(error);
+    return NextResponse.json(
+      { error: errorMessage, retryAfter },
+      { status },
+    );
   }
 }
+
+export const POST = withRateLimit(handler, 30, 60);

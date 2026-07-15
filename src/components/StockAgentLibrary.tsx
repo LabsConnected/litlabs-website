@@ -219,7 +219,7 @@ export default function StockAgentLibrary({
         </div>
         <button
           onClick={onClose}
-          className="p-1 rounded-lg transition-all hover:scale-110"
+          className="p-2 rounded-lg transition-all hover:scale-110"
           style={{ color: T.textMuted }}
         >
           ×

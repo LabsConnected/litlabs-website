@@ -421,7 +421,7 @@ export default function MusicPlayer({
           <div className="flex items-center gap-0.5">
             <button
               onClick={prev}
-              className="p-1 rounded hover:bg-white/10 transition-all"
+              className="p-2 rounded hover:bg-white/10 transition-all"
               style={{ color: T.textMuted }}
             >
               <SkipBack size={12} />
@@ -435,14 +435,14 @@ export default function MusicPlayer({
             </button>
             <button
               onClick={next}
-              className="p-1 rounded hover:bg-white/10 transition-all"
+              className="p-2 rounded hover:bg-white/10 transition-all"
               style={{ color: T.textMuted }}
             >
               <SkipForward size={12} />
             </button>
             <button
               onClick={() => setMuted((m) => !m)}
-              className="p-1 rounded hover:bg-white/10 transition-all"
+              className="p-2 rounded hover:bg-white/10 transition-all"
               style={{ color: T.textMuted }}
             >
               {muted ? <VolumeX size={12} /> : <Volume2 size={12} />}

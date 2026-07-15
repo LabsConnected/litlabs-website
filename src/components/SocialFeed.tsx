@@ -463,7 +463,7 @@ export default function SocialFeed({
                     )}
                     <button
                       onClick={() => removeMedia(i)}
-                      className="absolute top-1 right-1 p-1 rounded-full opacity-0 group-hover:opacity-100 transition-all"
+                      className="absolute top-1 right-1 p-2 rounded-full opacity-0 group-hover:opacity-100 transition-all"
                       style={{
                         backgroundColor: T.bgColor + "80",
                         color: T.textColor,
