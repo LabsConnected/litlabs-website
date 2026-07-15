@@ -125,7 +125,7 @@ export function QuickActionGrid({
                 boxShadow: `0 4px 20px ${a.color}15`,
               }}
             >
-              <Icon size={20} style={{ color: a.color }} />
+              <Icon size={20} aria-hidden="true" style={{ color: a.color }} />
             </div>
             <span
               className="relative text-xs font-black"
@@ -291,7 +291,11 @@ export function CenterStage({
                     border: `1px solid ${action.color}20`,
                   }}
                 >
-                  <Icon size={16} style={{ color: action.color }} />
+                  <Icon
+                    size={16}
+                    aria-hidden="true"
+                    style={{ color: action.color }}
+                  />
                   <span
                     className="text-[9px] font-bold"
                     style={{ color: T.textColor }}
@@ -576,15 +580,15 @@ export function CenterStage({
     }
     default:
       return (
-        <div className="space-y-6 md:space-y-8">
+        <div className="space-y-4 md:space-y-6">
           <HeroCard
             title={`Welcome back, ${displayName}`}
             subtitle="Your LiTT workspace is live. Ship something today."
             color={T.accentColor}
           />
 
-          <div>
-            <div className="flex items-center gap-2 mb-3">
+          <section>
+            <div className="flex items-center gap-2 mb-2">
               <div
                 className="w-1 h-4 rounded-full"
                 style={{ backgroundColor: T.accentColor }}
@@ -624,26 +628,14 @@ export function CenterStage({
                 },
               ]}
             />
-          </div>
+          </section>
 
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div
-                className="w-1 h-4 rounded-full"
-                style={{ backgroundColor: T.accentColor }}
-              />
-              <span
-                className="text-xs font-black uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Overview
-              </span>
-            </div>
+          <section>
             <DashboardContent />
-          </div>
+          </section>
 
-          <div>
-            <div className="flex items-center gap-2 mb-3">
+          <section>
+            <div className="flex items-center gap-2 mb-2">
               <div
                 className="w-1 h-4 rounded-full"
                 style={{ backgroundColor: T.accentColor }}
@@ -656,23 +648,9 @@ export function CenterStage({
               </span>
             </div>
             <OwnerStats />
-          </div>
+          </section>
 
-          <div>
-            <div className="flex items-center gap-2 mb-3">
-              <div
-                className="w-1 h-4 rounded-full"
-                style={{ backgroundColor: T.accentColor }}
-              />
-              <span
-                className="text-xs font-black uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Facebook Feed
-              </span>
-            </div>
-            <FacebookFeed />
-          </div>
+          <FacebookFeed />
         </div>
       );
   }

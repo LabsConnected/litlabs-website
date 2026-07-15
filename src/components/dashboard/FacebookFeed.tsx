@@ -8,42 +8,7 @@ export function FacebookFeed() {
   const { resolvedColors: T } = useTheme();
 
   if (!FACEBOOK_PAGE_URL) {
-    return (
-      <div
-        className="rounded-xl p-4 sm:p-5 border border-dashed"
-        style={{
-          backgroundColor: `${T.boxBg}40`,
-          borderColor: `${T.borderColor}30`,
-        }}
-      >
-        <div className="flex items-center gap-2 mb-2">
-          <div
-            className="w-8 h-8 rounded-lg flex items-center justify-center"
-            style={{
-              backgroundColor: "#1877f215",
-              border: "1px solid #1877f230",
-            }}
-          >
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="#1877f2">
-              <path d="M24 12.073C24 5.405 18.627 0 12 0S0 5.405 0 12.073C0 18.1 4.388 23.094 10.125 24v-8.437H7.078v-3.49h3.047V9.897c0-3.017 1.792-4.681 4.533-4.681 1.313 0 2.686.235 2.686.235v2.953H15.83c-1.491 0-1.956.925-1.956 1.875v2.25h3.328l-.532 3.49h-2.796V24C19.612 23.094 24 18.1 24 12.073z" />
-            </svg>
-          </div>
-          <div className="text-sm font-bold" style={{ color: T.textColor }}>
-            Facebook Feed
-          </div>
-        </div>
-        <p className="text-xs leading-relaxed" style={{ color: T.textMuted }}>
-          Add your Facebook page URL to the{" "}
-          <code
-            className="px-1 py-0.5 rounded text-[10px]"
-            style={{ backgroundColor: `${T.boxBg}80` }}
-          >
-            NEXT_PUBLIC_FACEBOOK_PAGE_URL
-          </code>{" "}
-          environment variable to display your page timeline here.
-        </p>
-      </div>
-    );
+    return null;
   }
 
   const encoded = encodeURIComponent(FACEBOOK_PAGE_URL);

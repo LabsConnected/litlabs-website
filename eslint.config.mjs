@@ -25,9 +25,11 @@ const eslintConfig = defineConfig([
     // Local binaries and heavy folders
     "chrome/**",
     "terminal-server/**",
+    "**/terminal-server/**",
     "Zoo-Code/**",
     // Generated / copied
     "public/**",
+    "**/public/**",
     "*.lock",
     "pnpm-lock.yaml",
     // Consolidation scratch copies
@@ -35,6 +37,7 @@ const eslintConfig = defineConfig([
     ".codex-reference/**",
     // Local artifact directories
     "litlabs/**",
+    "litlabs-website/**",
     "OmniRoute/**",
   ]),
 ]);
