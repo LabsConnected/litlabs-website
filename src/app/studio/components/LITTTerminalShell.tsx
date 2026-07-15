@@ -33,15 +33,12 @@ import {
   MicOff,
   Paperclip,
   X,
-  ChevronRight,
   Sparkles,
-  Rocket,
   LayoutGrid,
   Activity,
   Zap,
   Copy,
   Check,
-  RefreshCw,
   Square,
   Trash2,
   Loader2,
@@ -98,6 +95,7 @@ const AgentsTerminalTool = dynamic(
   () => import("../tools/AgentsTerminalTool"),
   { ssr: false },
 );
+const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
 
 type Message = {
   role: "user" | "assistant";
@@ -534,7 +532,6 @@ function LITTTerminalShellInner({
   const prevPersonaRef = useRef(persona.id);
 
   const displayName = profile?.displayName || "Operator";
-  const isEmpty = messages.length === 0;
   const agentList = useMemo(() => Object.values(AGENTS), []);
   const activeAgent = useMemo(
     () => AGENTS[agentId] || AGENTS.littcode,
@@ -551,6 +548,16 @@ function LITTTerminalShellInner({
   const agentMessages = useMemo(
     () => agentChats[activeAgent.id] || [],
     [agentChats, activeAgent.id],
+  );
+  const chatMessages = useMemo(
+    () =>
+      messages.map((m) => ({
+        id: `${m.role}-${m.createdAt ?? Math.random()}`,
+        role: m.role as "user" | "assistant",
+        content: m.content,
+        createdAt: m.createdAt,
+      })),
+    [messages],
   );
   const isAgentEmpty = agentMessages.length === 0;
   const micActive =
@@ -1221,6 +1228,13 @@ function LITTTerminalShellInner({
     ],
   );
 
+  const handleChatSend = useCallback(
+    async (text: string) => {
+      await send(text);
+    },
+    [send],
+  );
+
   const handleSend = () => {
     if (busy) {
       cancel();
@@ -1248,15 +1262,6 @@ function LITTTerminalShellInner({
 
   const closeCommand = (id: string) => {
     setActiveCommands((prev) => prev.filter((c) => c.id !== id));
-  };
-
-  const regenerate = () => {
-    if (busy) return;
-    const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
-    if (lastUserIndex === -1) return;
-    const trimmed = messages.slice(0, lastUserIndex + 1);
-    setMessages(trimmed);
-    void send(trimmed[lastUserIndex].content);
   };
 
   const toggleMic = () => {
@@ -1628,271 +1633,13 @@ function LITTTerminalShellInner({
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
             {activeTool === "chat" ? (
-              isEmpty ? (
-                <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
-                  <div className="flex flex-col items-center gap-2 text-center sm:gap-3">
-                    <div className="text-[11px] font-bold uppercase tracking-[0.2em] text-cyan-400 sm:text-xs">
-                      Welcome back, {displayName}.
-                    </div>
-                    <h1 className="max-w-xl text-lg font-light leading-tight sm:text-3xl">
-                      What can I{" "}
-                      <span className="font-black text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 to-blue-400">
-                        amplify
-                      </span>{" "}
-                      in your mission today?
-                    </h1>
-                  </div>
-
-                  {/* Hero visualization */}
-                  <div className="relative hidden h-16 w-full max-w-xs items-center justify-center sm:flex sm:h-40 sm:max-w-md">
-                    <div
-                      className="absolute inset-0 rounded-full blur-2xl"
-                      style={{
-                        background:
-                          "radial-gradient(circle, rgba(34,211,238,0.12) 0%, transparent 70%)",
-                      }}
-                    />
-                    <svg
-                      viewBox="0 0 400 200"
-                      className="h-full w-full"
-                      style={{ opacity: 0.7 }}
-                    >
-                      <defs>
-                        <linearGradient
-                          id="lineGrad"
-                          x1="0%"
-                          y1="0%"
-                          x2="100%"
-                          y2="0%"
-                        >
-                          <stop offset="0%" stopColor="rgba(34,211,238,0)" />
-                          <stop offset="50%" stopColor="rgba(34,211,238,0.6)" />
-                          <stop offset="100%" stopColor="rgba(34,211,238,0)" />
-                        </linearGradient>
-                      </defs>
-                      <path
-                        d="M0,150 Q100,180 200,100 T400,150"
-                        fill="none"
-                        stroke="url(#lineGrad)"
-                        strokeWidth="1.5"
-                      />
-                      <path
-                        d="M0,120 Q100,60 200,120 T400,80"
-                        fill="none"
-                        stroke="url(#lineGrad)"
-                        strokeWidth="1"
-                        opacity="0.5"
-                      />
-                      <path
-                        d="M0,170 Q120,140 220,160 T400,120"
-                        fill="none"
-                        stroke="url(#lineGrad)"
-                        strokeWidth="1"
-                        opacity="0.3"
-                      />
-                      {[...Array(24)].map((_, i) => {
-                        const x = (i / 23) * 360 + 20;
-                        const y = 100 + Math.sin(i * 0.7) * 30;
-                        return (
-                          <circle
-                            key={i}
-                            cx={x}
-                            cy={y}
-                            r={1.5}
-                            fill="rgba(34,211,238,0.7)"
-                          />
-                        );
-                      })}
-                    </svg>
-                  </div>
-
-                  {/* Action cards */}
-                  <div className="grid w-full grid-cols-2 gap-2 sm:grid-cols-4 sm:gap-3">
-                    {[
-                      {
-                        icon: Sparkles,
-                        title: "Create",
-                        desc: "Scaffold apps, services, and pipelines.",
-                      },
-                      {
-                        icon: Activity,
-                        title: "Analyze",
-                        desc: "Inspect logs, data, and system health.",
-                      },
-                      {
-                        icon: Rocket,
-                        title: "Build",
-                        desc: "Generate code, infra, and docs.",
-                      },
-                      {
-                        icon: Zap,
-                        title: "Automate",
-                        desc: "Design workflows and integrations.",
-                      },
-                    ].map((card) => (
-                      <button
-                        key={card.title}
-                        onClick={() =>
-                          void send(
-                            `Help me ${card.title.toLowerCase()} something`,
-                          )
-                        }
-                        className="group flex min-h-[72px] flex-col gap-1 rounded-xl border border-white/5 bg-white/2 p-2 text-left transition hover:border-cyan-500/20 hover:bg-cyan-500/5 sm:min-h-20 sm:gap-1.5 sm:p-3"
-                      >
-                        <div className="flex items-center justify-between">
-                          <card.icon
-                            size={14}
-                            className="text-cyan-400 transition group-hover:scale-110 sm:size-[15px]"
-                          />
-                          <ChevronRight
-                            size={12}
-                            className="text-gray-300 group-hover:text-cyan-400"
-                          />
-                        </div>
-                        <div className="text-xs font-bold sm:text-sm">
-                          {card.title}
-                        </div>
-                        <div className="text-[10px] leading-relaxed text-neutral-300 sm:text-[11px]">
-                          {card.desc}
-                        </div>
-                      </button>
-                    ))}
-                  </div>
-
-                  <button
-                    onClick={() => setPluginsOpen(true)}
-                    className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-400 sm:text-xs"
-                  >
-                    <LayoutGrid size={12} />
-                    View all plugins
-                    <ChevronRight size={10} />
-                  </button>
-                </div>
-              ) : (
-                <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                  {messages.map((message, index) => {
-                    const isUser = message.role === "user";
-                    const isLastAssistant =
-                      !isUser && index === messages.length - 1 && !busy;
-                    return (
-                      <div
-                        key={index}
-                        className={`flex gap-3 ${
-                          isUser ? "flex-row-reverse" : "flex-row"
-                        }`}
-                      >
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                            isUser
-                              ? "border border-orange-500/20 bg-orange-500/10"
-                              : "border border-cyan-500/20 bg-cyan-500/10"
-                          }`}
-                        >
-                          {isUser ? (
-                            <span className="text-[10px] font-bold text-orange-400">
-                              {displayName.slice(0, 1).toUpperCase()}
-                            </span>
-                          ) : (
-                            <Bot size={14} className="text-cyan-400" />
-                          )}
-                        </div>
-                        <div
-                          className={`flex max-w-[85%] flex-col ${
-                            isUser ? "items-end" : "items-start"
-                          }`}
-                        >
-                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
-                            {isUser ? (
-                              message.content
-                            ) : message.type === "image" && message.mediaUrl ? (
-                              // eslint-disable-next-line @next/next/no-img-element
-                              <img
-                                src={message.mediaUrl}
-                                alt={message.content}
-                                className="max-w-full rounded-xl border border-white/10"
-                                loading="lazy"
-                              />
-                            ) : message.type === "audio" && message.mediaUrl ? (
-                              <audio
-                                src={message.mediaUrl}
-                                controls
-                                className="w-full min-w-[240px]"
-                                preload="metadata"
-                              />
-                            ) : message.type === "video" && message.mediaUrl ? (
-                              <video
-                                src={message.mediaUrl}
-                                controls
-                                className="max-w-full rounded-xl border border-white/10"
-                                preload="metadata"
-                              />
-                            ) : message.type === "error" ? (
-                              <div className="text-xs leading-relaxed text-rose-300">
-                                {message.content}
-                              </div>
-                            ) : (
-                              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
-                                <ReactMarkdown>{message.content}</ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-1 flex items-center gap-2 px-1">
-                            <span className="text-[9px] text-gray-300">
-                              {message.createdAt
-                                ? new Date(
-                                    message.createdAt,
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : ""}
-                            </span>
-                            {!isUser &&
-                              (!message.type || message.type === "text") &&
-                              message.content && (
-                                <>
-                                  <CopyButton text={message.content} />
-                                  <button
-                                    onClick={() => speakText(message.content)}
-                                    className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
-                                  >
-                                    <Zap size={10} /> Speak
-                                  </button>
-                                  {isLastAssistant && (
-                                    <button
-                                      onClick={regenerate}
-                                      disabled={busy}
-                                      className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400 disabled:opacity-40"
-                                    >
-                                      <RefreshCw size={10} /> Regen
-                                    </button>
-                                  )}
-                                </>
-                              )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {busy && (
-                    <div className="flex items-center gap-2 text-[10px] text-cyan-400">
-                      <span className="flex gap-0.5">
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.1s]" />
-                        <span className="h-1.5 w-1.5 animate-bounce rounded-full bg-cyan-300 [animation-delay:0.2s]" />
-                      </span>
-                      LiTT is thinking…
-                      <button
-                        onClick={cancel}
-                        className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
-                        title="Cancel (Esc)"
-                      >
-                        <Square size={8} /> Stop
-                      </button>
-                    </div>
-                  )}
-                </div>
-              )
+              <ChatShell
+                embedded
+                messages={chatMessages}
+                sending={busy}
+                systemLines={[]}
+                onSend={handleChatSend}
+              />
             ) : activeTool === "agents" ? (
               isAgentEmpty ? (
                 <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">

@@ -5,6 +5,7 @@ import { useProfile } from "@/context/ProfileContext";
 import ChatShell from "../components/ChatShell";
 
 type Message = {
+  id: string;
   role: "user" | "assistant";
   content: string;
   createdAt?: number;
@@ -23,30 +24,30 @@ const MODEL_MAP: Record<string, { provider: string; model: string }> = {
 
 export default function ChatTool({
   selectedModel = "adaptive",
-  onToolChange,
 }: {
   selectedModel?: string;
-  onToolChange?: (tool: string) => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
   const { profile } = useProfile();
 
-  const send = async (
-    value: string,
-    attachments?: string[],
-  ): Promise<string> => {
-    const text = value.trim();
-    if ((!text && !attachments?.length) || busy) return "";
+  const send = async (text: string) => {
+    const trimmed = text.trim();
+    if (!trimmed || busy) return;
+    const userId = crypto.randomUUID();
     const historyForApi = [
-      ...messages,
-      { role: "user" as const, content: text || "(image)" },
+      ...messages.map((m) => ({
+        role: m.role as "user" | "assistant",
+        content: m.content,
+      })),
+      { role: "user" as const, content: trimmed },
     ];
     setMessages((current) => [
       ...current,
       {
+        id: userId,
         role: "user" as const,
-        content: text || "(image)",
+        content: trimmed,
         createdAt: Date.now(),
       },
     ]);
@@ -60,11 +61,10 @@ export default function ChatTool({
           agentSlug: "littcode",
           provider: modelConfig.provider,
           model: modelConfig.model,
-          message: text || "Describe what you see.",
+          message: trimmed,
           history: historyForApi,
           stream: false,
           userName: profile.displayName || "Creator",
-          images: attachments,
         }),
       });
       if (!response.ok) {
@@ -80,39 +80,36 @@ export default function ChatTool({
         "I’m ready. Tell me what we’re building.";
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: reply, createdAt: Date.now() },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: reply,
+          createdAt: Date.now(),
+        },
       ]);
-      return reply;
     } catch (error) {
       const reply =
         error instanceof Error ? error.message : "LiTT is reconnecting";
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: reply, createdAt: Date.now() },
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: reply,
+          createdAt: Date.now(),
+        },
       ]);
-      return reply;
     } finally {
       setBusy(false);
     }
   };
 
-  const handleRegenerate = () => {
-    const lastUserIndex = messages.findLastIndex((m) => m.role === "user");
-    if (lastUserIndex === -1) return;
-    const trimmed = messages.slice(0, lastUserIndex + 1);
-    setMessages(trimmed);
-    void send(trimmed[lastUserIndex].content);
-  };
-
   return (
     <ChatShell
-      selectedModel={selectedModel}
       messages={messages}
-      busy={busy}
+      sending={busy}
+      systemLines={[]}
       onSend={send}
-      onNewChat={() => setMessages([])}
-      onRegenerate={handleRegenerate}
-      onToolChange={onToolChange}
     />
   );
 }

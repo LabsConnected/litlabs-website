@@ -1,10 +1,25 @@
 import type { Metadata } from "next";
-import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
+import dynamic from "next/dynamic";
+
+const AutonomicLoopBanner = dynamic(
+  () => import("@/components/dashboard/AutonomicLoopBanner"),
+  { ssr: false },
+);
 
 export const metadata: Metadata = {
   title: "Dashboard",
   description:
     "Your LiTTree-LabStudios command center. Manage agents, track stats, and monitor your AI workforce.",
+  robots: {
+    index: true,
+    follow: true,
+  },
+  openGraph: {
+    title: "LiTTree-LabStudios Dashboard",
+    description:
+      "Your LiTTree-LabStudios command center. Manage agents, track stats, and monitor your AI workforce.",
+    type: "website",
+  },
 };
 
 /**

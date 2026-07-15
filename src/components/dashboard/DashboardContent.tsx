@@ -381,10 +381,10 @@ export default function DashboardContent() {
 
   const quickLinks = [
     {
-      href: "/studio?tool=chat",
-      label: "Chat",
+      href: "/studio",
+      label: "Open Studio",
       icon: Bot,
-      desc: "Ask LiTT anything",
+      desc: "Talk to any AI agent",
     },
     {
       href: "/studio?tool=image",

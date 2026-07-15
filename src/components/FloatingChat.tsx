@@ -16,6 +16,7 @@ import {
   ChevronDown,
   ChevronUp,
   RefreshCw,
+  Camera,
 } from "lucide-react";
 import {
   PREMIUM_VOICES,
@@ -58,6 +59,9 @@ export function FloatingChat() {
   const { tokens } = useTheme();
   const userName = profile?.displayName || "Creator";
   const [chatOpen, setChatOpen] = useState(false);
+  const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [voiceMode, setVoiceMode] = useState(false);
+  const [cameraMode, setCameraMode] = useState(false);
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -94,6 +98,8 @@ export function FloatingChat() {
   const streamRef = useRef<MediaStream | null>(null);
   const chunksRef = useRef<Blob[]>([]);
   const audioRef = useRef<HTMLAudioElement | null>(null);
+  const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
   const sendRef = useRef<(text: string) => void>(() => {});
   const retryRecordRef = useRef<() => void>(() => {});
   const retrySpeakRef = useRef<(text: string, idx: number) => void>(() => {});
@@ -138,7 +144,24 @@ export function FloatingChat() {
     return () => {
       audioRef.current?.pause();
       audioRef.current = null;
+      cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+      cameraStreamRef.current = null;
     };
+  }, []);
+
+  const closeCamera = useCallback(() => {
+    cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
+    cameraStreamRef.current = null;
+    if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+    setCameraMode(false);
+  }, []);
+
+  const openLauncher = useCallback(() => {
+    if (window.matchMedia("(max-width: 767px)").matches) {
+      setQuickActionsOpen(true);
+      return;
+    }
+    setChatOpen(true);
   }, []);
 
   const showToast = useCallback(
@@ -161,6 +184,32 @@ export function FloatingChat() {
   const dismissToast = useCallback((id: string) => {
     setToasts((prev) => prev.filter((t) => t.id !== id));
   }, []);
+
+  const openCamera = useCallback(async () => {
+    setQuickActionsOpen(false);
+    if (!navigator.mediaDevices?.getUserMedia) {
+      showToast("Camera access needs a secure HTTPS connection.");
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "user" },
+        audio: false,
+      });
+      cameraStreamRef.current = stream;
+      setCameraMode(true);
+      requestAnimationFrame(() => {
+        if (cameraVideoRef.current) cameraVideoRef.current.srcObject = stream;
+      });
+    } catch (err) {
+      const error = err as DOMException;
+      showToast(
+        error.name === "NotAllowedError"
+          ? "Camera permission was denied. Allow it in your browser and try again."
+          : "LiTT couldn't start the camera. Check that another app isn't using it.",
+      );
+    }
+  }, [showToast]);
 
   const send = useCallback(
     async (text: string) => {
@@ -376,6 +425,8 @@ export function FloatingChat() {
       const text = data.text?.trim();
       if (text) {
         setInput(text);
+        setVoiceMode(false);
+        setChatOpen(true);
         void send(text);
       } else {
         showToast("Didn't catch that. Try again?", { type: "record" });
@@ -798,17 +849,173 @@ export function FloatingChat() {
   return (
     <>
       {mounted && chatPanel && createPortal(chatPanel, document.body)}
+      {mounted &&
+        quickActionsOpen &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-9998 flex items-end bg-black/45 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden"
+            onClick={() => setQuickActionsOpen(false)}
+          >
+            <div
+              className="mx-auto w-full max-w-sm rounded-3xl border border-white/10 bg-[#111119]/95 p-4 shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label="LiTT assistant quick actions"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-black text-white">
+                    LiTT Assistant
+                  </p>
+                  <p className="text-xs text-neutral-400">
+                    How can I help right now?
+                  </p>
+                </div>
+                <button
+                  className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 hover:bg-white/5"
+                  onClick={() => setQuickActionsOpen(false)}
+                  aria-label="Close assistant actions"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button
+                  className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/5 text-cyan-300"
+                  onClick={() => {
+                    setQuickActionsOpen(false);
+                    setChatOpen(true);
+                  }}
+                >
+                  <MessageCircle size={22} />
+                  <span className="text-xs font-bold">Ask</span>
+                </button>
+                <button
+                  className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/5 text-violet-300"
+                  onClick={() => {
+                    setQuickActionsOpen(false);
+                    setVoiceMode(true);
+                    void toggleRecording();
+                  }}
+                >
+                  <Mic size={22} />
+                  <span className="text-xs font-bold">Speak</span>
+                </button>
+                <button
+                  className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/5 text-fuchsia-300"
+                  onClick={() => void openCamera()}
+                >
+                  <Camera size={22} />
+                  <span className="text-xs font-bold">Show Camera</span>
+                </button>
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {mounted &&
+        voiceMode &&
+        createPortal(
+          <div
+            className="fixed inset-0 z-9999 flex items-end bg-black/55 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden"
+            onClick={() => {
+              if (recording) recorderRef.current?.stop();
+              setVoiceMode(false);
+            }}
+          >
+            <div
+              className="mx-auto w-full max-w-sm rounded-3xl border border-violet-400/20 bg-[#111119]/95 p-5 text-center shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Speak to LiTT"
+              onClick={(event) => event.stopPropagation()}
+            >
+              <div
+                className={`mx-auto mb-4 flex h-20 w-20 items-center justify-center rounded-full ${recording ? "animate-pulse bg-red-500/20 text-red-300" : "bg-violet-500/15 text-violet-300"}`}
+              >
+                <Mic size={32} />
+              </div>
+              <p className="font-black text-white">
+                {transcribing
+                  ? "LiTT is processing…"
+                  : recording
+                    ? "LiTT is listening"
+                    : "Voice ready"}
+              </p>
+              <p className="mt-1 text-xs text-neutral-400">
+                Speak naturally. Your message opens in the assistant when ready.
+              </p>
+              <button
+                className="mt-5 min-h-12 w-full rounded-2xl bg-white/8 text-sm font-bold text-white"
+                onClick={() => {
+                  if (recording) recorderRef.current?.stop();
+                  setVoiceMode(false);
+                }}
+              >
+                {recording ? "Stop & send" : "Close"}
+              </button>
+            </div>
+          </div>,
+          document.body,
+        )}
+      {mounted &&
+        cameraMode &&
+        createPortal(
+          <div className="fixed inset-0 z-9999 flex items-end bg-black/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden">
+            <div
+              className="mx-auto w-full max-w-sm overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-[#111119] shadow-2xl"
+              role="dialog"
+              aria-modal="true"
+              aria-label="Show LiTT camera"
+            >
+              <div className="flex items-center justify-between p-4">
+                <div>
+                  <p className="text-sm font-black text-white">Show LiTT</p>
+                  <p className="text-xs text-neutral-400">
+                    Camera is live only while this view is open
+                  </p>
+                </div>
+                <button
+                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-white"
+                  onClick={closeCamera}
+                  aria-label="Close camera"
+                >
+                  <X size={18} />
+                </button>
+              </div>
+              <video
+                ref={cameraVideoRef}
+                autoPlay
+                playsInline
+                muted
+                className="aspect-[4/5] w-full bg-black object-cover"
+              />
+              <div className="flex items-center gap-2 p-4 text-xs text-emerald-300">
+                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
+                LiTT can see this live preview
+              </div>
+            </div>
+          </div>,
+          document.body,
+        )}
       <button
-        onClick={() => setChatOpen(true)}
-        className="chat-launcher flex h-10 w-10 items-center justify-center rounded-full shadow-md transition-all hover:scale-110 active:scale-95"
+        onClick={openLauncher}
+        className="chat-launcher flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95"
         style={{
           background: tokens.primary,
           color: "#0a0a0f",
-          boxShadow: `0 3px 12px ${tokens.primary}30`,
+          boxShadow: `0 4px 20px ${tokens.primary}40`,
         }}
-        aria-label="Open chat"
+        aria-label="Open LiTT Assistant"
       >
-        <MessageCircle size={18} />
+        <MessageCircle size={22} />
+        {!chatOpen && (
+          <span className="absolute -top-1 -right-1 flex h-3 w-3">
+            <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />
+            <span className="relative inline-flex h-3 w-3 rounded-full bg-green-500" />
+          </span>
+        )}
       </button>
     </>
   );

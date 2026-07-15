@@ -9,6 +9,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { cleanTextForSpeech } from "@/lib/tts-clean";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -57,6 +58,7 @@ export type VoiceActivity =
 
 export interface VoiceSessionCtx {
   voiceState: VoiceState;
+  state: "idle" | "loading" | "speaking" | "error";
   transcript: string;
   interimTranscript: string;
   micLevel: number;
@@ -86,6 +88,7 @@ const noop = () => {};
 
 const defaultCtx: VoiceSessionCtx = {
   voiceState: "idle",
+  state: "idle",
   transcript: "",
   interimTranscript: "",
   micLevel: 0,
@@ -176,6 +179,19 @@ export function VoiceSessionProvider({
   const [activity, setActivityState] = useState<VoiceActivity>({
     type: "idle",
   });
+
+  const state: "idle" | "loading" | "speaking" | "error" = useMemo(() => {
+    if (voiceState === "speaking") return "speaking";
+    if (voiceState === "error") return "error";
+    if (
+      voiceState === "idle" ||
+      voiceState === "complete" ||
+      voiceState === "paused" ||
+      voiceState === "muted"
+    )
+      return "idle";
+    return "loading";
+  }, [voiceState]);
 
   // --- Refs ---
   const streamRef = useRef<MediaStream | null>(null);
@@ -691,7 +707,8 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const speakText = useCallback(
-    (text: string) => {
+    (rawText: string) => {
+      const text = cleanTextForSpeech(rawText);
       if (!text.trim()) return;
 
       stopSpeaking();
@@ -871,6 +888,7 @@ export function VoiceSessionProvider({
   const ctx = useMemo<VoiceSessionCtx>(
     () => ({
       voiceState,
+      state,
       transcript,
       interimTranscript,
       micLevel,
@@ -892,6 +910,7 @@ export function VoiceSessionProvider({
     }),
     [
       voiceState,
+      state,
       transcript,
       interimTranscript,
       micLevel,

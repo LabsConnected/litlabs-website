@@ -1,0 +1,329 @@
+:root {
+  --bg: #07070b;
+  --panel: #10131a;
+  --cyan: #30e7ff;
+  --orange: #ff7a1a;
+  --muted: #a0a9b8;
+}
+* {
+  box-sizing: border-box;
+}
+.shell {
+  min-height: 100dvh;
+  max-width: 760px;
+  margin: auto;
+  color: #f5f7fa;
+  background:
+    radial-gradient(circle at 50% -10%, #0b2730 0, transparent 28%), var(--bg);
+  display: grid;
+  grid-template-rows: auto auto 1fr auto;
+  font-family: Inter, ui-sans-serif, system-ui;
+}
+.header {
+  height: 64px;
+  padding: env(safe-area-inset-top) 16px 0;
+  border-bottom: 1px solid #202630;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: #07070bea;
+  backdrop-filter: blur(16px);
+}
+.brand,
+.online {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+.prompt {
+  color: var(--cyan);
+  font: 800 18px monospace;
+}
+.online {
+  color: #b9c1cb;
+  font-size: 12px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.online i,
+.activity i,
+.voiceStatus i {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #42f59b;
+  box-shadow: 0 0 10px #42f59b;
+}
+.iconButton,
+.activity button,
+.quickActions button,
+.messageActions button,
+.composer button {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  cursor: pointer;
+}
+.iconButton:focus-visible,
+.activity button:focus-visible,
+.quickActions button:focus-visible,
+.messageActions button:focus-visible,
+.composer button:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+.iconButton {
+  min-width: 44px;
+  min-height: 44px;
+  font-size: 21px;
+}
+.activity {
+  margin: 10px 12px 0;
+  border: 1px solid #1c3a3e;
+  border-radius: 12px;
+  background: #0b1116;
+  overflow: hidden;
+}
+.activity > button {
+  width: 100%;
+  padding: 11px 13px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+.activity span {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #c8f8ee;
+  font-weight: 700;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+.activity small {
+  color: var(--muted);
+}
+.activity pre {
+  margin: 0;
+  padding: 12px;
+  border-top: 1px solid #18262b;
+  color: #9cb6b2;
+  font-size: 11px;
+  white-space: pre-wrap;
+  max-height: 130px;
+  overflow: auto;
+}
+.messages {
+  padding: 18px 12px 190px;
+  overflow: auto;
+}
+.message {
+  display: flex;
+  gap: 8px;
+  margin: 0 0 18px;
+  align-items: flex-start;
+}
+.message.user {
+  justify-content: flex-end;
+}
+.avatar {
+  flex: 0 0 32px;
+  height: 32px;
+  border: 1px solid #1bcfe4;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  color: var(--cyan);
+  box-shadow: 0 0 14px #30e7ff1f;
+}
+.bubble {
+  max-width: min(86%, 620px);
+  border: 1px solid #293441;
+  border-radius: 18px;
+  padding: 13px 14px 9px;
+  background: linear-gradient(145deg, #121820, #0d1117);
+  box-shadow: 0 12px 30px #0007;
+}
+.assistant .bubble {
+  border-left: 2px solid var(--cyan);
+}
+.user .bubble {
+  background: linear-gradient(145deg, #30180a, #1b110b);
+  border-color: #8f4814;
+  border-right: 2px solid var(--orange);
+}
+.copy {
+  white-space: pre-wrap;
+  line-height: 1.55;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+.bubble time {
+  display: block;
+  text-align: right;
+  margin-top: 8px;
+  color: #9ba5b3;
+  font-size: 11px;
+}
+.messageActions {
+  display: flex;
+  gap: 4px;
+  border-top: 1px solid #232b35;
+  margin-top: 9px;
+  padding-top: 7px;
+}
+.messageActions button {
+  padding: 7px 10px;
+  color: #c5cdd8;
+  font-size: 12px;
+  border-radius: 8px;
+}
+.messageActions button:first-child {
+  color: var(--cyan);
+}
+.messageActions button:hover {
+  background: #1a222c;
+}
+.thinking {
+  color: #b0bac8;
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding-left: 42px;
+}
+.thinking i {
+  width: 5px;
+  height: 5px;
+  background: var(--cyan);
+  border-radius: 50%;
+  animation: pulse 1s infinite alternate;
+}
+.thinking i:nth-child(2) {
+  animation-delay: 0.2s;
+}
+.thinking i:nth-child(3) {
+  animation-delay: 0.4s;
+}
+@keyframes pulse {
+  to {
+    opacity: 0.2;
+    transform: translateY(-3px);
+  }
+}
+.dock {
+  position: fixed;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(760px, 100%);
+  z-index: 6;
+  padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  background: linear-gradient(transparent, #07070b 15%);
+}
+.quickActions {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  scrollbar-width: none;
+  padding: 16px 2px 8px;
+}
+.quickActions button {
+  flex: 0 0 auto;
+  border: 1px solid #17444a;
+  border-radius: 9px;
+  color: #61d9d3;
+  padding: 8px 11px;
+  font: 700 12px monospace;
+  background: #091012;
+}
+.voiceStatus {
+  width: max-content;
+  margin: 0 auto 7px;
+  padding: 5px 10px;
+  border: 1px solid #24313b;
+  border-radius: 999px;
+  background: #0c1218;
+  color: #b4c3ce;
+  font-size: 11px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.composer {
+  min-height: 62px;
+  border: 1px solid #303b48;
+  border-radius: 18px;
+  background: #10151d;
+  display: grid;
+  grid-template-columns: 42px 1fr 44px 46px;
+  align-items: center;
+  gap: 4px;
+  padding: 7px;
+  box-shadow: 0 10px 35px #000c;
+}
+.composer textarea {
+  width: 100%;
+  max-height: 112px;
+  resize: none;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #f5f7fa;
+  font: 15px/1.4 inherit;
+}
+.composer textarea::placeholder {
+  color: #8893a0;
+}
+.composer button {
+  height: 42px;
+  border-radius: 12px;
+  font-size: 17px;
+}
+.mic {
+  color: var(--cyan) !important;
+  background: #12323a !important;
+}
+.send {
+  background: var(--orange) !important;
+  color: #130902 !important;
+}
+.send:focus-visible {
+  outline: 2px solid #fff;
+  outline-offset: 2px;
+}
+.send:disabled {
+  opacity: 0.35;
+}
+@media (min-width: 700px) {
+  .shell {
+    border-inline: 1px solid #202630;
+  }
+  .messages {
+    padding-inline: 22px;
+  }
+  .dock {
+    padding-inline: 20px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* Embedded mode: used inside LITTTerminalShell */
+.embedded .messages {
+  padding-bottom: 24px;
+}
+.embedded .dock {
+  position: relative;
+  left: auto;
+  transform: none;
+  width: 100%;
+  padding-bottom: 8px;
+}

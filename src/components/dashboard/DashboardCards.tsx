@@ -154,7 +154,9 @@ export function GlossyCard({
   const { resolvedColors: T } = useTheme();
   return (
     <div
-      className="group relative overflow-hidden rounded-xl p-5 transition-all hover:scale-[1.01] cursor-pointer"
+      className="group relative overflow-hidden rounded-xl p-5 transition-all hover:scale-[1.01] cursor-pointer focus-visible:outline-2 focus-visible:outline-offset-2"
+      role="button"
+      tabIndex={0}
       style={{
         backgroundColor: `${T.boxBg}60`,
         border: `1px solid ${color}20`,
@@ -609,10 +611,10 @@ export function CenterStage({
                   href: "/studio?tool=image",
                 },
                 {
-                  label: "Agent Chat",
+                  label: "Open Studio",
                   icon: Zap,
                   color: "#8b5cf6",
-                  href: "/agent-chat",
+                  href: "/studio",
                 },
                 {
                   label: "Marketplace",
