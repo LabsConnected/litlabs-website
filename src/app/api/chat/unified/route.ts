@@ -196,9 +196,17 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   };
 
   if (!stream) {
-    const llmOptions: { task: "chat"; provider?: LLMProvider; maxTokens: number } = {
+    // Cap maxTokens for chat to keep replies tight (5-8 sentences). The agent
+    // system prompt enforces brevity; this is the belt-and-suspenders ceiling.
+    const llmOptions: {
+      task: "chat";
+      provider?: LLMProvider;
+      maxTokens: number;
+      temperature: number;
+    } = {
       task: "chat",
-      maxTokens: 2048,
+      maxTokens: 500,
+      temperature: 0.4,
     };
     if (provider && llmProvider) llmOptions.provider = llmProvider;
     const r = await generateText(prompt, llmOptions, undefined);
@@ -217,9 +225,18 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     async start(controller) {
       let assistantText = "";
       try {
-        const streamOptions: { task: "chat"; provider?: LLMProvider; maxTokens: number } = {
+        // Streaming chat: cap maxTokens tighter (500) and pin temperature low
+        // (0.4) so the reply finishes fast and stays concise. The agent system
+        // prompt enforces brevity; this is the streaming-path ceiling.
+        const streamOptions: {
+          task: "chat";
+          provider?: LLMProvider;
+          maxTokens: number;
+          temperature: number;
+        } = {
           task: "chat",
-          maxTokens: 2048,
+          maxTokens: 500,
+          temperature: 0.4,
         };
         if (provider && llmProvider) streamOptions.provider = llmProvider;
         const r = await streamText(
@@ -281,7 +298,7 @@ async function handleSimpleChat(body: UnifiedChatRequest, userId: string | null)
   const prompt = buildPrompt(targetAgent, message, []);
   const r = await generateText(
     prompt,
-    { task: "chat", provider: "gemini", maxTokens: 2048 },
+    { task: "chat", provider: "gemini", maxTokens: 500, temperature: 0.4 },
     undefined,
   );
 

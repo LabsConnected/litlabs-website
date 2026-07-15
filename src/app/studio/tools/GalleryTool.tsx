@@ -572,7 +572,7 @@ export default function GalleryTool() {
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search assets..."
-              className="w-full rounded-xl border border-white/10 bg-white/3 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-[var(--text-muted)] focus:border-cyan-500/30 focus:bg-white/5 sm:w-56"
+              className="w-full rounded-xl border border-white/10 bg-white/3 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-(--text-muted) focus:border-cyan-500/30 focus:bg-white/5 sm:w-56"
               style={{ color: T.textColor }}
             />
           </div>

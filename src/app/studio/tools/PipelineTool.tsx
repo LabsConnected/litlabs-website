@@ -489,25 +489,25 @@ export default function PipelineTool() {
       {/* ── LEFT: Library ── */}
       <aside className="w-56 shrink-0 border-r border-fuchsia-900/30 bg-[#0a0310]/80 backdrop-blur-xl flex flex-col z-10">
         <div className="p-3 border-b border-white/5">
-          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-2">
+          <span className="text-[10px] font-bold text-(--text-muted) uppercase tracking-widest flex items-center gap-2">
             <Box className="w-3.5 h-3.5" /> Tool Library
           </span>
         </div>
         <div className="px-3 py-2">
           <div className="flex items-center gap-1.5 bg-[#130720] border border-white/10 rounded-lg px-2 py-1.5">
-            <Search className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
+            <Search className="w-3 h-3 text-(--text-muted) shrink-0" />
             <input
               id="pipeline-tool-library-filter"
               name="pipelineToolLibraryFilter"
               value={libraryFilter}
               onChange={(e) => setLibraryFilter(e.target.value)}
               placeholder="Filter nodes..."
-              className="bg-transparent text-[10px] text-[var(--text-color)] outline-none w-full placeholder:text-[var(--text-muted)]"
+              className="bg-transparent text-[10px] text-[var(--text-color)] outline-none w-full placeholder:text-(--text-muted)"
             />
             {libraryFilter && (
               <button
                 onClick={() => setLibraryFilter("")}
-                className="text-[var(--text-muted)] hover:text-[var(--text-color)]"
+                className="text-(--text-muted) hover:text-[var(--text-color)]"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -523,7 +523,7 @@ export default function PipelineTool() {
             if (catItems.length === 0) return null;
             return (
               <div key={cat} className="space-y-1.5">
-                <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest pl-1">
+                <div className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest pl-1">
                   {cat === "trigger"
                     ? "1. Triggers"
                     : cat === "agent"
@@ -548,7 +548,7 @@ export default function PipelineTool() {
                           {item.title}
                         </span>
                       </div>
-                      <p className="text-[9px] text-[var(--text-muted)] ml-7 leading-tight">
+                      <p className="text-[9px] text-(--text-muted) ml-7 leading-tight">
                         {item.desc}
                       </p>
                     </div>
@@ -566,7 +566,7 @@ export default function PipelineTool() {
       >
         {/* Header */}
         <div className="w-full max-w-lg mb-5 flex items-center justify-between px-1">
-          <span className="text-xs font-mono text-[var(--text-muted)]">
+          <span className="text-xs font-mono text-(--text-muted)">
             untitled_pipeline.yaml
           </span>
           <div className="flex items-center gap-2">
@@ -595,11 +595,11 @@ export default function PipelineTool() {
         <div className="w-full max-w-lg flex flex-col items-center pb-32">
           {nodes.length === 0 ? (
             <div className="mt-16 text-center flex flex-col items-center">
-              <Network className="w-14 h-14 text-[var(--text-muted)] mb-4" />
-              <h2 className="text-lg font-bold text-[var(--text-muted)] mb-2">
+              <Network className="w-14 h-14 text-(--text-muted) mb-4" />
+              <h2 className="text-lg font-bold text-(--text-muted) mb-2">
                 Pipeline Empty
               </h2>
-              <p className="text-sm text-[var(--text-muted)] max-w-sm">
+              <p className="text-sm text-(--text-muted) max-w-sm">
                 Click tools from the library or ask the AI to generate a
                 pipeline.
               </p>
@@ -635,7 +635,7 @@ export default function PipelineTool() {
                           ? "bg-emerald-900/80 text-[var(--success)] border-emerald-500/40"
                           : status === "error"
                             ? "bg-red-900/80 text-[var(--warning)] border-red-500/40"
-                            : "bg-slate-800 text-[var(--text-muted)] border-slate-600/30"
+                            : "bg-slate-800 text-(--text-muted) border-slate-600/30"
                     }`}
                     >
                       {status}
@@ -675,15 +675,15 @@ export default function PipelineTool() {
                       </div>
                       <button
                         onClick={(e) => deleteNode(node.id, e)}
-                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1.5 text-(--text-muted) hover:text-[var(--warning)] hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     {node.type === "agent" && (
-                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-[var(--text-muted)]">
+                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-(--text-muted)">
                         <span className="truncate flex-1 max-w-[200px]">
-                          <span className="text-[var(--text-muted)] mr-2">
+                          <span className="text-(--text-muted) mr-2">
                             prompt:
                           </span>
                           {String(node.config.prompt) || "No prompt set..."}
@@ -719,7 +719,7 @@ export default function PipelineTool() {
                 onChange={(e) => setAiPrompt(e.target.value)}
                 disabled={isGenerating}
                 placeholder="Describe a pipeline... e.g. 'Scrape hourly, summarize with AI, save to DB'"
-                className="flex-1 bg-transparent text-xs text-[var(--text-color)] py-2.5 pr-3 outline-none placeholder:text-[var(--text-muted)] font-medium"
+                className="flex-1 bg-transparent text-xs text-[var(--text-color)] py-2.5 pr-3 outline-none placeholder:text-(--text-muted) font-medium"
               />
               <button
                 type="submit"
@@ -750,7 +750,7 @@ export default function PipelineTool() {
                   Configuration
                 </h2>
                 <span
-                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-[var(--accent-color)]" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-[var(--success)]" : "bg-slate-800 text-[var(--text-muted)]"}`}
+                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-[var(--accent-color)]" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-[var(--success)]" : "bg-slate-800 text-(--text-muted)"}`}
                 >
                   {selectedNode.status || "idle"}
                 </span>
@@ -758,7 +758,7 @@ export default function PipelineTool() {
 
               {/* Node name */}
               <div>
-                <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                   Node Name
                 </label>
                 <input
@@ -782,7 +782,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Webhook Listener" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Endpoint Path
                     </label>
                     <input
@@ -801,7 +801,7 @@ export default function PipelineTool() {
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Method
                     </label>
                     <div className="flex gap-1.5">
@@ -811,7 +811,7 @@ export default function PipelineTool() {
                           onClick={() =>
                             updateConfig(selectedNode.id, "method", m)
                           }
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-[var(--text-muted)] border-white/10 hover:border-white/20"}`}
+                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
                         >
                           {m}
                         </button>
@@ -819,7 +819,7 @@ export default function PipelineTool() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Headers
                     </label>
                     <textarea
@@ -841,7 +841,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Scheduled Interval" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Preset
                     </label>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -856,7 +856,7 @@ export default function PipelineTool() {
                             updateConfig(selectedNode.id, "preset", p.id);
                             updateConfig(selectedNode.id, "cron", p.cron);
                           }}
-                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-[var(--text-muted)] border-white/10 hover:border-white/20"}`}
+                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-(--text-muted) border-white/10 hover:border-white/20"}`}
                         >
                           {p.label}
                         </button>
@@ -864,7 +864,7 @@ export default function PipelineTool() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Cron Expression
                     </label>
                     <input
@@ -886,7 +886,7 @@ export default function PipelineTool() {
                 selectedNode.title === "Task Champion") && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       AI Model
                     </label>
                     <select
@@ -909,7 +909,7 @@ export default function PipelineTool() {
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+                      <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest">
                         Temperature
                       </label>
                       <span className="text-[10px] text-[var(--accent-color)] font-mono">
@@ -936,7 +936,7 @@ export default function PipelineTool() {
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+                      <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest">
                         System Prompt
                       </label>
                       <button
@@ -971,7 +971,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Database Insert" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Target Table
                     </label>
                     <input
@@ -986,7 +986,7 @@ export default function PipelineTool() {
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Ledger Cluster
                     </label>
                     <select
@@ -1010,7 +1010,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Discord Webhook" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Webhook URL
                     </label>
                     <input
@@ -1029,7 +1029,7 @@ export default function PipelineTool() {
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Message Template
                     </label>
                     <textarea
@@ -1055,7 +1055,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Email Dispatch" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       To
                     </label>
                     <input
@@ -1070,7 +1070,7 @@ export default function PipelineTool() {
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Subject
                     </label>
                     <input
@@ -1085,7 +1085,7 @@ export default function PipelineTool() {
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-(--text-muted) uppercase tracking-widest mb-1 block">
                       Body
                     </label>
                     <textarea
@@ -1126,15 +1126,15 @@ export default function PipelineTool() {
         <div className="h-[220px] bg-[#050108] border-t border-fuchsia-900/40 flex flex-col relative">
           <div className="bg-[#130720]/80 px-3 py-1.5 border-b border-fuchsia-900/30 flex items-center justify-between absolute top-0 w-full z-10 backdrop-blur-md">
             <div className="flex items-center gap-2">
-              <Terminal className="w-3 h-3 text-[var(--text-muted)]" />
-              <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
+              <Terminal className="w-3 h-3 text-(--text-muted)" />
+              <span className="text-[8px] font-bold text-(--text-muted) uppercase tracking-widest">
                 Execution Log
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={clearTerminal}
-                className="text-[8px] text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors"
+                className="text-[8px] text-(--text-muted) hover:text-[var(--text-color)] transition-colors"
               >
                 Clear
               </button>
@@ -1148,7 +1148,7 @@ export default function PipelineTool() {
             style={{ scrollbarWidth: "none" }}
           >
             {terminalLogs.map((log, i) => {
-              let cls = "text-[var(--text-muted)]";
+              let cls = "text-(--text-muted)";
               if (log.includes("[OK]")) cls = "text-[var(--success)]";
               if (log.includes("[SYS]")) cls = "text-[var(--accent-color)]";
               if (log.includes("[WRN]")) cls = "text-[var(--warning)]";
@@ -1222,7 +1222,7 @@ export default function PipelineTool() {
                 </button>
                 <button
                   onClick={() => setShowYaml(false)}
-                  className="text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors"
+                  className="text-(--text-muted) hover:text-[var(--text-color)] transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
