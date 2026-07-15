@@ -47,6 +47,7 @@ export default function LayoutShell({
   const pathname = usePathname();
   const publicPage = isPublicPath(pathname || "/");
   const isStudio = pathname === "/studio";
+  const isChat = pathname === "/litt" || pathname === "/litt-terminal";
   const ownChrome = hasOwnChrome(pathname || "/");
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
     useState(isStudio);
@@ -64,7 +65,7 @@ export default function LayoutShell({
     return () => window.removeEventListener("keydown", handleKey);
   }, []);
 
-  if (isStudio) {
+  if (isStudio || isChat) {
     return (
       <>
         <AnimatedBackgroundWrapper />
