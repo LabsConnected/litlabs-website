@@ -2,21 +2,23 @@
 
 import Link from "next/link";
 import { Code2, Eye, FolderGit2, Play } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
 
 export default function BuilderTool() {
+  const { resolvedColors: T } = useTheme();
   return (
     <div className="mx-auto flex h-full w-full max-w-7xl flex-col gap-3 overflow-auto">
       <SystemTopologyPanel />
       <div className="grid flex-1 gap-3 md:grid-cols-[minmax(0,1fr)_320px]">
         <section className="rounded-2xl border border-white/10 bg-black/30 p-4">
           <div className="mb-4 flex items-center gap-2">
-            <Code2 size={16} className="text-cyan-300" />
+            <Code2 size={16} style={{ color: T.accentColor }} />
             <div>
               <p className="text-xs font-black uppercase tracking-wider">
                 AI Builder
               </p>
-              <p className="text-[10px] text-white/50">
+              <p className="text-[10px]" style={{ color: T.textMuted }}>
                 Prompt → files → build → preview
               </p>
             </div>
@@ -33,9 +35,16 @@ export default function BuilderTool() {
                   key={String(title)}
                   className="rounded-xl border border-white/10 bg-white/[0.035] p-3"
                 >
-                  <I size={15} className="mb-2 text-cyan-300" />
+                  <I
+                    size={15}
+                    className="mb-2"
+                    style={{ color: T.accentColor }}
+                  />
                   <p className="text-xs font-bold">{String(title)}</p>
-                  <p className="mt-1 text-[10px] text-white/50">
+                  <p
+                    className="mt-1 text-[10px]"
+                    style={{ color: T.textMuted }}
+                  >
                     {String(copy)}
                   </p>
                 </div>
@@ -46,18 +55,24 @@ export default function BuilderTool() {
             <p className="text-xs font-bold">
               Builder workspace is connected to the Studio shell.
             </p>
-            <p className="mt-1 text-[10px] text-white/50">
+            <p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>
               Use the command dock to describe what to build. File writes and
               dependency installs remain approval-gated.
             </p>
           </div>
         </section>
         <aside className="rounded-2xl border border-white/10 bg-black/30 p-4">
-          <p className="text-[9px] font-black uppercase tracking-[0.2em] text-cyan-300">
+          <p
+            className="text-[9px] font-black uppercase tracking-[0.2em]"
+            style={{ color: T.accentColor }}
+          >
             Project
           </p>
           <h3 className="mt-1 text-sm font-black">LiTTree-LabStudios</h3>
-          <p className="mt-2 text-[10px] leading-relaxed text-white/55">
+          <p
+            className="mt-2 text-[10px] leading-relaxed"
+            style={{ color: T.textMuted }}
+          >
             Repository, terminal, agents, media tools, and deployment live in
             one operating surface.
           </p>

@@ -36,7 +36,7 @@ export default function SpaceTool() {
     <div className="flex-1 flex flex-col h-full p-4 gap-4">
       {/* Header */}
       <div className="flex items-center gap-2">
-        <Rocket size={20} style={{ color: "#ff6b35" }} />
+        <Rocket size={20} style={{ color: T.accentColor }} />
         <span
           className="text-sm font-black uppercase tracking-widest"
           style={{ color: T.headerColor }}
@@ -46,9 +46,9 @@ export default function SpaceTool() {
         <span
           className="text-xs px-2 py-0.5 rounded-full font-mono"
           style={{
-            backgroundColor: "#ff6b3520",
-            color: "#ff6b35",
-            border: "1px solid #ff6b3540",
+            backgroundColor: T.accentColor + "20",
+            color: T.accentColor,
+            border: `1px solid ${T.accentColor}40`,
           }}
         >
           MiniMax
@@ -64,7 +64,7 @@ export default function SpaceTool() {
         }}
       >
         <label
-          className="text-xs font-bold uppercase tracking-widest opacity-60"
+          className="text-xs font-bold uppercase tracking-widest"
           style={{ color: T.textMuted }}
         >
           Prompt
@@ -76,7 +76,7 @@ export default function SpaceTool() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Describe a space scene, skybox, or 3D environment…"
-          className="w-full bg-transparent resize-none text-sm outline-none placeholder:opacity-40 sm:min-h-32"
+          className="w-full bg-transparent resize-none text-sm outline-none placeholder:text-[var(--text-muted)] sm:min-h-32"
           style={{ color: T.textColor }}
         />
         <button
@@ -84,8 +84,8 @@ export default function SpaceTool() {
           disabled={loading || !prompt.trim()}
           className="self-end flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-bold transition-all disabled:opacity-40"
           style={{
-            backgroundColor: "#ff6b35",
-            color: "#fff",
+            backgroundColor: T.accentColor,
+            color: T.textColor,
           }}
         >
           {loading ? (
@@ -102,9 +102,9 @@ export default function SpaceTool() {
         <div
           className="rounded-xl p-4 text-sm"
           style={{
-            backgroundColor: "#ff000015",
-            border: "1px solid #ff000040",
-            color: "#ff6b6b",
+            backgroundColor: T.warning + "15",
+            border: `1px solid ${T.warning}40`,
+            color: T.warning,
           }}
         >
           {error}
@@ -136,7 +136,7 @@ export default function SpaceTool() {
 
       {!result && !error && !loading && (
         <div
-          className="flex-1 flex flex-col items-center justify-center gap-3 opacity-30"
+          className="flex-1 flex flex-col items-center justify-center gap-3"
           style={{ color: T.textMuted }}
         >
           <Rocket size={40} />

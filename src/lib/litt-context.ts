@@ -6,7 +6,17 @@ export type LiTTActionType =
   | "create_file"
   | "edit_file"
   | "start_agent"
-  | "deploy";
+  | "deploy"
+  | "add_goal"
+  | "remember";
+
+export type LiTTMemoryScope =
+  | "profile"
+  | "preference"
+  | "agent"
+  | "project"
+  | "conversation"
+  | "temporary";
 
 export type LiTTAction = {
   type: LiTTActionType;
@@ -15,6 +25,13 @@ export type LiTTAction = {
   filePath?: string;
   content?: string;
   agentName?: string;
+  // add_goal
+  goalTitle?: string;
+  goalNotes?: string;
+  priority?: "low" | "medium" | "high";
+  // remember
+  memoryContent?: string;
+  memoryScope?: LiTTMemoryScope;
 };
 
 export type LiTTAgentStatus = "online" | "idle" | "running" | "error";
@@ -131,6 +148,62 @@ export function parseLiTTActions(answer: string): LiTTAction[] {
     if (command) {
       actions.push({ type: "insert_command", label: "Insert into terminal", command });
       actions.push({ type: "run_command", label: "Run command", command });
+    }
+  }
+
+  // Extract JSON action blocks. The model is instructed to emit these when
+  // the user says "add this to my list" / "make a goal" / "todo: X" / etc.
+  // We accept both fenced ```json … ``` and bare inline objects.
+  const jsonBlocks: string[] = [];
+  const fenceMatches = answer.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g);
+  for (const m of fenceMatches) jsonBlocks.push(m[1]);
+  const inlineMatches = answer.matchAll(
+    /(?<![`{])\{\s*"type"\s*:\s*"(add_goal|remember)"[\s\S]*?\}/g,
+  );
+  for (const m of inlineMatches) jsonBlocks.push(m[0]);
+
+  const validPriorities = ["low", "medium", "high"] as const;
+  const validScopes: LiTTMemoryScope[] = [
+    "profile",
+    "preference",
+    "agent",
+    "project",
+    "conversation",
+    "temporary",
+  ];
+
+  for (const raw of jsonBlocks) {
+    try {
+      const obj = JSON.parse(raw) as Record<string, unknown>;
+      if (obj.type === "add_goal" && typeof obj.title === "string" && obj.title.trim()) {
+        const priority = validPriorities.includes(obj.priority as never)
+          ? (obj.priority as "low" | "medium" | "high")
+          : "medium";
+        actions.push({
+          type: "add_goal",
+          label: `Add goal: ${obj.title}`,
+          goalTitle: obj.title.trim(),
+          goalNotes: typeof obj.notes === "string" ? obj.notes : undefined,
+          priority,
+        });
+      } else if (
+        obj.type === "remember" &&
+        typeof obj.content === "string" &&
+        obj.content.trim()
+      ) {
+        const scope = validScopes.includes(obj.scope as LiTTMemoryScope)
+          ? (obj.scope as LiTTMemoryScope)
+          : "conversation";
+        const preview = obj.content.length > 60 ? `${obj.content.slice(0, 60)}…` : obj.content;
+        actions.push({
+          type: "remember",
+          label: `Remember: ${preview}`,
+          memoryContent: obj.content.trim(),
+          memoryScope: scope,
+        });
+      }
+    } catch {
+      // Malformed JSON — skip this block, the rest of the answer is still useful.
     }
   }
 

@@ -460,9 +460,14 @@ export default function VideoTool() {
                 >
                   <div className="font-bold flex items-center justify-between">
                     <span>{m.label}</span>
-                    <span className="text-[9px] opacity-60">{m.provider}</span>
+                    <span className="text-[9px]" style={{ color: T.textMuted }}>
+                      {m.provider}
+                    </span>
                   </div>
-                  <div className="text-[9px] opacity-60 mt-0.5">
+                  <div
+                    className="text-[9px] mt-0.5"
+                    style={{ color: T.textMuted }}
+                  >
                     {m.desc} · {m.cost} 🪙
                   </div>
                 </button>
@@ -810,7 +815,7 @@ export default function VideoTool() {
                     setError(null);
                   }}
                   disabled={isGenerating}
-                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:opacity-80 disabled:opacity-50 line-clamp-2"
+                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:bg-white/10 disabled:opacity-50 line-clamp-2"
                   style={{
                     backgroundColor: T.bgColor,
                     borderColor: T.borderColor,
@@ -848,9 +853,9 @@ export default function VideoTool() {
             <div
               className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border"
               style={{
-                borderColor: "#f85149",
-                color: "#f85149",
-                backgroundColor: "#f8514910",
+                borderColor: T.warning,
+                color: T.warning,
+                backgroundColor: T.warning + "10",
               }}
             >
               <AlertTriangle size={12} />
@@ -876,7 +881,7 @@ export default function VideoTool() {
                 Preview
               </span>
               {current?.status === "succeeded" && (
-                <span className="text-[10px]" style={{ color: "#56d364" }}>
+                <span className="text-[10px]" style={{ color: T.success }}>
                   ● Ready
                 </span>
               )}
@@ -911,17 +916,25 @@ export default function VideoTool() {
                       🎬
                     </div>
                   </div>
-                  <p className="text-sm opacity-70">Generating video...</p>
-                  <p className="text-[10px] opacity-50 mt-1">
+                  <p className="text-sm" style={{ color: T.textColor }}>
+                    Generating video...
+                  </p>
+                  <p
+                    className="text-[10px] mt-1"
+                    style={{ color: T.textMuted }}
+                  >
                     This can take 30-120 seconds
                   </p>
                 </div>
               ) : (
-                <div className="text-center px-6">
-                  <div className="text-4xl mb-2 opacity-30">🎬</div>
-                  <p className="text-sm opacity-60">
-                    Your video will appear here
-                  </p>
+                <div
+                  className="text-center px-6"
+                  style={{ color: T.textMuted }}
+                >
+                  <div className="text-4xl mb-2" aria-hidden>
+                    🎬
+                  </div>
+                  <p className="text-sm">Your video will appear here</p>
                 </div>
               )}
             </div>
@@ -968,14 +981,18 @@ export default function VideoTool() {
               {history.length > 0 && (
                 <button
                   onClick={handleClear}
-                  className="text-[9px] opacity-60 hover:opacity-100"
+                  className="text-[9px]"
+                  style={{ color: T.textMuted }}
                 >
                   Clear
                 </button>
               )}
             </div>
             {history.length === 0 ? (
-              <div className="p-6 text-center text-xs opacity-50">
+              <div
+                className="p-6 text-center text-xs"
+                style={{ color: T.textMuted }}
+              >
                 No videos yet.
               </div>
             ) : (
@@ -1004,7 +1021,8 @@ export default function VideoTool() {
                       <div className="w-full h-full flex items-center justify-center">
                         <Loader2
                           size={14}
-                          className="animate-spin opacity-50"
+                          className="animate-spin"
+                          style={{ color: T.accentColor }}
                         />
                       </div>
                     )}

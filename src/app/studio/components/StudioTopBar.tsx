@@ -147,7 +147,10 @@ export default function StudioTopBar({
         <span style={{ color: T.accentColor }}>
           {walletLoading ? "—" : balance.toLocaleString()}
         </span>
-        <span className="hidden sm:inline opacity-50 text-[9px] uppercase tracking-wider">
+        <span
+          className="hidden sm:inline text-[9px] uppercase tracking-wider"
+          style={{ color: T.textMuted }}
+        >
           LBC
         </span>
       </div>
@@ -208,7 +211,10 @@ function HealthPulse({
     >
       <HeartPulse size={11} style={{ color: T.success }} />
       <span style={{ color: T.success }}>99.9%</span>
-      <span className="opacity-50 text-[9px] uppercase tracking-wider">
+      <span
+        className="text-[9px] uppercase tracking-wider"
+        style={{ color: T.textMuted }}
+      >
         UPTIME
       </span>
     </div>

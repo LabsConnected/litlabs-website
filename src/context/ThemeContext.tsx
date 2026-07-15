@@ -504,18 +504,63 @@ interface ThemeContextType {
   resetTheme: () => void;
 }
 
-// Helper: produce a muted variant with safe contrast for small text.
-// We lighten the base text color toward white so it never drops below ~4.5:1
-// on the matching dark background.
-function mixMuted(hex: string): string {
+// Helpers for safe muted color
+const hexToRgb = (hex: string) => {
   const c = hex.replace("#", "");
-  if (c.length !== 6) return "#c4c4d4";
-  const r = parseInt(c.slice(0, 2), 16);
-  const g = parseInt(c.slice(2, 4), 16);
-  const b = parseInt(c.slice(4, 6), 16);
-  const mix = (v: number) => Math.round(v + (235 - v) * 0.45);
-  const to2 = (v: number) => v.toString(16).padStart(2, "0");
-  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
+  if (c.length !== 6) return { r: 0, g: 0, b: 0 };
+  return {
+    r: parseInt(c.slice(0, 2), 16),
+    g: parseInt(c.slice(2, 4), 16),
+    b: parseInt(c.slice(4, 6), 16),
+  };
+};
+const to2 = (v: number) =>
+  Math.max(0, Math.min(255, Math.round(v)))
+    .toString(16)
+    .padStart(2, "0");
+const luminance = (r: number, g: number, b: number) => {
+  const a = [r, g, b].map((v) => {
+    v /= 255;
+    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+  });
+  return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
+};
+const contrastRatio = (lum1: number, lum2: number) => {
+  const l1 = lum1 + 0.05;
+  const l2 = lum2 + 0.05;
+  return Math.max(l1, l2) / Math.min(l1, l2);
+};
+
+// Helper: produce a muted variant with safe contrast for small text.
+// Mixes the text color toward the background color until contrast is just
+// above 4.5:1 so it stays readable in both dark and light modes.
+function mixMuted(textHex: string, bgHex: string): string {
+  const text = hexToRgb(textHex);
+  const bg = hexToRgb(bgHex);
+  const bgLum = luminance(bg.r, bg.g, bg.b);
+  let lo = 0;
+  let hi = 0.35;
+  let ratio = 0.15;
+  for (let i = 0; i < 8; i++) {
+    const r = text.r + (bg.r - text.r) * ratio;
+    const g = text.g + (bg.g - text.g) * ratio;
+    const b = text.b + (bg.b - text.b) * ratio;
+    const lum = luminance(r, g, b);
+    const cr = contrastRatio(lum, bgLum);
+    if (cr < 4.5) {
+      hi = ratio;
+      ratio = (lo + ratio) / 2;
+    } else if (cr > 6) {
+      lo = ratio;
+      ratio = (ratio + hi) / 2;
+    } else {
+      return `#${to2(r)}${to2(g)}${to2(b)}`;
+    }
+  }
+  const r = text.r + (bg.r - text.r) * ratio;
+  const g = text.g + (bg.g - text.g) * ratio;
+  const b = text.b + (bg.b - text.b) * ratio;
+  return `#${to2(r)}${to2(g)}${to2(b)}`;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
@@ -533,10 +578,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Apply accent override if not custom
     const accent = custom.accentColor ? null : accentOverrides[t.accent];
 
+    const bgColor = custom.bgColor || skinColors.bgColor;
+    const textColor = custom.textColor || skinColors.textColor;
     return {
-      bgColor: custom.bgColor || skinColors.bgColor,
-      textColor: custom.textColor || skinColors.textColor,
-      textMuted: mixMuted(custom.textColor || skinColors.textColor),
+      bgColor,
+      textColor,
+      textMuted: mixMuted(textColor, bgColor),
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor:
         accent?.headerColor || custom.headerColor || skinColors.headerColor,
@@ -597,10 +644,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     const colors = getResolvedColors(theme);
     root.style.setProperty("--bg-color", colors.bgColor);
     root.style.setProperty("--text-color", colors.textColor);
+    root.style.setProperty("--text-muted", colors.textMuted);
     root.style.setProperty("--link-color", colors.linkColor);
     root.style.setProperty("--header-color", colors.headerColor);
     root.style.setProperty("--border-color", colors.borderColor);
     root.style.setProperty("--accent-color", colors.accentColor);
+    root.style.setProperty("--success", colors.success);
+    root.style.setProperty("--warning", colors.warning);
     root.style.setProperty("--box-bg", colors.boxBg);
     // Sync data-theme attribute so the :root[data-theme="light"]
     // overrides in globals.css activate for legacy CSS-only components.

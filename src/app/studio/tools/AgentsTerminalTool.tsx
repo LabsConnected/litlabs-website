@@ -480,7 +480,7 @@ export default function AgentsTerminalTool() {
                   <div className="flex items-center gap-2">
                     <span
                       className="text-[9px] font-mono w-4 shrink-0"
-                      style={{ color: T.textMuted + "60" }}
+                      style={{ color: T.textMuted }}
                     >
                       {String(idx + 1).padStart(2, "0")}
                     </span>
@@ -501,7 +501,7 @@ export default function AgentsTerminalTool() {
                       <div
                         className="text-[9px] truncate"
                         style={{
-                          color: isActive ? T.textMuted : T.textMuted + "60",
+                          color: T.textMuted,
                         }}
                       >
                         {agent.role}
@@ -521,17 +521,17 @@ export default function AgentsTerminalTool() {
           >
             <div
               className="text-[9px] font-mono"
-              style={{ color: T.textMuted + "60" }}
+              style={{ color: T.textMuted }}
             >
               Quick commands:
             </div>
             <div className="grid grid-cols-2 gap-1 text-[9px] font-mono">
               <span style={{ color: T.accentColor }}>/help</span>
-              <span style={{ color: T.textMuted + "60" }}>show help</span>
+              <span style={{ color: T.textMuted }}>show help</span>
               <span style={{ color: T.accentColor }}>/clear</span>
-              <span style={{ color: T.textMuted + "60" }}>clear chat</span>
+              <span style={{ color: T.textMuted }}>clear chat</span>
               <span style={{ color: T.accentColor }}>/image</span>
-              <span style={{ color: T.textMuted + "60" }}>gen image</span>
+              <span style={{ color: T.textMuted }}>gen image</span>
             </div>
           </div>
 
@@ -541,12 +541,12 @@ export default function AgentsTerminalTool() {
             style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
           >
             <div>
-              <span style={{ color: T.textMuted + "40" }}>Lines:</span>
+              <span style={{ color: T.textMuted }}>Lines:</span>
               <br />
               <span style={{ color: T.accentColor }}>{lines.length}</span>
             </div>
             <div>
-              <span className="opacity-50">Model</span>
+              <span>Model</span>
               <br />
               <span style={{ color: providerConfig.color }}>
                 {providerConfig.label.split(" ")[0]}
@@ -688,7 +688,7 @@ export default function AgentsTerminalTool() {
             {lines.length === 0 && !streaming && (
               <div
                 className="flex flex-col items-center justify-center h-full text-center"
-                style={{ color: T.textMuted + "60" }}
+                style={{ color: T.textMuted }}
               >
                 <div className="text-center space-y-2">
                   <div
@@ -697,17 +697,17 @@ export default function AgentsTerminalTool() {
                   >
                     LiTree Labs Terminal
                   </div>
-                  <div className="text-[10px] opacity-60">
+                  <div className="text-[10px]">
                     Copyright (c) LiTree Lab Studios. All rights reserved.
                   </div>
-                  <div className="mt-4 text-[10px] opacity-40">
+                  <div className="mt-4 text-[10px]">
                     Connected to{" "}
                     <span style={{ color: selectedAgent.color }}>
                       {selectedAgent.name}
                     </span>
                   </div>
-                  <div className="text-[9px] opacity-30 mt-2">
-                    Try: <span className="text-cyan-400">/help</span> for
+                  <div className="text-[9px] mt-2">
+                    Try: <span style={{ color: T.linkColor }}>/help</span> for
                     commands
                   </div>
                 </div>
@@ -727,7 +727,7 @@ export default function AgentsTerminalTool() {
                     </span>
                     <span
                       className="whitespace-nowrap"
-                      style={{ color: T.textMuted + "80" }}
+                      style={{ color: T.textMuted }}
                     >
                       [{line.ts}] {selectedAgent.name}&gt;
                     </span>
@@ -752,7 +752,7 @@ export default function AgentsTerminalTool() {
                     <span style={{ color: "#ff6b6b" }}>{line.content}</span>
                   </div>
                 ) : line.role === "system" ? (
-                  <div className="flex items-start gap-1 pl-4 opacity-50">
+                  <div className="flex items-start gap-1 pl-4">
                     <span style={{ color: T.textMuted }}># {line.content}</span>
                   </div>
                 ) : (
@@ -802,7 +802,7 @@ export default function AgentsTerminalTool() {
                 />
                 <button
                   onClick={() => setAttachedImageUrl("")}
-                  className="text-[8px] opacity-50 hover:opacity-100"
+                  className="text-[8px]"
                   style={{ color: T.textMuted }}
                 >
                   <X size={10} />
@@ -857,16 +857,17 @@ export default function AgentsTerminalTool() {
                 </button>
                 <button
                   onClick={() => setShowImageInput(false)}
-                  className="px-1 opacity-50"
+                  className="px-1"
+                  style={{ color: T.textMuted }}
                 >
-                  <X size={10} style={{ color: T.textMuted }} />
+                  <X size={10} />
                 </button>
               </div>
             )}
 
             {attachedImageUrl && (
               <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
-                <span style={{ color: T.textMuted + "60" }}>📎 Attached:</span>
+                <span style={{ color: T.textMuted }}>📎 Attached:</span>
                 <span
                   className="text-[10px] truncate max-w-[200px]"
                   style={{ color: T.accentColor }}
@@ -875,7 +876,7 @@ export default function AgentsTerminalTool() {
                 </span>
                 <button
                   onClick={() => setAttachedImageUrl("")}
-                  className="text-[9px] opacity-50 hover:opacity-100"
+                  className="text-[9px]"
                   style={{ color: "#ff6b6b" }}
                 >
                   [Remove]
@@ -890,7 +891,7 @@ export default function AgentsTerminalTool() {
                 <span className="font-bold" style={{ color: "#00a2ed" }}>
                   PS
                 </span>
-                <span style={{ color: T.textMuted + "80" }}>
+                <span style={{ color: T.textMuted }}>
                   {" "}
                   [{formatTime()}] {selectedAgent.name}&gt;
                 </span>
@@ -922,9 +923,7 @@ export default function AgentsTerminalTool() {
                     onClick={() => setShowImageInput((v) => !v)}
                     className="p-1.5 transition-all hover:opacity-80"
                     style={{
-                      color: showImageInput
-                        ? T.accentColor
-                        : T.textMuted + "60",
+                      color: showImageInput ? T.accentColor : T.textMuted,
                     }}
                     title="Attach image (Ctrl+I)"
                   >
@@ -953,7 +952,7 @@ export default function AgentsTerminalTool() {
             {/* Status bar */}
             <div
               className="flex flex-wrap items-center justify-between gap-2 mt-2 px-0.5 text-[9px]"
-              style={{ color: T.textMuted + "40" }}
+              style={{ color: T.textMuted }}
             >
               <div className="flex flex-wrap gap-3">
                 <span>{providerLabel}</span>
@@ -1024,7 +1023,7 @@ export default function AgentsTerminalTool() {
                   {selectedAgent.name}
                 </div>
                 <div
-                  className="text-[9px] opacity-60 mt-0.5"
+                  className="text-[9px] mt-0.5"
                   style={{ color: T.textMuted }}
                 >
                   {selectedAgent.role}
@@ -1052,7 +1051,7 @@ export default function AgentsTerminalTool() {
                   Description
                 </div>
                 <p
-                  className="text-[10px] leading-relaxed opacity-70"
+                  className="text-[10px] leading-relaxed"
                   style={{ color: T.textColor }}
                 >
                   {selectedAgent.desc}
@@ -1154,14 +1153,14 @@ export default function AgentsTerminalTool() {
                   </button>
                   <button
                     onClick={copyLogs}
-                    className="flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded border opacity-60 hover:opacity-100 transition-all"
+                    className="flex items-center gap-1 text-[8px] px-1.5 py-0.5 rounded border transition-all"
                     style={{
                       borderColor: T.borderColor + "20",
                       color: T.textMuted,
                     }}
                   >
                     {copiedLogs ? (
-                      <Check size={9} className="text-green-400" />
+                      <Check size={9} style={{ color: T.success }} />
                     ) : (
                       <Copy size={9} />
                     )}{" "}
@@ -1195,7 +1194,7 @@ export default function AgentsTerminalTool() {
                         className="flex gap-1.5 px-1 py-0.5 rounded hover:bg-white/5 transition-colors"
                       >
                         <span
-                          className="shrink-0 opacity-40"
+                          className="shrink-0"
                           style={{ color: T.textMuted }}
                         >
                           [{l.timestamp}]
@@ -1217,11 +1216,8 @@ export default function AgentsTerminalTool() {
                   })
                 ) : (
                   <div className="flex flex-col items-center justify-center h-full text-center py-12">
-                    <div className="text-xl mb-2 opacity-30">📡</div>
-                    <div
-                      className="opacity-30 text-[9px]"
-                      style={{ color: T.textMuted }}
-                    >
+                    <div className="text-xl mb-2">📡</div>
+                    <div className="text-[9px]" style={{ color: T.textMuted }}>
                       {logFilter
                         ? "No matching logs"
                         : "Waiting for agent activity..."}

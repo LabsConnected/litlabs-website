@@ -230,7 +230,7 @@ function renderMarkdown(text: string): React.ReactNode[] {
       nodes.push(
         <p
           key={i}
-          className="pl-3 text-[11px] leading-relaxed before:content-['•'] before:mr-2 before:opacity-50"
+          className="pl-3 text-[11px] leading-relaxed before:content-['•'] before:mr-2"
         >
           {line.slice(2)}
         </p>,
@@ -827,12 +827,12 @@ export default function AgentTool() {
           style={{ borderColor: T.borderColor + "15", color: T.textMuted }}
         >
           <div>
-            <span className="opacity-50">Total msgs</span>
+            <span>Total msgs</span>
             <br />
             <span style={{ color: T.accentColor }}>{msgCount}</span>
           </div>
           <div>
-            <span className="opacity-50">Active</span>
+            <span>Active</span>
             <br />
             <span style={{ color: "#00ff41" }}>● Live</span>
           </div>
@@ -870,13 +870,13 @@ export default function AgentTool() {
               </span>
             </button>
             <div className="hidden h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10 md:flex">
-              <Bot size={16} className="text-cyan-400" />
+              <Bot size={16} style={{ color: T.linkColor }} />
             </div>
             <div className="hidden md:block">
               <div className="text-sm font-black tracking-wide text-white">
                 Agent Console
               </div>
-              <div className="text-[10px] text-neutral-500">
+              <div className="text-[10px]" style={{ color: T.textMuted }}>
                 {selectedAgent.name} · {selectedAgent.role}
               </div>
             </div>
@@ -885,11 +885,14 @@ export default function AgentTool() {
                 <span className="text-sm font-black tracking-wide text-white">
                   Agent Console
                 </span>
-                <span className="text-[10px] text-neutral-500 transition group-open:rotate-180">
+                <span
+                  className="text-[10px] transition group-open:rotate-180"
+                  style={{ color: T.textMuted }}
+                >
                   ▼
                 </span>
               </summary>
-              <div className="pt-1 text-[10px] text-neutral-500">
+              <div className="pt-1 text-[10px]" style={{ color: T.textMuted }}>
                 {selectedAgent.name} · {selectedAgent.role}
               </div>
             </details>
@@ -899,19 +902,26 @@ export default function AgentTool() {
             />
           </div>
           <div className="flex items-center gap-3 text-[10px]">
-            <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-neutral-400">
+            <span
+              className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1"
+              style={{ color: T.textMuted }}
+            >
               <span
                 className="h-1.5 w-1.5 rounded-full"
                 style={{ backgroundColor: selectedAgent.color }}
               />
               {selectedAgent.name.toUpperCase()} ACTIVE
             </span>
-            <span className="hidden font-mono text-neutral-500 sm:inline">
+            <span
+              className="hidden font-mono sm:inline"
+              style={{ color: T.textMuted }}
+            >
               {messages.length} MESSAGES
             </span>
             <button
               onClick={clearChat}
-              className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[9px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
+              className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[9px] transition hover:border-rose-500/30 hover:text-rose-300"
+              style={{ color: T.textMuted }}
             >
               <Trash2 size={9} /> Clear
             </button>
@@ -922,7 +932,7 @@ export default function AgentTool() {
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && !streaming && (
             <div className="flex flex-col items-center justify-center h-full px-4 pb-8 text-center">
-              <div className="text-4xl mb-2 opacity-90 sm:text-5xl sm:mb-3">
+              <div className="text-4xl mb-2 sm:text-5xl sm:mb-3">
                 {selectedAvatar.emoji}
               </div>
               <div
@@ -931,14 +941,11 @@ export default function AgentTool() {
               >
                 {selectedAgent.name}
               </div>
-              <div
-                className="text-xs mb-1 opacity-70"
-                style={{ color: T.textMuted }}
-              >
+              <div className="text-xs mb-1" style={{ color: T.textMuted }}>
                 {selectedAgent.role}
               </div>
               <div
-                className="text-xs max-w-sm mx-auto mb-4 opacity-80 leading-relaxed sm:mb-5"
+                className="text-xs max-w-sm mx-auto mb-4 leading-relaxed sm:mb-5"
                 style={{ color: T.textMuted }}
               >
                 {selectedAgent.desc}
@@ -1088,7 +1095,7 @@ export default function AgentTool() {
                     }}
                   />
                 </span>
-                <span className="opacity-70">
+                <span style={{ color: T.textMuted }}>
                   {selectedAgent.name} is thinking...
                 </span>
               </div>
@@ -1113,13 +1120,13 @@ export default function AgentTool() {
                   placeholder={`Message ${selectedAgent.name}...`}
                   rows={1}
                   disabled={isLoading}
-                  className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                  className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-[var(--text-muted)] focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                 />
                 <button
                   aria-label="Send message"
                   onClick={() => sendMessage()}
                   disabled={!input.trim() || isLoading}
-                  className="absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 text-cyan-400 transition hover:bg-cyan-500/20 disabled:opacity-40 sm:bottom-2 sm:h-9 sm:w-9"
+                  className="absolute bottom-1.5 right-1.5 flex h-8 w-8 items-center justify-center rounded-lg bg-cyan-500/10 transition hover:bg-cyan-500/20 disabled:opacity-40 sm:bottom-2 sm:h-9 sm:w-9"
                   style={{ color: selectedAgent.color }}
                 >
                   <Send size={15} />
@@ -1129,7 +1136,8 @@ export default function AgentTool() {
               <button
                 aria-label="Clear chat"
                 onClick={clearChat}
-                className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-0 sm:h-9 sm:w-9"
+                className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 transition hover:bg-white/10 sm:order-0 sm:h-9 sm:w-9"
+                style={{ color: T.textMuted }}
               >
                 <Trash2 size={15} />
               </button>
@@ -1144,14 +1152,14 @@ export default function AgentTool() {
                       setProvider(opt.id as "gemini" | "openrouter-free")
                     }
                     title={opt.hint}
-                    className="shrink-0 rounded-md border border-white/5 px-2 py-1 text-[11px] font-bold transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    className="shrink-0 rounded-md border border-white/5 px-2 py-1 text-[11px] font-bold transition hover:border-cyan-500/20 hover:text-[var(--link-color)]"
                     style={{
                       backgroundColor:
                         provider === opt.id
                           ? selectedAgent.color + "15"
                           : "transparent",
                       color:
-                        provider === opt.id ? selectedAgent.color : "#737373",
+                        provider === opt.id ? selectedAgent.color : T.textMuted,
                       borderColor:
                         provider === opt.id
                           ? selectedAgent.color + "40"
@@ -1166,14 +1174,15 @@ export default function AgentTool() {
                     onClick={triggerFlow}
                     disabled={!input.trim() || isLoading}
                     title="Send to ActivePieces multi-agent flow"
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-bold text-amber-300 transition disabled:opacity-30"
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-amber-500/20 bg-amber-500/10 px-2 py-1 text-[11px] font-bold transition disabled:opacity-30"
+                    style={{ color: T.warning }}
                   >
                     <Zap size={11} /> FLOW
                   </button>
                 )}
               </div>
               <span
-                className="hidden text-[10px] opacity-70 sm:block"
+                className="hidden text-[10px] sm:block"
                 style={{ color: T.textMuted }}
               >
                 Shift+Enter for new line
@@ -1206,10 +1215,7 @@ export default function AgentTool() {
           >
             {selectedAgent.name}
           </div>
-          <div
-            className="text-[9px] mt-0.5 opacity-60"
-            style={{ color: T.textMuted }}
-          >
+          <div className="text-[9px] mt-0.5" style={{ color: T.textMuted }}>
             {selectedAgent.role}
           </div>
           <div className="flex items-center justify-center gap-1 mt-2">
@@ -1236,7 +1242,7 @@ export default function AgentTool() {
               About
             </div>
             <p
-              className="text-[10px] leading-relaxed opacity-70"
+              className="text-[10px] leading-relaxed"
               style={{ color: T.textColor }}
             >
               {selectedAgent.desc}
@@ -1277,7 +1283,7 @@ export default function AgentTool() {
               System Prompt
             </div>
             <p
-              className="text-[9px] opacity-40 leading-relaxed line-clamp-6"
+              className="text-[9px] leading-relaxed line-clamp-6"
               style={{ color: T.textMuted }}
             >
               {selectedAgent.systemPrompt}
@@ -1309,7 +1315,7 @@ export default function AgentTool() {
 
           <button
             onClick={clearChat}
-            className="w-full text-[10px] py-1.5 rounded border opacity-50 hover:opacity-90 transition-all flex items-center justify-center gap-1"
+            className="w-full text-[10px] py-1.5 rounded border transition-all flex items-center justify-center gap-1"
             style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
           >
             <Trash2 size={9} /> Clear chat
@@ -1343,16 +1349,13 @@ export default function AgentTool() {
                 >
                   Build Agent
                 </h2>
-                <p
-                  className="text-[9px] opacity-50 mt-0.5"
-                  style={{ color: T.textMuted }}
-                >
+                <p className="text-[9px] mt-0.5" style={{ color: T.textMuted }}>
                   Create a custom AI specialist
                 </p>
               </div>
               <button
                 onClick={() => setShowCreate(false)}
-                className="opacity-50 hover:opacity-100"
+                style={{ color: T.textMuted }}
               >
                 <X size={14} style={{ color: T.textColor }} />
               </button>
@@ -1375,7 +1378,7 @@ export default function AgentTool() {
                   {createForm.name || "Agent Name"}
                 </div>
                 <div
-                  className="text-[9px] opacity-50 mt-0.5"
+                  className="text-[9px] mt-0.5"
                   style={{ color: T.textMuted }}
                 >
                   {createForm.category}
@@ -1563,7 +1566,7 @@ export default function AgentTool() {
                   Agent Boardroom
                 </span>
                 <span
-                  className="text-[9px] opacity-50 ml-1"
+                  className="text-[9px] ml-1"
                   style={{ color: T.textMuted }}
                 >
                   Two agents debate any topic
@@ -1737,7 +1740,10 @@ export default function AgentTool() {
                             style={{ color: entry.color }}
                           >
                             {entry.agent}
-                            <span className="ml-2 opacity-40 font-normal">
+                            <span
+                              className="ml-2 font-normal"
+                              style={{ color: T.textMuted }}
+                            >
                               Round {Math.floor(i / 2) + 1}
                             </span>
                           </div>
@@ -1764,7 +1770,7 @@ export default function AgentTool() {
                     setBrLog([]);
                     setBrTopic("");
                   }}
-                  className="text-[10px] opacity-50 hover:opacity-100 transition-all"
+                  className="text-[10px] transition-all"
                   style={{ color: T.textMuted }}
                 >
                   ↺ New debate

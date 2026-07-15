@@ -1,6 +1,7 @@
 ﻿"use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
+import { useTheme } from "@/context/ThemeContext";
 import {
   Box,
   Terminal,
@@ -53,21 +54,21 @@ const NODE_META: Record<
 > = {
   trigger: {
     label: "Trigger",
-    color: "text-amber-400",
+    color: "text-[var(--warning)]",
     bg: "bg-amber-500/10",
     border: "border-amber-500/30",
     ring: "ring-amber-500/40",
   },
   agent: {
     label: "AI Agent",
-    color: "text-fuchsia-400",
+    color: "text-[var(--accent-color)]",
     bg: "bg-fuchsia-600/10",
     border: "border-fuchsia-500/30",
     ring: "ring-fuchsia-500/40",
   },
   action: {
     label: "Action",
-    color: "text-emerald-400",
+    color: "text-[var(--success)]",
     bg: "bg-emerald-500/10",
     border: "border-emerald-500/30",
     ring: "ring-emerald-500/40",
@@ -225,6 +226,7 @@ function toYAML(nodes: PipelineNode[]): string {
   return lines.join("\n");
 }
 export default function PipelineTool() {
+  const { resolvedColors: T } = useTheme();
   const nodeIdCounter = useRef(0);
 
   const [nodes, setNodes] = useState<PipelineNode[]>([
@@ -473,7 +475,7 @@ export default function PipelineTool() {
 
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   return (
-    <div className="flex h-full bg-[#050108] text-slate-300 font-sans overflow-hidden relative">
+    <div className="flex h-full bg-[#050108] text-[var(--text-color)] font-sans overflow-hidden relative">
       {/* Grid */}
       <div
         className="absolute inset-0 z-0 pointer-events-none opacity-[0.12]"
@@ -487,25 +489,25 @@ export default function PipelineTool() {
       {/* ── LEFT: Library ── */}
       <aside className="w-56 shrink-0 border-r border-fuchsia-900/30 bg-[#0a0310]/80 backdrop-blur-xl flex flex-col z-10">
         <div className="p-3 border-b border-white/5">
-          <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest flex items-center gap-2">
+          <span className="text-[10px] font-bold text-[var(--text-muted)] uppercase tracking-widest flex items-center gap-2">
             <Box className="w-3.5 h-3.5" /> Tool Library
           </span>
         </div>
         <div className="px-3 py-2">
           <div className="flex items-center gap-1.5 bg-[#130720] border border-white/10 rounded-lg px-2 py-1.5">
-            <Search className="w-3 h-3 text-slate-500 shrink-0" />
+            <Search className="w-3 h-3 text-[var(--text-muted)] shrink-0" />
             <input
               id="pipeline-tool-library-filter"
               name="pipelineToolLibraryFilter"
               value={libraryFilter}
               onChange={(e) => setLibraryFilter(e.target.value)}
               placeholder="Filter nodes..."
-              className="bg-transparent text-[10px] text-white outline-none w-full placeholder:text-slate-600"
+              className="bg-transparent text-[10px] text-[var(--text-color)] outline-none w-full placeholder:text-[var(--text-muted)]"
             />
             {libraryFilter && (
               <button
                 onClick={() => setLibraryFilter("")}
-                className="text-slate-500 hover:text-white"
+                className="text-[var(--text-muted)] hover:text-[var(--text-color)]"
               >
                 <X className="w-3 h-3" />
               </button>
@@ -521,7 +523,7 @@ export default function PipelineTool() {
             if (catItems.length === 0) return null;
             return (
               <div key={cat} className="space-y-1.5">
-                <div className="text-[9px] font-bold text-slate-500 uppercase tracking-widest pl-1">
+                <div className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest pl-1">
                   {cat === "trigger"
                     ? "1. Triggers"
                     : cat === "agent"
@@ -542,11 +544,11 @@ export default function PipelineTool() {
                         >
                           {item.icon}
                         </div>
-                        <span className="text-[11px] font-bold text-white">
+                        <span className="text-[11px] font-bold text-[var(--text-color)]">
                           {item.title}
                         </span>
                       </div>
-                      <p className="text-[9px] text-slate-500 ml-7 leading-tight">
+                      <p className="text-[9px] text-[var(--text-muted)] ml-7 leading-tight">
                         {item.desc}
                       </p>
                     </div>
@@ -564,14 +566,14 @@ export default function PipelineTool() {
       >
         {/* Header */}
         <div className="w-full max-w-lg mb-5 flex items-center justify-between px-1">
-          <span className="text-xs font-mono text-slate-500">
+          <span className="text-xs font-mono text-[var(--text-muted)]">
             untitled_pipeline.yaml
           </span>
           <div className="flex items-center gap-2">
             <button
               onClick={runPipeline}
               disabled={isRunning || nodes.length === 0}
-              className="px-3 py-1.5 bg-emerald-500/20 text-emerald-400 hover:bg-emerald-500/30 border border-emerald-500/50 disabled:opacity-50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
+              className="px-3 py-1.5 bg-emerald-500/20 text-[var(--success)] hover:bg-emerald-500/30 border border-emerald-500/50 disabled:opacity-50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
             >
               {isRunning ? (
                 <RefreshCw className="w-3 h-3 animate-spin" />
@@ -582,7 +584,7 @@ export default function PipelineTool() {
             </button>
             <button
               onClick={() => setShowYaml(true)}
-              className="px-3 py-1.5 bg-fuchsia-600/20 text-fuchsia-400 hover:bg-fuchsia-600/30 border border-fuchsia-500/50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
+              className="px-3 py-1.5 bg-fuchsia-600/20 text-[var(--accent-color)] hover:bg-fuchsia-600/30 border border-fuchsia-500/50 text-[10px] font-bold rounded flex items-center gap-1.5 transition-all"
             >
               <FileJson className="w-3 h-3" /> Export YAML
             </button>
@@ -593,11 +595,11 @@ export default function PipelineTool() {
         <div className="w-full max-w-lg flex flex-col items-center pb-32">
           {nodes.length === 0 ? (
             <div className="mt-16 text-center flex flex-col items-center">
-              <Network className="w-14 h-14 text-slate-700 mb-4" />
-              <h2 className="text-lg font-bold text-slate-400 mb-2">
+              <Network className="w-14 h-14 text-[var(--text-muted)] mb-4" />
+              <h2 className="text-lg font-bold text-[var(--text-muted)] mb-2">
                 Pipeline Empty
               </h2>
-              <p className="text-sm text-slate-500 max-w-sm">
+              <p className="text-sm text-[var(--text-muted)] max-w-sm">
                 Click tools from the library or ask the AI to generate a
                 pipeline.
               </p>
@@ -628,12 +630,12 @@ export default function PipelineTool() {
                       className={`absolute -top-2 -right-2 text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full border
                     ${
                       status === "running"
-                        ? "bg-fuchsia-900/80 text-fuchsia-300 border-fuchsia-500/40 animate-pulse"
+                        ? "bg-fuchsia-900/80 text-[var(--accent-color)] border-fuchsia-500/40 animate-pulse"
                         : status === "completed"
-                          ? "bg-emerald-900/80 text-emerald-300 border-emerald-500/40"
+                          ? "bg-emerald-900/80 text-[var(--success)] border-emerald-500/40"
                           : status === "error"
-                            ? "bg-red-900/80 text-red-300 border-red-500/40"
-                            : "bg-slate-800 text-slate-400 border-slate-600/30"
+                            ? "bg-red-900/80 text-[var(--warning)] border-red-500/40"
+                            : "bg-slate-800 text-[var(--text-muted)] border-slate-600/30"
                     }`}
                     >
                       {status}
@@ -657,7 +659,7 @@ export default function PipelineTool() {
                           >
                             {s.label}
                           </div>
-                          <div className="text-sm font-bold text-white">
+                          <div className="text-sm font-bold text-[var(--text-color)]">
                             {node.title}
                           </div>
                         </div>
@@ -673,15 +675,15 @@ export default function PipelineTool() {
                       </div>
                       <button
                         onClick={(e) => deleteNode(node.id, e)}
-                        className="p-1.5 text-slate-600 hover:text-red-400 hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
+                        className="p-1.5 text-[var(--text-muted)] hover:text-[var(--warning)] hover:bg-red-500/10 rounded transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <Trash2 className="w-3.5 h-3.5" />
                       </button>
                     </div>
                     {node.type === "agent" && (
-                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-slate-400">
+                      <div className="mt-3 pt-3 border-t border-white/5 flex items-center justify-between text-[10px] font-mono text-[var(--text-muted)]">
                         <span className="truncate flex-1 max-w-[200px]">
-                          <span className="text-fuchsia-500/50 mr-2">
+                          <span className="text-[var(--text-muted)] mr-2">
                             prompt:
                           </span>
                           {String(node.config.prompt) || "No prompt set..."}
@@ -717,17 +719,17 @@ export default function PipelineTool() {
                 onChange={(e) => setAiPrompt(e.target.value)}
                 disabled={isGenerating}
                 placeholder="Describe a pipeline... e.g. 'Scrape hourly, summarize with AI, save to DB'"
-                className="flex-1 bg-transparent text-xs text-white py-2.5 pr-3 outline-none placeholder:text-slate-600 font-medium"
+                className="flex-1 bg-transparent text-xs text-[var(--text-color)] py-2.5 pr-3 outline-none placeholder:text-[var(--text-muted)] font-medium"
               />
               <button
                 type="submit"
                 disabled={isGenerating || !aiPrompt.trim()}
-                className="bg-white/10 hover:bg-white/20 text-white p-2 rounded-xl disabled:opacity-50 transition-colors"
+                className="bg-white/10 hover:bg-white/20 text-[var(--text-color)] p-2 rounded-xl disabled:opacity-50 transition-colors"
               >
                 {isGenerating ? (
                   <Loader2 className="w-3.5 h-3.5 animate-spin" />
                 ) : (
-                  <Sparkles className="w-3.5 h-3.5 text-fuchsia-400" />
+                  <Sparkles className="w-3.5 h-3.5 text-[var(--accent-color)]" />
                 )}
               </button>
             </form>
@@ -743,10 +745,12 @@ export default function PipelineTool() {
           {selectedNode ? (
             <div className="space-y-4">
               <div className="flex items-center gap-2">
-                <Settings className="w-4 h-4 text-fuchsia-400" />
-                <h2 className="text-sm font-bold text-white">Configuration</h2>
+                <Settings className="w-4 h-4 text-[var(--accent-color)]" />
+                <h2 className="text-sm font-bold text-[var(--text-color)]">
+                  Configuration
+                </h2>
                 <span
-                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-fuchsia-300" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-emerald-300" : "bg-slate-800 text-slate-400"}`}
+                  className={`text-[8px] font-bold uppercase px-1.5 py-0.5 rounded-full ml-auto ${selectedNode.status === "running" ? "bg-fuchsia-900/50 text-[var(--accent-color)]" : selectedNode.status === "completed" ? "bg-emerald-900/50 text-[var(--success)]" : "bg-slate-800 text-[var(--text-muted)]"}`}
                 >
                   {selectedNode.status || "idle"}
                 </span>
@@ -754,7 +758,7 @@ export default function PipelineTool() {
 
               {/* Node name */}
               <div>
-                <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                   Node Name
                 </label>
                 <input
@@ -770,7 +774,7 @@ export default function PipelineTool() {
                       ),
                     )
                   }
-                  className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-fuchsia-500/50 outline-none transition-colors"
+                  className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-fuchsia-500/50 outline-none transition-colors"
                 />
               </div>
 
@@ -778,7 +782,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Webhook Listener" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Endpoint Path
                     </label>
                     <input
@@ -793,11 +797,11 @@ export default function PipelineTool() {
                         )
                       }
                       placeholder="/api/v1/ingest"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-amber-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-amber-500/50 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Method
                     </label>
                     <div className="flex gap-1.5">
@@ -807,7 +811,7 @@ export default function PipelineTool() {
                           onClick={() =>
                             updateConfig(selectedNode.id, "method", m)
                           }
-                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-amber-400 border-amber-500/40" : "bg-transparent text-slate-400 border-white/10 hover:border-white/20"}`}
+                          className={`flex-1 py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.method === m ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-[var(--text-muted)] border-white/10 hover:border-white/20"}`}
                         >
                           {m}
                         </button>
@@ -815,7 +819,7 @@ export default function PipelineTool() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Headers
                     </label>
                     <textarea
@@ -827,7 +831,7 @@ export default function PipelineTool() {
                       }
                       rows={3}
                       placeholder="Content-Type: application/json&#10;Authorization: Bearer ..."
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-[10px] text-white focus:border-amber-500/50 outline-none resize-none font-mono"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-[10px] text-[var(--text-color)] focus:border-amber-500/50 outline-none resize-none font-mono"
                     />
                   </div>
                 </>
@@ -837,7 +841,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Scheduled Interval" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Preset
                     </label>
                     <div className="grid grid-cols-3 gap-1.5">
@@ -852,7 +856,7 @@ export default function PipelineTool() {
                             updateConfig(selectedNode.id, "preset", p.id);
                             updateConfig(selectedNode.id, "cron", p.cron);
                           }}
-                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-amber-400 border-amber-500/40" : "bg-transparent text-slate-400 border-white/10 hover:border-white/20"}`}
+                          className={`py-1.5 text-[10px] font-bold rounded-lg border transition-all ${selectedNode.config.preset === p.id ? "bg-amber-500/20 text-[var(--warning)] border-amber-500/40" : "bg-transparent text-[var(--text-muted)] border-white/10 hover:border-white/20"}`}
                         >
                           {p.label}
                         </button>
@@ -860,7 +864,7 @@ export default function PipelineTool() {
                     </div>
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Cron Expression
                     </label>
                     <input
@@ -872,7 +876,7 @@ export default function PipelineTool() {
                         updateConfig(selectedNode.id, "preset", "custom");
                       }}
                       placeholder="0 * * * *"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white font-mono focus:border-amber-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] font-mono focus:border-amber-500/50 outline-none"
                     />
                   </div>
                 </>
@@ -882,7 +886,7 @@ export default function PipelineTool() {
                 selectedNode.title === "Task Champion") && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       AI Model
                     </label>
                     <select
@@ -892,7 +896,7 @@ export default function PipelineTool() {
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "model", e.target.value)
                       }
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white outline-none cursor-pointer"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] outline-none cursor-pointer"
                     >
                       <option value="lit-core-v4">Lit Core v4 (Fast)</option>
                       <option value="lit-reason-max">
@@ -905,10 +909,10 @@ export default function PipelineTool() {
                   </div>
                   <div>
                     <div className="flex justify-between items-center mb-1">
-                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                      <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                         Temperature
                       </label>
-                      <span className="text-[10px] text-fuchsia-400 font-mono">
+                      <span className="text-[10px] text-[var(--accent-color)] font-mono">
                         {selectedNode.config.temperature}
                       </span>
                     </div>
@@ -932,13 +936,13 @@ export default function PipelineTool() {
                   </div>
                   <div>
                     <div className="flex items-center justify-between mb-1">
-                      <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest">
+                      <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                         System Prompt
                       </label>
                       <button
                         onClick={() => optimizePrompt(selectedNode.id)}
                         disabled={optimizingPrompt}
-                        className="text-[8px] px-1.5 py-0.5 rounded border border-fuchsia-500/30 text-fuchsia-400 hover:bg-fuchsia-500/10 disabled:opacity-50 transition-all flex items-center gap-1"
+                        className="text-[8px] px-1.5 py-0.5 rounded border border-fuchsia-500/30 text-[var(--accent-color)] hover:bg-fuchsia-500/10 disabled:opacity-50 transition-all flex items-center gap-1"
                       >
                         {optimizingPrompt ? (
                           <Loader2 className="w-2.5 h-2.5 animate-spin" />
@@ -957,7 +961,7 @@ export default function PipelineTool() {
                       }
                       placeholder="Instruct this agent on its specific task..."
                       rows={5}
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2.5 text-xs text-white focus:border-fuchsia-500/50 outline-none transition-colors resize-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2.5 text-xs text-[var(--text-color)] focus:border-fuchsia-500/50 outline-none transition-colors resize-none"
                     />
                   </div>
                 </>
@@ -967,7 +971,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Database Insert" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Target Table
                     </label>
                     <input
@@ -978,11 +982,11 @@ export default function PipelineTool() {
                         updateConfig(selectedNode.id, "table", e.target.value)
                       }
                       placeholder="pipeline_output"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Ledger Cluster
                     </label>
                     <select
@@ -992,7 +996,7 @@ export default function PipelineTool() {
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "cluster", e.target.value)
                       }
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white outline-none cursor-pointer"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] outline-none cursor-pointer"
                     >
                       <option value="primary">Primary</option>
                       <option value="analytics">Analytics</option>
@@ -1006,7 +1010,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Discord Webhook" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Webhook URL
                     </label>
                     <input
@@ -1021,11 +1025,11 @@ export default function PipelineTool() {
                         )
                       }
                       placeholder="https://discord.com/api/webhooks/..."
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Message Template
                     </label>
                     <textarea
@@ -1041,7 +1045,7 @@ export default function PipelineTool() {
                       }
                       rows={3}
                       placeholder="Pipeline completed: {{status}}"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none resize-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none resize-none"
                     />
                   </div>
                 </>
@@ -1051,7 +1055,7 @@ export default function PipelineTool() {
               {selectedNode.title === "Email Dispatch" && (
                 <>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       To
                     </label>
                     <input
@@ -1062,11 +1066,11 @@ export default function PipelineTool() {
                         updateConfig(selectedNode.id, "to", e.target.value)
                       }
                       placeholder="user@example.com"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Subject
                     </label>
                     <input
@@ -1077,11 +1081,11 @@ export default function PipelineTool() {
                         updateConfig(selectedNode.id, "subject", e.target.value)
                       }
                       placeholder="Pipeline Alert"
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none"
                     />
                   </div>
                   <div>
-                    <label className="text-[9px] font-bold text-slate-500 uppercase tracking-widest mb-1 block">
+                    <label className="text-[9px] font-bold text-[var(--text-muted)] uppercase tracking-widest mb-1 block">
                       Body
                     </label>
                     <textarea
@@ -1093,19 +1097,25 @@ export default function PipelineTool() {
                       }
                       rows={3}
                       placeholder="Pipeline finished execution."
-                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-white focus:border-emerald-500/50 outline-none resize-none"
+                      className="w-full bg-[#130720] border border-white/10 rounded-lg p-2 text-xs text-[var(--text-color)] focus:border-emerald-500/50 outline-none resize-none"
                     />
                   </div>
                 </>
               )}
             </div>
           ) : (
-            <div className="h-full flex flex-col items-center justify-center text-center p-6 opacity-40">
-              <SlidersHorizontal className="w-10 h-10 text-slate-600 mb-3" />
-              <h3 className="text-xs font-bold text-white mb-1">
+            <div className="h-full flex flex-col items-center justify-center text-center p-6">
+              <SlidersHorizontal
+                className="w-10 h-10 mb-3"
+                style={{ color: T.textMuted }}
+              />
+              <h3
+                className="text-xs font-bold mb-1"
+                style={{ color: T.textColor }}
+              >
                 No Node Selected
               </h3>
-              <p className="text-[10px] text-slate-400">
+              <p className="text-[10px]" style={{ color: T.textMuted }}>
                 Click a block in the canvas to configure it.
               </p>
             </div>
@@ -1116,15 +1126,15 @@ export default function PipelineTool() {
         <div className="h-[220px] bg-[#050108] border-t border-fuchsia-900/40 flex flex-col relative">
           <div className="bg-[#130720]/80 px-3 py-1.5 border-b border-fuchsia-900/30 flex items-center justify-between absolute top-0 w-full z-10 backdrop-blur-md">
             <div className="flex items-center gap-2">
-              <Terminal className="w-3 h-3 text-slate-400" />
-              <span className="text-[8px] font-bold text-slate-400 uppercase tracking-widest">
+              <Terminal className="w-3 h-3 text-[var(--text-muted)]" />
+              <span className="text-[8px] font-bold text-[var(--text-muted)] uppercase tracking-widest">
                 Execution Log
               </span>
             </div>
             <div className="flex items-center gap-2">
               <button
                 onClick={clearTerminal}
-                className="text-[8px] text-slate-500 hover:text-slate-300 transition-colors"
+                className="text-[8px] text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors"
               >
                 Clear
               </button>
@@ -1138,17 +1148,18 @@ export default function PipelineTool() {
             style={{ scrollbarWidth: "none" }}
           >
             {terminalLogs.map((log, i) => {
-              let cls = "text-slate-500";
-              if (log.includes("[OK]")) cls = "text-emerald-400";
-              if (log.includes("[SYS]")) cls = "text-fuchsia-400";
-              if (log.includes("[WRN]")) cls = "text-amber-400";
-              if (log.includes("[ERR]")) cls = "text-red-400";
+              let cls = "text-[var(--text-muted)]";
+              if (log.includes("[OK]")) cls = "text-[var(--success)]";
+              if (log.includes("[SYS]")) cls = "text-[var(--accent-color)]";
+              if (log.includes("[WRN]")) cls = "text-[var(--warning)]";
+              if (log.includes("[ERR]")) cls = "text-[var(--warning)]";
               if (log.includes("[ADD]") || log.includes("[DEL]"))
-                cls = "text-blue-400";
-              if (log.includes("[EXEC]")) cls = "text-white font-bold";
-              if (log.includes("[AI]")) cls = "text-cyan-400";
-              if (log.includes("[OPT]")) cls = "text-purple-400";
-              if (log.includes("[RUN]")) cls = "text-white";
+                cls = "text-[var(--link-color)]";
+              if (log.includes("[EXEC]"))
+                cls = "text-[var(--text-color)] font-bold";
+              if (log.includes("[AI]")) cls = "text-[var(--link-color)]";
+              if (log.includes("[OPT]")) cls = "text-[var(--accent-color)]";
+              if (log.includes("[RUN]")) cls = "text-[var(--text-color)]";
               return (
                 <div key={i} className={`${cls} leading-snug`}>
                   {log}
@@ -1157,7 +1168,7 @@ export default function PipelineTool() {
             })}
             <div
               ref={bottomRef}
-              className="text-fuchsia-500 animate-pulse font-bold"
+              className="text-[var(--accent-color)] animate-pulse font-bold"
             >
               _
             </div>
@@ -1185,8 +1196,8 @@ export default function PipelineTool() {
               style={{ borderColor: "rgba(255,255,255,0.1)" }}
             >
               <div className="flex items-center gap-2">
-                <FileJson className="w-4 h-4 text-fuchsia-400" />
-                <span className="text-sm font-bold text-white">
+                <FileJson className="w-4 h-4 text-[var(--accent-color)]" />
+                <span className="text-sm font-bold text-[var(--text-color)]">
                   Pipeline YAML
                 </span>
               </div>
@@ -1211,7 +1222,7 @@ export default function PipelineTool() {
                 </button>
                 <button
                   onClick={() => setShowYaml(false)}
-                  className="text-slate-500 hover:text-white transition-colors"
+                  className="text-[var(--text-muted)] hover:text-[var(--text-color)] transition-colors"
                 >
                   <X className="w-4 h-4" />
                 </button>
@@ -1223,7 +1234,7 @@ export default function PipelineTool() {
             >
               <pre
                 className="font-mono text-[10px] leading-relaxed whitespace-pre-wrap"
-                style={{ color: "#94a3b8" }}
+                style={{ color: T.textMuted }}
               >
                 {yaml}
               </pre>

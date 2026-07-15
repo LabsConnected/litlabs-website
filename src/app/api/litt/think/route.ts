@@ -13,8 +13,10 @@ import {
 } from "@/lib/litt-context";
 import { loadProjectContext } from "@/lib/project-context";
 import { integrationStatusBlock, getProjectHealth } from "@/lib/integrations";
-import { recallPersonaMemory } from "@/lib/agent-memory";
+import { recallPersonaMemory, savePersonaMemory } from "@/lib/agent-memory";
+import type { MemoryRecord } from "@/lib/agent-user";
 import type { PersonaId } from "@/lib/persona";
+import { detectIntegrations } from "@/lib/integrations";
 
 async function handler(req: NextRequest) {
   const { userId } = await auth();
@@ -43,11 +45,16 @@ async function handler(req: NextRequest) {
 
     // Recall per-user, per-persona memories from Supabase (and Supermemory via
     // the repository). Fail soft — if memory is unavailable, continue with no
-    // prior context rather than blocking the chat.
+    // prior context rather than blocking the chat. Bounded by a 1500ms timeout
+    // so a slow Supabase never delays the user-visible response.
     let memoryBlock = "";
     try {
       const personaId = ((body.persona as string) || "littcode") as PersonaId;
-      const recalled = await recallPersonaMemory(userId, personaId, 8);
+      const recallPromise = recallPersonaMemory(userId, personaId, 8);
+      const timeoutPromise = new Promise<MemoryRecord[]>((resolve) =>
+        setTimeout(() => resolve([]), 1500),
+      );
+      const recalled = await Promise.race([recallPromise, timeoutPromise]);
       if (recalled.length > 0) {
         memoryBlock =
           "\n\nPRIOR CONTEXT FROM MEMORY (recall from previous sessions with this user; " +
@@ -133,9 +140,31 @@ async function handler(req: NextRequest) {
       "Use pnpm (never npm/yarn) in commands. " +
       "When the user says 'add this to my list' or 'make a goal' or 'todo: X', " +
       "respond with a short confirmation and include an `add_goal` JSON action so the client can persist it. " +
+      "When the user says 'remember this' or 'remember that' or shares a stable fact about themselves " +
+      "(name, role, preferences, project context), emit a `remember` JSON action with `content` and " +
+      "an optional `scope` (profile | preference | agent | project | conversation | temporary) so " +
+      "the server can persist it to Supabase + Supermemory for next time. " +
       "Be ANTICIPATORY: if you see the user is on /litt and has high-priority open goals, " +
       "reference the top one without being asked. " +
-      "Do not ask vague follow-up questions unless absolutely necessary." +
+      "Do not ask vague follow-up questions unless absolutely necessary. " +
+      "\n\n" +
+      "HARD RULES — DO NOT HALLUCINATE: " +
+      "(1) NEVER pretend to execute shell commands, read files, or run tools. " +
+      "If you need to look at a file or run a command, you do NOT have the result — " +
+      "say so and ask the user to run it in the terminal, OR emit a bash code block " +
+      "with the exact command for the user to run themselves. " +
+      "(2) NEVER emit fake tool-call syntax like `<tool_call>cmd ... />`, " +
+      "`[read_file path=...]`, `[shell exec=...]`, or any other XML/bracket-based " +
+      "tool markers — these are not part of this system. Only use markdown code " +
+      "blocks and JSON action blocks. " +
+      "(3) NEVER invent file paths, line numbers, or test results. If you don't " +
+      "have the data, say 'I don't have that loaded right now — paste it or run " +
+      "the command in the terminal and I'll analyze the output.' " +
+      "(4) If the user's terminal context is empty, SAY SO before trying to " +
+      "diagnose. Don't pretend the terminal returned something it didn't. " +
+      "(5) When you do answer from memory, reference the memory entries by their " +
+      "index so the user knows where the answer came from (e.g. 'From memory " +
+      "entry #2 ...')." +
       memoryBlock;
 
     const messages = [
@@ -179,6 +208,31 @@ async function handler(req: NextRequest) {
         label: "Run build to see errors",
         command: "pnpm build",
       });
+    }
+
+    // Server-side persist any `remember` actions the model emitted. We do this
+    // here (not the client) so the fact is stored even if the user closes the
+    // tab before the client-side handler runs. Runs in the background so it
+    // does not delay the response — failures are logged, not thrown.
+    const rememberActions = actions.filter(
+      (a): a is LiTTAction & { type: "remember" } =>
+        a.type === "remember" && typeof a.memoryContent === "string",
+    );
+    if (rememberActions.length > 0) {
+      const personaId = ((body.persona as string) || "littcode") as PersonaId;
+      // Fire-and-forget; do not await.
+      void Promise.allSettled(
+        rememberActions.map((a) =>
+          savePersonaMemory(
+            userId,
+            personaId,
+            a.memoryContent as string,
+            "litt-think",
+          ).catch((saveErr) => {
+            console.error("[api/litt/think] savePersonaMemory failed:", saveErr);
+          }),
+        ),
+      );
     }
 
     return NextResponse.json({ answer, actions });
@@ -248,12 +302,12 @@ function buildTourAnswer(
     lines.push("");
   }
 
-  lines.push("**Subsystems online right now:**");
-  lines.push("- `src/lib/litt.ts` — notification dispatcher");
-  lines.push("- `src/lib/litt-context.ts` — my brain / prompt builder");
-  lines.push("- `src/lib/AgentOrchestrator.ts` — agent graph");
-  lines.push("- `src/lib/llm.ts` — unified LLM client (Gemini primary, OpenRouter fallback)");
-  lines.push("- Terminal server (separate process on its own port)");
+  lines.push("**Subsystems (live probe — not hardcoded):**");
+  const probes = probeSubsystems();
+  for (const p of probes) {
+    const icon = p.status === "live" ? "🟢" : p.status === "degraded" ? "🟡" : "🔴";
+    lines.push(`- ${icon} **${p.name}** — ${p.detail}`);
+  }
   lines.push("");
 
   lines.push("**Try next:**");
@@ -270,4 +324,135 @@ function tourActions(): LiTTAction[] {
     { type: "insert_command", label: "Type-check", command: "npx tsc --noEmit" },
     { type: "insert_command", label: "Build", command: "pnpm build" },
   ];
+}
+
+/* ------------------------------------------------------------------ */
+/*  Real subsystem probe — replaces the old hardcoded list            */
+/* ------------------------------------------------------------------ */
+
+type SubsystemStatus = "live" | "degraded" | "down";
+type SubsystemProbe = {
+  name: string;
+  status: SubsystemStatus;
+  detail: string;
+};
+
+function probeSubsystems(): SubsystemProbe[] {
+  const integrations = detectIntegrations();
+  const lookup = (id: string) => integrations.find((i) => i.id === id);
+  const probes: SubsystemProbe[] = [];
+
+  // LLM (Gemini primary, OpenRouter fallback)
+  const gemini = lookup("gemini");
+  const openrouter = lookup("openrouter");
+  if (gemini?.status === "connected") {
+    probes.push({
+      name: "LLM (Gemini primary)",
+      status: "live",
+      detail: "Gemini API key set",
+    });
+  } else if (openrouter?.status === "connected") {
+    probes.push({
+      name: "LLM (OpenRouter fallback only)",
+      status: "degraded",
+      detail: "Gemini missing; OpenRouter set",
+    });
+  } else {
+    probes.push({
+      name: "LLM",
+      status: "down",
+      detail: "No LLM provider configured",
+    });
+  }
+
+  // Database (Supabase)
+  const supabase = lookup("supabase");
+  probes.push({
+    name: "Database (Supabase)",
+    status: supabase?.status === "connected" ? "live" : "down",
+    detail: supabase?.status === "connected"
+      ? "URL + anon + service role all set"
+      : supabase?.detail ?? "Supabase env vars missing",
+  });
+
+  // Auth (Clerk)
+  const clerk = lookup("clerk");
+  probes.push({
+    name: "Auth (Clerk)",
+    status: clerk?.status === "connected" ? "live" : "down",
+    detail: clerk?.status === "connected"
+      ? "Secret + publishable key set"
+      : clerk?.detail ?? "Clerk env vars missing",
+  });
+
+  // Memory (Supabase storage + Supermemory semantic index)
+  const supermemorySet = Boolean(process.env.SUPERMEMORY_API_KEY?.trim());
+  if (supabase?.status === "connected" && supermemorySet) {
+    probes.push({
+      name: "Memory (Supabase + Supermemory)",
+      status: "live",
+      detail: "Full storage + semantic recall",
+    });
+  } else if (supabase?.status === "connected") {
+    probes.push({
+      name: "Memory (Supabase only)",
+      status: "degraded",
+      detail: "Storage works; semantic index disabled",
+    });
+  } else {
+    probes.push({
+      name: "Memory",
+      status: "down",
+      detail: "Supabase down — no memory layer",
+    });
+  }
+
+  // Media storage (R2)
+  const r2 = lookup("r2");
+  probes.push({
+    name: "Media storage (R2)",
+    status: r2?.status === "connected" ? "live" : "degraded",
+    detail: r2?.status === "connected"
+      ? "Cloudflare R2 configured"
+      : "R2 not set; falling back to Supabase Storage",
+  });
+
+  // Billing (Stripe)
+  const stripe = lookup("stripe");
+  probes.push({
+    name: "Billing (Stripe)",
+    status: stripe?.status === "connected" ? "live" : "down",
+    detail: stripe?.status === "connected"
+      ? "Stripe + webhook secret set"
+      : stripe?.detail ?? "Stripe env vars missing",
+  });
+
+  // Terminal server (env-var probe — not a live WS ping to keep the
+  // tour fast and not fail in environments where the terminal isn't
+  // running, like the Vercel build itself)
+  const termUrl =
+    process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+    process.env.TERMINAL_WS_URL;
+  const termPort = process.env.TERMINAL_PORT;
+  if (termUrl) {
+    probes.push({
+      name: "Terminal server",
+      status: "live",
+      detail: `WS: ${termUrl}`,
+    });
+  } else if (termPort) {
+    probes.push({
+      name: "Terminal server",
+      status: "live",
+      detail: `Port: ${termPort}`,
+    });
+  } else {
+    probes.push({
+      name: "Terminal server",
+      status: "degraded",
+      detail: "Not configured — run `pnpm terminal:dev`",
+    });
+  }
+
+  return probes;
 }

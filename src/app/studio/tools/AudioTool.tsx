@@ -451,7 +451,7 @@ export default function AudioTool() {
                     }}
                   >
                     <span className="font-bold">{v.label}</span>
-                    <span className="opacity-60">{v.desc}</span>
+                    <span style={{ color: T.textMuted }}>{v.desc}</span>
                   </button>
                 ))}
               </div>
@@ -486,7 +486,7 @@ export default function AudioTool() {
                   >
                     <div className="flex items-center gap-2">
                       <span className="font-bold">{m.label}</span>
-                      <span className="opacity-60">{m.desc}</span>
+                      <span style={{ color: T.textMuted }}>{m.desc}</span>
                     </div>
                     <span
                       className="px-1.5 py-0.5 rounded border text-[9px]"
@@ -725,9 +725,9 @@ export default function AudioTool() {
             <div
               className="flex items-center gap-2 p-2 rounded border text-[11px]"
               style={{
-                borderColor: "#ef4444",
-                color: "#ef4444",
-                backgroundColor: "rgba(239,68,68,0.1)",
+                borderColor: T.warning,
+                color: T.warning,
+                backgroundColor: T.warning + "10",
               }}
             >
               <AlertTriangle size={12} /> {error}
@@ -787,7 +787,7 @@ export default function AudioTool() {
                       ? "Ready"
                       : "Failed"}
                 </span>
-                <span className="text-[10px] opacity-60">
+                <span className="text-[10px]" style={{ color: T.textMuted }}>
                   {current.mode === "tts" ? "TTS" : "Music"}
                 </span>
               </div>
@@ -808,7 +808,7 @@ export default function AudioTool() {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => togglePlay(current.id, current.audioUrl!)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-bold hover:opacity-80"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-bold hover:bg-white/10"
                       style={{
                         borderColor: T.accentColor,
                         color: T.accentColor,
@@ -828,7 +828,7 @@ export default function AudioTool() {
                       onClick={() =>
                         handleDownload(current.audioUrl!, current.mode)
                       }
-                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs hover:opacity-80"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs hover:bg-white/10"
                       style={{ borderColor: T.borderColor, color: T.textMuted }}
                     >
                       <Download size={12} /> Download
@@ -842,7 +842,7 @@ export default function AudioTool() {
                   )}
                 </div>
               ) : current.status === "failed" ? (
-                <div className="text-sm" style={{ color: "#ef4444" }}>
+                <div className="text-sm" style={{ color: T.warning }}>
                   {current.error || "Failed"}
                 </div>
               ) : null}
@@ -864,7 +864,7 @@ export default function AudioTool() {
                 </span>
                 <button
                   onClick={handleClear}
-                  className="text-[10px] hover:opacity-70"
+                  className="text-[10px] hover:underline"
                   style={{ color: T.textMuted }}
                 >
                   Clear
@@ -879,12 +879,15 @@ export default function AudioTool() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-xs truncate">{g.text}</div>
-                      <div className="text-[10px] opacity-50 flex items-center gap-2">
+                      <div
+                        className="text-[10px] flex items-center gap-2"
+                        style={{ color: T.textMuted }}
+                      >
                         <span>{g.mode === "tts" ? "TTS" : "Music"}</span>
                         <span>•</span>
                         <span>{g.cost} 🪙</span>
                         {g.status === "failed" && (
-                          <span style={{ color: "#ef4444" }}>Failed</span>
+                          <span style={{ color: T.warning }}>Failed</span>
                         )}
                       </div>
                     </div>
@@ -892,7 +895,7 @@ export default function AudioTool() {
                       <div className="flex items-center gap-1 ml-2">
                         <button
                           onClick={() => togglePlay(g.id, g.audioUrl!)}
-                          className="p-1.5 rounded hover:opacity-80"
+                          className="p-1.5 rounded hover:bg-white/10"
                           style={{ color: T.accentColor }}
                           aria-label={
                             playingId === g.id ? "Pause audio" : "Play audio"
@@ -906,7 +909,7 @@ export default function AudioTool() {
                         </button>
                         <button
                           onClick={() => handleDownload(g.audioUrl!, g.mode)}
-                          className="p-1.5 rounded hover:opacity-80"
+                          className="p-1.5 rounded hover:bg-white/10"
                           style={{ color: T.textMuted }}
                           aria-label="Download audio"
                         >
@@ -925,7 +928,11 @@ export default function AudioTool() {
               className="border rounded-lg p-6 text-center"
               style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
             >
-              <Music size={24} className="mx-auto mb-2 opacity-30" />
+              <Music
+                size={24}
+                className="mx-auto mb-2"
+                style={{ color: T.textMuted }}
+              />
               <p className="text-sm" style={{ color: T.textMuted }}>
                 Your generated audio will appear here
               </p>

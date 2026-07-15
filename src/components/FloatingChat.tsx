@@ -170,19 +170,52 @@ export function FloatingChat() {
       setMessages((prev) => [...prev, { role: "user", content: trimmed }]);
       setLoading(true);
       try {
-        const res = await fetch("/api/agents/chat", {
+        // Build the history slice the server expects.
+        const history = messages
+          .filter((m) => m.role === "user" || m.role === "agent")
+          .map((m) => ({
+            role: m.role === "agent" ? "assistant" : "user",
+            content: m.content,
+          }))
+          .slice(-20);
+
+        const res = await fetch("/api/litt/think", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentId: "director", message: trimmed }),
+          body: JSON.stringify({
+            message: trimmed,
+            persona: "littcode",
+            history,
+            context: { route: "/floating-chat" },
+          }),
         });
         const data = await res.json();
         if (!res.ok || data.error) throw new Error(data.error || "Chat failed");
-        const reply = data.response || "I'm on it.";
+        const reply = data.answer || "I'm on it.";
         const newIdx = messages.length + 1;
         setMessages((prev) => [...prev, { role: "agent", content: reply }]);
         if (autoSpeak) {
           // slight delay so the UI renders first
           setTimeout(() => void speakRef.current(reply, newIdx), 300);
+        }
+
+        // Surface the server-side actions as success toasts so the user knows
+        // the system actually did something (saved a memory, added a goal,
+        // etc.). The server already persists `remember` and `add_goal` via
+        // Supabase; this is just user-visible feedback.
+        const actions: Array<{ type: string; label?: string }> = Array.isArray(
+          data.actions,
+        )
+          ? data.actions
+          : [];
+        for (const a of actions) {
+          if (a.type === "remember") {
+            showToast(`\u{1F4BE} Saved: ${a.label ?? "memory"}`);
+          } else if (a.type === "add_goal") {
+            showToast(`\u{1F3AF} ${a.label ?? "Goal added"}`);
+          } else if (a.type === "run_command" || a.type === "insert_command") {
+            // Don't toast every command — too noisy. The chat transcript is enough.
+          }
         }
       } catch (err) {
         const msg =
@@ -192,7 +225,7 @@ export function FloatingChat() {
         setLoading(false);
       }
     },
-    [loading, showToast, autoSpeak, messages.length],
+    [loading, showToast, autoSpeak, messages],
   );
 
   useEffect(() => {

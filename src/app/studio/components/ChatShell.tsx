@@ -81,7 +81,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
+      className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
       title="Copy"
     >
       {copied ? <Check size={10} /> : <Copy size={10} />}
@@ -111,7 +111,7 @@ function LiTTAvatar({ size = 36 }: { size?: number }) {
           animation: "spin 8s linear infinite",
         }}
       />
-      <Bot size={size * 0.5} className="relative z-10 text-cyan-300" />
+      <Bot size={size * 0.5} className="relative z-10 text-cyan-400" />
     </div>
   );
 }
@@ -130,7 +130,7 @@ function UserAvatar({ size = 32 }: { size?: number }) {
           "0 0 16px rgba(249,115,22,0.22), inset 0 0 10px rgba(249,115,22,0.12)",
       }}
     >
-      <User size={size * 0.45} className="text-orange-300" />
+      <User size={size * 0.45} className="text-orange-400" />
     </div>
   );
 }
@@ -364,7 +364,7 @@ export default function ChatShell({
                           <CopyButton text={message.content} />
                           <button
                             onClick={() => speakText(message.content)}
-                            className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
+                            className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
                             title="Read aloud"
                           >
                             <Zap size={10} /> Speak
@@ -373,7 +373,7 @@ export default function ChatShell({
                             <button
                               onClick={() => onRegenerate?.()}
                               disabled={busy}
-                              className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300 disabled:opacity-40"
+                              className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400 disabled:opacity-40"
                               title="Regenerate"
                             >
                               <RefreshCw size={10} /> Regen

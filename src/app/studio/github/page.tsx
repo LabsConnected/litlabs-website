@@ -113,7 +113,10 @@ export default function GitHubSetupPage() {
                 window.open("https://github.com/settings/developers", "_blank")
               }
               className="w-full rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
-              style={{ backgroundColor: tokens.primary, color: "#000" }}
+              style={{
+                backgroundColor: tokens.primary,
+                color: tokens.text,
+              }}
             >
               Open GitHub Developer Settings
             </button>
@@ -124,14 +127,17 @@ export default function GitHubSetupPage() {
           <button
             onClick={startInstall}
             className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
-            style={{ backgroundColor: tokens.primary, color: "#000" }}
+            style={{ backgroundColor: tokens.primary, color: tokens.text }}
           >
             Install GitHub App <ArrowRight size={14} />
           </button>
         )}
 
         {status === "error" && (
-          <div className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs text-red-400">
+          <div
+            className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs"
+            style={{ color: tokens.warning }}
+          >
             {error}
           </div>
         )}

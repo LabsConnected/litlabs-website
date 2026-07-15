@@ -41,7 +41,7 @@ const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
 const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
 const ReactMarkdown = dynamic(() => import("react-markdown"), {
   ssr: false,
-  loading: () => <span className="opacity-50">…</span>,
+  loading: () => <span className="text-gray-300">…</span>,
 });
 const PersonaSwitcher = dynamic(
   () =>
@@ -123,7 +123,7 @@ function CopyButton({ text }: { text: string }) {
   return (
     <button
       onClick={handleCopy}
-      className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
+      className="flex items-center gap-1 text-[9px] transition hover:text-cyan-400"
       title="Copy"
     >
       {copied ? <Check size={10} /> : <Copy size={10} />}
@@ -165,7 +165,7 @@ function LiTTAvatar({ size = 80 }: { size?: number }) {
           border: "1px solid rgba(34,211,238,0.15)",
         }}
       />
-      <Bot size={size * 0.45} className="relative z-10 text-cyan-300" />
+      <Bot size={size * 0.45} className="relative z-10 text-cyan-400" />
     </div>
   );
 }
@@ -233,7 +233,7 @@ function TelemetryBar() {
     { label: "NET", value: 42, color: "#34d399" },
   ];
   return (
-    <div className="flex min-w-0 items-center gap-2 px-3 text-[9px] font-mono text-neutral-400 sm:gap-4 sm:px-4 sm:text-[10px]">
+    <div className="flex min-w-0 items-center gap-2 px-3 text-[9px] font-mono text-gray-300 sm:gap-4 sm:px-4 sm:text-[10px]">
       <div className="flex items-center gap-1.5">
         <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
         <span className="text-emerald-400">NEURAL LINK</span>
@@ -279,7 +279,7 @@ function LiveClock() {
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, []);
-  return <span className="font-mono text-[10px] text-neutral-400">{time}</span>;
+  return <span className="font-mono text-[10px] text-gray-300">{time}</span>;
 }
 
 function ActiveCommandTabs({
@@ -294,14 +294,14 @@ function ActiveCommandTabs({
       {tabs.map((tab) => (
         <div
           key={tab.id}
-          className="group flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[10px] font-medium text-cyan-300"
+          className="group flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[10px] font-medium text-cyan-400"
         >
           <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
           {tab.label}
           <button
             onClick={() => onClose(tab.id)}
             aria-label={`Close ${tab.label}`}
-            className="opacity-60 transition hover:opacity-100"
+            className="text-gray-300 transition hover:text-white"
           >
             <X size={10} />
           </button>
@@ -309,7 +309,7 @@ function ActiveCommandTabs({
       ))}
       <button
         aria-label="Add active command"
-        className="flex h-5 w-5 items-center justify-center rounded-md border border-white/10 text-neutral-500 transition hover:bg-white/5"
+        className="flex h-5 w-5 items-center justify-center rounded-md border border-white/10 text-gray-300 transition hover:bg-white/5"
       >
         <Plus size={10} />
       </button>
@@ -345,7 +345,7 @@ function AttachmentStrip({
                 className="h-12 w-12 object-cover"
               />
             ) : (
-              <div className="flex h-12 w-12 items-center justify-center bg-white/5 text-cyan-300">
+              <div className="flex h-12 w-12 items-center justify-center bg-white/5 text-cyan-400">
                 <ImageIcon size={18} />
               </div>
             )}
@@ -353,7 +353,7 @@ function AttachmentStrip({
               <span className="max-w-[140px] truncate text-[10px] font-medium text-neutral-200">
                 {att.name}
               </span>
-              <span className="text-[9px] text-neutral-500">
+              <span className="text-[9px] text-gray-300">
                 {att.type || "file"}
               </span>
             </div>
@@ -1060,10 +1060,10 @@ function LITTTerminalShellInner({
           </div>
           <div className="ml-4 flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-300">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">
               Mission Active
             </span>
-            <span className="text-[9px] text-neutral-400">
+            <span className="text-[9px] text-gray-300">
               Everything is under control.
             </span>
           </div>
@@ -1071,7 +1071,7 @@ function LITTTerminalShellInner({
             <button
               onClick={clearChat}
               title="Start a new chat"
-              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/2 px-2 py-1 text-[10px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
+              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/2 px-2 py-1 text-[10px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
             >
               <Trash2 size={10} />
               New Chat
@@ -1085,8 +1085,8 @@ function LITTTerminalShellInner({
             aria-label="Toggle plugin registry"
             className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition ${
               pluginsOpen
-                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                : "border-white/10 bg-white/5 text-neutral-400 hover:text-neutral-300"
+                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
+                : "border-white/10 bg-white/5 text-gray-300 hover:text-white"
             }`}
           >
             <LayoutGrid size={12} />
@@ -1142,15 +1142,15 @@ function LITTTerminalShellInner({
                   size={18}
                   className={
                     active
-                      ? "text-cyan-300"
-                      : "text-neutral-500 group-hover:text-neutral-300"
+                      ? "text-cyan-400"
+                      : "text-gray-300 group-hover:text-white"
                   }
                 />
                 <span
                   className={`text-[8px] font-bold ${
                     active
-                      ? "text-cyan-300"
-                      : "text-neutral-400 group-hover:text-neutral-200"
+                      ? "text-cyan-400"
+                      : "text-gray-300 group-hover:text-neutral-200"
                   }`}
                 >
                   {item.label}
@@ -1163,7 +1163,7 @@ function LITTTerminalShellInner({
           <div className="mt-auto flex flex-col items-center gap-2 py-2">
             <div className="text-center">
               <div className="text-[9px] font-black text-cyan-400">LITT OS</div>
-              <div className="text-[8px] text-neutral-400">v2.2.0</div>
+              <div className="text-[8px] text-gray-300">v2.2.0</div>
             </div>
             <div className="flex items-center gap-1 text-[8px] text-emerald-400">
               <span className="h-1 w-1 rounded-full bg-emerald-400" />
@@ -1201,23 +1201,23 @@ function LITTTerminalShellInner({
                 <div className="text-sm font-black tracking-wide text-white">
                   LITT Terminal
                 </div>
-                <div className="hidden text-[10px] text-neutral-500 sm:block">
+                <div className="hidden text-[10px] text-gray-300 sm:block">
                   Your intelligent workspace. One command away.
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-3 text-[10px]">
-              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-neutral-400">
+              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-gray-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 SYSTEMS NOMINAL
               </span>
-              <span className="hidden font-mono text-neutral-500 sm:inline">
+              <span className="hidden font-mono text-gray-300 sm:inline">
                 MEMORY 78%
               </span>
-              <span className="hidden font-mono text-neutral-500 md:inline">
+              <span className="hidden font-mono text-gray-300 md:inline">
                 CONTEXT 128K
               </span>
-              <span className="hidden font-mono text-neutral-500 md:inline">
+              <span className="hidden font-mono text-gray-300 md:inline">
                 TOKENS 1.2M
               </span>
             </div>
@@ -1346,7 +1346,7 @@ function LITTTerminalShellInner({
                         />
                         <ChevronRight
                           size={12}
-                          className="text-neutral-500 group-hover:text-cyan-400"
+                          className="text-gray-300 group-hover:text-cyan-400"
                         />
                       </div>
                       <div className="text-xs font-bold sm:text-sm">
@@ -1361,7 +1361,7 @@ function LITTTerminalShellInner({
 
                 <button
                   onClick={() => setPluginsOpen(true)}
-                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-300 sm:text-xs"
+                  className="flex items-center gap-1.5 text-[10px] font-bold text-neutral-300 transition hover:text-cyan-400 sm:text-xs"
                 >
                   <LayoutGrid size={12} />
                   View all plugins
@@ -1389,11 +1389,11 @@ function LITTTerminalShellInner({
                         }`}
                       >
                         {isUser ? (
-                          <span className="text-[10px] font-bold text-orange-300">
+                          <span className="text-[10px] font-bold text-orange-400">
                             {displayName.slice(0, 1).toUpperCase()}
                           </span>
                         ) : (
-                          <Bot size={14} className="text-cyan-300" />
+                          <Bot size={14} className="text-cyan-400" />
                         )}
                       </div>
                       <div
@@ -1437,7 +1437,7 @@ function LITTTerminalShellInner({
                           )}
                         </div>
                         <div className="mt-1 flex items-center gap-2 px-1">
-                          <span className="text-[9px] text-neutral-500">
+                          <span className="text-[9px] text-gray-300">
                             {message.createdAt
                               ? new Date(message.createdAt).toLocaleTimeString(
                                   [],
@@ -1455,7 +1455,7 @@ function LITTTerminalShellInner({
                                 <CopyButton text={message.content} />
                                 <button
                                   onClick={() => speakText(message.content)}
-                                  className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300"
+                                  className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
                                 >
                                   <Zap size={10} /> Speak
                                 </button>
@@ -1463,7 +1463,7 @@ function LITTTerminalShellInner({
                                   <button
                                     onClick={regenerate}
                                     disabled={busy}
-                                    className="flex items-center gap-1 text-[9px] text-neutral-500 transition hover:text-cyan-300 disabled:opacity-40"
+                                    className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400 disabled:opacity-40"
                                   >
                                     <RefreshCw size={10} /> Regen
                                   </button>
@@ -1485,7 +1485,7 @@ function LITTTerminalShellInner({
                     LiTT is thinking…
                     <button
                       onClick={cancel}
-                      className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-neutral-400 transition hover:border-rose-500/30 hover:text-rose-300"
+                      className="ml-2 flex items-center gap-1 rounded border border-white/10 bg-white/2 px-1.5 py-0.5 text-[9px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
                       title="Cancel (Esc)"
                     >
                       <Square size={8} /> Stop
@@ -1552,7 +1552,7 @@ function LITTTerminalShellInner({
                           {voiceState === "muted" && "Paused"}
                           {voiceState === "error" && "Voice error"}
                         </div>
-                        <div className="text-[10px] text-neutral-400 truncate">
+                        <div className="text-[10px] text-gray-300 truncate">
                           {errorMessage
                             ? errorMessage
                             : interimTranscript ||
@@ -1604,7 +1604,7 @@ function LITTTerminalShellInner({
                     voiceState === "testing" ||
                     voiceState === "generating_response" ||
                     voiceState === "speaking") && (
-                    <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[10px] text-neutral-400 scrollbar-none">
+                    <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[10px] text-gray-300 scrollbar-none">
                       {[
                         { key: "hear", label: "Heard", done: true },
                         {
@@ -1644,7 +1644,7 @@ function LITTTerminalShellInner({
                   )}
                   {availableDevices.length > 1 && (
                     <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
-                      <span className="text-[10px] text-neutral-500">Mic:</span>
+                      <span className="text-[10px] text-gray-300">Mic:</span>
                       <select
                         name="mic-device"
                         id="litt-mic-device"
@@ -1680,7 +1680,7 @@ function LITTTerminalShellInner({
                   onClick={() => setCameraOpen(true)}
                   className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
                     cameraOpen
-                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-300"
+                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
@@ -1709,7 +1709,7 @@ function LITTTerminalShellInner({
                     aria-label="Message LITT"
                     placeholder="Ask LiTT..."
                     rows={1}
-                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
@@ -1745,10 +1745,10 @@ function LITTTerminalShellInner({
                         ? onToolChangeAction(chip.tool)
                         : handleChip(chip.label)
                     }
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                    className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
-                    <span className="hidden text-neutral-600 sm:inline">
+                    <span className="hidden text-gray-400 sm:inline">
                       {chip.desc}
                     </span>
                   </button>
@@ -1759,14 +1759,14 @@ function LITTTerminalShellInner({
                       key={plugin}
                       onClick={() => handleChip(`/${plugin}`)}
                       aria-label={`/${plugin} plugin command`}
-                      className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-mono text-neutral-500 transition hover:text-neutral-300"
+                      className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-mono text-gray-300 transition hover:text-white"
                     >
                       /{plugin}
                     </button>
                   ))}
                   <span
                     title="More plugins coming soon"
-                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-neutral-500 opacity-40"
+                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-gray-300 opacity-40"
                   >
                     +8
                   </span>
@@ -1780,7 +1780,7 @@ function LITTTerminalShellInner({
           {/* FOOTER TELEMETRY */}
           <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90 sm:flex">
             <TelemetryBar />
-            <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-neutral-600">
+            <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-gray-400">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>
               <span className="font-black tracking-widest text-cyan-500/60">
                 LITT
@@ -1810,7 +1810,7 @@ function LITTTerminalShellInner({
           ) : (
             <>
               <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-neutral-400">
+                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
                   LITT Presence
                 </span>
                 <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
@@ -1825,7 +1825,7 @@ function LITTTerminalShellInner({
                   <div className="text-sm font-black text-white">
                     {persona.name}
                   </div>
-                  <div className="flex items-center justify-center gap-2 text-[10px] text-neutral-500">
+                  <div className="flex items-center justify-center gap-2 text-[10px] text-gray-300">
                     <span style={{ color: persona.color }}>{persona.tag}</span>
                     <span>·</span>
                     <span>Omni</span>
@@ -1834,7 +1834,7 @@ function LITTTerminalShellInner({
                   </div>
                 </div>
                 <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2">
-                  <span className="text-[10px] font-bold text-neutral-400">
+                  <span className="text-[10px] font-bold text-gray-300">
                     Voice
                   </span>
                   <span
@@ -1851,17 +1851,17 @@ function LITTTerminalShellInner({
               </div>
 
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
                   Speaking Now
                 </div>
                 <Waveform active={busy || micActive} />
 
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
                   Recent Transcript
                 </div>
                 <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/2 p-3">
                   {messages.length === 0 ? (
-                    <div className="text-[10px] leading-relaxed text-neutral-400">
+                    <div className="text-[10px] leading-relaxed text-gray-300">
                       Hey, I am {persona.name}.
                       <br />
                       Need help building something?
@@ -1873,12 +1873,10 @@ function LITTTerminalShellInner({
                       <div
                         key={i}
                         className={`flex items-start gap-2 text-[10px] ${
-                          m.role === "user"
-                            ? "text-neutral-400"
-                            : "text-cyan-300"
+                          m.role === "user" ? "text-gray-300" : "text-cyan-400"
                         }`}
                       >
-                        <span className="mt-0.5 shrink-0 text-[8px] opacity-60">
+                        <span className="mt-0.5 shrink-0 text-[8px] text-gray-300">
                           {m.role === "user" ? "You" : "LITT"}
                         </span>
                         <span className="line-clamp-3">{m.content}</span>
@@ -1887,7 +1885,7 @@ function LITTTerminalShellInner({
                   )}
                 </div>
 
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-neutral-400">
+                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
                   Quick Replies
                 </div>
                 <div className="flex flex-wrap gap-2">
@@ -1895,7 +1893,7 @@ function LITTTerminalShellInner({
                     <button
                       key={q}
                       onClick={() => void send(q)}
-                      className="rounded-full border border-white/10 bg-white/3 px-2.5 py-1 text-[10px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
+                      className="rounded-full border border-white/10 bg-white/3 px-2.5 py-1 text-[10px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
                     >
                       {q}
                     </button>

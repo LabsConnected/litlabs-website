@@ -407,19 +407,28 @@ export default function GalleryTool() {
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-3">
             <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
-              <LayoutGrid size={16} className="text-cyan-400" />
+              <LayoutGrid size={16} style={{ color: T.accentColor }} />
             </div>
             <div>
-              <div className="text-sm font-black tracking-wide text-white">
+              <div
+                className="text-sm font-black tracking-wide"
+                style={{ color: T.textColor }}
+              >
                 Asset Bucket
               </div>
-              <div className="hidden text-[10px] text-neutral-500 sm:block">
+              <div
+                className="hidden text-[10px] sm:block"
+                style={{ color: T.textMuted }}
+              >
                 Your generated images, video, and audio
               </div>
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-[10px] text-neutral-400">
+            <span
+              className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-[10px]"
+              style={{ color: T.textMuted }}
+            >
               <span className="h-1.5 w-1.5 rounded-full bg-cyan-400" />
               {filteredItems.length} ASSETS
             </span>
@@ -427,9 +436,10 @@ export default function GalleryTool() {
               onClick={() => setShowShare((v) => !v)}
               className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-bold transition ${
                 showShare
-                  ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-300"
-                  : "border border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                  ? "border-cyan-500/30 bg-cyan-500/10"
+                  : "border border-white/10 bg-white/5 hover:bg-white/10"
               }`}
+              style={{ color: showShare ? T.accentColor : T.textMuted }}
             >
               <Plus size={12} /> Share
             </button>
@@ -535,13 +545,13 @@ export default function GalleryTool() {
               <button
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className="shrink-0 rounded-md border border-white/5 px-3 py-1.5 text-xs font-bold transition hover:border-cyan-500/20 hover:text-cyan-300"
+                className="shrink-0 rounded-md border border-white/5 px-3 py-1.5 text-xs font-bold transition hover:border-cyan-500/20"
                 style={{
                   backgroundColor:
                     activeTab === tab.id
                       ? T.accentColor + "12"
                       : "rgba(255,255,255,0.02)",
-                  color: activeTab === tab.id ? T.accentColor : "#a3a3a3",
+                  color: activeTab === tab.id ? T.accentColor : T.textMuted,
                   borderColor:
                     activeTab === tab.id ? T.accentColor + "40" : undefined,
                 }}
@@ -551,20 +561,25 @@ export default function GalleryTool() {
             ))}
           </div>
           <div className="relative flex items-center sm:ml-auto">
-            <Search size={14} className="absolute left-3 text-neutral-500" />
+            <Search
+              size={14}
+              className="absolute left-3"
+              style={{ color: T.textMuted }}
+            />
             <input
               id="gallery-tool-search"
               name="galleryToolSearch"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search assets..."
-              className="w-full rounded-xl border border-white/10 bg-white/3 py-2 pl-9 pr-3 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-cyan-500/30 focus:bg-white/5 sm:w-56"
+              className="w-full rounded-xl border border-white/10 bg-white/3 py-2 pl-9 pr-3 text-sm outline-none placeholder:text-[var(--text-muted)] focus:border-cyan-500/30 focus:bg-white/5 sm:w-56"
+              style={{ color: T.textColor }}
             />
           </div>
         </div>
 
         {filteredItems.length === 0 ? (
-          <div className="text-center py-16 opacity-80">
+          <div className="text-center py-16" style={{ color: T.textMuted }}>
             <div className="text-3xl mb-3">🪣</div>
             <div className="text-sm font-bold">Your bucket is empty.</div>
             <div className="text-xs mt-1" style={{ color: T.textMuted }}>
@@ -628,7 +643,7 @@ export default function GalleryTool() {
                       className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity"
                       style={{ backgroundColor: "rgba(0,0,0,0.45)" }}
                     >
-                      <ExternalLink size={22} style={{ color: "#fff" }} />
+                      <ExternalLink size={22} style={{ color: T.textColor }} />
                     </div>
                   )}
                   <div
@@ -657,12 +672,15 @@ export default function GalleryTool() {
                   )}
                 </div>
                 <div className="px-2.5 py-2">
-                  <div className="text-xs font-bold truncate text-white">
+                  <div
+                    className="text-xs font-bold truncate"
+                    style={{ color: T.textColor }}
+                  >
                     {item.title}
                   </div>
                   <div className="flex items-center justify-between mt-1">
                     <span
-                      className="text-[10px] opacity-80"
+                      className="text-[10px]"
                       style={{ color: T.textMuted }}
                     >
                       {item.artist} · {item.createdAt}
@@ -720,7 +738,7 @@ export default function GalleryTool() {
                     target="_blank"
                     rel="noopener noreferrer"
                     className="flex items-center gap-2 px-4 py-2 rounded-lg font-bold text-sm"
-                    style={{ backgroundColor: "#ff0000", color: "#fff" }}
+                    style={{ backgroundColor: T.warning, color: T.textColor }}
                   >
                     <ExternalLink size={14} /> Watch on YouTube
                   </a>

@@ -284,9 +284,9 @@ export default function FlowTool() {
         <div
           className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border"
           style={{
-            borderColor: "#f85149",
-            color: "#f85149",
-            backgroundColor: "#f8514910",
+            borderColor: T.warning,
+            color: T.warning,
+            backgroundColor: T.warning + "10",
           }}
         >
           <AlertTriangle size={12} />
@@ -309,9 +309,9 @@ export default function FlowTool() {
                   status === "running"
                     ? T.accentColor
                     : status === "succeeded"
-                      ? "#56d364"
+                      ? T.success
                       : status === "failed"
-                        ? "#f85149"
+                        ? T.warning
                         : T.borderColor,
                 backgroundColor: T.boxBg,
               }}
@@ -358,10 +358,10 @@ export default function FlowTool() {
                     <Loader2 size={10} className="animate-spin" />
                   )}
                   {status === "succeeded" && (
-                    <CheckCircle2 size={10} style={{ color: "#56d364" }} />
+                    <CheckCircle2 size={10} style={{ color: T.success }} />
                   )}
                   {status === "failed" && (
-                    <AlertTriangle size={10} style={{ color: "#f85149" }} />
+                    <AlertTriangle size={10} style={{ color: T.warning }} />
                   )}
                 </div>
               </div>
@@ -522,7 +522,8 @@ export default function FlowTool() {
                 <button
                   onClick={() => removeCell(cell.id)}
                   disabled={cells.length <= 1 || running}
-                  className="text-[10px] opacity-60 hover:opacity-100 disabled:opacity-20 flex items-center gap-1"
+                  className="text-[10px] disabled:opacity-20 flex items-center gap-1"
+                  style={{ color: T.textMuted }}
                 >
                   <Trash2 size={10} /> Remove
                 </button>
@@ -550,7 +551,8 @@ export default function FlowTool() {
             </div>
             <button
               onClick={clearHistory}
-              className="text-[9px] opacity-60 hover:opacity-100"
+              className="text-[9px]"
+              style={{ color: T.textMuted }}
             >
               Clear
             </button>
@@ -565,7 +567,10 @@ export default function FlowTool() {
                   backgroundColor: T.bgColor,
                 }}
               >
-                <div className="w-full h-full flex items-center justify-center text-2xl opacity-30">
+                <div
+                  className="w-full h-full flex items-center justify-center text-2xl"
+                  style={{ color: T.textMuted }}
+                >
                   <Film size={20} />
                 </div>
                 <div

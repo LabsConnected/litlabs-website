@@ -16,6 +16,7 @@ import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
+import { useTheme } from "@/context/ThemeContext";
 
 export type ComposerMode = "text" | "camera";
 
@@ -107,6 +108,7 @@ export default function MultimodalComposer({
     setOnTurn,
     errorMessage,
   } = useVoiceSession();
+  const { resolvedColors: T } = useTheme();
 
   // Set turn handler for voice sessions
   useEffect(() => {
@@ -182,21 +184,21 @@ export default function MultimodalComposer({
       case "idle":
         return {
           icon: Mic,
-          color: "text-white/40",
+          color: T.textMuted,
           disabled: false,
           onClick: startVoice,
         };
       case "requesting_permission":
         return {
           icon: Loader2,
-          color: "text-white/60",
+          color: T.textMuted,
           disabled: true,
           onClick: undefined,
         };
       case "connecting":
         return {
           icon: Loader2,
-          color: "text-white/60",
+          color: T.textMuted,
           disabled: true,
           onClick: undefined,
         };
@@ -204,7 +206,7 @@ export default function MultimodalComposer({
       case "speech_detected":
         return {
           icon: Mic,
-          color: "text-cyan-400",
+          color: T.accentColor,
           disabled: false,
           onClick: stopVoice,
         };
@@ -219,14 +221,14 @@ export default function MultimodalComposer({
       case "generating_response":
         return {
           icon: Loader2,
-          color: "text-cyan-400",
+          color: T.accentColor,
           disabled: true,
           onClick: undefined,
         };
       case "speaking":
         return {
           icon: Square,
-          color: "text-amber-400",
+          color: T.warning,
           disabled: false,
           onClick: interrupt,
         };
@@ -234,21 +236,21 @@ export default function MultimodalComposer({
       case "paused":
         return {
           icon: MicOff,
-          color: "text-amber-400",
+          color: T.warning,
           disabled: false,
           onClick: toggleMute,
         };
       case "error":
         return {
           icon: MicOff,
-          color: "text-red-400",
+          color: "#fb7185",
           disabled: false,
           onClick: startVoice,
         };
       default:
         return {
           icon: Mic,
-          color: "text-white/40",
+          color: T.textMuted,
           disabled: false,
           onClick: startVoice,
         };
@@ -305,7 +307,7 @@ export default function MultimodalComposer({
                     voiceState === "listening"
                   }
                 />
-                <span className="text-[11px] font-bold text-white/80">
+                <span className="text-[11px] font-bold text-white">
                   {STATUS_LABELS[voiceState]}
                 </span>
               </>
@@ -320,7 +322,7 @@ export default function MultimodalComposer({
             {voiceState === "speaking" && (
               <button
                 onClick={interrupt}
-                className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-400/10"
+                className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-400 hover:bg-amber-400/10"
               >
                 Interrupt
               </button>
@@ -329,13 +331,15 @@ export default function MultimodalComposer({
               <>
                 <button
                   onClick={toggleMute}
-                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
+                  style={{ color: T.textMuted }}
                 >
                   {isMuted ? "Unmute" : "Mute"}
                 </button>
                 <button
                   onClick={stopVoice}
-                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
+                  style={{ color: T.textMuted }}
                 >
                   Stop
                 </button>
@@ -384,19 +388,19 @@ export default function MultimodalComposer({
       <div className="scrollbar-hide mb-1 flex max-w-full gap-1 overflow-x-auto overscroll-x-contain pb-1">
         <button
           onClick={() => setShowAdd((v) => !v)}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-gray-300 hover:text-cyan-300"}`}
         >
           <Plus size={12} /> Add
         </button>
         <button
           onClick={() => setMode(mode === "camera" ? "text" : "camera")}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${mode === "camera" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-slate-400 hover:text-cyan-300"}`}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${mode === "camera" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-gray-300 hover:text-cyan-300"}`}
         >
           <Camera size={12} /> Camera
         </button>
         <button
           onClick={() => fileInputRef.current?.click()}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-slate-400 hover:text-cyan-300"
+          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-gray-300 hover:text-cyan-300"
         >
           <Paperclip size={12} /> Files
         </button>
@@ -410,15 +414,15 @@ export default function MultimodalComposer({
               setMode("camera");
               setShowAdd(false);
             }}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
+            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-gray-200 hover:bg-white/5"
           >
-            <Camera size={16} className="text-cyan-300" /> Camera
+            <Camera size={16} className="text-cyan-400" /> Camera
           </button>
           <button
             onClick={() => fileInputRef.current?.click()}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-slate-300 hover:bg-white/5"
+            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-gray-200 hover:bg-white/5"
           >
-            <Paperclip size={16} className="text-cyan-300" /> Files
+            <Paperclip size={16} className="text-cyan-400" /> Files
           </button>
         </div>
       )}
@@ -451,7 +455,7 @@ export default function MultimodalComposer({
             }
           }}
           placeholder="Message LiTT..."
-          className="flex-1 resize-none bg-transparent text-sm text-white placeholder-white/40 outline-none"
+          className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-neutral-400 outline-none"
           style={{ minHeight: "44px", maxHeight: "160px" }}
           rows={1}
         />
@@ -460,10 +464,10 @@ export default function MultimodalComposer({
         <button
           onClick={micButtonState.onClick}
           disabled={micButtonState.disabled}
-          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${micButtonState.color} ${
+          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${
             !micButtonState.disabled && "hover:bg-white/10"
           } ${micButtonState.disabled && "cursor-not-allowed"}`}
-          style={getMicButtonStyle()}
+          style={{ ...getMicButtonStyle(), color: micButtonState.color }}
           aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
         >
           <MicIcon
@@ -490,7 +494,7 @@ export default function MultimodalComposer({
         <button
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
-          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-gray-300 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send message"
         >
           <Send size={16} />
@@ -503,7 +507,7 @@ export default function MultimodalComposer({
           <button
             key={chip.tool}
             onClick={() => onToolChange?.(chip.tool)}
-            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-gray-200 transition hover:border-cyan-400/30 hover:text-cyan-300"
             aria-label={`Switch to ${chip.tool} tool`}
           >
             <span className="text-cyan-400">{chip.label}</span>

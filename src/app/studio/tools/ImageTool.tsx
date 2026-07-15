@@ -1052,7 +1052,7 @@ export default function ImageTool() {
                     aria-label="Workspace name"
                     title="Workspace name"
                     placeholder="Workspace name"
-                    className="h-6 px-2 text-[10px] font-bold rounded outline-none w-20"
+                    className="h-6 px-2 text-[10px] font-bold rounded outline-none w-20 placeholder:text-[var(--text-muted)]"
                     style={{
                       backgroundColor: T.bgColor,
                       border: `1px solid ${T.accentColor}`,
@@ -1082,7 +1082,7 @@ export default function ImageTool() {
                           e.stopPropagation();
                           deleteWorkspace(ws.id);
                         }}
-                        className="opacity-0 group-hover:opacity-60 hover:opacity-100! ml-0.5 flex items-center cursor-pointer"
+                        className="opacity-0 group-hover:opacity-100 hover:opacity-100 ml-0.5 flex items-center cursor-pointer"
                       >
                         <X size={8} />
                       </span>
@@ -1093,7 +1093,7 @@ export default function ImageTool() {
             ))}
             <button
               onClick={createWorkspace}
-              className="h-6 px-2 flex items-center gap-0.5 text-[10px] font-bold rounded border transition-all hover:opacity-80"
+              className="h-6 px-2 flex items-center gap-0.5 text-[10px] font-bold rounded border transition-all "
               style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
               title="New workspace"
             >
@@ -1155,7 +1155,7 @@ export default function ImageTool() {
           <button
             onClick={handleClaimBonus}
             disabled={claiming}
-            className="h-6 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+            className="h-6 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all disabled:opacity-40"
             style={{
               borderColor: T.accentColor + "60",
               color: T.accentColor,
@@ -1167,7 +1167,7 @@ export default function ImageTool() {
           </button>
           <button
             onClick={() => setShowLogs((v) => !v)}
-            className="h-6 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80"
+            className="h-6 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all "
             style={{
               borderColor: showLogs
                 ? T.accentColor + "60"
@@ -1256,7 +1256,7 @@ export default function ImageTool() {
                   <button
                     onClick={enhancePrompt}
                     disabled={!prompt.trim() || isWorking}
-                    className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all disabled:opacity-30"
                     style={{
                       borderColor: T.accentColor + "40",
                       color: T.accentColor,
@@ -1276,7 +1276,7 @@ export default function ImageTool() {
                   placeholder="Describe what you want to forge..."
                   rows={5}
                   disabled={isWorking}
-                  className="w-full px-3 py-2.5 text-[12px] rounded-lg outline-none resize-none disabled:opacity-50 transition-all focus:ring-1"
+                  className="w-full px-3 py-2.5 text-[12px] rounded-lg outline-none resize-none disabled:opacity-50 transition-all focus:ring-1 placeholder:text-[var(--text-muted)]"
                   style={{
                     backgroundColor: T.bgColor,
                     border: `1px solid ${T.borderColor}40`,
@@ -1286,7 +1286,7 @@ export default function ImageTool() {
                 />
                 <div
                   className="text-right text-[9px]"
-                  style={{ color: T.textMuted + "60" }}
+                  style={{ color: T.textMuted }}
                 >
                   {prompt.length}
                 </div>
@@ -1318,7 +1318,7 @@ export default function ImageTool() {
                       onChange={(e) => setNegativePrompt(e.target.value)}
                       placeholder="blurry, low quality, distorted..."
                       disabled={isWorking}
-                      className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-50"
+                      className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-50 placeholder:text-[var(--text-muted)]"
                       style={{
                         backgroundColor: T.bgColor,
                         border: `1px solid ${T.borderColor}40`,
@@ -1381,7 +1381,7 @@ export default function ImageTool() {
                   <button
                     onClick={() => fileInputRef.current?.click()}
                     disabled={isWorking}
-                    className="mx-3 mb-3 w-[calc(100%-24px)] py-3 rounded-md border border-dashed flex flex-col items-center gap-1 text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                    className="mx-3 mb-3 w-[calc(100%-24px)] py-3 rounded-md border border-dashed flex flex-col items-center gap-1 text-[10px] font-bold transition-all disabled:opacity-40"
                     style={{
                       borderColor: T.borderColor + "60",
                       color: T.textMuted,
@@ -1411,11 +1411,11 @@ export default function ImageTool() {
                       key={i}
                       onClick={() => handleUsePrompt(p)}
                       disabled={isWorking}
-                      className="w-full text-left text-[10px] px-2.5 py-1.5 rounded border hover:opacity-80 disabled:opacity-40 line-clamp-2 transition-all"
+                      className="w-full text-left text-[10px] px-2.5 py-1.5 rounded border disabled:opacity-40 line-clamp-2 transition-all"
                       style={{
                         backgroundColor: T.bgColor,
                         borderColor: T.borderColor + "40",
-                        color: T.textColor + "cc",
+                        color: T.textColor,
                       }}
                     >
                       {p}
@@ -1442,7 +1442,7 @@ export default function ImageTool() {
                     Remix Mode
                   </span>
                   <p
-                    className="text-[9px] mt-0.5 opacity-60"
+                    className="text-[9px] mt-0.5"
                     style={{ color: T.textMuted }}
                   >
                     How to use the reference image
@@ -1463,7 +1463,12 @@ export default function ImageTool() {
                         <div className="flex items-center gap-1.5 font-bold text-[10px] mb-0.5">
                           <Icon size={10} /> {mode.label}
                         </div>
-                        <div className="text-[9px] opacity-60">{mode.desc}</div>
+                        <div
+                          className="text-[9px]"
+                          style={{ color: T.textMuted }}
+                        >
+                          {mode.desc}
+                        </div>
                       </button>
                     );
                   })}
@@ -1485,7 +1490,7 @@ export default function ImageTool() {
                   {selectedStyle && (
                     <button
                       onClick={() => setSelectedStyle(null)}
-                      className="text-[9px] opacity-60 hover:opacity-100"
+                      className="text-[9px]"
                       style={{ color: T.accentColor }}
                     >
                       Clear
@@ -1536,7 +1541,7 @@ export default function ImageTool() {
                   {selectedLighting && (
                     <button
                       onClick={() => setSelectedLighting(null)}
-                      className="text-[9px] opacity-60 hover:opacity-100"
+                      className="text-[9px]"
                       style={{ color: T.accentColor }}
                     >
                       Clear
@@ -1589,7 +1594,7 @@ export default function ImageTool() {
                   {selectedMood && (
                     <button
                       onClick={() => setSelectedMood(null)}
-                      className="text-[9px] opacity-60 hover:opacity-100"
+                      className="text-[9px]"
                       style={{ color: T.accentColor }}
                     >
                       Clear
@@ -1640,7 +1645,7 @@ export default function ImageTool() {
                   {selectedCamera && (
                     <button
                       onClick={() => setSelectedCamera(null)}
-                      className="text-[9px] opacity-60 hover:opacity-100"
+                      className="text-[9px]"
                       style={{ color: T.accentColor }}
                     >
                       Clear
@@ -1693,7 +1698,7 @@ export default function ImageTool() {
                   {selectedQualityTag && (
                     <button
                       onClick={() => setSelectedQualityTag(null)}
-                      className="text-[9px] opacity-60 hover:opacity-100"
+                      className="text-[9px]"
                       style={{ color: T.accentColor }}
                     >
                       Clear
@@ -1745,7 +1750,7 @@ export default function ImageTool() {
                       Auto-Enhance Prompt
                     </span>
                     <p
-                      className="text-[9px] mt-0.5 opacity-60"
+                      className="text-[9px] mt-0.5"
                       style={{ color: T.textMuted }}
                     >
                       Automatically append selected tags to prompt
@@ -1812,7 +1817,10 @@ export default function ImageTool() {
                       style={pill(providerId === p.id)}
                     >
                       <span
-                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${p.ready ? "bg-green-400" : "bg-amber-400"}`}
+                        className="w-1.5 h-1.5 rounded-full shrink-0"
+                        style={{
+                          backgroundColor: p.ready ? T.success : T.warning,
+                        }}
                       />
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-1.5">
@@ -1820,13 +1828,19 @@ export default function ImageTool() {
                             {p.label}
                           </span>
                           <span
-                            className="text-[8px] px-1 py-px rounded font-bold opacity-60"
-                            style={{ backgroundColor: T.bgColor }}
+                            className="text-[8px] px-1 py-px rounded font-bold"
+                            style={{
+                              backgroundColor: T.bgColor,
+                              color: T.textMuted,
+                            }}
                           >
                             {p.tag}
                           </span>
                         </div>
-                        <div className="text-[9px] opacity-50 truncate">
+                        <div
+                          className="text-[9px] truncate"
+                          style={{ color: T.textMuted }}
+                        >
                           {p.desc} · {p.cost === 0 ? "FREE" : `${p.cost} 🪙`}
                         </div>
                       </div>
@@ -1894,7 +1908,7 @@ export default function ImageTool() {
                 </div>
                 <div
                   className="px-3 pb-3 text-[9px]"
-                  style={{ color: T.textMuted + "60" }}
+                  style={{ color: T.textMuted }}
                 >
                   Total:{" "}
                   {providerCost * batchSize === 0
@@ -1946,7 +1960,7 @@ export default function ImageTool() {
                     Quality Preset
                   </span>
                   <p
-                    className="text-[9px] mt-0.5 opacity-60"
+                    className="text-[9px] mt-0.5"
                     style={{ color: T.textMuted }}
                   >
                     Steps & guidance pre-configured
@@ -1968,8 +1982,16 @@ export default function ImageTool() {
                       <div className="font-bold text-[10px]">
                         {preset.label}
                       </div>
-                      <div className="text-[9px] opacity-60">{preset.desc}</div>
-                      <div className="text-[8px] opacity-40 mt-0.5">
+                      <div
+                        className="text-[9px]"
+                        style={{ color: T.textMuted }}
+                      >
+                        {preset.desc}
+                      </div>
+                      <div
+                        className="text-[8px] mt-0.5"
+                        style={{ color: T.textMuted }}
+                      >
                         {preset.steps} steps · CFG {preset.cfg}
                       </div>
                     </button>
@@ -1991,7 +2013,7 @@ export default function ImageTool() {
                       Guidance Scale (CFG)
                     </span>
                     <p
-                      className="text-[9px] mt-0.5 opacity-60"
+                      className="text-[9px] mt-0.5"
                       style={{ color: T.textMuted }}
                     >
                       Adherence to prompt vs creativity
@@ -2053,7 +2075,7 @@ export default function ImageTool() {
                       Inference Steps
                     </span>
                     <p
-                      className="text-[9px] mt-0.5 opacity-60"
+                      className="text-[9px] mt-0.5"
                       style={{ color: T.textMuted }}
                     >
                       More steps = more detail, slower
@@ -2115,7 +2137,7 @@ export default function ImageTool() {
                     Sampling Method
                   </span>
                   <p
-                    className="text-[9px] mt-0.5 opacity-60"
+                    className="text-[9px] mt-0.5"
                     style={{ color: T.textMuted }}
                   >
                     Algorithm for denoising (provider support varies)
@@ -2132,7 +2154,12 @@ export default function ImageTool() {
                     >
                       <div>
                         <div className="text-[11px] font-bold">{s.label}</div>
-                        <div className="text-[9px] opacity-50">{s.desc}</div>
+                        <div
+                          className="text-[9px]"
+                          style={{ color: T.textMuted }}
+                        >
+                          {s.desc}
+                        </div>
                       </div>
                       {sampler === s.id && (
                         <div
@@ -2160,7 +2187,7 @@ export default function ImageTool() {
                         Img2Img Strength
                       </span>
                       <p
-                        className="text-[9px] mt-0.5 opacity-60"
+                        className="text-[9px] mt-0.5"
                         style={{ color: T.textMuted }}
                       >
                         How much to deviate from reference
@@ -2241,7 +2268,7 @@ export default function ImageTool() {
                         setSeed(Math.floor(Math.random() * 2147483647))
                       }
                       disabled={isWorking || seedLocked}
-                      className="text-[9px] px-2 py-0.5 rounded border transition-all hover:opacity-80 disabled:opacity-40"
+                      className="text-[9px] px-2 py-0.5 rounded border transition-all disabled:opacity-40"
                       style={{
                         borderColor: T.borderColor + "60",
                         color: T.accentColor,
@@ -2264,7 +2291,7 @@ export default function ImageTool() {
                     aria-label="Seed for reproducible generation"
                     title="Seed for reproducible generation"
                     placeholder="0"
-                    className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40"
+                    className="w-full px-2.5 py-2 text-[11px] rounded-md outline-none disabled:opacity-40 placeholder:text-[var(--text-muted)]"
                     style={{
                       backgroundColor: T.bgColor,
                       border: `1px solid ${T.borderColor}40`,
@@ -2272,7 +2299,7 @@ export default function ImageTool() {
                     }}
                   />
                   <p
-                    className="text-[9px] mt-1.5 opacity-50"
+                    className="text-[9px] mt-1.5"
                     style={{ color: T.textMuted }}
                   >
                     Same seed + settings = reproducible results
@@ -2399,7 +2426,7 @@ export default function ImageTool() {
                           currentResult.prompt,
                         )
                       }
-                      className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
+                      className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all "
                       style={{
                         borderColor: T.accentColor + "50",
                         color: T.accentColor,
@@ -2462,7 +2489,7 @@ export default function ImageTool() {
                       <button
                         onClick={() => handleSaveToGallery(currentResult)}
                         disabled={status === "saving"}
-                        className="h-6 px-2 flex items-center gap-1 text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                        className="h-6 px-2 flex items-center gap-1 text-[9px] font-bold transition-all disabled:opacity-40"
                         style={{
                           backgroundColor: T.bgColor,
                           color: T.textMuted,
@@ -2479,7 +2506,7 @@ export default function ImageTool() {
 
                     <button
                       onClick={handleGenerate}
-                      className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
+                      className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all "
                       style={{
                         borderColor: T.borderColor + "50",
                         color: T.textMuted,
@@ -2487,10 +2514,7 @@ export default function ImageTool() {
                     >
                       <RefreshCw size={9} /> Regen
                     </button>
-                    <span
-                      className="text-[9px] opacity-40"
-                      style={{ color: T.textMuted }}
-                    >
+                    <span className="text-[9px]" style={{ color: T.textMuted }}>
                       {currentResult.provider} · {aspectRatio}
                     </span>
                   </div>
@@ -2573,7 +2597,7 @@ export default function ImageTool() {
                       Forging...
                     </p>
                     <p
-                      className="text-[10px] mt-1 opacity-50"
+                      className="text-[10px] mt-1"
                       style={{ color: T.textMuted }}
                     >
                       {currentProvider.label}
@@ -2594,7 +2618,7 @@ export default function ImageTool() {
                       Forge Failed
                     </p>
                     <p
-                      className="text-[11px] opacity-60 mb-4"
+                      className="text-[11px] mb-4"
                       style={{ color: T.textMuted }}
                     >
                       {error ||
@@ -2627,18 +2651,15 @@ export default function ImageTool() {
                   <div className="text-center select-none">
                     <ImageIcon
                       size={48}
-                      className="mx-auto mb-2 opacity-30"
+                      className="mx-auto mb-2"
                       style={{ color: T.textMuted }}
                     />
-                    <p
-                      className="text-sm opacity-30 mb-4"
-                      style={{ color: T.textMuted }}
-                    >
+                    <p className="text-sm mb-4" style={{ color: T.textMuted }}>
                       Your creation appears here
                     </p>
                     <button
                       onClick={() => setMobileLeftOpen(true)}
-                      className="md:hidden px-4 py-2 text-xs font-bold rounded-lg border transition-all hover:opacity-80"
+                      className="md:hidden px-4 py-2 text-xs font-bold rounded-lg border transition-all "
                       style={{
                         borderColor: T.accentColor,
                         color: T.accentColor,
@@ -2700,7 +2721,7 @@ export default function ImageTool() {
                 <div className="flex items-center gap-1.5">
                   <History size={10} />
                   <span>History</span>
-                  <span className="opacity-50">({history.length})</span>
+                  <span style={{ color: T.textMuted }}>({history.length})</span>
                 </div>
                 <div className="flex items-center gap-2">
                   <button
@@ -2720,7 +2741,7 @@ export default function ImageTool() {
                         e.stopPropagation();
                         handleClearHistory();
                       }}
-                      className="opacity-40 hover:opacity-100 transition-opacity"
+                      style={{ color: T.textMuted }}
                       title="Clear history"
                     >
                       <Trash2 size={9} />
@@ -2738,7 +2759,7 @@ export default function ImageTool() {
                 <div className="flex-1 overflow-y-auto p-2 grid grid-cols-2 gap-1.5 content-start">
                   {history.length === 0 ? (
                     <div
-                      className="col-span-2 py-8 text-center text-[10px] opacity-40"
+                      className="col-span-2 py-8 text-center text-[10px]"
                       style={{ color: T.textMuted }}
                     >
                       No history yet
@@ -2775,14 +2796,18 @@ export default function ImageTool() {
                             />
                           </>
                         ) : g.status === "failed" ? (
-                          <div className="w-full h-full flex items-center justify-center bg-red-500/10 text-red-400 text-lg">
+                          <div
+                            className="w-full h-full flex items-center justify-center bg-red-500/10 text-lg"
+                            style={{ color: "#f87171" }}
+                          >
                             ✕
                           </div>
                         ) : (
                           <div className="w-full h-full flex items-center justify-center">
                             <Loader2
                               size={12}
-                              className="animate-spin opacity-40"
+                              className="animate-spin"
+                              style={{ color: T.textMuted }}
                             />
                           </div>
                         )}
@@ -2829,7 +2854,7 @@ export default function ImageTool() {
                 </div>
                 <button
                   onClick={() => setLogs([])}
-                  className="text-[9px] opacity-40 hover:opacity-100"
+                  className="text-[9px]"
                   style={{ color: T.textMuted }}
                 >
                   Clear
@@ -2838,7 +2863,7 @@ export default function ImageTool() {
               <div className="overflow-y-auto h-[calc(100%-32px)] p-2 space-y-px">
                 {logs.length === 0 ? (
                   <div
-                    className="text-[10px] opacity-30 italic px-1 pt-1"
+                    className="text-[10px] italic px-1 pt-1"
                     style={{ color: T.textMuted }}
                   >
                     idle
@@ -2850,7 +2875,7 @@ export default function ImageTool() {
                       className="flex items-baseline gap-2 px-1 text-[10px]"
                     >
                       <span
-                        className="opacity-30 shrink-0 tabular-nums"
+                        className="shrink-0 tabular-nums"
                         style={{ color: T.textMuted }}
                       >
                         {log.time}
@@ -2870,12 +2895,7 @@ export default function ImageTool() {
                       >
                         {log.level}
                       </span>
-                      <span
-                        className="opacity-80"
-                        style={{ color: T.textColor }}
-                      >
-                        {log.message}
-                      </span>
+                      <span style={{ color: T.textColor }}>{log.message}</span>
                     </div>
                   ))
                 )}

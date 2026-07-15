@@ -17,6 +17,7 @@ import {
   ExternalLink,
   AlertCircle,
 } from "lucide-react";
+import { useTheme } from "@/context/ThemeContext";
 
 type PluginStatus = "disconnected" | "connected" | "loading" | "error";
 
@@ -48,6 +49,7 @@ interface GitHubInstallation {
 }
 
 export default function PluginPanel({ onClose }: { onClose?: () => void }) {
+  const { resolvedColors: T } = useTheme();
   const [plugins, setPlugins] = useState<PluginDef[]>([
     {
       id: "github",
@@ -193,14 +195,18 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
   return (
     <div className="flex h-full w-full flex-col overflow-hidden border-l border-white/5 bg-[#05050a]/80">
       <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/5 px-4">
-        <span className="text-xs font-black uppercase tracking-[0.18em] text-neutral-400">
+        <span
+          className="text-xs font-black uppercase tracking-[0.18em]"
+          style={{ color: T.textMuted }}
+        >
           Plugin Registry
         </span>
         {onClose && (
           <button
             onClick={onClose}
             aria-label="Close plugin panel"
-            className="text-[10px] text-neutral-500 transition hover:text-neutral-300"
+            className="text-[10px] transition hover:text-neutral-300"
+            style={{ color: T.textMuted }}
           >
             Close
           </button>
@@ -208,7 +214,10 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">
-        <div className="mb-4 text-[10px] leading-relaxed text-neutral-400">
+        <div
+          className="mb-4 text-[10px] leading-relaxed"
+          style={{ color: T.textMuted }}
+        >
           Connect live services so LiTT can read your project state, open
           issues, deploy, and act on your behalf.
         </div>
@@ -234,7 +243,8 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                   >
                     <Icon
                       size={16}
-                      className={active ? "text-cyan-300" : "text-neutral-400"}
+                      className={active ? "text-cyan-400" : "text-gray-300"}
+                      style={{ color: active ? T.linkColor : undefined }}
                     />
                   </div>
                   <div className="min-w-0 flex-1">
@@ -245,7 +255,8 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                       {plugin.status === "loading" && (
                         <Loader2
                           size={12}
-                          className="animate-spin text-neutral-500"
+                          className="animate-spin"
+                          style={{ color: T.textMuted }}
                         />
                       )}
                       {plugin.status === "connected" && (
@@ -255,10 +266,10 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                         <AlertCircle size={12} className="text-rose-400" />
                       )}
                       {plugin.status === "disconnected" && (
-                        <XCircle size={12} className="text-neutral-600" />
+                        <XCircle size={12} className="text-gray-500" />
                       )}
                     </div>
-                    <div className="text-[9px] text-neutral-500">
+                    <div className="text-[9px]" style={{ color: T.textMuted }}>
                       {plugin.description}
                     </div>
                     {plugin.error && (
@@ -269,19 +280,25 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                   </div>
                   {plugin.id === "github" ? (
                     isConnected ? (
-                      <span className="text-[9px] font-bold text-emerald-400">
+                      <span
+                        className="text-[9px] font-bold"
+                        style={{ color: T.success }}
+                      >
                         Connected
                       </span>
                     ) : (
                       <a
                         href={plugin.connectUrl || "#"}
-                        className="flex shrink-0 items-center gap-1 rounded-md bg-white/5 px-2 py-1 text-[9px] text-neutral-300 transition hover:bg-white/10"
+                        className="flex shrink-0 items-center gap-1 rounded-md bg-white/5 px-2 py-1 text-[9px] transition hover:bg-white/10"
+                        style={{ color: T.textColor }}
                       >
                         Connect <ChevronRight size={10} />
                       </a>
                     )
                   ) : (
-                    <span className="text-[9px] text-neutral-600">Soon</span>
+                    <span className="text-[9px]" style={{ color: T.textMuted }}>
+                      Soon
+                    </span>
                   )}
                 </div>
 
@@ -295,23 +312,35 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                             onClick={() => setSelectedInstallation(inst.id)}
                             className={`rounded-md px-2 py-1 text-[9px] transition ${
                               selectedInstallation === inst.id
-                                ? "bg-cyan-500/10 text-cyan-300"
-                                : "bg-white/3 text-neutral-400 hover:text-neutral-300"
+                                ? "bg-cyan-500/10 text-cyan-400"
+                                : "bg-white/3 text-gray-300 hover:text-neutral-200"
                             }`}
+                            style={{
+                              color:
+                                selectedInstallation === inst.id
+                                  ? T.linkColor
+                                  : undefined,
+                            }}
                           >
                             {inst.account || `Install ${inst.id}`}
                           </button>
                         ))}
                       </div>
                     ) : installations.length === 1 ? (
-                      <div className="mb-2 text-[9px] text-neutral-400">
+                      <div
+                        className="mb-2 text-[9px]"
+                        style={{ color: T.textMuted }}
+                      >
                         Install: {installations[0].account}
                       </div>
                     ) : null}
 
                     <div className="max-h-40 overflow-y-auto space-y-1">
                       {repos.length === 0 ? (
-                        <div className="text-[9px] text-neutral-600">
+                        <div
+                          className="text-[9px]"
+                          style={{ color: T.textMuted }}
+                        >
                           {selectedInstallation
                             ? "No repositories accessible for this installation."
                             : "Select an installation to view repositories."}
@@ -323,12 +352,14 @@ export default function PluginPanel({ onClose }: { onClose?: () => void }) {
                             href={repo.htmlUrl}
                             target="_blank"
                             rel="noreferrer"
-                            className="flex items-center justify-between rounded-md bg-white/2 px-2 py-1 text-[9px] text-neutral-300 transition hover:bg-white/5"
+                            className="flex items-center justify-between rounded-md bg-white/2 px-2 py-1 text-[9px] transition hover:bg-white/5"
+                            style={{ color: T.textColor }}
                           >
                             <span className="truncate">{repo.fullName}</span>
                             <ExternalLink
                               size={10}
-                              className="shrink-0 text-neutral-500"
+                              className="shrink-0"
+                              style={{ color: T.textMuted }}
                             />
                           </a>
                         ))

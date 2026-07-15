@@ -254,14 +254,12 @@ export default function CLIBridgeTool() {
                 setSelectedTool(tool);
               }}
               className={`px-3 py-1.5 text-xs rounded-md transition-all ${
-                selectedTool.id === tool.id
-                  ? "font-bold"
-                  : "opacity-60 hover:opacity-100"
+                selectedTool.id === tool.id ? "font-bold" : ""
               }`}
               style={{
                 backgroundColor:
                   selectedTool.id === tool.id ? tool.color + "20" : T.boxBg,
-                color: selectedTool.id === tool.id ? tool.color : T.textColor,
+                color: selectedTool.id === tool.id ? tool.color : T.textMuted,
                 border: `1px solid ${selectedTool.id === tool.id ? tool.color : T.borderColor + "30"}`,
               }}
             >
@@ -287,7 +285,7 @@ export default function CLIBridgeTool() {
             <button
               onClick={disconnect}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all"
-              style={{ backgroundColor: "#ff444420", color: "#ff4444" }}
+              style={{ backgroundColor: T.warning + "20", color: T.warning }}
             >
               <Square size={12} /> Disconnect
             </button>
@@ -316,7 +314,7 @@ export default function CLIBridgeTool() {
           )}
           <button
             onClick={clearTerminal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all opacity-60 hover:opacity-100"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all"
             style={{ backgroundColor: T.boxBg, color: T.textMuted }}
           >
             <Trash2 size={12} /> Clear
@@ -328,7 +326,7 @@ export default function CLIBridgeTool() {
       {error && (
         <div
           className="px-4 py-2 text-xs"
-          style={{ backgroundColor: "#ff444420", color: "#ff4444" }}
+          style={{ backgroundColor: T.warning + "20", color: T.warning }}
         >
           <AlertCircle size={12} className="inline mr-1" />
           {error}
@@ -345,7 +343,10 @@ export default function CLIBridgeTool() {
         }}
       >
         {lines.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full opacity-40">
+          <div
+            className="flex flex-col items-center justify-center h-full"
+            style={{ color: T.textMuted }}
+          >
             <Terminal size={32} className="mb-2" />
             <p className="text-xs">
               Click Connect to start {selectedTool.name}
