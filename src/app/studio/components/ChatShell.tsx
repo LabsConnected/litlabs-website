@@ -39,6 +39,7 @@ interface ChatShellProps {
   onSend: (value: string, attachments?: string[]) => Promise<string>;
   onNewChat?: () => void;
   onRegenerate?: () => void;
+  onToolChange?: (tool: string) => void;
 }
 
 const STARTERS = [
@@ -141,6 +142,7 @@ export default function ChatShell({
   onSend,
   onNewChat,
   onRegenerate,
+  onToolChange,
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -409,6 +411,7 @@ export default function ChatShell({
           onSend={onSend}
           busy={busy}
           modelName={selectedModel}
+          onToolChange={onToolChange}
         />
       </div>
 

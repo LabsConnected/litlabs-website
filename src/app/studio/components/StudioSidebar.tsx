@@ -18,6 +18,7 @@ import {
   Shell,
   Code,
   FolderOpen,
+  X,
 } from "lucide-react";
 
 export type StudioTool =
@@ -223,16 +224,6 @@ function ModeConfigPanel({
           T={T}
         />
         <ConfigSelect label="Duration" options={["4s", "6s", "10s"]} T={T} />
-        <ConfigSelect
-          label="Motion"
-          options={["Low", "Medium", "High"]}
-          T={T}
-        />
-        <ConfigSelect
-          label="Camera"
-          options={["Static", "Dolly in", "Pan left", "Zoom"]}
-          T={T}
-        />
         <button
           className="w-full py-2 rounded-lg text-[11px] font-black transition-opacity hover:opacity-90"
           style={{ background: T.accentColor, color: "#000" }}
@@ -259,16 +250,6 @@ function ModeConfigPanel({
         <ConfigSelect
           label="Mode"
           options={["Music", "Text-to-speech"]}
-          T={T}
-        />
-        <ConfigSelect
-          label="Genre"
-          options={["Auto", "Cinematic", "EDM", "Lo-fi", "Orchestral"]}
-          T={T}
-        />
-        <ConfigSelect
-          label="Duration"
-          options={["30s", "1:00", "3:00", "Full"]}
           T={T}
         />
         <ConfigSelect
@@ -421,10 +402,14 @@ export default function StudioSidebar({
   activeTool,
   onToolChange,
   search = "",
+  open = false,
+  onClose,
 }: {
   activeTool: StudioTool;
   onToolChange: (tool: StudioTool) => void;
   search?: string;
+  open?: boolean;
+  onClose?: () => void;
 }) {
   const { resolvedColors: T } = useTheme();
   const [collapsed, setCollapsed] = useState(false);
@@ -436,9 +421,11 @@ export default function StudioSidebar({
           DESKTOP sidebar — hidden on tablet/mobile (lg+)
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden lg:flex flex-col h-full shrink-0 transition-[width] duration-300 ease-out"
+        className={`flex-col h-full shrink-0 transition-[width] duration-300 ease-out ${
+          open ? "flex" : "hidden lg:flex"
+        }`}
         style={{
-          width: collapsed ? "60px" : "240px",
+          width: open ? "100%" : collapsed ? "60px" : "240px",
           backgroundColor: T.boxBg + "70",
           backdropFilter: "blur(20px) saturate(180%)",
           borderRight: `1px solid ${T.borderColor}18`,
@@ -467,15 +454,31 @@ export default function StudioSidebar({
               </span>
             </div>
           )}
-          <button
-            onClick={() => setCollapsed((v) => !v)}
-            className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
-            style={{ color: T.textMuted + "80" }}
-            title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? <ChevronRight size={14} /> : <ChevronLeft size={14} />}
-          </button>
+          {onClose ? (
+            <button
+              onClick={onClose}
+              className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
+              style={{ color: T.textMuted + "80" }}
+              aria-label="Close menu"
+              title="Close menu"
+            >
+              <X size={14} />
+            </button>
+          ) : (
+            <button
+              onClick={() => setCollapsed((v) => !v)}
+              className="p-1 rounded-md transition-transform hover:bg-white/10 hover:scale-105 ml-auto"
+              style={{ color: T.textMuted + "80" }}
+              title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+            >
+              {collapsed ? (
+                <ChevronRight size={14} />
+              ) : (
+                <ChevronLeft size={14} />
+              )}
+            </button>
+          )}
         </div>
 
         {/* Grouped nav */}

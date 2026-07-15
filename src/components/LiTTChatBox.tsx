@@ -1,7 +1,7 @@
 "use client";
 
 import { useState } from "react";
-import { askJarvis } from "@/lib/ai/client";
+import { askLiTT } from "@/lib/ai/client";
 
 export default function LiTTChatBox() {
   const [message, setMessage] = useState("");
@@ -15,7 +15,7 @@ export default function LiTTChatBox() {
     setReply("");
 
     try {
-      const data = await askJarvis(message);
+      const data = await askLiTT(message);
       setReply(data.reply || "No reply returned.");
     } catch (err) {
       setReply(err instanceof Error ? err.message : "LiTT failed.");

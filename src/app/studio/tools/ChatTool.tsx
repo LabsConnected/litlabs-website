@@ -23,8 +23,10 @@ const MODEL_MAP: Record<string, { provider: string; model: string }> = {
 
 export default function ChatTool({
   selectedModel = "adaptive",
+  onToolChange,
 }: {
   selectedModel?: string;
+  onToolChange?: (tool: string) => void;
 }) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [busy, setBusy] = useState(false);
@@ -110,6 +112,7 @@ export default function ChatTool({
       onSend={send}
       onNewChat={() => setMessages([])}
       onRegenerate={handleRegenerate}
+      onToolChange={onToolChange}
     />
   );
 }

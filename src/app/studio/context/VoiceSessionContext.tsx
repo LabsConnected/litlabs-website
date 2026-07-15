@@ -351,7 +351,11 @@ export function VoiceSessionProvider({
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || `Transcription API error ${res.status}`);
+          const clean =
+            typeof err.error === "string"
+              ? err.error
+              : `Transcription API error ${res.status}`;
+          throw new Error(clean);
         }
 
         const data = (await res.json()) as { text?: string };

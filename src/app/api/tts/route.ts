@@ -98,9 +98,16 @@ export async function POST(req: NextRequest) {
         },
       });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const raw = err instanceof Error ? err.message : String(err);
+      const lower = raw.toLowerCase();
+      if (lower.includes("429") || lower.includes("quota") || lower.includes("resource_exhausted")) {
+        return NextResponse.json(
+          { error: "Voice service rate limit reached. Please try again shortly." },
+          { status: 429 },
+        );
+      }
       return NextResponse.json(
-        { error: "TTS synthesis failed", detail: message },
+        { error: "TTS synthesis failed", detail: raw },
         { status: 500 },
       );
     }

@@ -2,12 +2,12 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { runAI } from "@/lib/ai/providers";
 import {
-  buildJarvisPrompt,
-  buildJarvisSystemPrompt,
-  collectJarvisContext,
-  JarvisContext,
-  JarvisAction,
-  parseJarvisActions,
+  buildLiTTPrompt,
+  buildLiTTSystemPrompt,
+  collectLiTTContext,
+  LiTTContext,
+  LiTTAction,
+  parseLiTTActions,
 } from "@/lib/litt-context";
 import { loadProjectContext } from "@/lib/project-context";
 import { integrationStatusBlock, getProjectHealth } from "@/lib/integrations";
@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   try {
     const body = await req.json();
     const message = body.message as string;
-    const contextRaw = body.context as Partial<JarvisContext> & { route: string };
+    const contextRaw = body.context as Partial<LiTTContext> & { route: string };
     const clientGoals = Array.isArray(body.goals) ? body.goals : undefined;
     const clientTimeOfDay = typeof body.timeOfDay === "string" ? body.timeOfDay : undefined;
     const history = Array.isArray(body.history)
@@ -35,7 +35,7 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
-    const context = collectJarvisContext(contextRaw || { route: "/litt" });
+    const context = collectLiTTContext(contextRaw || { route: "/litt" });
 
     // Detect phrase intent — "show me around" / "tour" / "what's connected"
     // / "what's the project" all map to a special tour handler that
@@ -64,7 +64,7 @@ export async function POST(req: NextRequest) {
     // Detect goal-management intent — "make a list of X", "add goal: Y",
     // "create a goal" etc. The LLM should still respond, but we pass
     // goal context in the system prompt so it can act.
-    const userPrompt = buildJarvisPrompt(message, context);
+    const userPrompt = buildLiTTPrompt(message, context);
 
     // Build a system prompt that ALWAYS carries the static litlabs.net
     // project identity, the live integration state, and the (optional)
@@ -97,7 +97,7 @@ export async function POST(req: NextRequest) {
               : "night");
 
     const systemPrompt =
-      buildJarvisSystemPrompt(project) +
+      buildLiTTSystemPrompt(project) +
       "\n\n" +
       `LIVE INTEGRATION STATE (auto-detected from process.env):\n${integrationStatusBlock()}\n` +
       `\nTIME OF DAY: ${tod} — adjust tone and suggestions accordingly. ${tod === "morning" ? "Lead with what's most important to ship today." : tod === "evening" ? "User is winding down; suggest wrap-up tasks and what's left for tomorrow." : tod === "night" ? "User is in deep-work mode; be terse and avoid drive-by questions." : "Steady afternoon — propose one concrete next step, not a menu."}\n` +
@@ -136,10 +136,10 @@ export async function POST(req: NextRequest) {
       }
     }
 
-    const parsed = parseJarvisActions(answer);
+    const parsed = parseLiTTActions(answer);
 
     // Add context-aware fallback actions if the AI didn't return any
-    const actions: JarvisAction[] = parsed.length > 0 ? parsed : [];
+    const actions: LiTTAction[] = parsed.length > 0 ? parsed : [];
 
     if (lower.includes("scan") && context.websocketStatus !== "connected") {
       actions.unshift({
@@ -233,7 +233,7 @@ function buildTourAnswer(
   return lines.join("\n");
 }
 
-function tourActions(): JarvisAction[] {
+function tourActions(): LiTTAction[] {
   return [
     { type: "insert_command", label: "Start dev server", command: "pnpm dev" },
     { type: "insert_command", label: "Type-check", command: "npx tsc --noEmit" },

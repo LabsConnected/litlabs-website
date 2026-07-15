@@ -26,7 +26,17 @@ interface MultimodalComposerProps {
   onSend: (value: string, attachments?: string[]) => Promise<string>;
   busy?: boolean;
   modelName?: string;
+  onToolChange?: (tool: string) => void;
 }
+
+const SLASH_CHIPS = [
+  { label: "/image", tool: "image" },
+  { label: "/video", tool: "video" },
+  { label: "/audio", tool: "audio" },
+  { label: "/build", tool: "builder" },
+  { label: "/code", tool: "canvas" },
+  { label: "/agent", tool: "agents" },
+] as const;
 
 // @voice-statuses
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -79,6 +89,7 @@ export default function MultimodalComposer({
   onSend,
   busy,
   modelName = "Gemini 2.5 Flash",
+  onToolChange,
 }: MultimodalComposerProps) {
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
@@ -505,6 +516,20 @@ export default function MultimodalComposer({
         >
           <Send size={16} />
         </button>
+      </div>
+
+      {/* Tool shortcut chips */}
+      <div className="scrollbar-hide flex items-center gap-1.5 overflow-x-auto pb-1">
+        {SLASH_CHIPS.map((chip) => (
+          <button
+            key={chip.tool}
+            onClick={() => onToolChange?.(chip.tool)}
+            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1 text-[11px] text-slate-300 transition hover:border-cyan-400/30 hover:text-cyan-300"
+            aria-label={`Switch to ${chip.tool} tool`}
+          >
+            <span className="text-cyan-400">{chip.label}</span>
+          </button>
+        ))}
       </div>
     </div>
   );

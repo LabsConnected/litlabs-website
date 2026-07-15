@@ -26,9 +26,9 @@ import {
   X,
 } from "lucide-react";
 import type {
-  JarvisContext,
-  JarvisAction,
-  JarvisThinkResponse,
+  LiTTContext,
+  LiTTAction,
+  LiTTThinkResponse,
 } from "@/lib/litt-context";
 import {
   type Goal,
@@ -65,14 +65,14 @@ const quickActions = [
 ];
 
 type Message = {
-  role: "user" | "jarvis";
+  role: "user" | "litt";
   text: string;
-  actions?: JarvisAction[];
+  actions?: LiTTAction[];
   loading?: boolean;
 };
 
 interface LiTTAssistantPanelProps {
-  context: JarvisContext;
+  context: LiTTContext;
   onInsertCommand?: (cmd: string) => void;
   onRunCommand?: (cmd: string) => void;
   onCreateFile?: (path: string, content: string) => void;
@@ -128,7 +128,7 @@ export function LiTTAssistantPanel({
             : "Late night — litlabs.net is online.";
     setMessages([
       {
-        role: "jarvis",
+        role: "litt",
         text: `${hi} I'm connected to your terminal, files, logs, agents, integrations, and goals. I already know the stack and the conventions — just tell me what to do.${topStr}`,
       },
     ]);
@@ -150,7 +150,7 @@ export function LiTTAssistantPanel({
     (g) => g.status !== "done" && g.status !== "dropped",
   );
 
-  const askJarvis = useCallback(
+  const askLiTT = useCallback(
     async (rawInput: string) => {
       const text = rawInput.trim();
       if (!text) return;
@@ -158,7 +158,7 @@ export function LiTTAssistantPanel({
       setMessages((prev) => [
         ...prev,
         { role: "user", text },
-        { role: "jarvis", text: "", loading: true },
+        { role: "litt", text: "", loading: true },
       ]);
       setPrompt("");
       setLoading(true);
@@ -171,7 +171,7 @@ export function LiTTAssistantPanel({
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             last.text =
               openGoals.length === 0
                 ? "No open goals yet. Add one in the panel to the right, or type `add goal: <title>` here."
@@ -189,7 +189,7 @@ export function LiTTAssistantPanel({
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             const health = getProjectHealth();
             last.text = `**${health.connected}/${health.total}** integrations connected. ${health.requiredMissing.length > 0 ? `Required missing: ${health.requiredMissing.join(", ")}.` : "All required integrations are live."} See the side panel for the full table.`;
             last.loading = false;
@@ -203,7 +203,7 @@ export function LiTTAssistantPanel({
         const next = suggestNext(goals, context);
         setMessages((prev) => {
           const last = prev[prev.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             last.text = next;
             last.loading = false;
           }
@@ -224,7 +224,7 @@ export function LiTTAssistantPanel({
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             last.text = `Added **${g.title}** to your list. Priority: medium. I'll keep it on your radar.`;
             last.loading = false;
           }
@@ -245,12 +245,12 @@ export function LiTTAssistantPanel({
             timeOfDay: tod,
           }),
         });
-        const data: JarvisThinkResponse & { error?: string } = await res.json();
+        const data: LiTTThinkResponse & { error?: string } = await res.json();
 
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             last.text = data.error || data.answer || "No response.";
             last.actions = data.actions || [];
             last.loading = false;
@@ -261,7 +261,7 @@ export function LiTTAssistantPanel({
         setMessages((prev) => {
           const next = [...prev];
           const last = next[next.length - 1];
-          if (last?.role === "jarvis" && last.loading) {
+          if (last?.role === "litt" && last.loading) {
             last.text =
               err instanceof Error ? err.message : "Failed to reach LiTT.";
             last.loading = false;
@@ -275,7 +275,7 @@ export function LiTTAssistantPanel({
     [context, goals, openGoals, tod],
   );
 
-  function handleAction(action: JarvisAction) {
+  function handleAction(action: LiTTAction) {
     if (action.type === "insert_command" && action.command) {
       onInsertCommand?.(action.command);
     } else if (action.type === "run_command" && action.command) {
@@ -312,7 +312,7 @@ export function LiTTAssistantPanel({
   function handleKeyDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      askJarvis(prompt);
+      askLiTT(prompt);
     } else if (e.key === "/" && prompt === "") {
       setShowSlash(true);
     } else if (e.key === "Escape") {
@@ -408,11 +408,11 @@ export function LiTTAssistantPanel({
               </div>
             ) : (
               <div className="prose prose-invert prose-sm max-w-none">
-                <JarvisMarkdown text={msg.text} />
+                <LiTTMarkdown text={msg.text} />
               </div>
             )}
 
-            {msg.role === "jarvis" && !msg.loading && (
+            {msg.role === "litt" && !msg.loading && (
               <div className="mt-3 flex flex-wrap gap-2">
                 {msg.actions?.map((action) => (
                   <button
@@ -500,7 +500,7 @@ export function LiTTAssistantPanel({
             className="h-24 w-full resize-none rounded-lg border border-neutral-800 bg-black p-3 pr-10 text-sm outline-none focus:border-orange-600"
           />
           <button
-            onClick={() => askJarvis(prompt)}
+            onClick={() => askLiTT(prompt)}
             disabled={loading || !prompt.trim()}
             className="absolute bottom-2 right-2 rounded-lg bg-orange-600 p-2 text-white disabled:opacity-50 hover:bg-orange-500"
           >
@@ -514,7 +514,7 @@ export function LiTTAssistantPanel({
             return (
               <button
                 key={item.label}
-                onClick={() => askJarvis(item.prompt)}
+                onClick={() => askLiTT(item.prompt)}
                 className="flex items-center gap-2 rounded-lg border border-neutral-800 px-3 py-2 text-left text-xs text-neutral-300 hover:border-orange-600 hover:text-orange-400"
               >
                 <Icon className="h-3.5 w-3.5" />
@@ -708,7 +708,7 @@ function IntegrationsPanel({ onClose }: { onClose: () => void }) {
   );
 }
 
-function suggestNext(goals: Goal[], ctx: JarvisContext): string {
+function suggestNext(goals: Goal[], ctx: LiTTContext): string {
   const open = goals.filter(
     (g) => g.status !== "done" && g.status !== "dropped",
   );
@@ -761,7 +761,7 @@ function suggestNext(goals: Goal[], ctx: JarvisContext): string {
   return lines.join("\n");
 }
 
-function ActionIcon({ type }: { type: JarvisAction["type"] }) {
+function ActionIcon({ type }: { type: LiTTAction["type"] }) {
   if (type === "run_command") return <Play className="h-3 w-3" />;
   if (type === "insert_command") return <Terminal className="h-3 w-3" />;
   if (type === "create_file" || type === "edit_file")
@@ -771,7 +771,7 @@ function ActionIcon({ type }: { type: JarvisAction["type"] }) {
   return <Sparkles className="h-3 w-3" />;
 }
 
-function JarvisMarkdown({ text }: { text: string }) {
+function LiTTMarkdown({ text }: { text: string }) {
   const parts = text.split(/(```[\s\S]*?```)/g);
   return (
     <>

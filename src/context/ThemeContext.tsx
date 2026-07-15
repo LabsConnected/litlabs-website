@@ -5,10 +5,16 @@ import {
   useContext,
   useState,
   useEffect,
+  useLayoutEffect,
   useCallback,
   ReactNode,
 } from "react";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
+
+// Use layout effect on the client so CSS variables are applied before the
+// first paint, avoiding a flash of the default volcanic palette.
+const useIsomorphicLayoutEffect =
+  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Skin presets
 export type SkinPreset =
@@ -582,39 +588,45 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // Apply CSS variables synchronously before the browser paints so the
+  // ThemeContext palette takes effect immediately (and before any stored theme
+  // is loaded). This is intentionally not gated by `mounted`.
+  useIsomorphicLayoutEffect(() => {
+    if (typeof document === "undefined") return;
+    const root = document.documentElement;
+    const colors = getResolvedColors(theme);
+    root.style.setProperty("--bg-color", colors.bgColor);
+    root.style.setProperty("--text-color", colors.textColor);
+    root.style.setProperty("--link-color", colors.linkColor);
+    root.style.setProperty("--header-color", colors.headerColor);
+    root.style.setProperty("--border-color", colors.borderColor);
+    root.style.setProperty("--accent-color", colors.accentColor);
+    root.style.setProperty("--box-bg", colors.boxBg);
+    // Sync data-theme attribute so the :root[data-theme="light"]
+    // overrides in globals.css activate for legacy CSS-only components.
+    // Also handle the "system" mode by reading prefers-color-scheme.
+    const isLight =
+      theme.mode === "light" ||
+      (theme.mode === "system" &&
+        typeof window !== "undefined" &&
+        !!window.matchMedia &&
+        window.matchMedia("(prefers-color-scheme: light)").matches);
+    if (isLight) {
+      root.setAttribute("data-theme", "light");
+    } else {
+      root.removeAttribute("data-theme");
+    }
+    // Keep the browser chrome (mobile address bar, splash) in sync.
+    const meta = document.querySelector('meta[name="theme-color"]');
+    if (meta) {
+      meta.setAttribute("content", colors.bgColor);
+    }
+  }, [theme]);
+
   // Save to localStorage on change
   useEffect(() => {
     if (mounted) {
       localStorage.setItem("litlabs-theme", JSON.stringify(theme));
-      // Apply CSS variables
-      const root = document.documentElement;
-      const colors = getResolvedColors(theme);
-      root.style.setProperty("--bg-color", colors.bgColor);
-      root.style.setProperty("--text-color", colors.textColor);
-      root.style.setProperty("--link-color", colors.linkColor);
-      root.style.setProperty("--header-color", colors.headerColor);
-      root.style.setProperty("--border-color", colors.borderColor);
-      root.style.setProperty("--accent-color", colors.accentColor);
-      root.style.setProperty("--box-bg", colors.boxBg);
-      // Sync data-theme attribute so the :root[data-theme="light"]
-      // overrides in globals.css activate for legacy CSS-only components.
-      // Also handle the "system" mode by reading prefers-color-scheme.
-      const isLight =
-        theme.mode === "light" ||
-        (theme.mode === "system" &&
-          typeof window !== "undefined" &&
-          !!window.matchMedia &&
-          window.matchMedia("(prefers-color-scheme: light)").matches);
-      if (isLight) {
-        root.setAttribute("data-theme", "light");
-      } else {
-        root.removeAttribute("data-theme");
-      }
-      // Keep the browser chrome (mobile address bar, splash) in sync.
-      const meta = document.querySelector('meta[name="theme-color"]');
-      if (meta) {
-        meta.setAttribute("content", colors.bgColor);
-      }
     }
   }, [theme, mounted]);
 

@@ -30,7 +30,7 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#0d0a05",
+  themeColor: "#1a1210",
 };
 
 const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";

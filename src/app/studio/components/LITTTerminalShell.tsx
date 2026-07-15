@@ -88,12 +88,12 @@ const RAIL_ITEMS: RailItem[] = [
 ];
 
 const SLASH_CHIPS = [
-  { id: "image", label: "/image", desc: "Generate Image" },
-  { id: "video", label: "/video", desc: "Generate Video" },
-  { id: "audio", label: "/audio", desc: "Generate Audio" },
-  { id: "build", label: "/build", desc: "Build Anything" },
-  { id: "code", label: "/code", desc: "Generate Code" },
-  { id: "agent", label: "/agent", desc: "Run Agent" },
+  { id: "image", label: "/image", desc: "Generate Image", tool: "image" },
+  { id: "video", label: "/video", desc: "Generate Video", tool: "video" },
+  { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
+  { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
+  { id: "code", label: "/code", desc: "Generate Code", tool: "canvas" },
+  { id: "agent", label: "/agent", desc: "Run Agent", tool: "agents" },
 ];
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
@@ -1729,7 +1729,11 @@ function LITTTerminalShellInner({
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() => handleChip(chip.label)}
+                    onClick={() =>
+                      onToolChangeAction
+                        ? onToolChangeAction(chip.tool)
+                        : handleChip(chip.label)
+                    }
                     className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-neutral-400 transition hover:border-cyan-500/20 hover:text-cyan-300"
                   >
                     <span className="text-cyan-500">{chip.label}</span>

@@ -91,6 +91,7 @@ export default function StudioOS() {
     if (storedModel) setModel(storedModel);
   }, []);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
 
@@ -173,6 +174,7 @@ export default function StudioOS() {
             onSearchChange={setSearch}
             selectedModel={model}
             onModelChange={setModel}
+            onMenuToggle={() => setMobileMenuOpen((v) => !v)}
             onInspectorToggle={() => setInspectorOpen((v) => !v)}
             T={T}
           />
@@ -203,12 +205,34 @@ export default function StudioOS() {
                 onClick={() => setInspectorOpen(false)}
                 aria-label="Close inspector"
               />
-              <div className="absolute right-0 top-0 h-full w-[280px]">
+              <div className="absolute right-0 top-0 h-full w-[85%] max-w-[280px]">
                 <StudioInspector
                   variant="sheet"
                   onClose={() => setInspectorOpen(false)}
                   T={T}
                   activeTool={activeTool}
+                />
+              </div>
+            </div>
+          )}
+
+          {mobileMenuOpen && (
+            <div className="fixed inset-0 z-10000 lg:hidden">
+              <button
+                className="absolute inset-0 h-full w-full cursor-default bg-black/60"
+                onClick={() => setMobileMenuOpen(false)}
+                aria-label="Close sidebar"
+              />
+              <div className="absolute left-0 top-0 h-full w-[85%] max-w-[260px]">
+                <StudioSidebar
+                  activeTool={activeTool}
+                  onToolChange={(tool) => {
+                    setMobileMenuOpen(false);
+                    handleToolChange(tool);
+                  }}
+                  search={search}
+                  open
+                  onClose={() => setMobileMenuOpen(false)}
                 />
               </div>
             </div>

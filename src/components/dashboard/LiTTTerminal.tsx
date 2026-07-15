@@ -11,7 +11,7 @@ import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
-import type { JarvisAction, JarvisThinkResponse } from "@/lib/litt-context";
+import type { LiTTAction, LiTTThinkResponse } from "@/lib/litt-context";
 import {
   Terminal,
   Mic,
@@ -618,7 +618,7 @@ export default function LiTTTerminal() {
           }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
-        const data = (await res.json()) as JarvisThinkResponse & {
+        const data = (await res.json()) as LiTTThinkResponse & {
           error?: string;
         };
         if (data.error) throw new Error(data.error);
@@ -642,7 +642,7 @@ export default function LiTTTerminal() {
         // Surface any returned actions as clickable log hints
         if (actions.length > 0) {
           const actionLines = actions
-            .map((a: JarvisAction, i: number) =>
+            .map((a: LiTTAction, i: number) =>
               a.type === "insert_command" || a.type === "run_command"
                 ? `  ${i + 1}. [${a.type}] ${a.label}: ${a.command}`
                 : `  ${i + 1}. [${a.type}] ${a.label}`,
@@ -971,10 +971,8 @@ export default function LiTTTerminal() {
           // look like a command (helps when the mic picks up TV / music).
           if (transcript.length < 8) return;
           const lower = transcript.toLowerCase();
-          if (lower.startsWith("hey jarvis") || lower.startsWith("jarvis")) {
-            const cmd = transcript
-              .replace(/^(hey\s+)?jarvis[,\s]*/i, "")
-              .trim();
+          if (lower.startsWith("hey litt") || lower.startsWith("litt")) {
+            const cmd = transcript.replace(/^(hey\s+)?litt[,\s]*/i, "").trim();
             setInput(cmd);
             if (cmd) {
               setTimeout(() => sendMessage(), 200);

@@ -12,7 +12,7 @@
 [PROJECT_TRUTH]
 - This is a multi-agent AI app: LiTTree Lab Studios.
 - Real subsystems (all verified to exist on disk):
-    src/lib/litt.ts            — LiTT notification dispatcher (exports the legacy `jarvis` singleton for compatibility)
+    src/lib/litt.ts            — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias kept for compatibility)
     src/lib/litt-context.ts    — LiTT brain / prompt builder / action helpers
     src/lib/AgentOrchestrator.ts — orchestration matrix
     src/lib/agent-logger.ts, agent-profiles.ts, agent-tools.ts,
@@ -24,7 +24,7 @@
     src/lib/r2.ts               — Cloudflare R2 storage
     src/lib/usage.ts            — usage telemetry
     src/lib/TaskRepository.ts   — task persistence
-- There is NO src/lib/jarvis.ts. The `jarvis` export is defined in `src/lib/litt.ts` for compatibility.
+- There is NO src/lib/jarvis.ts. Code is branded as LiTT; the `jarvis` export is only a backward-compat alias from `src/lib/litt.ts`.
 - Repository (git remote): https://github.com/LabsConnected/litlabs-website
 - Branch: main
 - Deployed on Vercel. Self-host via Dockerfile or docker-compose.yml.

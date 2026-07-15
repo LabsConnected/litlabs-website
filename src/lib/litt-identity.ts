@@ -1,23 +1,23 @@
- /**
- * litt-identity.ts
- *
- * The single source of truth for "what project are we in" that gets
- * automatically injected into every LLM call.
- *
- * Goal: the assistant should always know — without being told — that it is
- * operating inside the **litlabs.net / LiTTree-LabStudios** codebase, what the
- * stack is, where the subsystems live, and which commands/conventions to use.
- *
- * Two layers:
- *   1. STATIC identity (LITLABS_IDENTITY) — hard-coded facts about the project.
- *      Always injected. Cannot be disabled. This is the "baseline brain".
- *   2. DYNAMIC context (ProjectContext from project-context.ts) — per-user,
- *      editable notes the user can add on top (current focus, extra stack,
- *      custom rules). Opt-in, stored in localStorage.
- *
- * Both layers are merged by `buildSystemPrompt()` (in agents.ts) and by the
- * automatic injection inside `llm.ts`. Callers don't have to remember anything.
- */
+/**
+* litt-identity.ts
+*
+* The single source of truth for "what project are we in" that gets
+* automatically injected into every LLM call.
+*
+* Goal: the assistant should always know — without being told — that it is
+* operating inside the **litlabs.net / LiTTree-LabStudios** codebase, what the
+* stack is, where the subsystems live, and which commands/conventions to use.
+*
+* Two layers:
+*   1. STATIC identity (LITLABS_IDENTITY) — hard-coded facts about the project.
+*      Always injected. Cannot be disabled. This is the "baseline brain".
+*   2. DYNAMIC context (ProjectContext from project-context.ts) — per-user,
+*      editable notes the user can add on top (current focus, extra stack,
+*      custom rules). Opt-in, stored in localStorage.
+*
+* Both layers are merged by `buildSystemPrompt()` (in agents.ts) and by the
+* automatic injection inside `llm.ts`. Callers don't have to remember anything.
+*/
 
 /* ------------------------------------------------------------------ */
 /*  1. STATIC project identity                                        */
@@ -71,8 +71,7 @@ a different project.
 - Supabase migrations directory is the source of truth for DB changes
 
 ## Subsystems that already exist (do not recreate)
-- **src/lib/litt.ts** — LiTT notification dispatcher (also exports the legacy
-  \`jarvis\` singleton for backward compat)
+- **src/lib/litt.ts** — LiTT notification dispatcher (exports \`litt\` singleton; \`jarvis\` alias kept for backward compat)
 - **src/lib/litt-context.ts** — LiTT brain / prompt builder / action helpers
 - **src/lib/litt-identity.ts** — this file (project identity)
 - **src/lib/project-context.ts** — per-user editable project notes (localStorage)

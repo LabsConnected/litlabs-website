@@ -7,7 +7,10 @@
    ============================================================ */
 
 :root {
-  /* Volcanic Cyber theme - burnt orange and ember red */
+  /* Volcanic Cyber theme - burnt orange and ember red.
+     These are the default/fallback values that match the default dark
+     volcanic skin. ThemeContext overrides them on document.documentElement
+     after hydration so dynamic skin changes take effect. */
   --bg-color: #1a1210;
   --bg-elevated: #251a15;
   --bg-card: rgba(37, 26, 21, 0.95);

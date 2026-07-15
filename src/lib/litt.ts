@@ -153,7 +153,7 @@ class LiTT {
           body: payload.body,
           data: payload.data,
           timestamp: new Date().toISOString(),
-          source: "jarvis",
+          source: "litt",
         }),
       });
       return response.ok;
@@ -328,10 +328,13 @@ class LiTT {
   }
 }
 
-export const jarvis = new LiTT();
+export const litt = new LiTT();
+
+// Backward compatibility shim for legacy "jarvis" imports
+export const jarvis = litt;
 
 if (typeof window === "undefined") {
-  jarvis.init({
+  litt.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
     webhookEndpoint: process.env.LiTT_WEBHOOK_URL,

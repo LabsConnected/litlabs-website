@@ -1,6 +1,6 @@
 import { LITLABS_IDENTITY_SNIPPET, mergeLittIdentityWithProject } from "@/lib/litt-identity";
 
-export type JarvisActionType =
+export type LiTTActionType =
   | "run_command"
   | "insert_command"
   | "create_file"
@@ -8,8 +8,8 @@ export type JarvisActionType =
   | "start_agent"
   | "deploy";
 
-export type JarvisAction = {
-  type: JarvisActionType;
+export type LiTTAction = {
+  type: LiTTActionType;
   label: string;
   command?: string;
   filePath?: string;
@@ -17,9 +17,9 @@ export type JarvisAction = {
   agentName?: string;
 };
 
-export type JarvisAgentStatus = "online" | "idle" | "running" | "error";
+export type LiTTAgentStatus = "online" | "idle" | "running" | "error";
 
-export type JarvisContext = {
+export type LiTTContext = {
   route: string;
   terminalOutput: string;
   commandHistory: string[];
@@ -31,17 +31,17 @@ export type JarvisContext = {
   fileTree: string[];
   agents: {
     name: string;
-    status: JarvisAgentStatus;
+    status: LiTTAgentStatus;
   }[];
   websocketStatus: "connected" | "offline" | "connecting";
 };
 
-export type JarvisThinkResponse = {
+export type LiTTThinkResponse = {
   answer: string;
-  actions?: JarvisAction[];
+  actions?: LiTTAction[];
 };
 
-export type JarvisProjectContext = {
+export type LiTTProjectContext = {
   name?: string;
   description?: string;
   stack?: string;
@@ -61,7 +61,7 @@ export type JarvisProjectContext = {
  * If you need to force the identity into a prompt-only caller (no system
  * message slot), use `mergeLittIdentityWithProject()` to prepend it.
  */
-export function buildJarvisPrompt(message: string, context: JarvisContext): string {
+export function buildLiTTPrompt(message: string, context: LiTTContext): string {
   return `
 You are LiTT inside LiTTree-LabStudios (litlabs.net).
 
@@ -117,12 +117,12 @@ Rules:
  * when the caller can't pass a separate system-prompt slot and only has
  * a single user-prompt string to send to the LLM.
  */
-export function buildJarvisSystemPrompt(project?: JarvisProjectContext): string {
+export function buildLiTTSystemPrompt(project?: LiTTProjectContext): string {
   return mergeLittIdentityWithProject(project);
 }
 
-export function parseJarvisActions(answer: string): JarvisAction[] {
-  const actions: JarvisAction[] = [];
+export function parseLiTTActions(answer: string): LiTTAction[] {
+  const actions: LiTTAction[] = [];
 
   // Extract bash commands from the first code block and offer to insert/run
   const codeBlockMatch = answer.match(/```(?:bash|sh|shell)?\n([\s\S]*?)```/);
@@ -137,9 +137,9 @@ export function parseJarvisActions(answer: string): JarvisAction[] {
   return actions;
 }
 
-export function collectJarvisContext(
-  partial: Partial<JarvisContext> & { route: string },
-): JarvisContext {
+export function collectLiTTContext(
+  partial: Partial<LiTTContext> & { route: string },
+): LiTTContext {
   return {
     route: partial.route,
     terminalOutput: partial.terminalOutput || "",
