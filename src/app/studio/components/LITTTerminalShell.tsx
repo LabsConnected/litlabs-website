@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
@@ -74,17 +75,18 @@ type RailItem = {
   label: string;
   icon: typeof Terminal;
   tool?: string;
+  href?: string;
 };
 
 const RAIL_ITEMS: RailItem[] = [
   { id: "terminal", label: "Terminal", icon: Terminal },
-  { id: "projects", label: "Projects", icon: FolderKanban },
-  { id: "pipelines", label: "Pipelines", icon: GitBranch },
-  { id: "agents", label: "Agents", icon: Bot },
-  { id: "assets", label: "Assets", icon: FolderOpen },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen },
-  { id: "spaces", label: "Spaces", icon: Boxes },
-  { id: "settings", label: "Settings", icon: Settings },
+  { id: "projects", label: "Projects", icon: FolderKanban, href: "/projects" },
+  { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
+  { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
+  { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/docs" },
+  { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
+  { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
 
 const SLASH_CHIPS = [
@@ -376,6 +378,7 @@ function LITTTerminalShellInner({
   activeTool?: string;
   onToolChangeAction?: (tool: string) => void;
 }) {
+  const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
   const {
@@ -1110,14 +1113,22 @@ function LITTTerminalShellInner({
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* LEFT RAIL */}
-        <aside className="hidden w-16 shrink-0 flex-col items-center gap-1 border-r border-white/5 bg-[#05050a]/80 py-3 md:flex">
+        <aside className="hidden w-16 shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 md:flex">
           {RAIL_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = activeTool === item.tool || activeTab === item.id;
             return (
               <button
                 key={item.id}
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  if (item.href) {
+                    router.push(item.href);
+                  } else if (item.tool) {
+                    onToolChangeAction?.(item.tool);
+                  } else {
+                    setActiveTab(item.id);
+                  }
+                }}
                 aria-label={item.label}
                 className={`group relative flex w-11 flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors ${
                   active ? "bg-cyan-500/10" : "hover:bg-white/5"
