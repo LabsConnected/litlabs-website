@@ -29,6 +29,7 @@ interface SpeechRecognition extends EventTarget {
   continuous: boolean;
   lang: string;
   interimResults: boolean;
+  maxAlternatives: number;
   onstart: ((this: SpeechRecognition, ev: Event) => unknown) | null;
   onend: ((this: SpeechRecognition, ev: Event) => unknown) | null;
   onresult:
@@ -847,6 +848,7 @@ export default function LiTTTerminal() {
     rec.continuous = false;
     rec.lang = "en-US";
     rec.interimResults = true;
+    rec.maxAlternatives = 1;
     rec.onstart = () => setIsListening(true);
     rec.onend = () => {
       setIsListening(false);
@@ -876,6 +878,9 @@ export default function LiTTTerminal() {
       setInput(transcript);
       if (results[results.length - 1].isFinal) {
         if (wakeWordEnabled) {
+          // Require a known wake phrase and ignore anything that doesn't
+          // look like a command (helps when the mic picks up TV / music).
+          if (transcript.length < 8) return;
           const lower = transcript.toLowerCase();
           if (lower.startsWith("hey jarvis") || lower.startsWith("jarvis")) {
             const cmd = transcript

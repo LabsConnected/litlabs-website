@@ -17,6 +17,12 @@ import {
   ChevronUp,
   RefreshCw,
 } from "lucide-react";
+import {
+  PREMIUM_VOICES,
+  loadStoredVoice,
+  saveStoredVoice,
+  type VoiceDescriptor,
+} from "@/lib/voices";
 
 type ChatMessage = {
   role: "user" | "agent";
@@ -39,13 +45,7 @@ const SUGGESTIONS = [
   "Recall a memory",
 ];
 
-const VOICES = [
-  { value: "Puck", label: "Puck", desc: "Upbeat · Male" },
-  { value: "Kore", label: "Kore", desc: "Firm · Female" },
-  { value: "Charon", label: "Charon", desc: "Informational · Male" },
-  { value: "Fenrir", label: "Fenrir", desc: "Excitable · Male" },
-  { value: "Orus", label: "Orus", desc: "Steady · Male" },
-];
+// Voice list is now sourced from @/lib/voices.ts (PREMIUM_VOICES).
 
 function audioSrcFromBase64(input: string): string {
   if (!input) return "";
@@ -67,7 +67,16 @@ export function FloatingChat() {
     },
   ]);
   const [loading, setLoading] = useState(false);
-  const [voice, setVoice] = useState("Puck");
+  // Default voice is the persona-bound voice for the active persona, with
+  // any stored user preference layered on top.
+  const [voice, setVoiceState] = useState<VoiceDescriptor>(() => {
+    if (typeof window === "undefined") return PREMIUM_VOICES[0];
+    return loadStoredVoice();
+  });
+  const setVoice = (v: VoiceDescriptor) => {
+    setVoiceState(v);
+    saveStoredVoice(v);
+  };
   const [recording, setRecording] = useState(false);
   const [transcribing, setTranscribing] = useState(false);
   const [speaking, setSpeaking] = useState<number | null>(null);
@@ -378,7 +387,7 @@ export function FloatingChat() {
       const res = await fetch("/api/media/generate-audio", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, voice }),
+        body: JSON.stringify({ prompt: text, voice: voice.id }),
       });
       const data = await res.json();
       if (!res.ok || data.error) throw new Error(data.error || "TTS failed");
@@ -453,11 +462,11 @@ export function FloatingChat() {
           <button
             onClick={() => setVoiceMenuOpen(true)}
             aria-label="Select voice"
-            title={`Voice: ${voice}`}
+            title={`Voice: ${voice.label} (${voice.provider})`}
             className="flex h-7 items-center gap-1 rounded-lg border border-neutral-700/50 bg-neutral-900/60 px-2 text-[10px] font-bold text-neutral-300 transition hover:border-white/20 hover:text-white"
           >
             <Volume2 size={10} />
-            {voice}
+            {voice.label}
           </button>
 
           {/* Desktop expand/collapse toggle */}
@@ -505,23 +514,35 @@ export function FloatingChat() {
               </button>
             </div>
             <div className="space-y-1">
-              {VOICES.map((v) => (
+              {PREMIUM_VOICES.map((v) => (
                 <button
-                  key={v.value}
+                  key={v.id}
                   onClick={() => {
-                    setVoice(v.value);
+                    setVoice(v);
                     setVoiceMenuOpen(false);
                   }}
                   className={`flex w-full items-center justify-between rounded-xl px-3 py-2 text-[10px] transition hover:bg-white/5 ${
-                    voice === v.value ? "text-white" : "text-neutral-300"
+                    voice.id === v.id ? "text-white" : "text-neutral-300"
                   }`}
                   style={{
                     backgroundColor:
-                      voice === v.value ? `${tokens.primary}20` : undefined,
+                      voice.id === v.id ? `${tokens.primary}20` : undefined,
                   }}
                 >
-                  <span className="font-bold">{v.label}</span>
-                  <span className="text-neutral-500">{v.desc}</span>
+                  <div className="flex flex-col items-start">
+                    <span className="font-bold">
+                      {v.label}
+                      {v.premium && (
+                        <span className="ml-1 rounded bg-amber-500/20 px-1 py-0.5 text-[8px] font-black uppercase text-amber-300">
+                          Premium
+                        </span>
+                      )}
+                    </span>
+                    <span className="text-[9px] opacity-60">{v.desc} · {v.style}</span>
+                  </div>
+                  {voice.id === v.id && (
+                    <span className="text-[9px] font-bold uppercase tracking-wider">Active</span>
+                  )}
                 </button>
               ))}
             </div>
@@ -535,7 +556,10 @@ export function FloatingChat() {
                 setVoicePreviewError(null);
                 setVoicePreviewLoading(true);
                 try {
-                  await speak(`Hi, I'm ${voice}. Ready when you are.`, -1);
+                  await speak(
+                    `Hi, I'm ${voice.label}. Ready when you are.`,
+                    -1,
+                  );
                 } catch {
                   setVoicePreviewError(
                     "Preview failed. Browser voice will be used.",
