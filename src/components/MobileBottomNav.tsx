@@ -17,8 +17,8 @@ export default function MobileBottomNav() {
     return pathname?.startsWith(href) ?? false;
   };
 
-  const primary = MOBILE_BOTTOM_ITEMS.slice(0, 5);
-  const overflow = MOBILE_BOTTOM_ITEMS.slice(5);
+  const primary = MOBILE_BOTTOM_ITEMS.slice(0, 4);
+  const overflow = MOBILE_BOTTOM_ITEMS.slice(4);
   const anyOverflowActive = overflow.some((item) => isActive(item.href));
 
   return (
@@ -39,7 +39,7 @@ export default function MobileBottomNav() {
               <Link
                 key={item.label}
                 href={item.href}
-                className="relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
+                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${item.label === "Create" ? "-mt-5" : ""}`}
                 style={{ color: active ? T.accentColor : T.textMuted }}
               >
                 {active && (
@@ -48,7 +48,7 @@ export default function MobileBottomNav() {
                     style={{ backgroundColor: T.accentColor }}
                   />
                 )}
-                <Icon size={20} />
+                <span className={item.label === "Create" ? "grid h-12 w-12 place-items-center rounded-full bg-violet-600 text-white shadow-[0_0_24px_rgba(139,92,246,.5)]" : ""}><Icon size={item.label === "Create" ? 24 : 20} /></span>
                 <span className="text-[9px] font-black">{item.label}</span>
               </Link>
             );

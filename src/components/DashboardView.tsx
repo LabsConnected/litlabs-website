@@ -3,7 +3,7 @@
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
-import { CenterStage } from "@/components/dashboard/DashboardCards";
+import PersonalDashboard from "@/components/dashboard/PersonalDashboard";
 
 export default function DashboardView() {
   const { user } = useAppUser();
@@ -20,7 +20,7 @@ export default function DashboardView() {
     >
       {/* Center */}
       <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6">
-        <CenterStage activeApp="home" displayName={displayName} />
+        <PersonalDashboard displayName={displayName} />
       </main>
     </div>
   );
