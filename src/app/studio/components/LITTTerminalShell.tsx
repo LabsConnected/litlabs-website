@@ -6,6 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
+import { parseLiTTActions } from "@/lib/litt-context";
 import {
   Terminal,
   FolderKanban,
@@ -928,6 +929,12 @@ function LITTTerminalShellInner({
             }
           }
         }
+        setActiveCommands(
+          parseLiTTActions(fullText).map((a, i) => ({
+            id: `${a.type}-${i}`,
+            label: a.label,
+          })),
+        );
         return fullText;
       } catch (error) {
         const isAbort =
