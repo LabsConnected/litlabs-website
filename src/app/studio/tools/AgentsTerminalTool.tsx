@@ -639,12 +639,7 @@ export default function AgentsTerminalTool() {
                     boxShadow: `0 0 8px ${providerConfig.color}`,
                   }}
                 />
-                <span
-                  className="hidden sm:inline"
-                  style={{ color: T.textMuted }}
-                >
-                  Model
-                </span>
+                <span style={{ color: T.textMuted }}>Model</span>
                 <span className="font-bold truncate max-w-[120px]">
                   {providerLabel}
                 </span>
@@ -666,7 +661,7 @@ export default function AgentsTerminalTool() {
                 }}
               >
                 <Monitor size={10} />
-                <span className="hidden sm:inline">CRT</span>
+                <span>CRT</span>
               </button>
 
               {/* Clear */}
@@ -679,7 +674,7 @@ export default function AgentsTerminalTool() {
                 }}
               >
                 <Trash2 size={10} />
-                <span className="hidden sm:inline">Clear</span>
+                <span>Clear</span>
               </button>
             </div>
           </div>

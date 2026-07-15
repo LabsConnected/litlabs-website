@@ -721,7 +721,7 @@ export default function Gallery() {
                 <button
                   key={item.id}
                   onClick={() => setSelectedItem(item)}
-                  className="shrink-0 w-[120px] sm:w-[160px] text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
+                  className="shrink-0 w-28 sm:w-40 text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
                   style={{
                     backgroundColor: T.boxBg,
                     border: `1px solid ${T.borderColor}20`,
@@ -1336,7 +1336,7 @@ export default function Gallery() {
       <div className="px-2 py-3 sm:px-4 sm:py-6 w-full">
         {galleryLoading && items.length === 0 && (
           <div
-            className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3"
+            className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"
             aria-label="Loading gallery"
           >
             {[0, 1, 2, 3, 4, 5].map((index) => (
@@ -1452,7 +1452,7 @@ export default function Gallery() {
                       alt={item.title}
                       fill
                       className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
-                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
+                      sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
                       unoptimized
                       onError={() =>
                         setBrokenImages((prev) =>
@@ -1718,12 +1718,11 @@ export default function Gallery() {
         ::-webkit-scrollbar-track { background: ${T.bgColor}; }
         ::-webkit-scrollbar-thumb { background: ${T.borderColor}; border-radius: 3px; }
         .gallery-masonry {
-          columns: 1;
+          columns: 2;
           column-gap: 12px;
         }
-        @media (min-width: 640px) { .gallery-masonry { columns: 2; column-gap: 16px; } }
-        @media (min-width: 1024px) { .gallery-masonry { columns: 3; } }
-        @media (min-width: 1400px) { .gallery-masonry { columns: 4; } }
+        @media (min-width: 640px) { .gallery-masonry { columns: 3; column-gap: 16px; } }
+        @media (min-width: 768px) { .gallery-masonry { columns: 4; } }
         .gallery-item { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
         @media (min-width: 640px) { .gallery-item { margin-bottom: 16px; } }
       `}</style>

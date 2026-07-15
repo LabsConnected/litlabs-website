@@ -31,6 +31,7 @@ import {
   CreditCard,
   Shield,
   LogOut,
+  ChevronDown,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -453,8 +454,49 @@ export default function SettingsPage() {
           </span>
         </div>
 
-        {/* Tabs */}
-        <div className="flex gap-1 overflow-x-auto pb-2 mb-6 scrollbar-hide">
+        {/* Mobile: native-style select */}
+        <div className="md:hidden mb-6 relative">
+          <div
+            className="flex items-center justify-between gap-3 px-4 py-2.5 rounded-lg border text-sm font-bold"
+            style={{
+              backgroundColor: `${T.boxBg}40`,
+              borderColor: `${T.borderColor}30`,
+              color: T.textColor,
+            }}
+          >
+            <div className="flex items-center gap-2">
+              {(() => {
+                const currentTab = TABS.find((t) => t.id === activeTab)!;
+                const CurrentIcon = currentTab.icon;
+                return (
+                  <>
+                    <CurrentIcon size={16} />
+                    {currentTab.label}
+                  </>
+                );
+              })()}
+            </div>
+            <ChevronDown size={16} style={{ color: T.textMuted }} />
+          </div>
+          <select
+            value={activeTab}
+            onChange={(e) => {
+              const value = e.target.value;
+              if (isTabId(value)) changeTab(value);
+            }}
+            className="absolute inset-0 w-full h-full opacity-0 cursor-pointer"
+            aria-label="Select settings tab"
+          >
+            {TABS.map((tab) => (
+              <option key={tab.id} value={tab.id}>
+                {tab.label}
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {/* Desktop: horizontal tab row */}
+        <div className="hidden md:flex gap-1 overflow-x-auto pb-2 mb-6 scrollbar-hide">
           {TABS.map((tab) => {
             const Icon = tab.icon;
             const active = activeTab === tab.id;

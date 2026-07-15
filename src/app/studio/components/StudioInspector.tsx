@@ -617,7 +617,7 @@ export default function StudioInspector({
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
+              className="flex-1 flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-colors"
               style={{
                 color: active ? T.accentColor : "rgba(255,255,255,0.75)",
                 backgroundColor: active ? T.accentColor + "12" : "transparent",
@@ -627,7 +627,7 @@ export default function StudioInspector({
               }}
             >
               <Icon size={11} />
-              <span className="hidden md:inline">{t.label}</span>
+              <span>{t.label}</span>
             </button>
           );
         })}

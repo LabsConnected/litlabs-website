@@ -147,7 +147,7 @@ export default function StudioCommandDock({
                 style={{ color: T.textColor }}
               />
               <span
-                className="hidden md:inline text-[9px] font-mono opacity-40"
+                className="text-[9px] font-mono opacity-40 inline shrink-0"
                 style={{ color: T.textMuted }}
               >
                 {prompt.length}/2000
@@ -156,7 +156,7 @@ export default function StudioCommandDock({
             <button
               type="submit"
               disabled={!prompt.trim() || busy}
-              className="rounded-xl px-3 flex items-center gap-1.5 text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40"
+              className="rounded-xl px-3 flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 text-[11px] font-black uppercase tracking-wider transition-all disabled:opacity-40"
               style={{
                 backgroundColor: T.accentColor,
                 color: "#fff",
@@ -165,7 +165,7 @@ export default function StudioCommandDock({
               title="Send"
             >
               {busy ? <Square size={11} /> : <Send size={11} />}
-              <span className="hidden sm:inline">Run</span>
+              <span>Run</span>
             </button>
           </form>
 

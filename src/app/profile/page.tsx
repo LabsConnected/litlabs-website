@@ -195,7 +195,10 @@ function ProfilePageInner() {
         </div>
 
         {(activeTab === "overview" || activeTab === "about") && (
-          <div className="profile-content-grid" style={{ marginTop: "24px" }}>
+          <div
+            className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1fr_340px]"
+            style={{ marginTop: "24px" }}
+          >
             <ProfileOverview hasProjects hasAgents />
             <ProfileRightRail profile={profile} />
           </div>
@@ -248,14 +251,7 @@ function ProfilePageInner() {
           margin: 0 auto;
           padding: 24px 28px 100px;
         }
-        .profile-content-grid {
-          display: grid;
-          grid-template-columns: 1fr 340px;
-          gap: 20px;
-          align-items: start;
-        }
         @media (max-width: 1099px) {
-          .profile-content-grid { grid-template-columns: 1fr; }
           .profile-container { padding-inline: 20px; }
         }
         @media (max-width: 767px) {
