@@ -1,12 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { sanitizeProviderError } from "@/lib/provider-error";
-import { streamText, generateText, type LLMProvider } from "@/lib/llm";
+import {
+  generateText,
+  streamAgentTurn,
+  type LLMFunctionCall,
+  type LLMProvider,
+  type LLMTool,
+} from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { recallPersonaMemory, savePersonaMemory } from "@/lib/agent-memory";
+import { AGENT_TOOL_SCHEMAS, executeAgentTool } from "@/lib/agent-tools";
+import { withLittIdentity } from "@/lib/litt-identity";
 import type { PersonaId } from "@/lib/persona";
+
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -220,46 +229,184 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     });
   }
 
+  // Build the canonical OpenAI-style messages array. We carry this across
+  // the function-calling loop so tool results can be appended naturally.
+  type Msg =
+    | { role: "system"; content: string }
+    | { role: "user"; content: string }
+    | { role: "assistant"; content: string }
+    | { role: "assistant"; content: string; tool_calls?: LLMFunctionCall[] }
+    | { role: "tool"; name: string; content: string };
+  const messages: Msg[] = [];
+  // System prompt = static project identity + agent's own prompt + memory.
+  // We re-use withLittIdentity so the identity block lands in front, same as
+  // every other LLM call.
+  const systemPrompt = withLittIdentity(
+    [agent.systemPrompt, memories.length > 0
+      ? `--- Long-term memory (relevant past context) ---\n${memories.join("\n")}\n--- End memory ---`
+      : ""].join("\n\n"),
+  );
+  messages.push({ role: "system", content: systemPrompt });
+  for (const h of history.slice(-HISTORY_LIMIT)) {
+    messages.push({
+      role: h.role,
+      content: h.content,
+    });
+  }
+  messages.push({ role: "user", content: message });
+
+  // Only the read-only tools are exposed to the chat path. Destructive tools
+  // (run_build, run_lint, shell_command, npm_run) require an explicit
+  // confirmation flow that the chat path does not implement yet; the
+  // dedicated /api/agent-tool route is the entry point for those.
+  const CHAT_TOOLS: LLMTool[] = AGENT_TOOL_SCHEMAS.filter(
+    (s) => s.readonly,
+  ).map((s) => ({
+    name: s.name,
+    description: s.description,
+    parameters: s.parameters as LLMTool["parameters"],
+  }));
+
   const encoder = new TextEncoder();
   const sse = new ReadableStream({
     async start(controller) {
       let assistantText = "";
-      try {
-        // Streaming chat: cap maxTokens tighter (500) and pin temperature low
-        // (0.4) so the reply finishes fast and stays concise. The agent system
-        // prompt enforces brevity; this is the streaming-path ceiling.
-        const streamOptions: {
-          task: "chat";
-          provider?: LLMProvider;
-          maxTokens: number;
-          temperature: number;
-        } = {
-          task: "chat",
-          maxTokens: 500,
-          temperature: 0.4,
-        };
-        if (provider && llmProvider) streamOptions.provider = llmProvider;
-        const r = await streamText(
-          prompt,
-          (chunk) => {
-            assistantText += chunk;
-            controller.enqueue(
-              encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
-            );
-          },
-          streamOptions,
-        );
+      let lastProvider: LLMProvider = "gemini";
+      let lastModel = "";
+      const tStart = Date.now();
+      const MAX_TURNS = 5;
+
+      const streamOptions = (): {
+        task: "chat";
+        provider?: LLMProvider;
+        maxTokens: number;
+        temperature: number;
+        tools?: LLMTool[];
+      } => ({
+        task: "chat",
+        maxTokens: 500,
+        temperature: 0.4,
+        ...(provider && llmProvider ? { provider: llmProvider } : {}),
+        ...(CHAT_TOOLS.length > 0 ? { tools: CHAT_TOOLS } : {}),
+      });
+
+      const send = (event: Record<string, unknown>) => {
         controller.enqueue(
-          encoder.encode(
-            `data: ${JSON.stringify({ done: true, provider: r.provider, model: r.model, latencyMs: r.latencyMs })}\n\n`,
-          ),
+          encoder.encode(`data: ${JSON.stringify(event)}\n\n`),
         );
+      };
+
+      try {
+        // Turn loop: each turn may emit text, function calls, or both.
+        // We keep going until the model produces a plain-text turn with
+        // no function calls, or we hit MAX_TURNS.
+        for (let turn = 0; turn < MAX_TURNS; turn++) {
+          // Re-render the full message history into a single prompt the
+          // LLM layer expects. OpenAI/Gemini both accept messages[] but
+          // streamAgentTurn currently takes a single prompt string, so we
+          // serialize the array into a transcript block.
+          const transcript = messages
+            .map((m) => {
+              if (m.role === "system") return ""; // already system-prompt
+              if (m.role === "tool") {
+                return `[Tool ${m.name} returned]:\n${m.content}\n`;
+              }
+              if (m.role === "user") return `User: ${m.content}`;
+              if (m.role === "assistant") {
+                const calls =
+                  "tool_calls" in m && m.tool_calls && m.tool_calls.length > 0
+                    ? `\n[Called tools: ${m.tool_calls.map((c) => c.name).join(", ")}]`
+                    : "";
+                return `${agent.name}: ${m.content}${calls}`;
+              }
+              return "";
+            })
+            .filter(Boolean)
+            .join("\n\n");
+
+          const pending = { text: "", calls: [] as LLMFunctionCall[] };
+          const r = await streamAgentTurn(
+            transcript,
+            (chunk) => {
+              pending.text += chunk;
+              assistantText += chunk;
+              send({ text: chunk });
+            },
+            (call) => {
+              pending.calls.push(call);
+            },
+            streamOptions(),
+            systemPrompt,
+          );
+          const pendingText = pending.text;
+          const pendingCalls = pending.calls;
+          lastProvider = r.provider;
+          lastModel = r.model;
+
+          // Emit a status event so the client can show "Scanning..." in
+          // the UI while tools run, without having to know the internals.
+          if (pendingCalls.length > 0) {
+            const humanLabels: Record<string, string> = {
+              git_status: "Checking git status",
+              git_log: "Reading recent commits",
+              read_file: "Reading a file",
+              list_directory: "Scanning a folder",
+              search_code: "Searching the codebase",
+            };
+            for (const c of pendingCalls) {
+              send({
+                tool: c.name,
+                status: "running",
+                message: humanLabels[c.name] ?? `Running ${c.name}`,
+              });
+            }
+            messages.push({
+              role: "assistant",
+              content: pendingText,
+              tool_calls: pendingCalls,
+            });
+            for (const call of pendingCalls) {
+              const result = await executeAgentTool(
+                call.name,
+                { ...call.args, _confirmed: false } as Record<string, unknown>,
+                userId ?? "anonymous",
+              );
+              messages.push({
+                role: "tool",
+                name: call.name,
+                content:
+                  typeof result.result === "string"
+                    ? result.result
+                    : JSON.stringify(result.result ?? result.message ?? ""),
+              });
+              send({
+                tool: call.name,
+                status: "complete",
+                message: result.message,
+              });
+            }
+            // Continue the loop — model gets the tool results and may
+            // emit more text or another tool call.
+            continue;
+          }
+
+          // No tool call this turn — we have the final answer.
+          messages.push({ role: "assistant", content: pendingText });
+          break;
+        }
+
+        send({
+          done: true,
+          provider: lastProvider,
+          model: lastModel,
+          latencyMs: Date.now() - tStart,
+        });
+        // [DONE] is an SSE control message, not a JSON event. The client
+        // already keys off `done: true` to close the stream.
         controller.enqueue(encoder.encode("data: [DONE]\n\n"));
       } catch (err) {
         const { error: msg } = sanitizeProviderError(err);
-        controller.enqueue(
-          encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
-        );
+        send({ error: msg });
       } finally {
         controller.close();
         if (assistantText) {
@@ -269,6 +416,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
       }
     },
   });
+
 
   return new Response(sse, {
     headers: {

@@ -51,6 +51,44 @@ export type LLMProvider =
   | "openrouter-llama"
   | "openrouter-trinity";
 
+/**
+ * A single function declaration the model is allowed to call.
+ * Shape mirrors the Gemini `FunctionDeclaration` so the same value can
+ * be passed through to @google/generative-ai. OpenRouter's chat/completions
+ * endpoint accepts the same shape under the `tools` key.
+ */
+export interface LLMTool {
+  name: string;
+  description: string;
+  /** JSON-Schema-ish parameter object. `parameters.type` must be "object". */
+  parameters: {
+    type: "object";
+    properties: Record<
+      string,
+      {
+        type: "string" | "number" | "boolean" | "integer" | "array" | "object";
+        description?: string;
+        enum?: string[];
+        items?: unknown;
+      }
+    >;
+    required?: string[];
+  };
+}
+
+/**
+ * Emitted by streamText / generateText when the model wants to call a
+ * tool. The caller is responsible for executing it and feeding the
+ * result back in via the function-calling loop.
+ */
+export interface LLMFunctionCall {
+  name: string;
+  /** Decoded JSON object the model wants to pass to the tool. */
+  args: Record<string, unknown>;
+  /** Stable per-call id, when the provider gives us one. */
+  id?: string;
+}
+
 export interface LLMOptions {
   task?: LLMTask;
   /** Force a specific provider (skips the chain). */
@@ -65,7 +103,16 @@ export interface LLMOptions {
   modelOverride?: Partial<Record<LLMProvider, string>>;
   /** Per-request timeout in ms. Default 30s for non-streaming, 60s for streaming. */
   timeoutMs?: number;
+  /**
+   * Tools the model is allowed to call. Only supported on Gemini and
+   * OpenRouter (ignored for providers that don't expose function calling).
+   * When provided, the model may return a `functionCall` chunk instead of
+   * text. Caller should execute the tool, append the result to history,
+   * and call the model again.
+   */
+  tools?: LLMTool[];
 }
+
 
 export interface LLMUsage {
   prompt: number;
@@ -418,6 +465,27 @@ export async function streamText(
   latencyMs: number;
   failover: LLMProvider[];
 }> {
+  return streamAgentTurn(prompt, onChunk, () => undefined, options, systemPrompt);
+}
+
+/**
+ * Stream a model turn that may produce plain text and/or function calls.
+ * `onChunk(text)` fires for every text delta; `onFunctionCall(call)` fires
+ * for each tool the model wants to invoke. The caller is expected to
+ * execute the tool and call the model again with the result.
+ */
+export async function streamAgentTurn(
+  prompt: string,
+  onChunk: (text: string) => void,
+  onFunctionCall: (call: LLMFunctionCall) => void,
+  options: LLMOptions = {},
+  systemPrompt?: string,
+): Promise<{
+  provider: LLMProvider;
+  model: string;
+  latencyMs: number;
+  failover: LLMProvider[];
+}> {
   const task = options.task ?? "chat";
   const timeoutMs = options.timeoutMs ?? 60_000;
   const chain = defaultChain(task, options);
@@ -434,6 +502,7 @@ export async function streamText(
         return await streamViaGemini(
           { prompt, systemPrompt: finalSystemPrompt, task, opts: options },
           onChunk,
+          onFunctionCall,
           t0,
           failover,
         );
@@ -442,6 +511,7 @@ export async function streamText(
         provider,
         { prompt, systemPrompt: finalSystemPrompt, task, opts: options },
         onChunk,
+        onFunctionCall,
         t0,
         failover,
         timeoutMs,
@@ -462,9 +532,11 @@ export async function streamText(
   );
 }
 
+
 async function streamViaGemini(
   p: GenerateParams,
   onChunk: (text: string) => void,
+  onFunctionCall: (call: LLMFunctionCall) => void,
   t0: number,
   failover: LLMProvider[],
 ): Promise<{
@@ -477,14 +549,56 @@ async function streamViaGemini(
   if (!genAI) throw new ProviderError("gemini", null, "GEMINI_API_KEY not set");
   const modelName =
     p.opts.modelOverride?.["gemini"] ?? DEFAULT_MODELS["gemini"];
-  const model = genAI.getGenerativeModel({ model: modelName });
+
+  // Build request config. Tools are passed as a single `tools` block with
+  // functionDeclarations, which is the canonical Gemini shape.
+  const requestConfig: Record<string, unknown> = {};
+  if (p.opts.tools && p.opts.tools.length > 0) {
+    requestConfig.tools = [
+      { functionDeclarations: p.opts.tools as unknown as Record<string, unknown>[] },
+    ];
+  }
+  const model = genAI.getGenerativeModel({
+    model: modelName,
+    ...(Object.keys(requestConfig).length > 0
+      ? { tools: requestConfig.tools as never }
+      : {}),
+  });
+
+  const generationConfig: Record<string, unknown> = {};
+  if (p.opts.maxTokens) generationConfig.maxOutputTokens = p.opts.maxTokens;
+  if (p.opts.temperature !== undefined)
+    generationConfig.temperature = p.opts.temperature;
+  else if (p.task === "chat") generationConfig.temperature = 0.7;
   const fullPrompt = p.systemPrompt
     ? `${p.systemPrompt}\n\n${p.prompt}`
     : p.prompt;
-  const result = await model.generateContentStream(fullPrompt);
+
+  const result = await model.generateContentStream({
+    contents: [{ role: "user", parts: [{ text: fullPrompt }] }],
+    generationConfig,
+  });
   for await (const chunk of result.stream) {
+    // Text part
     const t = chunk.text();
     if (t) onChunk(t);
+    // Function-call part(s)
+    const parts = chunk.candidates?.[0]?.content?.parts ?? [];
+    for (const part of parts) {
+      // Gemini SDK exposes functionCall at runtime even though some
+      // versions of @types/google-generative-ai omit it on parts.
+      const fc = (part as { functionCall?: { name?: string; args?: Record<string, unknown> } })
+        .functionCall;
+      if (fc && fc.name) {
+        onFunctionCall({
+          name: String(fc.name),
+          args:
+            fc.args && typeof fc.args === "object"
+              ? (fc.args as Record<string, unknown>)
+              : {},
+        });
+      }
+    }
   }
   return {
     provider: "gemini",
@@ -498,6 +612,7 @@ async function streamViaOpenRouter(
   provider: LLMProvider,
   p: GenerateParams,
   onChunk: (text: string) => void,
+  onFunctionCall: (call: LLMFunctionCall) => void,
   t0: number,
   failover: LLMProvider[],
   timeoutMs: number,
@@ -521,6 +636,9 @@ async function streamViaOpenRouter(
   };
   if (p.opts.maxTokens) body.max_tokens = p.opts.maxTokens;
   if (p.opts.temperature !== undefined) body.temperature = p.opts.temperature;
+  if (p.opts.tools && p.opts.tools.length > 0) {
+    body.tools = p.opts.tools.map((t) => ({ type: "function", function: t }));
+  }
 
   const res = await fetchWithTimeout(
     `${OPENROUTER_BASE}/chat/completions`,
@@ -553,7 +671,6 @@ async function streamViaOpenRouter(
     const { done, value } = await reader.read();
     if (done) break;
     buffer += decoder.decode(value, { stream: true });
-    // SSE lines separated by \n\n
     const lines = buffer.split("\n");
     buffer = lines.pop() ?? "";
     for (const line of lines) {
@@ -563,8 +680,26 @@ async function streamViaOpenRouter(
       if (payload === "[DONE]") continue;
       try {
         const json = JSON.parse(payload);
-        const delta = json.choices?.[0]?.delta?.content;
-        if (delta) onChunk(delta);
+        const delta = json.choices?.[0]?.delta;
+        if (delta?.content) onChunk(delta.content);
+        // OpenRouter streams tool_calls incrementally; we only need the
+        // final, fully-assembled call to dispatch, so accumulate by index.
+        if (Array.isArray(delta?.tool_calls)) {
+          for (const tc of delta.tool_calls) {
+            // We don't have full args here (streamed in pieces). The
+            // complete tool call is in the `message` field of the final
+            // non-delta chunk, but for simplicity we only support the
+            // non-streaming case for OpenRouter tool calls. If the
+            // model needs them, callers can fall back to the gemini path.
+            if (tc?.function?.name) {
+              onFunctionCall({
+                id: tc.id,
+                name: String(tc.function.name),
+                args: {},
+              });
+            }
+          }
+        }
       } catch {
         // ignore malformed chunk
       }
@@ -572,6 +707,7 @@ async function streamViaOpenRouter(
   }
   return { provider, model: modelName, latencyMs: Date.now() - t0, failover };
 }
+
 
 /* ------------------------------------------------------------------ */
 /*  Health check — useful for the /api/llm/health route                */

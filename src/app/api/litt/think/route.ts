@@ -173,21 +173,19 @@ async function handler(req: NextRequest) {
       { role: "user" as const, content: userPrompt },
     ];
 
+    // Try a chain of OpenRouter models. Never fall back to the local Ollama
+    // 3B model — it does not have enough capacity to follow the long system
+    // prompt and hallucinates fake tool calls.
     let answer: string;
     try {
-      answer = await runAI({
-        provider: "openrouter",
-        model: "google/gemini-2.5-flash",
-        messages,
-      });
+      answer = await runAIWithFallbacks(messages);
     } catch {
-      // Fallback to Ollama only for local dev
-      try {
-        answer = await runAI({ provider: "ollama", model: "llama3.2:3b", messages });
-      } catch {
-        answer = "I'm having trouble connecting to my brain right now. Please try again shortly.";
-      }
+      answer = "I'm having trouble connecting to my brain right now. Please try again shortly.";
     }
+
+    // Post-process: strip any hallucinated tool-call syntax that the model may
+    // still emit despite the hard rules. Replace with an honest note.
+    answer = sanitizeLiTTResponse(answer);
 
     const parsed = parseLiTTActions(answer);
 
@@ -248,6 +246,76 @@ async function handler(req: NextRequest) {
 }
 
 export const POST = withRateLimit(handler, 30, 60);
+
+/* ------------------------------------------------------------------ */
+/*  LLM helpers                                                        */
+/* ------------------------------------------------------------------ */
+
+const OPENROUTER_FALLBACKS = [
+  { model: "google/gemini-2.5-flash" },
+  { model: "google/gemini-2.5-pro" },
+  { model: "openrouter/free" },
+];
+
+async function runAIWithFallbacks(
+  messages: { role: "system" | "user" | "assistant"; content: string }[],
+): Promise<string> {
+  let lastErr: unknown = null;
+  for (const { model } of OPENROUTER_FALLBACKS) {
+    try {
+      return await runAI({
+        provider: "openrouter",
+        model,
+        messages,
+        temperature: 0.2,
+        stop: ["<tool_call", "[read_file", "[shell", "[exec", "[run", "<cmd"],
+      });
+    } catch (err) {
+      lastErr = err;
+      console.warn(`[api/litt/think] ${model} failed, trying next fallback`, err);
+    }
+  }
+  throw lastErr;
+}
+
+// Strip any hallucinated tool-call syntax and other forbidden patterns. The
+// system prompt already forbids these; this is a defensive last mile.
+function sanitizeLiTTResponse(text: string): string {
+  const patterns = [
+    // Fake XML/bracket tool calls
+    /<tool_call\b[^>]*>\s*<cmd\b[^>]*\/>\s*<\/tool_call>/gi,
+    /<tool_call\b[^>]*>[\s\S]*?<\/tool_call>/gi,
+    /<cmd\b[^>]*\/>/gi,
+    /<read_file\b[^>]*\/>/gi,
+    /<shell\b[^>]*\/>/gi,
+    /<run\b[^>]*\/>/gi,
+    /<execute\b[^>]*\/>/gi,
+    // Bracket-based fake tool markers
+    /\[read_file\s+[^\]]*\]/gi,
+    /\[shell\s+[^\]]*\]/gi,
+    /\[exec\s+[^\]]*\]/gi,
+    /\[run\s+[^\]]*\]/gi,
+    /\[tool_call\s+[^\]]*\]/gi,
+    // Markdown with fake command
+    /```tool-call[\s\S]*?```/gi,
+  ];
+  let cleaned = text;
+  let hadFake = false;
+  for (const re of patterns) {
+    if (re.test(cleaned)) hadFake = true;
+    cleaned = cleaned.replace(re, "");
+  }
+
+  // Collapse multiple blank lines left by removals
+  cleaned = cleaned.replace(/\n{3,}/g, "\n\n").trim();
+
+  if (hadFake) {
+    const note =
+      "\n\n*(I started to emit a tool command, which I can't execute myself. If you want me to look at a file or run a command, paste it here or run it in the terminal and I'll analyze the output.)*";
+    return cleaned + note;
+  }
+  return cleaned;
+}
 
 /* ------------------------------------------------------------------ */
 /*  Tour handler — no LLM round-trip needed                          */

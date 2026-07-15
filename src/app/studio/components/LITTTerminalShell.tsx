@@ -286,23 +286,38 @@ function LiveClock() {
 function ActiveCommandTabs({
   tabs,
   onClose,
+  onActivate,
 }: {
-  tabs: { id: string; label: string }[];
+  tabs: { id: string; label: string; tool?: string; payload?: Record<string, unknown> }[];
   onClose: (id: string) => void;
+  /**
+   * Fired when the user clicks the chip body (not the close X). The
+   * terminal's parent wires this to either (a) push the label into the
+   * composer as a follow-up message, or (b) when the chip carries a
+   * direct tool invocation, POST /api/agent-tool to dispatch it.
+   */
+  onActivate?: (id: string) => void;
 }) {
   return (
     <div className="flex items-center gap-2 px-4 pb-2">
       {tabs.map((tab) => (
         <div
           key={tab.id}
-          className="group flex items-center gap-2 rounded-md border border-cyan-500/20 bg-cyan-500/5 px-2.5 py-1 text-[10px] font-medium text-cyan-400"
+          className="group flex items-center gap-1 rounded-md border border-cyan-500/20 bg-cyan-500/5 text-[10px] font-medium text-cyan-400"
         >
-          <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
-          {tab.label}
+          <button
+            onClick={() => onActivate?.(tab.id)}
+            disabled={!onActivate}
+            title={tab.tool ? `Run ${tab.tool}` : "Send as follow-up"}
+            className="flex items-center gap-2 rounded-l-md px-2.5 py-1 transition hover:bg-cyan-500/10 disabled:cursor-default"
+          >
+            <span className="h-1.5 w-1.5 rounded-full bg-cyan-400 animate-pulse" />
+            {tab.label}
+          </button>
           <button
             onClick={() => onClose(tab.id)}
             aria-label={`Close ${tab.label}`}
-            className="text-gray-300 transition hover:text-white"
+            className="rounded-r-md px-1.5 py-1 text-gray-300 transition hover:bg-rose-500/10 hover:text-rose-300"
           >
             <X size={10} />
           </button>
@@ -317,6 +332,7 @@ function ActiveCommandTabs({
     </div>
   );
 }
+
 
 /* ------------------------------------------------------------------ */
 /*  Attachment previews — shown above the input row                    */
@@ -407,9 +423,13 @@ function LITTTerminalShellInner({
   const [activeTab, setActiveTab] = useState("terminal");
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [activeCommands, setActiveCommands] = useState<
-    { id: string; label: string }[]
-  >([]);
+  type ActiveCommand = {
+    id: string;
+    label: string;
+    tool?: string;
+    payload?: Record<string, unknown>;
+  };
+  const [activeCommands, setActiveCommands] = useState<ActiveCommand[]>([]);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
@@ -929,10 +949,25 @@ function LITTTerminalShellInner({
             }
           }
         }
+        // The action-chips emitted by parseLiTTActions are *user-driven* next
+        // steps, not model function calls. The model emits them as
+        // structured JSON; the user clicks one and the terminal sends the
+        // label back as a follow-up turn. We attach the original action
+        // object so the click handler can do something smarter (run a
+        // command, ask for confirmation, etc.) when the shape allows.
+        const actionObjects = parseLiTTActions(fullText);
         setActiveCommands(
-          parseLiTTActions(fullText).map((a, i) => ({
+          actionObjects.map((a, i) => ({
             id: `${a.type}-${i}`,
             label: a.label,
+            tool: a.type,
+            payload: {
+              command: a.command,
+              filePath: a.filePath,
+              content: a.content,
+              goalTitle: a.goalTitle,
+              memoryContent: a.memoryContent,
+            },
           })),
         );
         return fullText;
@@ -1026,6 +1061,54 @@ function LITTTerminalShellInner({
       startVoice();
     }
   };
+
+  // When the user clicks a chip body, we treat it as a follow-up turn so
+  // the chat path picks up the chip's intent. Destructive action types
+  // (anything that would run a shell command, edit a file, or build/deploy)
+  // are gated behind window.confirm() — the user has to explicitly say
+  // yes before the action fires. A richer in-app confirmation dialog
+  // can replace this later without touching the loop logic.
+  const activateCommand = useCallback(
+    (id: string) => {
+      const chip = activeCommands.find((c) => c.id === id);
+      if (!chip) return;
+      const destructive = new Set([
+        "run_command",
+        "edit_file",
+        "create_file",
+        "shell_command",
+        "npm_run",
+        "run_build",
+        "run_lint",
+      ]);
+      const cmdText =
+        typeof chip.payload?.command === "string"
+          ? chip.payload.command
+          : undefined;
+      const hasCommand =
+        typeof cmdText === "string" && cmdText.trim().length > 0;
+      const isDestructive =
+        (chip.tool && destructive.has(chip.tool)) || hasCommand;
+      if (isDestructive) {
+        const desc = hasCommand && cmdText
+          ? `This will run: \`${cmdText}\``
+          : `This will run: ${chip.label}`;
+
+        if (
+          typeof window !== "undefined" &&
+          !window.confirm(`${desc}\n\nAllow?`)
+        ) {
+          return;
+        }
+      }
+      // Send the chip's label back as a follow-up message. The chat path
+      // will see the label in history and the model can either (a)
+      // decide to call a tool, or (b) answer with a clarification.
+      void send(chip.label);
+    },
+    [activeCommands, send],
+  );
+
 
   return (
     <div
@@ -1781,7 +1864,12 @@ function LITTTerminalShellInner({
               </div>
             </div>
 
-            <ActiveCommandTabs tabs={activeCommands} onClose={closeCommand} />
+            <ActiveCommandTabs
+              tabs={activeCommands}
+              onClose={closeCommand}
+              onActivate={activateCommand}
+            />
+
           </div>
 
           {/* FOOTER TELEMETRY */}
