@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { orchestrator } from "@/lib/agents";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, buildSystemPrompt } from "@/lib/agents";
 import { generateText } from "@/lib/llm";
 
 async function handler(req: NextRequest) {
@@ -25,9 +25,19 @@ async function handler(req: NextRequest) {
         );
       }
 
+      // System prompt always carries the static litlabs.net project
+      // identity (via buildSystemPrompt → mergeLittIdentityWithProject),
+      // plus the agent's own role/personality. The user message stays in
+      // the user role below. This way the model always knows we're in
+      // the litlabs.net codebase, even on this lightweight endpoint.
+      const systemPrompt = buildSystemPrompt(
+        `${agent.systemPrompt}\n\nPersonality: ${agent.personality}\nRole: ${agent.role}`,
+      );
+
       const response = await generateText(
-        `${agent.systemPrompt}\n\nPersonality: ${agent.personality}\nRole: ${agent.role}\n\nUser: ${message}\n\nRespond as ${agent.name} in character. Be helpful, concise, and natural.`,
+        `User: ${message}\n\nRespond as ${agent.name} in character. Be helpful, concise, and natural.`,
         { task: "chat", maxTokens: 1024 },
+        systemPrompt,
       );
 
       return NextResponse.json({

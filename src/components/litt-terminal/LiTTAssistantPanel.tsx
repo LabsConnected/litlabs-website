@@ -71,7 +71,7 @@ export function LiTTAssistantPanel({
     {
       role: "jarvis",
       text:
-        "I am connected to your terminal, files, logs, and agents. Ask me to scan, fix, explain, or run commands. Use `/` for quick commands.",
+        "Online inside **litlabs.net / LiTTree-LabStudios** \u2014 Next.js 16, React 19, Supabase, Vercel, pnpm 9. I am connected to your terminal, files, logs, and agents. I already know the stack and the conventions, so just tell me what you want to do. Use `/` for quick commands.",
     },
   ]);
   const [loading, setLoading] = useState(false);
