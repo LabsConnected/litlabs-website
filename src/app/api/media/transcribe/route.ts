@@ -36,7 +36,9 @@ async function handler(req: NextRequest) {
     });
 
     return NextResponse.json({
-      text: response.text || "No transcription detected.",
+      // An empty transcript is a normal no-speech result. Returning a human
+      // sentence here caused clients to submit it to LiTT as if the user spoke.
+      text: response.text?.trim() || "",
     });
   } catch (err: unknown) {
     const raw = err instanceof Error ? err.message : String(err);
