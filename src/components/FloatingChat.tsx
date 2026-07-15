@@ -17,6 +17,11 @@ import {
   ChevronUp,
   RefreshCw,
   Camera,
+  Eye,
+  EyeOff,
+  Maximize2,
+  Minimize2,
+  MoveHorizontal,
 } from "lucide-react";
 import {
   PREMIUM_VOICES,
@@ -60,6 +65,11 @@ export function FloatingChat() {
   const userName = profile?.displayName || "Creator";
   const [chatOpen, setChatOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState(false);
+  const [cameraDock, setCameraDock] = useState<"left" | "right">("right");
+  const [cameraMinimized, setCameraMinimized] = useState(false);
+  const [visionActive, setVisionActive] = useState(false);
+  const [visionBusy, setVisionBusy] = useState(false);
+  const [visionSummary, setVisionSummary] = useState<string | null>(null);
   const [desktopExpanded, setDesktopExpanded] = useState(false);
   const [input, setInput] = useState("");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -103,6 +113,7 @@ export function FloatingChat() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const cameraVideoRef = useRef<HTMLVideoElement | null>(null);
   const cameraStreamRef = useRef<MediaStream | null>(null);
+  const visionBusyRef = useRef(false);
   const sendRef = useRef<(text: string) => void>(() => {});
   const retryRecordRef = useRef<() => void>(() => {});
   const retrySpeakRef = useRef<(text: string, idx: number) => void>(() => {});
@@ -166,8 +177,68 @@ export function FloatingChat() {
     cameraStreamRef.current?.getTracks().forEach((track) => track.stop());
     cameraStreamRef.current = null;
     if (cameraVideoRef.current) cameraVideoRef.current.srcObject = null;
+    setVisionActive(false);
+    setVisionSummary(null);
+    setCameraMinimized(false);
     setCameraMode(false);
   }, []);
+
+  const captureVisionFrame = useCallback(async () => {
+    const video = cameraVideoRef.current;
+    if (!video || video.readyState < 2 || visionBusyRef.current) return;
+    visionBusyRef.current = true;
+    setVisionBusy(true);
+    try {
+      const maxWidth = 640;
+      const scale = Math.min(1, maxWidth / Math.max(video.videoWidth, 1));
+      const canvas = document.createElement("canvas");
+      canvas.width = Math.max(1, Math.round(video.videoWidth * scale));
+      canvas.height = Math.max(1, Math.round(video.videoHeight * scale));
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Camera frame unavailable");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      const dataUrl = canvas.toDataURL("image/jpeg", 0.68);
+      const imageBytes = dataUrl.split(",")[1];
+      const res = await fetch("/api/media/analyze-image", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          imageBytes,
+          mimeType: "image/jpeg",
+          prompt:
+            "Describe what is visibly happening in this explicitly shared camera frame for an AI assistant. Focus on objects, actions, screens, and useful context. Never identify the person or infer sensitive traits. Use two short factual sentences.",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "Vision scan failed");
+      setVisionSummary(data.text || "Camera frame received.");
+    } catch (err) {
+      const id = Math.random().toString(36).slice(2);
+      const message =
+        err instanceof Error ? err.message : "LiTT couldn't read the camera frame.";
+      setToasts((prev) => [...prev, { id, message }]);
+      window.setTimeout(
+        () => setToasts((prev) => prev.filter((toast) => toast.id !== id)),
+        6000,
+      );
+    } finally {
+      visionBusyRef.current = false;
+      setVisionBusy(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!cameraMode || !visionActive) return;
+    void captureVisionFrame();
+    const interval = window.setInterval(() => void captureVisionFrame(), 12000);
+    return () => window.clearInterval(interval);
+  }, [cameraMode, visionActive, captureVisionFrame]);
+
+  useEffect(() => {
+    if (cameraMode && !cameraMinimized && cameraVideoRef.current) {
+      cameraVideoRef.current.srcObject = cameraStreamRef.current;
+    }
+  }, [cameraMode, cameraMinimized]);
 
   const openLauncher = useCallback(() => {
     setChatOpen(true);
@@ -244,6 +315,7 @@ export function FloatingChat() {
             persona: "littcode",
             history,
             context: { route: "/floating-chat" },
+            visionContext: visionSummary || undefined,
           }),
         });
         const data = await res.json();
@@ -282,7 +354,7 @@ export function FloatingChat() {
         setLoading(false);
       }
     },
-    [loading, showToast, autoSpeak, messages],
+    [loading, showToast, autoSpeak, messages, visionSummary],
   );
 
   useEffect(() => {
@@ -870,41 +942,96 @@ export function FloatingChat() {
       {mounted &&
         cameraMode &&
         createPortal(
-          <div className="fixed inset-0 z-9999 flex items-end justify-center bg-black/70 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:items-center md:pb-4">
-            <div
-              className="mx-auto w-full max-w-sm overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-[#111119] shadow-2xl"
-              role="dialog"
-              aria-modal="true"
-              aria-label="Show LiTT camera"
-            >
-              <div className="flex items-center justify-between p-4">
-                <div>
-                  <p className="text-sm font-black text-white">Show LiTT</p>
-                  <p className="text-xs text-neutral-400">
-                    Camera is live only while this view is open
-                  </p>
-                </div>
+          <aside
+            className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-9999 w-[min(48vw,220px)] overflow-hidden rounded-2xl border bg-[#101017]/95 shadow-[0_18px_60px_rgba(0,0,0,.65)] backdrop-blur-xl transition-all md:bottom-20 md:w-64 ${
+              cameraDock === "right" ? "right-3 md:right-24" : "left-3 md:left-24"
+            } ${visionActive ? "border-cyan-400/45 shadow-[0_0_35px_rgba(34,211,238,.18)]" : "border-white/15"}`}
+            aria-label="LiTT vision camera"
+          >
+            <div className="flex min-h-11 items-center justify-between gap-1 border-b border-white/10 px-2.5">
+              <div className="min-w-0">
+                <p className="truncate text-[11px] font-black text-white">LiTT Vision</p>
+                <p className={`truncate text-[8px] font-bold uppercase tracking-wider ${visionActive ? "text-cyan-300" : "text-neutral-500"}`}>
+                  {visionActive ? (visionBusy ? "Scanning frame" : "Vision active") : "Private preview"}
+                </p>
+              </div>
+              <div className="flex items-center gap-0.5">
                 <button
-                  className="flex h-10 w-10 items-center justify-center rounded-full bg-white/5 text-white"
+                  className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-white/10 hover:text-white"
+                  onClick={() => setCameraDock((side) => (side === "right" ? "left" : "right"))}
+                  aria-label={`Dock camera on ${cameraDock === "right" ? "left" : "right"}`}
+                  title="Move camera"
+                >
+                  <MoveHorizontal size={14} />
+                </button>
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-white/10 hover:text-white"
+                  onClick={() => setCameraMinimized((value) => !value)}
+                  aria-label={cameraMinimized ? "Expand camera" : "Minimize camera"}
+                >
+                  {cameraMinimized ? <Maximize2 size={14} /> : <Minimize2 size={14} />}
+                </button>
+                <button
+                  className="grid h-8 w-8 place-items-center rounded-lg text-neutral-400 hover:bg-red-500/15 hover:text-red-300"
                   onClick={closeCamera}
                   aria-label="Close camera"
                 >
-                  <X size={18} />
+                  <X size={15} />
                 </button>
               </div>
-              <video
-                ref={cameraVideoRef}
-                autoPlay
-                playsInline
-                muted
-                className="aspect-[4/5] w-full bg-black object-cover"
-              />
-              <div className="flex items-center gap-2 p-4 text-xs text-emerald-300">
-                <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-400" />
-                LiTT can see this live preview
-              </div>
             </div>
-          </div>,
+
+            {!cameraMinimized && (
+              <>
+                <div className="relative">
+                  <video
+                    ref={cameraVideoRef}
+                    autoPlay
+                    playsInline
+                    muted
+                    className="aspect-video w-full bg-black object-cover"
+                  />
+                  {visionActive && (
+                    <div className="pointer-events-none absolute inset-0 border border-cyan-300/30">
+                      <span className="absolute left-2 top-2 h-3 w-3 border-l-2 border-t-2 border-cyan-300" />
+                      <span className="absolute right-2 top-2 h-3 w-3 border-r-2 border-t-2 border-cyan-300" />
+                      <span className="absolute bottom-2 left-2 h-3 w-3 border-b-2 border-l-2 border-cyan-300" />
+                      <span className="absolute bottom-2 right-2 h-3 w-3 border-b-2 border-r-2 border-cyan-300" />
+                    </div>
+                  )}
+                </div>
+                <div className="space-y-2 p-2.5">
+                  <button
+                    className={`flex min-h-9 w-full items-center justify-center gap-2 rounded-xl border text-[10px] font-black transition ${
+                      visionActive
+                        ? "border-cyan-400/35 bg-cyan-400/12 text-cyan-200"
+                        : "border-white/10 bg-white/5 text-neutral-300"
+                    }`}
+                    onClick={() => {
+                      setVisionActive((value) => !value);
+                      if (visionActive) setVisionSummary(null);
+                    }}
+                    aria-pressed={visionActive}
+                  >
+                    {visionActive ? <Eye size={14} /> : <EyeOff size={14} />}
+                    {visionActive ? "Vision on · tap to stop" : "Let LiTT see"}
+                  </button>
+                  {visionActive && (
+                    <button
+                      className="w-full rounded-lg px-2 py-1.5 text-[9px] font-bold text-cyan-300 hover:bg-cyan-400/10 disabled:opacity-50"
+                      onClick={() => void captureVisionFrame()}
+                      disabled={visionBusy}
+                    >
+                      {visionBusy ? "Reading scene…" : "Scan now"}
+                    </button>
+                  )}
+                  <p className="line-clamp-2 text-[8px] leading-relaxed text-neutral-500">
+                    {visionSummary || (visionActive ? "LiTT will refresh visual context every 12 seconds." : "Nothing is shared until you turn Vision on.")}
+                  </p>
+                </div>
+              </>
+            )}
+          </aside>,
           document.body,
         )}
       <button
