@@ -215,7 +215,11 @@ function CopyButton({ text }: { text: string }) {
       className="flex items-center gap-1 text-[9px] transition hover:text-cyan-400"
       title="Copy"
     >
-      {copied ? <Check size={10} /> : <Copy size={10} />}
+      {copied ? (
+        <Check size={10} aria-hidden="true" />
+      ) : (
+        <Copy size={10} aria-hidden="true" />
+      )}
       {copied ? "Copied" : "Copy"}
     </button>
   );
@@ -1385,7 +1389,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-dvh md:h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1519,6 +1523,7 @@ function LITTTerminalShellInner({
                         ? "text-cyan-400"
                         : "text-gray-300 group-hover:text-white"
                     }
+                    aria-hidden="true"
                   />
                   <span
                     className={cn(
@@ -1673,19 +1678,17 @@ function LITTTerminalShellInner({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-[10px]">
-              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2.5 py-1 text-gray-300">
+            <div className="flex items-center gap-2 text-[10px]">
+              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2 py-1 text-gray-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                SYSTEMS NOMINAL
+                <span className="hidden sm:inline">Systems nominal</span>
+                <span className="sm:hidden">Online</span>
               </span>
               <span className="hidden font-mono text-gray-300 sm:inline">
-                MEMORY 78%
+                MEM 78%
               </span>
-              <span className="hidden font-mono text-gray-300 md:inline">
-                CONTEXT 128K
-              </span>
-              <span className="hidden font-mono text-gray-300 md:inline">
-                TOKENS 1.2M
+              <span className="hidden font-mono text-gray-300 lg:inline">
+                128K
               </span>
             </div>
           </div>
@@ -2025,7 +2028,7 @@ function LITTTerminalShellInner({
                   onClick={() => fileInputRef.current?.click()}
                   className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
                 >
-                  <Plus size={15} />
+                  <Plus size={15} aria-hidden="true" />
                 </button>
                 <button
                   aria-label="Capture from camera"
@@ -2036,7 +2039,7 @@ function LITTTerminalShellInner({
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  <Camera size={15} />
+                  <Camera size={15} aria-hidden="true" />
                 </button>
                 <button
                   aria-label={micActive ? "Stop voice" : "Start voice"}
@@ -2047,7 +2050,11 @@ function LITTTerminalShellInner({
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  {micActive ? <MicOff size={15} /> : <Mic size={15} />}
+                  {micActive ? (
+                    <MicOff size={15} aria-hidden="true" />
+                  ) : (
+                    <Mic size={15} aria-hidden="true" />
+                  )}
                 </button>
 
                 <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
@@ -2075,7 +2082,11 @@ function LITTTerminalShellInner({
                         : "bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20"
                     }`}
                   >
-                    {busy ? <Square size={12} /> : <Send size={15} />}
+                    {busy ? (
+                      <Square size={12} aria-hidden="true" />
+                    ) : (
+                      <Send size={15} aria-hidden="true" />
+                    )}
                   </button>
                 </div>
 
