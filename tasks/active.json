@@ -1,7 +1,24 @@
 {
-  "milestone": "System Initialization",
-  "status": "pending",
-  "director_instructions": "Verify the Autonomic Loop setup. Build out the core dashboard components with volcanic cyber theme. Ensure all pages are functional and connected.",
-  "target_files": ["src/app/(dashboard)/layout.tsx"],
-  "error_logs": ""
+  "milestone": "Autonomic Loop Wiring",
+  "status": "in_progress",
+  "director_instructions": "The System Initialization milestone is DONE. The AutonomicLoopBanner is now mounted in src/app/dashboard/layout.tsx so the Director → Agent-Tasks → Worker pipeline is verified on every dashboard render. Next: verify the loop endpoints (/api/director/plan, /api/agents, /api/memory, /api/agent-tasks) return 2xx, fix any 4xx/5xx, and make sure the banner reflects live state on the dashboard, agent, and studio routes.",
+  "target_files": [
+    "src/app/dashboard/layout.tsx",
+    "src/app/agent/layout.tsx",
+    "src/app/studio/layout.tsx",
+    "src/app/api/director/plan/route.ts",
+    "src/app/api/agents/route.ts",
+    "src/app/api/memory/route.ts",
+    "src/app/api/agent-tasks/route.ts"
+  ],
+  "error_logs": "",
+  "previous_milestone": {
+    "name": "System Initialization",
+    "completed_at": "2026-07-14T21:38:00-04:00",
+    "completed_changes": [
+      "Replaced src/app/dashboard/layout.tsx passthrough with a real layout that mounts <AutonomicLoopBanner /> above the dashboard surface.",
+      "Confirmed AutonomicLoopBanner was previously exported but never imported anywhere in the codebase (search across src/ returned zero callers).",
+      "Default theme is volcanic + sunset-orange (per ThemeContext.defaultTheme), so the banner picks up the volcanic cyber palette automatically."
+    ]
+  }
 }

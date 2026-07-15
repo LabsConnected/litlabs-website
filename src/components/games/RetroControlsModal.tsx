@@ -104,7 +104,7 @@ export function RetroControlsModal({
 
   return (
     <div
-      className="fixed inset-0 z-[10001] flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
+      className="fixed inset-0 z-10001 flex items-center justify-center bg-black/70 p-4 backdrop-blur-sm"
       onClick={(e) => {
         if (e.target === e.currentTarget) onClose();
       }}
@@ -128,7 +128,10 @@ export function RetroControlsModal({
               <Gamepad2 size={16} style={{ color: T.accentColor }} />
             </div>
             <div>
-              <div className="text-sm font-black" style={{ color: T.textColor }}>
+              <div
+                className="text-sm font-black"
+                style={{ color: T.textColor }}
+              >
                 {controls.name} controls
               </div>
               <div className="text-[10px]" style={{ color: T.textMuted }}>
@@ -156,7 +159,10 @@ export function RetroControlsModal({
                 borderColor: `${T.borderColor}20`,
               }}
             >
-              <span className="text-xs font-bold" style={{ color: T.textColor }}>
+              <span
+                className="text-xs font-bold"
+                style={{ color: T.textColor }}
+              >
                 {c.action}
               </span>
               <span
@@ -174,8 +180,12 @@ export function RetroControlsModal({
           ))}
         </div>
 
-        <p className="mt-4 text-[10px] leading-relaxed" style={{ color: T.textMuted }}>
-          Gamepad is also supported. Press the controller icon in the emulator menu to remap buttons.
+        <p
+          className="mt-4 text-[10px] leading-relaxed"
+          style={{ color: T.textMuted }}
+        >
+          Gamepad is also supported. Press the controller icon in the emulator
+          menu to remap buttons.
         </p>
       </div>
     </div>

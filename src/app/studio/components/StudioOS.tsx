@@ -4,9 +4,11 @@ import { useState, useMemo, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/context/ThemeContext";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import StudioSidebar, { type StudioTool } from "./StudioSidebar";
-import StudioTopBar from "./StudioTopBar";
+import type { StudioTool } from "./StudioSidebar";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
+
+const StudioSidebar = dynamic(() => import("./StudioSidebar"), { ssr: false });
+const StudioTopBar = dynamic(() => import("./StudioTopBar"), { ssr: false });
 
 const StudioInspector = dynamic(() => import("./StudioInspector"), {
   ssr: false,

@@ -4,7 +4,6 @@ import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
-import ReactMarkdown from "react-markdown";
 import { cn } from "@/lib/utils";
 import {
   Terminal,
@@ -39,11 +38,21 @@ import dynamic from "next/dynamic";
 
 const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
 const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
+const ReactMarkdown = dynamic(() => import("react-markdown"), {
+  ssr: false,
+  loading: () => <span className="opacity-50">…</span>,
+});
+const PersonaSwitcher = dynamic(
+  () =>
+    import("@/components/terminal/PersonaSwitcher").then(
+      (m) => m.PersonaSwitcher,
+    ),
+  { ssr: false },
+);
 import {
   PersonaProvider,
   usePersona,
 } from "@/components/terminal/PersonaContext";
-import { PersonaSwitcher } from "@/components/terminal/PersonaSwitcher";
 
 type Message = {
   role: "user" | "assistant";

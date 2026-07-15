@@ -2,11 +2,11 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import dynamic from "next/dynamic";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
-import ModelPicker from "@/components/ModelPicker";
 import {
   Activity,
   Bell,
@@ -19,6 +19,10 @@ import {
   X,
 } from "lucide-react";
 import type { UserProfile } from "@/context/ProfileContext";
+
+const ModelPicker = dynamic(() => import("@/components/ModelPicker"), {
+  ssr: false,
+});
 
 /**
  * StudioTopBar — the global status strip for the Command Center.
