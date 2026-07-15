@@ -629,6 +629,8 @@ export default function CodeScannerPage() {
                     style={{ color: T.textMuted }}
                   />
                   <input
+                    id="code-search"
+                    name="codeSearch"
                     type="text"
                     placeholder="Search files..."
                     value={searchQuery}

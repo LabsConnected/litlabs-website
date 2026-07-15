@@ -163,6 +163,8 @@ export default function RetroArcadePage() {
             </button>
             <input
               ref={inputRef}
+              id="retro-file"
+              name="retroFile"
               type="file"
               className="hidden"
               accept=".nes,.sfc,.smc,.swc,.bs,.bsa,.fig,.gb,.gbc,.gba,.gen,.md,.smd"
@@ -261,6 +263,8 @@ export default function RetroArcadePage() {
               <label className="flex items-center gap-2 rounded-xl border border-white/10 bg-white/[.035] px-3 py-2 text-white/50">
                 <Search size={15} />
                 <input
+                  id="retro-search"
+                  name="retroSearch"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search library"
@@ -491,6 +495,8 @@ export default function RetroArcadePage() {
                     Display title
                   </span>
                   <input
+                    id="retro-title"
+                    name="retroTitle"
                     value={pending.title}
                     onChange={(event) =>
                       setPending({ ...pending, title: event.target.value })
@@ -503,6 +509,8 @@ export default function RetroArcadePage() {
                     Detected system
                   </span>
                   <select
+                    id="retro-system"
+                    name="retroSystem"
                     value={pending.system}
                     onChange={(event) =>
                       setPending({
@@ -533,6 +541,8 @@ export default function RetroArcadePage() {
                 </div>
                 <label className="flex cursor-pointer items-start gap-3 rounded-xl border border-amber-300/15 bg-amber-300/[.04] p-4">
                   <input
+                    id="retro-favorite"
+                    name="retroFavorite"
                     type="checkbox"
                     checked={pending.legal}
                     onChange={(event) =>

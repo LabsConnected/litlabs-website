@@ -120,6 +120,8 @@ export default function AssetLibrary({ onAssetSelect }: AssetLibraryProps) {
       >
         <Search size={12} style={{ color: T.textMuted }} />
         <input
+          id="asset-library-search"
+          name="assetSearch"
           type="text"
           placeholder="Search assets..."
           value={searchQuery}

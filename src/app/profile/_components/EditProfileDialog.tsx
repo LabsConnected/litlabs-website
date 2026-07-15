@@ -50,6 +50,8 @@ export function EditProfileDialog({
       </label>
       {multiline ? (
         <textarea
+          id="edit-profile-bio"
+          name="editProfileBio"
           value={form[key]}
           maxLength={maxLen}
           onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
@@ -71,6 +73,8 @@ export function EditProfileDialog({
         />
       ) : (
         <input
+          id="edit-profile-name"
+          name="editProfileName"
           type="text"
           value={form[key]}
           maxLength={maxLen}

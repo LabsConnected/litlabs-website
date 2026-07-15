@@ -233,6 +233,8 @@ export default function FlowTool() {
       {/* Controls */}
       <div className="flex flex-wrap items-center gap-2">
         <input
+          id="flow-tool-name"
+          name="flowToolName"
           value={flowName}
           onChange={(e) => setFlowName(e.target.value)}
           aria-label="Flow name"
@@ -333,6 +335,8 @@ export default function FlowTool() {
                     {idx + 1}
                   </span>
                   <input
+                    id={`flow-tool-cell-${cell.id}-label`}
+                    name={`flowToolCellLabel`}
                     value={cell.label}
                     onChange={(e) =>
                       updateCell(cell.id, { label: e.target.value })
@@ -375,6 +379,8 @@ export default function FlowTool() {
                     Format
                   </label>
                   <select
+                    id={`flow-tool-cell-${cell.id}-format`}
+                    name="flowToolCellFormat"
                     value={cell.format}
                     onChange={(e) =>
                       updateCell(cell.id, {
@@ -403,6 +409,8 @@ export default function FlowTool() {
                     Provider
                   </label>
                   <select
+                    id={`flow-tool-cell-${cell.id}-provider`}
+                    name="flowToolCellProvider"
                     value={cell.providerId}
                     onChange={(e) =>
                       updateCell(cell.id, {
@@ -434,6 +442,8 @@ export default function FlowTool() {
               {/* Prompt */}
               <div className="px-3 py-2 flex-1 flex flex-col gap-2">
                 <textarea
+                  id={`flow-tool-cell-${cell.id}-prompt`}
+                  name="flowToolCellPrompt"
                   value={cell.prompt}
                   onChange={(e) =>
                     updateCell(cell.id, { prompt: e.target.value })
@@ -455,6 +465,8 @@ export default function FlowTool() {
                   }}
                 />
                 <input
+                  id={`flow-tool-cell-${cell.id}-negative-prompt`}
+                  name="flowToolCellNegativePrompt"
                   value={cell.negativePrompt}
                   onChange={(e) =>
                     updateCell(cell.id, { negativePrompt: e.target.value })

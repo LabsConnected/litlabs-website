@@ -85,6 +85,8 @@ export default function PromptComposer({
     <div className="space-y-3">
       <div className="relative">
         <textarea
+          id="prompt-composer"
+          name="promptComposer"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           placeholder={placeholder}

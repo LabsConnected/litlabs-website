@@ -338,6 +338,8 @@ export default function DragDropCanvas({
                     X:
                   </span>
                   <input
+                    id="canvas-x"
+                    name="canvasX"
                     type="number"
                     value={Math.round(selectedItem.x)}
                     onChange={(e) =>
@@ -362,6 +364,8 @@ export default function DragDropCanvas({
                     Y:
                   </span>
                   <input
+                    id="canvas-y"
+                    name="canvasY"
                     type="number"
                     value={Math.round(selectedItem.y)}
                     onChange={(e) =>
@@ -396,6 +400,8 @@ export default function DragDropCanvas({
                     W:
                   </span>
                   <input
+                    id="canvas-width"
+                    name="canvasWidth"
                     type="number"
                     value={selectedItem.width}
                     onChange={(e) =>
@@ -420,6 +426,8 @@ export default function DragDropCanvas({
                     H:
                   </span>
                   <input
+                    id="canvas-height"
+                    name="canvasHeight"
                     type="number"
                     value={selectedItem.height}
                     onChange={(e) =>
@@ -450,6 +458,8 @@ export default function DragDropCanvas({
                   Content
                 </label>
                 <textarea
+                  id="canvas-content"
+                  name="canvasContent"
                   value={selectedItem.content || ""}
                   onChange={(e) =>
                     setItems(

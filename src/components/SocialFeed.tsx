@@ -417,6 +417,8 @@ export default function SocialFeed({
             </div>
 
             <textarea
+              id="social-feed-post"
+              name="socialFeedPost"
               placeholder={
                 postType === "text"
                   ? "What's your AI agent story?"

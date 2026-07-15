@@ -1026,6 +1026,8 @@ function LITTTerminalShellInner({
       <input
         ref={fileInputRef}
         type="file"
+        name="file-attachment"
+        id="litt-file-attachment"
         multiple
         hidden
         aria-label="File attachment"
@@ -1035,6 +1037,8 @@ function LITTTerminalShellInner({
       <input
         ref={cameraInputRef}
         type="file"
+        name="camera-capture"
+        id="litt-camera-capture"
         hidden
         aria-label="Camera capture"
         accept="image/*"
@@ -1631,6 +1635,8 @@ function LITTTerminalShellInner({
                     <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
                       <span className="text-[10px] text-neutral-500">Mic:</span>
                       <select
+                        name="mic-device"
+                        id="litt-mic-device"
                         value={selectedDeviceId ?? ""}
                         onChange={(e) => selectDevice(e.target.value)}
                         className="max-w-[180px] rounded border border-white/10 bg-white/3 px-2 py-1 text-[10px] text-neutral-300 outline-none"
@@ -1684,6 +1690,8 @@ function LITTTerminalShellInner({
                 <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
                   <textarea
                     ref={textInputRef}
+                    name="litt-message"
+                    id="litt-message-input"
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}

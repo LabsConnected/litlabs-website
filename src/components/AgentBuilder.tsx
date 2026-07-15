@@ -225,6 +225,8 @@ export default function AgentBuilder({
               Role / Specialty
             </label>
             <input
+              id="agent-role"
+              name="agentRole"
               value={agent.role || ""}
               onChange={(e) => setAgent({ ...agent, role: e.target.value })}
               placeholder="e.g. Code Reviewer, Creative Writer, Data Analyst"
@@ -244,6 +246,8 @@ export default function AgentBuilder({
               Agent Name
             </label>
             <input
+              id="agent-name"
+              name="agentName"
               value={agent.name || ""}
               onChange={(e) =>
                 setAgent({
@@ -269,6 +273,8 @@ export default function AgentBuilder({
               Short Description
             </label>
             <textarea
+              id="agent-description"
+              name="agentDescription"
               value={agent.description || ""}
               onChange={(e) =>
                 setAgent({ ...agent, description: e.target.value })
@@ -318,6 +324,8 @@ export default function AgentBuilder({
               System Prompt
             </label>
             <textarea
+              id="agent-system-prompt"
+              name="agentSystemPrompt"
               value={agent.systemPrompt || ""}
               onChange={(e) =>
                 setAgent({ ...agent, systemPrompt: e.target.value })
@@ -341,6 +349,8 @@ export default function AgentBuilder({
             </label>
             <div className="flex items-center gap-2">
               <input
+                id="agent-tags"
+                name="agentTags"
                 value={tagInput}
                 onChange={(e) => setTagInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && addTag()}
@@ -472,6 +482,8 @@ export default function AgentBuilder({
               Default Model
             </label>
             <select
+              id="agent-model"
+              name="agentModel"
               value={agent.model}
               onChange={(e) => setAgent({ ...agent, model: e.target.value })}
               className="w-full px-3 py-2 rounded-lg text-sm outline-none"

@@ -368,6 +368,8 @@ function ConfigField({
       </div>
       <input
         type="text"
+        name="studio-sidebar-search"
+        id="studio-sidebar-search"
         placeholder={placeholder}
         className="w-full rounded-md px-2 py-1.5 text-[10px] outline-none transition-colors focus:border-[var(--accent)]"
         style={{
@@ -395,6 +397,8 @@ function ConfigSelect({
         {label}
       </div>
       <select
+        name="studio-config-select"
+        id="studio-config-select"
         className="w-full rounded-md px-2 py-1.5 text-[10px] outline-none cursor-pointer transition-colors"
         style={{
           background: T.bgColor + "60",

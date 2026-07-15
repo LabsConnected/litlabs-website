@@ -1250,6 +1250,8 @@ function MarketplaceInner() {
             </div>
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <input
+                id="marketplace-search"
+                name="marketplaceSearch"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -1267,6 +1269,8 @@ function MarketplaceInner() {
                 }}
               />
               <select
+                id="marketplace-sort"
+                name="marketplaceSort"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 style={{

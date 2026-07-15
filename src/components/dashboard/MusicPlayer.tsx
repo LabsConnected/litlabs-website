@@ -733,6 +733,8 @@ export default function MusicPlayer({
         {showAdd && (
           <div className="px-4 pb-3 space-y-2">
             <input
+              id="music-file"
+              name="musicFile"
               type="file"
               accept="audio/*"
               ref={fileInputRef}
@@ -759,6 +761,8 @@ export default function MusicPlayer({
               Or paste an audio URL below
             </div>
             <input
+              id="music-url"
+              name="musicUrl"
               value={addUrl}
               onChange={(e) => setAddUrl(e.target.value)}
               placeholder="Audio URL or YouTube link"
@@ -771,6 +775,8 @@ export default function MusicPlayer({
             />
             <div className="flex gap-2">
               <input
+                id="music-title"
+                name="musicTitle"
                 value={addTitle}
                 onChange={(e) => setAddTitle(e.target.value)}
                 placeholder="Title"
@@ -782,6 +788,8 @@ export default function MusicPlayer({
                 }}
               />
               <input
+                id="music-artist"
+                name="musicArtist"
                 value={addArtist}
                 onChange={(e) => setAddArtist(e.target.value)}
                 placeholder="Artist"

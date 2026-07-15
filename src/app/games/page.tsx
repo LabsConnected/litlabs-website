@@ -521,6 +521,8 @@ export default function GamesPage() {
             style={{ color: T.textMuted }}
           />
           <input
+            id="games-search"
+            name="gamesSearch"
             type="text"
             placeholder="Search games..."
             value={searchQuery}

@@ -80,6 +80,8 @@ function StudioChatComposer() {
     <div className="shrink-0 rounded-2xl border border-neutral-800/60 bg-black/40 p-2 sm:p-3">
       <div className="flex items-center gap-2">
         <input
+          id="litt-page-ask"
+          name="littAsk"
           type="text"
           value={input}
           onChange={(e) => setInput(e.target.value)}
@@ -292,6 +294,8 @@ function LiTTTerminalPageInner() {
           <div className="hidden shrink-0 items-center gap-2 sm:flex">
             <ConnectorStrip connected={connected} />
             <select
+              id="litt-wallpaper-select"
+              name="littWallpaper"
               value={profile.wallpaper}
               onChange={(e) =>
                 handleWallpaperChange(e.target.value as WallpaperId)
@@ -306,6 +310,8 @@ function LiTTTerminalPageInner() {
               ))}
             </select>
             <input
+              id="litt-wallpaper-file"
+              name="littWallpaperFile"
               ref={wallpaperInputRef}
               type="file"
               accept="image/*"

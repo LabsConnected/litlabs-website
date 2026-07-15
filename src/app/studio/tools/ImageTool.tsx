@@ -1002,6 +1002,8 @@ export default function ImageTool() {
                 {editingWsName === ws.id ? (
                   <input
                     autoFocus
+                    id="image-tool-workspace-name"
+                    name="imageToolWorkspaceName"
                     value={wsNameInput}
                     onChange={(e) => setWsNameInput(e.target.value)}
                     onBlur={() => {
@@ -1241,6 +1243,8 @@ export default function ImageTool() {
                   </button>
                 </div>
                 <textarea
+                  id="image-tool-prompt"
+                  name="imageToolPrompt"
                   value={prompt}
                   onChange={(e) => {
                     setPrompt(e.target.value);
@@ -1285,6 +1289,8 @@ export default function ImageTool() {
                 {negativePromptOpen && (
                   <div className="px-3 pb-3">
                     <input
+                      id="image-tool-negative-prompt"
+                      name="imageToolNegativePrompt"
                       value={negativePrompt}
                       onChange={(e) => setNegativePrompt(e.target.value)}
                       placeholder="blurry, low quality, distorted..."
@@ -1327,6 +1333,8 @@ export default function ImageTool() {
                 </div>
                 <input
                   type="file"
+                  id="image-tool-file"
+                  name="imageToolFile"
                   accept="image/*"
                   ref={fileInputRef}
                   onChange={handleFileUpload}
@@ -1979,6 +1987,8 @@ export default function ImageTool() {
                 <div className="px-3 pb-3">
                   <input
                     type="range"
+                    id="image-tool-guidance-scale"
+                    name="imageToolGuidanceScale"
                     min={1}
                     max={15}
                     step={0.5}
@@ -2039,6 +2049,8 @@ export default function ImageTool() {
                 <div className="px-3 pb-3">
                   <input
                     type="range"
+                    id="image-tool-inference-steps"
+                    name="imageToolInferenceSteps"
                     min={10}
                     max={100}
                     step={5}
@@ -2144,6 +2156,8 @@ export default function ImageTool() {
                   <div className="px-3 pb-3">
                     <input
                       type="range"
+                      id="image-tool-strength"
+                      name="imageToolStrength"
                       min={0.1}
                       max={1}
                       step={0.05}
@@ -2217,6 +2231,8 @@ export default function ImageTool() {
                 <div className="px-3 pb-3">
                   <input
                     type="number"
+                    id="image-tool-seed"
+                    name="imageToolSeed"
                     value={seed}
                     onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
                     min={0}
@@ -2399,6 +2415,8 @@ export default function ImageTool() {
 
                       {/* Category selector */}
                       <select
+                        id="image-tool-gallery-category"
+                        name="imageToolGalleryCategory"
                         value={galleryCategory}
                         onChange={(e) => setGalleryCategory(e.target.value)}
                         aria-label="Gallery category"

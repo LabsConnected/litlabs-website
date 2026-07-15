@@ -93,6 +93,8 @@ export default function GameCloudHome() {
         </div>
 
         <input
+          id="game-cloud-search"
+          name="gameCloudSearch"
           type="text"
           placeholder="Search games..."
           value={searchQuery}

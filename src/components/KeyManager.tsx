@@ -154,6 +154,8 @@ export default function KeyManager() {
       <div className="mt-4 grid gap-2">
         <div className="grid grid-cols-2 gap-2">
           <select
+            id="key-provider"
+            name="keyProvider"
             value={newProvider}
             onChange={(e) => setNewProvider(e.target.value)}
             className="rounded-xl border px-3 py-2 text-sm outline-none"
@@ -170,6 +172,8 @@ export default function KeyManager() {
             <option>Local</option>
           </select>
           <input
+            id="key-label"
+            name="keyLabel"
             value={newLabel}
             onChange={(e) => setNewLabel(e.target.value)}
             placeholder="Label"
@@ -183,6 +187,8 @@ export default function KeyManager() {
         </div>
         <div className="flex gap-2">
           <input
+            id="key-secret"
+            name="keySecret"
             value={newSecret}
             onChange={(e) => setNewSecret(e.target.value)}
             type={reveal ? "text" : "password"}

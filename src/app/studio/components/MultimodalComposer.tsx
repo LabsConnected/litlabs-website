@@ -450,6 +450,8 @@ export default function MultimodalComposer({
       <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/4 px-3 py-2">
         <textarea
           ref={textareaRef}
+          name="litt-composer-message"
+          id="litt-composer-message"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {

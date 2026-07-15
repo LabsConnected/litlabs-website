@@ -631,6 +631,8 @@ export default function DashboardContent() {
             <div className="flex items-center gap-3 mb-3">
               <Avatar name={displayName} size={32} />
               <input
+                id="broadcast-input"
+                name="broadcast"
                 readOnly
                 placeholder="Neural broadcast..."
                 onClick={() => (window.location.href = "/social")}

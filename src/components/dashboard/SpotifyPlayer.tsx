@@ -431,6 +431,8 @@ export default function SpotifyPlayer() {
           {/* Search */}
           <div className="flex gap-2">
             <input
+              id="spotify-search-1"
+              name="spotifySearch1"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doSearch()}
@@ -738,6 +740,8 @@ export default function SpotifyPlayer() {
         <div className="p-4 space-y-3">
           <div className="flex gap-2">
             <input
+              id="spotify-search-2"
+              name="spotifySearch2"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doSearch()}

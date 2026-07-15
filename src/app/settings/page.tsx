@@ -531,6 +531,8 @@ export default function SettingsPage() {
                       {field.label}
                     </label>
                     <input
+                      id="settings-display-name"
+                      name="displayName"
                       value={field.value}
                       onChange={(e) => field.set(e.target.value)}
                       placeholder={field.placeholder}
@@ -547,6 +549,8 @@ export default function SettingsPage() {
                     Avatar URL
                   </label>
                   <input
+                    id="settings-avatar-url"
+                    name="avatarUrl"
                     value={avatarUrl}
                     onChange={(e) => setAvatarUrl(e.target.value)}
                     placeholder="https://..."
@@ -562,6 +566,8 @@ export default function SettingsPage() {
                     Bio
                   </label>
                   <textarea
+                    id="settings-bio"
+                    name="bio"
                     value={bio}
                     onChange={(e) => setBio(e.target.value)}
                     placeholder="Tell the community who you are..."
@@ -1052,6 +1058,8 @@ export default function SettingsPage() {
                       Default workspace
                     </span>
                     <select
+                      id="settings-workspace"
+                      name="workspace"
                       value={defaultWorkspace}
                       onChange={(e) => setDefaultWorkspace(e.target.value)}
                       className="w-full px-3 py-2 rounded-lg border text-sm outline-none"
@@ -1302,6 +1310,8 @@ export default function SettingsPage() {
                       {k.label} ({k.env})
                     </label>
                     <input
+                      id="settings-api-key"
+                      name="apiKey"
                       type="password"
                       value={keys[k.id] || ""}
                       onChange={(e) =>
@@ -1353,6 +1363,8 @@ export default function SettingsPage() {
                     Discord Webhook URL
                   </label>
                   <input
+                    id="settings-discord-webhook"
+                    name="discordWebhook"
                     value={discordWebhook}
                     onChange={(e) => setDiscordWebhook(e.target.value)}
                     placeholder="https://discord.com/api/webhooks/..."
@@ -1566,6 +1578,8 @@ export default function SettingsPage() {
                     Email
                   </label>
                   <input
+                    id="settings-email"
+                    name="email"
                     value={user?.primaryEmailAddress?.emailAddress || ""}
                     readOnly
                     className="w-full px-3 py-2 rounded-lg border text-sm outline-none"

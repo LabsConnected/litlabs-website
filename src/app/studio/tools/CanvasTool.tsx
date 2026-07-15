@@ -479,6 +479,8 @@ export default function CanvasTool() {
                 />
                 <textarea
                   ref={inputRef}
+                  id="canvas-tool-prompt"
+                  name="canvasToolPrompt"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKey}

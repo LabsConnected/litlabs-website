@@ -486,6 +486,8 @@ export default function PipelineTool() {
           <div className="flex items-center gap-1.5 bg-[#130720] border border-white/10 rounded-lg px-2 py-1.5">
             <Search className="w-3 h-3 text-slate-500 shrink-0" />
             <input
+              id="pipeline-tool-library-filter"
+              name="pipelineToolLibraryFilter"
               value={libraryFilter}
               onChange={(e) => setLibraryFilter(e.target.value)}
               placeholder="Filter nodes..."
@@ -700,6 +702,8 @@ export default function PipelineTool() {
             <form onSubmit={handleAiBuild} className="flex items-center w-full">
               <div className="w-2 h-2 bg-fuchsia-500 rounded-full animate-pulse ml-3 mr-3 shadow-[0_0_10px_rgba(217,70,239,0.8)] shrink-0" />
               <input
+                id="pipeline-tool-ai-prompt"
+                name="pipelineToolAiPrompt"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 disabled={isGenerating}
@@ -745,6 +749,8 @@ export default function PipelineTool() {
                   Node Name
                 </label>
                 <input
+                  id="pipeline-tool-node-name"
+                  name="pipelineToolNodeName"
                   value={selectedNode.title}
                   onChange={(e) =>
                     setNodes((prev) =>
@@ -767,6 +773,8 @@ export default function PipelineTool() {
                       Endpoint Path
                     </label>
                     <input
+                      id="pipeline-tool-endpoint"
+                      name="pipelineToolEndpoint"
                       value={String(selectedNode.config.endpoint || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -802,6 +810,8 @@ export default function PipelineTool() {
                       Headers
                     </label>
                     <textarea
+                      id="pipeline-tool-headers"
+                      name="pipelineToolHeaders"
                       value={String(selectedNode.config.headers || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "headers", e.target.value)
@@ -845,6 +855,8 @@ export default function PipelineTool() {
                       Cron Expression
                     </label>
                     <input
+                      id="pipeline-tool-cron"
+                      name="pipelineToolCron"
                       value={String(selectedNode.config.cron || "")}
                       onChange={(e) => {
                         updateConfig(selectedNode.id, "cron", e.target.value);
@@ -865,6 +877,8 @@ export default function PipelineTool() {
                       AI Model
                     </label>
                     <select
+                      id="pipeline-tool-model"
+                      name="pipelineToolModel"
                       value={String(selectedNode.config.model)}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "model", e.target.value)
@@ -891,6 +905,8 @@ export default function PipelineTool() {
                     </div>
                     <input
                       type="range"
+                      id="pipeline-tool-temperature"
+                      name="pipelineToolTemperature"
                       min="0"
                       max="1"
                       step="0.1"
@@ -924,6 +940,8 @@ export default function PipelineTool() {
                       </button>
                     </div>
                     <textarea
+                      id="pipeline-tool-prompt"
+                      name="pipelineToolPrompt"
                       value={String(selectedNode.config.prompt)}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "prompt", e.target.value)
@@ -944,6 +962,8 @@ export default function PipelineTool() {
                       Target Table
                     </label>
                     <input
+                      id="pipeline-tool-table"
+                      name="pipelineToolTable"
                       value={String(selectedNode.config.table || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "table", e.target.value)
@@ -957,6 +977,8 @@ export default function PipelineTool() {
                       Ledger Cluster
                     </label>
                     <select
+                      id="pipeline-tool-cluster"
+                      name="pipelineToolCluster"
                       value={String(selectedNode.config.cluster || "primary")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "cluster", e.target.value)
@@ -979,6 +1001,8 @@ export default function PipelineTool() {
                       Webhook URL
                     </label>
                     <input
+                      id="pipeline-tool-webhook-url"
+                      name="pipelineToolWebhookUrl"
                       value={String(selectedNode.config.webhook_url || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -996,6 +1020,8 @@ export default function PipelineTool() {
                       Message Template
                     </label>
                     <textarea
+                      id="pipeline-tool-message-template"
+                      name="pipelineToolMessageTemplate"
                       value={String(selectedNode.config.message_template || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -1020,6 +1046,8 @@ export default function PipelineTool() {
                       To
                     </label>
                     <input
+                      id="pipeline-tool-email-to"
+                      name="pipelineToolEmailTo"
                       value={String(selectedNode.config.to || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "to", e.target.value)
@@ -1033,6 +1061,8 @@ export default function PipelineTool() {
                       Subject
                     </label>
                     <input
+                      id="pipeline-tool-email-subject"
+                      name="pipelineToolEmailSubject"
                       value={String(selectedNode.config.subject || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "subject", e.target.value)
@@ -1046,6 +1076,8 @@ export default function PipelineTool() {
                       Body
                     </label>
                     <textarea
+                      id="pipeline-tool-email-body"
+                      name="pipelineToolEmailBody"
                       value={String(selectedNode.config.body || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "body", e.target.value)

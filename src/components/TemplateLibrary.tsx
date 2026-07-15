@@ -122,6 +122,8 @@ export default function TemplateLibrary({
       >
         <Search size={12} style={{ color: T.textMuted }} />
         <input
+          id="template-library-search"
+          name="templateSearch"
           type="text"
           placeholder="Search templates..."
           value={searchQuery}

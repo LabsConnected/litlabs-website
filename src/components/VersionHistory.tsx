@@ -19,7 +19,11 @@ interface VersionHistoryProps {
   onSave?: (name: string, description: string) => void;
 }
 
-export default function VersionHistory({ currentData, onRestore, onSave }: VersionHistoryProps) {
+export default function VersionHistory({
+  currentData,
+  onRestore,
+  onSave,
+}: VersionHistoryProps) {
   const { resolvedColors: T } = useTheme();
   const [versions, setVersions] = useState<Version[]>(() => {
     try {
@@ -57,7 +61,7 @@ export default function VersionHistory({ currentData, onRestore, onSave }: Versi
   };
 
   const deleteVersion = (id: string) => {
-    setVersions(versions.filter(v => v.id !== id));
+    setVersions(versions.filter((v) => v.id !== id));
   };
 
   const formatTime = (date: Date) => {
@@ -70,25 +74,45 @@ export default function VersionHistory({ currentData, onRestore, onSave }: Versi
 
   return (
     <div className="space-y-3">
-      <div className="p-3 rounded-xl border"
-        style={{ backgroundColor: T.boxBg + "40", borderColor: T.borderColor + "30" }}>
-        <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+      <div
+        className="p-3 rounded-xl border"
+        style={{
+          backgroundColor: T.boxBg + "40",
+          borderColor: T.borderColor + "30",
+        }}
+      >
+        <div
+          className="text-[10px] font-bold uppercase tracking-widest mb-2"
+          style={{ color: T.textMuted }}
+        >
           Save Version
         </div>
         <input
+          id="version-name"
+          name="versionName"
           type="text"
           placeholder="Version name (e.g. Hero Banner v2)"
           value={saveName}
           onChange={(e) => setSaveName(e.target.value)}
           className="w-full px-3 py-2 rounded-lg text-sm outline-none mb-2"
-          style={{ backgroundColor: T.bgColor + "40", border: "1px solid " + T.borderColor + "30", color: T.textColor }}
+          style={{
+            backgroundColor: T.bgColor + "40",
+            border: "1px solid " + T.borderColor + "30",
+            color: T.textColor,
+          }}
         />
         <textarea
+          id="version-description"
+          name="versionDescription"
           placeholder="Description (optional)"
           value={saveDescription}
           onChange={(e) => setSaveDescription(e.target.value)}
           className="w-full px-3 py-2 rounded-lg text-sm outline-none mb-2 resize-none"
-          style={{ backgroundColor: T.bgColor + "40", border: "1px solid " + T.borderColor + "30", color: T.textColor }}
+          style={{
+            backgroundColor: T.bgColor + "40",
+            border: "1px solid " + T.borderColor + "30",
+            color: T.textColor,
+          }}
           rows={2}
         />
         <button
@@ -107,9 +131,13 @@ export default function VersionHistory({ currentData, onRestore, onSave }: Versi
           onClick={() => setShowHistory(!showHistory)}
           className="flex items-center gap-2 w-full px-3 py-2 rounded-lg text-xs font-bold transition-all hover:scale-105"
           style={{
-            backgroundColor: showHistory ? T.accentColor + "15" : T.boxBg + "40",
+            backgroundColor: showHistory
+              ? T.accentColor + "15"
+              : T.boxBg + "40",
             color: showHistory ? T.accentColor : T.textMuted,
-            border: showHistory ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30",
+            border: showHistory
+              ? "1px solid " + T.accentColor + "30"
+              : "1px solid " + T.borderColor + "30",
           }}
         >
           <History size={12} />
@@ -120,27 +148,45 @@ export default function VersionHistory({ currentData, onRestore, onSave }: Versi
           <div className="mt-2 space-y-2 max-h-64 overflow-y-auto">
             {versions.length === 0 ? (
               <div className="text-center py-4">
-                <History size={20} className="mx-auto mb-2" style={{ color: T.textMuted }} />
-                <p className="text-xs" style={{ color: T.textMuted }}>No versions saved yet</p>
+                <History
+                  size={20}
+                  className="mx-auto mb-2"
+                  style={{ color: T.textMuted }}
+                />
+                <p className="text-xs" style={{ color: T.textMuted }}>
+                  No versions saved yet
+                </p>
               </div>
             ) : (
               versions.map((version) => (
                 <div
                   key={version.id}
                   className="p-3 rounded-lg border"
-                  style={{ backgroundColor: T.boxBg + "30", borderColor: T.borderColor + "20" }}
+                  style={{
+                    backgroundColor: T.boxBg + "30",
+                    borderColor: T.borderColor + "20",
+                  }}
                 >
                   <div className="flex items-start justify-between mb-1">
                     <div className="flex-1">
-                      <div className="text-xs font-bold" style={{ color: T.textColor }}>
+                      <div
+                        className="text-xs font-bold"
+                        style={{ color: T.textColor }}
+                      >
                         {version.name}
                       </div>
                       {version.description && (
-                        <div className="text-[10px]" style={{ color: T.textMuted }}>
+                        <div
+                          className="text-[10px]"
+                          style={{ color: T.textMuted }}
+                        >
                           {version.description}
                         </div>
                       )}
-                      <div className="flex items-center gap-1 mt-1 text-[9px]" style={{ color: T.textMuted }}>
+                      <div
+                        className="flex items-center gap-1 mt-1 text-[9px]"
+                        style={{ color: T.textMuted }}
+                      >
                         <Clock size={8} />
                         {formatTime(version.timestamp)}
                       </div>

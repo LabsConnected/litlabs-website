@@ -237,6 +237,8 @@ export default function StockAgentLibrary({
         >
           <Search size={14} style={{ color: T.textMuted }} />
           <input
+            id="stock-agent-search"
+            name="stockAgentSearch"
             type="text"
             placeholder="Search agents by name, role, or tags..."
             value={searchQuery}

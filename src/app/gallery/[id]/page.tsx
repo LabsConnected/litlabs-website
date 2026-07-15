@@ -250,6 +250,8 @@ export default function AgentDeploymentPage({
           >
             <div className="flex gap-2 items-center bg-black/60 rounded-2xl border border-white/10 p-1.5 sm:p-2 focus-within:border-neon-cyan/40 transition-all duration-300 shadow-inner">
               <input
+                id="gallery-item-command"
+                name="galleryItemCommand"
                 className="flex-1 bg-transparent border-none px-4 py-2.5 sm:py-3 text-sm sm:text-base text-text-primary outline-none placeholder:text-text-muted font-medium"
                 placeholder={`Initialize command sequence for ${agent.name.split(" ")[0]}...`}
                 value={input}

@@ -251,6 +251,8 @@ export default function VideoTool() {
               Scene Description
             </label>
             <textarea
+              id="video-tool-prompt"
+              name="videoToolPrompt"
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value);
@@ -324,6 +326,8 @@ export default function VideoTool() {
             </label>
             <input
               type="range"
+              id="video-tool-duration"
+              name="videoToolDuration"
               min={2}
               max={8}
               step={1}

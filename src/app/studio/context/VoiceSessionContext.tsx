@@ -718,31 +718,21 @@ export function VoiceSessionProvider({
         }
       };
 
-      fetch("/api/media/generate-audio", {
+      fetch("/api/tts", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, voice: "Puck" }),
+        body: JSON.stringify({ text, voice: "aoede" }),
       })
         .then(async (res) => {
-          if (!res.ok) throw new Error(`API ${res.status}`);
-          const data = (await res.json()) as {
-            audioBase64?: string;
-            audioUrl?: string;
-          };
-
-          let src = "";
-          if (data.audioBase64) {
-            src = `data:audio/mpeg;base64,${data.audioBase64}`;
-          } else if (data.audioUrl) {
-            src = data.audioUrl;
-          } else {
-            throw new Error("No audio data in response");
-          }
+          if (!res.ok) throw new Error(`TTS ${res.status}`);
+          const blob = await res.blob();
+          const src = URL.createObjectURL(blob);
 
           const audio = new Audio(src);
           currentAudioRef.current = audio;
 
           audio.onended = () => {
+            URL.revokeObjectURL(src);
             if (currentAudioRef.current === audio) {
               currentAudioRef.current = null;
             }
@@ -750,6 +740,7 @@ export function VoiceSessionProvider({
           };
 
           audio.onerror = () => {
+            URL.revokeObjectURL(src);
             console.warn(
               "[LiTT Voice] HTMLAudio error — falling back to speechSynthesis",
             );
@@ -762,13 +753,14 @@ export function VoiceSessionProvider({
           try {
             await audio.play();
           } catch (err) {
+            URL.revokeObjectURL(src);
             console.warn("[LiTT Voice] audio.play() blocked:", err);
             fallbackSynth(text, onSpeechEnd);
           }
         })
         .catch((err) => {
           console.warn(
-            "[LiTT Voice] generate-audio API failed:",
+            "[LiTT Voice] /api/tts failed:",
             err,
             "— falling back to speechSynthesis",
           );

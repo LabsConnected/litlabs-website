@@ -224,6 +224,8 @@ export default function NeuralImagingStudio() {
               Your Vision
             </label>
             <textarea
+              id="neural-imaging-prompt"
+              name="neuralImagingPrompt"
               value={prompt}
               onChange={handlePromptChange}
               className="w-full h-32 bg-slate-950 border border-slate-800 rounded-xl p-3 text-sm text-white focus:outline-none focus:ring-2 focus:ring-orange-500 resize-none placeholder-slate-600"

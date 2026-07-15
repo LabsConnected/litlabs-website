@@ -532,6 +532,8 @@ export default function AdminTerminal() {
             />
             <input
               ref={inputRef}
+              id="admin-terminal-command"
+              name="adminTerminalCommand"
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}

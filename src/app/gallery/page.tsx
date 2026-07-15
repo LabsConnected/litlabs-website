@@ -868,6 +868,8 @@ export default function Gallery() {
         <div className="flex gap-2 items-center flex-wrap">
           <div className="relative">
             <input
+              id="gallery-search"
+              name="gallerySearch"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -885,6 +887,8 @@ export default function Gallery() {
             </span>
           </div>
           <select
+            id="gallery-sort"
+            name="gallerySort"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
             className="px-2 py-1.5 rounded-lg text-[11px] outline-none cursor-pointer"
@@ -942,6 +946,8 @@ export default function Gallery() {
                   Media Type
                 </label>
                 <select
+                  id="gallery-media-type"
+                  name="galleryMediaType"
                   value={uploadForm.mediaType}
                   onChange={(e) =>
                     setUploadForm({
@@ -976,6 +982,8 @@ export default function Gallery() {
                   Title
                 </label>
                 <input
+                  id="gallery-title"
+                  name="galleryTitle"
                   type="text"
                   value={uploadForm.title}
                   onChange={(e) =>
@@ -1084,6 +1092,8 @@ export default function Gallery() {
                           >
                             browse
                             <input
+                              id="gallery-file"
+                              name="galleryFile"
                               type="file"
                               accept="image/*"
                               onChange={(e) => {
@@ -1122,6 +1132,8 @@ export default function Gallery() {
                   {!uploadFile && !uploadForm.imageUrl && (
                     <div>
                       <input
+                        id="gallery-image-url"
+                        name="galleryImageUrl"
                         type="text"
                         value={uploadForm.imageUrl}
                         onChange={(e) =>
@@ -1159,6 +1171,8 @@ export default function Gallery() {
                     Video URL
                   </label>
                   <input
+                    id="gallery-video-url"
+                    name="galleryVideoUrl"
                     type="text"
                     value={uploadForm.videoUrl}
                     onChange={(e) =>
@@ -1197,6 +1211,8 @@ export default function Gallery() {
                     Artist
                   </label>
                   <input
+                    id="gallery-artist"
+                    name="galleryArtist"
                     type="text"
                     value={uploadForm.artist}
                     onChange={(e) =>
@@ -1227,6 +1243,8 @@ export default function Gallery() {
                     Category
                   </label>
                   <select
+                    id="gallery-category"
+                    name="galleryCategory"
                     value={uploadForm.category}
                     onChange={(e) =>
                       setUploadForm({ ...uploadForm, category: e.target.value })

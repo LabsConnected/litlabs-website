@@ -260,6 +260,27 @@ function buildBootLogs(userName = "Creator"): LogEntry[] {
   return bootLogs;
 }
 
+/* Browser speechSynthesis fallback when server TTS is unavailable */
+function fallbackBrowserSpeech(
+  text: string,
+  voices: SpeechSynthesisVoice[],
+  selectedURI: string | null,
+  onDone: () => void,
+) {
+  if (typeof window === "undefined" || !window.speechSynthesis) {
+    onDone();
+    return;
+  }
+  const utterance = new SpeechSynthesisUtterance(text);
+  utterance.rate = 1.05;
+  utterance.pitch = 1.15;
+  const voice = voices.find((v) => v.voiceURI === selectedURI) || voices[0];
+  if (voice) utterance.voice = voice;
+  utterance.onend = onDone;
+  utterance.onerror = onDone;
+  window.speechSynthesis.speak(utterance);
+}
+
 export default function LiTTTerminal() {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -466,8 +487,7 @@ export default function LiTTTerminal() {
         return;
       }
 
-      const synth = window.speechSynthesis;
-      if (!synth) return;
+      /* Use server-side Gemini TTS (free, Aoede voice) with browser fallback */
       ttsQueue.current.push(text);
       if (isSpeaking.current) return;
       const processQueue = () => {
@@ -484,18 +504,49 @@ export default function LiTTTerminal() {
           return;
         }
         isSpeaking.current = true;
-        const utterance = new SpeechSynthesisUtterance(
-          ttsQueue.current.shift()!,
-        );
-        utterance.rate = 1.15;
-        utterance.pitch = 0.85;
-        const voice =
-          availableVoices.find((v) => v.voiceURI === selectedVoiceURI) ||
-          availableVoices[0];
-        if (voice) utterance.voice = voice;
-        utterance.onend = processQueue;
-        utterance.onerror = processQueue;
-        synth.speak(utterance);
+        const next = ttsQueue.current.shift()!;
+        fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: next, voice: "aoede" }),
+        })
+          .then(async (res) => {
+            if (!res.ok) throw new Error(`TTS ${res.status}`);
+            const blob = await res.blob();
+            const url = URL.createObjectURL(blob);
+            const audio = new Audio(url);
+            audio.onended = () => {
+              URL.revokeObjectURL(url);
+              processQueue();
+            };
+            audio.onerror = () => {
+              URL.revokeObjectURL(url);
+              /* Fallback to browser speechSynthesis */
+              fallbackBrowserSpeech(
+                next,
+                availableVoices,
+                selectedVoiceURI,
+                processQueue,
+              );
+            };
+            audio.play().catch(() => {
+              URL.revokeObjectURL(url);
+              fallbackBrowserSpeech(
+                next,
+                availableVoices,
+                selectedVoiceURI,
+                processQueue,
+              );
+            });
+          })
+          .catch(() => {
+            fallbackBrowserSpeech(
+              next,
+              availableVoices,
+              selectedVoiceURI,
+              processQueue,
+            );
+          });
       };
       processQueue();
     },
@@ -1399,6 +1450,8 @@ export default function LiTTTerminal() {
             </span>
             <div className="flex-1 relative min-w-0">
               <input
+                id="litt-terminal-command"
+                name="littCommand"
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}

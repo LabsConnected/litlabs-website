@@ -1091,6 +1091,8 @@ export default function AgentTool() {
               <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-0 sm:w-auto sm:items-center">
                 <textarea
                   ref={textareaRef}
+                  id="agent-tool-message"
+                  name="agentToolMessage"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKey}
@@ -1420,6 +1422,8 @@ export default function AgentTool() {
                     {f.label}
                   </label>
                   <input
+                    id={`agent-tool-${f.key}`}
+                    name={`agentTool${f.key.charAt(0).toUpperCase()}${f.key.slice(1)}`}
                     value={createForm[f.key as keyof typeof createForm]}
                     onChange={(e) =>
                       setCreateForm({ ...createForm, [f.key]: e.target.value })
@@ -1443,6 +1447,8 @@ export default function AgentTool() {
                   Category
                 </label>
                 <select
+                  id="agent-tool-category"
+                  name="agentToolCategory"
                   value={createForm.category}
                   onChange={(e) =>
                     setCreateForm({ ...createForm, category: e.target.value })
@@ -1479,6 +1485,8 @@ export default function AgentTool() {
                   System Prompt *
                 </label>
                 <textarea
+                  id="agent-tool-system-prompt"
+                  name="agentToolSystemPrompt"
                   value={createForm.systemPrompt}
                   onChange={(e) =>
                     setCreateForm({
@@ -1565,6 +1573,8 @@ export default function AgentTool() {
                       Agent A
                     </label>
                     <select
+                      id="agent-tool-boardroom-agent-a"
+                      name="agentToolBoardroomAgentA"
                       value={brAgentA}
                       onChange={(e) => setBrAgentA(e.target.value)}
                       className="w-full px-2 py-1.5 text-xs rounded-lg outline-none"
@@ -1589,6 +1599,8 @@ export default function AgentTool() {
                       Agent B
                     </label>
                     <select
+                      id="agent-tool-boardroom-agent-b"
+                      name="agentToolBoardroomAgentB"
                       value={brAgentB}
                       onChange={(e) => setBrAgentB(e.target.value)}
                       className="w-full px-2 py-1.5 text-xs rounded-lg outline-none"
@@ -1619,6 +1631,8 @@ export default function AgentTool() {
                       Debate Topic
                     </label>
                     <input
+                      id="agent-tool-boardroom-topic"
+                      name="agentToolBoardroomTopic"
                       value={brTopic}
                       onChange={(e) => setBrTopic(e.target.value)}
                       placeholder="e.g. Should startups use AI from day one?"

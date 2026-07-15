@@ -273,6 +273,8 @@ export default function AudioTool() {
               {mode === "tts" ? "Text to Speak" : "Music Prompt"}
             </label>
             <textarea
+              id="audio-tool-prompt"
+              name="audioToolPrompt"
               value={text}
               onChange={(e) => {
                 setText(e.target.value);

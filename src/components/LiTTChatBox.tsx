@@ -34,6 +34,8 @@ export default function LiTTChatBox() {
       </div>
 
       <textarea
+        id="litt-chat-message"
+        name="littChatMessage"
         className="w-full rounded-xl bg-black/70 border border-white/10 p-3 text-white outline-none focus:border-orange-500"
         rows={5}
         value={message}

@@ -422,6 +422,8 @@ export default function AudioTool() {
                 Text
               </label>
               <textarea
+                id="tts-text"
+                name="ttsText"
                 value={ttsText}
                 onChange={(e) => setTtsText(e.target.value)}
                 rows={4}
@@ -504,6 +506,8 @@ export default function AudioTool() {
                 Music Prompt
               </label>
               <textarea
+                id="music-prompt"
+                name="musicPrompt"
                 value={musicPrompt}
                 onChange={(e) => setMusicPrompt(e.target.value)}
                 rows={3}
@@ -548,6 +552,8 @@ export default function AudioTool() {
                   Lyrics (optional)
                 </label>
                 <textarea
+                  id="music-lyrics"
+                  name="musicLyrics"
                   value={musicLyrics}
                   onChange={(e) => setMusicLyrics(e.target.value)}
                   rows={3}

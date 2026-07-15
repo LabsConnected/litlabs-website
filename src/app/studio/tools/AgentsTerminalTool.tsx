@@ -834,6 +834,8 @@ export default function AgentsTerminalTool() {
                   PS Image&gt;
                 </span>
                 <input
+                  id="agents-terminal-tool-image-url"
+                  name="agentsTerminalToolImageUrl"
                   value={imageUrlInput}
                   onChange={(e) => setImageUrlInput(e.target.value)}
                   placeholder="Paste image URL..."
@@ -903,6 +905,8 @@ export default function AgentsTerminalTool() {
               <div className="flex-1 min-w-0 flex gap-2 items-start">
                 <textarea
                   ref={textareaRef}
+                  id="agents-terminal-tool-message"
+                  name="agentsTerminalToolMessage"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKey}
@@ -1128,6 +1132,8 @@ export default function AgentsTerminalTool() {
                     style={{ color: T.textMuted, opacity: 0.5 }}
                   />
                   <input
+                    id="agents-terminal-tool-log-filter"
+                    name="agentsTerminalToolLogFilter"
                     value={logFilter}
                     onChange={(e) => setLogFilter(e.target.value)}
                     placeholder="Filter logs..."

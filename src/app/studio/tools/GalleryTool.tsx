@@ -454,6 +454,8 @@ export default function GalleryTool() {
             </div>
             <div className="flex flex-col gap-2">
               <input
+                id="gallery-tool-share-video-url"
+                name="galleryToolShareVideoUrl"
                 value={shareForm.videoUrl}
                 onChange={(e) =>
                   setShareForm((f) => ({ ...f, videoUrl: e.target.value }))
@@ -468,6 +470,8 @@ export default function GalleryTool() {
               />
               <div className="flex gap-2">
                 <input
+                  id="gallery-tool-share-title"
+                  name="galleryToolShareTitle"
                   value={shareForm.title}
                   onChange={(e) =>
                     setShareForm((f) => ({ ...f, title: e.target.value }))
@@ -481,6 +485,8 @@ export default function GalleryTool() {
                   }}
                 />
                 <input
+                  id="gallery-tool-share-artist"
+                  name="galleryToolShareArtist"
                   value={shareForm.artist}
                   onChange={(e) =>
                     setShareForm((f) => ({ ...f, artist: e.target.value }))
@@ -547,6 +553,8 @@ export default function GalleryTool() {
           <div className="relative flex items-center sm:ml-auto">
             <Search size={14} className="absolute left-3 text-neutral-500" />
             <input
+              id="gallery-tool-search"
+              name="galleryToolSearch"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               placeholder="Search assets..."

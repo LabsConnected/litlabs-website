@@ -211,7 +211,10 @@ export default function SocialPageContent() {
   }
 
   return (
-    <div className="min-h-full pb-8" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+    <div
+      className="min-h-full pb-8"
+      style={{ backgroundColor: C.bgColor, color: C.textColor }}
+    >
       {/* Toast */}
       {toast && (
         <div
@@ -269,7 +272,11 @@ export default function SocialPageContent() {
         {isMock && (
           <div
             className="mb-4 w-full rounded-lg px-4 py-2 text-center text-[10px]"
-            style={{ backgroundColor: C.accentColor + "20", color: C.accentColor, borderBottom: `1px solid ${C.accentColor}40` }}
+            style={{
+              backgroundColor: C.accentColor + "20",
+              color: C.accentColor,
+              borderBottom: `1px solid ${C.accentColor}40`,
+            }}
           >
             🛠 Demo feed — connect Supabase to see real community posts.
           </div>
@@ -436,6 +443,8 @@ export default function SocialPageContent() {
                   </div>
                   <div className="flex-1">
                     <textarea
+                      id="social-post"
+                      name="socialPost"
                       value={newPost}
                       onChange={(e) => setNewPost(e.target.value)}
                       onKeyDown={(e) => {
@@ -684,7 +693,9 @@ export default function SocialPageContent() {
                           : C.textMuted,
                         opacity: likedPosts.has(post.id) ? 1 : 0.6,
                       }}
-                      aria-label={likedPosts.has(post.id) ? "Unlike post" : "Like post"}
+                      aria-label={
+                        likedPosts.has(post.id) ? "Unlike post" : "Like post"
+                      }
                     >
                       <Heart
                         size={14}
@@ -692,7 +703,9 @@ export default function SocialPageContent() {
                           likedPosts.has(post.id) ? C.linkColor : "transparent"
                         }
                       />
-                      <span className="sr-only">{likedPosts.has(post.id) ? "Unlike" : "Like"}</span>
+                      <span className="sr-only">
+                        {likedPosts.has(post.id) ? "Unlike" : "Like"}
+                      </span>
                       {post.likes_count}
                     </button>
                     <button

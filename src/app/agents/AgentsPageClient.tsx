@@ -290,6 +290,8 @@ export default function AgentsPageClient() {
             </label>
             <div className="flex gap-3">
               <input
+                id="agents-command"
+                name="agentsCommand"
                 type="text"
                 value={command}
                 onChange={(e) => setCommand(e.target.value)}

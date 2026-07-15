@@ -488,6 +488,8 @@ export function LiTTAssistantPanel({
 
         <div className="relative">
           <textarea
+            id="litt-assistant-prompt"
+            name="littPrompt"
             value={prompt}
             onChange={(e) => {
               setPrompt(e.target.value);
@@ -574,6 +576,8 @@ function GoalsPanel({
         className="mb-3 flex gap-2"
       >
         <input
+          id="litt-assistant-goal"
+          name="littGoal"
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Add a goal…"
@@ -608,6 +612,8 @@ function GoalsPanel({
                 className="flex items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950 px-2 py-1.5 text-xs"
               >
                 <select
+                  id="litt-assistant-priority"
+                  name="littPriority"
                   value={g.priority}
                   onChange={(e) =>
                     onUpdate(g.id, {

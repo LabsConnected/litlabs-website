@@ -70,6 +70,8 @@ export default function SpaceTool() {
           Prompt
         </label>
         <textarea
+          id="space-tool-prompt"
+          name="spaceToolPrompt"
           rows={4}
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
