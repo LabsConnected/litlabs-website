@@ -24,6 +24,12 @@ export async function POST(req: NextRequest) {
     const contextRaw = body.context as Partial<JarvisContext> & { route: string };
     const clientGoals = Array.isArray(body.goals) ? body.goals : undefined;
     const clientTimeOfDay = typeof body.timeOfDay === "string" ? body.timeOfDay : undefined;
+    const history = Array.isArray(body.history)
+      ? body.history.filter(
+        (h: { role?: string; content?: string }) =>
+          h.role && h.content && typeof h.content === "string",
+      ).slice(-20)
+      : [];
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
@@ -110,18 +116,24 @@ export async function POST(req: NextRequest) {
 
     const messages = [
       { role: "system" as const, content: systemPrompt },
+      ...(history as { role: "user" | "assistant"; content: string }[]),
       { role: "user" as const, content: userPrompt },
     ];
 
     let answer: string;
     try {
-      answer = await runAI({ provider: "ollama", model: "llama3.2:3b", messages });
-    } catch {
       answer = await runAI({
         provider: "openrouter",
         model: "google/gemini-2.5-flash",
         messages,
       });
+    } catch {
+      // Fallback to Ollama only for local dev
+      try {
+        answer = await runAI({ provider: "ollama", model: "llama3.2:3b", messages });
+      } catch {
+        answer = "I'm having trouble connecting to my brain right now. Please check that OPENROUTER_API_KEY is configured.";
+      }
     }
 
     const parsed = parseJarvisActions(answer);

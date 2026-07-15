@@ -587,6 +587,7 @@ export default function LiTTTerminal() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             message: msg,
+            history: historySnapshot,
             context: {
               route: "/studio/litt",
               terminalOutput: logs

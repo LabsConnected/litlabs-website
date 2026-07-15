@@ -113,9 +113,9 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 // ---------------------------------------------------------------------------
 
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
-const SILENCE_THRESHOLD = 0.025;
-const SPEECH_START_THRESHOLD = 0.045;
-const SILENCE_TIMEOUT_MS = 1500;
+const SILENCE_THRESHOLD = 0.02;
+const SPEECH_START_THRESHOLD = 0.035;
+const SILENCE_TIMEOUT_MS = 2500;
 const MAX_RECORDING_MS = 30_000;
 const CHUNK_INTERVAL_MS = 250;
 
