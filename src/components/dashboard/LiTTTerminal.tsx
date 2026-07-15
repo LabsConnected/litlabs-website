@@ -599,7 +599,7 @@ export default function LiTTTerminal() {
                 .map((l) => l.text),
               logs: logs.slice(-20).map((l) => `[${l.type}] ${l.text}`),
               fileTree: [],
-              agents: Object.entries(REAL_AGENTS).map(([slug, a]) => ({
+              agents: Object.values(REAL_AGENTS).map((a) => ({
                 name: a.name,
                 status: a.status === "online" ? "online" : "idle",
               })),

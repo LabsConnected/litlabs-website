@@ -25,7 +25,7 @@ export default function MobileBottomNav() {
     <>
       <nav
         aria-label="Mobile navigation"
-        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-[100] border-t backdrop-blur-xl"
+        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-50 border-t backdrop-blur-xl"
         style={{ borderColor: `${T.borderColor}20` }}
       >
         <div
@@ -77,12 +77,12 @@ export default function MobileBottomNav() {
       {moreOpen && (
         <>
           <div
-            className="fixed inset-0 z-[99] bg-black/40 md:hidden"
+            className="fixed inset-0 z-40 bg-black/40 md:hidden"
             onClick={() => setMoreOpen(false)}
             aria-hidden="true"
           />
           <div
-            className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] left-2 right-2 z-[101] rounded-2xl border p-3 shadow-2xl md:hidden"
+            className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] left-2 right-2 z-50 rounded-2xl border p-3 shadow-2xl md:hidden"
             style={{
               backgroundColor: T.boxBg,
               borderColor: `${T.borderColor}30`,

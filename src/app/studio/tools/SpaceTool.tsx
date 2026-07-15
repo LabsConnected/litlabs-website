@@ -76,7 +76,7 @@ export default function SpaceTool() {
           value={prompt}
           onChange={(e) => setPrompt(e.target.value)}
           placeholder="Describe a space scene, skybox, or 3D environment…"
-          className="w-full bg-transparent resize-none text-sm outline-none placeholder:opacity-40 sm:min-h-[8rem]"
+          className="w-full bg-transparent resize-none text-sm outline-none placeholder:opacity-40 sm:min-h-32"
           style={{ color: T.textColor }}
         />
         <button

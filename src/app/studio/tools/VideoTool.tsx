@@ -767,6 +767,8 @@ export default function VideoTool() {
                 style={{ borderColor: T.borderColor }}
               >
                 {imagePreviewUrl && (
+                  // Local object URL preview; next/image is not beneficial here
+                  // eslint-disable-next-line @next/next/no-img-element
                   <img
                     src={imagePreviewUrl}
                     alt="Reference"
