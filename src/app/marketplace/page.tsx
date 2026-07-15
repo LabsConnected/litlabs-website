@@ -742,17 +742,8 @@ function MarketplaceInner() {
           grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
           gap: 16px !important;
         }
-        .marketplace-buy-grid {
-          display: grid !important;
-          grid-template-columns: repeat(
-            auto-fit,
-            minmax(170px, 1fr)
-          ) !important;
-          gap: 10px !important;
-        }
         .marketplace-tier-card,
-        .marketplace-spend-card,
-        .marketplace-buy-chip {
+        .marketplace-spend-card {
           min-width: 0;
           overflow-wrap: anywhere;
         }
@@ -775,8 +766,7 @@ function MarketplaceInner() {
             padding-right: 16px !important;
           }
           .marketplace-tier-grid,
-          .marketplace-spend-grid,
-          .marketplace-buy-grid {
+          .marketplace-spend-grid {
             grid-template-columns: 1fr !important;
           }
           .marketplace-tier-card {
@@ -1921,76 +1911,6 @@ function MarketplaceInner() {
                       {feat.action}
                     </button>
                   </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* PRICING EXAMPLES */}
-          <div
-            style={{
-              borderTop: "2px solid " + T.borderColor,
-              paddingTop: "24px",
-            }}
-          >
-            <div
-              style={{
-                color: T.textColor,
-                fontSize: "12px",
-                letterSpacing: "1px",
-                marginBottom: "16px",
-                fontWeight: "bold",
-                opacity: 0.8,
-              }}
-            >
-              📊 WHAT CAN YOU BUY?
-            </div>
-            <div
-              className="marketplace-buy-grid"
-              style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}
-            >
-              {[
-                { name: "Support Agent", cost: 50, color: T.accentColor },
-                { name: "Writing Coach", cost: 75, color: T.headerColor },
-                { name: "Research Guru", cost: 100, color: "#60a5fa" },
-                { name: "Social Dominator", cost: 250, color: "#34d399" },
-                { name: "Data Slayer", cost: 300, color: "#a78bfa" },
-                { name: "Pixel Forge", cost: 200, color: "#ec4899" },
-                { name: "Music Producer", cost: 400, color: "#22d3ee" },
-                { name: "Legal Shield", cost: 1000, color: "#ff6b35" },
-                { name: "Security Guru", cost: 1200, color: "#f87171" },
-                { name: "ML Engineer", cost: 1500, color: "#fbbf24" },
-              ].map((item) => (
-                <div
-                  key={item.name}
-                  className="marketplace-buy-chip"
-                  style={{
-                    padding: "10px 16px",
-                    border: "1px solid " + T.borderColor,
-                    borderRadius: "6px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span
-                    style={{
-                      color: item.color,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {item.name}
-                  </span>
-                  <span
-                    style={{
-                      color: "gold",
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatLbc(item.cost)}
-                  </span>
                 </div>
               ))}
             </div>

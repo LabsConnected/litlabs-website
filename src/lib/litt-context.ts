@@ -1,3 +1,5 @@
+import { LITLABS_IDENTITY_SNIPPET, mergeLittIdentityWithProject } from "@/lib/litt-identity";
+
 export type JarvisActionType =
   | "run_command"
   | "insert_command"
@@ -39,12 +41,35 @@ export type JarvisThinkResponse = {
   actions?: JarvisAction[];
 };
 
+export type JarvisProjectContext = {
+  name?: string;
+  description?: string;
+  stack?: string;
+  goals?: string;
+  repoUrl?: string;
+  customInstructions?: string;
+};
+
+/**
+ * Build the user prompt for the LiTT think route.
+ *
+ * The static litlabs.net project identity is auto-injected by the LLM
+ * layer (see `withLittIdentity` in src/lib/llm.ts), so we do NOT include
+ * it here again. We only include the live runtime context (route,
+ * terminal, files, logs, agents).
+ *
+ * If you need to force the identity into a prompt-only caller (no system
+ * message slot), use `mergeLittIdentityWithProject()` to prepend it.
+ */
 export function buildJarvisPrompt(message: string, context: JarvisContext): string {
   return `
-You are LiTT inside LiTTree-LabStudios.
+You are LiTT inside LiTTree-LabStudios (litlabs.net).
 
 You are not a normal chatbot.
 You are an AI developer command center.
+
+Project brain (in case the system prompt didn't carry it through):
+${LITLABS_IDENTITY_SNIPPET}
 
 User request:
 ${message}
@@ -78,11 +103,22 @@ Rules:
 - Be direct.
 - Diagnose the issue.
 - Give prioritized fixes.
-- Return useful commands.
+- Return useful commands (pnpm …, not npm …).
 - Do not ask vague questions unless truly required.
 - For dangerous commands, require approval.
 - Prefer markdown formatting with code blocks.
+- This is the litlabs.net codebase — use real paths (src/lib/…, src/app/api/…),
+  not invented ones.
 `;
+}
+
+/**
+ * Build a *system* prompt that includes the project identity. Use this
+ * when the caller can't pass a separate system-prompt slot and only has
+ * a single user-prompt string to send to the LLM.
+ */
+export function buildJarvisSystemPrompt(project?: JarvisProjectContext): string {
+  return mergeLittIdentityWithProject(project);
 }
 
 export function parseJarvisActions(answer: string): JarvisAction[] {

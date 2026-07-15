@@ -20,16 +20,22 @@
  *
  *   const obj = await generateJSON<{ title: string }>("Return JSON: { title: '...' }", { task: "json" });
  *
- *   await streamText("...", (chunk) => sendToClient(chunk));
+ *   await streamText("...", (chunk) => sendToClient());
  *
  * Env:
  *   GEMINI_API_KEY   — your Gemini key (preferred primary)
  *   GOOGLE_API_KEY   — alias used by @google/generative-ai if GEMINI_API_KEY not set
  *   OPENROUTER_API_KEY — enables the OpenRouter fallback chain
+ *
+ * Project identity: every call automatically prepends the static
+ * `LITLABS_IDENTITY` block (see `src/lib/litt-identity.ts`) so the model
+ * always knows it is inside the litlabs.net codebase. Callers don't need
+ * to remember to add it.
  */
 
 import { GoogleGenerativeAI } from "@google/generative-ai";
 import { SITE_URL } from "@/lib/siteConfig";
+import { withLittIdentity } from "@/lib/litt-identity";
 
 /* ------------------------------------------------------------------ */
 /*  Types                                                              */
@@ -315,12 +321,18 @@ export async function generateText(
   const failover: LLMProvider[] = [];
   const t0 = Date.now();
 
+  // Always prepend the static litlabs.net project identity so the model
+  // knows what project it is inside — no matter what the caller passes.
+  // Callers can still pass their own systemPrompt on top; identity wins
+  // as the highest-priority context.
+  const finalSystemPrompt = withLittIdentity(systemPrompt);
+
   let lastErr: unknown = null;
   for (const provider of chain) {
     try {
       const r = await dispatchProvider(
         provider,
-        { prompt, systemPrompt, task, opts: options },
+        { prompt, systemPrompt: finalSystemPrompt, task, opts: options },
         timeoutMs,
       );
       return {
@@ -359,6 +371,8 @@ export async function generateJSON<T = unknown>(
   systemPrompt?: string,
 ): Promise<T> {
   const jsonPrompt = `${prompt}\n\nRespond with valid JSON only. No markdown, no commentary, no code fences.`;
+  // generateText already injects the project identity, so we pass the
+  // caller's systemPrompt straight through and let the layer below merge.
   const r = await generateText(
     jsonPrompt,
     { ...options, task: "json" },
@@ -410,12 +424,15 @@ export async function streamText(
   const failover: LLMProvider[] = [];
   const t0 = Date.now();
 
+  // Always prepend the static litlabs.net project identity.
+  const finalSystemPrompt = withLittIdentity(systemPrompt);
+
   let lastErr: unknown = null;
   for (const provider of chain) {
     try {
       if (provider === "gemini") {
         return await streamViaGemini(
-          { prompt, systemPrompt, task, opts: options },
+          { prompt, systemPrompt: finalSystemPrompt, task, opts: options },
           onChunk,
           t0,
           failover,
@@ -423,7 +440,7 @@ export async function streamText(
       }
       return await streamViaOpenRouter(
         provider,
-        { prompt, systemPrompt, task, opts: options },
+        { prompt, systemPrompt: finalSystemPrompt, task, opts: options },
         onChunk,
         t0,
         failover,
@@ -564,6 +581,8 @@ export interface LLMHealth {
   openrouter: { available: boolean; model: string };
   preferFree: boolean;
   primary: LLMProvider;
+  /** True when the static project identity block is in place. */
+  projectIdentity: boolean;
 }
 
 export function llmHealth(): LLMHealth {
@@ -573,7 +592,8 @@ export function llmHealth(): LLMHealth {
       available: !!OPENROUTER_KEY,
       model: DEFAULT_MODELS["openrouter-free"],
     },
-    preferFree: !GEMINI_KEY, // if no Gemini key, force the free route
+    preferFree: !GEMINI_KEY,
     primary: defaultChain("chat", {})[0],
+    projectIdentity: true,
   };
 }

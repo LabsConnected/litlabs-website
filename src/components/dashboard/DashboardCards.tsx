@@ -38,13 +38,6 @@ const LiTTTerminal = dynamic(() => import("./LiTTTerminal"), {
   ),
 });
 
-const MarketplacePreview = dynamic(() => import("./MarketplacePreview"), {
-  ssr: false,
-  loading: () => (
-    <div className="h-96 rounded-xl animate-pulse bg-slate-800/30 border border-slate-700/30" />
-  ),
-});
-
 export function HeroCard({
   title,
   subtitle,
@@ -230,6 +223,9 @@ export function CenterStage({
     if (activeApp === "gallery") {
       router.replace("/gallery");
     }
+    if (activeApp === "marketplace") {
+      router.replace("/marketplace");
+    }
   }, [activeApp, router]);
 
   switch (activeApp) {
@@ -404,17 +400,6 @@ export function CenterStage({
       );
     case "social":
       return <SocialPageContent />;
-    case "marketplace":
-      return (
-        <div className="space-y-6">
-          <HeroCard
-            title="Marketplace"
-            subtitle="Agents, templates & coin packs."
-            color="#ff9ff3"
-          />
-          <MarketplacePreview />
-        </div>
-      );
     case "music":
       return <MusicHub />;
 

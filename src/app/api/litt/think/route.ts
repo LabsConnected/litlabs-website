@@ -3,11 +3,13 @@ import { auth } from "@clerk/nextjs/server";
 import { runAI } from "@/lib/ai/providers";
 import {
   buildJarvisPrompt,
+  buildJarvisSystemPrompt,
   collectJarvisContext,
   JarvisContext,
   JarvisAction,
   parseJarvisActions,
 } from "@/lib/litt-context";
+import { loadProjectContext } from "@/lib/project-context";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -25,19 +27,31 @@ export async function POST(req: NextRequest) {
     }
 
     const context = collectJarvisContext(contextRaw || { route: "/litt" });
-    const prompt = buildJarvisPrompt(message, context);
+    const userPrompt = buildJarvisPrompt(message, context);
+
+    // Build a system prompt that ALWAYS carries the static litlabs.net
+    // project identity, plus the (optional) per-user project notes from
+    // localStorage. This is the route's primary "brain" — the model
+    // should already know what project it's inside.
+    let project;
+    try {
+      project = loadProjectContext();
+    } catch {
+      project = undefined;
+    }
+    const systemPrompt =
+      buildJarvisSystemPrompt(project) +
+      "\n\n" +
+      "You are LiTT, the AI operating layer for LiTTree-LabStudios (litlabs.net). " +
+      "You are connected to a real terminal, file explorer, logs, and agent runner. " +
+      "Inspect the provided context, diagnose issues, and give prioritized fixes with commands. " +
+      "When you include a command, wrap it in a bash code block. " +
+      "Use pnpm (never npm/yarn) in commands. " +
+      "Do not ask vague follow-up questions unless absolutely necessary.";
 
     const messages = [
-      {
-        role: "system" as const,
-        content:
-          "You are LiTT, the AI operating layer for LiTTree-LabStudios. " +
-          "You are connected to a real terminal, file explorer, logs, and agent runner. " +
-          "Inspect the provided context, diagnose issues, and give prioritized fixes with commands. " +
-          "When you include a command, wrap it in a bash code block. " +
-          "Do not ask vague follow-up questions unless absolutely necessary.",
-      },
-      { role: "user" as const, content: prompt },
+      { role: "system" as const, content: systemPrompt },
+      { role: "user" as const, content: userPrompt },
     ];
 
     let answer: string;
