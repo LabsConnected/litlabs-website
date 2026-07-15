@@ -184,6 +184,7 @@ export function VoiceSessionProvider({
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
+  const ttsCancelledRef = useRef(false);
   const rafRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxRecordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -244,10 +245,13 @@ export function VoiceSessionProvider({
     recordedChunksRef.current = [];
 
     // Stop TTS
+    ttsCancelledRef.current = true;
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
     }
     if (currentAudioRef.current) {
+      currentAudioRef.current.onended = null;
+      currentAudioRef.current.onerror = null;
       currentAudioRef.current.pause();
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
@@ -665,10 +669,13 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const stopSpeaking = useCallback(() => {
+    ttsCancelledRef.current = true;
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
     }
     if (currentAudioRef.current) {
+      currentAudioRef.current.onended = null;
+      currentAudioRef.current.onerror = null;
       currentAudioRef.current.pause();
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
@@ -684,6 +691,7 @@ export function VoiceSessionProvider({
       if (!text.trim()) return;
 
       stopSpeaking();
+      ttsCancelledRef.current = false;
 
       // Pause recording while speaking to avoid echo loops
       if (mediaRecorderRef.current?.state === "recording") {
@@ -699,6 +707,7 @@ export function VoiceSessionProvider({
       setActivity({ type: "speaking" });
 
       const onSpeechEnd = () => {
+        if (ttsCancelledRef.current) return;
         if (mediaRecorderRef.current?.state === "paused") {
           try {
             mediaRecorderRef.current.resume();
@@ -741,12 +750,13 @@ export function VoiceSessionProvider({
 
           audio.onerror = () => {
             URL.revokeObjectURL(src);
-            console.warn(
-              "[LiTT Voice] HTMLAudio error — falling back to speechSynthesis",
-            );
             if (currentAudioRef.current === audio) {
               currentAudioRef.current = null;
             }
+            if (ttsCancelledRef.current) return;
+            console.warn(
+              "[LiTT Voice] HTMLAudio error — falling back to speechSynthesis",
+            );
             fallbackSynth(text, onSpeechEnd);
           };
 
@@ -754,11 +764,13 @@ export function VoiceSessionProvider({
             await audio.play();
           } catch (err) {
             URL.revokeObjectURL(src);
+            if (ttsCancelledRef.current) return;
             console.warn("[LiTT Voice] audio.play() blocked:", err);
             fallbackSynth(text, onSpeechEnd);
           }
         })
         .catch((err) => {
+          if (ttsCancelledRef.current) return;
           console.warn(
             "[LiTT Voice] /api/tts failed:",
             err,
