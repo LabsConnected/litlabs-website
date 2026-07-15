@@ -381,8 +381,29 @@ export default function ImageTool() {
     "prompt",
   );
   const [historyOpen, setHistoryOpen] = useState(true);
-  const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
+  const [mobileLeftOpen, setMobileLeftOpen] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768;
+  });
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return window.innerWidth < 768;
+  });
+
+  useEffect(() => {
+    const update = () => {
+      const mobile = window.innerWidth < 768;
+      setIsMobile(mobile);
+      if (!mobile) {
+        setMobileLeftOpen(false);
+        setMobileRightOpen(false);
+      }
+    };
+    update();
+    window.addEventListener("resize", update);
+    return () => window.removeEventListener("resize", update);
+  }, []);
 
   /* ── Resizable panel widths ── */
   const [leftWidth, setLeftWidth] = useState(() => {
@@ -1098,6 +1119,7 @@ export default function ImageTool() {
             aria-label="Toggle history"
           >
             <History size={14} />
+            <span>History</span>
           </button>
           <button
             onClick={() => setMobileLeftOpen((v) => !v)}
@@ -1114,6 +1136,7 @@ export default function ImageTool() {
             aria-label="Toggle controls"
           >
             <Menu size={14} />
+            <span>Controls</span>
           </button>
         </div>
 
@@ -1176,7 +1199,7 @@ export default function ImageTool() {
         <div
           className={`shrink-0 flex flex-col overflow-y-auto transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-[10000] ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{
-            width: leftWidth,
+            width: isMobile ? "85%" : leftWidth,
             borderRight: `1px solid ${T.borderColor}18`,
             backgroundColor: T.boxBg + "40",
             backdropFilter: "blur(20px)",
@@ -2601,15 +2624,30 @@ export default function ImageTool() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center select-none opacity-30">
+                  <div className="text-center select-none">
                     <ImageIcon
                       size={48}
-                      className="mx-auto mb-2"
+                      className="mx-auto mb-2 opacity-30"
                       style={{ color: T.textMuted }}
                     />
-                    <p className="text-sm" style={{ color: T.textMuted }}>
+                    <p
+                      className="text-sm opacity-30 mb-4"
+                      style={{ color: T.textMuted }}
+                    >
                       Your creation appears here
                     </p>
+                    <button
+                      onClick={() => setMobileLeftOpen(true)}
+                      className="md:hidden px-4 py-2 text-xs font-bold rounded-lg border transition-all hover:opacity-80"
+                      style={{
+                        borderColor: T.accentColor,
+                        color: T.accentColor,
+                        backgroundColor: T.accentColor + "10",
+                      }}
+                    >
+                      <Wand2 size={12} className="inline mr-1.5" /> Open
+                      Controls
+                    </button>
                   </div>
                 )}
               </div>
