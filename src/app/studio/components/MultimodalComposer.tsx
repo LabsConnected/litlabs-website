@@ -8,7 +8,6 @@ import {
   Paperclip,
   Plus,
   Send,
-  Square,
   Loader2,
 } from "lucide-react";
 import CameraSession from "./CameraSession";
@@ -40,25 +39,13 @@ const SLASH_CHIPS = [
 
 // @voice-statuses
 const STATUS_LABELS: Record<VoiceState, string> = {
-  idle: "",
-  requesting_permission: "Requesting microphone…",
-  connecting: "Connecting…",
-  listening: "Listening",
-  speech_detected: "You're speaking…",
+  idle: "Tap to speak",
+  listening: "Listening…",
   transcribing: "Transcribing…",
-  sending: "Sending…",
-  thinking: "Thinking…",
-  using_tool: "Using tool…",
-  reading_files: "Reading files…",
-  writing_files: "Writing files…",
-  running_command: "Running command…",
-  testing: "Running tests…",
-  generating_response: "Generating response…",
-  speaking: "LiTT speaking",
-  muted: "Muted",
-  paused: "Paused",
-  complete: "",
-  error: "",
+  thinking: "LiTT is thinking…",
+  speaking: "LiTT is speaking…",
+  cooldown: "Voice temporarily unavailable",
+  error: "Voice error",
 };
 
 function WaveformBars({ level, active }: { level: number; active: boolean }) {
@@ -100,10 +87,9 @@ export default function MultimodalComposer({
   const {
     voiceState,
     micLevel,
-    isMuted,
+    cooldownRemaining,
     startVoice,
     stopVoice,
-    toggleMute,
     interrupt,
     speakText,
     setOnTurn,
@@ -194,22 +180,7 @@ export default function MultimodalComposer({
           disabled: false,
           onClick: startVoice,
         };
-      case "requesting_permission":
-        return {
-          icon: Loader2,
-          color: T.textMuted,
-          disabled: true,
-          onClick: undefined,
-        };
-      case "connecting":
-        return {
-          icon: Loader2,
-          color: T.textMuted,
-          disabled: true,
-          onClick: undefined,
-        };
       case "listening":
-      case "speech_detected":
         return {
           icon: Mic,
           color: T.accentColor,
@@ -217,34 +188,14 @@ export default function MultimodalComposer({
           onClick: stopVoice,
         };
       case "transcribing":
-      case "sending":
       case "thinking":
-      case "using_tool":
-      case "reading_files":
-      case "writing_files":
-      case "running_command":
-      case "testing":
-      case "generating_response":
+      case "speaking":
+      case "cooldown":
         return {
           icon: Loader2,
           color: T.accentColor,
           disabled: true,
           onClick: undefined,
-        };
-      case "speaking":
-        return {
-          icon: Square,
-          color: T.warning,
-          disabled: false,
-          onClick: interrupt,
-        };
-      case "muted":
-      case "paused":
-        return {
-          icon: MicOff,
-          color: T.warning,
-          disabled: false,
-          onClick: toggleMute,
         };
       case "error":
         return {
@@ -268,7 +219,7 @@ export default function MultimodalComposer({
 
   // Mic button styling with pulse effect for listening/speaking states
   const getMicButtonStyle = () => {
-    if (voiceState === "listening" || voiceState === "speech_detected") {
+    if (voiceState === "listening") {
       return {
         boxShadow: `0 0 0 ${2 + micLevel * 8}px rgba(34,211,238,${0.2 + micLevel * 0.4})`,
       };
@@ -294,33 +245,34 @@ export default function MultimodalComposer({
       )}
 
       {/* Voice status strip */}
-      {!["idle"].includes(voiceState) && (
+      {voiceState !== "idle" && (
         <div
           className={`flex items-center justify-between gap-3 rounded-t-xl border-x border-t px-3 py-1.5 backdrop-blur-md ${
-            voiceState === "error"
+            voiceState === "error" || voiceState === "cooldown"
               ? "border-red-500/20 bg-red-500/5"
               : "border-white/10 bg-black/40"
           }`}
         >
           {/* Left: waveform bars + status text */}
           <div className="flex items-center gap-2">
-            {voiceState !== "error" ? (
+            {voiceState === "error" ? (
+              <span className="text-[11px] font-bold text-red-400">
+                {errorMessage || "Voice session error"}
+              </span>
+            ) : voiceState === "cooldown" ? (
+              <span className="text-[11px] font-bold text-amber-400">
+                Voice limit reached. Retry available in {cooldownRemaining}s
+              </span>
+            ) : (
               <>
                 <WaveformBars
                   level={micLevel}
-                  active={
-                    voiceState === "speech_detected" ||
-                    voiceState === "listening"
-                  }
+                  active={voiceState === "listening"}
                 />
                 <span className="text-[11px] font-bold text-white">
                   {STATUS_LABELS[voiceState]}
                 </span>
               </>
-            ) : (
-              <span className="text-[11px] font-bold text-red-400">
-                {errorMessage || "Voice session error"}
-              </span>
             )}
           </div>
           {/* Right: controls */}
@@ -333,29 +285,42 @@ export default function MultimodalComposer({
                 Interrupt
               </button>
             )}
-            {voiceState !== "error" ? (
+            {voiceState === "cooldown" ? (
               <>
                 <button
-                  onClick={toggleMute}
-                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
-                  style={{ color: T.textMuted }}
+                  onClick={() => {
+                    stopVoice();
+                    void startVoice();
+                  }}
+                  className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-400 hover:bg-amber-400/10"
                 >
-                  {isMuted ? "Unmute" : "Mute"}
+                  Retry
                 </button>
                 <button
-                  onClick={stopVoice}
+                  onClick={() => {
+                    stopVoice();
+                    textareaRef.current?.focus();
+                  }}
                   className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
                   style={{ color: T.textMuted }}
                 >
-                  Stop
+                  Use text instead
                 </button>
               </>
-            ) : (
+            ) : voiceState === "error" ? (
               <button
                 onClick={stopVoice}
                 className="rounded-full border border-red-500/30 px-2.5 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/10"
               >
                 Dismiss
+              </button>
+            ) : (
+              <button
+                onClick={stopVoice}
+                className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
+                style={{ color: T.textMuted }}
+              >
+                Stop
               </button>
             )}
           </div>
@@ -479,17 +444,7 @@ export default function MultimodalComposer({
           <MicIcon
             size={16}
             className={
-              voiceState === "requesting_permission" ||
-              voiceState === "connecting" ||
-              voiceState === "transcribing" ||
-              voiceState === "sending" ||
-              voiceState === "thinking" ||
-              voiceState === "using_tool" ||
-              voiceState === "reading_files" ||
-              voiceState === "writing_files" ||
-              voiceState === "running_command" ||
-              voiceState === "testing" ||
-              voiceState === "generating_response"
+              voiceState === "transcribing" || voiceState === "thinking"
                 ? "animate-spin"
                 : ""
             }

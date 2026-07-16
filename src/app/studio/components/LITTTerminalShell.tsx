@@ -86,9 +86,6 @@ import {
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
-const BuilderTool = dynamic(() => import("../tools/BuilderTool"), {
-  ssr: false,
-});
 const PipelineTool = dynamic(() => import("../tools/PipelineTool"), {
   ssr: false,
 });
@@ -191,13 +188,12 @@ const AGENT_QUICK: Record<string, string[]> = {
 };
 
 const TOOL_COMPONENTS: Record<
-  Exclude<StudioTool, "chat" | "agents">,
+  Exclude<StudioTool, "chat" | "agents" | "builder">,
   ComponentType
 > = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
-  builder: BuilderTool,
   terminal: TerminalTool,
   pipeline: PipelineTool,
   gallery: GalleryTool,
@@ -464,6 +460,7 @@ function LITTTerminalShellInner({
   const {
     voiceState,
     errorMessage,
+    cooldownRemaining,
     speakText,
     startVoice,
     stopVoice,
@@ -530,24 +527,12 @@ function LITTTerminalShellInner({
     [messages],
   );
   const isAgentEmpty = agentMessages.length === 0;
-  const micActive =
-    voiceState === "requesting_permission" ||
-    voiceState === "connecting" ||
-    voiceState === "listening" ||
-    voiceState === "speech_detected" ||
+  const micActive = voiceState !== "idle";
+  const micDisabled =
     voiceState === "transcribing" ||
-    voiceState === "sending" ||
     voiceState === "thinking" ||
-    voiceState === "using_tool" ||
-    voiceState === "reading_files" ||
-    voiceState === "writing_files" ||
-    voiceState === "running_command" ||
-    voiceState === "testing" ||
-    voiceState === "generating_response" ||
     voiceState === "speaking" ||
-    voiceState === "muted" ||
-    voiceState === "paused" ||
-    voiceState === "error";
+    voiceState === "cooldown";
 
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
@@ -1398,10 +1383,11 @@ function LITTTerminalShellInner({
   };
 
   const toggleMic = () => {
+    if (micDisabled) return;
     if (micActive) {
       stopVoice();
     } else {
-      startVoice();
+      void startVoice();
     }
   };
 
@@ -1836,12 +1822,11 @@ function LITTTerminalShellInner({
             ref={transcriptRef}
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
-            {activeTool === "chat" ||
-            (activeTool === "builder" && messages.length > 0) ? (
+            {activeTool === "chat" || activeTool === "builder" ? (
               <ChatShell
                 embedded
-                hideDock={activeTool !== "builder"}
-                builderMode
+                hideDock={false}
+                builderMode={activeTool === "builder"}
                 messages={chatMessages}
                 sending={busy}
                 systemLines={[]}
@@ -2026,8 +2011,6 @@ function LITTTerminalShellInner({
                   )}
                 </div>
               )
-            ) : activeTool === "builder" && messages.length === 0 ? (
-              <BuilderTool onToolSelectAction={onToolChangeAction} />
             ) : ActiveTool ? (
               <ActiveTool />
             ) : (
@@ -2039,17 +2022,34 @@ function LITTTerminalShellInner({
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
-          {/* COMMAND BAR — single persistent bottom composer */}
-          <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-md sm:px-6 sm:py-3">
+          {activeTool !== "builder" && (
+            <>
+              {/* COMMAND BAR — single persistent bottom composer */}
+              <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-md sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-1.5">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
                 <div className="flex items-center gap-2 px-1 text-[11px]">
                   {(() => {
+                    if (voiceState === "cooldown") {
+                      return (
+                        <>
+                          <span className="text-amber-400 font-bold">Voice limit reached</span>
+                          <span className="text-amber-400">· Retry available in {cooldownRemaining}s</span>
+                        </>
+                      );
+                    }
+                    if (voiceState === "error") {
+                      return (
+                        <span className="text-rose-400 truncate">
+                          {errorMessage || "Voice session error"}
+                        </span>
+                      );
+                    }
                     const steps = [
-                      { label: "Listening", active: voiceState === "listening" || voiceState === "speech_detected" || voiceState === "connecting" },
-                      { label: "Transcribing", active: voiceState === "transcribing" || voiceState === "sending" },
-                      { label: "Thinking", active: ["thinking", "using_tool", "reading_files", "writing_files", "running_command", "testing", "generating_response"].includes(voiceState) },
+                      { label: "Listening", active: voiceState === "listening" },
+                      { label: "Transcribing", active: voiceState === "transcribing" },
+                      { label: "Thinking", active: voiceState === "thinking" },
                       { label: "Speaking", active: voiceState === "speaking" },
                     ];
                     const activeIdx = steps.findIndex((s) => s.active);
@@ -2063,9 +2063,6 @@ function LITTTerminalShellInner({
                       </span>
                     ));
                   })()}
-                  {errorMessage && (
-                    <span className="ml-auto shrink-0 text-rose-400 truncate">{errorMessage}</span>
-                  )}
                 </div>
               )}
 
@@ -2150,9 +2147,13 @@ function LITTTerminalShellInner({
                           ? "LiTT is speaking..."
                           : voiceState === "transcribing"
                             ? "Transcribing..."
-                            : voiceState === "listening" || voiceState === "speech_detected"
-                              ? "Listening..."
-                              : "Voice active..."
+                            : voiceState === "thinking"
+                              ? "LiTT is thinking..."
+                              : voiceState === "listening"
+                                ? "Listening..."
+                                : voiceState === "cooldown"
+                                  ? "Voice temporarily unavailable"
+                                  : "Voice active..."
                         : "Ask LiTT anything..."
                     }
                     rows={1}
@@ -2181,22 +2182,23 @@ function LITTTerminalShellInner({
 
                 {/* Mic button — tap to start, tap again to cancel */}
                 <button
-                  aria-label={micActive ? "Cancel voice" : "Start voice"}
+                  aria-label={
+                    micDisabled ? "Voice busy" : micActive ? "Cancel voice" : "Start voice"
+                  }
                   onClick={toggleMic}
+                  disabled={micDisabled}
                   className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
-                    micActive
-                      ? voiceState === "speaking"
-                        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
-                        : "border-rose-500/40 bg-rose-500/10 text-rose-300"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                    micDisabled
+                      ? "border-white/5 bg-white/5 text-neutral-500 cursor-not-allowed"
+                      : micActive
+                        ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                        : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  {micActive ? (
-                    voiceState === "speaking" ? (
-                      <Loader2 size={15} className="animate-spin" aria-hidden="true" />
-                    ) : (
-                      <MicOff size={15} aria-hidden="true" />
-                    )
+                  {micDisabled ? (
+                    <Loader2 size={15} aria-hidden="true" />
+                  ) : micActive ? (
+                    <MicOff size={15} aria-hidden="true" />
                   ) : (
                     <Mic size={15} aria-hidden="true" />
                   )}
@@ -2265,6 +2267,8 @@ function LITTTerminalShellInner({
               onActivate={activateCommand}
             />
           </div>
+            </>
+          )}
 
           {/* FOOTER TELEMETRY */}
           <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">

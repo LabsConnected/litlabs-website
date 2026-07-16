@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { cleanTextForSpeech } from "@/lib/tts-clean";
+import { sanitizeProviderError } from "@/lib/provider-error";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -17,23 +18,11 @@ import { cleanTextForSpeech } from "@/lib/tts-clean";
 
 export type VoiceState =
   | "idle"
-  | "requesting_permission"
-  | "connecting"
   | "listening"
-  | "speech_detected"
   | "transcribing"
-  | "sending"
   | "thinking"
-  | "using_tool"
-  | "reading_files"
-  | "writing_files"
-  | "running_command"
-  | "testing"
-  | "generating_response"
   | "speaking"
-  | "muted"
-  | "paused"
-  | "complete"
+  | "cooldown"
   | "error";
 
 export type VoiceActivity =
@@ -54,7 +43,33 @@ export type VoiceActivity =
   | { type: "speaking" }
   | { type: "paused" }
   | { type: "complete" }
+  | { type: "cooldown"; retryAfter?: number }
   | { type: "error"; message: string };
+
+const ACTIVITY_TO_VOICE_STATE: Record<
+  VoiceActivity["type"],
+  VoiceState | undefined
+> = {
+  idle: "idle",
+  requesting_permission: "listening",
+  connecting: "listening",
+  listening: "listening",
+  speech_detected: "listening",
+  transcribing: "transcribing",
+  sending: "thinking",
+  thinking: "thinking",
+  using_tool: "thinking",
+  reading_files: "thinking",
+  writing_files: "thinking",
+  running_command: "thinking",
+  testing: "thinking",
+  generating_response: "thinking",
+  speaking: "speaking",
+  paused: "idle",
+  complete: "idle",
+  cooldown: "cooldown",
+  error: "error",
+};
 
 export interface VoiceSessionCtx {
   voiceState: VoiceState;
@@ -63,6 +78,7 @@ export interface VoiceSessionCtx {
   interimTranscript: string;
   micLevel: number;
   errorMessage: string | null;
+  cooldownRemaining: number;
   isMuted: boolean;
   selectedDeviceId: string | null;
   availableDevices: MediaDeviceInfo[];
@@ -93,6 +109,7 @@ const defaultCtx: VoiceSessionCtx = {
   interimTranscript: "",
   micLevel: 0,
   errorMessage: null,
+  cooldownRemaining: 0,
   isMuted: false,
   selectedDeviceId: null,
   availableDevices: [],
@@ -121,9 +138,9 @@ const SPEECH_START_THRESHOLD = 0.035;
 const SILENCE_TIMEOUT_MS = 1200;
 const MAX_RECORDING_MS = 30_000;
 const CHUNK_INTERVAL_MS = 250;
-const MIN_RECORDING_MS = 500; // don't transcribe clips shorter than this
-const MIN_BLOB_SIZE = 8000; // don't transcribe blobs smaller than this
-const MIN_TRANSCRIBE_INTERVAL_MS = 2000; // min gap between transcribe API calls to avoid 429s
+const MIN_RECORDING_MS = 500;
+const MIN_BLOB_SIZE = 8000;
+const MIN_TRANSCRIBE_INTERVAL_MS = 2000;
 
 function isMobileDevice(): boolean {
   if (typeof window === "undefined") return false;
@@ -134,8 +151,6 @@ function isMobileDevice(): boolean {
 }
 
 function getSupportedMimeType(): string | undefined {
-  // Order matters: prefer high-quality opus codecs, but include mobile-
-  // friendly formats. iOS Safari supports audio/mp4 (AAC) but NOT webm.
   const types = [
     "audio/webm;codecs=opus",
     "audio/webm",
@@ -174,11 +189,12 @@ export function VoiceSessionProvider({
   children: React.ReactNode;
 }) {
   // --- State ---
-  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceState, setVoiceStateRaw] = useState<VoiceState>("idle");
   const [transcript, setTranscript] = useState("");
   const [interimTranscript, setInterimTranscript] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
     () => {
@@ -196,14 +212,8 @@ export function VoiceSessionProvider({
 
   const state: "idle" | "loading" | "speaking" | "error" = useMemo(() => {
     if (voiceState === "speaking") return "speaking";
-    if (voiceState === "error") return "error";
-    if (
-      voiceState === "idle" ||
-      voiceState === "complete" ||
-      voiceState === "paused" ||
-      voiceState === "muted"
-    )
-      return "idle";
+    if (voiceState === "error" || voiceState === "cooldown") return "error";
+    if (voiceState === "idle") return "idle";
     return "loading";
   }, [voiceState]);
 
@@ -228,13 +238,11 @@ export function VoiceSessionProvider({
   const speechDetectedRef = useRef(false);
   const activityRef = useRef<VoiceActivity>({ type: "idle" });
   const recorderMimeTypeRef = useRef<string>("audio/webm");
-  // Throttle: minimum gap between transcribe API calls to avoid Gemini 429s.
   const lastTranscribeMsRef = useRef<number>(0);
-  // Timer that restarts listening after a turn if no TTS is triggered.
-  // Cancelled by speakText so the recorder only resumes AFTER TTS ends.
   const pendingListenRestartRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
+  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Keep mirrors in sync
   useEffect(() => {
@@ -244,10 +252,23 @@ export function VoiceSessionProvider({
     activityRef.current = activity;
   }, [activity]);
 
-  const setActivity = useCallback((next: VoiceActivity) => {
-    activityRef.current = next;
-    setActivityState(next);
-  }, []);
+  const setVoiceState = useCallback(
+    (next: VoiceState) => {
+      voiceStateRef.current = next;
+      setVoiceStateRaw(next);
+    },
+    [setVoiceStateRaw],
+  );
+
+  const setActivity = useCallback(
+    (next: VoiceActivity) => {
+      activityRef.current = next;
+      setActivityState(next);
+      const mapped = ACTIVITY_TO_VOICE_STATE[next.type];
+      if (mapped) setVoiceState(mapped);
+    },
+    [setActivityState, setVoiceState],
+  );
 
   // ---------------------------------------------------------------------------
   // cleanup
@@ -256,26 +277,22 @@ export function VoiceSessionProvider({
   const cleanup = useCallback(() => {
     console.debug("[LiTT Voice] cleanup");
 
-    // Cancel any pending listen restart
     if (pendingListenRestartRef.current) {
       clearTimeout(pendingListenRestartRef.current);
       pendingListenRestartRef.current = null;
     }
 
-    // Stop mic tracks
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
 
-    // Close AudioContext
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
 
-    // Stop MediaRecorder
     if (mediaRecorderRef.current) {
       try {
         if (mediaRecorderRef.current.state !== "inactive") {
@@ -288,7 +305,6 @@ export function VoiceSessionProvider({
     }
     recordedChunksRef.current = [];
 
-    // Stop TTS
     ttsCancelledRef.current = true;
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
@@ -301,13 +317,11 @@ export function VoiceSessionProvider({
       currentAudioRef.current = null;
     }
 
-    // Cancel RAF
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
 
-    // Clear timers
     if (silenceTimerRef.current !== null) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
@@ -323,6 +337,34 @@ export function VoiceSessionProvider({
     setMicLevel(0);
     prevMicLevelRef.current = 0;
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Cooldown
+  // ---------------------------------------------------------------------------
+
+  const enterCooldown = useCallback(
+    (seconds: number) => {
+      console.debug("[LiTT Voice] cooldown entered:", seconds);
+      cleanup();
+      setTranscript("");
+      setInterimTranscript("");
+      setErrorMessage("Voice limit reached");
+      setCooldownRemaining(seconds);
+      setActivity({ type: "cooldown", retryAfter: seconds });
+      activeRef.current = false;
+    },
+    [cleanup, setActivity],
+  );
+
+  const finishCooldown = useCallback(() => {
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
+    }
+    setActivity({ type: "idle" });
+    setCooldownRemaining(0);
+    setErrorMessage(null);
+  }, [setActivity]);
 
   // ---------------------------------------------------------------------------
   // Device enumeration
@@ -362,22 +404,14 @@ export function VoiceSessionProvider({
 
   const sendForTranscription = useCallback(
     async (chunks: Blob[]) => {
-      // Use the actual mimeType the MediaRecorder used, NOT a fresh
-      // getSupportedMimeType() call — on mobile the result can differ and
-      // produce a mismatch that corrupts the audio sent to Gemini.
       const mimeType = recorderMimeTypeRef.current || "audio/webm";
       const blob = new Blob(chunks, { type: mimeType });
 
-      // Check recording duration — don't transcribe clips shorter than
-      // MIN_RECORDING_MS (likely just noise or a button mis-tap)
       const recordingDuration = listeningStartMsRef.current
         ? Date.now() - listeningStartMsRef.current
         : 0;
 
       if (blob.size < MIN_BLOB_SIZE || recordingDuration < MIN_RECORDING_MS) {
-        // Too short — likely no speech, go back to listening
-        setVoiceState("listening");
-        voiceStateRef.current = "listening";
         setActivity({ type: "listening" });
         setInterimTranscript("");
         speechDetectedRef.current = false;
@@ -390,17 +424,13 @@ export function VoiceSessionProvider({
         return;
       }
 
-      setVoiceState("transcribing");
-      voiceStateRef.current = "transcribing";
       setActivity({ type: "transcribing" });
 
       try {
         const arrayBuffer = await blob.arrayBuffer();
-        // Efficient base64 encoding — chunked to avoid call-stack overflow
-        // on mobile devices with larger audio buffers
         const bytes = new Uint8Array(arrayBuffer);
         let base64 = "";
-        const chunkSize = 0x8000; // 32KB chunks
+        const chunkSize = 0x8000;
         for (let i = 0; i < bytes.length; i += chunkSize) {
           base64 += String.fromCharCode.apply(
             null,
@@ -409,8 +439,7 @@ export function VoiceSessionProvider({
         }
         base64 = btoa(base64);
 
-        // Throttle: enforce minimum gap between transcribe API calls to
-        // avoid hitting Gemini's per-minute rate limit (429).
+        // Throttle to avoid Gemini per-minute rate limits.
         const now = Date.now();
         const elapsed = now - lastTranscribeMsRef.current;
         if (elapsed < MIN_TRANSCRIBE_INTERVAL_MS) {
@@ -427,19 +456,29 @@ export function VoiceSessionProvider({
 
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
-          const clean =
+          const raw =
             typeof err.error === "string"
               ? err.error
               : `Transcription API error ${res.status}`;
-          throw new Error(clean);
+
+          if (
+            res.status === 429 ||
+            /rate limit|too many requests|429|resource_exhausted/i.test(raw)
+          ) {
+            const { retryAfter } = sanitizeProviderError(new Error(raw));
+            const seconds =
+              typeof err.retryAfter === "number" ? err.retryAfter : retryAfter || 60;
+            enterCooldown(seconds);
+            return;
+          }
+
+          throw new Error(raw);
         }
 
         const data = (await res.json()) as { text?: string };
         const text = data.text?.trim();
 
         if (!text) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
           setActivity({ type: "listening" });
           setInterimTranscript("");
           setErrorMessage(
@@ -449,20 +488,15 @@ export function VoiceSessionProvider({
           return;
         }
 
-        // Hallucination guard: if the transcript is suspiciously long
-        // relative to the recording duration, it's likely Gemini
-        // inventing text from noise. Normal speech is ~2.5 words/second.
-        // Allow generous margin but reject extreme cases.
+        // Hallucination guard
         const durationSec = recordingDuration / 1000;
         const wordCount = text.split(/\s+/).length;
-        const maxExpectedWords = Math.max(5, durationSec * 5); // 5 wps = very fast
+        const maxExpectedWords = Math.max(5, durationSec * 5);
         if (wordCount > maxExpectedWords) {
           console.warn(
             "[LiTT Voice] transcript length suspicious for duration — likely hallucination, discarding",
             { wordCount, durationSec, text: text.slice(0, 100) },
           );
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
           setActivity({ type: "listening" });
           setInterimTranscript("");
           speechDetectedRef.current = false;
@@ -477,34 +511,22 @@ export function VoiceSessionProvider({
 
         setTranscript(text);
         setInterimTranscript("");
-        setVoiceState("sending");
-        voiceStateRef.current = "sending";
         setActivity({ type: "sending" });
 
         // Hand off to chat
         onTurnRef.current(text);
 
-        // Don't immediately restart the recorder — the turn handler may
-        // call speakText() which needs the mic paused to avoid a TTS
-        // feedback loop (mic picks up speaker audio → transcribes TTS →
-        // re-sends the same text → infinite loop). Instead, wait 2s; if
-        // speakText is called within that window it cancels this timer
-        // and handles restarting the recorder after TTS finishes.
+        // If no TTS/speakText is triggered within 2s, restart listening.
         if (activeRef.current) {
           if (pendingListenRestartRef.current) {
             clearTimeout(pendingListenRestartRef.current);
           }
           pendingListenRestartRef.current = setTimeout(() => {
             pendingListenRestartRef.current = null;
-            // Only restart if we're still in "sending" state — if
-            // speakText was called, we'll be in "speaking" state and
-            // the recorder will be restarted by onSpeechEnd.
             if (
               activeRef.current &&
-              voiceStateRef.current === "sending"
+              voiceStateRef.current === "thinking"
             ) {
-              setVoiceState("listening");
-              voiceStateRef.current = "listening";
               setActivity({ type: "listening" });
               speechDetectedRef.current = false;
               recordedChunksRef.current = [];
@@ -519,13 +541,11 @@ export function VoiceSessionProvider({
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Transcription failed";
         console.error("[LiTT Voice] transcription error:", msg);
-        setVoiceState("error");
-        voiceStateRef.current = "error";
         setActivity({ type: "error", message: msg });
         setErrorMessage(msg);
       }
     },
-    [setActivity],
+    [enterCooldown, setActivity],
   );
 
   // ---------------------------------------------------------------------------
@@ -537,21 +557,14 @@ export function VoiceSessionProvider({
     if (!analyser) return;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
-    // Mobile mics pick up more background noise — use higher thresholds
-    // to avoid false speech detection from ambient sound.
     const mobile = isMobileDevice();
     const speechStart = mobile ? SPEECH_START_THRESHOLD * 1.8 : SPEECH_START_THRESHOLD;
     const silence = mobile ? SILENCE_THRESHOLD * 2.5 : SILENCE_THRESHOLD;
-    // Require sustained speech (not a brief noise spike) before triggering
     let speechHitCount = 0;
     const SPEECH_HITS_REQUIRED = mobile ? 4 : 2;
 
     const tick = () => {
-      const state = voiceStateRef.current;
-      if (
-        !activeRef.current ||
-        (state !== "listening" && state !== "speech_detected")
-      ) {
+      if (!activeRef.current || voiceStateRef.current !== "listening") {
         rafRef.current = null;
         return;
       }
@@ -570,19 +583,15 @@ export function VoiceSessionProvider({
         setMicLevel(level);
       }
 
-      // Update listening duration
       if (listeningStartMsRef.current) {
         setListeningDurationMs(Date.now() - listeningStartMsRef.current);
       }
 
-      // Speech detection state machine — require sustained signal to
-      // avoid triggering on transient noise (especially on mobile)
+      // Speech detection — require sustained signal to avoid false triggers
       if (!speechDetectedRef.current && level > speechStart) {
         speechHitCount++;
         if (speechHitCount >= SPEECH_HITS_REQUIRED) {
           speechDetectedRef.current = true;
-          setVoiceState("speech_detected");
-          voiceStateRef.current = "speech_detected";
           setActivity({ type: "speech_detected", durationMs: 0 });
         }
       } else if (!speechDetectedRef.current) {
@@ -591,13 +600,11 @@ export function VoiceSessionProvider({
 
       if (speechDetectedRef.current) {
         if (level > silence) {
-          // Voice still present — reset silence timer
           if (silenceTimerRef.current !== null) {
             clearTimeout(silenceTimerRef.current);
             silenceTimerRef.current = null;
           }
         } else if (silenceTimerRef.current === null) {
-          // Start silence timer
           silenceTimerRef.current = setTimeout(() => {
             silenceTimerRef.current = null;
             finalizeRecording();
@@ -618,25 +625,20 @@ export function VoiceSessionProvider({
 
   const startVoice = useCallback(async () => {
     const current = voiceStateRef.current;
-    if (current !== "idle" && current !== "error" && current !== "complete") {
+    if (current !== "idle" && current !== "error") {
       console.debug("[LiTT Voice] startVoice ignored — state:", current);
       return;
     }
 
     console.debug("[LiTT Voice] session start");
-    setVoiceState("requesting_permission");
-    voiceStateRef.current = "requesting_permission";
+    setActivity({ type: "requesting_permission" });
     setErrorMessage(null);
     setTranscript("");
     setInterimTranscript("");
-    setActivity({ type: "requesting_permission" });
 
     cleanup();
 
-    // Check MediaRecorder support
     if (typeof window === "undefined" || !window.MediaRecorder) {
-      setVoiceState("error");
-      voiceStateRef.current = "error";
       setActivity({ type: "error", message: "MediaRecorder not supported" });
       setErrorMessage("MediaRecorder not supported in this browser.");
       return;
@@ -644,14 +646,11 @@ export function VoiceSessionProvider({
 
     const mimeType = getSupportedMimeType();
     if (!mimeType) {
-      setVoiceState("error");
-      voiceStateRef.current = "error";
       setActivity({ type: "error", message: "No supported audio MIME type" });
       setErrorMessage("No supported audio format found in this browser.");
       return;
     }
 
-    // --- getUserMedia ---
     let stream: MediaStream;
     try {
       stream = await navigator.mediaDevices.getUserMedia({
@@ -667,8 +666,6 @@ export function VoiceSessionProvider({
       const e = err as DOMException;
       const msg = getUserMediaErrorMessage(e);
       console.error("[LiTT Voice] getUserMedia error:", e.name, msg);
-      setVoiceState("error");
-      voiceStateRef.current = "error";
       setActivity({ type: "error", message: msg });
       setErrorMessage(msg);
       return;
@@ -678,9 +675,6 @@ export function VoiceSessionProvider({
     streamRef.current = stream;
     activeRef.current = true;
 
-    // --- AudioContext + Analyser ---
-    setVoiceState("connecting");
-    voiceStateRef.current = "connecting";
     setActivity({ type: "connecting" });
 
     try {
@@ -696,16 +690,11 @@ export function VoiceSessionProvider({
       source.connect(analyser);
     } catch (err) {
       console.warn("[LiTT Voice] AudioContext setup failed:", err);
-      // non-fatal — mic level won't work but recording can continue
     }
 
-    // --- MediaRecorder ---
     try {
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
-      // Store the actual mimeType the recorder negotiated — may differ from
-      // what we requested on some mobile browsers. Used when building the
-      // blob for transcription to avoid MIME mismatches.
       recorderMimeTypeRef.current = recorder.mimeType || mimeType;
       recordedChunksRef.current = [];
 
@@ -725,8 +714,6 @@ export function VoiceSessionProvider({
 
       recorder.onerror = (ev) => {
         console.error("[LiTT Voice] MediaRecorder error:", ev);
-        setVoiceState("error");
-        voiceStateRef.current = "error";
         setActivity({ type: "error", message: "Recording error" });
         setErrorMessage("Recording error. Please try again.");
       };
@@ -734,24 +721,17 @@ export function VoiceSessionProvider({
       recorder.start(CHUNK_INTERVAL_MS);
       listeningStartMsRef.current = Date.now();
       setListeningDurationMs(0);
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
       setActivity({ type: "listening" });
       startMicLevelLoop();
 
       // Max recording safety net
       maxRecordingTimerRef.current = setTimeout(() => {
-        if (
-          voiceStateRef.current === "listening" ||
-          voiceStateRef.current === "speech_detected"
-        ) {
+        if (voiceStateRef.current === "listening") {
           finalizeRecording();
         }
       }, MAX_RECORDING_MS);
     } catch (err) {
       console.error("[LiTT Voice] MediaRecorder start failed:", err);
-      setVoiceState("error");
-      voiceStateRef.current = "error";
       setActivity({ type: "error", message: "Could not start recorder" });
       setErrorMessage("Could not start audio recorder.");
       cleanup();
@@ -772,8 +752,11 @@ export function VoiceSessionProvider({
   const stopVoice = useCallback(() => {
     console.debug("[LiTT Voice] stopVoice");
     activeRef.current = false;
-    setVoiceState("idle");
-    voiceStateRef.current = "idle";
+    if (cooldownTimerRef.current) {
+      clearInterval(cooldownTimerRef.current);
+      cooldownTimerRef.current = null;
+    }
+    setCooldownRemaining(0);
     setActivity({ type: "idle" });
     cleanup();
     setTranscript("");
@@ -792,20 +775,10 @@ export function VoiceSessionProvider({
       tracks.forEach((t) => {
         t.enabled = !next;
       });
-      if (next) {
-        setVoiceState("muted");
-        voiceStateRef.current = "muted";
-        setActivity({ type: "paused" });
-      } else {
-        setVoiceState("listening");
-        voiceStateRef.current = "listening";
-        setActivity({ type: "listening" });
-        startMicLevelLoop();
-      }
       console.debug("[LiTT Voice] mute toggled:", next);
       return next;
     });
-  }, [startMicLevelLoop, setActivity]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // stopSpeaking
@@ -837,14 +810,11 @@ export function VoiceSessionProvider({
       stopSpeaking();
       ttsCancelledRef.current = false;
 
-      // Cancel any pending listen restart — TTS is about to play, so we
-      // must NOT restart the mic until TTS finishes.
       if (pendingListenRestartRef.current) {
         clearTimeout(pendingListenRestartRef.current);
         pendingListenRestartRef.current = null;
       }
 
-      // Stop/pause recording while speaking to avoid TTS feedback loops
       if (mediaRecorderRef.current?.state === "recording") {
         try {
           mediaRecorderRef.current.pause();
@@ -853,15 +823,10 @@ export function VoiceSessionProvider({
         }
       }
 
-      setVoiceState("speaking");
-      voiceStateRef.current = "speaking";
       setActivity({ type: "speaking" });
 
       const onSpeechEnd = () => {
         if (ttsCancelledRef.current) return;
-        // Resume the recorder if it was paused, or start it fresh if it
-        // was stopped (e.g. sendForTranscription stopped it and we never
-        // restarted it because we cancelled the pending restart).
         const recorder = mediaRecorderRef.current;
         if (recorder?.state === "paused") {
           try {
@@ -870,7 +835,6 @@ export function VoiceSessionProvider({
             // ignore
           }
         } else if (recorder?.state === "inactive" && activeRef.current) {
-          // Recorder was stopped (not just paused) — start fresh
           recordedChunksRef.current = [];
           try {
             recorder.start(CHUNK_INTERVAL_MS);
@@ -879,14 +843,10 @@ export function VoiceSessionProvider({
           }
         }
         if (activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
           setActivity({ type: "listening" });
           speechDetectedRef.current = false;
           startMicLevelLoop();
         } else {
-          setVoiceState("idle");
-          voiceStateRef.current = "idle";
           setActivity({ type: "idle" });
         }
       };
@@ -897,10 +857,31 @@ export function VoiceSessionProvider({
         body: JSON.stringify({ text, voice: "aoede" }),
       })
         .then(async (res) => {
-          if (!res.ok) throw new Error(`TTS ${res.status}`);
+          if (!res.ok) {
+            const data = await res.json().catch(() => ({}));
+            const raw =
+              typeof data.error === "string"
+                ? data.error
+                : `TTS ${res.status}`;
+
+            if (
+              res.status === 429 ||
+              /rate limit|too many requests|429|resource_exhausted/i.test(raw)
+            ) {
+              const { retryAfter } = sanitizeProviderError(new Error(raw));
+              const seconds =
+                typeof data.retryAfter === "number"
+                  ? data.retryAfter
+                  : retryAfter || 60;
+              enterCooldown(seconds);
+              return;
+            }
+
+            throw new Error(raw);
+          }
+
           const blob = await res.blob();
           const src = URL.createObjectURL(blob);
-
           const audio = new Audio(src);
           currentAudioRef.current = audio;
 
@@ -943,10 +924,8 @@ export function VoiceSessionProvider({
           fallbackSynth(text, onSpeechEnd);
         });
     },
-    [stopSpeaking, startMicLevelLoop, setActivity],
+    [stopSpeaking, startMicLevelLoop, setActivity, enterCooldown],
   );
-
-  // ---------------------------------------------------------------------------
 
   // ---------------------------------------------------------------------------
   // interrupt
@@ -963,8 +942,6 @@ export function VoiceSessionProvider({
       }
     }
     if (activeRef.current) {
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
       setActivity({ type: "listening" });
       startMicLevelLoop();
     }
@@ -989,6 +966,41 @@ export function VoiceSessionProvider({
   const setOnTurn = useCallback((handler: (text: string) => void) => {
     onTurnRef.current = handler;
   }, []);
+
+  // ---------------------------------------------------------------------------
+  // Cooldown countdown
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (voiceState !== "cooldown" || cooldownRemaining <= 0) {
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+      return;
+    }
+
+    cooldownTimerRef.current = setInterval(() => {
+      setCooldownRemaining((prev) => {
+        if (prev <= 1) {
+          if (cooldownTimerRef.current) {
+            clearInterval(cooldownTimerRef.current);
+            cooldownTimerRef.current = null;
+          }
+          finishCooldown();
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+
+    return () => {
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
+    };
+  }, [voiceState, cooldownRemaining, finishCooldown]);
 
   // ---------------------------------------------------------------------------
   // Page lifecycle recovery
@@ -1019,6 +1031,10 @@ export function VoiceSessionProvider({
   useEffect(() => {
     return () => {
       activeRef.current = false;
+      if (cooldownTimerRef.current) {
+        clearInterval(cooldownTimerRef.current);
+        cooldownTimerRef.current = null;
+      }
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1036,6 +1052,7 @@ export function VoiceSessionProvider({
       interimTranscript,
       micLevel,
       errorMessage,
+      cooldownRemaining,
       isMuted,
       selectedDeviceId,
       availableDevices,
@@ -1058,6 +1075,7 @@ export function VoiceSessionProvider({
       interimTranscript,
       micLevel,
       errorMessage,
+      cooldownRemaining,
       isMuted,
       selectedDeviceId,
       availableDevices,

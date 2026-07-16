@@ -51,6 +51,7 @@ export function ChatShell({
   const {
     voiceState,
     state,
+    cooldownRemaining,
     startVoice,
     stopVoice,
     speakText,
@@ -60,23 +61,29 @@ export function ChatShell({
   const voiceLabel =
     voiceState === "speaking"
       ? "Speaking"
-      : voiceState === "listening" || voiceState === "speech_detected"
+      : voiceState === "listening"
         ? "Listening"
         : voiceState === "transcribing"
           ? "Transcribing"
-          : voiceState === "sending" || voiceState === "thinking"
+          : voiceState === "thinking"
             ? "Thinking"
-            : voiceState === "error"
-              ? "Voice error"
-              : "Voice ready";
+            : voiceState === "cooldown"
+              ? "Voice temporarily unavailable"
+              : voiceState === "error"
+                ? "Voice error"
+                : "Voice ready";
   const visibleMessages = useMemo(
     () => messages.filter((m) => m.role !== "system"),
     [messages],
   );
   const voiceActive =
-    voiceState !== "idle" &&
-    voiceState !== "error" &&
-    voiceState !== "complete";
+    voiceState !== "idle";
+
+  const micDisabled =
+    voiceState === "transcribing" ||
+    voiceState === "thinking" ||
+    voiceState === "speaking" ||
+    voiceState === "cooldown";
 
   useEffect(() => {
     setOnTurn(async (text) => {
@@ -253,7 +260,13 @@ export function ChatShell({
             ))}
           </div>
           <div className={styles.voiceStatus} role="status" aria-live="polite">
-            <i /> {voiceLabel} · clean speech
+            {voiceState === "cooldown" ? (
+              <span className="text-amber-400">Retry available in {cooldownRemaining}s</span>
+            ) : (
+              <>
+                <i /> {voiceLabel} · clean speech
+              </>
+            )}
           </div>
           <form className={styles.composer} onSubmit={submit}>
             <button type="button" aria-label="Attach file" title="Attach file">
@@ -274,11 +287,23 @@ export function ChatShell({
             <button
               type="button"
               className={styles.mic}
+              disabled={micDisabled}
               aria-label={
-                voiceActive ? "Stop voice input" : "Start voice input"
+                micDisabled
+                  ? "Voice busy"
+                  : voiceActive
+                    ? "Stop voice input"
+                    : "Start voice input"
               }
-              title={voiceActive ? "Stop voice" : "Voice input"}
-              onClick={voiceActive ? stopVoice : startVoice}
+              title={micDisabled ? "Voice busy" : voiceActive ? "Stop voice" : "Voice input"}
+              onClick={() => {
+                if (micDisabled) return;
+                if (voiceActive) {
+                  stopVoice();
+                } else {
+                  void startVoice();
+                }
+              }}
             >
               🎙
             </button>
