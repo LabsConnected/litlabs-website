@@ -19,7 +19,14 @@
     "src/app/api/media/video-status/route.ts": { "maxDuration": 30 },
     "src/app/api/media/video-download/route.ts": { "maxDuration": 60 },
     "src/app/api/music/generate/route.ts": { "maxDuration": 60 },
-    "src/app/api/flow/route.ts": { "maxDuration": 60 },
-    "src/app/api/studio/video/route.ts": { "maxDuration": 120 }
+    "src/app/api/studio/video/route.ts": { "maxDuration": 120 },
+    "src/app/api/agents/run/route.ts": { "maxDuration": 60 },
+    "src/app/api/orchestrate/route.ts": { "maxDuration": 60 },
+    "src/app/api/ai/chat/route.ts": { "maxDuration": 60 },
+    "src/app/api/ai-chat/route.ts": { "maxDuration": 60 },
+    "src/app/api/chat/unified/route.ts": { "maxDuration": 60 },
+    "src/app/api/gemini/chat/route.ts": { "maxDuration": 60 },
+    "src/app/api/tts/route.ts": { "maxDuration": 60 },
+    "src/app/api/bridge/cli/route.ts": { "maxDuration": 60 }
   }
 }
