@@ -80,29 +80,9 @@ export function newProject(name = "Untitled Project", files?: StudioFile[]): Stu
 }
 
 /**
- * Optional remote sync. The codebase defensively no-ops Supabase when env keys
- * are missing, so this is safe to call always; it just won't persist remotely
- * until NEXT_PUBLIC_SUPABASE_URL + anon key are configured.
+ * NOTE: Remote sync via /api/studio/projects has been replaced by the
+ * GitHub-backed studio_projects table. The old push/pull functions are
+ * removed because the API now uses a different schema (uuid id, GitHub
+ * fields, scan_summary). CodeTool uses local-first storage only.
+ * GitHub-backed projects are managed via ProjectDrawer + /api/studio/projects.
  */
-export async function pushProjectRemote(userId: string, project: StudioProject): Promise<void> {
-  try {
-    await fetch("/api/studio/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ userId, project }),
-    });
-  } catch {
-    // non-fatal — local-first
-  }
-}
-
-export async function pullProjectsRemote(userId: string): Promise<StudioProject[]> {
-  try {
-    const res = await fetch(`/api/studio/projects?userId=${encodeURIComponent(userId)}`);
-    if (!res.ok) return [];
-    const data = await res.json();
-    return Array.isArray(data.projects) ? (data.projects as StudioProject[]) : [];
-  } catch {
-    return [];
-  }
-}

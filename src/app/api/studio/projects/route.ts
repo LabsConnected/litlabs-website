@@ -1,92 +1,158 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getSupabaseAdmin } from "@/lib/supabase";
-import type { StudioProject } from "@/lib/studio-projects";
+import { supabaseAdmin } from "@/lib/supabase";
 
-export async function GET(_req: NextRequest) {
-  void _req;
+/**
+ * GET /api/studio/projects
+ * List all GitHub-backed studio projects for the authenticated user.
+ */
+export async function GET() {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const sb = supabaseAdmin;
+  if (!sb) return NextResponse.json({ projects: [] });
+
   try {
-    const { userId } = await auth();
-    if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
-
-    const supabase = getSupabaseAdmin();
-    if (!supabase) return NextResponse.json({ projects: [], synced: false });
-
-    const { data, error } = await supabase
+    const { data, error } = await sb
       .from("studio_projects")
-      .select("id, name, files, active_file, created_at, updated_at")
-      .eq("clerk_id", userId)
+      .select("*")
+      .eq("user_id", userId)
       .order("updated_at", { ascending: false });
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
-    const projects: StudioProject[] = (data ?? []).map((r) => ({
-      id: r.id,
-      name: r.name,
-      files: r.files ?? [],
-      activeFile: r.active_file ?? "",
-      createdAt: new Date(r.created_at).getTime(),
-      updatedAt: new Date(r.updated_at).getTime(),
-    }));
-
-    return NextResponse.json({ projects, synced: true });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "failed" }, { status: 500 });
+    return NextResponse.json({ projects: data ?? [] });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to load projects";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 
-export async function POST(req: NextRequest) {
-  try {
-    const { userId } = await auth();
-    if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+/**
+ * POST /api/studio/projects
+ * Create a new studio project. Can be GitHub-backed or empty.
+ *
+ * Body for GitHub import:
+ *   { github_installation_id, repository_id, owner, repository, full_name, default_branch, branch }
+ *
+ * Body for empty project:
+ *   { name, slug }
+ */
+export async function POST(request: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
-    const body = await req.json();
-    const project: StudioProject = body.project;
-    if (!project?.id || !project?.name) {
-      return NextResponse.json({ error: "invalid project" }, { status: 400 });
+  const sb = supabaseAdmin;
+  if (!sb) return NextResponse.json({ error: "Database not configured" }, { status: 503 });
+
+  try {
+    const body = await request.json();
+
+    // GitHub-backed project
+    if (body.github_installation_id && body.repository_id) {
+      const {
+        github_installation_id,
+        repository_id,
+        owner,
+        repository,
+        full_name,
+        default_branch = "main",
+        branch,
+      } = body;
+
+      if (!owner || !repository) {
+        return NextResponse.json({ error: "Missing owner or repository" }, { status: 400 });
+      }
+
+      // Verify the user owns this installation
+      const { data: inst, error: instError } = await sb
+        .from("github_installations")
+        .select("installation_id")
+        .eq("user_id", userId)
+        .eq("installation_id", github_installation_id)
+        .single();
+      if (instError || !inst) {
+        return NextResponse.json({ error: "Installation not found" }, { status: 404 });
+      }
+
+      const slug = repository.toLowerCase().replace(/[^a-z0-9-]/g, "-");
+
+      const { data, error } = await sb
+        .from("studio_projects")
+        .upsert(
+          {
+            user_id: userId,
+            name: repository,
+            slug,
+            github_installation_id,
+            github_repository_id: repository_id,
+            github_owner: owner,
+            github_repo: repository,
+            github_full_name: full_name || `${owner}/${repository}`,
+            github_default_branch: default_branch,
+            github_branch: branch || default_branch,
+            scan_status: "pending",
+          },
+          { onConflict: "user_id,github_repository_id" },
+        )
+        .select()
+        .single();
+
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ project: data });
     }
 
-    const supabase = getSupabaseAdmin();
-    if (!supabase) return NextResponse.json({ synced: false, reason: "supabase-not-configured" });
+    // Empty project
+    if (body.name && body.slug) {
+      const { data, error } = await sb
+        .from("studio_projects")
+        .insert({
+          user_id: userId,
+          name: body.name,
+          slug: body.slug,
+          scan_status: "pending",
+        })
+        .select()
+        .single();
 
-    const upsert = {
-      id: project.id,
-      clerk_id: userId,
-      name: project.name,
-      files: project.files,
-      active_file: project.activeFile,
-      updated_at: new Date(project.updatedAt).toISOString(),
-    };
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+      return NextResponse.json({ project: data });
+    }
 
-    const { error } = await supabase.from("studio_projects").upsert(upsert, { onConflict: "id" });
-    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-
-    return NextResponse.json({ synced: true });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "failed" }, { status: 500 });
+    return NextResponse.json({ error: "Missing required fields" }, { status: 400 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to create project";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
 
-export async function DELETE(req: NextRequest) {
+/**
+ * DELETE /api/studio/projects
+ * Delete a project by id.
+ * Body: { id }
+ */
+export async function DELETE(request: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+
+  const sb = supabaseAdmin;
+  if (!sb) return NextResponse.json({ deleted: false });
+
   try {
-    const { userId } = await auth();
-    if (!userId) return NextResponse.json({ error: "unauthorized" }, { status: 401 });
+    const { id } = await request.json();
+    if (!id) return NextResponse.json({ error: "Missing id" }, { status: 400 });
 
-    const { id } = await req.json();
-    if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
-
-    const supabase = getSupabaseAdmin();
-    if (!supabase) return NextResponse.json({ deleted: false });
-
-    const { error } = await supabase
+    const { error } = await sb
       .from("studio_projects")
       .delete()
       .eq("id", id)
-      .eq("clerk_id", userId);
+      .eq("user_id", userId);
 
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
     return NextResponse.json({ deleted: true });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "failed" }, { status: 500 });
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : "Failed to delete project";
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }
