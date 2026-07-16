@@ -22,7 +22,6 @@ const VALID_TOOLS: StudioTool[] = [
   "gallery",
   "canvas",
   "clibridge",
-  "color",
   "space",
 ];
 

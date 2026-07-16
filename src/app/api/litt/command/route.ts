@@ -24,7 +24,10 @@ function checkCommand(root: string, action: CheckAction) {
     ],
   } satisfies Record<CheckAction, string[]>;
   const [script, ...args] = scripts[action];
-  return { file: process.execPath, args: [path.join(root, script), ...args] };
+  return {
+    file: process.execPath,
+    args: [path.join(/*turbopackIgnore: true*/ root, script), ...args],
+  };
 }
 
 export async function POST(req: NextRequest) {

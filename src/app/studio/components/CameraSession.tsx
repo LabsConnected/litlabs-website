@@ -11,12 +11,14 @@ interface CameraSessionProps {
   onSnapshot?: (dataUrl: string) => void;
   onClose?: () => void;
   modelName?: string;
+  compact?: boolean;
 }
 
 export default function CameraSession({
   onSnapshot,
   onClose,
   modelName = "Gemini 2.5 Flash Vision",
+  compact = false,
 }: CameraSessionProps) {
   const { resolvedColors: T } = useTheme();
   const { lastError, requestVideo, resetPermission } = useMediaPermissions();
@@ -24,6 +26,7 @@ export default function CameraSession({
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+  const mountedRef = useRef(false);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -61,10 +64,18 @@ export default function CameraSession({
   }, [facingMode, startCamera, stopStream]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       stopStream();
     };
   }, [stopStream]);
+
+  useEffect(() => {
+    if (compact && mountedRef.current) {
+      void startCamera();
+    }
+  }, [compact, startCamera]);
 
   const capture = useCallback(() => {
     const video = videoRef.current;
@@ -85,6 +96,79 @@ export default function CameraSession({
     setState("idle");
     onClose?.();
   }, [onClose, resetPermission, stopStream]);
+
+  if (compact) {
+    return (
+      <div className="relative overflow-hidden rounded-xl border border-cyan-400/30 bg-black/80 shadow-lg">
+        <div className="absolute inset-x-0 top-0 z-10 flex items-center justify-between bg-linear-to-b from-black/80 to-transparent px-2 py-1.5">
+          <div className="flex items-center gap-1.5">
+            <span className="flex h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
+            <span
+              className="text-[9px] font-black uppercase tracking-wider"
+              style={{ color: T.textColor }}
+            >
+              LIVE
+            </span>
+          </div>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => void flipCamera()}
+              className="rounded p-1 text-neutral-400 hover:bg-white/10 hover:text-white"
+              title="Flip camera"
+              aria-label="Flip camera"
+            >
+              <RefreshCw size={12} />
+            </button>
+            <button
+              onClick={close}
+              className="rounded p-1 text-neutral-400 hover:bg-white/10 hover:text-white"
+              title="Stop camera"
+              aria-label="Stop camera"
+            >
+              <X size={12} />
+            </button>
+          </div>
+        </div>
+
+        {state === "error" ? (
+          <div className="flex aspect-video flex-col items-center justify-center gap-2 p-3 text-center">
+            <X size={16} style={{ color: T.warning }} />
+            <p className="text-[9px]" style={{ color: T.warning }}>
+              {lastError?.message || "Camera unavailable"}
+            </p>
+          </div>
+        ) : state === "requesting" ? (
+          <div className="flex aspect-video items-center justify-center gap-2">
+            <Aperture size={16} className="animate-spin" style={{ color: T.accentColor }} />
+            <span className="text-[9px]" style={{ color: T.accentColor }}>
+              Starting camera…
+            </span>
+          </div>
+        ) : (
+          <video
+            ref={videoRef}
+            autoPlay
+            playsInline
+            muted
+            className="aspect-video w-full object-cover"
+          />
+        )}
+
+        <div className="flex items-center justify-between border-t border-white/10 bg-[#0a0f1c] px-2 py-1.5">
+          <button
+            onClick={capture}
+            disabled={state !== "active"}
+            className="flex items-center gap-1 rounded-full bg-cyan-500 px-2 py-1 text-[9px] font-black text-black hover:bg-cyan-400 disabled:opacity-50"
+          >
+            <Zap size={10} /> Snapshot
+          </button>
+          <span className="text-[8px]" style={{ color: T.textMuted }}>
+            {facingMode === "user" ? "Front" : "Rear"} camera
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   if (state === "idle") {
     return (

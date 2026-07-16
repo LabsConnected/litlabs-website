@@ -20,7 +20,7 @@ import {
 } from "lucide-react";
 import type { UserProfile } from "@/context/ProfileContext";
 
-const ModelPicker = dynamic(() => import("@/components/ModelPicker"), {
+const ModelPicker = dynamic(() => import("./ModelPicker"), {
   ssr: false,
 });
 

@@ -47,7 +47,6 @@ import {
   Image as ImageIcon,
   Film,
   Music,
-  Palette,
   Hammer,
   Code,
   Shell,
@@ -87,9 +86,6 @@ const GalleryTool = dynamic(() => import("../tools/GalleryTool"), {
 });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
-  ssr: false,
-});
-const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), {
   ssr: false,
 });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
@@ -134,7 +130,6 @@ const TOOL_RAIL: ToolRailItem[] = [
   { id: "builder", label: "Build", icon: Hammer, tool: "builder" },
   { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
-  { id: "color", label: "Color", icon: Palette, tool: "color" },
   { id: "clibridge", label: "CLI", icon: Shell, tool: "clibridge" },
   { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/docs" },
   { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
@@ -187,7 +182,6 @@ const TOOL_COMPONENTS: Record<
   gallery: GalleryTool,
   canvas: CanvasTool,
   clibridge: CLIBridgeTool,
-  color: ColorByNumberTool,
   space: SpaceTool,
 };
 
@@ -1861,25 +1855,6 @@ function LITTTerminalShellInner({
           {/* COMMAND BAR */}
           <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-2">
-              {cameraOpen && (
-                <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-                  <CameraSession
-                    onSnapshot={(url) => {
-                      if (activeTool !== "chat") {
-                        onToolChangeAction?.("chat");
-                      }
-                      void send("Describe what you see.", [url]).then(
-                        (reply) => {
-                          if (reply) speakText(reply);
-                        },
-                      );
-                      setCameraOpen(false);
-                    }}
-                    onClose={() => setCameraOpen(false)}
-                    modelName={persona.name}
-                  />
-                </div>
-              )}
               {micActive && (
                 <div className="mb-1 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3">
                   <div className="flex items-center justify-between gap-3">
@@ -2319,6 +2294,27 @@ function LITTTerminalShellInner({
                   </span>
                 </div>
               </div>
+
+              {cameraOpen && (
+                <div className="border-b border-white/5 px-4 py-3">
+                  <CameraSession
+                    compact
+                    onSnapshot={(url) => {
+                      if (activeTool !== "chat") {
+                        onToolChangeAction?.("chat");
+                      }
+                      void send("Describe what you see.", [url]).then(
+                        (reply) => {
+                          if (reply) speakText(reply);
+                        },
+                      );
+                      setCameraOpen(false);
+                    }}
+                    onClose={() => setCameraOpen(false)}
+                    modelName={persona.name}
+                  />
+                </div>
+              )}
 
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
                 <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">

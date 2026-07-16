@@ -6,7 +6,6 @@ import {
   Image,
   Film,
   Music,
-  Palette,
   Bot,
   Rocket,
   ChevronLeft,
@@ -33,7 +32,6 @@ export type StudioTool =
   | "gallery"
   | "space"
   | "clibridge"
-  | "color"
   | "canvas";
 
 type ToolItem = {
@@ -62,7 +60,6 @@ const AI_TOOLS: ToolItem[] = [
 
 const ORGANIZE_TOOLS: ToolItem[] = [
   { id: "gallery", label: "Assets", icon: FolderOpen, shortcut: "8" },
-  { id: "color", label: "Color", icon: Palette, shortcut: "4" },
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
 ];
 
