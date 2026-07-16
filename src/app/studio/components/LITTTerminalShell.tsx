@@ -47,6 +47,7 @@ import {
   Mic,
   MicOff,
   X,
+  Sparkles,
   LayoutGrid,
   Zap,
   Copy,
@@ -1449,7 +1450,7 @@ function LITTTerminalShellInner({
         {/* Mobile sidebar backdrop */}
         {mobileSidebarOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            className="fixed inset-0 z-[90] bg-black/60 md:hidden"
             onClick={() => setMobileSidebarOpen(false)}
             aria-hidden="true"
           />
@@ -1459,10 +1460,17 @@ function LITTTerminalShellInner({
           className={cn(
             "shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 w-48",
             mobileSidebarOpen
-              ? "fixed inset-y-0 left-0 z-50 flex md:relative md:inset-auto"
+              ? "fixed inset-y-0 left-0 z-[100] flex md:relative md:inset-auto"
               : "hidden md:flex",
           )}
         >
+          <div className="mb-2 flex items-center gap-2 px-3 pb-2">
+            <span className="grid h-8 w-8 place-items-center rounded-lg bg-cyan-500/10 text-cyan-400">
+              <Sparkles size={16} />
+            </span>
+            <span className="text-sm font-black tracking-widest text-white">LITT</span>
+          </div>
+
           {TOOL_RAIL.map((item) => {
             const Icon = item.icon;
             const active = activeTool === item.tool;
@@ -1479,8 +1487,10 @@ function LITTTerminalShellInner({
                 }}
                 aria-label={item.label}
                 className={cn(
-                  "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
-                  active ? "bg-cyan-500/10" : "hover:bg-white/5",
+                  "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all duration-200",
+                  active
+                    ? "bg-cyan-500/10 text-cyan-300 shadow-[inset_0_0_16px_rgba(34,211,238,0.08)]"
+                    : "text-gray-300 hover:bg-white/5 hover:text-white",
                 )}
                 title={item.label}
               >
@@ -1578,17 +1588,8 @@ function LITTTerminalShellInner({
             </>
           )}
 
-          <div className="w-full border-t border-white/5" />
-          <PersonaSwitcher />
-          <div className="mt-auto flex flex-col items-center gap-2 py-2">
-            <div className="text-center">
-              <div className="text-[9px] font-black text-cyan-400">LITT OS</div>
-              <div className="text-[8px] text-gray-300">v2.2.0</div>
-            </div>
-            <div className="flex items-center gap-1 text-[8px] text-emerald-400">
-              <span className="h-1 w-1 rounded-full bg-emerald-400" />
-              ONLINE
-            </div>
+          <div className="mt-auto w-full border-t border-white/5 px-2 pt-2">
+            <PersonaSwitcher />
           </div>
         </aside>
 
@@ -1596,10 +1597,10 @@ function LITTTerminalShellInner({
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Ambient background - simplified on mobile to reduce paint */}
           <div
-            className="pointer-events-none absolute inset-0 hidden opacity-40 sm:block"
+            className="pointer-events-none absolute inset-0 hidden opacity-50 sm:block"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 50% 60%, rgba(34,211,238,0.10) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08) 0%, transparent 35%)",
+                "radial-gradient(circle at 20% 30%, rgba(34,211,238,0.12) 0%, transparent 40%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.12) 0%, transparent 35%), radial-gradient(circle at 60% 80%, rgba(236,72,153,0.08) 0%, transparent 45%), linear-gradient(to bottom, transparent, rgba(3,3,8,0.9))",
             }}
           />
           <div
@@ -1670,7 +1671,7 @@ function LITTTerminalShellInner({
           </div>
 
           {cameraOpen && (
-            <div className="absolute right-4 top-14 z-30 w-64 sm:top-16">
+            <div className="absolute right-4 top-14 z-[60] w-64 sm:top-16">
               <CameraSession
                 compact
                 onSnapshot={(url) => {
@@ -2068,12 +2069,12 @@ function LITTTerminalShellInner({
                   {plusMenuOpen && (
                     <>
                       <div
-                        className="fixed inset-0 z-40 bg-black/60 sm:bg-transparent"
+                        className="fixed inset-0 z-[90] bg-black/60 sm:bg-transparent"
                         onClick={() => setPlusMenuOpen(false)}
                         aria-hidden="true"
                       />
                       <div
-                        className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl border border-white/10 bg-[#0a0a0f] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-56 sm:rounded-xl sm:p-2"
+                        className="fixed bottom-0 left-0 right-0 z-[100] rounded-t-2xl border border-white/10 bg-[#0a0a0f] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-56 sm:rounded-xl sm:p-2"
                         onClick={(e) => e.stopPropagation()}
                       >
                         <div className="flex items-center justify-between pb-2 sm:hidden">
@@ -2167,11 +2168,7 @@ function LITTTerminalShellInner({
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() =>
-                      onToolChangeAction
-                        ? onToolChangeAction(chip.tool)
-                        : handleChip(chip.label)
-                    }
+                    onClick={() => handleChip(chip.label)}
                     className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
@@ -2229,7 +2226,7 @@ function LITTTerminalShellInner({
           </div>
 
           {/* FOOTER TELEMETRY */}
-          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90 sm:flex">
+          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">
             <TelemetryBar />
             <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-gray-400">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>
@@ -2243,7 +2240,7 @@ function LITTTerminalShellInner({
         {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
         {pluginsOpen && (
           <div
-            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            className="fixed inset-0 z-[90] bg-black/60 md:hidden"
             onClick={() => setPluginsOpen(false)}
             aria-hidden="true"
           />
@@ -2252,7 +2249,7 @@ function LITTTerminalShellInner({
           className={cn(
             "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
             pluginsOpen
-              ? "fixed inset-y-0 right-0 z-50 flex w-[80%] md:relative md:inset-auto md:w-64 lg:relative"
+              ? "fixed inset-y-0 right-0 z-[100] flex w-[80%] md:relative md:inset-auto md:w-64 lg:relative"
               : "hidden w-64 lg:flex",
           )}
         >
