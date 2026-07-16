@@ -23,7 +23,9 @@ const VALID_TOOLS: StudioTool[] = [
   "canvas",
   "clibridge",
   "space",
+  "loops",
 ];
+
 
 const STORAGE_KEY = "littree:studio:tool";
 

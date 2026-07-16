@@ -29,7 +29,9 @@ export type StudioTool =
   | "gallery"
   | "canvas"
   | "clibridge"
-  | "space";
+  | "space"
+  | "loops";
+
 
 import {
   Terminal,
@@ -65,7 +67,9 @@ import {
   Hammer,
   Code,
   Shell,
+  Rocket,
 } from "lucide-react";
+
 import dynamic from "next/dynamic";
 
 const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
@@ -103,10 +107,12 @@ const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
   ssr: false,
 });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
+const LoopsTool = dynamic(() => import("../tools/LoopsTool"), { ssr: false });
 const AgentsTerminalTool = dynamic(
   () => import("../tools/AgentsTerminalTool"),
   { ssr: false },
 );
+
 const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
 
 type Message = {
@@ -135,6 +141,7 @@ type ToolRailItem = {
 const TOOL_RAIL: ToolRailItem[] = [
   { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
   { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
+  { id: "loops", label: "Loops", icon: Rocket, tool: "loops" },
   { id: "projects", label: "Projects", icon: FolderKanban, href: "/projects" },
   { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
   { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
@@ -149,6 +156,7 @@ const TOOL_RAIL: ToolRailItem[] = [
   { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
+
 
 const SLASH_CHIPS: {
   id: string;
@@ -197,7 +205,9 @@ const TOOL_COMPONENTS: Record<
   canvas: CanvasTool,
   clibridge: CLIBridgeTool,
   space: SpaceTool,
+  loops: LoopsTool,
 };
+
 
 const PLUGINS = [
   "git",
