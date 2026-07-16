@@ -4,7 +4,7 @@ import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 export const metadata: Metadata = {
   title: "Dashboard",
   description:
-    "Your LiTTree-LabStudios command center. Manage agents, track stats, and monitor your AI workforce.",
+    "Your personal LiTT command center. Direct your agents, track real workspace stats, and ship what matters.",
   robots: {
     index: true,
     follow: true,
@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "LiTTree-LabStudios Dashboard",
     description:
-      "Your LiTTree-LabStudios command center. Manage agents, track stats, and monitor your AI workforce.",
+      "Your personal LiTT command center. Direct your agents, track real workspace stats, and ship what matters.",
     type: "website",
   },
 };
