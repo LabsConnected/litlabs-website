@@ -5,7 +5,6 @@ const isProtectedRoute = createRouteMatcher([
   "/marketplace(.*)",
   "/settings(.*)",
   "/profile(.*)",
-  "/agent-chat(.*)",
   "/gallery/(.*)",
   "/api/user-agents(.*)",
   "/api/conversations(.*)",

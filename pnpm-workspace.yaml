@@ -1,3 +1,4 @@
 packages:
   - "."
   - "terminal-server"
+  - "cli"
