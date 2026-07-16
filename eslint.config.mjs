@@ -18,6 +18,7 @@ const eslintConfig = defineConfig([
     // Dependencies and build output
     "node_modules/**",
     ".next/**",
+    ".vercel/**",
     "out/**",
     "build/**",
     "dist/**",

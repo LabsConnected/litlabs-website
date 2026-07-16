@@ -3,7 +3,7 @@ FROM node:20-slim
 
 # Install dependencies for node-pty and optional shell tools
 RUN apt-get update && apt-get install -y \
-    python3 make g++ bash git curl \
+    python3 python3-distutils make g++ bash git curl \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
