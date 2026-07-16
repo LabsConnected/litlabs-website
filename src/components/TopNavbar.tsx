@@ -57,7 +57,7 @@ export default function TopNavbar() {
             >
               <Zap size={16} />
             </span>
-            <span className="bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
+            <span className="bg-linear-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
               LiTT
             </span>
           </Link>
@@ -80,7 +80,7 @@ export default function TopNavbar() {
                 >
                   {active && (
                     <span
-                      className="absolute inset-x-0 -bottom-[9px] h-[2px] rounded-full"
+                      className="absolute inset-x-0 bottom-[-9px] h-[2px] rounded-full"
                       style={{ backgroundColor: T.accentColor }}
                     />
                   )}
