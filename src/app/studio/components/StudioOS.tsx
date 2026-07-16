@@ -15,7 +15,6 @@ const VALID_TOOLS: StudioTool[] = [
   "image",
   "video",
   "audio",
-  "agents",
   "terminal",
   "builder",
   "pipeline",
@@ -26,12 +25,22 @@ const VALID_TOOLS: StudioTool[] = [
   "loops",
 ];
 
+const MIGRATED_TOOLS: Record<string, StudioTool> = {
+  agents: "builder",
+};
 
 const STORAGE_KEY = "littree:studio:tool";
 
 function resolveValidTool(tool: string | null | undefined): StudioTool | null {
   if (!tool) return null;
-  return VALID_TOOLS.includes(tool as StudioTool) ? (tool as StudioTool) : null;
+  const normalized = MIGRATED_TOOLS[tool] ?? tool;
+  return VALID_TOOLS.includes(normalized as StudioTool)
+    ? (normalized as StudioTool)
+    : null;
+}
+
+function normalizeTool(tool: StudioTool): StudioTool {
+  return MIGRATED_TOOLS[tool] ?? tool;
 }
 
 export default function StudioOS() {
@@ -69,6 +78,12 @@ export default function StudioOS() {
   }, [activeTool, mounted]);
 
   useEffect(() => {
+    if (urlTool === "agents") {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("tool", "builder");
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      return;
+    }
     if (!mounted || urlTool) return;
     const params = new URLSearchParams(searchParams?.toString() ?? "");
     if (activeTool === "builder") {
@@ -84,14 +99,15 @@ export default function StudioOS() {
 
   const selectTool = useCallback(
     (tool: StudioTool) => {
-      if (!VALID_TOOLS.includes(tool)) return;
+      const target = normalizeTool(tool);
+      if (!VALID_TOOLS.includes(target)) return;
       const params = new URLSearchParams(searchParams?.toString() ?? "");
-      if (tool === "builder") {
+      if (target === "builder") {
         params.set("tool", "builder");
-      } else if (tool === "chat") {
+      } else if (target === "chat") {
         params.delete("tool");
       } else {
-        params.set("tool", tool);
+        params.set("tool", target);
       }
       const query = params.toString();
       router.push(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });

@@ -136,7 +136,6 @@ type ToolRailItem = {
 const TOOL_RAIL: ToolRailItem[] = [
   { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
   { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
-  { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
   { id: "projects", label: "Projects", icon: FolderKanban, tool: "builder" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
@@ -154,7 +153,7 @@ const SLASH_CHIPS: {
   { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
   { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
   { id: "code", label: "/code", desc: "Generate Code", tool: "canvas" },
-  { id: "agent", label: "/agent", desc: "Run Agent", tool: "agents" },
+  { id: "agent", label: "/agent", desc: "Run Agent", tool: "builder" },
 ];
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
@@ -703,9 +702,56 @@ function LITTTerminalShellInner({
       const prompt = raw.trim();
 
       if (cmd === "agent") {
-        if (activeTool === "agents") return false;
-        setPendingAgentQuery(prompt);
-        onToolChangeAction?.("agents");
+        if (!prompt) {
+          addToolMessage({
+            role: "assistant",
+            content:
+              "Add a prompt after `/agent`, e.g. `/agent review my React component`.",
+            createdAt: Date.now(),
+          });
+          return true;
+        }
+        addToolMessage({
+          role: "assistant",
+          content: `Asking ${activeAgent.name}…`,
+          createdAt: Date.now(),
+          status: "pending",
+        });
+        try {
+          const res = await fetch("/api/agents/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentId: activeAgent.id,
+              message: prompt,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(
+              err.error || err.detail || "Agent service error",
+            );
+          }
+          const data = (await res.json()) as {
+            response?: string;
+            agent?: { name?: string };
+          };
+          const reply = data.response || "I'm on it.";
+          updateLastToolMessage({
+            content: reply,
+            status: "complete",
+          });
+        } catch (err) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Agent service unavailable";
+          updateLastToolMessage({
+            content: msg,
+            type: "error",
+            status: "error",
+          });
+        }
         return true;
       }
 
@@ -906,7 +952,14 @@ function LITTTerminalShellInner({
 
       return false;
     },
-    [activeTool, addToolMessage, updateLastToolMessage, onToolChangeAction],
+    [
+      activeTool,
+      addToolMessage,
+      updateLastToolMessage,
+      onToolChangeAction,
+      activeAgent.id,
+      activeAgent.name,
+    ],
   );
 
   const sendAgent = useCallback(
@@ -1639,7 +1692,7 @@ function LITTTerminalShellInner({
                     : activeTool === "chat"
                       ? "LITT Terminal"
                       : activeTool === "builder"
-                        ? "LiTT Builder"
+                        ? "Builder"
                         : activeTool.charAt(0).toUpperCase() +
                           activeTool.slice(1)}
                 </div>

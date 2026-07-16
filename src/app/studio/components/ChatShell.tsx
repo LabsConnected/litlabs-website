@@ -156,7 +156,7 @@ export function ChatShell({
                 <span><b>Build an app</b><small>Turn a plain-English idea into working code</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              <button onClick={() => builderMode ? setDraft("/agent ") : onToolSelect?.("agents")}>
+              <button onClick={() => builderMode ? setDraft("/agent ") : onToolSelect?.("builder")}>
                 <span className={styles.actionIcon}><Bot size={21} /></span>
                 <span><b>Launch an agent</b><small>Delegate research, coding, and repeat work</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
