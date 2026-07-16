@@ -3,6 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 
 const POLLINATIONS_VIDEO_BASE = "https://gen.pollinations.ai/video";
+const POLLINATIONS_KEY = process.env.POLLINATIONS_API_KEY;
 
 async function handler(req: NextRequest) {
   if (req.method !== "POST") {
@@ -12,6 +13,13 @@ async function handler(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  if (!POLLINATIONS_KEY) {
+    return NextResponse.json(
+      { error: "Video service not configured" },
+      { status: 503 },
+    );
   }
 
   try {
@@ -31,6 +39,7 @@ async function handler(req: NextRequest) {
     const timer = setTimeout(() => controller.abort(), 60_000);
     const upstream = await fetch(url, {
       method: "GET",
+      headers: { Authorization: `Bearer ${POLLINATIONS_KEY}` },
       signal: controller.signal,
     });
     clearTimeout(timer);

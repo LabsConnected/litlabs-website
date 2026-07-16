@@ -57,7 +57,7 @@ export default configuredMiddleware ?? (() => NextResponse.next());
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$|api/studio/video|api/media/generate|api/music/generate).*)",
     "/__clerk/:path*",
   ],
 };
