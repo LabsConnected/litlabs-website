@@ -68,6 +68,7 @@ import {
   Code,
   Shell,
   Rocket,
+  Menu,
 } from "lucide-react";
 
 import dynamic from "next/dynamic";
@@ -545,6 +546,7 @@ function LITTTerminalShellInner({
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -1619,11 +1621,22 @@ function LITTTerminalShellInner({
 
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
+        {/* Mobile sidebar backdrop */}
+        {mobileSidebarOpen && (
+          <div
+            className="fixed inset-0 z-40 bg-black/60 md:hidden"
+            onClick={() => setMobileSidebarOpen(false)}
+            aria-hidden="true"
+          />
+        )}
         {/* LEFT RAIL */}
         <aside
           className={cn(
-            "hidden shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 md:flex",
+            "shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3",
             activeTool === "agents" ? "w-44" : "w-16",
+            mobileSidebarOpen
+              ? "fixed inset-y-0 left-0 z-50 flex md:relative md:inset-auto"
+              : "hidden md:flex",
           )}
         >
           {TOOL_RAIL.map((item) => {
@@ -1638,6 +1651,7 @@ function LITTTerminalShellInner({
                   } else if (item.tool) {
                     onToolChangeAction?.(item.tool);
                   }
+                  setMobileSidebarOpen(false);
                 }}
                 aria-label={item.label}
                 className={cn(
@@ -1785,6 +1799,13 @@ function LITTTerminalShellInner({
           {/* Stage header */}
           <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:border-0 sm:px-6 sm:pt-5">
             <div className="flex items-center gap-3">
+              <button
+                onClick={() => setMobileSidebarOpen((v) => !v)}
+                aria-label="Toggle sidebar"
+                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 md:hidden"
+              >
+                <Menu size={16} />
+              </button>
               <div
                 className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10"
                 style={
@@ -2018,7 +2039,7 @@ function LITTTerminalShellInner({
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
           {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
+          <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-2">
               {micActive && (
                 <div className="mb-1 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3">
