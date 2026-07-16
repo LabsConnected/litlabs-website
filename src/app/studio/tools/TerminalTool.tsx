@@ -1,38 +1,201 @@
 "use client";
 
 /**
- * TerminalTool — Real interactive terminal in Studio
+ * TerminalTool — Studio terminal surface
  *
- * Connects to the standalone terminal-server (terminal-server/server.ts)
- * over Socket.IO using a short-lived token from /api/terminal/token.
- * Streams xterm.js output bidirectionally with proper resize, copy/paste,
- * and reconnect handling.
+ * Renders an interactive xterm.js terminal in the Studio at
+ * `/studio?tool=terminal`. There are two backends:
  *
- * Architecture:
- *   Browser xterm.js
- *      ⇅ socket.io-client (wss://)
- *   Standalone terminal-server (Express + node-pty + Docker sandbox)
- *      ⇅
- *   Per-user workspace at $TERMINAL_WORKSPACE_ROOT/<clerkUserId>
+ *   1. **Real PTY** (default when available): the standalone
+ *      `terminal-server` process on `NEXT_PUBLIC_TERMINAL_URL`
+ *      (default `http://localhost:4001`). Streams a real bash/PS over
+ *      Socket.IO with auth from `/api/terminal/token`. Start it locally
+ *      with `pnpm terminal:dev`.
  *
- * The terminal-server is a separate process (`pnpm terminal:dev`).
- * It does NOT run on Vercel — the UI shows a guard explaining how
- * to start it locally or on a Fly.io/Railway instance.
+ *   2. **Local LiTT Shell** (fallback): if the token endpoint returns
+ *      503/401, or the socket can't connect, we drop into a tiny
+ *      in-browser shell emulator that supports a handful of useful
+ *      commands. This guarantees the terminal view always *does
+ *      something* on production (where the terminal-server can't run
+ *      because Vercel is serverless and node-pty needs a long-lived
+ *      process), instead of showing a "Cannot reach terminal-server"
+ *      error every time.
+ *
+ * The Connect button in the toolbar switches between the two modes.
  */
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "xterm-addon-web-links";
 import { io, type Socket } from "socket.io-client";
-import { AlertTriangle, Plug, RotateCcw, TerminalSquare } from "lucide-react";
+import {
+  AlertTriangle,
+  Plug,
+  RotateCcw,
+  Server,
+  TerminalSquare,
+} from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import "@xterm/xterm/css/xterm.css";
 
 type Status = "idle" | "connecting" | "connected" | "disconnected" | "error";
+type Mode = "remote" | "local";
 
 const TERMINAL_URL =
   process.env.NEXT_PUBLIC_TERMINAL_URL || "http://localhost:4001";
+
+/* ── Local in-browser shell (fallback) ───────────────────────── */
+
+const LOCAL_WELCOME = [
+  "",
+  "\x1b[36m╭─────────────────────────────────────────────────────────╮\x1b[0m",
+  "\x1b[36m│\x1b[0m  \x1b[1mLiTT Local Shell\x1b[0m  \x1b[2m— in-browser PTY-free emulator\x1b[0m    \x1b[36m│\x1b[0m",
+  "\x1b[36m│\x1b[0m  \x1b[2mType \x1b[0m\x1b[33mhelp\x1b[0m\x1b[2m for the list of supported commands.\x1b[0m       \x1b[36m│\x1b[0m",
+  "\x1b[36m╰─────────────────────────────────────────────────────────╯\x1b[0m",
+  "",
+];
+
+const LOCAL_HELP = [
+  "  \x1b[1mSupported commands:\x1b[0m",
+  "    \x1b[33mhelp\x1b[0m                Show this list",
+  "    \x1b[33mclear\x1b[0m               Clear the screen",
+  "    \x1b[33mwhoami\x1b[0m              Print the current user",
+  "    \x1b[33mpwd\x1b[0m                 Print the workspace directory",
+  "    \x1b[33mls [path]\x1b[0m           List files (mocked workspace)",
+  "    \x1b[33mcat <file>\x1b[0m          Print a mocked file",
+  "    \x1b[33mecho <text>\x1b[0m         Echo text",
+  "    \x1b[33mdate\x1b[0m                Print the current date",
+  "    \x1b[33muname -a\x1b[0m            System info",
+  "    \x1b[33mnode -v\x1b[0m              Node.js version",
+  "    \x1b[33mpnpm -v\x1b[0m              pnpm version",
+  "    \x1b[33mneofetch\x1b[0m             Tiny system info card",
+  "",
+  "  \x1b[2mFor a real PTY (bash/PS), run \x1b[0m\x1b[33mpnpm terminal:dev\x1b[0m\x1b[2m and click Connect.\x1b[0m",
+  "",
+];
+
+const LOCAL_FS: Record<string, string> = {
+  "/workspace/README.md":
+    "# LiTTree Lab Studios\n\nStudio OS for AI agents. Project Loops, real-time terminal, and more.\n",
+  "/workspace/package.json":
+    '{\n  "name": "litlabs-website",\n  "version": "0.1.0",\n  "private": true,\n  "scripts": {\n    "dev": "next dev --turbo",\n    "build": "next build"\n  }\n}\n',
+  "/workspace/.env.local":
+    "# This file is intentionally blank — secrets live on the server.\n",
+  "/workspace/next.config.ts":
+    "// next.config.ts — Turbopack, no cleanDistDir, serverExternalPackages: ['jose']\n",
+};
+
+const LOCAL_LS: Record<string, string[]> = {
+  "/workspace": [
+    "README.md",
+    "package.json",
+    "next.config.ts",
+    ".env.local",
+    "src/",
+    "public/",
+    "supabase/",
+    "terminal-server/",
+  ],
+  "/workspace/src": ["app/", "components/", "lib/", "hooks/", "context/"],
+  "/workspace/src/app": ["studio/", "api/", "dashboard/", "docs/"],
+  "/workspace/supabase": ["migrations/", "schema.sql"],
+  "/workspace/terminal-server": ["server.ts", "auth.ts", "Dockerfile"],
+};
+
+const LOCAL_PWD = "/workspace";
+const LOCAL_USER = "creator@littree";
+
+function runLocalCommand(line: string): string[] {
+  const trimmed = line.trim();
+  if (!trimmed) return [];
+  const [cmd, ...args] = trimmed.split(/\s+/);
+
+  switch (cmd) {
+    case "help":
+    case "?":
+      return LOCAL_HELP;
+    case "clear":
+    case "cls":
+      return ["\x1b[2J\x1b[H"];
+    case "whoami":
+      return [LOCAL_USER];
+    case "pwd":
+      return [LOCAL_PWD];
+    case "echo":
+      return [args.join(" ")];
+    case "date":
+      return [new Date().toString()];
+    case "uname":
+      if (args[0] === "-a") {
+        return [
+          "LiTTree-LabStudios 1.0.0 #1 SMP local time zone browser-xterm",
+          "Build: xterm.js + node-pty + socket.io",
+          "Arch: x86_64 (browser)",
+          "Kernel: Vercel Edge / Next.js 16",
+        ];
+      }
+      return ["LiTTree-LabStudios"];
+    case "node":
+      if (args[0] === "-v" || args[0] === "--version") return ["v22.22.0"];
+      return ["node: command not implemented in Local Shell (use Connect for real bash)"];
+    case "pnpm":
+      if (args[0] === "-v" || args[0] === "--version") return ["9.15.0"];
+      return ["pnpm: command not implemented in Local Shell"];
+    case "neofetch":
+      return [
+        "       ╭─────────────────────────╮",
+        "       │ \x1b[36mLiTTree Lab Studios\x1b[0m     │",
+        "       │ \x1b[2m(studio: in-browser)\x1b[0m    │",
+        "       ╰─────────────────────────╯",
+        "  \x1b[2mOS\x1b[0m      Local LiTT Shell 1.0",
+        "  \x1b[2mHost\x1b[0m    browser-xterm",
+        "  \x1b[2mKernel\x1b[0m  Vercel Edge",
+        "  \x1b[2mShell\x1b[0m   xterm.js + socket.io-client",
+        "  \x1b[2mCPU\x1b[0m     TypeScript, React, Next.js 16",
+        "  \x1b[2mMemory\x1b[0m  vibes",
+        "",
+      ];
+    case "ls":
+    case "dir": {
+      const target = args[0] || LOCAL_PWD;
+      const key = target.endsWith("/") ? target : target;
+      const entries = LOCAL_LS[key];
+      if (!entries) return [`ls: ${target}: No such file or directory`];
+      return [
+        entries
+          .map((e) => (e.endsWith("/") ? `\x1b[34m${e}\x1b[0m` : e))
+          .join("  "),
+      ];
+    }
+    case "cat": {
+      if (!args[0]) return ["cat: missing operand"];
+      const key = args[0].startsWith("/") ? args[0] : `${LOCAL_PWD}/${args[0]}`;
+      const content = LOCAL_FS[key];
+      if (!content) return [`cat: ${args[0]}: No such file or directory`];
+      return [content.replace(/\n$/, "")];
+    }
+    case "cd":
+      return [
+        args[0] ? `(cd ${args[0]} — Local Shell does not track cwd, always at ${LOCAL_PWD})` : "",
+      ];
+    case "exit":
+    case "logout":
+      return ["(use Connect to switch to the real PTY)"];
+    default:
+      return [
+        `${cmd}: command not found. Type \x1b[33mhelp\x1b[0m for the list of supported commands.`,
+      ];
+  }
+}
+
+/* ── React component ─────────────────────────────────────────── */
 
 export default function TerminalTool() {
   const { resolvedColors: T } = useTheme();
@@ -42,9 +205,79 @@ export default function TerminalTool() {
   const fitRef = useRef<FitAddon | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
+  // Local shell state
+  const localLineRef = useRef<string>("");
+  const localHistoryRef = useRef<string[]>([]);
+  const localHistIndexRef = useRef<number>(-1);
+
   const [status, setStatus] = useState<Status>("idle");
   const [error, setError] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>("local");
   const [sessionId, setSessionId] = useState<string | null>(null);
+
+  const writePrompt = useCallback(() => {
+    if (!termRef.current) return;
+    termRef.current.write(
+      `\x1b[36m${LOCAL_USER}\x1b[0m:\x1b[34m${LOCAL_PWD}\x1b[0m$ `,
+    );
+  }, []);
+
+  const handleLocalInput = useCallback(
+    (data: string) => {
+      const term = termRef.current;
+      if (!term) return;
+      for (const ch of data) {
+        const code = ch.charCodeAt(0);
+        if (ch === "\r") {
+          // Enter
+          term.write("\r\n");
+          const line = localLineRef.current;
+          localLineRef.current = "";
+          if (line.trim().length > 0) {
+            localHistoryRef.current.push(line);
+            localHistIndexRef.current = localHistoryRef.current.length;
+            const output = runLocalCommand(line);
+            for (const o of output) term.writeln(o);
+          }
+          writePrompt();
+        } else if (code === 127) {
+          // Backspace
+          if (localLineRef.current.length > 0) {
+            localLineRef.current = localLineRef.current.slice(0, -1);
+            term.write("\b \b");
+          }
+        } else if (ch === "\u0003") {
+          // Ctrl+C
+          term.write("^C\r\n");
+          localLineRef.current = "";
+          writePrompt();
+        } else if (ch === "\u000c") {
+          // Ctrl+L
+          term.write("\x1b[2J\x1b[H");
+          writePrompt();
+        } else if (ch === "\u001b") {
+          // Escape sequences — ignore (no arrow-key history for now)
+        } else if (code === 12) {
+          // Ctrl+L (alternate)
+          term.write("\x1b[2J\x1b[H");
+          writePrompt();
+        } else if (code >= 32) {
+          localLineRef.current += ch;
+          term.write(ch);
+        }
+      }
+    },
+    [writePrompt],
+  );
+
+  const startLocal = useCallback((term: Terminal) => {
+    setMode("local");
+    setStatus("connected");
+    setError(null);
+    setSessionId(null);
+    for (const line of LOCAL_WELCOME) term.writeln(line);
+    term.write(`\x1b[36m${LOCAL_USER}\x1b[0m:\x1b[34m${LOCAL_PWD}\x1b[0m$ `);
+  }, []);
 
   /* ── Initialize xterm once on mount ─────────────────────────── */
   useEffect(() => {
@@ -101,27 +334,8 @@ export default function TerminalTool() {
     termRef.current = term;
     fitRef.current = fit;
 
-    term.writeln("\x1b[36m╭──────────────────────────────────────────────╮\x1b[0m");
-    term.writeln(
-      "\x1b[36m│\x1b[0m  \x1b[1mLiTTree Terminal\x1b[0m  \x1b[2m— real PTY, real sandbox\x1b[0m      \x1b[36m│\x1b[0m",
-    );
-    term.writeln(
-      "\x1b[36m│\x1b[0m  Press \x1b[33mEnter\x1b[0m or click Connect to start.        \x1b[36m│\x1b[0m",
-    );
-    term.writeln("\x1b[36m╰──────────────────────────────────────────────╯\x1b[0m");
-    term.writeln("");
-
-    const dataDisp = term.onData((d) => {
-      if (socketRef.current?.connected) {
-        socketRef.current.emit("terminal:input", d);
-      }
-    });
-
-    const resizeDisp = term.onResize(({ cols, rows }) => {
-      if (socketRef.current?.connected) {
-        socketRef.current.emit("terminal:resize", { cols, rows });
-      }
-    });
+    // Default: start in local mode and write the welcome banner
+    startLocal(term);
 
     const ro = new ResizeObserver(() => {
       try {
@@ -133,8 +347,6 @@ export default function TerminalTool() {
     ro.observe(containerRef.current);
 
     return () => {
-      dataDisp.dispose();
-      resizeDisp.dispose();
       ro.disconnect();
       term.dispose();
       termRef.current = null;
@@ -144,8 +356,30 @@ export default function TerminalTool() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* ── Connect to terminal-server ──────────────────────────────── */
-  const connect = useCallback(async () => {
+  // Route keystrokes to the right backend
+  useEffect(() => {
+    const term = termRef.current;
+    if (!term) return;
+    const disp = term.onData((d) => {
+      if (mode === "local") {
+        handleLocalInput(d);
+      } else if (socketRef.current?.connected) {
+        socketRef.current.emit("terminal:input", d);
+      }
+    });
+    const resizeDisp = term.onResize(({ cols, rows }) => {
+      if (mode === "remote" && socketRef.current?.connected) {
+        socketRef.current.emit("terminal:resize", { cols, rows });
+      }
+    });
+    return () => {
+      disp.dispose();
+      resizeDisp.dispose();
+    };
+  }, [mode, handleLocalInput]);
+
+  /* ── Connect to terminal-server (remote PTY) ─────────────── */
+  const connectRemote = useCallback(async () => {
     if (status === "connecting" || status === "connected") return;
 
     setStatus("connecting");
@@ -158,7 +392,9 @@ export default function TerminalTool() {
         const body = (await tokenRes.json().catch(() => ({}))) as {
           error?: string;
         };
-        throw new Error(body.error || `Token endpoint returned ${tokenRes.status}`);
+        throw new Error(
+          body.error || `Token endpoint returned ${tokenRes.status}`,
+        );
       }
       const { token, baseUrl } = (await tokenRes.json()) as {
         token: string;
@@ -177,6 +413,7 @@ export default function TerminalTool() {
       });
 
       socketRef.current = socket;
+      setMode("remote");
 
       socket.on("connect", () => {
         setStatus("connected");
@@ -228,8 +465,16 @@ export default function TerminalTool() {
   const disconnect = useCallback(() => {
     socketRef.current?.disconnect();
     socketRef.current = null;
-    setStatus("disconnected");
-  }, []);
+    setSessionId(null);
+    setStatus("idle");
+    // Drop back to local shell
+    const term = termRef.current;
+    if (term) {
+      term.writeln("");
+      term.writeln("\x1b[33m⚡ Dropped back to Local LiTT Shell.\x1b[0m");
+      startLocal(term);
+    }
+  }, [startLocal]);
 
   /* ── Cleanup on unmount ─────────────────────────────────────── */
   useEffect(() => {
@@ -240,17 +485,20 @@ export default function TerminalTool() {
   }, []);
 
   /* ── Render ─────────────────────────────────────────────────── */
-  const statusColor =
-    status === "connected"
+  const statusColor = useMemo(() => {
+    if (mode === "local") return "#22d3ee";
+    return status === "connected"
       ? "#22c55e"
       : status === "connecting"
         ? "#fbbf24"
         : status === "error"
           ? "#ef4444"
           : "#64748b";
+  }, [mode, status]);
 
-  const statusLabel =
-    status === "connected"
+  const statusLabel = useMemo(() => {
+    if (mode === "local") return "Local Shell";
+    return status === "connected"
       ? "Connected"
       : status === "connecting"
         ? "Connecting…"
@@ -259,6 +507,7 @@ export default function TerminalTool() {
           : status === "error"
             ? "Error"
             : "Idle";
+  }, [mode, status]);
 
   return (
     <div
@@ -290,8 +539,15 @@ export default function TerminalTool() {
               className="text-[9px] font-mono"
               style={{ color: T.textMuted }}
             >
-              {sessionId ? sessionId.slice(0, 8) : "no session"} ·{" "}
-              {TERMINAL_URL.replace(/^https?:\/\//, "")}
+              {mode === "local"
+                ? "Local LiTT Shell · no PTY"
+                : sessionId
+                  ? sessionId.slice(0, 8)
+                  : "no session"}{" "}
+              ·{" "}
+              {mode === "local"
+                ? "in-browser"
+                : TERMINAL_URL.replace(/^https?:\/\//, "")}
             </span>
           </div>
         </div>
@@ -302,75 +558,109 @@ export default function TerminalTool() {
               className="h-2 w-2 rounded-full"
               style={{ backgroundColor: statusColor }}
             />
-            <span style={{ color: statusColor }}>{statusLabel}</span>
+            {statusLabel}
           </span>
 
-          {status === "connected" || status === "connecting" ? (
+          {mode === "local" ? (
             <button
-              onClick={disconnect}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wider transition hover:opacity-90"
+              onClick={() => connectRemote()}
+              disabled={status === "connecting"}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold transition-colors"
               style={{
-                border: `1px solid ${T.borderColor}40`,
-                color: T.textColor,
+                backgroundColor: `${T.accentColor}22`,
+                color: T.accentColor,
+                opacity: status === "connecting" ? 0.5 : 1,
               }}
             >
-              <RotateCcw size={11} /> Disconnect
+              <Plug size={12} />
+              Connect to PTY
             </button>
           ) : (
             <button
-              onClick={connect}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-[10px] font-black uppercase tracking-wider transition hover:opacity-90"
+              onClick={disconnect}
+              className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold transition-colors"
               style={{
-                backgroundColor: T.accentColor,
-                color: T.bgColor,
+                backgroundColor: `${T.accentColor}22`,
+                color: T.accentColor,
               }}
             >
-              <Plug size={11} />
-              {status === "error" ? "Retry" : "Connect"}
+              <Server size={12} />
+              Disconnect
             </button>
           )}
+
+          <button
+            onClick={() => {
+              const term = termRef.current;
+              if (!term) return;
+              term.write("\x1b[2J\x1b[H");
+              if (mode === "local") writePrompt();
+            }}
+            className="flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-[10px] font-bold transition-colors"
+            style={{
+              backgroundColor: `${T.borderColor}22`,
+              color: T.textMuted,
+            }}
+          >
+            <RotateCcw size={12} />
+            Clear
+          </button>
         </div>
       </header>
 
-      {error && status !== "connected" && (
+      {error && mode === "remote" && (
         <div
-          className="flex items-start gap-2 rounded-xl border p-2 text-[11px]"
+          className="flex items-center gap-2 rounded-xl border px-3 py-2 text-[11px]"
           style={{
-            backgroundColor: `${T.boxBg}cc`,
-            borderColor: "#f8717130",
+            backgroundColor: "#f8717122",
+            borderColor: "#f8717155",
             color: "#fca5a5",
           }}
         >
-          <AlertTriangle size={12} className="mt-0.5 shrink-0" />
-          <div className="min-w-0">
-            <p className="font-black">Cannot reach terminal-server</p>
-            <p
-              className="mt-0.5 text-[10px]"
-              style={{ color: T.textMuted }}
-            >
-              Start it with{" "}
-              <code
-                className="rounded px-1 py-0.5 font-mono"
-                style={{ backgroundColor: "rgba(0,0,0,.4)" }}
-              >
-                pnpm terminal:dev
-              </code>{" "}
-              in another terminal, then click <strong>Connect</strong>.
-              {error ? ` (${error})` : ""}
-            </p>
-          </div>
+          <AlertTriangle size={14} className="shrink-0" />
+          <span className="flex-1">{error}</span>
+          <button
+            onClick={disconnect}
+            className="shrink-0 font-bold underline"
+          >
+            Back to Local Shell
+          </button>
         </div>
       )}
 
       <div
         ref={containerRef}
-        className="flex-1 overflow-hidden rounded-2xl border"
+        className="min-h-0 flex-1 overflow-hidden rounded-2xl border"
         style={{
           backgroundColor: "#0a0a0f",
           borderColor: `${T.borderColor}30`,
-          minHeight: 320,
         }}
       />
+
+      {mode === "local" && (
+        <div
+          className="flex items-center gap-2 rounded-xl px-3 py-1.5 text-[10px]"
+          style={{
+            backgroundColor: `${T.accentColor}11`,
+            color: T.textMuted,
+          }}
+        >
+          <TerminalSquare size={12} />
+          <span>
+            In-browser Local Shell — type{" "}
+            <code className="font-bold" style={{ color: T.accentColor }}>
+              help
+            </code>{" "}
+            for commands. Click{" "}
+            <code className="font-bold" style={{ color: T.accentColor }}>
+              Connect to PTY
+            </code>{" "}
+            for a real bash/PS (requires{" "}
+            <code className="font-bold">pnpm terminal:dev</code> running
+            locally).
+          </span>
+        </div>
+      )}
     </div>
   );
 }
