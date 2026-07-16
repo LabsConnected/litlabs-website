@@ -108,6 +108,12 @@ const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
 });
 const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
 const LoopsTool = dynamic(() => import("../tools/LoopsTool"), { ssr: false });
+const TerminalTool = dynamic(() => import("../tools/TerminalTool"), {
+  ssr: false,
+  loading: () => (
+    <div className="p-4 text-xs text-neutral-500">Loading terminal…</div>
+  ),
+});
 const AgentsTerminalTool = dynamic(
   () => import("../tools/AgentsTerminalTool"),
   { ssr: false },
@@ -199,7 +205,7 @@ const TOOL_COMPONENTS: Record<
   video: VideoTool,
   audio: AudioTool,
   builder: BuilderTool,
-  terminal: AgentsTerminalTool,
+  terminal: TerminalTool,
   pipeline: PipelineTool,
   gallery: GalleryTool,
   canvas: CanvasTool,

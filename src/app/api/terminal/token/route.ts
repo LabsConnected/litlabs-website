@@ -11,9 +11,19 @@ export async function GET() {
   }
 
   try {
-    return NextResponse.json(createTerminalToken(userId), {
-      headers: { "Cache-Control": "no-store" },
-    });
+    const { token, expiresAt } = createTerminalToken(userId);
+    // baseUrl is the absolute URL of the terminal-server. The client
+    // uses it to open the Socket.IO connection and to call /run for
+    // one-shot commands. Defaults to localhost:4001 in dev; production
+    // callers should set TERMINAL_SERVER_URL.
+    const baseUrl =
+      process.env.TERMINAL_SERVER_URL ||
+      process.env.NEXT_PUBLIC_TERMINAL_URL ||
+      "http://localhost:4001";
+    return NextResponse.json(
+      { token, expiresAt, baseUrl },
+      { headers: { "Cache-Control": "no-store" } },
+    );
   } catch (error) {
     console.error("[terminal/token] Terminal authentication is not configured", error);
     return NextResponse.json(

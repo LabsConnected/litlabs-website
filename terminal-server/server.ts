@@ -7,6 +7,7 @@ import * as pty from "node-pty";
 import { randomUUID } from "crypto";
 import { isAbsolute, relative, resolve } from "path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "fs";
+import { spawn } from "child_process";
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
@@ -169,6 +170,107 @@ app.post("/files/delete", (req: AuthenticatedRequest, res) => {
   } catch (err) {
     res.status(500).json({ error: err instanceof Error ? err.message : "Failed to delete file" });
   }
+});
+
+/* ── One-shot command runner (used by the Loop agent) ────────── */
+
+const MAX_RUN_OUTPUT = 2 * 1024 * 1024;
+const DEFAULT_RUN_TIMEOUT_MS = 5 * 60 * 1000;
+
+app.post("/run", (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
+  const command = String(req.body.command || "").trim();
+  const cwdArg = typeof req.body.cwd === "string" ? req.body.cwd : "";
+  const timeoutMs = Number.isFinite(req.body.timeoutMs)
+    ? Math.min(Math.max(Number(req.body.timeoutMs), 1_000), 30 * 60 * 1000)
+    : DEFAULT_RUN_TIMEOUT_MS;
+  const envOverrides =
+    req.body.env && typeof req.body.env === "object" && !Array.isArray(req.body.env)
+      ? (req.body.env as Record<string, string>)
+      : {};
+
+  if (!command) {
+    return res.status(400).json({ error: "command is required" });
+  }
+  if (command.length > 16_384) {
+    return res.status(413).json({ error: "command too long" });
+  }
+  if (isBlockedCommand(command)) {
+    return res.status(403).json({ error: "Blocked by security policy" });
+  }
+
+  let cwd: string;
+  try {
+    cwd = cwdArg ? safePath(userId, cwdArg) : getUserWorkspace(userId);
+  } catch (err) {
+    return res
+      .status(400)
+      .json({ error: err instanceof Error ? err.message : "Invalid cwd" });
+  }
+
+  const shell = process.platform === "win32" ? "powershell.exe" : "/bin/bash";
+  const shellArgs =
+    process.platform === "win32"
+      ? ["-NoProfile", "-Command", command]
+      : ["-lc", command];
+
+  const startedAt = Date.now();
+  const child = spawn(shell, shellArgs, {
+    cwd,
+    env: { ...process.env, ...envOverrides, LITTREE_USER_ID: userId },
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+
+  let stdout = "";
+  let stderr = "";
+  let truncated = false;
+  const append = (target: "stdout" | "stderr", chunk: string) => {
+    if (truncated) return;
+    const combined = target === "stdout" ? stdout : stderr;
+    const next = combined + chunk;
+    if (next.length > MAX_RUN_OUTPUT) {
+      truncated = true;
+      if (target === "stdout") stdout = next.slice(0, MAX_RUN_OUTPUT);
+      else stderr = next.slice(0, MAX_RUN_OUTPUT);
+      return;
+    }
+    if (target === "stdout") stdout = next;
+    else stderr = next;
+  };
+  child.stdout.on("data", (d) => append("stdout", d.toString("utf8")));
+  child.stderr.on("data", (d) => append("stderr", d.toString("utf8")));
+
+  const killTimer = setTimeout(() => {
+    child.kill("SIGTERM");
+    setTimeout(() => {
+      if (!child.killed) child.kill("SIGKILL");
+    }, 5_000);
+  }, timeoutMs);
+
+  child.on("error", (err) => {
+    clearTimeout(killTimer);
+    res.status(500).json({
+      error: err.message,
+      stdout,
+      stderr,
+      exitCode: null,
+      truncated,
+      durationMs: Date.now() - startedAt,
+    });
+  });
+
+  child.on("close", (code, signal) => {
+    clearTimeout(killTimer);
+    res.json({
+      stdout,
+      stderr,
+      exitCode: code,
+      signal: signal ?? null,
+      truncated,
+      durationMs: Date.now() - startedAt,
+      cwd,
+    });
+  });
 });
 
 io.use((socket, next) => {

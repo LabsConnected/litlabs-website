@@ -46,9 +46,11 @@
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
     "sharp": "^0.35.3",
+    "socket.io-client": "4.8.3",
     "stripe": "^18.0.0",
     "supermemory": "^4.24.12",
-    "svix": "^1.95.1"
+    "svix": "^1.95.1",
+    "xterm-addon-web-links": "0.9.0"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
