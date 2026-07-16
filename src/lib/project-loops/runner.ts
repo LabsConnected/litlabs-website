@@ -161,7 +161,7 @@ export async function runIteration(
   let snapshot: RepoSnapshot = emptySnapshot();
   if (githubAvailable()) {
     try {
-      snapshot = await readRepoSnapshot(loop, iteration);
+      snapshot = await readRepoSnapshot(loop);
     } catch (err) {
       await phase(
         "inspecting",
@@ -182,7 +182,7 @@ export async function runIteration(
 
   /* ── 2. Plan (Director) ─────────────────────────────────────────── */
   await phase("planning", "director", "phase", "Creating plan");
-  const planResult = await runDirectorPlan(loop, snapshot, opts.signal);
+  const planResult = await runDirectorPlan(loop, snapshot);
   tokensUsed += planResult.tokensUsed;
   costCents += planResult.costCents;
   if (planResult.text) {
@@ -200,12 +200,7 @@ export async function runIteration(
 
   /* ── 3. Edit (Engineer) ─────────────────────────────────────────── */
   await phase("editing", "engineer", "phase", "Editing files");
-  const editResult = await runEngineerEdit(
-    loop,
-    snapshot,
-    planResult.text,
-    opts.signal,
-  );
+  const editResult = await runEngineerEdit(loop, snapshot, planResult.text);
   tokensUsed += editResult.tokensUsed;
   costCents += editResult.costCents;
   fileChanges += editResult.files.length;
@@ -264,7 +259,7 @@ export async function runIteration(
 
   /* ── 4. Test (QA) ───────────────────────────────────────────────── */
   await phase("testing", "qa", "phase", "Running tests");
-  const testResult = await runQaTests(loop, diff, opts.signal);
+  const testResult = await runQaTests(loop, diff);
   tokensUsed += testResult.tokensUsed;
   costCents += testResult.costCents;
 
@@ -285,7 +280,7 @@ export async function runIteration(
 
   /* ── 5. Review (Reviewer) ───────────────────────────────────────── */
   await phase("reviewing", "reviewer", "phase", "Reviewing diff");
-  const review = await runReviewer(loop, diff, testResult.results, opts.signal);
+  const review = await runReviewer(loop, diff, testResult.results);
   tokensUsed += review.tokensUsed;
   costCents += review.costCents;
 

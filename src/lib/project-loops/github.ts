@@ -61,10 +61,7 @@ const SAMPLE_FILES: { path: string; size: number }[] = [
   { path: "eslint.config.mjs", size: 400 },
 ];
 
-export async function readRepoSnapshot(
-  loop: ProjectLoop,
-  _iteration: number,
-): Promise<RepoSnapshot> {
+export async function readRepoSnapshot(loop: ProjectLoop): Promise<RepoSnapshot> {
   if (!githubAvailable()) {
     return {
       available: false,
