@@ -227,6 +227,11 @@ export function VoiceSessionProvider({
   const speechDetectedRef = useRef(false);
   const activityRef = useRef<VoiceActivity>({ type: "idle" });
   const recorderMimeTypeRef = useRef<string>("audio/webm");
+  // Timer that restarts listening after a turn if no TTS is triggered.
+  // Cancelled by speakText so the recorder only resumes AFTER TTS ends.
+  const pendingListenRestartRef = useRef<ReturnType<typeof setTimeout> | null>(
+    null,
+  );
 
   // Keep mirrors in sync
   useEffect(() => {
@@ -247,6 +252,12 @@ export function VoiceSessionProvider({
 
   const cleanup = useCallback(() => {
     console.debug("[LiTT Voice] cleanup");
+
+    // Cancel any pending listen restart
+    if (pendingListenRestartRef.current) {
+      clearTimeout(pendingListenRestartRef.current);
+      pendingListenRestartRef.current = null;
+    }
 
     // Stop mic tracks
     if (streamRef.current) {
@@ -460,18 +471,37 @@ export function VoiceSessionProvider({
         // Hand off to chat
         onTurnRef.current(text);
 
-        // After handing off, go back to listening if still active
+        // Don't immediately restart the recorder — the turn handler may
+        // call speakText() which needs the mic paused to avoid a TTS
+        // feedback loop (mic picks up speaker audio → transcribes TTS →
+        // re-sends the same text → infinite loop). Instead, wait 2s; if
+        // speakText is called within that window it cancels this timer
+        // and handles restarting the recorder after TTS finishes.
         if (activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          setActivity({ type: "listening" });
-          speechDetectedRef.current = false;
-          recordedChunksRef.current = [];
-          try {
-            mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
-          } catch {
-            // ignore
+          if (pendingListenRestartRef.current) {
+            clearTimeout(pendingListenRestartRef.current);
           }
+          pendingListenRestartRef.current = setTimeout(() => {
+            pendingListenRestartRef.current = null;
+            // Only restart if we're still in "sending" state — if
+            // speakText was called, we'll be in "speaking" state and
+            // the recorder will be restarted by onSpeechEnd.
+            if (
+              activeRef.current &&
+              voiceStateRef.current === "sending"
+            ) {
+              setVoiceState("listening");
+              voiceStateRef.current = "listening";
+              setActivity({ type: "listening" });
+              speechDetectedRef.current = false;
+              recordedChunksRef.current = [];
+              try {
+                mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
+              } catch {
+                // ignore
+              }
+            }
+          }, 2000);
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Transcription failed";
@@ -794,7 +824,14 @@ export function VoiceSessionProvider({
       stopSpeaking();
       ttsCancelledRef.current = false;
 
-      // Pause recording while speaking to avoid echo loops
+      // Cancel any pending listen restart — TTS is about to play, so we
+      // must NOT restart the mic until TTS finishes.
+      if (pendingListenRestartRef.current) {
+        clearTimeout(pendingListenRestartRef.current);
+        pendingListenRestartRef.current = null;
+      }
+
+      // Stop/pause recording while speaking to avoid TTS feedback loops
       if (mediaRecorderRef.current?.state === "recording") {
         try {
           mediaRecorderRef.current.pause();
@@ -809,9 +846,21 @@ export function VoiceSessionProvider({
 
       const onSpeechEnd = () => {
         if (ttsCancelledRef.current) return;
-        if (mediaRecorderRef.current?.state === "paused") {
+        // Resume the recorder if it was paused, or start it fresh if it
+        // was stopped (e.g. sendForTranscription stopped it and we never
+        // restarted it because we cancelled the pending restart).
+        const recorder = mediaRecorderRef.current;
+        if (recorder?.state === "paused") {
           try {
-            mediaRecorderRef.current.resume();
+            recorder.resume();
+          } catch {
+            // ignore
+          }
+        } else if (recorder?.state === "inactive" && activeRef.current) {
+          // Recorder was stopped (not just paused) — start fresh
+          recordedChunksRef.current = [];
+          try {
+            recorder.start(CHUNK_INTERVAL_MS);
           } catch {
             // ignore
           }
@@ -820,6 +869,7 @@ export function VoiceSessionProvider({
           setVoiceState("listening");
           voiceStateRef.current = "listening";
           setActivity({ type: "listening" });
+          speechDetectedRef.current = false;
           startMicLevelLoop();
         } else {
           setVoiceState("idle");
