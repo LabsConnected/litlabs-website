@@ -30,7 +30,7 @@ async function handler(req: NextRequest) {
       contents: [
         { inlineData: { data: audioBytes, mimeType } },
         {
-          text: "Provide a complete, highly accurate, and clean transcription of the spoken words in this audio. Do not include introductory notes, timestamps, speaker tags, or external commentary. Output only the transcript text.",
+          text: "Transcribe only the clear, intelligible spoken words in this audio clip. If the audio is mostly silence, background noise, static, music, or unintelligible mumbling, return an empty string. Do NOT guess, invent, or hallucinate words that are not clearly spoken. Do NOT add commentary, timestamps, speaker tags, or introductory text. Output ONLY the transcript text or an empty string.",
         },
       ],
     });

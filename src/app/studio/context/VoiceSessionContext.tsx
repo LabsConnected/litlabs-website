@@ -121,11 +121,24 @@ const SPEECH_START_THRESHOLD = 0.035;
 const SILENCE_TIMEOUT_MS = 2500;
 const MAX_RECORDING_MS = 30_000;
 const CHUNK_INTERVAL_MS = 250;
+const MIN_RECORDING_MS = 500; // don't transcribe clips shorter than this
+const MIN_BLOB_SIZE = 8000; // don't transcribe blobs smaller than this
+
+function isMobileDevice(): boolean {
+  if (typeof window === "undefined") return false;
+  return (
+    /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent) ||
+    (navigator.maxTouchPoints > 1 && window.innerWidth < 1024)
+  );
+}
 
 function getSupportedMimeType(): string | undefined {
+  // Order matters: prefer high-quality opus codecs, but include mobile-
+  // friendly formats. iOS Safari supports audio/mp4 (AAC) but NOT webm.
   const types = [
     "audio/webm;codecs=opus",
     "audio/webm",
+    "audio/mp4;codecs=mp4a.40.2",
     "audio/mp4",
     "audio/ogg;codecs=opus",
     "audio/ogg",
@@ -213,6 +226,7 @@ export function VoiceSessionProvider({
   const prevMicLevelRef = useRef(0);
   const speechDetectedRef = useRef(false);
   const activityRef = useRef<VoiceActivity>({ type: "idle" });
+  const recorderMimeTypeRef = useRef<string>("audio/webm");
 
   // Keep mirrors in sync
   useEffect(() => {
@@ -334,15 +348,31 @@ export function VoiceSessionProvider({
 
   const sendForTranscription = useCallback(
     async (chunks: Blob[]) => {
-      const mimeType = getSupportedMimeType() || "audio/webm";
+      // Use the actual mimeType the MediaRecorder used, NOT a fresh
+      // getSupportedMimeType() call — on mobile the result can differ and
+      // produce a mismatch that corrupts the audio sent to Gemini.
+      const mimeType = recorderMimeTypeRef.current || "audio/webm";
       const blob = new Blob(chunks, { type: mimeType });
-      if (blob.size < 1000) {
-        // Too short — likely no speech
+
+      // Check recording duration — don't transcribe clips shorter than
+      // MIN_RECORDING_MS (likely just noise or a button mis-tap)
+      const recordingDuration = listeningStartMsRef.current
+        ? Date.now() - listeningStartMsRef.current
+        : 0;
+
+      if (blob.size < MIN_BLOB_SIZE || recordingDuration < MIN_RECORDING_MS) {
+        // Too short — likely no speech, go back to listening
         setVoiceState("listening");
         voiceStateRef.current = "listening";
         setActivity({ type: "listening" });
         setInterimTranscript("");
         speechDetectedRef.current = false;
+        recordedChunksRef.current = [];
+        try {
+          mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
+        } catch {
+          // ignore
+        }
         return;
       }
 
@@ -352,12 +382,18 @@ export function VoiceSessionProvider({
 
       try {
         const arrayBuffer = await blob.arrayBuffer();
-        const base64 = btoa(
-          new Uint8Array(arrayBuffer).reduce(
-            (data, byte) => data + String.fromCharCode(byte),
-            "",
-          ),
-        );
+        // Efficient base64 encoding — chunked to avoid call-stack overflow
+        // on mobile devices with larger audio buffers
+        const bytes = new Uint8Array(arrayBuffer);
+        let base64 = "";
+        const chunkSize = 0x8000; // 32KB chunks
+        for (let i = 0; i < bytes.length; i += chunkSize) {
+          base64 += String.fromCharCode.apply(
+            null,
+            Array.from(bytes.subarray(i, i + chunkSize)) as unknown as number[],
+          );
+        }
+        base64 = btoa(base64);
 
         const res = await fetch("/api/media/transcribe", {
           method: "POST",
@@ -386,6 +422,32 @@ export function VoiceSessionProvider({
             "No speech detected. Try speaking closer to the mic.",
           );
           speechDetectedRef.current = false;
+          return;
+        }
+
+        // Hallucination guard: if the transcript is suspiciously long
+        // relative to the recording duration, it's likely Gemini
+        // inventing text from noise. Normal speech is ~2.5 words/second.
+        // Allow generous margin but reject extreme cases.
+        const durationSec = recordingDuration / 1000;
+        const wordCount = text.split(/\s+/).length;
+        const maxExpectedWords = Math.max(5, durationSec * 5); // 5 wps = very fast
+        if (wordCount > maxExpectedWords) {
+          console.warn(
+            "[LiTT Voice] transcript length suspicious for duration — likely hallucination, discarding",
+            { wordCount, durationSec, text: text.slice(0, 100) },
+          );
+          setVoiceState("listening");
+          voiceStateRef.current = "listening";
+          setActivity({ type: "listening" });
+          setInterimTranscript("");
+          speechDetectedRef.current = false;
+          recordedChunksRef.current = [];
+          try {
+            mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
+          } catch {
+            // ignore
+          }
           return;
         }
 
@@ -432,6 +494,14 @@ export function VoiceSessionProvider({
     if (!analyser) return;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
+    // Mobile mics pick up more background noise — use higher thresholds
+    // to avoid false speech detection from ambient sound.
+    const mobile = isMobileDevice();
+    const speechStart = mobile ? SPEECH_START_THRESHOLD * 1.8 : SPEECH_START_THRESHOLD;
+    const silence = mobile ? SILENCE_THRESHOLD * 2.5 : SILENCE_THRESHOLD;
+    // Require sustained speech (not a brief noise spike) before triggering
+    let speechHitCount = 0;
+    const SPEECH_HITS_REQUIRED = mobile ? 4 : 2;
 
     const tick = () => {
       const state = voiceStateRef.current;
@@ -462,16 +532,22 @@ export function VoiceSessionProvider({
         setListeningDurationMs(Date.now() - listeningStartMsRef.current);
       }
 
-      // Speech detection state machine
-      if (!speechDetectedRef.current && level > SPEECH_START_THRESHOLD) {
-        speechDetectedRef.current = true;
-        setVoiceState("speech_detected");
-        voiceStateRef.current = "speech_detected";
-        setActivity({ type: "speech_detected", durationMs: 0 });
+      // Speech detection state machine — require sustained signal to
+      // avoid triggering on transient noise (especially on mobile)
+      if (!speechDetectedRef.current && level > speechStart) {
+        speechHitCount++;
+        if (speechHitCount >= SPEECH_HITS_REQUIRED) {
+          speechDetectedRef.current = true;
+          setVoiceState("speech_detected");
+          voiceStateRef.current = "speech_detected";
+          setActivity({ type: "speech_detected", durationMs: 0 });
+        }
+      } else if (!speechDetectedRef.current) {
+        speechHitCount = 0;
       }
 
       if (speechDetectedRef.current) {
-        if (level > SILENCE_THRESHOLD) {
+        if (level > silence) {
           // Voice still present — reset silence timer
           if (silenceTimerRef.current !== null) {
             clearTimeout(silenceTimerRef.current);
@@ -584,6 +660,10 @@ export function VoiceSessionProvider({
     try {
       const recorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = recorder;
+      // Store the actual mimeType the recorder negotiated — may differ from
+      // what we requested on some mobile browsers. Used when building the
+      // blob for transcription to avoid MIME mismatches.
+      recorderMimeTypeRef.current = recorder.mimeType || mimeType;
       recordedChunksRef.current = [];
 
       recorder.ondataavailable = (ev) => {
