@@ -16,6 +16,7 @@ const VALID_TOOLS: StudioTool[] = [
   "audio",
   "terminal",
   "builder",
+  "agents",
   "pipeline",
   "gallery",
   "canvas",
@@ -27,7 +28,6 @@ const VALID_TOOLS: StudioTool[] = [
 // Tools that have been merged into the Builder hub. Old URLs and stored
 // preferences are silently redirected so bookmarks don't break.
 const MIGRATED_TOOLS: Record<string, StudioTool> = {
-  agents: "builder",
   chat: "builder",
 };
 
@@ -80,7 +80,7 @@ export default function StudioOS() {
   }, [activeTool, mounted]);
 
   useEffect(() => {
-    if (urlTool === "agents" || urlTool === "chat") {
+    if (urlTool === "chat") {
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.set("tool", "builder");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });

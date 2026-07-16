@@ -35,6 +35,7 @@ import {
   Code2,
   Wand2,
   Bot,
+  Film,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -47,7 +48,8 @@ const NavAuth = dynamic(
 /* ------------------------------------------------------------------ */
 const navLinks = [
   { href: "/", label: "Home", icon: Home },
-  { href: "/dashboard", label: "Dashboard", icon: Bot },
+  { href: "/generate", label: "Generate", icon: Wand2 },
+  { href: "/flow", label: "Flow", icon: Film },
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/gallery", label: "Gallery", icon: Sparkles },

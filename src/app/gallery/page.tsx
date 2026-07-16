@@ -5,8 +5,7 @@ import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
+import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
@@ -82,7 +81,7 @@ type GalleryItem = {
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Gallery() {
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { user } = useAppUser();
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);

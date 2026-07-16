@@ -55,6 +55,8 @@ import {
   Terminal,
   Gift,
   Paintbrush,
+  Code,
+  Server,
 } from "lucide-react";
 
 export type NavItem = {
@@ -78,7 +80,7 @@ export type NavGroup = {
 export const GROUP_ACCENTS: Record<string, string> = {
   Home: "#00f0ff",
   Social: "#22c55e",
-  Create: "#ff00a0",
+  Studio: "#ff00a0",
   Marketplace: "#f59e0b",
   Gaming: "#ef4444",
   Creator: "#8b5cf6",
@@ -176,10 +178,10 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Create",
+    label: "Studio",
     href: "/studio",
     icon: Sparkles,
-    accent: GROUP_ACCENTS.Create,
+    accent: GROUP_ACCENTS.Studio,
     items: [
       { label: "Studio", href: "/studio", icon: Sparkles },
       { label: "Canvas Builder", href: "/studio?tool=canvas", icon: PenTool },
@@ -200,6 +202,10 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Exports", href: "/studio?tool=exports", icon: Download },
       { label: "Templates", href: "/studio?tool=templates", icon: FileText },
       { label: "Workflows", href: "/studio?tool=workflows", icon: Layers },
+      { label: "Terminal", href: "/studio?tool=terminal", icon: Terminal },
+      { label: "Code", href: "/code", icon: Code },
+      { label: "Projects", href: "/projects", icon: Folder },
+      { label: "Deployments", href: "/deployments", icon: Server },
     ],
   },
   {
@@ -339,7 +345,7 @@ export const NAV_GROUPS: NavGroup[] = [
 
 export const MOBILE_BOTTOM_ITEMS = [
   { label: "Home", href: "/dashboard", icon: Home },
-  { label: "Create", href: "/studio", icon: Sparkles },
+  { label: "Studio", href: "/studio", icon: Sparkles },
   { label: "Social", href: "/social", icon: MessagesSquare, badge: 4 },
   { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "More", href: "#menu", icon: Menu },
@@ -348,17 +354,21 @@ export const MOBILE_BOTTOM_ITEMS = [
 export const MOBILE_MORE_ITEMS = [
   { label: "Profile", href: "/profile", icon: User },
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
+  { label: "Generate", href: "/generate", icon: Wand2 },
   { label: "Studio", href: "/studio", icon: Paintbrush },
+  { label: "Flow", href: "/flow", icon: Layers },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Music", href: "/dashboard?app=music", icon: Music },
   { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "Social", href: "/social", icon: Users },
-  { label: "Flow", href: "/studio?tool=workflow", icon: Layers },
   { label: "Watch", href: "/dashboard?app=watch", icon: Clapperboard },
   { label: "Radio", href: "/dashboard?app=radio", icon: Radio },
-  { label: "Terminal", href: "/dashboard?app=terminal", icon: Terminal },
+  { label: "Terminal", href: "/studio?tool=terminal", icon: Terminal },
+  { label: "Code", href: "/code", icon: Code },
+  { label: "Projects", href: "/projects", icon: Folder },
+  { label: "Deployments", href: "/deployments", icon: Server },
   { label: "Wallet", href: "/wallet", icon: Wallet },
   { label: "Notifications", href: "/social?tab=notifications", icon: Bell },
   { label: "Settings", href: "/settings", icon: Settings },

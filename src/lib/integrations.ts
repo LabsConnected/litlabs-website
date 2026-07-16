@@ -168,16 +168,6 @@ export const INTEGRATION_REGISTRY: Omit<Integration, "status" | "detail">[] = [
 
   /* ── Notifications ────────────────────────────────────────────── */
   {
-    id: "discord",
-    name: "Discord Webhook",
-    tagline: "Outbound notifications (sales, signups, agent events).",
-    purpose:
-      "Driven by the LiTT notification dispatcher. Set DISCORD_WEBHOOK_URL.",
-    category: "notifications",
-    envKeys: ["DISCORD_WEBHOOK_URL"],
-    required: false,
-  },
-  {
     id: "resend",
     name: "Resend",
     tagline: "Transactional email (alerts, system mail).",

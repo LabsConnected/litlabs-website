@@ -66,9 +66,10 @@ export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     const client = getSupabaseAdmin();
     if (!client) {
-      return typeof prop === "string" && ["from"].includes(prop)
-        ? () => ({ select: () => ({}), insert: () => ({}), update: () => ({}) })
-        : undefined;
+      if (typeof prop === "string" && ["from", "auth", "channel", "storage", "rpc"].includes(prop)) {
+        return chainable;
+      }
+      return undefined;
     }
     return (client as unknown as Record<string | symbol, unknown>)[prop];
   },

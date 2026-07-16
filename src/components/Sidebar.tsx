@@ -6,8 +6,7 @@ import { usePathname, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useProfile } from "@/context/ProfileContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useUser } from "@clerk/nextjs";
+import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
 import {
   X,
   ChevronLeft,
@@ -278,7 +277,7 @@ function SidebarContent({
   const { balance } = useWallet();
   const { profile } = useProfile();
   const { isSignedIn } = useClerkAuth();
-  const { user } = useUser();
+  const { user } = useAppUser();
 
   const [groupExpanded, setGroupExpanded] = useState<Record<string, boolean>>(() => {
     const saved = loadJson<Record<string, boolean>>(GROUP_EXPANDED_KEY, {});

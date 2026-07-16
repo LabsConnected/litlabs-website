@@ -59,6 +59,7 @@ import {
   Music,
   Hammer,
   Code,
+  Rocket,
   Menu,
 } from "lucide-react";
 
@@ -143,6 +144,14 @@ const TOOL_RAIL: ToolRailItem[] = [
   { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
   { id: "projects", label: "Projects", icon: FolderKanban, drawer: "projects" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
+  { id: "video", label: "Video", icon: Film, tool: "video" },
+  { id: "audio", label: "Audio", icon: Music, tool: "audio" },
+  { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
+  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
+  { id: "pipeline", label: "Pipeline", icon: LayoutGrid, tool: "pipeline" },
+  { id: "loops", label: "Loops", icon: Zap, tool: "loops" },
+  { id: "space", label: "Space", icon: Rocket, tool: "space" },
+  { id: "clibridge", label: "CLI", icon: Terminal, tool: "clibridge" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
 
@@ -159,6 +168,7 @@ const SLASH_CHIPS: {
   { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
   { id: "code", label: "/code", desc: "Generate Code", tool: "canvas" },
   { id: "agent", label: "/agent", desc: "Run Agent", tool: "builder" },
+  { id: "terminal", label: "/terminal", desc: "Open Terminal", tool: "terminal" },
 ];
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
@@ -500,14 +510,8 @@ function LITTTerminalShellInner({
     [agentId],
   );
   const ActiveTool = useMemo<ComponentType | null>(() => {
-    // chat and image are merged into the Builder hub — they render ChatShell,
-    // not a standalone tool component.
-    if (
-      activeTool === "chat" ||
-      activeTool === "agents" ||
-      activeTool === "image" ||
-      activeTool === "builder"
-    )
+    // chat, agents, and builder have dedicated rendering branches.
+    if (activeTool === "chat" || activeTool === "agents" || activeTool === "builder")
       return null;
     return TOOL_COMPONENTS[activeTool];
   }, [activeTool]);
@@ -726,7 +730,7 @@ function LITTTerminalShellInner({
   const runSlashCommand = useCallback(
     async (text: string) => {
       const match = text.match(
-        /^\/(image|audio|video|build|code|agent)\s*(.*)/i,
+        /^\/(image|audio|video|build|code|agent|terminal)\s*(.*)/i,
       );
       if (!match) return false;
       const [, cmd, raw] = match;
@@ -976,6 +980,18 @@ function LITTTerminalShellInner({
           content: prompt
             ? `Switched to the Code tool. Prompt: ${prompt}`
             : "Switched to the Code tool.",
+          createdAt: Date.now(),
+        });
+        return true;
+      }
+
+      if (cmd === "terminal") {
+        onToolChangeAction?.("terminal");
+        addToolMessage({
+          role: "assistant",
+          content: prompt
+            ? `Switched to the Terminal. Command queued: ${prompt}`
+            : "Switched to the Terminal.",
           createdAt: Date.now(),
         });
         return true;
@@ -1821,11 +1837,10 @@ function LITTTerminalShellInner({
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
             {activeTool === "chat" ||
-            activeTool === "builder" ||
-            activeTool === "image" ? (
+            (activeTool === "builder" && messages.length > 0) ? (
               <ChatShell
                 embedded
-                hideDock
+                hideDock={activeTool !== "builder"}
                 builderMode
                 messages={chatMessages}
                 sending={busy}
@@ -2011,6 +2026,8 @@ function LITTTerminalShellInner({
                   )}
                 </div>
               )
+            ) : activeTool === "builder" && messages.length === 0 ? (
+              <BuilderTool onToolSelectAction={onToolChangeAction} />
             ) : ActiveTool ? (
               <ActiveTool />
             ) : (

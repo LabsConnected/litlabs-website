@@ -33,27 +33,27 @@ export default function MobileBottomNav() {
           {primary.map((item) => {
             const Icon = item.icon;
             const active = item.href !== "#" && isActive(item.href);
-            const isCreate = item.label === "Create";
+            const isStudio = item.label === "Studio";
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isCreate ? "-mt-5" : ""}`}
+                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isStudio ? "-mt-5" : ""}`}
                 style={{
                   color: active
                     ? T.accentColor
-                    : isCreate
+                    : isStudio
                       ? T.bgColor
                       : T.textMuted,
                 }}
               >
-                {active && !isCreate && (
+                {active && !isStudio && (
                   <span
                     className="absolute inset-0 rounded-xl opacity-15"
                     style={{ backgroundColor: T.accentColor }}
                   />
                 )}
-                {isCreate ? (
+                {isStudio ? (
                   <span
                     className="grid h-12 w-12 place-items-center rounded-full shadow-[0_0_24px_rgba(139,92,246,.5)]"
                     style={{ backgroundColor: T.accentColor }}
