@@ -8,16 +8,29 @@ import {
   useMemo,
   type ComponentType,
 } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import { useNavDrawer } from "@/context/NavDrawerContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
 import { AGENTS } from "@/lib/agents";
 import { AGENT_AVATAR_META } from "@/lib/avatars";
-import type { StudioTool } from "./StudioSidebar";
+export type StudioTool =
+  | "chat"
+  | "image"
+  | "video"
+  | "audio"
+  | "agents"
+  | "terminal"
+  | "builder"
+  | "pipeline"
+  | "gallery"
+  | "canvas"
+  | "clibridge"
+  | "space";
+
 import {
   Terminal,
   FolderKanban,
@@ -29,13 +42,15 @@ import {
   Settings,
   Send,
   Plus,
+  Upload,
   Camera,
+  ScreenShare,
   Mic,
   MicOff,
-  Paperclip,
   X,
   Sparkles,
   LayoutGrid,
+  LayoutDashboard,
   Activity,
   Zap,
   Copy,
@@ -50,7 +65,6 @@ import {
   Hammer,
   Code,
   Shell,
-  Menu,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -490,7 +504,6 @@ function LITTTerminalShellInner({
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
-  const { toggle: toggleNavDrawer } = useNavDrawer();
   const {
     voiceState,
     interimTranscript,
@@ -515,6 +528,7 @@ function LITTTerminalShellInner({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -664,6 +678,39 @@ function LITTTerminalShellInner({
       .finally(() => {
         if (e.target) e.target.value = "";
       });
+  }, []);
+
+  const handleScreenCapture = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject();
+      });
+      await video.play();
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      stream.getTracks().forEach((track) => track.stop());
+      const dataUrl = canvas.toDataURL("image/png");
+      setAttachments((prev) =>
+        [...prev, { url: dataUrl, name: "screenshot.png", type: "image/png" }].slice(0, 8),
+      );
+    } catch {
+      // ignore cancellation or errors
+    }
   }, []);
 
   const removeAttachment = useCallback((idx: number) => {
@@ -1336,6 +1383,63 @@ function LITTTerminalShellInner({
     }
   };
 
+  const plusActions = [
+    {
+      id: "upload",
+      label: "Upload",
+      icon: Upload,
+      onClick: () => fileInputRef.current?.click(),
+    },
+    {
+      id: "camera",
+      label: "Camera",
+      icon: Camera,
+      onClick: () => setCameraOpen(true),
+    },
+    {
+      id: "screen",
+      label: "Screen capture",
+      icon: ScreenShare,
+      onClick: handleScreenCapture,
+    },
+    {
+      id: "image",
+      label: "Image",
+      icon: ImageIcon,
+      onClick: () => onToolChangeAction?.("image"),
+    },
+    {
+      id: "video",
+      label: "Video",
+      icon: Film,
+      onClick: () => onToolChangeAction?.("video"),
+    },
+    {
+      id: "audio",
+      label: "Audio",
+      icon: Music,
+      onClick: () => onToolChangeAction?.("audio"),
+    },
+    {
+      id: "plugins",
+      label: "Plugins",
+      icon: LayoutGrid,
+      onClick: () => setPluginsOpen(true),
+    },
+    {
+      id: "assets",
+      label: "Assets",
+      icon: FolderOpen,
+      onClick: () => onToolChangeAction?.("gallery"),
+    },
+    {
+      id: "agent",
+      label: "Add agent/skill",
+      icon: Bot,
+      onClick: () => onToolChangeAction?.("agents"),
+    },
+  ];
+
   // When the user clicks a chip body, we treat it as a follow-up turn so
   // the chat path picks up the chip's intent. Destructive action types
   // (anything that would run a shell command, edit a file, or build/deploy)
@@ -1416,14 +1520,17 @@ function LITTTerminalShellInner({
       {/* ── TOP BAR ── */}
       <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md md:flex">
         <div className="flex items-center gap-3">
-          <button
-            onClick={toggleNavDrawer}
-            className="rounded-lg p-1.5 transition-colors hover:bg-white/10"
-            aria-label="Open navigation"
-            title="Open navigation (Ctrl+B)"
+          <Link
+            href="/dashboard"
+            className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-white/10"
+            aria-label="Dashboard"
+            title="Dashboard"
           >
-            <Menu size={18} className="text-gray-300" />
-          </button>
+            <LayoutDashboard size={18} className="text-cyan-400" />
+            <span className="hidden text-sm font-black tracking-[0.15em] sm:inline">
+              LITT
+            </span>
+          </Link>
           <div className="flex items-center gap-2">
             <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
               <Sparkles size={12} className="text-white" />
@@ -1684,6 +1791,15 @@ function LITTTerminalShellInner({
               </div>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
+              <Link
+                href="/dashboard"
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-neutral-300 transition hover:bg-white/10 sm:px-3"
+                aria-label="Dashboard"
+                title="Dashboard"
+              >
+                <LayoutDashboard size={14} className="text-cyan-400" />
+                <span className="hidden sm:inline">Dashboard</span>
+              </Link>
               <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2 py-1 text-gray-300">
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
                 <span className="hidden sm:inline">Systems nominal</span>
@@ -1697,6 +1813,27 @@ function LITTTerminalShellInner({
               </span>
             </div>
           </div>
+
+          {cameraOpen && (
+            <div className="absolute right-4 top-14 z-30 w-64 sm:top-16">
+              <CameraSession
+                compact
+                onSnapshot={(url) => {
+                  if (activeTool !== "chat") {
+                    onToolChangeAction?.("chat");
+                  }
+                  void send("Describe what you see.", [url]).then(
+                    (reply) => {
+                      if (reply) speakText(reply);
+                    },
+                  );
+                  setCameraOpen(false);
+                }}
+                onClose={() => setCameraOpen(false)}
+                modelName={persona.name}
+              />
+            </div>
+          )}
 
           {/* Scrollable content */}
           <div
@@ -2009,42 +2146,67 @@ function LITTTerminalShellInner({
                 attachments={attachments}
                 onRemove={removeAttachment}
               />
-              <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:items-center">
-                <button
-                  aria-label="Add attachment"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
-                >
-                  <Plus size={15} aria-hidden="true" />
-                </button>
-                <button
-                  aria-label="Capture from camera"
-                  onClick={() => setCameraOpen(true)}
-                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
-                    cameraOpen
-                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
-                  }`}
-                >
-                  <Camera size={15} aria-hidden="true" />
-                </button>
-                <button
-                  aria-label={micActive ? "Stop voice" : "Start voice"}
-                  onClick={toggleMic}
-                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
-                    micActive
-                      ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
-                  }`}
-                >
-                  {micActive ? (
-                    <MicOff size={15} aria-hidden="true" />
-                  ) : (
-                    <Mic size={15} aria-hidden="true" />
+              <div className="flex items-end gap-2 sm:items-center">
+                <div className="relative">
+                  <button
+                    aria-label="Open creation menu"
+                    aria-expanded={plusMenuOpen}
+                    onClick={() => setPlusMenuOpen((v) => !v)}
+                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:h-9 sm:w-9 ${
+                      plusMenuOpen
+                        ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
+                        : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                    }`}
+                  >
+                    <Plus size={15} aria-hidden="true" />
+                  </button>
+                  {plusMenuOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-40 bg-black/60 sm:bg-transparent"
+                        onClick={() => setPlusMenuOpen(false)}
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="fixed bottom-0 left-0 right-0 z-50 rounded-t-2xl border border-white/10 bg-[#0a0a0f] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-56 sm:rounded-xl sm:p-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between pb-2 sm:hidden">
+                          <span className="text-xs font-black text-white">
+                            Create & attach
+                          </span>
+                          <button
+                            onClick={() => setPlusMenuOpen(false)}
+                            aria-label="Close creation menu"
+                            className="rounded-md p-1 text-neutral-300 hover:bg-white/10"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-1">
+                          {plusActions.map((action) => {
+                            const Icon = action.icon;
+                            return (
+                              <button
+                                key={action.id}
+                                onClick={() => {
+                                  setPlusMenuOpen(false);
+                                  action.onClick();
+                                }}
+                                className="flex flex-col items-center gap-1 rounded-lg p-2 text-[10px] text-neutral-200 transition hover:bg-white/5 sm:flex-row sm:gap-2 sm:px-3 sm:py-2 sm:text-xs"
+                              >
+                                <Icon size={16} className="text-cyan-400" />
+                                <span>{action.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
                   )}
-                </button>
+                </div>
 
-                <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
+                <div className="relative flex min-w-0 flex-1 items-end">
                   <textarea
                     ref={textInputRef}
                     name="litt-message"
@@ -2078,11 +2240,19 @@ function LITTTerminalShellInner({
                 </div>
 
                 <button
-                  aria-label="Attach file"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
+                  aria-label={micActive ? "Stop voice" : "Start voice"}
+                  onClick={toggleMic}
+                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:h-9 sm:w-9 ${
+                    micActive
+                      ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                  }`}
                 >
-                  <Paperclip size={15} />
+                  {micActive ? (
+                    <MicOff size={15} aria-hidden="true" />
+                  ) : (
+                    <Mic size={15} aria-hidden="true" />
+                  )}
                 </button>
               </div>
 
@@ -2175,8 +2345,8 @@ function LITTTerminalShellInner({
           className={cn(
             "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
             pluginsOpen
-              ? "fixed inset-y-0 right-0 z-50 flex w-[85%] md:relative md:inset-auto md:w-[300px] lg:relative"
-              : "hidden w-[300px] lg:flex",
+              ? "fixed inset-y-0 right-0 z-50 flex w-[80%] md:relative md:inset-auto md:w-64 lg:relative"
+              : "hidden w-64 lg:flex",
           )}
         >
           {pluginsOpen ? (
@@ -2294,27 +2464,6 @@ function LITTTerminalShellInner({
                   </span>
                 </div>
               </div>
-
-              {cameraOpen && (
-                <div className="border-b border-white/5 px-4 py-3">
-                  <CameraSession
-                    compact
-                    onSnapshot={(url) => {
-                      if (activeTool !== "chat") {
-                        onToolChangeAction?.("chat");
-                      }
-                      void send("Describe what you see.", [url]).then(
-                        (reply) => {
-                          if (reply) speakText(reply);
-                        },
-                      );
-                      setCameraOpen(false);
-                    }}
-                    onClose={() => setCameraOpen(false)}
-                    modelName={persona.name}
-                  />
-                </div>
-              )}
 
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
                 <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">

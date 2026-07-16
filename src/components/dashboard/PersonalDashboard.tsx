@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   Activity,
@@ -99,7 +99,6 @@ export default function PersonalDashboard({
   displayName: string;
 }) {
   const { resolvedColors: T } = useTheme();
-  const [command, setCommand] = useState("");
   const [data, setData] = useState<CommandData | null>(null);
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [balance, setBalance] = useState<number | null>(null);
@@ -208,16 +207,6 @@ export default function PersonalDashboard({
     return items.slice(0, 5);
   }, [balance, data, failedDeployments, failedTasks, usage]);
 
-  function submit(event: FormEvent) {
-    event.preventDefault();
-    const text = command.trim();
-    if (!text) return;
-    window.dispatchEvent(
-      new CustomEvent("litt-chat-trigger", { detail: { text } }),
-    );
-    setCommand("");
-  }
-
   const panel = "rounded-2xl border border-white/10 bg-white/[.035]";
   const recentProject = data?.projects[0];
 
@@ -231,55 +220,50 @@ export default function PersonalDashboard({
   return (
     <div className="mx-auto w-full max-w-7xl space-y-4 pb-8">
       <header className={`${panel} overflow-hidden p-5 sm:p-7`}>
-        <div className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-black uppercase tracking-[.18em] text-cyan-300">
-              Personal command center
-            </p>
-            <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">
-              Welcome back, {displayName}
-            </h1>
-            <p className="mt-1 text-sm" style={{ color: T.textMuted }}>
-              Own the work. Direct the agents. Ship what matters.
-            </p>
-          </div>
-          <div className="flex gap-2 text-xs">
+        <p className="text-xs font-black uppercase tracking-[.18em] text-cyan-300">
+          Personal command center
+        </p>
+        <h1 className="mt-2 text-2xl font-black tracking-tight sm:text-4xl">
+          Welcome back, {displayName}
+        </h1>
+        <p className="mt-1 text-sm" style={{ color: T.textMuted }}>
+          Own the work. Direct the agents. Ship what matters.
+        </p>
+
+        <div className="mt-6 grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="flex flex-col gap-2 rounded-2xl border border-amber-500/20 bg-amber-500/5 p-4">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-amber-300">
+              <Coins size={14} />
+              LBC Balance
+            </div>
+            <div className="text-3xl font-black text-white">
+              {balance ?? "—"} <span className="text-sm">LBC</span>
+            </div>
             <Link
               href="/wallet"
-              className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2"
+              className="text-xs font-bold text-amber-300 hover:underline"
             >
-              <Coins size={14} className="text-amber-300" />
-              {balance ?? "—"} LBC
+              Manage credits
             </Link>
+          </div>
+          <div className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/[.03] p-4">
+            <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-300">
+              <Gauge size={14} />
+              Workspace status
+            </div>
+            <div className="text-lg font-black text-white">
+              {data?.partial ? "Check data" : "Healthy"}
+            </div>
             <Link
               href="/settings"
-              className="flex items-center gap-2 rounded-xl border border-white/10 px-3 py-2"
+              className="text-xs font-bold text-emerald-300 hover:underline"
             >
-              <Gauge size={14} className="text-emerald-300" />
-              {data?.partial ? "Check data" : "Healthy"}
+              {data?.partial ? "Review connections" : "View settings"}
             </Link>
           </div>
         </div>
-        <form
-          onSubmit={submit}
-          className="mt-6 flex gap-2 rounded-2xl border border-cyan-400/25 bg-black/25 p-2 focus-within:border-cyan-300/50"
-        >
-          <Sparkles className="ml-2 mt-2.5 shrink-0 text-cyan-300" size={18} />
-          <input
-            value={command}
-            onChange={(e) => setCommand(e.target.value)}
-            className="min-w-0 flex-1 bg-transparent px-2 text-sm outline-none"
-            placeholder="What do you want LiTT to build?"
-            aria-label="Command LiTT"
-          />
-          <button
-            className="rounded-xl bg-cyan-300 px-4 py-2 text-xs font-black text-black disabled:opacity-40"
-            disabled={!command.trim()}
-          >
-            Run
-          </button>
-        </form>
-        <div className="mt-3 grid grid-cols-3 gap-2">
+
+        <div className="mt-4 grid grid-cols-3 gap-2">
           {[
             { label: "Open Studio", href: "/studio", icon: Sparkles },
             { label: "New Project", href: "/studio/github", icon: Plus },
@@ -288,7 +272,7 @@ export default function PersonalDashboard({
             <Link
               key={item.label}
               href={item.href}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.03] text-[10px] font-black sm:text-xs"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.03] text-[10px] font-black transition hover:bg-white/[.06] sm:text-xs"
             >
               <item.icon size={14} />
               {item.label}

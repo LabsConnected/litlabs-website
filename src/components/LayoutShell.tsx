@@ -51,8 +51,8 @@ export default function LayoutShell({
   const pathname = usePathname();
   const { open, setOpen, toggle } = useNavDrawer();
   const publicPage = isPublicPath(pathname || "/");
-  const isStudio = pathname === "/studio";
-  const isChat = pathname === "/litt" || pathname === "/litt-terminal";
+  const isStudio =
+    pathname === "/studio" || pathname?.startsWith("/studio/") || false;
   const ownChrome = hasOwnChrome(pathname || "/");
 
   useEffect(() => {
@@ -83,23 +83,20 @@ export default function LayoutShell({
     );
   }
 
-  if (isStudio || isChat) {
+  if (isStudio) {
     return (
       <>
         <AnimatedBackgroundWrapper />
         <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          {!isStudio && <NavbarWrapper />}
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden md:pb-0 pb-[calc(64px+env(safe-area-inset-bottom))]">
+            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden">
               {children}
             </main>
           </div>
-          <MobileBottomNav />
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>
-        <Sidebar open={open} onClose={() => setOpen(false)} />
       </>
     );
   }

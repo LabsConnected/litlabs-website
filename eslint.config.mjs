@@ -21,7 +21,8 @@ const eslintConfig = defineConfig([
     ".vercel/**",
     "out/**",
     "build/**",
-    "dist/**",
+    "**/dist/**",
+    "**/dist/**",
     "next-env.d.ts",
     // Local binaries and heavy folders
     "chrome/**",

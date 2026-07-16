@@ -3,7 +3,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
-import type { StudioTool } from "./StudioSidebar";
+import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import styles from "./ChatShell.module.css";
 

@@ -27,7 +27,6 @@ const nextConfig: NextConfig = {
       "@google/genai",
       "@google/generative-ai",
       "@monaco-editor/react",
-      "socket.io-client",
       "stripe",
       "supermemory",
     ],
@@ -207,11 +206,6 @@ const nextConfig: NextConfig = {
         permanent: false,
       },
       { source: "/flow", destination: "/studio?tool=flow", permanent: false },
-      {
-        source: "/agent-chat",
-        destination: "/agent",
-        permanent: false,
-      },
     ];
   },
 
