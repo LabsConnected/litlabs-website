@@ -4,6 +4,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
+import { cn } from "@/lib/utils";
 import styles from "./ChatShell.module.css";
 
 export type StudioMessage = {
@@ -286,7 +287,7 @@ export function ChatShell({
             />
             <button
               type="button"
-              className={styles.mic}
+              className={cn(styles.mic, voiceState === "listening" && styles.listening)}
               disabled={micDisabled}
               aria-label={
                 micDisabled

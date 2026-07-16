@@ -2611,3 +2611,94 @@ main {
     transform: translate(-2px, -1px);
   }
 }
+
+/* ============================================================
+   GLOBAL FLOW / MOTION / POLISH
+   Smooth interactive feedback, accessible focus, and consistent
+   entry motion across the app.
+   ============================================================ */
+
+::selection {
+  background: color-mix(in srgb, var(--accent-color) 50%, transparent);
+  color: #fff;
+}
+
+:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--accent-color) 80%, transparent);
+  outline-offset: 2px;
+  border-radius: var(--radius-md);
+}
+
+button,
+a,
+input,
+textarea,
+select,
+[role="button"] {
+  transition:
+    color var(--transition),
+    background-color var(--transition),
+    border-color var(--transition),
+    transform var(--transition),
+    box-shadow var(--transition);
+}
+
+button:not(:disabled):active,
+a[role="button"]:active {
+  transform: scale(0.98);
+}
+
+/* Page / panel entrance animations */
+@keyframes enter-fade {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes enter-slide-up {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 18px color-mix(in srgb, var(--accent-color) 25%, transparent);
+  }
+}
+
+.animate-enter {
+  animation: enter-fade 0.35s ease-out both;
+}
+
+.animate-slide-up {
+  animation: enter-slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.animate-pulse-glow {
+  animation: pulse-glow 2s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-enter,
+  .animate-slide-up,
+  .animate-pulse-glow {
+    animation: none !important;
+    transform: none !important;
+    opacity: 1 !important;
+  }
+}

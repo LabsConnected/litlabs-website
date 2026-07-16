@@ -1822,6 +1822,7 @@ function LITTTerminalShellInner({
             ref={transcriptRef}
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
+            <div key={activeTool} className="animate-enter">
             {activeTool === "chat" || activeTool === "builder" ? (
               <ChatShell
                 embedded
@@ -2018,6 +2019,7 @@ function LITTTerminalShellInner({
                 Tool not available
               </div>
             )}
+            </div>
           </div>
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
