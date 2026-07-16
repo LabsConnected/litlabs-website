@@ -110,7 +110,7 @@ export function LandingFooter() {
               href="/"
               className="inline-flex items-center gap-2.5 text-sm font-black tracking-tight text-white"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
                 <Sparkles size={15} className="text-black" />
               </div>
               LiTT <span className="text-neutral-500">/</span> Labs

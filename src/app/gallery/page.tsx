@@ -1342,7 +1342,7 @@ export default function Gallery() {
             {[0, 1, 2, 3, 4, 5].map((index) => (
               <div
                 key={index}
-                className="aspect-[4/3] animate-pulse rounded-2xl border"
+                className="aspect-4/3 animate-pulse rounded-2xl border"
                 style={{
                   backgroundColor: `${T.boxBg}b8`,
                   borderColor: `${T.borderColor}30`,

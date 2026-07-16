@@ -243,7 +243,7 @@ export default function RetroPlayerPage() {
               <input ref={biosInputRef} type="file" className="hidden" accept=".sfc,.smc,.bin,.rom" onChange={(event) => { pickBios(event.target.files?.[0]); event.target.value = ""; }} />
             </section>
           )}
-          <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-b from-violet-500/10 to-transparent p-5"><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl"/><Sparkles className="text-violet-300" size={20}/><div className="mt-3 text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">
+          <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5"><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl"/><Sparkles className="text-violet-300" size={20}/><div className="mt-3 text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">
             {emulatorError ? "Emulator trouble." : emulatorTimeout ? "Emulator is taking a while." : emulatorReady ? "Chapter loaded." : "Loading cartridge…"}
           </h2><p className="mt-2 text-sm leading-6 text-white/45">
             {emulatorError

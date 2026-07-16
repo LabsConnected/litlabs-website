@@ -169,7 +169,7 @@ export default function GameCloudHome() {
       {/* Game Player Overlay */}
       {selectedGame && (
         <div
-          className="fixed inset-0 z-[120] flex items-center justify-center p-4"
+          className="fixed inset-0 z-120 flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
         >
           <div

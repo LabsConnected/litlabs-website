@@ -208,7 +208,7 @@ export function LandingHero() {
 
               {/* Composer */}
               <div className="mt-auto flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2.5">
-                <div className="h-5 w-5 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shrink-0">L</div>
+                <div className="h-5 w-5 rounded-full bg-linear-to-br from-orange-400 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shrink-0">L</div>
                 <span className="flex-1 text-[11.5px] text-neutral-500">
                   Ask LiTT to build, fix, design, research, or deploy…
                 </span>

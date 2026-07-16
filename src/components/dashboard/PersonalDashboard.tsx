@@ -524,7 +524,7 @@ export default function PersonalDashboard({
                     className="flex h-full flex-1 flex-col justify-end gap-1"
                   >
                     <div
-                      className="rounded-t-md bg-gradient-to-t from-violet-600 to-cyan-300"
+                      className="rounded-t-md bg-linear-to-t from-violet-600 to-cyan-300"
                       style={{
                         height: `${Math.max(4, (total / maxChart) * 100)}%`,
                       }}

@@ -100,7 +100,7 @@ export default function BuilderTool() {
               <span>Your AI crew</span><span className="text-emerald-300">Online</span>
             </div>
             <div className="mt-3 grid grid-cols-[40px_1fr_10px] items-center gap-3 p-1">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-gradient-to-br from-violet-600 to-cyan-400 text-xs font-black text-white">Li</span>
+              <span className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-br from-violet-600 to-cyan-400 text-xs font-black text-white">Li</span>
               <span><b className="block text-sm text-white">LiTT Director</b><small className="mt-1 block text-[10px]" style={{ color: T.textMuted }}>Ready to help</small></span>
               <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_#34d399]" aria-label="Online" />
             </div>

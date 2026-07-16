@@ -38,7 +38,7 @@ export function LandingTestimonials() {
           <h2 className="mb-4 text-3xl font-black tracking-tight text-white md:text-5xl">
             Creators ship faster
             <br />
-            <span className="bg-gradient-to-r from-amber-300 to-pink-300 bg-clip-text text-transparent">
+            <span className="bg-linear-to-r from-amber-300 to-pink-300 bg-clip-text text-transparent">
               with their crew.
             </span>
           </h2>
@@ -48,7 +48,7 @@ export function LandingTestimonials() {
           {TESTIMONIALS.map((t) => (
             <figure
               key={t.author}
-              className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/8 bg-gradient-to-b from-white/[0.04] to-white/[0.01] p-6 transition hover:border-white/15"
+              className="group relative flex h-full flex-col overflow-hidden rounded-2xl border border-white/8 bg-linear-to-b from-white/[0.04] to-white/[0.01] p-6 transition hover:border-white/15"
             >
               <svg
                 aria-hidden
@@ -65,7 +65,7 @@ export function LandingTestimonials() {
 
               <figcaption className="mt-5 flex items-center gap-3 border-t border-white/5 pt-5">
                 <div
-                  className={`flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br ${t.accent} text-sm font-black text-black`}
+                  className={`flex h-10 w-10 items-center justify-center rounded-full bg-linear-to-br ${t.accent} text-sm font-black text-black`}
                 >
                   {t.initial}
                 </div>

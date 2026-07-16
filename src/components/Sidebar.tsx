@@ -140,7 +140,7 @@ function SidebarContent({
             <Zap size={17} />
           </span>
           <span className="min-w-0">
-            <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
+            <b className="block bg-linear-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
               LiTT
             </b>
             <span className="block text-[8px] font-bold uppercase tracking-[.22em] text-neutral-400">

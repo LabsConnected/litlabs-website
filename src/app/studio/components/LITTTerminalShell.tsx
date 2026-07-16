@@ -1544,7 +1544,7 @@ function LITTTerminalShellInner({
             </span>
           </Link>
           <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
+            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-cyan-400 to-blue-600">
               <Sparkles size={12} className="text-white" />
             </div>
             <span className="text-sm font-black tracking-[0.15em]">LITT</span>

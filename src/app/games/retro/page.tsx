@@ -157,7 +157,7 @@ export default function RetroArcadePage() {
             </div>
             <button
               onClick={() => inputRef.current?.click()}
-              className="flex items-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-600 px-4 py-2.5 text-sm font-black shadow-[0_0_30px_rgba(217,70,239,.25)] transition hover:scale-[1.02]"
+              className="flex items-center gap-2 rounded-xl bg-linear-to-r from-fuchsia-500 to-violet-600 px-4 py-2.5 text-sm font-black shadow-[0_0_30px_rgba(217,70,239,.25)] transition hover:scale-[1.02]"
             >
               <Upload size={16} /> Add your game
             </button>
@@ -227,7 +227,7 @@ export default function RetroArcadePage() {
             {recent && (
               <Link
                 href={`/games/retro/play/${recent.id}`}
-                className="group relative flex min-h-40 overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-gradient-to-br from-violet-950 via-[#15101e] to-cyan-950 p-6 shadow-[0_25px_80px_rgba(0,0,0,.35)]"
+                className="group relative flex min-h-40 overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-linear-to-br from-violet-950 via-[#15101e] to-cyan-950 p-6 shadow-[0_25px_80px_rgba(0,0,0,.35)]"
               >
                 <div className="relative z-10 flex max-w-xl flex-col justify-end">
                   <span className="mb-2 text-[10px] font-black uppercase tracking-[.25em] text-fuchsia-300">
@@ -395,7 +395,7 @@ export default function RetroArcadePage() {
           </section>
 
           <aside className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-b from-violet-500/10 to-transparent p-5">
+            <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5">
               <Sparkles className="mb-3 text-violet-300" />
               <div className="text-[10px] font-black uppercase tracking-[.22em] text-violet-300">
                 LiTT Companion
@@ -559,7 +559,7 @@ export default function RetroArcadePage() {
               <button
                 disabled={!pending.legal || busy || !pending.title.trim()}
                 onClick={importGame}
-                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-fuchsia-500 to-violet-600 py-3 font-black disabled:cursor-not-allowed disabled:opacity-30"
+                className="mt-6 flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-fuchsia-500 to-violet-600 py-3 font-black disabled:cursor-not-allowed disabled:opacity-30"
               >
                 <Gamepad2 size={17} />
                 {busy ? "Saving locally…" : "Add to my arcade"}

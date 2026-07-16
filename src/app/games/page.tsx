@@ -341,7 +341,7 @@ export default function GamesPage() {
                 key={`rail-${game.id}`}
                 type="button"
                 onClick={() => launchGame(game)}
-                className="group relative aspect-[4/3] w-[230px] shrink-0 snap-start overflow-hidden rounded-2xl border text-left sm:w-[280px]"
+                className="group relative aspect-4/3 w-[230px] shrink-0 snap-start overflow-hidden rounded-2xl border text-left sm:w-[280px]"
                 style={{
                   borderColor: `${T.borderColor}55`,
                   backgroundColor: T.boxBg,
@@ -354,7 +354,7 @@ export default function GamesPage() {
                   alt=""
                   className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
                 />
-                <span className="absolute inset-0 bg-gradient-to-t from-black/75 via-transparent to-transparent" />
+                <span className="absolute inset-0 bg-linear-to-t from-black/75 via-transparent to-transparent" />
                 <span className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
                   <span>
                     <span className="block text-sm font-black text-white">
