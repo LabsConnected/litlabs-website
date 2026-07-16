@@ -2,3 +2,4 @@ packages:
   - "."
   - "terminal-server"
   - "cli"
+  - "packages/litt-agent-core"

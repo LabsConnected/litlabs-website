@@ -10,7 +10,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSy
 import type { NextFunction, Request, Response } from "express";
 import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
-import { handleLiTTCodeCommand } from "./litt-code";
+import { handleLiTTCodeCommand } from "@litt/agent-core";
 import { bearerToken, verifyTerminalToken } from "./auth";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);

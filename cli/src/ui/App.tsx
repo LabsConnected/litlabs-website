@@ -3,6 +3,7 @@ import process from "node:process";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";
+import { askLiTTCode } from "@litt/agent-core";
 
 type AppProps = {
   cwd: string;
@@ -60,16 +61,15 @@ export function App({ cwd, model, mode }: AppProps): React.JSX.Element {
     ]);
 
     try {
-      // Replace with agent.run() and streaming callbacks.
-      await new Promise((resolve) => setTimeout(resolve, 400));
+      const resolvedModel = model === "auto" ? undefined : model;
+      const reply = await askLiTTCode(prompt, resolvedModel);
 
       setMessages((current) => [
         ...current,
         {
           id: crypto.randomUUID(),
           role: "assistant",
-          content:
-            "Agent runtime is connected. Next step: inspect the repository and create a plan.",
+          content: reply,
         },
       ]);
     } catch (error) {

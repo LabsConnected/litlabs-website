@@ -23,6 +23,7 @@
 
 # Build artifacts
 /build
+dist/
 terminal-server/dist/
 cli/dist/
 

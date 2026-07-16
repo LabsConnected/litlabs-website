@@ -4,6 +4,7 @@ import React from "react";
 import process from "node:process";
 import { Command } from "commander";
 import { render } from "ink";
+import { askLiTTCode } from "@litt/agent-core";
 import { App } from "./ui/App.js";
 
 const program = new Command();
@@ -22,8 +23,14 @@ program
   .option("--cwd <directory>", "Working directory", process.cwd())
   .action(async (options) => {
     if (options.print) {
-      // Later: call your headless agent runner here.
-      console.log(`LiTT: ${options.print}`);
+      const model = options.model === "auto" ? undefined : options.model;
+      try {
+        const reply = await askLiTTCode(options.print, model);
+        console.log(reply);
+      } catch (err) {
+        console.error(err instanceof Error ? err.message : String(err));
+        process.exitCode = 1;
+      }
       return;
     }
 

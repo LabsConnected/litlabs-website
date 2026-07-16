@@ -135,6 +135,9 @@ importers:
 
   cli:
     dependencies:
+      '@litt/agent-core':
+        specifier: workspace:*
+        version: link:../packages/litt-agent-core
       commander:
         specifier: ^15.0.0
         version: 15.0.0
@@ -170,11 +173,23 @@ importers:
         specifier: ^5
         version: 5.9.3
 
+  packages/litt-agent-core:
+    devDependencies:
+      '@types/node':
+        specifier: ^20
+        version: 20.19.43
+      typescript:
+        specifier: ^5
+        version: 5.9.3
+
   terminal-server:
     dependencies:
       '@clerk/backend':
         specifier: ^3.11.4
         version: 3.11.4(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
+      '@litt/agent-core':
+        specifier: workspace:*
+        version: link:../packages/litt-agent-core
       cors:
         specifier: ^2.8.5
         version: 2.8.6

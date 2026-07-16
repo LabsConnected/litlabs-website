@@ -13,12 +13,13 @@
   "scripts": {
     "clean": "rimraf dist",
     "typecheck": "tsc --noEmit -p tsconfig.json",
-    "build": "rimraf dist && tsc -p tsconfig.json",
-    "dev": "tsx src/litt-code-cli.tsx",
+    "build": "pnpm --filter @litt/agent-core build && rimraf dist && tsc -p tsconfig.json",
+    "dev": "pnpm --filter @litt/agent-core build && tsx src/litt-code-cli.tsx",
     "start": "node dist/litt-code-cli.js",
     "validate": "pnpm typecheck && pnpm build && node dist/litt-code-cli.js --help"
   },
   "dependencies": {
+    "@litt/agent-core": "workspace:*",
     "commander": "^15.0.0",
     "ink": "^7.1.0",
     "ink-spinner": "^5.0.0",

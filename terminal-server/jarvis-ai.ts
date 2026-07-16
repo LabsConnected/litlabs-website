@@ -2,4 +2,4 @@
 export {
   askLiTTCode as askJarvis,
   handleLiTTCodeCommand as handleJarvisCommand,
-} from "./litt-code";
+} from "@litt/agent-core";

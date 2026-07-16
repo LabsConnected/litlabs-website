@@ -15,7 +15,7 @@
     "clean:dist": "powershell -Command \"Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue\"",
     "rebuild": "pnpm clean && pnpm build",
     "kill-build": "powershell -Command \"Get-Process node -ErrorAction SilentlyContinue | Where-Object { $_.StartTime -gt (Get-Date).AddMinutes(-5) } | Stop-Process -Force -ErrorAction SilentlyContinue\"",
-    "terminal:dev": "tsx terminal-server/server.ts",
+    "terminal:dev": "pnpm --filter @litt/agent-core build && tsx terminal-server/server.ts",
     "terminal:build": "tsc -p terminal-server/tsconfig.json",
     "terminal:start": "node terminal-server/dist/server.js",
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
