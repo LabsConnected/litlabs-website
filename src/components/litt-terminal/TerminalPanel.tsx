@@ -12,7 +12,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { getTerminalToken } from "@/lib/terminal-client";
-import { Maximize2, Minimize2, RotateCcw, Trash2 } from "lucide-react";
+import { Maximize2, Minimize2, RotateCcw, Trash2, WifiOff, Wifi } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 
 interface TerminalPanelProps {
@@ -41,12 +41,15 @@ export const TerminalPanel = forwardRef<
   const commandBufferRef = useRef<string>("");
   const outputBufferRef = useRef<string>("");
   const [connected, setConnected] = useState(false);
+  const [serverAvailable, setServerAvailable] = useState(false);
   const [fullScreen, setFullScreen] = useState(false);
   const { isLoaded, isSignedIn } = useClerkAuth();
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
     let disposed = false;
+
+    const resize = () => fitAddonRef.current?.fit();
 
     const term = new Terminal({
       cursorBlink: true,
@@ -87,96 +90,142 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[1;32m🔥 LiTT Terminal\x1b[0m");
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
-    term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
 
     const wsUrl =
       process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
-    const resize = () => {
-      fit.fit();
-      socketRef.current?.emit("terminal:resize", {
-        cols: term.cols,
-        rows: term.rows,
-      });
+    
+    // Health check before attempting connection
+    const checkServerHealth = async (): Promise<boolean> => {
+      try {
+        const healthUrl = wsUrl.replace("ws://", "http://").replace("wss://", "https://");
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 3000);
+        
+        const response = await fetch(`${healthUrl}/health`, {
+          signal: controller.signal,
+          headers: { Accept: "application/json" },
+        });
+        
+        clearTimeout(timeoutId);
+        const data = await response.json().catch(() => ({}));
+        return response.ok && data.ok === true;
+      } catch {
+        return false;
+      }
     };
 
-    void getTerminalToken()
-      .then((token) => {
-        if (disposed) return;
-        const connectedSocket = io(wsUrl, {
-          auth: { token },
-          transports: ["websocket", "polling"],
-          reconnectionAttempts: 5,
-        });
+    void checkServerHealth().then((isHealthy) => {
+      if (disposed) return;
+      setServerAvailable(isHealthy);
+      
+      if (!isHealthy) {
+        term.writeln("\x1b[33m⚠ Terminal server not available\x1b[0m");
+        term.writeln("\x1b[90mStart it with: pnpm terminal:dev\x1b[0m");
+        term.writeln("");
+        term.writeln("\x1b[36m💡 Local commands only (no remote shell)\x1b[0m");
+        onLog?.("[TERMINAL] Server offline - local mode");
+        return;
+      }
 
-        socketRef.current = connectedSocket;
+      term.writeln("\x1b[32m✓ Terminal server found\x1b[0m");
+      
+      void getTerminalToken()
+        .then((token) => {
+          if (disposed) return;
+          const connectedSocket = io(wsUrl, {
+            auth: { token },
+            transports: ["websocket", "polling"],
+            reconnectionAttempts: 5,
+            reconnectionDelay: 1000,
+            timeout: 5000,
+          });
 
-        connectedSocket.on("connect", () => {
-          setConnected(true);
-          onConnectionChange?.(true);
-          term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
-          onLog?.("[WS] Connected to terminal server");
-        });
+          socketRef.current = connectedSocket;
 
-        connectedSocket.on("disconnect", (reason) => {
-          setConnected(false);
-          onConnectionChange?.(false);
-          term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
-          onLog?.(`[WS] Disconnected: ${reason}`);
-        });
+          connectedSocket.on("connect", () => {
+            if (disposed) return;
+            setConnected(true);
+            onConnectionChange?.(true);
+            term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
+            onLog?.("[WS] Connected to terminal server");
+          });
 
-        connectedSocket.on("session:ready", ({ sessionId: sid }) => {
-          term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
-          onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
-        });
+          connectedSocket.on("disconnect", (reason) => {
+            if (disposed) return;
+            setConnected(false);
+            onConnectionChange?.(false);
+            term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
+            onLog?.(`[WS] Disconnected: ${reason}`);
+          });
 
-        connectedSocket.on("terminal:output", (data: string) => {
-          term.write(data);
-          outputBufferRef.current += data;
-          if (outputBufferRef.current.length > 4000) {
-            outputBufferRef.current = outputBufferRef.current.slice(-4000);
-          }
-          onTerminalOutput?.(outputBufferRef.current);
-        });
+          connectedSocket.on("session:ready", ({ sessionId: sid }) => {
+            if (disposed) return;
+            term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
+            onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
+          });
 
-        connectedSocket.on("terminal:error", (msg: string) => {
-          term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
-          outputBufferRef.current += `\n⚠ ${msg}`;
-          onLog?.(`[ERROR] ${msg}`);
-        });
-
-        term.onData((data) => {
-          if (data === "\r") {
-            const cmd = commandBufferRef.current.trim();
-            if (cmd) {
-              onCommand?.(cmd);
-              if (cmd.startsWith("litt-code ")) {
-                connectedSocket.emit("litt-code:command", cmd);
-                commandBufferRef.current = "";
-                return;
-              }
+          connectedSocket.on("terminal:output", (data: string) => {
+            if (disposed) return;
+            term.write(data);
+            outputBufferRef.current += data;
+            if (outputBufferRef.current.length > 4000) {
+              outputBufferRef.current = outputBufferRef.current.slice(-4000);
             }
-            commandBufferRef.current = "";
-          } else if (data === "\u007f") {
-            commandBufferRef.current = commandBufferRef.current.slice(0, -1);
-          } else if (data === "\u0003") {
-            commandBufferRef.current = "";
-          } else {
-            commandBufferRef.current += data;
-          }
-          socketRef.current?.emit("terminal:input", data);
-        });
+            onTerminalOutput?.(outputBufferRef.current);
+          });
 
-        window.addEventListener("resize", resize);
-        resize();
-      })
-      .catch((error) => {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Terminal authentication failed";
-        term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
-        onLog?.(`[AUTH] ${message}`);
-      });
+          connectedSocket.on("terminal:error", (msg: string) => {
+            if (disposed) return;
+            term.writeln(`\x1b[31m⚠ ${msg}\x1b[0m`);
+            outputBufferRef.current += `\n⚠ ${msg}`;
+            onLog?.(`[ERROR] ${msg}`);
+          });
+
+          term.onData((data) => {
+            const socket = socketRef.current;
+            if (!socket) {
+              // No server connection - show message in terminal
+              if (data === "\r") {
+                term.writeln("\x1b[31m⛔ Terminal server offline\x1b[0m");
+                term.writeln("\x1b[90mStart with: pnpm terminal:dev\x1b[0m");
+              }
+              return;
+            }
+
+            if (data === "\r") {
+              const cmd = commandBufferRef.current.trim();
+              if (cmd) {
+                onCommand?.(cmd);
+                if (cmd.startsWith("litt-code ")) {
+                  socket.emit("litt-code:command", cmd);
+                  commandBufferRef.current = "";
+                  return;
+                }
+              }
+              commandBufferRef.current = "";
+            } else if (data === "\u007f") {
+              commandBufferRef.current = commandBufferRef.current.slice(0, -1);
+            } else if (data === "\u0003") {
+              commandBufferRef.current = "";
+            } else {
+              commandBufferRef.current += data;
+            }
+            socket.emit("terminal:input", data);
+          });
+
+          window.addEventListener("resize", resize);
+          resize();
+        })
+        .catch((error) => {
+          if (disposed) return;
+          const message =
+            error instanceof Error
+              ? error.message
+              : "Terminal authentication failed";
+          term.writeln(`\x1b[31m❌ ${message}\x1b[0m`);
+          onLog?.(`[AUTH] ${message}`);
+        });
+    });
 
     return () => {
       disposed = true;
@@ -197,17 +246,27 @@ export const TerminalPanel = forwardRef<
     insertCommand: (cmd: string) => {
       const term = termRef.current;
       const socket = socketRef.current;
-      if (!term || !socket) return;
-      term.write(cmd);
-      commandBufferRef.current = cmd;
+      if (!term) return;
+      
+      if (socket && serverAvailable) {
+        term.write(cmd);
+        commandBufferRef.current = cmd;
+      } else {
+        term.writeln("\x1b[31m⛔ Terminal server offline\x1b[0m");
+      }
     },
     runCommand: (cmd: string) => {
       const term = termRef.current;
       const socket = socketRef.current;
-      if (!term || !socket) return;
-      term.write(cmd + "\r");
-      socket.emit("terminal:input", cmd + "\r");
-      commandBufferRef.current = "";
+      if (!term) return;
+      
+      if (socket && serverAvailable) {
+        term.write(cmd + "\r");
+        socket.emit("terminal:input", cmd + "\r");
+        commandBufferRef.current = "";
+      } else {
+        term.writeln("\x1b[31m⛔ Terminal server offline - start with: pnpm terminal:dev\x1b[0m");
+      }
     },
   }));
 
@@ -233,11 +292,17 @@ export const TerminalPanel = forwardRef<
           <span className="rounded bg-neutral-900 px-3 py-1 text-neutral-400">
             docker
           </span>
-          <span
-            className={`rounded px-3 py-1 text-xs font-bold ${connected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
-          >
-            {connected ? "Online" : "Offline"}
-          </span>
+          {serverAvailable ? (
+            <span
+              className={`rounded px-3 py-1 text-xs font-bold flex items-center gap-1 ${connected ? "bg-green-500/20 text-green-400" : "bg-red-500/20 text-red-400"}`}
+            >
+              {connected ? <><Wifi className="h-3 w-3" /> Online</> : <><WifiOff className="h-3 w-3" /> Offline</>}
+            </span>
+          ) : (
+            <span className="rounded bg-yellow-500/20 px-3 py-1 text-xs font-bold text-yellow-400">
+              ⚠ Server Down
+            </span>
+          )}
         </div>
 
         <div className="flex items-center gap-2">
