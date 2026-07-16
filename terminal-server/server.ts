@@ -58,6 +58,8 @@ app.get("/health", (_req, res) => {
     ok: true,
     docker: USE_DOCKER,
     authConfigured: (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32,
+    activeSessions: sessions.size,
+    uptime: process.uptime(),
   });
 });
 

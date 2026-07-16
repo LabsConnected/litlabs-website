@@ -11,6 +11,7 @@ import {
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
+import { useNavDrawer } from "@/context/NavDrawerContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
@@ -50,6 +51,7 @@ import {
   Hammer,
   Code,
   Shell,
+  Menu,
 } from "lucide-react";
 import dynamic from "next/dynamic";
 
@@ -494,6 +496,7 @@ function LITTTerminalShellInner({
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
+  const { toggle: toggleNavDrawer } = useNavDrawer();
   const {
     voiceState,
     interimTranscript,
@@ -1419,6 +1422,14 @@ function LITTTerminalShellInner({
       {/* ── TOP BAR ── */}
       <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md md:flex">
         <div className="flex items-center gap-3">
+          <button
+            onClick={toggleNavDrawer}
+            className="rounded-lg p-1.5 transition-colors hover:bg-white/10"
+            aria-label="Open navigation"
+            title="Open navigation (Ctrl+B)"
+          >
+            <Menu size={18} className="text-gray-300" />
+          </button>
           <div className="flex items-center gap-2">
             <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
               <Sparkles size={12} className="text-white" />

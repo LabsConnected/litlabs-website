@@ -11,5 +11,16 @@ export default defineConfig({
     environment: "jsdom",
     globals: true,
     setupFiles: [],
+    include: ["src/**/*.test.{ts,tsx}", "tests/**/*.test.{ts,tsx}"],
+    exclude: [
+      "node_modules",
+      ".next",
+      "OmniRoute",
+      "litlabs",
+      "litlabs-website",
+      "work",
+      "Zoo-Code",
+      "meta",
+    ],
   },
 });

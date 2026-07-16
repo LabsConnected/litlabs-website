@@ -3,14 +3,12 @@
 import { useState, useEffect } from "react";
 import { Menu, Bell, Search } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
+import { useNavDrawer } from "@/context/NavDrawerContext";
 import { NavAuth } from "@/components/ClerkAuth";
 
-export default function NavbarWrapper({
-  onMenuClick,
-}: {
-  onMenuClick?: () => void;
-}) {
+export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
+  const { toggle } = useNavDrawer();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -32,7 +30,7 @@ export default function NavbarWrapper({
     >
       <div className="flex items-center gap-3">
         <button
-          onClick={onMenuClick}
+          onClick={toggle}
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
           aria-label="Open navigation"

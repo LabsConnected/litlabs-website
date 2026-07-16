@@ -253,5 +253,4 @@ export const CREATOR_MODES = [
 export const PINNED_KEY = "litlabs-nav-pinned-v2";
 export const HIDDEN_KEY = "litlabs-nav-hidden-v2";
 export const MODE_KEY = "litlabs-nav-mode";
-export const COLLAPSED_KEY = "litlabs-sidebar-collapsed";
 export const GROUP_EXPANDED_KEY = "litlabs-sidebar-groups-expanded-v2";

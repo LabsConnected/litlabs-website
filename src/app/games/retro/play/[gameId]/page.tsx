@@ -46,6 +46,17 @@ function buildPlayerDocument(opts: {
   configLines.push(
     `window.addEventListener("error",(e)=>{try{parent.postMessage({source:"ejs",type:"error",message:(e&&e.message)||"emulator error"},"*")}catch(_){}});`,
   );
+  // Let the parent know when the iframe document has finished loading so the
+  // watchdog can be cleared. If loader.js never runs, the timeout in the
+  // parent will eventually surface a helpful message.
+  configLines.push(
+    `window.addEventListener("load",()=>{try{parent.postMessage({source:"ejs",type:"ready"},"*")}catch(_){}});`,
+  );
+  // If the loader hangs without ever dispatching load, warn the parent after
+  // a generous interval so the user isn't stuck on a blank screen.
+  configLines.push(
+    `setTimeout(()=>{try{parent.postMessage({source:"ejs",type:"error",message:"The emulator loader is taking too long. The CDN may be blocked or the core failed to download."},"*")}catch(_){}},40000);`,
+  );
   const config = configLines.join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body,#game{width:100%;height:100%;margin:0;background:#020204;overflow:hidden}body{font-family:system-ui,sans-serif}</style></head>
@@ -64,8 +75,11 @@ export default function RetroPlayerPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [emulatorError, setEmulatorError] = useState<string | null>(null);
+  const [emulatorReady, setEmulatorReady] = useState(false);
+  const [emulatorTimeout, setEmulatorTimeout] = useState(false);
   const [isSatellaview, setIsSatellaview] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const loadTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -93,12 +107,26 @@ export default function RetroPlayerPage() {
     return () => { active = false; };
   }, [params.gameId]);
 
-  // Forward emulator errors emitted from the iframe back into a visible state.
+  // Forward emulator errors and readiness emitted from the iframe back into state.
   useEffect(() => {
     function onMessage(event: MessageEvent) {
       const data = event.data as { source?: string; type?: string; message?: string } | null;
-      if (data && data.source === "ejs" && (data.type === "error" || data.type === "ready")) {
-        if (data.type === "error" && data.message) setEmulatorError(data.message);
+      if (!data || data.source !== "ejs") return;
+      if (data.type === "error" && data.message) {
+        setEmulatorError(data.message);
+        setEmulatorTimeout(false);
+        if (loadTimeoutRef.current) {
+          clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = null;
+        }
+      }
+      if (data.type === "ready") {
+        setEmulatorReady(true);
+        setEmulatorTimeout(false);
+        if (loadTimeoutRef.current) {
+          clearTimeout(loadTimeoutRef.current);
+          loadTimeoutRef.current = null;
+        }
       }
     }
     window.addEventListener("message", onMessage);
@@ -124,6 +152,26 @@ export default function RetroPlayerPage() {
       bsnesBios: undefined,
     });
   }, [game, romDataUrl, biosDataUrl, isSatellaview, emulatorCore, system]);
+
+  // Reset emulator readiness and start a load watchdog whenever the cartridge changes.
+  useEffect(() => {
+    setEmulatorReady(false);
+    setEmulatorTimeout(false);
+    if (loadTimeoutRef.current) {
+      clearTimeout(loadTimeoutRef.current);
+      loadTimeoutRef.current = null;
+    }
+    if (!srcDoc) return;
+    loadTimeoutRef.current = setTimeout(() => {
+      setEmulatorTimeout(true);
+    }, 25000);
+    return () => {
+      if (loadTimeoutRef.current) {
+        clearTimeout(loadTimeoutRef.current);
+        loadTimeoutRef.current = null;
+      }
+    };
+  }, [srcDoc]);
 
   async function pickBios(file?: File) {
     if (!file) return;
@@ -195,7 +243,17 @@ export default function RetroPlayerPage() {
               <input ref={biosInputRef} type="file" className="hidden" accept=".sfc,.smc,.bin,.rom" onChange={(event) => { pickBios(event.target.files?.[0]); event.target.value = ""; }} />
             </section>
           )}
-          <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-b from-violet-500/10 to-transparent p-5"><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl"/><Sparkles className="text-violet-300" size={20}/><div className="mt-3 text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">{emulatorError ? "Emulator trouble." : "Chapter loaded."}</h2><p className="mt-2 text-sm leading-6 text-white/45">{emulatorError ? emulatorError : `Your ${system.shortName} cartridge is running locally. Open the emulator menu for saves, control mapping, cheats, screenshots, and other supported tools.`}</p></section>
+          <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-gradient-to-b from-violet-500/10 to-transparent p-5"><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl"/><Sparkles className="text-violet-300" size={20}/><div className="mt-3 text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">
+            {emulatorError ? "Emulator trouble." : emulatorTimeout ? "Emulator is taking a while." : emulatorReady ? "Chapter loaded." : "Loading cartridge…"}
+          </h2><p className="mt-2 text-sm leading-6 text-white/45">
+            {emulatorError
+              ? emulatorError
+              : emulatorTimeout
+                ? "The emulator loader has not responded. This usually means the CDN is blocked, the core is still downloading, or the browser is throttling the iframe. Try reloading the page or check your network."
+                : emulatorReady
+                  ? `Your ${system.shortName} cartridge is running locally. Open the emulator menu for saves, control mapping, cheats, screenshots, and other supported tools.`
+                  : `Starting ${system.shortName} core and loading your local cartridge into the player…`}
+          </p></section>
           <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5"><h2 className="text-sm font-black">Session details</h2><dl className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-3"><dt className="text-white/35">System</dt><dd className="text-right font-bold">{system.name}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/35">Core</dt><dd className="text-right font-bold">{emulatorCore}</dd></div>{isSatellaview && <div className="flex justify-between gap-3"><dt className="text-white/35">Mode</dt><dd className="text-right font-bold text-cyan-200">Satellaview / BS‑X</dd></div>}<div className="flex justify-between gap-3"><dt className="text-white/35">Launches</dt><dd className="font-bold">{game.launches}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/35">Storage</dt><dd className="font-bold text-emerald-300">This browser</dd></div></dl></section>
           <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-5"><ShieldCheck className="text-emerald-300" size={19}/><h2 className="mt-3 text-sm font-black">Private play</h2><p className="mt-2 text-xs leading-5 text-white/40">The ROM and BIOS were loaded from this browser only — the data stays in memory as a base64 URL inside the emulator iframe. LiTT does not upload the file.</p></section>
         </aside>

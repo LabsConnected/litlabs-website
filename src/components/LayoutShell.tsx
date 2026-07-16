@@ -1,16 +1,20 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useEffect } from "react";
 import { usePathname } from "next/navigation";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import FooterWrapper from "@/components/FooterWrapper";
 import Sidebar from "@/components/Sidebar";
 import MobileBottomNav from "@/components/MobileBottomNav";
-import { FloatingChat } from "@/components/FloatingChat";
+import { useNavDrawer } from "@/context/NavDrawerContext";
 import dynamic from "next/dynamic";
 const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
   ssr: false,
 });
+const FloatingChat = dynamic(
+  () => import("@/components/FloatingChat").then((m) => ({ default: m.FloatingChat })),
+  { ssr: false },
+);
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
@@ -45,52 +49,27 @@ export default function LayoutShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
+  const { open, setOpen, toggle } = useNavDrawer();
   const publicPage = isPublicPath(pathname || "/");
   const isStudio = pathname === "/studio";
   const isChat = pathname === "/litt" || pathname === "/litt-terminal";
   const ownChrome = hasOwnChrome(pathname || "/");
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
-    useState(isStudio);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
-        if (window.innerWidth >= 1024) {
-          setDesktopSidebarCollapsed((v) => !v);
-        }
+        toggle();
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  }, [toggle]);
 
-  if (isStudio || isChat) {
-    return (
-      <>
-        <AnimatedBackgroundWrapper />
-        <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
-          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper
-            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
-          />
-          <div className="flex flex-1 min-h-0 overflow-hidden">
-            <Sidebar
-              open={false}
-              onClose={() => {}}
-              collapsed={desktopSidebarCollapsed}
-            />
-            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden md:pb-0 pb-[calc(64px+env(safe-area-inset-bottom))]">
-              {children}
-            </main>
-          </div>
-        </div>
-        <MobileBottomNav />
-        <CookieConsent />
-        <ServiceWorkerRegistration />
-      </>
-    );
-  }
+  // Close the drawer on route changes so it never stays open after navigation.
+  useEffect(() => {
+    if (open) setOpen(false);
+  }, [pathname, open, setOpen]);
 
   if (publicPage) {
     return (
@@ -104,20 +83,34 @@ export default function LayoutShell({
     );
   }
 
+  if (isStudio || isChat) {
+    return (
+      <>
+        <AnimatedBackgroundWrapper />
+        <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
+          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+          {!isStudio && <NavbarWrapper />}
+          <div className="flex flex-1 min-h-0 overflow-hidden">
+            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden md:pb-0 pb-[calc(64px+env(safe-area-inset-bottom))]">
+              {children}
+            </main>
+          </div>
+          <MobileBottomNav />
+          <CookieConsent />
+          <ServiceWorkerRegistration />
+        </div>
+        <Sidebar open={open} onClose={() => setOpen(false)} />
+      </>
+    );
+  }
+
   return (
     <>
       <AnimatedBackgroundWrapper />
       <div className="relative z-10 flex min-h-dvh">
-        <Sidebar
-          open={false}
-          onClose={() => {}}
-          collapsed={desktopSidebarCollapsed}
-        />
         <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper
-            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
-          />
+          <NavbarWrapper />
           <main
             className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
               ownChrome ? "pb-0" : "pb-[calc(72px+env(safe-area-inset-bottom))]"
@@ -132,6 +125,7 @@ export default function LayoutShell({
           <ServiceWorkerRegistration />
         </div>
       </div>
+      <Sidebar open={open} onClose={() => setOpen(false)} />
     </>
   );
 }

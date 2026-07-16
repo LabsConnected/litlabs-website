@@ -14,8 +14,6 @@ import {
   Image as ImageIcon,
   MessageSquare,
   Music2,
-  PanelLeftClose,
-  PanelLeftOpen,
   ShieldCheck,
   Sparkles,
   TerminalSquare,
@@ -25,13 +23,11 @@ import {
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
-import { COLLAPSED_KEY, NAV_GROUPS, type NavGroup } from "@/lib/navigation";
+import { NAV_GROUPS, type NavGroup } from "@/lib/navigation";
 
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
-  collapsed?: boolean;
-  onCollapseChange?: () => void;
 }
 
 const QUICK_TOOLS = [
@@ -71,13 +67,9 @@ const QUICK_TOOLS = [
 ] as const;
 
 function SidebarContent({
-  collapsed,
   onClose,
-  onToggleCollapse,
 }: {
-  collapsed: boolean;
   onClose?: () => void;
-  onToggleCollapse?: () => void;
 }) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -147,50 +139,30 @@ function SidebarContent({
           >
             <Zap size={17} />
           </span>
-          {!collapsed && (
-            <span className="min-w-0">
-              <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
-                LiTT
-              </b>
-              <span className="block text-[8px] font-bold uppercase tracking-[.22em] text-neutral-400">
-                Lab Studios
-              </span>
+          <span className="min-w-0">
+            <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">
+              LiTT
+            </b>
+            <span className="block text-[8px] font-bold uppercase tracking-[.22em] text-neutral-400">
+              Lab Studios
             </span>
-          )}
+          </span>
         </Link>
-        {onToggleCollapse && !onClose && (
-          <button
-            onClick={onToggleCollapse}
-            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5"
-            style={{ color: T.textMuted }}
-            aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          >
-            {collapsed ? (
-              <PanelLeftOpen size={15} />
-            ) : (
-              <PanelLeftClose size={15} />
-            )}
-          </button>
-        )}
-        {onClose && (
-          <button
-            onClick={onClose}
-            className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5"
-            style={{ color: T.textMuted }}
-            aria-label="Close navigation"
-          >
-            <X size={16} />
-          </button>
-        )}
+        <button
+          onClick={onClose}
+          className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5"
+          style={{ color: T.textMuted }}
+          aria-label="Close navigation"
+        >
+          <X size={16} />
+        </button>
       </header>
 
       <div className="sidebar-scroll flex-1 overflow-y-auto px-2.5 pb-3">
-        {!collapsed && <LiTTAgentCard onClose={onClose} T={T} />}
+        <LiTTAgentCard onClose={onClose} T={T} />
 
-        <SectionLabel collapsed={collapsed}>Quick access</SectionLabel>
-        <div
-          className={collapsed ? "grid gap-1.5" : "grid grid-cols-4 gap-1.5"}
-        >
+        <SectionLabel>Quick access</SectionLabel>
+        <div className="grid grid-cols-4 gap-1.5">
           {QUICK_TOOLS.map((tool) => {
             const Icon = tool.icon;
             const active = activeHref(tool.href);
@@ -200,7 +172,7 @@ function SidebarContent({
                 href={tool.href}
                 onClick={onClose}
                 title={tool.label}
-                className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-transform hover:-translate-y-px ${collapsed ? "mx-auto w-11" : ""}`}
+                className="relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-transform hover:-translate-y-px"
                 style={{
                   backgroundColor: active ? `${tool.color}18` : `${T.boxBg}70`,
                   borderColor: active
@@ -211,20 +183,18 @@ function SidebarContent({
                 }}
               >
                 <Icon size={15} />
-                {!collapsed && (
-                  <span
-                    className="mt-1 truncate text-[7px] font-bold"
-                    style={{ color: T.textMuted }}
-                  >
-                    {tool.label}
-                  </span>
-                )}
+                <span
+                  className="mt-1 truncate text-[7px] font-bold"
+                  style={{ color: T.textMuted }}
+                >
+                  {tool.label}
+                </span>
               </Link>
             );
           })}
         </div>
 
-        <SectionLabel collapsed={collapsed}>Main navigation</SectionLabel>
+        <SectionLabel>Main navigation</SectionLabel>
         <nav className="space-y-1">
           {NAV_GROUPS.map((group) => {
             const active = activeGroup(group);
@@ -234,7 +204,7 @@ function SidebarContent({
                 href={group.href}
                 onClick={onClose}
                 title={group.label}
-                className={`group relative flex h-10 items-center rounded-xl border transition-colors ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
+                className="group relative flex h-10 items-center gap-2.5 rounded-xl border px-3 transition-colors"
                 style={{
                   background: active
                     ? `linear-gradient(90deg, ${group.accent}28, ${group.accent}08, transparent)`
@@ -245,37 +215,33 @@ function SidebarContent({
                 }}
               >
                 <group.icon size={16} style={{ color: group.accent }} />
-                {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold">
-                      {group.label}
-                    </span>
-                    {group.label === "Marketplace" && (
-                      <span
-                        className="rounded-full border px-1.5 py-0.5 text-[7px] font-black"
-                        style={{
-                          borderColor: `${group.accent}35`,
-                          color: group.accent,
-                        }}
-                      >
-                        NEW
-                      </span>
-                    )}
-                    <ChevronRight
-                      size={12}
-                      className="opacity-25 transition-transform group-hover:translate-x-0.5 group-hover:opacity-70"
-                    />
-                  </>
+                <span className="min-w-0 flex-1 truncate text-[11px] font-bold">
+                  {group.label}
+                </span>
+                {group.label === "Marketplace" && (
+                  <span
+                    className="rounded-full border px-1.5 py-0.5 text-[7px] font-black"
+                    style={{
+                      borderColor: `${group.accent}35`,
+                      color: group.accent,
+                    }}
+                  >
+                    NEW
+                  </span>
                 )}
+                <ChevronRight
+                  size={12}
+                  className="opacity-25 transition-transform group-hover:translate-x-0.5 group-hover:opacity-70"
+                />
               </Link>
             );
           })}
         </nav>
 
-        {!collapsed && <CreditsCard balance={balance} plan={plan} T={T} />}
+        <CreditsCard balance={balance} plan={plan} T={T} />
       </div>
 
-      <SystemStatus collapsed={collapsed} T={T} />
+      <SystemStatus T={T} />
     </div>
   );
 }
@@ -355,18 +321,16 @@ function LiTTAgentCard({
 }
 
 function SectionLabel({
-  collapsed,
   children,
 }: {
-  collapsed: boolean;
   children: React.ReactNode;
 }) {
   return (
     <div
-      className={`mb-1.5 mt-4 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1"}`}
+      className="mb-1.5 mt-4 px-1 text-[8px] font-black uppercase tracking-[.2em]"
       style={{ color: "rgba(255,255,255,.32)" }}
     >
-      {collapsed ? "•••" : children}
+      {children}
     </div>
   );
 }
@@ -432,10 +396,8 @@ function CreditsCard({
 }
 
 function SystemStatus({
-  collapsed,
   T,
 }: {
-  collapsed: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   return (
@@ -446,51 +408,27 @@ function SystemStatus({
       <Link
         href="/settings"
         aria-label="System status and settings"
-        className={`flex items-center rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] ${collapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"}`}
+        className="flex items-center gap-2.5 rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] px-2.5 py-2"
       >
         <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10">
           <ShieldCheck size={14} className="text-emerald-400" />
           <span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-[#080910] bg-emerald-400" />
         </span>
-        {!collapsed && (
-          <span className="min-w-0">
-            <b className="block text-[8px] uppercase tracking-wider text-neutral-400">
-              System status
-            </b>
-            <span className="block truncate text-[8px] font-bold text-emerald-400">
-              All systems operational
-            </span>
+        <span className="min-w-0">
+          <b className="block text-[8px] uppercase tracking-wider text-neutral-400">
+            System status
+          </b>
+          <span className="block truncate text-[8px] font-bold text-emerald-400">
+            All systems operational
           </span>
-        )}
+        </span>
       </Link>
     </div>
   );
 }
 
-export default function Sidebar({
-  open = false,
-  onClose,
-  collapsed: externalCollapsed,
-  onCollapseChange,
-}: SidebarProps) {
+export default function Sidebar({ open = false, onClose }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [internalCollapsed, setInternalCollapsed] = useState(false);
-  const collapsed = externalCollapsed ?? internalCollapsed;
-
-  // Restore collapsed state after hydration to avoid server/client mismatch
-  useEffect(() => {
-    const stored = localStorage.getItem(COLLAPSED_KEY);
-    if (stored === "true") setInternalCollapsed(true);
-  }, []);
-
-  const toggleCollapse = () => {
-    if (onCollapseChange) return onCollapseChange();
-    setInternalCollapsed((current) => {
-      const next = !current;
-      localStorage.setItem(COLLAPSED_KEY, String(next));
-      return next;
-    });
-  };
   const shellStyle = {
     background: `linear-gradient(180deg, ${T.bgColor}fc, #07060d 60%, ${T.bgColor}fc)`,
     borderColor: `${T.borderColor}24`,
@@ -499,17 +437,8 @@ export default function Sidebar({
 
   return (
     <>
-      <aside
-        className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`}
-        style={shellStyle}
-      >
-        <SidebarContent
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-        />
-      </aside>
       {open && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div className="fixed inset-0 z-50 flex">
           <button
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={onClose}
@@ -519,7 +448,7 @@ export default function Sidebar({
             className="relative flex h-full w-[min(19rem,calc(100vw-1.5rem))] flex-col border-r shadow-2xl"
             style={shellStyle}
           >
-            <SidebarContent collapsed={false} onClose={onClose} />
+            <SidebarContent onClose={onClose} />
           </aside>
         </div>
       )}
