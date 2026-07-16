@@ -111,6 +111,9 @@ const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
 const ImageGenPopover = dynamic(() => import("./ImageGenPopover"), {
   ssr: false,
 });
+const ProjectDrawer = dynamic(() => import("./ProjectDrawer"), {
+  ssr: false,
+});
 
 type Message = {
   role: "user" | "assistant";
@@ -133,11 +136,12 @@ type ToolRailItem = {
   icon: typeof Terminal;
   tool?: StudioTool;
   href?: string;
+  drawer?: "projects";
 };
 
 const TOOL_RAIL: ToolRailItem[] = [
   { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
-  { id: "projects", label: "Projects", icon: FolderKanban, tool: "builder" },
+  { id: "projects", label: "Projects", icon: FolderKanban, drawer: "projects" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
@@ -449,18 +453,10 @@ function LITTTerminalShellInner({
   const { profile } = useProfile();
   const {
     voiceState,
-    interimTranscript,
-    micLevel,
     errorMessage,
-    listeningDurationMs,
-    availableDevices,
-    selectedDeviceId,
     speakText,
     startVoice,
     stopVoice,
-    interrupt,
-    stopSpeaking,
-    selectDevice,
     setOnTurn,
     setActivity,
   } = useVoiceSession();
@@ -474,6 +470,8 @@ function LITTTerminalShellInner({
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [imageGenOpen, setImageGenOpen] = useState(false);
+  const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -556,6 +554,15 @@ function LITTTerminalShellInner({
       params.delete("openImage");
       const query = params.toString();
       router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Sync active project from URL ?project=ID
+  useEffect(() => {
+    const urlProject = searchParams?.get("project");
+    if (urlProject && urlProject !== activeProjectId) {
+      setActiveProjectId(urlProject);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -1556,12 +1563,14 @@ function LITTTerminalShellInner({
 
           {TOOL_RAIL.map((item) => {
             const Icon = item.icon;
-            const active = activeTool === item.tool;
+            const active = item.tool ? activeTool === item.tool : false;
             return (
               <button
                 key={item.id}
                 onClick={() => {
-                  if (item.href) {
+                  if (item.drawer === "projects") {
+                    setProjectDrawerOpen(true);
+                  } else if (item.href) {
                     router.push(item.href);
                   } else if (item.tool) {
                     onToolChangeAction?.(item.tool);
@@ -1729,7 +1738,9 @@ function LITTTerminalShellInner({
                 <div className="hidden text-[10px] text-gray-300 sm:block">
                   {activeTool === "agents"
                     ? `${activeAgent.name} · ${activeAgent.role}`
-                    : "Your intelligent workspace. One command away."}
+                    : activeProjectId
+                      ? `Project · ${activeProjectId.slice(0, 12)}`
+                      : "Your intelligent workspace. One command away."}
                 </div>
               </div>
             </div>
@@ -1783,6 +1794,24 @@ function LITTTerminalShellInner({
                   { url, name, type: "image/png" },
                 ].slice(0, 8),
               );
+            }}
+          />
+
+          {/* Project drawer — opened from the Projects rail item */}
+          <ProjectDrawer
+            open={projectDrawerOpen}
+            onClose={() => setProjectDrawerOpen(false)}
+            activeProjectId={activeProjectId}
+            onSelect={(projectId) => {
+              setActiveProjectId(projectId);
+              setProjectDrawerOpen(false);
+              // Update URL with project param
+              const params = new URLSearchParams(
+                searchParams?.toString() ?? "",
+              );
+              params.set("project", projectId);
+              params.set("tool", "builder");
+              router.push(`/studio?${params.toString()}`, { scroll: false });
             }}
           />
 
@@ -1993,155 +2022,32 @@ function LITTTerminalShellInner({
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
-          {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
-            <div className="mx-auto flex max-w-4xl flex-col gap-2">
+          {/* COMMAND BAR — single persistent bottom composer */}
+          <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-md sm:px-6 sm:py-3">
+            <div className="mx-auto flex max-w-4xl flex-col gap-1.5">
+              {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
-                <div className="mb-1 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500/10">
-                        <Waveform
-                          active={
-                            voiceState === "listening" ||
-                            voiceState === "speech_detected" ||
-                            voiceState === "connecting"
-                          }
-                        />
-                        {(voiceState === "listening" ||
-                          voiceState === "speech_detected") && (
-                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#030308]" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">
-                          {voiceState === "requesting_permission" &&
-                            "Allow microphone"}
-                          {voiceState === "connecting" && "Connecting..."}
-                          {voiceState === "listening" && "Listening"}
-                          {voiceState === "speech_detected" && "Hearing you"}
-                          {voiceState === "transcribing" && "Transcribing"}
-                          {voiceState === "sending" && "Sending"}
-                          {voiceState === "thinking" && "Thinking..."}
-                          {voiceState === "using_tool" && "Using tool..."}
-                          {voiceState === "reading_files" && "Reading files..."}
-                          {voiceState === "writing_files" && "Writing files..."}
-                          {voiceState === "running_command" &&
-                            "Running command..."}
-                          {voiceState === "testing" && "Running tests..."}
-                          {voiceState === "generating_response" &&
-                            "Generating response..."}
-                          {voiceState === "speaking" && "LiTT is speaking"}
-                          {voiceState === "muted" && "Paused"}
-                          {voiceState === "error" && "Voice error"}
-                        </div>
-                        <div className="text-[10px] text-gray-300 truncate">
-                          {errorMessage
-                            ? errorMessage
-                            : interimTranscript ||
-                              `00:${Math.floor(listeningDurationMs / 1000)
-                                .toString()
-                                .padStart(2, "0")}`}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {voiceState === "speaking" && (
-                        <button
-                          onClick={interrupt}
-                          className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-neutral-300 transition hover:bg-white/10"
-                        >
-                          Interrupt
-                        </button>
-                      )}
-                      <button
-                        onClick={() =>
-                          voiceState === "speaking"
-                            ? stopSpeaking()
-                            : stopVoice()
-                        }
-                        className="rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-300 transition hover:bg-rose-500/20"
-                      >
-                        {voiceState === "speaking" ? "Stop" : "End"}
-                      </button>
-                    </div>
-                  </div>
-                  {(voiceState === "listening" ||
-                    voiceState === "speech_detected" ||
-                    voiceState === "connecting") && (
-                    <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/5">
-                      <div
-                        className="h-full bg-cyan-400 transition-all duration-100"
-                        style={{ width: `${Math.max(5, micLevel * 100)}%` }}
-                      />
-                    </div>
-                  )}
-                  {(voiceState === "speech_detected" ||
-                    voiceState === "transcribing" ||
-                    voiceState === "sending" ||
-                    voiceState === "thinking" ||
-                    voiceState === "using_tool" ||
-                    voiceState === "reading_files" ||
-                    voiceState === "writing_files" ||
-                    voiceState === "running_command" ||
-                    voiceState === "testing" ||
-                    voiceState === "generating_response" ||
-                    voiceState === "speaking") && (
-                    <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[10px] text-gray-300 scrollbar-none">
-                      {[
-                        { key: "hear", label: "Heard", done: true },
-                        {
-                          key: "transcribe",
-                          label: "Transcribed",
-                          done: voiceState !== "speech_detected",
-                        },
-                        {
-                          key: "think",
-                          label: "Thinking",
-                          done: ["generating_response", "speaking"].includes(
-                            voiceState,
-                          ),
-                        },
-                        {
-                          key: "respond",
-                          label: "Responding",
-                          done: voiceState === "speaking",
-                        },
-                      ].map((step, idx, arr) => (
-                        <span
-                          key={step.key}
-                          className="flex shrink-0 items-center gap-1"
-                        >
-                          <span className={step.done ? "text-emerald-400" : ""}>
-                            {step.done ? "✓" : "○"}
-                          </span>
-                          <span className={step.done ? "text-neutral-300" : ""}>
-                            {step.label}
-                          </span>
-                          {idx < arr.length - 1 && (
-                            <span className="text-white/10">›</span>
-                          )}
+                <div className="flex items-center gap-2 px-1 text-[11px]">
+                  {(() => {
+                    const steps = [
+                      { label: "Listening", active: voiceState === "listening" || voiceState === "speech_detected" || voiceState === "connecting" },
+                      { label: "Transcribing", active: voiceState === "transcribing" || voiceState === "sending" },
+                      { label: "Thinking", active: ["thinking", "using_tool", "reading_files", "writing_files", "running_command", "testing", "generating_response"].includes(voiceState) },
+                      { label: "Speaking", active: voiceState === "speaking" },
+                    ];
+                    const activeIdx = steps.findIndex((s) => s.active);
+                    return steps.map((step, idx) => (
+                      <span key={step.label} className="flex shrink-0 items-center gap-1">
+                        <span className={idx <= activeIdx && activeIdx >= 0 ? "text-cyan-400" : idx < activeIdx ? "text-emerald-400" : "text-white/20"}>
+                          {idx < activeIdx ? "✓" : idx === activeIdx ? "●" : "○"}
                         </span>
-                      ))}
-                    </div>
-                  )}
-                  {availableDevices.length > 1 && (
-                    <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
-                      <span className="text-[10px] text-gray-300">Mic:</span>
-                      <select
-                        name="mic-device"
-                        id="litt-mic-device"
-                        value={selectedDeviceId ?? ""}
-                        onChange={(e) => selectDevice(e.target.value)}
-                        className="max-w-[180px] rounded border border-white/10 bg-white/3 px-2 py-1 text-[10px] text-neutral-300 outline-none"
-                      >
-                        {availableDevices.map((d) => (
-                          <option key={d.deviceId} value={d.deviceId}>
-                            {d.label || "Microphone"}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                        <span className={idx === activeIdx ? "text-neutral-200 font-bold" : idx < activeIdx ? "text-neutral-400" : "text-white/20"}>{step.label}</span>
+                        {idx < steps.length - 1 && <span className="text-white/10">›</span>}
+                      </span>
+                    ));
+                  })()}
+                  {errorMessage && (
+                    <span className="ml-auto shrink-0 text-rose-400 truncate">{errorMessage}</span>
                   )}
                 </div>
               )}
@@ -2151,18 +2057,19 @@ function LITTTerminalShellInner({
                 onRemove={removeAttachment}
               />
               <div className="flex items-end gap-2 sm:items-center">
+                {/* + button — single, opens bottom sheet */}
                 <div className="relative">
                   <button
                     aria-label="Open creation menu"
                     aria-expanded={plusMenuOpen}
                     onClick={() => setPlusMenuOpen((v) => !v)}
-                    className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:h-9 sm:w-9 ${
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
                       plusMenuOpen
                         ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
                         : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                     }`}
                   >
-                    <Plus size={15} aria-hidden="true" />
+                    <Plus size={16} aria-hidden="true" />
                   </button>
                   {plusMenuOpen && (
                     <>
@@ -2210,6 +2117,7 @@ function LITTTerminalShellInner({
                   )}
                 </div>
 
+                {/* Text input — placeholder shows voice state when mic active */}
                 <div className="relative flex min-w-0 flex-1 items-end">
                   <textarea
                     ref={textInputRef}
@@ -2219,10 +2127,21 @@ function LITTTerminalShellInner({
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     aria-label="Message LITT"
-                    placeholder="Ask LiTT..."
+                    placeholder={
+                      micActive
+                        ? voiceState === "speaking"
+                          ? "LiTT is speaking..."
+                          : voiceState === "transcribing"
+                            ? "Transcribing..."
+                            : voiceState === "listening" || voiceState === "speech_detected"
+                              ? "Listening..."
+                              : "Voice active..."
+                        : "Ask LiTT anything..."
+                    }
                     rows={1}
                     className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
+                  {/* Contextual send/stop button inside textarea */}
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
                     onClick={handleSend}
@@ -2243,17 +2162,24 @@ function LITTTerminalShellInner({
                   </button>
                 </div>
 
+                {/* Mic button — tap to start, tap again to cancel */}
                 <button
-                  aria-label={micActive ? "Stop voice" : "Start voice"}
+                  aria-label={micActive ? "Cancel voice" : "Start voice"}
                   onClick={toggleMic}
-                  className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:h-9 sm:w-9 ${
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
                     micActive
-                      ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
+                      ? voiceState === "speaking"
+                        ? "border-amber-500/40 bg-amber-500/10 text-amber-300"
+                        : "border-rose-500/40 bg-rose-500/10 text-rose-300"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
                   {micActive ? (
-                    <MicOff size={15} aria-hidden="true" />
+                    voiceState === "speaking" ? (
+                      <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+                    ) : (
+                      <MicOff size={15} aria-hidden="true" />
+                    )
                   ) : (
                     <Mic size={15} aria-hidden="true" />
                   )}

@@ -154,13 +154,40 @@ export default function ImageGenPopover({
           seed: Math.floor(Math.random() * 2147483647),
         }),
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || "Generation failed");
 
-      setResultUrl(data.downloadUrl || data.thumbUrl || null);
+      // Safely parse JSON — the server may return non-JSON on 500/502
+      let data: { downloadUrl?: string; thumbUrl?: string; error?: string };
+      const text = await res.text();
+      try {
+        data = JSON.parse(text);
+      } catch {
+        // Response wasn't JSON — likely a proxy error or empty body
+        if (res.status === 502 || res.status === 503) {
+          throw new Error("Image service is temporarily unavailable. Please try again.");
+        }
+        if (res.status === 429) {
+          throw new Error("Rate limit reached. Please wait a moment and try again.");
+        }
+        throw new Error(`Image generation failed (HTTP ${res.status}). Please try a different provider.`);
+      }
+
+      if (!res.ok) {
+        throw new Error(
+          typeof data.error === "string" && data.error.length < 200
+            ? data.error
+            : `Generation failed (HTTP ${res.status}). Try a different provider.`,
+        );
+      }
+
+      const url = data.downloadUrl || data.thumbUrl;
+      if (!url) {
+        throw new Error("No image URL returned. Try a different provider.");
+      }
+
+      setResultUrl(url);
       setStatus("done");
     } catch (err) {
-      const msg = err instanceof Error ? err.message : "Generation failed";
+      const msg = err instanceof Error ? err.message : "Generation failed. Please try again.";
       setError(msg);
       setStatus("error");
     }
@@ -183,13 +210,13 @@ export default function ImageGenPopover({
         aria-hidden="true"
       />
 
-      {/* Dialog */}
-      <div className="fixed inset-0 z-120 flex items-center justify-center p-4 pointer-events-none">
+      {/* Dialog — bottom sheet on mobile, centered on desktop */}
+      <div className="fixed inset-0 z-120 flex items-end justify-center sm:items-center sm:p-4 pointer-events-none">
         <div
           ref={dialogRef}
           role="dialog"
           aria-label="Generate image"
-          className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-white/10 bg-[#0a0a14] shadow-2xl"
+          className="pointer-events-auto w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-t-2xl border border-white/10 bg-[#0a0a14] shadow-2xl sm:rounded-2xl"
         >
           {/* Header */}
           <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
@@ -254,12 +281,21 @@ export default function ImageGenPopover({
               </div>
             </div>
 
-            {/* Style preset */}
+            {/* Style preset — dropdown on mobile, pills on desktop */}
             <div>
               <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-gray-400">
                 Style
               </label>
-              <div className="flex flex-wrap gap-1.5">
+              <select
+                value={styleIdx}
+                onChange={(e) => setStyleIdx(Number(e.target.value))}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500/30 sm:hidden"
+              >
+                {STYLE_PRESETS.map((style, i) => (
+                  <option key={style} value={i}>{style}</option>
+                ))}
+              </select>
+              <div className="hidden flex-wrap gap-1.5 sm:flex">
                 {STYLE_PRESETS.map((style, i) => (
                   <button
                     key={style}
@@ -276,12 +312,21 @@ export default function ImageGenPopover({
               </div>
             </div>
 
-            {/* Provider */}
+            {/* Provider — dropdown on mobile, pills on desktop */}
             <div>
               <label className="mb-1 block text-[10px] font-bold uppercase tracking-widest text-gray-400">
                 Provider
               </label>
-              <div className="flex flex-wrap gap-1.5">
+              <select
+                value={providerId}
+                onChange={(e) => setProviderId(e.target.value as typeof providerId)}
+                className="w-full rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm text-white outline-none focus:border-cyan-500/30 sm:hidden"
+              >
+                {PROVIDER_OPTIONS.map((p) => (
+                  <option key={p.id} value={p.id}>{p.label} ({p.tag})</option>
+                ))}
+              </select>
+              <div className="hidden flex-wrap gap-1.5 sm:flex">
                 {PROVIDER_OPTIONS.map((p) => (
                   <button
                     key={p.id}
