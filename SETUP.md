@@ -73,6 +73,10 @@ DOCKER_TERMINAL_IMAGE=littree-terminal:latest
 
 # AI fallback
 OPENROUTER_API_KEY=your_key
+
+# Facebook Page publishing (server-side only)
+FACEBOOK_PAGE_ID=your_page_id
+FACEBOOK_PAGE_ACCESS_TOKEN=your_page_access_token
 ```
 
 For production:

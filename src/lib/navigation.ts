@@ -30,6 +30,7 @@ import {
   PlusCircle,
   Menu,
   MoreHorizontal,
+  Share2,
 } from "lucide-react";
 
 export type NavItem = {
@@ -137,6 +138,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Social,
     items: [
       { label: "Community", href: "/social", icon: Users },
+      { label: "Facebook Publisher", href: "/facebook", icon: Share2 },
     ],
   },
   {
