@@ -118,3 +118,5 @@ chrome/
 lighthouse-mobile.json
 lighthouse-*.json
 eslint-full.txt
+
+.env*

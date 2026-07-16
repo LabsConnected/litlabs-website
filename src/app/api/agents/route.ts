@@ -41,11 +41,16 @@ async function getHandler(req: NextRequest) {
     const { data: rows, error } = await query;
 
     if (error) {
-      // Supabase error:
-      return NextResponse.json(
-        { error: "Failed to fetch agents" },
-        { status: 500 },
-      );
+      // The agents table may not exist in fresh environments. Fall back to
+      // built-in core agents so the banner and marketplace never appear down.
+      console.warn("[api/agents] Supabase query failed, using core fallback:", error.message);
+      return NextResponse.json({
+        agents: getCoreAgents(),
+        total: getCoreAgents().length,
+        categories: [...new Set(getCoreAgents().map((a) => a.role ?? "general"))],
+        timestamp: new Date().toISOString(),
+        warning: "Agents table not initialized; core fallback used",
+      });
     }
 
     const dbRows = rows || [];
@@ -79,12 +84,18 @@ async function getHandler(req: NextRequest) {
       categories: [...new Set(agents.map((a) => a.category))],
       timestamp: new Date().toISOString(),
     });
-  } catch {
-    // Error fetching agents:
-    return NextResponse.json(
-      { error: "Failed to fetch agents" },
-      { status: 500 },
-    );
+  } catch (err: unknown) {
+    // Supabase not configured / table missing / proxy stub throws before the query completes.
+    // Return built-in core agents so the banner and marketplace never appear down.
+    console.warn("[api/agents] Unhandled error, using core fallback:", err);
+    const fallback = getCoreAgents();
+    return NextResponse.json({
+      agents: fallback,
+      total: fallback.length,
+      categories: [...new Set(fallback.map((a) => a.role ?? "general"))],
+      timestamp: new Date().toISOString(),
+      warning: "Agents table not initialized or Supabase unavailable; core fallback used",
+    });
   }
 }
 

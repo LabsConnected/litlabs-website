@@ -104,28 +104,67 @@ export const metadata: Metadata = {
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
 const hasClerk = !!clerkKey && clerkKey.length > 10;
 
+const clerkAppearance = {
+  variables: {
+    colorPrimary: "#fbbf24",
+    colorBackground: "#0a0a0f",
+    colorText: "#f5e6c8",
+    colorTextSecondary: "#a8916b",
+    colorDanger: "#ef4444",
+    colorSuccess: "#22c55e",
+    borderRadius: "8px",
+  },
+  elements: {
+    card: {
+      backgroundColor: "#1a1510",
+      border: "1px solid #3d3220",
+      boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
+    },
+    userButtonPopoverCard: {
+      backgroundColor: "#1a1510",
+      border: "1px solid #3d3220",
+    },
+    userButtonPopoverActionButton: {
+      "&:hover": {
+        backgroundColor: "rgba(251,191,36,0.1)",
+      },
+    },
+    badge: {
+      backgroundColor: "#f59e0b",
+    },
+  },
+};
+
+function AppShell({ children }: { children: React.ReactNode }) {
+  // FloatingChat is mounted inside LayoutShell which already has access to
+  // the provider tree via context. LayoutShell suppresses it on /studio so
+  // the Studio route manages its own voice/chat UI exclusively.
+  return (
+    <ClerkAuthContextProvider clerkAvailable={hasClerk}>
+      <ThemeProvider>
+        <ProfileProvider>
+          <WalletProvider>
+            <NavDrawerProvider>
+              <LayoutShell>{children}</LayoutShell>
+            </NavDrawerProvider>
+          </WalletProvider>
+        </ProfileProvider>
+      </ThemeProvider>
+    </ClerkAuthContextProvider>
+  );
+}
+
 export default function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // FloatingChat is mounted inside LayoutShell which already has access to
-  // the provider tree via context. LayoutShell suppresses it on /studio so
-  // the Studio route manages its own voice/chat UI exclusively.
-  const shell = (
-    <ThemeProvider>
-      <ProfileProvider>
-        <WalletProvider>
-          <NavDrawerProvider>
-            <LayoutShell>{children}</LayoutShell>
-          </NavDrawerProvider>
-        </WalletProvider>
-      </ProfileProvider>
-    </ThemeProvider>
-  );
-
-  return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+  const html = (
+    <html
+      lang="en"
+      suppressHydrationWarning
+      className={`${inter.variable} ${jetbrainsMono.variable}`}
+    >
       <link
         rel="preconnect"
         href="https://accounts.dev"
@@ -146,60 +185,29 @@ export default function RootLayout({
       <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
       <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body className="min-h-dvh overflow-x-clip antialiased">
-        {hasClerk ? (
-          <ClerkProvider
-            publishableKey={clerkKey!}
-            signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
-            signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
-            signInFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"
-            }
-            signUpFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"
-            }
-            appearance={{
-              variables: {
-                colorPrimary: "#fbbf24",
-                colorBackground: "#0a0a0f",
-                colorText: "#f5e6c8",
-                colorTextSecondary: "#a8916b",
-                colorDanger: "#ef4444",
-                colorSuccess: "#22c55e",
-                borderRadius: "8px",
-              },
-              elements: {
-                card: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
-                  boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
-                },
-                userButtonPopoverCard: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
-                },
-                userButtonPopoverActionButton: {
-                  "&:hover": {
-                    backgroundColor: "rgba(251,191,36,0.1)",
-                  },
-                },
-                badge: {
-                  backgroundColor: "#f59e0b",
-                },
-              },
-            }}
-          >
-            <ClerkAuthContextProvider clerkAvailable={true}>
-              {shell}
-            </ClerkAuthContextProvider>
-          </ClerkProvider>
-        ) : (
-          <ClerkAuthContextProvider clerkAvailable={false}>
-            {shell}
-          </ClerkAuthContextProvider>
-        )}
+        <AppShell>{children}</AppShell>
         <Analytics />
         <SpeedInsights />
       </body>
     </html>
+  );
+
+  return hasClerk ? (
+    <ClerkProvider
+      publishableKey={clerkKey!}
+      signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
+      signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
+      signInFallbackRedirectUrl={
+        process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"
+      }
+      signUpFallbackRedirectUrl={
+        process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"
+      }
+      appearance={clerkAppearance}
+    >
+      {html}
+    </ClerkProvider>
+  ) : (
+    html
   );
 }

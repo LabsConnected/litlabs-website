@@ -10,6 +10,10 @@ import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  return NextResponse.json({ status: "ok", ready: true });
+}
+
 export async function POST(request: Request) {
   const { userId } = await auth();
   if (!userId) {

@@ -4,6 +4,10 @@ import { DirectorGraphPlanner } from "@/lib/director-graph";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  return NextResponse.json({ status: "ok", ready: true });
+}
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();

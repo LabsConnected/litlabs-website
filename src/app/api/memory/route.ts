@@ -132,9 +132,13 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
-  const { userId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  let userId: string | null = null;
+  try {
+    const authResult = await auth();
+    userId = authResult.userId ?? null;
+  } catch (authError) {
+    console.warn("[api/memory] auth failed:", authError);
+    userId = null;
   }
 
   try {
@@ -143,6 +147,21 @@ export async function GET(req: NextRequest) {
     const scope = searchParams.get("scope") || undefined;
     const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
     const normalizedScope = scope ? normalizeScope(scope) : undefined;
+
+    // Banner health check does not require auth; semantic queries do.
+    if (!query.trim()) {
+      if (!userId) {
+        return NextResponse.json({
+          memories: [],
+          count: 0,
+          source: "auth",
+          status: "ok",
+          warning: "Sign in to load memories",
+        });
+      }
+    } else if (!userId) {
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    }
 
     // Health check / recent list: return Supabase memories when no semantic query is provided.
     if (!query.trim()) {

@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   title: "Studio",
@@ -21,5 +22,10 @@ export default function StudioLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <div className="flex min-h-dvh flex-col">
+      <AutonomicLoopBanner />
+      <div className="flex-1 min-w-0">{children}</div>
+    </div>
+  );
 }
