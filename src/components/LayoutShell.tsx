@@ -1,12 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
 import { usePathname } from "next/navigation";
-import NavbarWrapper from "@/components/NavbarWrapper";
+import TopNavbar from "@/components/TopNavbar";
 import FooterWrapper from "@/components/FooterWrapper";
-import Sidebar from "@/components/Sidebar";
-import MobileBottomNav from "@/components/MobileBottomNav";
-import { useNavDrawer } from "@/context/NavDrawerContext";
 import dynamic from "next/dynamic";
 const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
   ssr: false,
@@ -30,17 +26,8 @@ const PUBLIC_PATHS = [
   "/docs",
 ];
 
-// Routes that render their own bottom navigation / floating chrome
-const SELF_CONTAINED_CHROME = ["/games/cloud"];
-
 function isPublicPath(path: string) {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
-}
-
-function hasOwnChrome(path: string) {
-  return SELF_CONTAINED_CHROME.some(
-    (p) => path === p || path.startsWith(`${p}/`),
-  );
 }
 
 export default function LayoutShell({
@@ -49,27 +36,9 @@ export default function LayoutShell({
   children: React.ReactNode;
 }) {
   const pathname = usePathname();
-  const { open, setOpen, toggle } = useNavDrawer();
   const publicPage = isPublicPath(pathname || "/");
   const isStudio =
     pathname === "/studio" || pathname?.startsWith("/studio/") || false;
-  const ownChrome = hasOwnChrome(pathname || "/");
-
-  useEffect(() => {
-    const handleKey = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
-        e.preventDefault();
-        toggle();
-      }
-    };
-    window.addEventListener("keydown", handleKey);
-    return () => window.removeEventListener("keydown", handleKey);
-  }, [toggle]);
-
-  // Close the drawer on route changes so it never stays open after navigation.
-  useEffect(() => {
-    if (open) setOpen(false);
-  }, [pathname, open, setOpen]);
 
   if (publicPage) {
     return (
@@ -104,25 +73,17 @@ export default function LayoutShell({
   return (
     <>
       <AnimatedBackgroundWrapper />
-      <div className="relative z-10 flex min-h-dvh">
-        <div className="flex min-h-dvh min-w-0 flex-1 flex-col">
-          {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <NavbarWrapper />
-          <main
-            className={`flex-1 w-full max-w-full min-w-0 overflow-x-hidden md:pb-0 ${
-              ownChrome ? "pb-0" : "pb-[calc(72px+env(safe-area-inset-bottom))]"
-            }`}
-          >
-            {children}
-          </main>
-          {!ownChrome && <MobileBottomNav />}
-          <FloatingChat />
-          <FooterWrapper />
-          <CookieConsent />
-          <ServiceWorkerRegistration />
-        </div>
+      <div className="relative z-10 flex min-h-dvh flex-col">
+        {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
+        <TopNavbar />
+        <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden">
+          {children}
+        </main>
+        <FloatingChat />
+        <FooterWrapper />
+        <CookieConsent />
+        <ServiceWorkerRegistration />
       </div>
-      <Sidebar open={open} onClose={() => setOpen(false)} />
     </>
   );
 }
