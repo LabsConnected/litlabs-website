@@ -10,7 +10,6 @@ import { useState, useEffect } from "react";
 import MusicPlayer from "./MusicPlayer";
 import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
-import DashboardCommandCenter from "./DashboardCommandCenter";
 
 const SpotifyPlayer = dynamic(() => import("./SpotifyPlayer"), { ssr: false });
 const SocialPageContent = dynamic(
@@ -562,7 +561,15 @@ export function CenterStage({
       );
     }
     default:
-      return <DashboardCommandCenter />;
+      return (
+        <div className="space-y-6 md:space-y-8">
+          <HeroCard
+            title={`Welcome back, ${displayName}`}
+            subtitle="Your LiTT workspace is live. Ship something today."
+            color={T.accentColor}
+          />
+        </div>
+      );
   }
 }
 

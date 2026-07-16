@@ -28,6 +28,10 @@ async function handler(req: NextRequest) {
   try {
     const body = await req.json();
     const message = body.message as string;
+    const visionContext =
+      typeof body.visionContext === "string"
+        ? body.visionContext.trim().slice(0, 1600)
+        : "";
     const contextRaw = body.context as Partial<LiTTContext> & { route: string };
     const clientGoals = Array.isArray(body.goals) ? body.goals : undefined;
     const clientTimeOfDay = typeof body.timeOfDay === "string" ? body.timeOfDay : undefined;
@@ -135,6 +139,9 @@ async function handler(req: NextRequest) {
       `LIVE INTEGRATION STATE (auto-detected from process.env):\n${integrationStatusBlock()}\n` +
       `\nTIME OF DAY: ${tod} — adjust tone and suggestions accordingly. ${tod === "morning" ? "Lead with what's most important to ship today." : tod === "evening" ? "User is winding down; suggest wrap-up tasks and what's left for tomorrow." : tod === "night" ? "User is in deep-work mode; be terse and avoid drive-by questions." : "Steady afternoon — propose one concrete next step, not a menu."}\n` +
       `\n${goalsBlock}\n` +
+      (visionContext
+        ? `\nEXPLICITLY SHARED LIVE VISION CONTEXT (recent camera analysis; describe only what is stated here):\n${visionContext}\n`
+        : "") +
       "\n" +
       "You are LiTT, the AI operating layer for LiTTree-LabStudios (litlabs.net). " +
       "You are connected to a real terminal, file explorer, logs, and agent runner. " +

@@ -27,8 +27,8 @@ import {
   Code2,
   Workflow,
   FolderKanban,
+  PlusCircle,
   Menu,
-  Plus,
   MoreHorizontal,
 } from "lucide-react";
 
@@ -164,7 +164,7 @@ type MobileNavItem = {
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: Home },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Create", href: "/studio?tool=image", icon: Plus },
+  { label: "Create", href: "/studio?tool=builder", icon: PlusCircle },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "More", href: "#", icon: MoreHorizontal },
   { label: "Projects", href: "/projects", icon: FolderKanban },

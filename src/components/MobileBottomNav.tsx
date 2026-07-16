@@ -17,8 +17,8 @@ export default function MobileBottomNav() {
     return pathname?.startsWith(href) ?? false;
   };
 
-  const primary = MOBILE_BOTTOM_ITEMS.slice(0, 5);
-  const overflow = MOBILE_BOTTOM_ITEMS.slice(5);
+  const primary = MOBILE_BOTTOM_ITEMS.slice(0, 4);
+  const overflow = MOBILE_BOTTOM_ITEMS.slice(4);
   const anyOverflowActive = overflow.some((item) => isActive(item.href));
 
   return (
@@ -40,7 +40,7 @@ export default function MobileBottomNav() {
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isCreate ? "-mt-3" : ""}`}
+                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isCreate ? "-mt-5" : ""}`}
                 style={{
                   color: active
                     ? T.accentColor
@@ -49,7 +49,7 @@ export default function MobileBottomNav() {
                       : T.textMuted,
                 }}
               >
-                {active && (
+                {active && !isCreate && (
                   <span
                     className="absolute inset-0 rounded-xl opacity-15"
                     style={{ backgroundColor: T.accentColor }}
@@ -57,13 +57,10 @@ export default function MobileBottomNav() {
                 )}
                 {isCreate ? (
                   <span
-                    className="flex h-12 w-12 items-center justify-center rounded-full shadow-lg"
-                    style={{
-                      backgroundColor: T.accentColor,
-                      boxShadow: `0 0 18px ${T.accentColor}60`,
-                    }}
+                    className="grid h-12 w-12 place-items-center rounded-full shadow-[0_0_24px_rgba(139,92,246,.5)]"
+                    style={{ backgroundColor: T.accentColor }}
                   >
-                    <Icon size={22} aria-hidden="true" />
+                    <Icon size={24} aria-hidden="true" />
                   </span>
                 ) : (
                   <Icon size={20} aria-hidden="true" />
