@@ -19,6 +19,7 @@ type Props = {
   systemLines?: string[];
   onSend: (text: string) => string | Promise<string | void>;
   onToolSelect?: (tool: StudioTool) => void;
+  onOpenImageGen?: () => void;
   embedded?: boolean;
   hideDock?: boolean;
   builderMode?: boolean;
@@ -40,6 +41,7 @@ export function ChatShell({
   systemLines = [],
   onSend,
   onToolSelect,
+  onOpenImageGen,
   embedded = false,
   hideDock = false,
   builderMode = false,
@@ -146,7 +148,7 @@ export function ChatShell({
             </p>
 
             <div className={styles.createGrid}>
-              <button onClick={() => builderMode ? setDraft("/image create an image of ") : onToolSelect?.("image")}>
+              <button onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}>
                 <span className={styles.actionIcon}><ImageIcon size={21} /></span>
                 <span><b>Create an image</b><small>Generate art, ads, and product visuals</small></span>
                 <ArrowRight size={17} aria-hidden="true" />

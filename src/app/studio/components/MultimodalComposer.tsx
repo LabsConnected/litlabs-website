@@ -105,17 +105,23 @@ export default function MultimodalComposer({
     stopVoice,
     toggleMute,
     interrupt,
+    speakText,
     setOnTurn,
     errorMessage,
   } = useVoiceSession();
   const { resolvedColors: T } = useTheme();
 
-  // Set turn handler for voice sessions
+  // Set turn handler for voice sessions — transcribed speech is sent to the
+  // model and the reply is spoken back so the voice loop is bidirectional.
   useEffect(() => {
     setOnTurn((text) => {
-      void onSend(text);
+      if (!text) return;
+      void onSend(text).then((reply) => {
+        if (reply) speakText(reply);
+      });
     });
-  }, [onSend, setOnTurn]);
+    return () => setOnTurn(() => {});
+  }, [onSend, setOnTurn, speakText]);
 
   // Auto-resize textarea
   useEffect(() => {

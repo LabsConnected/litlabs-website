@@ -11,7 +11,6 @@ const LITTTerminalShell = dynamic(() => import("./LITTTerminalShell"), {
 });
 
 const VALID_TOOLS: StudioTool[] = [
-  "chat",
   "image",
   "video",
   "audio",
@@ -25,8 +24,11 @@ const VALID_TOOLS: StudioTool[] = [
   "loops",
 ];
 
+// Tools that have been merged into the Builder hub. Old URLs and stored
+// preferences are silently redirected so bookmarks don't break.
 const MIGRATED_TOOLS: Record<string, StudioTool> = {
   agents: "builder",
+  chat: "builder",
 };
 
 const STORAGE_KEY = "littree:studio:tool";
@@ -78,7 +80,7 @@ export default function StudioOS() {
   }, [activeTool, mounted]);
 
   useEffect(() => {
-    if (urlTool === "agents") {
+    if (urlTool === "agents" || urlTool === "chat") {
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.set("tool", "builder");
       router.replace(`${pathname}?${params.toString()}`, { scroll: false });
@@ -86,13 +88,7 @@ export default function StudioOS() {
     }
     if (!mounted || urlTool) return;
     const params = new URLSearchParams(searchParams?.toString() ?? "");
-    if (activeTool === "builder") {
-      params.set("tool", "builder");
-    } else if (activeTool === "chat") {
-      params.delete("tool");
-    } else {
-      params.set("tool", activeTool);
-    }
+    params.set("tool", activeTool);
     const query = params.toString();
     router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
   }, [mounted, urlTool, activeTool, pathname, router, searchParams]);
@@ -102,13 +98,7 @@ export default function StudioOS() {
       const target = normalizeTool(tool);
       if (!VALID_TOOLS.includes(target)) return;
       const params = new URLSearchParams(searchParams?.toString() ?? "");
-      if (target === "builder") {
-        params.set("tool", "builder");
-      } else if (target === "chat") {
-        params.delete("tool");
-      } else {
-        params.set("tool", target);
-      }
+      params.set("tool", target);
       const query = params.toString();
       router.push(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
     },

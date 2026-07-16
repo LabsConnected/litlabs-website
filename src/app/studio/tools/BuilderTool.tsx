@@ -17,7 +17,7 @@ const START_ACTIONS = [
     icon: ImageIcon,
     label: "Create an image",
     desc: "Generate art, ads, and product visuals",
-    href: "/studio?tool=image",
+    href: "/studio?tool=builder&openImage=1",
     color: "#22d3ee",
   },
   {

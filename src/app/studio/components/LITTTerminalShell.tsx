@@ -8,7 +8,7 @@ import {
   useMemo,
   type ComponentType,
 } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
@@ -54,7 +54,6 @@ import {
   Check,
   Square,
   Loader2,
-  MessageSquare,
   Image as ImageIcon,
   Film,
   Music,
@@ -109,6 +108,9 @@ const TerminalTool = dynamic(() => import("../tools/TerminalTool"), {
 });
 
 const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
+const ImageGenPopover = dynamic(() => import("./ImageGenPopover"), {
+  ssr: false,
+});
 
 type Message = {
   role: "user" | "assistant";
@@ -135,7 +137,6 @@ type ToolRailItem = {
 
 const TOOL_RAIL: ToolRailItem[] = [
   { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
-  { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
   { id: "projects", label: "Projects", icon: FolderKanban, tool: "builder" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
@@ -436,13 +437,14 @@ function AttachmentStrip({
 }
 
 function LITTTerminalShellInner({
-  activeTool = "chat",
+  activeTool = "builder",
   onToolChangeAction,
 }: {
   activeTool?: StudioTool;
   onToolChangeAction?: (tool: StudioTool) => void;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
   const {
@@ -471,6 +473,7 @@ function LITTTerminalShellInner({
   const [cameraOpen, setCameraOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
   const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [imageGenOpen, setImageGenOpen] = useState(false);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -499,7 +502,15 @@ function LITTTerminalShellInner({
     [agentId],
   );
   const ActiveTool = useMemo<ComponentType | null>(() => {
-    if (activeTool === "chat" || activeTool === "agents") return null;
+    // chat and image are merged into the Builder hub — they render ChatShell,
+    // not a standalone tool component.
+    if (
+      activeTool === "chat" ||
+      activeTool === "agents" ||
+      activeTool === "image" ||
+      activeTool === "builder"
+    )
+      return null;
     return TOOL_COMPONENTS[activeTool];
   }, [activeTool]);
   const agentMessages = useMemo(
@@ -535,6 +546,19 @@ function LITTTerminalShellInner({
     voiceState === "muted" ||
     voiceState === "paused" ||
     voiceState === "error";
+
+  // Auto-open the image generation popover when navigated with ?openImage=1
+  useEffect(() => {
+    if (searchParams?.get("openImage") === "1") {
+      setImageGenOpen(true);
+      // Clean the param so it doesn't re-open on every render
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("openImage");
+      const query = params.toString();
+      router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     const el = transcriptRef.current;
@@ -1334,6 +1358,12 @@ function LITTTerminalShellInner({
   };
 
   const handleChip = (chip: string) => {
+    // /image opens the inline image generation popover instead of just
+    // inserting the slash command text.
+    if (chip === "/image") {
+      setImageGenOpen(true);
+      return;
+    }
     setInput((prev) => {
       const base = prev.replace(/\s+/g, " ").trim();
       return base ? `${base} ${chip} ` : `${chip} `;
@@ -1375,7 +1405,7 @@ function LITTTerminalShellInner({
       id: "image",
       label: "Image",
       icon: ImageIcon,
-      onClick: () => onToolChangeAction?.("image"),
+      onClick: () => setImageGenOpen(true),
     },
     {
       id: "video",
@@ -1689,12 +1719,12 @@ function LITTTerminalShellInner({
                 <div className="text-sm font-black tracking-wide text-white">
                   {activeTool === "agents"
                     ? "Agent Console"
-                    : activeTool === "chat"
-                      ? "LITT Terminal"
-                      : activeTool === "builder"
-                        ? "Builder"
-                        : activeTool.charAt(0).toUpperCase() +
-                          activeTool.slice(1)}
+                    : activeTool === "builder" ||
+                        activeTool === "chat" ||
+                        activeTool === "image"
+                      ? "Builder"
+                      : activeTool.charAt(0).toUpperCase() +
+                        activeTool.slice(1)}
                 </div>
                 <div className="hidden text-[10px] text-gray-300 sm:block">
                   {activeTool === "agents"
@@ -1721,8 +1751,12 @@ function LITTTerminalShellInner({
               <CameraSession
                 compact
                 onSnapshot={(url) => {
-                  if (activeTool !== "chat") {
-                    onToolChangeAction?.("chat");
+                  if (
+                    activeTool !== "builder" &&
+                    activeTool !== "chat" &&
+                    activeTool !== "image"
+                  ) {
+                    onToolChangeAction?.("builder");
                   }
                   void send("Describe what you see.", [url]).then(
                     (reply) => {
@@ -1737,21 +1771,39 @@ function LITTTerminalShellInner({
             </div>
           )}
 
+          {/* Inline image generation popover — opened from the + menu */}
+          <ImageGenPopover
+            open={imageGenOpen}
+            onClose={() => setImageGenOpen(false)}
+            initialPrompt={input}
+            onInsert={(url, name) => {
+              setAttachments((prev) =>
+                [
+                  ...prev,
+                  { url, name, type: "image/png" },
+                ].slice(0, 8),
+              );
+            }}
+          />
+
           {/* Scrollable content */}
           <div
             ref={transcriptRef}
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
-            {activeTool === "chat" || activeTool === "builder" ? (
+            {activeTool === "chat" ||
+            activeTool === "builder" ||
+            activeTool === "image" ? (
               <ChatShell
                 embedded
                 hideDock
-                builderMode={activeTool === "builder"}
+                builderMode
                 messages={chatMessages}
                 sending={busy}
                 systemLines={[]}
                 onSend={handleChatSend}
                 onToolSelect={onToolChangeAction}
+                onOpenImageGen={() => setImageGenOpen(true)}
               />
             ) : activeTool === "agents" ? (
               isAgentEmpty ? (
