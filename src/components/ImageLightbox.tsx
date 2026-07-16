@@ -161,7 +161,7 @@ export default function ImageLightbox({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-[10000] flex items-center justify-center"
+      className="fixed inset-0 z-[120] flex items-center justify-center"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.95)" }}
       onClick={handleBackdropClick}
       onMouseMove={handleMouseMove}

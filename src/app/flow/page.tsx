@@ -489,7 +489,7 @@ export default function FlowPage() {
 
   if (!isLoaded) {
     return (
-      <div className="min-h-screen flex items-center justify-center font-mono bg-[#050108] text-fuchsia-400">
+      <div className="min-h-dvh flex items-center justify-center font-mono bg-[#050108] text-fuchsia-400">
         <div className="text-center">
           <div className="text-3xl mb-4 animate-pulse">⚡</div>
           <div>Loading Pipeline...</div>
@@ -1203,7 +1203,7 @@ export default function FlowPage() {
       {/* ── YAML Export Modal ── */}
       {showYaml && (
         <div
-          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
+          className="fixed inset-0 z-[120] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
           onClick={() => setShowYaml(false)}
         >

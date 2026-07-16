@@ -35,7 +35,7 @@ export default class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBo
       }
 
       return (
-        <div className="min-h-screen flex items-center justify-center px-4" style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}>
+        <div className="min-h-dvh flex items-center justify-center px-4" style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}>
           <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>
             <div className="text-center mb-6">
               <AlertTriangle size={48} className="mx-auto mb-4" style={{ color: "#ef4444" }} />

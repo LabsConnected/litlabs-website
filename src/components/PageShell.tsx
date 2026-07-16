@@ -22,7 +22,7 @@ export default function PageShell({
 
   return (
     <div
-      className={`min-h-screen w-full ${className}`}
+      className={`min-h-dvh w-full ${className}`}
       style={{ color: T.textColor }}
     >
       {(title || subtitle) && (

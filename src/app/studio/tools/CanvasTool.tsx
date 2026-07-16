@@ -258,7 +258,7 @@ export default function CanvasTool() {
 
   return (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[10000]" : "h-full"}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[120]" : "h-full"}`}
       style={{ backgroundColor: T.bgColor }}
     >
       {/* Header with Model Switcher */}

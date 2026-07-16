@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 export default function PrivacyPage() {
   return (
     <div
-      className="min-h-screen pb-20 font-mono text-xs"
+      className="min-h-dvh pb-20 font-mono text-xs"
       style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}
     >
       <div className="max-w-3xl mx-auto px-4 py-12">

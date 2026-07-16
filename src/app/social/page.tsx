@@ -22,7 +22,7 @@ export default function SocialPage() {
   if (!isLoaded) {
     return (
       <div
-        className="flex min-h-screen items-center justify-center p-6"
+        className="flex min-h-dvh items-center justify-center p-6"
         style={{ backgroundColor: tokens.background, color: tokens.textMuted }}
       >
         <div className="flex flex-col items-center gap-3">
@@ -42,7 +42,7 @@ export default function SocialPage() {
   if (!isSignedIn) {
     return (
       <div
-        className="flex min-h-screen items-center justify-center p-6"
+        className="flex min-h-dvh items-center justify-center p-6"
         style={{ backgroundColor: tokens.background, color: tokens.textMuted }}
       >
         <div className="flex flex-col items-center gap-3 text-center">

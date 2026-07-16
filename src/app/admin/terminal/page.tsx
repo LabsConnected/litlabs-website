@@ -395,7 +395,7 @@ export default function AdminTerminal() {
   if (!isLoaded) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-dvh flex items-center justify-center"
         style={{ backgroundColor: T.bgColor }}
       >
         <RefreshCw
@@ -410,7 +410,7 @@ export default function AdminTerminal() {
   if (!isSignedIn || userId !== ADMIN_USER_ID) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-dvh flex items-center justify-center"
         style={{ backgroundColor: T.bgColor }}
       >
         <div className="text-center">
@@ -443,7 +443,7 @@ export default function AdminTerminal() {
 
   return (
     <div
-      className="min-h-screen flex flex-col"
+      className="min-h-dvh flex flex-col"
       style={{
         backgroundColor: T.bgColor,
         color: T.textColor,
@@ -497,7 +497,7 @@ export default function AdminTerminal() {
           <div
             ref={outputRef}
             className="flex-1 overflow-auto p-4 text-sm leading-relaxed"
-            style={{ minHeight: 0, maxHeight: "calc(100vh - 148px)" }}
+            style={{ minHeight: 0, maxHeight: "calc(100dvh - 148px)" }}
             onClick={() => inputRef.current?.focus()}
           >
             {output.map((line) => (

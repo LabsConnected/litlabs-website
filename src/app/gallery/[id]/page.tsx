@@ -86,7 +86,7 @@ export default function AgentDeploymentPage({
   if (!isLoaded) {
     return (
       <PageShell title="Loading...">
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-dvh flex items-center justify-center">
           <div className="text-center">
             <div className="text-3xl mb-4 animate-pulse">🎨</div>
             <div>Loading agent...</div>

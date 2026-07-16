@@ -47,7 +47,7 @@ export default function GitHubSetupPage() {
 
   return (
     <div
-      className="flex min-h-screen items-center justify-center p-6"
+      className="flex min-h-dvh items-center justify-center p-6"
       style={{ backgroundColor: tokens.background }}
     >
       <div

@@ -198,7 +198,7 @@ export default function SocialPageContent() {
   if (!isLoaded) {
     return (
       <div
-        className="min-h-screen flex items-center justify-center"
+        className="min-h-dvh flex items-center justify-center"
         style={{ backgroundColor: C.bgColor }}
       >
         <Loader2

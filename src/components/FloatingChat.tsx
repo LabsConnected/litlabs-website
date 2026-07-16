@@ -589,7 +589,7 @@ export function FloatingChat() {
 
   const chatPanel = chatOpen && (
     <div
-      className={`fixed inset-0 z-9999 flex flex-col bg-[#080910] md:inset-auto md:right-6 md:bottom-24 md:rounded-2xl md:border md:border-neutral-800 md:shadow-2xl ${
+      className={`fixed inset-0 z-[110] flex flex-col bg-[#080910] md:inset-auto md:right-6 md:bottom-24 md:rounded-2xl md:border md:border-neutral-800 md:shadow-2xl ${
         desktopExpanded
           ? "md:h-[650px] md:w-[420px]"
           : "md:h-[520px] md:w-[380px]"
@@ -943,7 +943,7 @@ export function FloatingChat() {
         cameraMode &&
         createPortal(
           <aside
-            className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-9999 w-[min(48vw,220px)] overflow-hidden rounded-2xl border bg-[#101017]/95 shadow-[0_18px_60px_rgba(0,0,0,.65)] backdrop-blur-xl transition-all md:bottom-20 md:w-64 ${
+            className={`fixed bottom-[calc(5.25rem+env(safe-area-inset-bottom))] z-[110] w-[min(48vw,220px)] overflow-hidden rounded-2xl border bg-[#101017]/95 shadow-[0_18px_60px_rgba(0,0,0,.65)] backdrop-blur-xl transition-all md:bottom-20 md:w-64 ${
               cameraDock === "right" ? "right-3 md:right-24" : "left-3 md:left-24"
             } ${visionActive ? "border-cyan-400/45 shadow-[0_0_35px_rgba(34,211,238,.18)]" : "border-white/15"}`}
             aria-label="LiTT vision camera"

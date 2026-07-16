@@ -64,7 +64,7 @@ export default function HomePage() {
   const { profile, displayName } = useProfile();
   
   return (
-    <div className="min-h-screen" style={{ backgroundColor: C.bgColor }}>
+    <div className="min-h-dvh" style={{ backgroundColor: C.bgColor }}>
       {/* Content */}
     </div>
   );
@@ -459,7 +459,7 @@ export default function CodeScannerPage() {
   if (!isLoaded) {
     return (
       <PageShell title="Loading...">
-        <div className="min-h-screen flex items-center justify-center">
+        <div className="min-h-dvh flex items-center justify-center">
           <div className="text-center">
             <Cpu
               className="animate-spin mx-auto mb-4"

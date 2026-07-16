@@ -674,7 +674,7 @@ function MarketplaceInner() {
       <div
         style={{
           backgroundColor: T?.bgColor || "#0a0a0f",
-          minHeight: "100vh",
+          minHeight: "100dvh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -716,7 +716,7 @@ function MarketplaceInner() {
 
   return (
     <div
-      className="marketplace-page flex min-h-screen flex-col"
+      className="marketplace-page flex min-h-dvh flex-col"
       style={{
         backgroundColor: T.bgColor,
         color: T.textColor,
@@ -2489,7 +2489,7 @@ export default function Marketplace() {
     <Suspense
       fallback={
         <div
-          className="min-h-screen flex items-center justify-center"
+          className="min-h-dvh flex items-center justify-center"
           style={{ backgroundColor: "#0a0a0f" }}
         >
           <div className="text-center">

@@ -76,7 +76,7 @@ export default function ProjectsPageClient() {
   if (!isLoaded) {
     return (
       <div
-        className="relative flex min-h-screen items-center justify-center overflow-hidden"
+        className="relative flex min-h-dvh items-center justify-center overflow-hidden"
         style={{ backgroundColor: tokens.background }}
       >
         <div className="pointer-events-none absolute inset-0">
@@ -105,7 +105,7 @@ export default function ProjectsPageClient() {
   if (!isSignedIn) {
     return (
       <div
-        className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
+        className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
       >
         <div

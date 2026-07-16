@@ -8,7 +8,7 @@ export const metadata: Metadata = {
 export default function NotFound() {
   return (
     <div
-      className="min-h-screen flex items-center justify-center px-4"
+      className="min-h-dvh flex items-center justify-center px-4"
       style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
     >
       <div className="max-w-md w-full rounded-xl p-8" style={{ border: "1px solid #2a2a3a", backgroundColor: "#1a1a24" }}>

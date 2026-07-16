@@ -278,7 +278,7 @@ export default function Gallery() {
       <div
         style={{
           backgroundColor: T?.bgColor || "#0f0f14",
-          minHeight: "100vh",
+          minHeight: "100dvh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",

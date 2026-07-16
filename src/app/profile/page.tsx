@@ -113,7 +113,7 @@ function ProfilePageInner() {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -131,7 +131,7 @@ function ProfilePageInner() {
     return (
       <div
         style={{
-          minHeight: "100vh",
+          minHeight: "100dvh",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -239,7 +239,7 @@ function ProfilePageInner() {
 
       <style>{`
         .profile-page {
-          min-height: 100vh;
+          min-height: 100dvh;
           background:
             radial-gradient(circle at 15% 5%, rgba(168,85,247,0.08), transparent 28%),
             radial-gradient(circle at 90% 15%, rgba(48,231,255,0.05), transparent 24%),

@@ -87,7 +87,7 @@ body {
   line-height: 1.55;
   margin: 0;
   padding: 0;
-  min-height: 100vh;
+  min-height: 100dvh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -1660,13 +1660,10 @@ main {
   }
 }
 
-/* Safe area insets for notched phones */
-@supports (padding-top: env(safe-area-inset-top)) {
-  body {
-    padding-top: env(safe-area-inset-top);
-    padding-bottom: env(safe-area-inset-bottom);
-  }
-}
+/* Safe area insets for notched phones are handled per-element on fixed
+   positioned UI (mobile-bottom-nav, chat-launcher, studio composer) via
+   env(safe-area-inset-*). Adding body-level padding here shifts dvh-based
+   layouts and causes double-counting, so it is intentionally omitted. */
 
 /* Touch-friendly tap targets (min 44px) */
 @media (pointer: coarse) {
@@ -2125,7 +2122,7 @@ main {
   position: fixed;
   right: 16px;
   bottom: calc(88px + env(safe-area-inset-bottom));
-  z-index: 9998;
+  z-index: 110;
 }
 
 @media (min-width: 768px) {
@@ -2142,7 +2139,7 @@ main {
   bottom: 0;
   left: 0;
   right: 0;
-  z-index: 100;
+  z-index: 90;
   padding-bottom: env(safe-area-inset-bottom);
 }
 

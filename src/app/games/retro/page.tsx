@@ -135,7 +135,7 @@ export default function RetroArcadePage() {
 
   return (
     <PageShell className="bg-[#07070b]">
-      <main className="min-h-screen overflow-hidden bg-[radial-gradient(circle_at_20%_0%,rgba(124,58,237,.22),transparent_28%),radial-gradient(circle_at_90%_20%,rgba(6,182,212,.12),transparent_25%),#07070b] text-white">
+      <main className="min-h-dvh overflow-hidden bg-[radial-gradient(circle_at_20%_0%,rgba(124,58,237,.22),transparent_28%),radial-gradient(circle_at_90%_20%,rgba(6,182,212,.12),transparent_25%),#07070b] text-white">
         <header className="border-b border-white/10 bg-black/30 px-4 py-4 backdrop-blur-xl sm:px-6">
           <div className="mx-auto flex max-w-[1500px] items-center justify-between gap-4">
             <div className="flex items-center gap-3">

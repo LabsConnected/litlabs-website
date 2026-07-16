@@ -271,7 +271,7 @@ function PublicHeader() {
 
 function LandingPage() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#06060e] text-[#e2e2e9]">
+    <div className="min-h-dvh overflow-x-hidden bg-[#06060e] text-[#e2e2e9]">
       <PublicHeader />
 
       {/* Background glows */}
