@@ -3,6 +3,9 @@
 import { usePathname } from "next/navigation";
 import TopNavbar from "@/components/TopNavbar";
 import FooterWrapper from "@/components/FooterWrapper";
+import MobileBottomNav from "@/components/MobileBottomNav";
+import Sidebar from "@/components/Sidebar";
+import { useNavDrawer } from "@/context/NavDrawerContext";
 import dynamic from "next/dynamic";
 const CookieConsent = dynamic(() => import("@/components/CookieConsent"), {
   ssr: false,
@@ -39,6 +42,7 @@ export default function LayoutShell({
   const publicPage = isPublicPath(pathname || "/");
   const isStudio =
     pathname === "/studio" || pathname?.startsWith("/studio/") || false;
+  const { open: drawerOpen, setOpen: setDrawerOpen } = useNavDrawer();
 
   if (publicPage) {
     return (
@@ -76,11 +80,13 @@ export default function LayoutShell({
       <div className="relative z-10 flex min-h-dvh flex-col">
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <TopNavbar />
-        <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden">
+        <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
           {children}
         </main>
         <FloatingChat />
         <FooterWrapper />
+        <MobileBottomNav />
+        <Sidebar open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         <CookieConsent />
         <ServiceWorkerRegistration />
       </div>

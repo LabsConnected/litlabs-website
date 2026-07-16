@@ -5,6 +5,7 @@ import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
+import { NavDrawerProvider } from "@/context/NavDrawerContext";
 import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleAnalytics } from "@next/third-parties/google";
@@ -115,7 +116,9 @@ export default function RootLayout({
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <NavDrawerProvider>
+            <LayoutShell>{children}</LayoutShell>
+          </NavDrawerProvider>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
