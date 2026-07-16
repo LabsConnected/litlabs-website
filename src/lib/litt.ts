@@ -328,6 +328,7 @@ class Jarvis {
 }
 
 export const jarvis = new Jarvis();
+export const litt = jarvis;
 
 if (typeof window === "undefined") {
   jarvis.init({
