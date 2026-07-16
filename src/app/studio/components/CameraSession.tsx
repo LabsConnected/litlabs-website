@@ -13,6 +13,7 @@ interface CameraSessionProps {
   modelName?: string;
   initialStream?: MediaStream | null;
   initialError?: string | null;
+  compact?: boolean;
 }
 
 export default function CameraSession({
@@ -21,6 +22,7 @@ export default function CameraSession({
   modelName = "Gemini 2.5 Flash Vision",
   initialStream = null,
   initialError = null,
+  compact = false,
 }: CameraSessionProps) {
   const { resolvedColors: T } = useTheme();
   const { lastError, requestVideo, resetPermission } = useMediaPermissions();
@@ -28,8 +30,25 @@ export default function CameraSession({
     initialStream ? "active" : initialError ? "error" : "idle",
   );
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
+  const [cameraDevices, setCameraDevices] = useState<MediaDeviceInfo[]>([]);
+  const [selectedDeviceId, setSelectedDeviceId] = useState("");
+  const [activeDeviceLabel, setActiveDeviceLabel] = useState("Camera");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const identifyStream = useCallback(async (stream: MediaStream) => {
+    const track = stream.getVideoTracks()[0];
+    const settings = track?.getSettings();
+    setSelectedDeviceId(settings?.deviceId || "");
+    setActiveDeviceLabel(track?.label || "Camera");
+
+    try {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      setCameraDevices(devices.filter((device) => device.kind === "videoinput"));
+    } catch {
+      setCameraDevices([]);
+    }
+  }, []);
 
   useEffect(() => {
     if (!initialStream) return;
@@ -40,7 +59,8 @@ export default function CameraSession({
       video.srcObject = initialStream;
       void video.play();
     }
-  }, [initialStream]);
+    void identifyStream(initialStream);
+  }, [identifyStream, initialStream]);
 
   useEffect(() => {
     if (initialError) setState("error");
@@ -57,9 +77,12 @@ export default function CameraSession({
   }, []);
 
   const startCamera = useCallback(
-    async (mode: "user" | "environment" = facingMode) => {
+    async (
+      mode: "user" | "environment" = facingMode,
+      deviceId?: string,
+    ) => {
       setState("requesting");
-      const stream = await requestVideo(mode);
+      const stream = await requestVideo(mode, deviceId);
       if (!stream) {
         setState("error");
         return;
@@ -69,13 +92,25 @@ export default function CameraSession({
         videoRef.current.srcObject = stream;
         videoRef.current.play().catch(() => {});
       }
+      await identifyStream(stream);
       setState("active");
     },
-    [facingMode, requestVideo],
+    [facingMode, identifyStream, requestVideo],
+  );
+
+  const changeCamera = useCallback(
+    async (deviceId: string) => {
+      if (!deviceId || deviceId === selectedDeviceId) return;
+      stopStream();
+      setSelectedDeviceId(deviceId);
+      await startCamera(facingMode, deviceId);
+    },
+    [facingMode, selectedDeviceId, startCamera, stopStream],
   );
 
   const flipCamera = useCallback(async () => {
     stopStream();
+    setSelectedDeviceId("");
     const nextMode = facingMode === "user" ? "environment" : "user";
     setFacingMode(nextMode);
     await startCamera(nextMode);
@@ -163,8 +198,6 @@ export default function CameraSession({
     );
   }
 
-  const cameraLabel = facingMode === "user" ? "Front camera" : "Rear camera";
-
   return (
     <div className="relative overflow-hidden rounded-2xl border border-cyan-400/30 bg-black/80 shadow-2xl">
       {/* Header overlay */}
@@ -177,8 +210,12 @@ export default function CameraSession({
           >
             LIVE
           </span>
-          <span className="text-[10px]" style={{ color: T.textMuted }}>
-            {cameraLabel}
+          <span
+            className="max-w-[120px] truncate text-[10px]"
+            style={{ color: T.textMuted }}
+            title={activeDeviceLabel}
+          >
+            {activeDeviceLabel}
           </span>
         </div>
         <div className="flex items-center gap-1.5">
@@ -194,11 +231,26 @@ export default function CameraSession({
         autoPlay
         playsInline
         muted
-        className="aspect-video w-full object-cover"
+        className={compact ? "aspect-[4/3] w-full object-cover" : "aspect-video w-full object-cover"}
       />
 
       {/* Bottom toolbar */}
-      <div className="flex items-center justify-between gap-2 border-t border-white/10 bg-[#0a0f1c] p-2">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-t border-white/10 bg-[#0a0f1c] p-2">
+        {cameraDevices.length > 0 && (
+          <select
+            aria-label="Camera device"
+            value={selectedDeviceId}
+            onChange={(event) => void changeCamera(event.target.value)}
+            className="min-w-0 flex-1 truncate rounded-lg border border-white/10 bg-black/50 px-2 py-1.5 text-[10px] text-neutral-300 outline-none focus:border-cyan-400/40"
+            title={activeDeviceLabel}
+          >
+            {cameraDevices.map((device, index) => (
+              <option key={device.deviceId} value={device.deviceId}>
+                {device.label || `Camera ${index + 1}`}
+              </option>
+            ))}
+          </select>
+        )}
         <div className="flex items-center gap-2">
           <button
             onClick={capture}
@@ -208,13 +260,13 @@ export default function CameraSession({
             <Zap size={14} /> Snapshot
           </button>
           <span
-            className="hidden text-[10px] sm:inline"
+            className={compact ? "hidden" : "hidden text-[10px] sm:inline"}
             style={{ color: T.textMuted }}
           >
             Point and tap Snapshot to ask LiTT what it sees
           </span>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="ml-auto flex items-center gap-2">
           <button
             onClick={flipCamera}
             className="rounded-full border border-white/20 p-2 hover:bg-white/10"

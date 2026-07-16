@@ -32,7 +32,6 @@ import {
   Camera,
   Mic,
   MicOff,
-  Paperclip,
   X,
   Sparkles,
   LayoutGrid,
@@ -521,6 +520,7 @@ function LITTTerminalShellInner({
   const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
   const [cameraError, setCameraError] = useState<string | null>(null);
   const [cameraRequesting, setCameraRequesting] = useState(false);
+  const [presencePanelVisible, setPresencePanelVisible] = useState(false);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -548,6 +548,22 @@ function LITTTerminalShellInner({
     () => AGENT_AVATAR_META[agentId] || AGENT_AVATAR_META.littcode,
     [agentId],
   );
+  const selectedMicDevice = useMemo(
+    () =>
+      availableDevices.find((device) => device.deviceId === selectedDeviceId) ||
+      availableDevices[0],
+    [availableDevices, selectedDeviceId],
+  );
+  const cameraDocked =
+    presencePanelVisible && !pluginsOpen && activeTool !== "agents";
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 1024px)");
+    const update = () => setPresencePanelVisible(mediaQuery.matches);
+    update();
+    mediaQuery.addEventListener("change", update);
+    return () => mediaQuery.removeEventListener("change", update);
+  }, []);
   const ActiveTool = useMemo<ComponentType | null>(() => {
     if (activeTool === "chat" || activeTool === "agents") return null;
     return TOOL_COMPONENTS[activeTool];
@@ -1364,6 +1380,25 @@ function LITTTerminalShellInner({
     }
   }, [cameraOpen, cameraRequesting]);
 
+  const closeCamera = useCallback(() => {
+    setCameraOpen(false);
+    setCameraStream(null);
+    setCameraError(null);
+  }, []);
+
+  const snapshotCamera = useCallback(
+    (url: string) => {
+      if (activeTool !== "chat") {
+        onToolChangeAction?.("chat");
+      }
+      void send("Describe what you see.", [url]).then((reply) => {
+        if (reply) speakText(reply);
+      });
+      closeCamera();
+    },
+    [activeTool, closeCamera, onToolChangeAction, send, speakText],
+  );
+
   // When the user clicks a chip body, we treat it as a follow-up turn so
   // the chat path picks up the chip's intent. Destructive action types
   // (anything that would run a shell command, edit a file, or build/deploy)
@@ -1873,31 +1908,15 @@ function LITTTerminalShellInner({
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
           {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 backdrop-blur-md sm:px-6 sm:py-3">
+          <div className="relative z-20 shrink-0 bg-linear-to-t from-[#030308] via-[#030308]/98 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-2">
-              {cameraOpen && (
+              {cameraOpen && !cameraDocked && (
                 <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
                   <CameraSession
                     initialStream={cameraStream}
                     initialError={cameraError}
-                    onSnapshot={(url) => {
-                      if (activeTool !== "chat") {
-                        onToolChangeAction?.("chat");
-                      }
-                      void send("Describe what you see.", [url]).then(
-                        (reply) => {
-                          if (reply) speakText(reply);
-                        },
-                      );
-                      setCameraOpen(false);
-                      setCameraStream(null);
-                      setCameraError(null);
-                    }}
-                    onClose={() => {
-                      setCameraOpen(false);
-                      setCameraStream(null);
-                      setCameraError(null);
-                    }}
+                    onSnapshot={snapshotCamera}
+                    onClose={closeCamera}
                     modelName={persona.name}
                   />
                 </div>
@@ -2027,7 +2046,7 @@ function LITTTerminalShellInner({
                       ))}
                     </div>
                   )}
-                  {availableDevices.length > 1 && (
+                  {availableDevices.length > 0 && (
                     <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
                       <span className="text-[10px] text-gray-300">Mic:</span>
                       <select
@@ -2048,11 +2067,12 @@ function LITTTerminalShellInner({
                 </div>
               )}
 
-              <AttachmentStrip
-                attachments={attachments}
-                onRemove={removeAttachment}
-              />
-              <div className="flex items-center gap-1.5 sm:gap-2">
+              <div className="rounded-2xl border border-white/10 bg-[#08080f]/95 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.02]">
+                <AttachmentStrip
+                  attachments={attachments}
+                  onRemove={removeAttachment}
+                />
+                <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
                   aria-label="Add attachment"
                   onClick={() => fileInputRef.current?.click()}
@@ -2121,16 +2141,9 @@ function LITTTerminalShellInner({
                   </button>
                 </div>
 
-                <button
-                  aria-label="Attach file"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:h-11 sm:w-11"
-                >
-                  <Paperclip size={15} />
-                </button>
-              </div>
+                </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
+                <div className="mt-2 flex items-center gap-1.5 overflow-x-auto border-t border-white/5 pt-2 scrollbar-none [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
@@ -2178,6 +2191,7 @@ function LITTTerminalShellInner({
                       /{plugin}
                     </button>
                   ))}
+                </div>
                 </div>
               </div>
             </div>
@@ -2302,8 +2316,25 @@ function LITTTerminalShellInner({
                 </div>
               </div>
 
-              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
-                <LiTTAvatar size={90} />
+              {cameraOpen && cameraDocked && (
+                <div className="border-b border-white/5 p-3">
+                  <div className="mb-2 flex items-center justify-between text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
+                    <span>LiTT Vision</span>
+                    <span className="text-cyan-400">One-click live</span>
+                  </div>
+                  <CameraSession
+                    initialStream={cameraStream}
+                    initialError={cameraError}
+                    onSnapshot={snapshotCamera}
+                    onClose={closeCamera}
+                    modelName={persona.name}
+                    compact
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-5">
+                <LiTTAvatar size={cameraDocked && cameraOpen ? 58 : 90} />
                 <div className="text-center">
                   <div className="text-sm font-black text-white">
                     {persona.name}
@@ -2331,6 +2362,24 @@ function LITTTerminalShellInner({
                     {micActive ? "Listening" : "Live"}
                   </span>
                 </div>
+                {availableDevices.length > 0 && (
+                  <label className="flex w-full items-center gap-2 rounded-lg border border-white/5 bg-white/2 px-3 py-2">
+                    <Mic size={12} className="shrink-0 text-cyan-400" />
+                    <span className="sr-only">Microphone device</span>
+                    <select
+                      value={selectedDeviceId ?? selectedMicDevice?.deviceId ?? ""}
+                      onChange={(event) => selectDevice(event.target.value)}
+                      className="min-w-0 flex-1 truncate bg-transparent text-[9px] text-gray-300 outline-none"
+                      title={selectedMicDevice?.label || "Default microphone"}
+                    >
+                      {availableDevices.map((device, index) => (
+                        <option key={device.deviceId} value={device.deviceId}>
+                          {device.label || `Microphone ${index + 1}`}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                )}
               </div>
 
               <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">

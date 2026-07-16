@@ -402,7 +402,10 @@ export function VoiceSessionProvider({
 
         // A spoken reply owns the microphone until playback finishes. If the
         // turn produced no speech, immediately continue the conversation.
-        if (activeRef.current && voiceStateRef.current !== "speaking") {
+        if (
+          activeRef.current &&
+          String(voiceStateRef.current) !== "speaking"
+        ) {
           restartListeningRef.current();
         }
       } catch (err: unknown) {
@@ -539,7 +542,9 @@ export function VoiceSessionProvider({
     }
   }, [finalizeRecording, setActivity, startMicLevelLoop]);
 
-  restartListeningRef.current = restartListening;
+  useEffect(() => {
+    restartListeningRef.current = restartListening;
+  }, [restartListening]);
 
   // ---------------------------------------------------------------------------
   // startVoice

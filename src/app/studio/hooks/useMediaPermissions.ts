@@ -18,6 +18,7 @@ interface MediaPermissionError {
 
 export async function requestCameraStream(
   facingMode: "user" | "environment" = "user",
+  deviceId?: string,
 ): Promise<MediaStream> {
   if (typeof window === "undefined" || !window.isSecureContext) {
     throw new DOMException(
@@ -35,7 +36,9 @@ export async function requestCameraStream(
 
   return navigator.mediaDevices.getUserMedia({
     video: {
-      facingMode: { ideal: facingMode },
+      ...(deviceId
+        ? { deviceId: { exact: deviceId } }
+        : { facingMode: { ideal: facingMode } }),
       width: { ideal: 1280 },
       height: { ideal: 720 },
     },
@@ -83,6 +86,7 @@ export function useMediaPermissions() {
 
   const requestVideo = useCallback(async (
     facingMode: "user" | "environment" = "user",
+    deviceId?: string,
   ): Promise<MediaStream | null> => {
     setLastError(null);
     if (typeof navigator === "undefined" || !navigator.mediaDevices?.getUserMedia) {
@@ -95,7 +99,7 @@ export function useMediaPermissions() {
       return null;
     }
     try {
-      const stream = await requestCameraStream(facingMode);
+      const stream = await requestCameraStream(facingMode, deviceId);
       setPermission((p) => ({ ...p, video: "granted" }));
       return stream;
     } catch (e) {
