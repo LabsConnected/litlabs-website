@@ -1,11 +1,12 @@
 "use client";
 export const dynamic = "force-dynamic";
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
-import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { useUser } from "@clerk/nextjs";
 import { useRouter } from "next/navigation";
 import PageShell from "@/components/PageShell";
 import Lightbox from "@/components/Lightbox";
@@ -78,46 +79,10 @@ type GalleryItem = {
   videoUrl?: string;
 };
 
-function getArtifactIdentity(item: GalleryItem): string {
-  const imageUrl = item.imageUrl.trim().toLowerCase().replace(/\/$/, "");
-  const mediaUrl = (item.videoUrl || imageUrl)
-    .trim()
-    .toLowerCase()
-    .replace(/\/$/, "");
-  return `${item.mediaType || "image"}:${mediaUrl}`;
-}
-
-function dedupeArtifacts(items: GalleryItem[]): GalleryItem[] {
-  const byId = new Map<string, GalleryItem>();
-  const identityToId = new Map<string, string>();
-
-  for (const item of items) {
-    const identity = getArtifactIdentity(item);
-    const existingId = byId.has(item.id) ? item.id : identityToId.get(identity);
-
-    if (existingId) {
-      const existing = byId.get(existingId)!;
-      byId.set(existingId, {
-        ...item,
-        ...existing,
-        isOwner: existing.isOwner || item.isOwner,
-        isPublic: existing.isPublic ?? item.isPublic,
-        likes: Math.max(existing.likes || 0, item.likes || 0),
-      });
-      continue;
-    }
-
-    byId.set(item.id, item);
-    identityToId.set(identity, item.id);
-  }
-
-  return Array.from(byId.values());
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 export default function Gallery() {
   const { isLoaded, isSignedIn } = useClerkAuth();
-  const { user } = useAppUser();
+  const { user } = useUser();
   const router = useRouter();
   const { resolvedColors: T } = useTheme();
   const [apiItems, setApiItems] = useState<GalleryItem[]>([]);
@@ -161,19 +126,16 @@ export default function Gallery() {
   } | null>(null);
   const [brokenImages, setBrokenImages] = useState<Set<string>>(new Set());
   const [isMock, setIsMock] = useState(false);
-  const [galleryError, setGalleryError] = useState<string | null>(null);
-  const [galleryLoading, setGalleryLoading] = useState(true);
 
   // Real API items first; fall back to user items only when API returns nothing
-  const items = useMemo(
-    () =>
-      dedupeArtifacts([...apiItems, ...userItems]).map((item) => ({
-        ...item,
-        likes:
-          likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
-      })),
-    [apiItems, userItems, likeCounts],
-  );
+  const baseItems =
+    apiItems.length > 0
+      ? [...apiItems, ...userItems]
+      : [...userItems];
+  const items = baseItems.map((item) => ({
+    ...item,
+    likes: likeCounts[item.id] !== undefined ? likeCounts[item.id] : item.likes,
+  }));
 
   // Memoized Lightbox navigation handlers to prevent infinite loops
   const handleLightboxNext = useCallback(() => {
@@ -203,23 +165,17 @@ export default function Gallery() {
 
   // Fetch gallery items when view mode or category changes
   useEffect(() => {
-    const controller = new AbortController();
     const params = new URLSearchParams();
     params.set("view", viewMode);
     if (selectedCategory !== "all") {
       params.set("category", selectedCategory);
     }
 
-    fetch(`/api/gallery?${params.toString()}`, { signal: controller.signal })
-      .then(async (r) => {
-        const data = await r.json();
-        if (!r.ok) throw new Error(data?.error || "Gallery refresh failed");
-        return data;
-      })
+    fetch(`/api/gallery?${params.toString()}`)
+      .then((r) => r.json())
       .then((data: { items?: GalleryItem[]; mock?: boolean }) => {
-        setGalleryError(null);
         setIsMock(data.mock === true);
-        if (data.items) {
+        if (data.items && data.items.length > 0) {
           // Mark items as owned by current user
           const currentUserName = user?.fullName || user?.username;
           const itemsWithOwnership = data.items.map((item) => ({
@@ -227,28 +183,17 @@ export default function Gallery() {
             isOwner: item.artist === currentUserName,
           }));
           setApiItems(itemsWithOwnership);
-        } else {
-          setApiItems([]);
         }
       })
-      .catch((error: unknown) => {
-        if (controller.signal.aborted) return;
-        setGalleryError(
-          error instanceof Error ? error.message : "Gallery refresh failed",
-        );
-      })
-      .finally(() => {
-        if (!controller.signal.aborted) setGalleryLoading(false);
+      .catch(() => {
+        // silent fail — demo items still show
       });
-    return () => controller.abort();
   }, [viewMode, selectedCategory, user]);
 
-  const openUpload = useCallback(() => {
+  useEffect(() => {
     if (isLoaded && !isSignedIn) {
       router.push("/sign-in?redirect_url=/gallery");
-      return;
     }
-    setShowUpload(true);
   }, [isLoaded, isSignedIn, router]);
 
   const toggleLike = useCallback(
@@ -278,7 +223,7 @@ export default function Gallery() {
       <div
         style={{
           backgroundColor: T?.bgColor || "#0f0f14",
-          minHeight: "100dvh",
+          minHeight: "100vh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -288,6 +233,26 @@ export default function Gallery() {
         <div style={{ textAlign: "center" }}>
           <div style={{ fontSize: "32px", marginBottom: "16px" }}>⏳</div>
           <div>Loading gallery...</div>
+        </div>
+      </div>
+    );
+  }
+
+  if (!isLoaded || !isSignedIn) {
+    return (
+      <div
+        style={{
+          backgroundColor: T?.bgColor || "#0f0f14",
+          minHeight: "100vh",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          color: T?.textColor || "#e2e8f0",
+        }}
+      >
+        <div style={{ textAlign: "center" }}>
+          <div style={{ fontSize: "32px", marginBottom: "16px" }}>🔒</div>
+          <div>Sign in to view the gallery</div>
         </div>
       </div>
     );
@@ -490,8 +455,8 @@ export default function Gallery() {
 
   return (
     <PageShell
-      title="Artifact Museum"
-      subtitle="A living archive of AI-made images, worlds, and creative work"
+      title="Gallery"
+      subtitle="AI-generated art, worlds, and creative works"
     >
       {/* Retro Ticker */}
       <div
@@ -499,7 +464,7 @@ export default function Gallery() {
         style={{ borderColor: T.borderColor, color: T.accentColor }}
       >
         <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>🏛️ ARTIFACT MUSEUM ONLINE // LITLABS CREATIVE ARCHIVE</span>
+          <span>🎨 AI GALLERY RENDERS ONLINE // SECTOR 9 IMAGING SECTOR</span>
           <span>⚡ PIXEL FORGE MODELS LIVE GENERATING 360° SPHERES DAILY</span>
           <span>
             🪐 IMMERSIVE AI IMAGE GENERATION ACROSS MULTIPLE PROVIDERS
@@ -510,23 +475,9 @@ export default function Gallery() {
       {isMock && (
         <div
           className="w-full px-4 py-2 text-[10px] text-center"
-          style={{
-            backgroundColor: T.accentColor + "20",
-            color: T.accentColor,
-            borderBottom: `1px solid ${T.accentColor}40`,
-          }}
+          style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
         >
-          🛠 Demo museum — connect Supabase to see real community artifacts.
-        </div>
-      )}
-
-      {galleryError && (
-        <div
-          role="status"
-          className="w-full px-4 py-2 text-center text-[11px] font-bold"
-          style={{ backgroundColor: "#f59e0b18", color: "#fbbf24" }}
-        >
-          Showing the last available collection. Refresh later to sync new work.
+          🛠 Demo gallery — connect Supabase to see real community uploads.
         </div>
       )}
 
@@ -542,7 +493,7 @@ export default function Gallery() {
               : null;
           if (!featured) return null;
           return (
-            <div className="relative h-[180px] sm:h-[260px] md:h-[380px] lg:h-[480px] group">
+            <div className="relative h-[280px] sm:h-[380px] md:h-[480px] group">
               {brokenImages.has(featured.imageUrl) ? (
                 <div
                   className="absolute inset-0 flex items-center justify-center"
@@ -586,11 +537,11 @@ export default function Gallery() {
               />
 
               {/* Hero content */}
-              <div className="absolute bottom-0 left-0 right-0 p-3 sm:p-6 md:p-10">
+              <div className="absolute bottom-0 left-0 right-0 p-4 sm:p-6 md:p-10">
                 <div className="w-full">
                   <div className="flex items-center gap-2 mb-2 sm:mb-3">
                     <span
-                      className="text-[8px] sm:text-[10px] font-bold uppercase tracking-[0.2em] px-1.5 py-0.5 sm:px-2 rounded"
+                      className="text-[9px] sm:text-[10px] font-bold uppercase tracking-[0.2em] px-2 py-0.5 rounded"
                       style={{
                         backgroundColor: T.accentColor + "20",
                         color: T.accentColor,
@@ -600,23 +551,21 @@ export default function Gallery() {
                       Featured
                     </span>
                     <span
-                      className="text-[8px] sm:text-[10px] font-bold uppercase tracking-wider opacity-50"
+                      className="text-[9px] sm:text-[10px] font-bold uppercase tracking-wider opacity-50"
                       style={{ color: T.textColor }}
                     >
                       {featured.artist}
                     </span>
-                    <span className="text-[8px] sm:text-[10px] opacity-30">
-                      ·
-                    </span>
+                    <span className="text-[9px] sm:text-[10px] opacity-30">·</span>
                     <span
-                      className="text-[8px] sm:text-[10px] opacity-40"
+                      className="text-[9px] sm:text-[10px] opacity-40"
                       style={{ color: T.textColor }}
                     >
                       {featured.likes.toLocaleString()} sparks
                     </span>
                   </div>
                   <h1
-                    className="text-xl sm:text-3xl md:text-5xl lg:text-6xl font-black tracking-tight mb-1 sm:mb-2"
+                    className="text-2xl sm:text-4xl md:text-6xl font-black tracking-tight mb-1 sm:mb-2"
                     style={{
                       color: T.headerColor,
                       textShadow: `0 2px 30px ${T.bgColor}`,
@@ -625,7 +574,7 @@ export default function Gallery() {
                     {featured.title}
                   </h1>
                   <p
-                    className="text-xs sm:text-sm md:text-base opacity-60 max-w-lg mb-3 sm:mb-6 hidden sm:block"
+                    className="text-xs sm:text-sm md:text-base opacity-60 max-w-lg mb-4 sm:mb-6 hidden sm:block"
                     style={{ color: T.textColor }}
                   >
                     Worlds, characters, and dreams generated by AI agents. Every
@@ -645,14 +594,14 @@ export default function Gallery() {
                     ].map((stat, i) => (
                       <div
                         key={stat.label}
-                        className="px-2 py-1 sm:px-4 sm:py-2 rounded-lg backdrop-blur-sm"
+                        className="px-3 py-1.5 sm:px-4 sm:py-2 rounded-lg backdrop-blur-sm"
                         style={{
                           backgroundColor: T.boxBg + "80",
                           border: `1px solid ${T.borderColor}30`,
                         }}
                       >
                         <div
-                          className="text-sm sm:text-lg font-black"
+                          className="text-base sm:text-lg font-black"
                           style={{
                             color: i === 0 ? T.accentColor : T.headerColor,
                           }}
@@ -660,7 +609,7 @@ export default function Gallery() {
                           {stat.value.toLocaleString()}
                         </div>
                         <div
-                          className="text-[8px] sm:text-[10px] uppercase tracking-wider opacity-40"
+                          className="text-[9px] sm:text-[10px] uppercase tracking-wider opacity-40"
                           style={{ color: T.textColor }}
                         >
                           {stat.label}
@@ -674,7 +623,7 @@ export default function Gallery() {
                         setSearchQuery("");
                         setSelectedItem(featured);
                       }}
-                      className="px-3 py-1.5 sm:px-5 sm:py-2.5 rounded-lg text-[10px] sm:text-xs font-bold uppercase tracking-wider transition-all hover:scale-105"
+                      className="px-5 py-2.5 rounded-lg text-xs font-bold uppercase tracking-wider transition-all hover:scale-105"
                       style={{
                         backgroundColor: T.accentColor,
                         color: T.bgColor,
@@ -721,13 +670,13 @@ export default function Gallery() {
                 <button
                   key={item.id}
                   onClick={() => setSelectedItem(item)}
-                  className="shrink-0 w-28 sm:w-40 text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
+                  className="shrink-0 w-[140px] sm:w-[180px] text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
                   style={{
                     backgroundColor: T.boxBg,
                     border: `1px solid ${T.borderColor}20`,
                   }}
                 >
-                  <div className="relative h-[75px] sm:h-[100px]">
+                  <div className="relative h-[90px] sm:h-[110px]">
                     {brokenImages.has(item.imageUrl) ? (
                       <div
                         className="absolute inset-0 flex items-center justify-center"
@@ -784,9 +733,15 @@ export default function Gallery() {
 
       {/* ── Controls Bar ── */}
       <div
-        className="sticky top-0 z-30 flex flex-wrap items-center justify-between gap-2 px-3 py-2 sm:px-6 sm:py-3.5 backdrop-blur-md"
+        className="sticky top-0 z-30 backdrop-blur-md"
         style={{
+          padding: "12px 16px sm:14px 24px",
           borderBottom: `1px solid ${T.borderColor}40`,
+          display: "flex",
+          gap: "8px sm:gap-12px",
+          flexWrap: "wrap",
+          alignItems: "center",
+          justifyContent: "space-between",
           backgroundColor: T.boxBg + "dd",
         }}
       >
@@ -868,8 +823,6 @@ export default function Gallery() {
         <div className="flex gap-2 items-center flex-wrap">
           <div className="relative">
             <input
-              id="gallery-search"
-              name="gallerySearch"
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -887,8 +840,6 @@ export default function Gallery() {
             </span>
           </div>
           <select
-            id="gallery-sort"
-            name="gallerySort"
             value={sortBy}
             onChange={(e) => setSortBy(e.target.value)}
             className="px-2 py-1.5 rounded-lg text-[11px] outline-none cursor-pointer"
@@ -905,7 +856,7 @@ export default function Gallery() {
             ))}
           </select>
           <button
-            onClick={() => (showUpload ? setShowUpload(false) : openUpload())}
+            onClick={() => setShowUpload(!showUpload)}
             className="px-3 py-1.5 rounded-lg text-[11px] font-bold transition-all hover:opacity-90"
             style={{ backgroundColor: T.accentColor, color: T.bgColor }}
           >
@@ -946,8 +897,6 @@ export default function Gallery() {
                   Media Type
                 </label>
                 <select
-                  id="gallery-media-type"
-                  name="galleryMediaType"
                   value={uploadForm.mediaType}
                   onChange={(e) =>
                     setUploadForm({
@@ -982,8 +931,6 @@ export default function Gallery() {
                   Title
                 </label>
                 <input
-                  id="gallery-title"
-                  name="galleryTitle"
                   type="text"
                   value={uploadForm.title}
                   onChange={(e) =>
@@ -1092,8 +1039,6 @@ export default function Gallery() {
                           >
                             browse
                             <input
-                              id="gallery-file"
-                              name="galleryFile"
                               type="file"
                               accept="image/*"
                               onChange={(e) => {
@@ -1132,8 +1077,6 @@ export default function Gallery() {
                   {!uploadFile && !uploadForm.imageUrl && (
                     <div>
                       <input
-                        id="gallery-image-url"
-                        name="galleryImageUrl"
                         type="text"
                         value={uploadForm.imageUrl}
                         onChange={(e) =>
@@ -1171,8 +1114,6 @@ export default function Gallery() {
                     Video URL
                   </label>
                   <input
-                    id="gallery-video-url"
-                    name="galleryVideoUrl"
                     type="text"
                     value={uploadForm.videoUrl}
                     onChange={(e) =>
@@ -1211,8 +1152,6 @@ export default function Gallery() {
                     Artist
                   </label>
                   <input
-                    id="gallery-artist"
-                    name="galleryArtist"
                     type="text"
                     value={uploadForm.artist}
                     onChange={(e) =>
@@ -1243,8 +1182,6 @@ export default function Gallery() {
                     Category
                   </label>
                   <select
-                    id="gallery-category"
-                    name="galleryCategory"
                     value={uploadForm.category}
                     onChange={(e) =>
                       setUploadForm({ ...uploadForm, category: e.target.value })
@@ -1333,66 +1270,7 @@ export default function Gallery() {
       )}
 
       {/* ── Enhanced Masonry Gallery ── */}
-      <div className="px-2 py-3 sm:px-4 sm:py-6 w-full">
-        {galleryLoading && items.length === 0 && (
-          <div
-            className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4"
-            aria-label="Loading gallery"
-          >
-            {[0, 1, 2, 3, 4, 5].map((index) => (
-              <div
-                key={index}
-                className="aspect-4/3 animate-pulse rounded-2xl border"
-                style={{
-                  backgroundColor: `${T.boxBg}b8`,
-                  borderColor: `${T.borderColor}30`,
-                }}
-              />
-            ))}
-          </div>
-        )}
-        {!galleryLoading && filteredItems.length === 0 && (
-          <div
-            className="mx-auto my-12 max-w-lg rounded-2xl px-6 py-10 text-center"
-            style={{
-              backgroundColor: T.boxBg,
-              border: `1px solid ${T.borderColor}40`,
-            }}
-          >
-            <div className="mb-3 text-4xl" aria-hidden="true">
-              🏛️
-            </div>
-            <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
-              No artifacts in this wing yet
-            </h2>
-            <p
-              className="mt-2 text-xs opacity-60"
-              style={{ color: T.textColor }}
-            >
-              {searchQuery
-                ? `Nothing matches “${searchQuery}”. Try another search or clear the filters.`
-                : viewMode === "my-uploads"
-                  ? "Upload your first creation to start a personal collection."
-                  : "Be the first artist to add a creation to this collection."}
-            </p>
-            <button
-              onClick={() => {
-                if (searchQuery || selectedCategory !== "all") {
-                  setSearchQuery("");
-                  setSelectedCategory("all");
-                } else {
-                  openUpload();
-                }
-              }}
-              className="mt-5 rounded-lg px-4 py-2 text-xs font-bold"
-              style={{ backgroundColor: T.accentColor, color: T.bgColor }}
-            >
-              {searchQuery || selectedCategory !== "all"
-                ? "Clear filters"
-                : "Add an artifact"}
-            </button>
-          </div>
-        )}
+      <div className="px-3 py-4 sm:px-4 sm:py-6 w-full">
         <div className="gallery-masonry">
           {filteredItems.map((item) => {
             // Calculate actual aspect ratio from image URL dimensions
@@ -1405,6 +1283,7 @@ export default function Gallery() {
                 style={{
                   backgroundColor: T.boxBg,
                   border: `1px solid ${T.borderColor}20`,
+                  marginBottom: "16px",
                   breakInside: "avoid",
                   transition: "border-color 0.3s, box-shadow 0.3s",
                 }}
@@ -1452,7 +1331,7 @@ export default function Gallery() {
                       alt={item.title}
                       fill
                       className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
-                      sizes="(max-width: 640px) 50vw, (max-width: 768px) 33vw, 25vw"
+                      sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                       unoptimized
                       onError={() =>
                         setBrokenImages((prev) =>
@@ -1478,7 +1357,7 @@ export default function Gallery() {
 
                   {/* Category badge */}
                   <div
-                    className="absolute top-2 right-2 sm:top-3 sm:right-3 px-1.5 py-0.5 sm:px-2 rounded text-[8px] sm:text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
+                    className="absolute top-3 right-3 px-2 py-0.5 rounded-md text-[9px] font-bold uppercase tracking-wider backdrop-blur-sm"
                     style={{
                       backgroundColor: T.bgColor + "cc",
                       color: T.accentColor,
@@ -1497,7 +1376,7 @@ export default function Gallery() {
                           e.stopPropagation();
                           handleToggleVisibility(item.id, !item.isPublic);
                         }}
-                        className="w-6 h-6 sm:w-7 sm:h-7 rounded-md flex items-center justify-center text-[10px] sm:text-xs backdrop-blur-sm transition-colors"
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-xs backdrop-blur-sm transition-colors"
                         style={{
                           backgroundColor: T.bgColor + "cc",
                           color: item.isPublic ? "#22c55e" : T.textMuted,
@@ -1520,7 +1399,7 @@ export default function Gallery() {
                             handleDeleteItem(item.id);
                           }
                         }}
-                        className="w-6 h-6 sm:w-7 sm:h-7 rounded-md flex items-center justify-center text-[10px] sm:text-xs backdrop-blur-sm transition-colors hover:bg-red-500/80"
+                        className="w-7 h-7 rounded-md flex items-center justify-center text-xs backdrop-blur-sm transition-colors hover:bg-red-500/80"
                         style={{
                           backgroundColor: T.bgColor + "cc",
                           color: "#fff",
@@ -1575,22 +1454,19 @@ export default function Gallery() {
                 </div>
 
                 {/* Card footer */}
-                <div className="px-2.5 py-2 sm:px-3 sm:py-2.5 flex items-center justify-between">
+                <div className="px-3 py-2.5 flex items-center justify-between">
                   <div className="flex items-center gap-2 min-w-0">
                     {item.artistAvatar ? (
-                      <>
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={item.artistAvatar}
-                          alt={item.artist}
-                          className="w-5 h-5 rounded-full object-cover shrink-0"
-                          onError={(e) => {
-                            // Fallback to initial on error
-                            (e.target as HTMLImageElement).style.display =
-                              "none";
-                          }}
-                        />
-                      </>
+                      /* eslint-disable-next-line @next/next/no-img-element */
+                      <img
+                        src={item.artistAvatar}
+                        alt={item.artist}
+                        className="w-5 h-5 rounded-full object-cover shrink-0"
+                        onError={(e) => {
+                          // Fallback to initial on error
+                          (e.target as HTMLImageElement).style.display = "none";
+                        }}
+                      />
                     ) : (
                       <div
                         className="w-5 h-5 rounded-full flex items-center justify-center text-[8px] font-black shrink-0"
@@ -1603,7 +1479,7 @@ export default function Gallery() {
                       </div>
                     )}
                     <span
-                      className="text-[10px] sm:text-[11px] truncate opacity-60"
+                      className="text-[11px] truncate opacity-60"
                       style={{ color: T.textColor }}
                     >
                       {item.artist}
@@ -1614,7 +1490,7 @@ export default function Gallery() {
                       e.stopPropagation();
                       toggleLike(item.id);
                     }}
-                    className="flex items-center gap-1 text-[10px] sm:text-[11px] transition-all duration-200 hover:scale-110"
+                    className="flex items-center gap-1 text-[11px] transition-all duration-200 hover:scale-110"
                     style={{
                       color: isLiked ? "#ff3366" : T.textColor + "80",
                       background: "none",
@@ -1718,13 +1594,13 @@ export default function Gallery() {
         ::-webkit-scrollbar-track { background: ${T.bgColor}; }
         ::-webkit-scrollbar-thumb { background: ${T.borderColor}; border-radius: 3px; }
         .gallery-masonry {
-          columns: 2;
-          column-gap: 12px;
+          columns: 1;
+          column-gap: 16px;
         }
-        @media (min-width: 640px) { .gallery-masonry { columns: 3; column-gap: 16px; } }
-        @media (min-width: 768px) { .gallery-masonry { columns: 4; } }
-        .gallery-item { break-inside: avoid; page-break-inside: avoid; margin-bottom: 12px; }
-        @media (min-width: 640px) { .gallery-item { margin-bottom: 16px; } }
+        @media (min-width: 640px) { .gallery-masonry { columns: 2; } }
+        @media (min-width: 1024px) { .gallery-masonry { columns: 3; } }
+        @media (min-width: 1400px) { .gallery-masonry { columns: 4; } }
+        .gallery-item { break-inside: avoid; page-break-inside: avoid; }
       `}</style>
     </PageShell>
   );

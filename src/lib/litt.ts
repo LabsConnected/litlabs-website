@@ -31,7 +31,7 @@ export interface NotificationConfig {
   resendApiKey?: string;
 }
 
-class LiTT {
+class Jarvis {
   private config: NotificationConfig;
   private initialized = false;
 
@@ -46,7 +46,7 @@ class LiTT {
 
   async notify(payload: NotificationPayload): Promise<boolean> {
     if (!this.initialized) {
-      // LiTT not initialized — using default config
+      // Jarvis not initialized — using default config
     }
 
     const channels = payload.channels || ["discord"];
@@ -62,9 +62,8 @@ class LiTT {
         data: payload.data || {},
         channels: channels,
       });
-      // DB error saving notification — continuing
     } catch {
-      // Error saving notification — continuing
+      // DB error saving notification — continuing
     }
 
     for (const channel of channels) {
@@ -119,12 +118,12 @@ class LiTT {
       timestamp: new Date().toISOString(),
       fields: payload.data
         ? Object.entries(payload.data).map(([key, value]) => ({
-          name: key,
-          value: String(value).substring(0, 1000),
-          inline: true,
-        }))
+            name: key,
+            value: String(value).substring(0, 1000),
+            inline: true,
+          }))
         : [],
-      footer: { text: `LiTT \u2022 ${payload.priority.toUpperCase()}` },
+      footer: { text: `LiTTree Labs \u2022 ${payload.priority.toUpperCase()}` },
     };
 
     try {
@@ -153,7 +152,7 @@ class LiTT {
           body: payload.body,
           data: payload.data,
           timestamp: new Date().toISOString(),
-          source: "litt",
+          source: "jarvis",
         }),
       });
       return response.ok;
@@ -214,7 +213,7 @@ class LiTT {
           Authorization: `Bearer ${this.config.resendApiKey}`,
         },
         body: JSON.stringify({
-          from: "LiTT <notifications@litlabs.net>",
+          from: "Jarvis <notifications@litlabs.net>",
           to: this.config.adminEmail,
           subject: `[${payload.priority.toUpperCase()}] ${payload.title}`,
           html: `
@@ -222,7 +221,7 @@ class LiTT {
             <p>${payload.body}</p>
             ${payload.data ? `<pre>${JSON.stringify(payload.data, null, 2)}</pre>` : ""}
             <hr />
-            <p style="color: #888; font-size: 12px;">LiTT Notification System</p>
+            <p style="color: #888; font-size: 12px;">LiTTree Labs Notification System</p>
           `,
         }),
       });
@@ -328,16 +327,13 @@ class LiTT {
   }
 }
 
-export const litt = new LiTT();
-
-// Backward compatibility shim for legacy "jarvis" imports
-export const jarvis = litt;
+export const jarvis = new Jarvis();
 
 if (typeof window === "undefined") {
-  litt.init({
+  jarvis.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
-    webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
+    webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
     pushVapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
     pushVapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
     pushVapidSubject: process.env.VAPID_SUBJECT || "mailto:admin@litlabs.net",
