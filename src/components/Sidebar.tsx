@@ -32,6 +32,7 @@ interface SidebarProps {
   onClose?: () => void;
   collapsed?: boolean;
   onCollapseChange?: () => void;
+  drawerOnly?: boolean;
 }
 
 const QUICK_TOOLS = [
@@ -472,6 +473,7 @@ export default function Sidebar({
   onClose,
   collapsed: externalCollapsed,
   onCollapseChange,
+  drawerOnly = false,
 }: SidebarProps) {
   const { resolvedColors: T } = useTheme();
   const [internalCollapsed, setInternalCollapsed] = useState(false);
@@ -499,17 +501,24 @@ export default function Sidebar({
 
   return (
     <>
-      <aside
-        className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`}
-        style={shellStyle}
-      >
-        <SidebarContent
-          collapsed={collapsed}
-          onToggleCollapse={toggleCollapse}
-        />
-      </aside>
+      {!drawerOnly && (
+        <aside
+          className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`}
+          style={shellStyle}
+        >
+          <SidebarContent
+            collapsed={collapsed}
+            onToggleCollapse={toggleCollapse}
+          />
+        </aside>
+      )}
       {open && (
-        <div className="fixed inset-0 z-50 flex md:hidden">
+        <div
+          className={`fixed inset-0 z-50 flex ${drawerOnly ? "" : "md:hidden"}`}
+          role="dialog"
+          aria-modal="true"
+          aria-label="All navigation"
+        >
           <button
             className="absolute inset-0 bg-black/70 backdrop-blur-sm"
             onClick={onClose}

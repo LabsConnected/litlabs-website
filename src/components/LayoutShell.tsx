@@ -51,19 +51,28 @@ export default function LayoutShell({
   const ownChrome = hasOwnChrome(pathname || "/");
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] =
     useState(isStudio);
+  const [studioNavOpen, setStudioNavOpen] = useState(false);
 
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
         e.preventDefault();
         if (window.innerWidth >= 1024) {
-          setDesktopSidebarCollapsed((v) => !v);
+          if (isStudio) {
+            setStudioNavOpen((open) => !open);
+          } else {
+            setDesktopSidebarCollapsed((v) => !v);
+          }
         }
       }
     };
     window.addEventListener("keydown", handleKey);
     return () => window.removeEventListener("keydown", handleKey);
-  }, []);
+  }, [isStudio]);
+
+  useEffect(() => {
+    setStudioNavOpen(false);
+  }, [pathname]);
 
   if (isStudio || isChat) {
     return (
@@ -72,19 +81,32 @@ export default function LayoutShell({
         <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
           <NavbarWrapper
-            onMenuClick={() => setDesktopSidebarCollapsed((v) => !v)}
+            onMenuClick={() =>
+              isStudio
+                ? setStudioNavOpen(true)
+                : setDesktopSidebarCollapsed((v) => !v)
+            }
           />
           <div className="flex flex-1 min-h-0 overflow-hidden">
-            <Sidebar
-              open={false}
-              onClose={() => {}}
-              collapsed={desktopSidebarCollapsed}
-            />
+            {!isStudio && (
+              <Sidebar
+                open={false}
+                onClose={() => {}}
+                collapsed={desktopSidebarCollapsed}
+              />
+            )}
             <main className="flex h-full w-full min-w-0 flex-col overflow-hidden pb-[calc(80px+env(safe-area-inset-bottom))] md:pb-0">
               {children}
             </main>
           </div>
         </div>
+        {isStudio && (
+          <Sidebar
+            open={studioNavOpen}
+            onClose={() => setStudioNavOpen(false)}
+            drawerOnly
+          />
+        )}
         <MobileBottomNav />
         <CookieConsent />
         <ServiceWorkerRegistration />
