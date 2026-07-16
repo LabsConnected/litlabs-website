@@ -1,5 +1,22 @@
 {
   "typescript.tsdk": "node_modules/typescript/lib",
   "typescript.enablePromptUseWorkspaceTsdk": true,
-  "editor.formatOnSave": false
+  "editor.formatOnSave": false,
+  "tailwindCSS.lint.recommended": false,
+  "tailwindCSS.lint.invalidConfigPath": "ignore",
+  "tailwindCSS.lint.cssConflict": "ignore",
+  "files.exclude": {
+    "**/.git": true,
+    "**/node_modules": true,
+    "**/.next": true,
+    "**/.pnpm-store": true,
+    "**/.pnpm-store9": true,
+    "litlabs": true,
+    "litlabs-website": true,
+    "work": true,
+    "OmniRoute": true,
+    "Zoo-Code": true,
+    "meta": true,
+    "chrome": true
+  }
 }
