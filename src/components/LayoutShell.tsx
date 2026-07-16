@@ -62,11 +62,9 @@ export default function LayoutShell({
         <AnimatedBackgroundWrapper />
         <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <div className="flex flex-1 min-h-0 overflow-hidden">
-            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden">
-              {children}
-            </main>
-          </div>
+          <main className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+            {children}
+          </main>
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>

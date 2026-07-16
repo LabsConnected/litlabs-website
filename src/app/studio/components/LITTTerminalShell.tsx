@@ -1421,6 +1421,18 @@ function LITTTerminalShellInner({
       onClick: () => onToolChangeAction?.("audio"),
     },
     {
+      id: "build",
+      label: "Build",
+      icon: Hammer,
+      onClick: () => onToolChangeAction?.("builder"),
+    },
+    {
+      id: "code",
+      label: "Code",
+      icon: Code,
+      onClick: () => onToolChangeAction?.("canvas"),
+    },
+    {
       id: "plugins",
       label: "Plugins",
       icon: LayoutGrid,
@@ -2256,7 +2268,9 @@ function LITTTerminalShellInner({
                 </button>
               </div>
 
-              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none [&::-webkit-scrollbar]:hidden">
+              {/* Slash + plugin chips: secondary actions, hidden on mobile
+                  (they live in the + menu there) to keep the composer compact. */}
+              <div className="hidden items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none sm:flex [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}

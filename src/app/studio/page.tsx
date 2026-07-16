@@ -19,7 +19,7 @@ function StudioHub() {
 
   if (!isLoaded) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#030308] p-6">
+      <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
         <div className="relative flex flex-col items-center gap-4">
           <div className="relative">
             <div className="absolute inset-0 animate-ping rounded-full bg-cyan-400/20" />
@@ -51,7 +51,7 @@ function StudioHub() {
 
   if (!isSignedIn) {
     return (
-      <div className="relative flex min-h-screen items-center justify-center overflow-hidden bg-[#030308] p-6">
+      <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
         <div className="relative max-w-sm w-full rounded-2xl border border-white/5 bg-[#05050a] p-8 text-center">
           <div className="mb-5 inline-flex h-16 w-16 items-center justify-center rounded-2xl bg-cyan-500/10 shadow-[0_0_32px_rgba(34,211,238,0.15)]">
             <Lock size={28} style={{ color: T.accentColor }} />
@@ -96,7 +96,7 @@ export default function StudioPage() {
     <Suspense
       fallback={
         <div
-          className="flex min-h-screen items-center justify-center bg-[#030308] p-6"
+          className="flex min-h-dvh items-center justify-center bg-[#030308] p-6"
           style={{ color: T.textMuted }}
         >
           <div className="flex flex-col items-center gap-4">
