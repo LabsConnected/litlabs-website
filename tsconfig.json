@@ -46,6 +46,8 @@
     "OmniRoute",
     "chrome",
     "meta",
-    "codex-reference"
+    "codex-reference",
+    "cli",
+    "packages"
   ]
 }
