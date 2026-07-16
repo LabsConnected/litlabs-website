@@ -15,6 +15,7 @@ import {
   Loader2,
   Plus,
   Rocket,
+  Send,
   Sparkles,
 } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
@@ -246,7 +247,7 @@ export default function PersonalDashboard({
               Manage credits
             </Link>
           </div>
-          <div className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/[.03] p-4">
+          <div className="flex flex-col gap-2 rounded-2xl border border-white/10 bg-white/3 p-4">
             <div className="flex items-center gap-2 text-xs font-black uppercase tracking-wider text-emerald-300">
               <Gauge size={14} />
               Workspace status
@@ -272,7 +273,7 @@ export default function PersonalDashboard({
             <Link
               key={item.label}
               href={item.href}
-              className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/[.03] text-[10px] font-black transition hover:bg-white/[.06] sm:text-xs"
+              className="flex min-h-11 items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/3 text-[10px] font-black transition hover:bg-white/6 sm:text-xs"
             >
               <item.icon size={14} />
               {item.label}
@@ -454,6 +455,7 @@ export default function PersonalDashboard({
               { label: "Run an agent", href: "/studio?tool=agents", icon: Bot },
               { label: "Open projects", href: "/projects", icon: FolderKanban },
               { label: "Deployments", href: "/deployments", icon: Rocket },
+              { label: "Facebook post", href: "/facebook", icon: Send },
             ].map((item) => (
               <Link
                 key={item.label}
