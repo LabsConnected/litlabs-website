@@ -8,7 +8,7 @@ import PageShell from "@/components/PageShell";
 import CLIBridgeTool from "@/app/studio/tools/CLIBridgeTool";
 import { THEMES } from "@/lib/themes";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
-import type { SkinPreset, AccentColor } from "@/context/ThemeContext";
+import type { SkinPreset, AccentColor, EffectKey } from "@/context/ThemeContext";
 import {
   User,
   Palette,
@@ -22,6 +22,8 @@ import {
   Sun,
   Monitor,
   ScanLine,
+  Zap,
+  Cloud,
   AlertTriangle,
   ExternalLink,
   Terminal,
@@ -45,6 +47,12 @@ const BACKGROUND_MODES: { id: BackgroundMode; label: string }[] = [
   { id: "waves", label: "Waves" },
   { id: "minimal", label: "Minimal" },
   { id: "holo", label: "Holo" },
+];
+
+const EFFECTS: { id: EffectKey; label: string; icon: React.ElementType }[] = [
+  { id: "glow", label: "Neon Glow", icon: Zap },
+  { id: "bloom", label: "Bloom", icon: Sun },
+  { id: "noise", label: "Film Grain", icon: Cloud },
 ];
 
 const BYOK_KEYS = [
@@ -211,6 +219,7 @@ export default function SettingsPage() {
     setSkin,
     setAccent,
     setBackgroundMode,
+    setEffect,
   } = useTheme();
   const { profile, updateProfile } = useProfile();
   const { crtEnabled, toggleCrt } = useCrtToggle();
@@ -1403,6 +1412,34 @@ export default function SettingsPage() {
                         <ScanLine size={14} />
                         CRT Scanlines {crtEnabled ? "On" : "Off"}
                       </button>
+
+                      <div className="pt-2 border-t" style={{ borderColor: `${T.borderColor}20` }}>
+                        <div className="text-[11px] uppercase tracking-[0.15em] mb-2 font-black" style={{ color: T.textMuted }}>
+                          Global FX
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {EFFECTS.map(({ id, label, icon: Icon }) => {
+                            const active = !!theme.effects?.[id];
+                            return (
+                              <button
+                                key={id}
+                                onClick={() => setEffect(id, !active)}
+                                className="flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-bold transition-all"
+                                style={{
+                                  backgroundColor: active
+                                    ? `${T.accentColor}20`
+                                    : `${T.bgColor}45`,
+                                  border: `1px solid ${active ? T.accentColor : T.borderColor}50`,
+                                  color: active ? T.accentColor : T.textColor,
+                                }}
+                              >
+                                <Icon size={14} />
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
                     </div>
                   </div>
                 </section>

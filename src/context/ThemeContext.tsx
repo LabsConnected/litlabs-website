@@ -51,6 +51,8 @@ export type AccentColor =
   | "purple-haze";
 
 // Theme structure
+export type EffectKey = "glow" | "noise" | "bloom";
+
 export interface Theme {
   mode: ThemeMode;
   skin: SkinPreset;
@@ -64,6 +66,11 @@ export interface Theme {
     borderColor?: string;
     accentColor?: string;
     boxBg?: string;
+  };
+  effects?: {
+    glow?: boolean;
+    noise?: boolean;
+    bloom?: boolean;
   };
 }
 
@@ -456,6 +463,11 @@ const defaultTheme: Theme = {
   skin: "volcanic",
   accent: "sunset-orange",
   backgroundMode: "constellation",
+  effects: {
+    glow: false,
+    noise: false,
+    bloom: false,
+  },
 };
 
 // Context
@@ -501,6 +513,7 @@ interface ThemeContextType {
     accentColor?: string;
     boxBg?: string;
   }) => void;
+  setEffect: (key: EffectKey, value: boolean) => void;
   resetTheme: () => void;
 }
 
@@ -671,6 +684,12 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     if (meta) {
       meta.setAttribute("content", colors.bgColor);
     }
+
+    // Toggle optional global visual effects.
+    const fx = theme.effects || { glow: false, noise: false, bloom: false };
+    root.setAttribute("data-effect-glow", String(fx.glow ?? false));
+    root.setAttribute("data-effect-noise", String(fx.noise ?? false));
+    root.setAttribute("data-effect-bloom", String(fx.bloom ?? false));
   }, [theme]);
 
   // Save to localStorage on change
@@ -711,6 +730,13 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }));
   };
 
+  const setEffect = (key: EffectKey, value: boolean) => {
+    setTheme((prev) => ({
+      ...prev,
+      effects: { ...prev.effects, [key]: value },
+    }));
+  };
+
   const resetTheme = () => {
     setTheme(defaultTheme);
   };
@@ -726,6 +752,7 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setAccent,
         setBackgroundMode,
         setCustomColors,
+        setEffect,
         resetTheme,
       }}
     >
