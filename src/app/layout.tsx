@@ -157,27 +157,44 @@ export default function RootLayout({
             appearance={{
               variables: {
                 colorPrimary: "#fbbf24",
-                colorBackground: "#0a0a0f",
-                colorText: "#f5e6c8",
-                colorTextSecondary: "#a8916b",
+                colorBackground: "#151824",
+                colorText: "#f8fafc",
+                colorTextSecondary: "#cbd5e1",
                 colorDanger: "#ef4444",
                 colorSuccess: "#22c55e",
                 borderRadius: "8px",
               },
               elements: {
                 card: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
-                  boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
+                  backgroundColor: "#151824",
+                  border: "1px solid #34394a",
+                  boxShadow: "0 18px 55px rgba(0,0,0,0.45)",
                 },
                 userButtonPopoverCard: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
+                  backgroundColor: "#151824",
+                  border: "1px solid #34394a",
                 },
                 userButtonPopoverActionButton: {
+                  color: "#f8fafc",
                   "&:hover": {
-                    backgroundColor: "rgba(251,191,36,0.1)",
+                    backgroundColor: "rgba(34,211,238,0.12)",
                   },
+                },
+                userButtonPopoverActionButtonText: {
+                  color: "#f8fafc",
+                },
+                userButtonPopoverActionButtonIcon: {
+                  color: "#94a3b8",
+                },
+                userPreviewMainIdentifier: {
+                  color: "#f8fafc",
+                },
+                userPreviewSecondaryIdentifier: {
+                  color: "#cbd5e1",
+                },
+                userButtonPopoverFooter: {
+                  backgroundColor: "#11131d",
+                  borderTop: "1px solid #34394a",
                 },
                 badge: {
                   backgroundColor: "#f59e0b",

@@ -1449,7 +1449,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#080a13] text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1477,7 +1477,7 @@ function LITTTerminalShellInner({
       />
 
       {/* ── TOP BAR ── */}
-      <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md md:flex">
+      <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/10 bg-[#0c0f1a]/95 px-4 backdrop-blur-md md:flex">
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
@@ -1542,7 +1542,7 @@ function LITTTerminalShellInner({
         {/* LEFT RAIL */}
         <aside
           className={cn(
-            "hidden shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 md:flex",
+            "hidden shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/10 bg-[#0d101c]/95 py-3 md:flex",
             activeTool === "agents" ? "w-44" : "w-16",
           )}
         >
@@ -1908,7 +1908,7 @@ function LITTTerminalShellInner({
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
           {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 bg-linear-to-t from-[#030308] via-[#030308]/98 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:py-3">
+          <div className="relative z-20 shrink-0 bg-linear-to-t from-[#080a13] via-[#080a13]/98 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:py-3">
             <div className="mx-auto flex max-w-4xl flex-col gap-2">
               {cameraOpen && !cameraDocked && (
                 <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
@@ -1935,7 +1935,7 @@ function LITTTerminalShellInner({
                         />
                         {(voiceState === "listening" ||
                           voiceState === "speech_detected") && (
-                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#030308]" />
+                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#080a13]" />
                         )}
                       </div>
                       <div className="min-w-0">
@@ -2067,7 +2067,7 @@ function LITTTerminalShellInner({
                 </div>
               )}
 
-              <div className="rounded-2xl border border-white/10 bg-[#08080f]/95 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.45)] ring-1 ring-white/[0.02]">
+              <div className="rounded-2xl border border-white/15 bg-[#111522]/98 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.35)] ring-1 ring-cyan-400/[0.04]">
                 <AttachmentStrip
                   attachments={attachments}
                   onRemove={removeAttachment}
@@ -2204,7 +2204,7 @@ function LITTTerminalShellInner({
           </div>
 
           {/* FOOTER TELEMETRY */}
-          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90 sm:flex">
+          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/10 bg-[#0c0f1a]/95 sm:flex">
             <TelemetryBar />
             <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-gray-400">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>
@@ -2225,7 +2225,7 @@ function LITTTerminalShellInner({
         )}
         <aside
           className={cn(
-            "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
+            "shrink-0 flex-col border-l border-white/10 bg-[#0d101c]/95",
             pluginsOpen
               ? "fixed inset-y-0 right-0 z-50 flex w-[85%] md:relative md:inset-auto md:w-[300px] lg:relative"
               : "hidden w-[300px] lg:flex",
