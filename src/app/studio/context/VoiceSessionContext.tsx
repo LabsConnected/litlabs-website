@@ -123,6 +123,7 @@ const MAX_RECORDING_MS = 30_000;
 const CHUNK_INTERVAL_MS = 250;
 const MIN_RECORDING_MS = 500; // don't transcribe clips shorter than this
 const MIN_BLOB_SIZE = 8000; // don't transcribe blobs smaller than this
+const MIN_TRANSCRIBE_INTERVAL_MS = 2000; // min gap between transcribe API calls to avoid 429s
 
 function isMobileDevice(): boolean {
   if (typeof window === "undefined") return false;
@@ -227,6 +228,8 @@ export function VoiceSessionProvider({
   const speechDetectedRef = useRef(false);
   const activityRef = useRef<VoiceActivity>({ type: "idle" });
   const recorderMimeTypeRef = useRef<string>("audio/webm");
+  // Throttle: minimum gap between transcribe API calls to avoid Gemini 429s.
+  const lastTranscribeMsRef = useRef<number>(0);
   // Timer that restarts listening after a turn if no TTS is triggered.
   // Cancelled by speakText so the recorder only resumes AFTER TTS ends.
   const pendingListenRestartRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -405,6 +408,16 @@ export function VoiceSessionProvider({
           );
         }
         base64 = btoa(base64);
+
+        // Throttle: enforce minimum gap between transcribe API calls to
+        // avoid hitting Gemini's per-minute rate limit (429).
+        const now = Date.now();
+        const elapsed = now - lastTranscribeMsRef.current;
+        if (elapsed < MIN_TRANSCRIBE_INTERVAL_MS) {
+          const wait = MIN_TRANSCRIBE_INTERVAL_MS - elapsed;
+          await new Promise((r) => setTimeout(r, wait));
+        }
+        lastTranscribeMsRef.current = Date.now();
 
         const res = await fetch("/api/media/transcribe", {
           method: "POST",
