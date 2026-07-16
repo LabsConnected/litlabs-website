@@ -4,6 +4,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { CSSProperties } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
+import { useSearchParams } from "next/navigation";
 import {
   Wand2,
   Download,
@@ -312,9 +313,11 @@ const PROVIDER_OPTIONS = [
 
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
+  const searchParams = useSearchParams();
+  const initialPrompt = searchParams?.get("prompt") ?? "";
 
   /* ── Prompt state ── */
-  const [prompt, setPrompt] = useState("");
+  const [prompt, setPrompt] = useState(initialPrompt);
   const [negativePrompt, setNegativePrompt] = useState("");
   const [remixMode, setRemixMode] = useState<RemixMode>("reskin");
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
@@ -649,6 +652,13 @@ export default function ImageTool() {
     },
     [addLog],
   );
+
+  const randomizePrompt = useCallback(() => {
+    const p = PROMPT_PRESETS[Math.floor(Math.random() * PROMPT_PRESETS.length)];
+    setPrompt(p);
+    setError(null);
+    addLog("info", "Randomized prompt");
+  }, [addLog]);
 
   const enhancePrompt = useCallback(() => {
     if (!prompt.trim()) return;
@@ -1231,17 +1241,30 @@ export default function ImageTool() {
                   >
                     Prompt
                   </label>
-                  <button
-                    onClick={enhancePrompt}
-                    disabled={!prompt.trim() || isWorking}
-                    className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
-                    style={{
-                      borderColor: T.accentColor + "40",
-                      color: T.accentColor,
-                    }}
-                  >
-                    <Zap size={8} /> Enhance
-                  </button>
+                  <div className="flex items-center gap-2">
+                    <button
+                      onClick={randomizePrompt}
+                      disabled={isWorking}
+                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                      style={{
+                        borderColor: T.accentColor + "40",
+                        color: T.accentColor,
+                      }}
+                    >
+                      <RefreshCw size={8} /> Randomize
+                    </button>
+                    <button
+                      onClick={enhancePrompt}
+                      disabled={!prompt.trim() || isWorking}
+                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                      style={{
+                        borderColor: T.accentColor + "40",
+                        color: T.accentColor,
+                      }}
+                    >
+                      <Zap size={8} /> Enhance
+                    </button>
+                  </div>
                 </div>
                 <textarea
                   value={prompt}

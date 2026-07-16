@@ -1,8 +1,8 @@
 "use client";
 
-import { useState, useCallback } from "react";
+import { useState, useCallback, useMemo } from "react";
+import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import Link from "next/link";
 import PageShell from "@/components/PageShell";
 import {
   Search,
@@ -20,6 +20,7 @@ import {
   MonitorPlay,
   Code2,
   ArrowUpRight,
+  Shuffle,
 } from "lucide-react";
 import {
   GAME_LIBRARY,
@@ -40,6 +41,17 @@ const CATEGORIES: {
   { id: "retro", label: "Retro", icon: Gamepad2 },
   { id: "arcade", label: "Arcade", icon: Zap },
   { id: "puzzle", label: "Puzzle", icon: Grid3X3 },
+];
+
+const GAME_PROMPTS = [
+  "A neon-lit cyberpunk arcade at midnight, glowing cabinets, pixel art characters, rain on the window",
+  "A cozy retro gaming room with CRT monitors, bean bags, snacks, and neon wall art",
+  "A fantasy RPG battle scene in a glowing crystal cave, heroes versus a shadow dragon",
+  "A side-scrolling platformer level made of candy, clouds, and floating coins",
+  "A sci-fi racing game on a glowing track above a city skyline at sunset",
+  "A puzzle game set inside a stained-glass cathedral with rotating gems",
+  "A pixel-art space shooter dodging asteroids near a purple gas giant",
+  "A whimsical farming sim with floating islands, crops, and friendly robots",
 ];
 
 const EMULATOR_LABS = [
@@ -75,8 +87,13 @@ const FREE_DISCOVERY = [
   },
 ];
 
+function randomPrompt() {
+  return GAME_PROMPTS[Math.floor(Math.random() * GAME_PROMPTS.length)];
+}
+
 export default function GamesPage() {
   const { resolvedColors: T } = useTheme();
+  const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<GameCategory | "all">(
     "all",
@@ -103,6 +120,11 @@ export default function GamesPage() {
     : activeCategory === "all"
       ? GAME_LIBRARY
       : getGamesByCategory(activeCategory);
+
+  const studioImageHref = useMemo(() => {
+    const prompt = searchQuery.trim() || randomPrompt();
+    return `/studio?tool=image&prompt=${encodeURIComponent(prompt)}`;
+  }, [searchQuery]);
 
   const handleToggleFav = useCallback((gameId: string) => {
     const isNowFav = toggleFavorite(gameId);
@@ -140,20 +162,20 @@ export default function GamesPage() {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            <Link
-              href="/studio?tool=image"
+            <button
+              onClick={() => router.push(studioImageHref)}
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
               style={{ backgroundColor: T.accentColor, color: T.bgColor }}
             >
               <Wand2 size={14} /> Build in Studio
-            </Link>
-            <Link
+            </button>
+            <a
               href="/studio?tool=pipeline"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
               style={{ borderColor: `${T.borderColor}40`, color: T.textColor }}
             >
               Agent Pipelines
-            </Link>
+            </a>
           </div>
         </div>
       </div>
@@ -524,13 +546,23 @@ export default function GamesPage() {
             id="games-search"
             name="gamesSearch"
             type="text"
-            placeholder="Search games..."
+            placeholder="Search games or describe a scene to create..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full pl-10 pr-4 py-2 border bg-transparent text-sm outline-none focus:border-cyan-500/50"
             style={{ borderColor: T.borderColor, color: T.textColor }}
           />
         </div>
+
+        {/* Prompt randomizer */}
+        <button
+          onClick={() => router.push(studioImageHref)}
+          className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide transition hover:opacity-80"
+          style={{ borderColor: `${T.accentColor}60`, color: T.accentColor }}
+          title="Generate a game-themed image"
+        >
+          <Shuffle size={11} /> Surprise me
+        </button>
 
         {/* Category Filters */}
         <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1">
