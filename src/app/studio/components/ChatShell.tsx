@@ -1,7 +1,6 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
@@ -22,6 +21,7 @@ type Props = {
   onToolSelect?: (tool: StudioTool) => void;
   embedded?: boolean;
   hideDock?: boolean;
+  builderMode?: boolean;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
@@ -42,6 +42,7 @@ export function ChatShell({
   onToolSelect,
   embedded = false,
   hideDock = false,
+  builderMode = false,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
@@ -145,17 +146,17 @@ export function ChatShell({
             </p>
 
             <div className={styles.createGrid}>
-              <button onClick={() => onToolSelect?.("image")}>
+              <button onClick={() => builderMode ? setDraft("/image create an image of ") : onToolSelect?.("image")}>
                 <span className={styles.actionIcon}><ImageIcon size={21} /></span>
                 <span><b>Create an image</b><small>Generate art, ads, and product visuals</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              <button onClick={() => onToolSelect?.("builder")}>
+              <button onClick={() => builderMode ? setDraft("/build ") : onToolSelect?.("builder")}>
                 <span className={styles.actionIcon}><Code2 size={21} /></span>
                 <span><b>Build an app</b><small>Turn a plain-English idea into working code</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              <button onClick={() => onToolSelect?.("agents")}>
+              <button onClick={() => builderMode ? setDraft("/agent ") : onToolSelect?.("agents")}>
                 <span className={styles.actionIcon}><Bot size={21} /></span>
                 <span><b>Launch an agent</b><small>Delegate research, coding, and repeat work</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
@@ -166,13 +167,13 @@ export function ChatShell({
               <section className={styles.homePanel}>
                 <div className={styles.panelHeading}>
                   <span>Recent projects</span>
-                  <Link href="/projects">View all</Link>
+                  <button className={styles.viewAll} onClick={() => onToolSelect?.("builder")}>View all</button>
                 </div>
-                <Link href="/projects" className={styles.projectRow}>
+                <button className={styles.projectRow} onClick={() => onToolSelect?.("builder")}>
                   <span className={styles.projectBadge}>LL</span>
                   <span><b>LiTTree Lab Studios</b><small>Updated today</small></span>
                   <ArrowRight size={15} aria-hidden="true" />
-                </Link>
+                </button>
               </section>
 
               <section className={styles.homePanel}>

@@ -40,7 +40,7 @@ export default function StudioOS() {
   const searchParams = useSearchParams();
 
   const urlTool = searchParams?.get("tool") ?? null;
-  const [fallbackTool, setFallbackTool] = useState<StudioTool>("chat");
+  const [fallbackTool, setFallbackTool] = useState<StudioTool>("builder");
   const [mounted, setMounted] = useState(false);
 
   const activeTool = useMemo(
@@ -70,10 +70,10 @@ export default function StudioOS() {
 
   useEffect(() => {
     if (!mounted || urlTool) return;
-    // URL is the source of truth; if it has no tool, replace with the
-    // persisted fallback so the active tool is always reflected in the URL.
     const params = new URLSearchParams(searchParams?.toString() ?? "");
-    if (activeTool === "chat") {
+    if (activeTool === "builder") {
+      params.set("tool", "builder");
+    } else if (activeTool === "chat") {
       params.delete("tool");
     } else {
       params.set("tool", activeTool);
@@ -86,7 +86,9 @@ export default function StudioOS() {
     (tool: StudioTool) => {
       if (!VALID_TOOLS.includes(tool)) return;
       const params = new URLSearchParams(searchParams?.toString() ?? "");
-      if (tool === "chat") {
+      if (tool === "builder") {
+        params.set("tool", "builder");
+      } else if (tool === "chat") {
         params.delete("tool");
       } else {
         params.set("tool", tool);

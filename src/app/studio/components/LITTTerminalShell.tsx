@@ -8,8 +8,8 @@ import {
   useMemo,
   type ComponentType,
 } from "react";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
@@ -36,11 +36,8 @@ export type StudioTool =
 import {
   Terminal,
   FolderKanban,
-  GitBranch,
   Bot,
   FolderOpen,
-  BookOpen,
-  Boxes,
   Settings,
   Send,
   Plus,
@@ -50,15 +47,11 @@ import {
   Mic,
   MicOff,
   X,
-  Sparkles,
   LayoutGrid,
-  LayoutDashboard,
-  Activity,
   Zap,
   Copy,
   Check,
   Square,
-  Trash2,
   Loader2,
   MessageSquare,
   Image as ImageIcon,
@@ -66,8 +59,6 @@ import {
   Music,
   Hammer,
   Code,
-  Shell,
-  Rocket,
   Menu,
 } from "lucide-react";
 
@@ -115,10 +106,6 @@ const TerminalTool = dynamic(() => import("../tools/TerminalTool"), {
     <div className="p-4 text-xs text-neutral-500">Loading terminal…</div>
   ),
 });
-const AgentsTerminalTool = dynamic(
-  () => import("../tools/AgentsTerminalTool"),
-  { ssr: false },
-);
 
 const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
 
@@ -146,21 +133,11 @@ type ToolRailItem = {
 };
 
 const TOOL_RAIL: ToolRailItem[] = [
+  { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
   { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
-  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
-  { id: "loops", label: "Loops", icon: Rocket, tool: "loops" },
-  { id: "projects", label: "Projects", icon: FolderKanban, href: "/projects" },
-  { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
   { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
-  { id: "image", label: "Image", icon: ImageIcon, tool: "image" },
-  { id: "video", label: "Video", icon: Film, tool: "video" },
-  { id: "audio", label: "Audio", icon: Music, tool: "audio" },
-  { id: "builder", label: "Build", icon: Hammer, tool: "builder" },
-  { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
+  { id: "projects", label: "Projects", icon: FolderKanban, tool: "builder" },
   { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
-  { id: "clibridge", label: "CLI", icon: Shell, tool: "clibridge" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/docs" },
-  { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
 
@@ -346,60 +323,7 @@ function Waveform({ active = true }: { active?: boolean }) {
 }
 
 function TelemetryBar() {
-  const metrics = [
-    { label: "GPU", value: 68, color: "#22d3ee" },
-    { label: "CPU", value: 32, color: "#f97316" },
-    { label: "RAM", value: 72, color: "#a855f7" },
-    { label: "NET", value: 42, color: "#34d399" },
-  ];
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-3 text-[9px] font-mono text-gray-300 sm:gap-4 sm:px-4 sm:text-[10px]">
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
-        <span className="text-emerald-400">NEURAL LINK</span>
-        <span>STABLE</span>
-      </div>
-      <div className="hidden h-3 w-px bg-white/10 sm:block" />
-      {metrics.map((m) => (
-        <div key={m.label} className="hidden items-center gap-1.5 sm:flex">
-          <span className="uppercase">{m.label}</span>
-          <div className="h-1 w-16 overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${m.value}%`, backgroundColor: m.color }}
-            />
-          </div>
-          <span style={{ color: m.color }}>{m.value}%</span>
-        </div>
-      ))}
-      <div className="ml-auto hidden items-center gap-1.5 md:flex">
-        <Activity size={10} className="text-cyan-400" />
-        <span>NET</span>
-        <span className="text-cyan-400">42ms</span>
-      </div>
-    </div>
-  );
-}
-
-function LiveClock() {
-  const [time, setTime] = useState("--:--:--");
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      setTime(
-        now.toLocaleTimeString("en-GB", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }) + " UTC+0",
-      );
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="font-mono text-[10px] text-gray-300">{time}</span>;
+  return null;
 }
 
 function ActiveCommandTabs({
@@ -661,12 +585,6 @@ function LITTTerminalShellInner({
   const cancel = useCallback(() => {
     abortRef.current?.abort();
   }, []);
-
-  const clearChat = useCallback(() => {
-    if (busy) abortRef.current?.abort();
-    setMessages([]);
-    setAttachments([]);
-  }, [busy]);
 
   const handleFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
@@ -1526,78 +1444,6 @@ function LITTTerminalShellInner({
         onChange={handleFiles}
       />
 
-      {/* ── TOP BAR ── */}
-      <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/5 bg-[#030308]/90 px-4 backdrop-blur-md md:flex">
-        <div className="flex items-center gap-3">
-          <Link
-            href="/dashboard"
-            className="flex items-center gap-2 rounded-lg p-1.5 transition-colors hover:bg-white/10"
-            aria-label="Dashboard"
-            title="Dashboard"
-          >
-            <LayoutDashboard size={18} className="text-cyan-400" />
-            <span className="hidden text-sm font-black tracking-[0.15em] sm:inline">
-              LITT
-            </span>
-          </Link>
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-cyan-400 to-blue-600">
-              <Sparkles size={12} className="text-white" />
-            </div>
-            <span className="text-sm font-black tracking-[0.15em]">LITT</span>
-          </div>
-          <div className="ml-4 flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">
-              Mission Active
-            </span>
-            <span className="text-[9px] text-gray-300">
-              Everything is under control.
-            </span>
-          </div>
-          {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              title="Start a new chat"
-              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/2 px-2 py-1 text-[10px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
-            >
-              <Trash2 size={10} />
-              New Chat
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setPluginsOpen((v) => !v)}
-            aria-label="Toggle plugin registry"
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition ${
-              pluginsOpen
-                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
-                : "border-white/10 bg-white/5 text-gray-300 hover:text-white"
-            }`}
-          >
-            <LayoutGrid size={12} />
-            Plugins
-          </button>
-          <div className="flex items-center gap-1.5 text-cyan-400">
-            <Camera size={12} />
-            <span className="text-[9px] font-bold uppercase tracking-wider">
-              Vision On
-            </span>
-          </div>
-          <div className="flex flex-col items-end">
-            <LiveClock />
-          </div>
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[10px] font-bold"
-            title={displayName}
-          >
-            {displayName.slice(0, 2).toUpperCase()}
-          </div>
-        </div>
-      </header>
-
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* Mobile sidebar backdrop */}
@@ -1611,8 +1457,7 @@ function LITTTerminalShellInner({
         {/* LEFT RAIL */}
         <aside
           className={cn(
-            "shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3",
-            activeTool === "agents" ? "w-44" : "w-16",
+            "shrink-0 flex-col gap-1 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 w-48",
             mobileSidebarOpen
               ? "fixed inset-y-0 left-0 z-50 flex md:relative md:inset-auto"
               : "hidden md:flex",
@@ -1634,8 +1479,7 @@ function LITTTerminalShellInner({
                 }}
                 aria-label={item.label}
                 className={cn(
-                  "group relative flex flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors",
-                  activeTool === "agents" ? "w-full px-2" : "w-11",
+                  "group relative flex w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-colors",
                   active ? "bg-cyan-500/10" : "hover:bg-white/5",
                 )}
                 title={item.label}
@@ -1643,31 +1487,23 @@ function LITTTerminalShellInner({
                 {active && (
                   <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
                 )}
-                <div
+                <Icon
+                  size={18}
+                  className={
+                    active
+                      ? "text-cyan-400"
+                      : "text-gray-300 group-hover:text-white"
+                  }
+                  aria-hidden="true"
+                />
+                <span
                   className={cn(
-                    "flex items-center gap-2",
-                    activeTool === "agents" ? "w-full px-2" : "",
+                    "text-xs font-bold",
+                    active ? "text-cyan-400" : "text-gray-300",
                   )}
                 >
-                  <Icon
-                    size={activeTool === "agents" ? 16 : 18}
-                    className={
-                      active
-                        ? "text-cyan-400"
-                        : "text-gray-300 group-hover:text-white"
-                    }
-                    aria-hidden="true"
-                  />
-                  <span
-                    className={cn(
-                      "text-[8px] font-bold",
-                      active ? "text-cyan-400" : "text-gray-300",
-                      activeTool === "agents" ? "inline" : "hidden",
-                    )}
-                  >
-                    {item.label}
-                  </span>
-                </div>
+                  {item.label}
+                </span>
               </button>
             );
           })}
@@ -1808,8 +1644,10 @@ function LITTTerminalShellInner({
                     ? "Agent Console"
                     : activeTool === "chat"
                       ? "LITT Terminal"
-                      : activeTool.charAt(0).toUpperCase() +
-                        activeTool.slice(1)}
+                      : activeTool === "builder"
+                        ? "LiTT Builder"
+                        : activeTool.charAt(0).toUpperCase() +
+                          activeTool.slice(1)}
                 </div>
                 <div className="hidden text-[10px] text-gray-300 sm:block">
                   {activeTool === "agents"
@@ -1819,26 +1657,15 @@ function LITTTerminalShellInner({
               </div>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
-              <Link
-                href="/dashboard"
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-neutral-300 transition hover:bg-white/10 sm:px-3"
-                aria-label="Dashboard"
-                title="Dashboard"
-              >
-                <LayoutDashboard size={14} className="text-cyan-400" />
-                <span className="hidden sm:inline">Dashboard</span>
-              </Link>
-              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2 py-1 text-gray-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                <span className="hidden sm:inline">Systems nominal</span>
-                <span className="sm:hidden">Online</span>
-              </span>
-              <span className="hidden font-mono text-gray-300 sm:inline">
-                MEM 78%
-              </span>
-              <span className="hidden font-mono text-gray-300 lg:inline">
-                128K
-              </span>
+              <UserButton
+                afterSignOutUrl="/sign-in"
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox:
+                      "h-7 w-7 rounded-full border border-white/10",
+                  },
+                }}
+              />
             </div>
           </div>
 
@@ -1868,10 +1695,11 @@ function LITTTerminalShellInner({
             ref={transcriptRef}
             className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
           >
-            {activeTool === "chat" ? (
+            {activeTool === "chat" || activeTool === "builder" ? (
               <ChatShell
                 embedded
                 hideDock
+                builderMode={activeTool === "builder"}
                 messages={chatMessages}
                 sending={busy}
                 systemLines={[]}
