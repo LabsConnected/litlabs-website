@@ -63,7 +63,7 @@ const SAMPLE_FILES: { path: string; size: number }[] = [
 
 export async function readRepoSnapshot(
   loop: ProjectLoop,
-  iteration: number,
+  _iteration: number,
 ): Promise<RepoSnapshot> {
   if (!githubAvailable()) {
     return {
@@ -102,7 +102,7 @@ export async function readRepoSnapshot(
       languages: detectLanguages(files.map((f) => f.path)),
       headSha: ref.data.object.sha,
     };
-  } catch (err) {
+  } catch {
     return {
       available: false,
       files: SAMPLE_FILES,
@@ -161,17 +161,59 @@ export async function applyFileChanges(
   files: { path: string; content: string }[],
 ): Promise<LoopFileChange[]> {
   if (!githubAvailable()) {
-    return files.map((f) => ({
-      path: f.path,
-      additions: f.content.split("\n").length,
-      deletions: 0,
-      status: "modified" as const,
-      patch: f.content.slice(0, 500),
-    }));
+    return synthesizeDiff(files);
   }
-  // For now: dry-run outside of an actual Git commit. The runner
-  // doesn't need a real commit to evaluate the loop — the user reviews
-  // the diff content in the UI before approving and shipping.
+  const octokit = await getOctokit();
+  const [owner, repo] = loop.repo.split("/");
+  if (!owner || !repo) throw new Error(`Invalid repo: ${loop.repo}`);
+
+  // Read the current head of the working branch so we can build a tree
+  // on top of it.
+  const baseRef = await octokit.git.getRef({
+    owner,
+    repo,
+    ref: `heads/${loop.workingBranch}`,
+  });
+  const baseSha = baseRef.data.object.sha;
+  const baseCommit = await octokit.git.getCommit({
+    owner,
+    repo,
+    commit_sha: baseSha,
+  });
+  const baseTreeSha = baseCommit.data.tree.sha;
+
+  // Build a new tree with each file replaced by the proposed content.
+  const { data: newTree } = await octokit.git.createTree({
+    owner,
+    repo,
+    base_tree: baseTreeSha,
+    tree: files.map((f) => ({
+      path: f.path,
+      mode: "100644",
+      type: "blob",
+      content: f.content,
+    })),
+  });
+
+  // Commit the new tree on top of the working branch head.
+  const { data: newCommit } = await octokit.git.createCommit({
+    owner,
+    repo,
+    message: `lit-loop: iteration ${loop.iteration + 1}\n\n${files
+      .map((f) => `- ${f.path}`)
+      .join("\n")}`,
+    tree: newTree.sha,
+    parents: [baseSha],
+  });
+
+  // Fast-forward the working branch to the new commit.
+  await octokit.git.updateRef({
+    owner,
+    repo,
+    ref: `heads/${loop.workingBranch}`,
+    sha: newCommit.sha,
+  });
+
   return files.map((f) => ({
     path: f.path,
     additions: f.content.split("\n").length,
@@ -185,13 +227,36 @@ export async function applyFileChanges(
 
 export async function revertToSha(
   loop: ProjectLoop,
-  _sha: string,
+  sha: string,
 ): Promise<void> {
   if (!githubAvailable()) return;
-  // No-op for now — the actual revert happens via a force-reset on
-  // the working branch in a follow-up. The store records rollbackSha
-  // so this is safe to defer.
-  return;
+  const octokit = await getOctokit();
+  const [owner, repo] = loop.repo.split("/");
+  if (!owner || !repo) return;
+
+  // Force-reset the working branch to the recorded rollback SHA so
+  // the next iteration starts from a clean slate.
+  await octokit.git.updateRef({
+    owner,
+    repo,
+    ref: `heads/${loop.workingBranch}`,
+    sha,
+    force: true,
+  });
+}
+
+/* ── Helpers ───────────────────────────────────────────────────── */
+
+function synthesizeDiff(
+  files: { path: string; content: string }[],
+): LoopFileChange[] {
+  return files.map((f) => ({
+    path: f.path,
+    additions: f.content.split("\n").length,
+    deletions: 0,
+    status: "modified" as const,
+    patch: f.content.slice(0, 500),
+  }));
 }
 
 /* ── Pull request ──────────────────────────────────────────────── */
