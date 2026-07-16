@@ -129,7 +129,6 @@ export async function runEngineerEdit(
   loop: ProjectLoop,
   snapshot: RepoSnapshot,
   plan: string,
-  _signal?: AbortSignal,
 ): Promise<EngineerEditResult> {
   const fileContext = snapshot.files
     .slice(0, 30)
@@ -203,7 +202,6 @@ function parseFileBlocks(text: string): { path: string; content: string }[] {
 export async function runQaTests(
   loop: ProjectLoop,
   diff: LoopDiff | undefined,
-  _signal?: AbortSignal,
 ): Promise<QaResult> {
   const results: LoopTestResult[] = [];
 
@@ -288,7 +286,6 @@ export async function runReviewer(
   loop: ProjectLoop,
   diff: LoopDiff | undefined,
   tests: LoopTestResult[],
-  _signal?: AbortSignal,
 ): Promise<ReviewerResult> {
   const prompt = `You are the **Reviewer** in a LiTT Project Loop.
 
