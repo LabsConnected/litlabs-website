@@ -22,7 +22,6 @@ const eslintConfig = defineConfig([
     "out/**",
     "build/**",
     "**/dist/**",
-    "**/dist/**",
     "next-env.d.ts",
     // Local binaries and heavy folders
     "chrome/**",

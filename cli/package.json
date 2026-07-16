@@ -1,28 +1,30 @@
-{
-  "name": "litt-code-cli",
-  "version": "0.1.0",
-  "private": true,
-  "description": "LiTT-Code — LiTTree Lab Studios engineering agent for your terminal.",
-  "bin": {
-    "litt-code": "./litt-code-cli.ts",
-    "littcode": "./litt-code-cli.ts"
-  },
-  "scripts": {
-    "dev": "tsx litt-code-cli.ts",
-    "repl": "tsx litt-code-cli.ts repl",
-    "chat": "tsx litt-code-cli.ts chat",
-    "build": "tsc -p tsconfig.json",
-    "start": "node dist/litt-code-cli.js"
-  },
-  "dependencies": {
-    "chalk": "^5.3.0"
-  },
-  "devDependencies": {
-    "@types/node": "^20",
-    "tsx": "^4.19.0",
-    "typescript": "^5"
-  },
-  "engines": {
-    "node": ">=18"
-  }
+﻿{
+    "name":  "litt-code-cli",
+    "version":  "0.1.0",
+    "private":  true,
+    "description":  "LiTT-Code — LiTTree Lab Studios engineering agent for your terminal.",
+    "bin":  {
+                "litt-code":  "./dist/cli/litt-code-cli.js",
+                "littcode":  "./dist/cli/litt-code-cli.js"
+            },
+    "preferGlobal":  true,
+    "scripts":  {
+                    "dev":  "tsx litt-code-cli.ts",
+                    "repl":  "tsx litt-code-cli.ts repl",
+                    "chat":  "tsx litt-code-cli.ts chat",
+                    "build":  "tsc -p tsconfig.json",
+                    "prepare":  "pnpm build",
+                    "start":  "node dist/cli/litt-code-cli.js"
+                },
+    "dependencies":  {
+                         "chalk":  "^5.3.0"
+                     },
+    "devDependencies":  {
+                            "@types/node":  "^20",
+                            "tsx":  "^4.19.0",
+                            "typescript":  "^5"
+                        },
+    "engines":  {
+                    "node":  ">=18"
+                }
 }

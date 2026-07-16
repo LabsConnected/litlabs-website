@@ -3,7 +3,35 @@ export type ChatMessage = {
   content: string;
 };
 
-async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:3b") {
+function resolveModelAndProvider(
+  modelArg?: string
+): { provider: "openrouter" | "ollama"; model: string } {
+  const explicit = modelArg ?? process.env.LITT_CODE_MODEL;
+
+  if (explicit?.startsWith("ollama:")) {
+    return { provider: "ollama", model: explicit.slice("ollama:".length) };
+  }
+
+  if (process.env.OPENROUTER_API_KEY) {
+    return {
+      provider: "openrouter",
+      model: explicit?.replace(/^ollama:/, "") ?? "google/gemini-2.5-flash",
+    };
+  }
+
+  // No API key configured — fail fast instead of hanging on Ollama
+  throw new Error(
+    "No LLM backend configured.\n" +
+      "  Option 1 (cloud): set OPENROUTER_API_KEY\n" +
+      "  Option 2 (local): set LITT_CODE_MODEL=ollama:llama3.2:3b and run `ollama serve`\n" +
+      "  Option 3 (CLI flag):  litt-code --ollama \"<prompt>\""
+  );
+}
+
+async function chatWithOllama(
+  messages: ChatMessage[],
+  model = "llama3.2:3b"
+): Promise<string> {
   const baseUrl = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
   const res = await fetch(`${baseUrl.replace(/\/$/, "")}/api/chat`, {
     method: "POST",
@@ -11,11 +39,14 @@ async function chatWithOllama(messages: ChatMessage[], model = "llama3.2:3b") {
     body: JSON.stringify({ model, messages, stream: false }),
   });
   if (!res.ok) throw new Error(`Ollama failed: ${res.status}`);
-  const data = await res.json();
+  const data = (await res.json()) as { message?: { content?: string } };
   return data.message?.content ?? "";
 }
 
-async function chatWithOpenRouter(messages: ChatMessage[], model = "google/gemini-2.5-flash") {
+async function chatWithOpenRouter(
+  messages: ChatMessage[],
+  model = "google/gemini-2.5-flash"
+): Promise<string> {
   const key = process.env.OPENROUTER_API_KEY;
   if (!key) throw new Error("OPENROUTER_API_KEY not configured");
 
@@ -29,11 +60,13 @@ async function chatWithOpenRouter(messages: ChatMessage[], model = "google/gemin
     body: JSON.stringify({ model, messages, stream: false }),
   });
   if (!res.ok) throw new Error(`OpenRouter failed: ${res.status}`);
-  const data = await res.json();
+  const data = (await res.json()) as {
+    choices?: { message?: { content?: string } }[];
+  };
   return data.choices?.[0]?.message?.content ?? "";
 }
 
-export async function askLiTTCode(prompt: string) {
+export async function askLiTTCode(prompt: string, model?: string): Promise<string> {
   const messages: ChatMessage[] = [
     {
       role: "system",
@@ -45,11 +78,13 @@ export async function askLiTTCode(prompt: string) {
     { role: "user", content: prompt },
   ];
 
-  try {
-    return await chatWithOllama(messages);
-  } catch {
-    return await chatWithOpenRouter(messages);
+  const { provider, model: resolvedModel } = resolveModelAndProvider(model);
+
+  if (provider === "ollama") {
+    return chatWithOllama(messages, resolvedModel);
   }
+
+  return chatWithOpenRouter(messages, resolvedModel);
 }
 
 export async function handleLiTTCodeCommand(input: string): Promise<string> {
@@ -74,5 +109,6 @@ Be concise. If the command is unclear, list the available commands.
 `;
 
   const prompt = `${systemContext}\n\nCommand: ${command || "help"}\nArguments: ${rest || "none"}`;
-  return await askLiTTCode(prompt);
+  // Pass through the explicit model so /ollama etc. resolve correctly
+  return askLiTTCode(prompt, process.env.LITT_CODE_MODEL);
 }

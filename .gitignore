@@ -24,6 +24,7 @@
 # Build artifacts
 /build
 terminal-server/dist/
+cli/dist/
 
 # Misc
 .DS_Store

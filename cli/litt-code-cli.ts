@@ -1,5 +1,5 @@
 /**
- * LiTT-Code CLI — engineering agent shell for LiTTree Lab Studios.
+ * LiTT-Code CLI â€” engineering agent shell for LiTTree Lab Studios.
  *
  * Usage:
  *   litt-code              # REPL
@@ -10,9 +10,6 @@
  */
 
 import { askLiTTCode, handleLiTTCodeCommand } from "../terminal-server/litt-code";
-
-const DEFAULT_MODEL = process.env.LITT_CODE_MODEL || "google/gemini-2.5-flash";
-const OLLAMA_URL = process.env.OLLAMA_BASE_URL || "http://localhost:11434";
 
 type Args = {
   mode: "repl" | "chat";
@@ -105,36 +102,9 @@ function parseArgs(argv: string[]): Args {
 }
 
 async function callAI(prompt: string, model?: string): Promise<string> {
-  const messages = [
-    {
-      role: "system" as const,
-      content:
-        "You are LiTT-Code, the engineering AI inside LiTTree Lab Studios. " +
-        "Keep answers concise and actionable. Prefer commands over long prose. " +
-        "For destructive ops, warn before recommending them.",
-    },
-    { role: "user" as const, content: prompt },
-  ];
-
-  const effectiveModel = model || DEFAULT_MODEL;
-
-  try {
-    const baseUrl = (process.env.OLLAMA_BASE_URL || OLLAMA_URL).replace(/\/$/, "");
-    const res = await fetch(`${baseUrl}/api/chat`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model: effectiveModel.replace(/^ollama:/, ""), messages, stream: false }),
-    });
-
-    if (!res.ok) {
-      throw new Error(`Ollama failed: ${res.status} ${res.statusText}`);
-    }
-
-    const data = (await res.json()) as { message?: { content?: string } };
-    return data.message?.content?.trim() || "";
-  } catch {
-    return await askLiTTCode(prompt);
-  }
+  // All routing / fallback logic lives in terminal-server/litt-code.ts.
+  // The CLI just forwards the prompt (+ optional model override) to that layer.
+  return askLiTTCode(prompt, model);
 }
 
 async function handleInput(input: string): Promise<boolean> {
@@ -168,7 +138,7 @@ async function handleInput(input: string): Promise<boolean> {
   }
 
   if (trimmed === "/ollama") {
-    delete process.env.LITT_CODE_MODEL;
+    process.env.LITT_CODE_MODEL = "ollama:llama3.2:3b";
     console.log("Switched to local Ollama.");
     return true;
   }
