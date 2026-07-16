@@ -102,17 +102,20 @@ ALTER TABLE public.project_files ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.project_scans ENABLE ROW LEVEL SECURITY;
 
 -- service_role full access (used by server API routes)
-CREATE POLICY IF NOT EXISTS service_role_all_studio_projects
+DROP POLICY IF EXISTS service_role_all_studio_projects ON public.studio_projects;
+CREATE POLICY service_role_all_studio_projects
   ON public.studio_projects
   FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS service_role_all_project_files
+DROP POLICY IF EXISTS service_role_all_project_files ON public.project_files;
+CREATE POLICY service_role_all_project_files
   ON public.project_files
   FOR ALL TO service_role
   USING (true) WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS service_role_all_project_scans
+DROP POLICY IF EXISTS service_role_all_project_scans ON public.project_scans;
+CREATE POLICY service_role_all_project_scans
   ON public.project_scans
   FOR ALL TO service_role
   USING (true) WITH CHECK (true);
