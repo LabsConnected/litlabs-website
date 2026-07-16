@@ -25,53 +25,50 @@ export default function MobileBottomNav() {
     <>
       <nav
         aria-label="Mobile navigation"
-        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-50 border-t backdrop-blur-xl"
+        className="mobile-bottom-nav fixed inset-x-0 bottom-0 z-50 border-t pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
         style={{ borderColor: `${T.borderColor}20` }}
       >
         <div
-          className="flex items-center justify-around px-2 py-1"
+          className="grid h-[72px] grid-cols-5 items-center px-2"
           style={{ backgroundColor: `${T.bgColor}ee` }}
         >
           {primary.map((item) => {
             const Icon = item.icon;
-            const active = item.href !== "#" && isActive(item.href);
-            const isCreate = item.label === "Create";
+            const active = isActive(item.href);
+            const isStudio = item.label === "Studio";
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isCreate ? "-mt-5" : ""}`}
-                style={{
-                  color: active
-                    ? T.accentColor
-                    : isCreate
-                      ? T.bgColor
-                      : T.textMuted,
-                }}
+                className={`relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-all ${isStudio ? "-mt-6" : ""}`}
+                style={{ color: active ? T.accentColor : T.textMuted }}
               >
-                {active && !isCreate && (
+                {active && !isStudio && (
                   <span
                     className="absolute inset-0 rounded-xl opacity-15"
                     style={{ backgroundColor: T.accentColor }}
                   />
                 )}
-                {isCreate ? (
-                  <span
-                    className="grid h-12 w-12 place-items-center rounded-full shadow-[0_0_24px_rgba(139,92,246,.5)]"
-                    style={{ backgroundColor: T.accentColor }}
-                  >
-                    <Icon size={24} aria-hidden="true" />
-                  </span>
-                ) : (
-                  <Icon size={20} aria-hidden="true" />
-                )}
-                <span className="text-[9px] font-black">{item.label}</span>
+                <span
+                  className={
+                    isStudio
+                      ? "grid h-14 w-14 place-items-center rounded-full bg-violet-600 text-white shadow-[0_0_24px_rgba(139,92,246,.65)]"
+                      : "grid h-8 w-8 place-items-center"
+                  }
+                >
+                  <Icon size={isStudio ? 24 : 20} aria-hidden="true" />
+                </span>
+                <span
+                  className={`text-[10px] font-black ${isStudio ? "text-violet-300" : ""}`}
+                >
+                  {item.label}
+                </span>
               </Link>
             );
           })}
           <button
             onClick={() => setMoreOpen((v) => !v)}
-            className="relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
+            className="relative flex min-w-0 flex-col items-center justify-center gap-1 rounded-xl px-1 py-2 transition-all"
             style={{
               color:
                 moreOpen || anyOverflowActive ? T.accentColor : T.textMuted,
@@ -98,7 +95,7 @@ export default function MobileBottomNav() {
             aria-hidden="true"
           />
           <div
-            className="fixed bottom-[calc(3.5rem+env(safe-area-inset-bottom))] left-2 right-2 z-50 rounded-2xl border p-3 shadow-2xl md:hidden"
+            className="fixed bottom-[calc(76px+env(safe-area-inset-bottom))] left-2 right-2 z-50 rounded-2xl border p-3 shadow-2xl md:hidden"
             style={{
               backgroundColor: T.boxBg,
               borderColor: `${T.borderColor}30`,

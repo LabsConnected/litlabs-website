@@ -27,9 +27,7 @@ import {
   Code2,
   Workflow,
   FolderKanban,
-  PlusCircle,
   Menu,
-  MoreHorizontal,
 } from "lucide-react";
 
 export type NavItem = {
@@ -163,12 +161,9 @@ type MobileNavItem = {
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Home", href: "/dashboard", icon: Home },
-  { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Create", href: "/studio?tool=builder", icon: PlusCircle },
-  { label: "Agents", href: "/agents", icon: Bot },
-  { label: "More", href: "#", icon: MoreHorizontal },
   { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Chat", href: "/litt", icon: MessagesSquare },
+  { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Agents", href: "/agents", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Market", href: "/marketplace", icon: Store },
   { label: "Games", href: "/games", icon: Gamepad2 },

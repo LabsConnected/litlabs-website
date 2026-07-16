@@ -80,7 +80,7 @@ export default function LayoutShell({
               onClose={() => {}}
               collapsed={desktopSidebarCollapsed}
             />
-            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden md:pb-0 pb-[calc(64px+env(safe-area-inset-bottom))]">
+            <main className="flex h-full w-full min-w-0 flex-col overflow-hidden pb-[calc(80px+env(safe-area-inset-bottom))] md:pb-0">
               {children}
             </main>
           </div>

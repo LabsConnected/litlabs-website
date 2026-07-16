@@ -12,6 +12,7 @@ import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
+import { requestCameraStream } from "@/app/studio/hooks/useMediaPermissions";
 import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
 import { AGENTS } from "@/lib/agents";
@@ -506,7 +507,6 @@ function LITTTerminalShellInner({
     startVoice,
     stopVoice,
     interrupt,
-    stopSpeaking,
     selectDevice,
     setOnTurn,
     setActivity,
@@ -518,6 +518,9 @@ function LITTTerminalShellInner({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [cameraRequesting, setCameraRequesting] = useState(false);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -1286,11 +1289,10 @@ function LITTTerminalShellInner({
 
   // Voice transcripts are finalised after a silence gap — auto-send and speak reply
   useEffect(() => {
-    setOnTurn((text) => {
+    setOnTurn(async (text) => {
       if (!text) return;
-      void send(text).then((reply) => {
-        if (reply) speakText(reply);
-      });
+      const reply = await send(text);
+      if (reply) speakText(reply);
     });
     return () => setOnTurn(() => {});
   }, [send, speakText, setOnTurn]);
@@ -1332,12 +1334,35 @@ function LITTTerminalShellInner({
   };
 
   const toggleMic = () => {
-    if (micActive) {
+    if (micActive && voiceState !== "error") {
       stopVoice();
     } else {
       startVoice();
     }
   };
+
+  const openCameraFromTap = useCallback(async () => {
+    if (cameraOpen || cameraRequesting) return;
+
+    setCameraRequesting(true);
+    setCameraError(null);
+    try {
+      const stream = await requestCameraStream("user");
+      setCameraStream(stream);
+      setCameraOpen(true);
+    } catch (cause) {
+      const error = cause as DOMException;
+      setCameraError(
+        error.name === "NotAllowedError" ||
+          error.name === "PermissionDeniedError"
+          ? "Camera permission was denied. Allow camera access for litlabs.net and try again."
+          : error.message || "LiTT couldn't start the camera.",
+      );
+      setCameraOpen(true);
+    } finally {
+      setCameraRequesting(false);
+    }
+  }, [cameraOpen, cameraRequesting]);
 
   // When the user clicks a chip body, we treat it as a follow-up turn so
   // the chat path picks up the chip's intent. Destructive action types
@@ -1853,6 +1878,8 @@ function LITTTerminalShellInner({
               {cameraOpen && (
                 <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
                   <CameraSession
+                    initialStream={cameraStream}
+                    initialError={cameraError}
                     onSnapshot={(url) => {
                       if (activeTool !== "chat") {
                         onToolChangeAction?.("chat");
@@ -1863,8 +1890,14 @@ function LITTTerminalShellInner({
                         },
                       );
                       setCameraOpen(false);
+                      setCameraStream(null);
+                      setCameraError(null);
                     }}
-                    onClose={() => setCameraOpen(false)}
+                    onClose={() => {
+                      setCameraOpen(false);
+                      setCameraStream(null);
+                      setCameraError(null);
+                    }}
                     modelName={persona.name}
                   />
                 </div>
@@ -1928,14 +1961,10 @@ function LITTTerminalShellInner({
                         </button>
                       )}
                       <button
-                        onClick={() =>
-                          voiceState === "speaking"
-                            ? stopSpeaking()
-                            : stopVoice()
-                        }
+                        onClick={stopVoice}
                         className="rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-300 transition hover:bg-rose-500/20"
                       >
-                        {voiceState === "speaking" ? "Stop" : "End"}
+                        End conversation
                       </button>
                     </div>
                   </div>
@@ -2023,19 +2052,20 @@ function LITTTerminalShellInner({
                 attachments={attachments}
                 onRemove={removeAttachment}
               />
-              <div className="flex flex-wrap items-end gap-2 sm:flex-nowrap sm:items-center">
+              <div className="flex items-center gap-1.5 sm:gap-2">
                 <button
                   aria-label="Add attachment"
                   onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:h-11 sm:w-11"
                 >
                   <Plus size={15} aria-hidden="true" />
                 </button>
                 <button
                   aria-label="Capture from camera"
-                  onClick={() => setCameraOpen(true)}
-                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
-                    cameraOpen
+                  onClick={() => void openCameraFromTap()}
+                  disabled={cameraRequesting}
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition disabled:opacity-50 sm:h-11 sm:w-11 ${
+                    cameraOpen || cameraRequesting
                       ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
@@ -2045,20 +2075,20 @@ function LITTTerminalShellInner({
                 <button
                   aria-label={micActive ? "Stop voice" : "Start voice"}
                   onClick={toggleMic}
-                  className={`order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border transition sm:order-none sm:h-9 sm:w-9 ${
-                    micActive
+                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition sm:h-11 sm:w-11 ${
+                    micActive && voiceState !== "error"
                       ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
                       : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
                   }`}
                 >
-                  {micActive ? (
+                  {micActive && voiceState !== "error" ? (
                     <MicOff size={15} aria-hidden="true" />
                   ) : (
                     <Mic size={15} aria-hidden="true" />
                   )}
                 </button>
 
-                <div className="relative order-1 flex w-full min-w-0 flex-1 items-end sm:order-none sm:w-auto sm:items-center">
+                <div className="relative flex min-w-0 flex-1 items-center">
                   <textarea
                     ref={textInputRef}
                     name="litt-message"
@@ -2069,7 +2099,7 @@ function LITTTerminalShellInner({
                     aria-label="Message LITT"
                     placeholder="Ask LiTT..."
                     rows={1}
-                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                    className="max-h-32 min-h-11 w-full min-w-0 resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
@@ -2094,7 +2124,7 @@ function LITTTerminalShellInner({
                 <button
                   aria-label="Attach file"
                   onClick={() => fileInputRef.current?.click()}
-                  className="order-2 flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:order-none sm:h-9 sm:w-9"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:h-11 sm:w-11"
                 >
                   <Paperclip size={15} />
                 </button>
@@ -2148,12 +2178,6 @@ function LITTTerminalShellInner({
                       /{plugin}
                     </button>
                   ))}
-                  <span
-                    title="More plugins coming soon"
-                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-gray-300 opacity-40"
-                  >
-                    +8
-                  </span>
                 </div>
               </div>
             </div>

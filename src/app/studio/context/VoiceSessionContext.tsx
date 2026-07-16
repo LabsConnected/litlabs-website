@@ -76,7 +76,7 @@ export interface VoiceSessionCtx {
   speakText: (text: string) => void;
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
-  setOnTurn: (handler: (text: string) => void) => void;
+  setOnTurn: (handler: (text: string) => void | Promise<void>) => void;
   setActivity: (activity: VoiceActivity) => void;
 }
 
@@ -118,9 +118,11 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
 const SILENCE_THRESHOLD = 0.02;
 const SPEECH_START_THRESHOLD = 0.035;
-const SILENCE_TIMEOUT_MS = 2500;
+const MIN_SPEECH_MS = 250;
+const SILENCE_TIMEOUT_MS = 900;
 const MAX_RECORDING_MS = 30_000;
 const CHUNK_INTERVAL_MS = 250;
+const MIN_AUDIO_BYTES = 2_000;
 
 function getSupportedMimeType(): string | undefined {
   const types = [
@@ -209,10 +211,12 @@ export function VoiceSessionProvider({
   const listeningStartMsRef = useRef<number | null>(null);
   const activeRef = useRef(false);
   const voiceStateRef = useRef<VoiceState>("idle");
-  const onTurnRef = useRef<(text: string) => void>(noop);
+  const onTurnRef = useRef<(text: string) => void | Promise<void>>(noop);
   const prevMicLevelRef = useRef(0);
   const speechDetectedRef = useRef(false);
+  const speechCandidateAtRef = useRef<number | null>(null);
   const activityRef = useRef<VoiceActivity>({ type: "idle" });
+  const restartListeningRef = useRef<() => void>(noop);
 
   // Keep mirrors in sync
   useEffect(() => {
@@ -290,6 +294,7 @@ export function VoiceSessionProvider({
     }
 
     speechDetectedRef.current = false;
+    speechCandidateAtRef.current = null;
     listeningStartMsRef.current = null;
     setListeningDurationMs(0);
     setMicLevel(0);
@@ -336,13 +341,9 @@ export function VoiceSessionProvider({
     async (chunks: Blob[]) => {
       const mimeType = getSupportedMimeType() || "audio/webm";
       const blob = new Blob(chunks, { type: mimeType });
-      if (blob.size < 1000) {
-        // Too short — likely no speech
-        setVoiceState("listening");
-        voiceStateRef.current = "listening";
-        setActivity({ type: "listening" });
-        setInterimTranscript("");
-        speechDetectedRef.current = false;
+      if (blob.size < MIN_AUDIO_BYTES) {
+        setErrorMessage("I didn't catch that. Keep speaking naturally.");
+        restartListeningRef.current();
         return;
       }
 
@@ -374,18 +375,20 @@ export function VoiceSessionProvider({
           throw new Error(clean);
         }
 
-        const data = (await res.json()) as { text?: string };
+        const data = (await res.json()) as {
+          text?: string;
+          confidence?: number;
+        };
         const text = data.text?.trim();
 
-        if (!text) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          setActivity({ type: "listening" });
+        if (
+          !text ||
+          text.replace(/[^a-zA-Z0-9]/g, "").length < 2 ||
+          (typeof data.confidence === "number" && data.confidence < 0.55)
+        ) {
           setInterimTranscript("");
-          setErrorMessage(
-            "No speech detected. Try speaking closer to the mic.",
-          );
-          speechDetectedRef.current = false;
+          setErrorMessage("I didn't catch that. Please try again.");
+          restartListeningRef.current();
           return;
         }
 
@@ -395,21 +398,12 @@ export function VoiceSessionProvider({
         voiceStateRef.current = "sending";
         setActivity({ type: "sending" });
 
-        // Hand off to chat
-        onTurnRef.current(text);
+        await onTurnRef.current(text);
 
-        // After handing off, go back to listening if still active
-        if (activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          setActivity({ type: "listening" });
-          speechDetectedRef.current = false;
-          recordedChunksRef.current = [];
-          try {
-            mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
-          } catch {
-            // ignore
-          }
+        // A spoken reply owns the microphone until playback finishes. If the
+        // turn produced no speech, immediately continue the conversation.
+        if (activeRef.current && voiceStateRef.current !== "speaking") {
+          restartListeningRef.current();
         }
       } catch (err: unknown) {
         const msg = err instanceof Error ? err.message : "Transcription failed";
@@ -464,10 +458,20 @@ export function VoiceSessionProvider({
 
       // Speech detection state machine
       if (!speechDetectedRef.current && level > SPEECH_START_THRESHOLD) {
-        speechDetectedRef.current = true;
-        setVoiceState("speech_detected");
-        voiceStateRef.current = "speech_detected";
-        setActivity({ type: "speech_detected", durationMs: 0 });
+        const now = performance.now();
+        if (speechCandidateAtRef.current === null) {
+          speechCandidateAtRef.current = now;
+        } else if (now - speechCandidateAtRef.current >= MIN_SPEECH_MS) {
+          speechDetectedRef.current = true;
+          setVoiceState("speech_detected");
+          voiceStateRef.current = "speech_detected";
+          setActivity({ type: "speech_detected", durationMs: MIN_SPEECH_MS });
+        }
+      } else if (
+        !speechDetectedRef.current &&
+        level <= SPEECH_START_THRESHOLD
+      ) {
+        speechCandidateAtRef.current = null;
       }
 
       if (speechDetectedRef.current) {
@@ -492,6 +496,50 @@ export function VoiceSessionProvider({
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
   }, [setActivity, finalizeRecording]);
+
+  const restartListening = useCallback(() => {
+    if (!activeRef.current) return;
+
+    const recorder = mediaRecorderRef.current;
+    if (!recorder || recorder.state !== "inactive") return;
+
+    if (silenceTimerRef.current !== null) {
+      clearTimeout(silenceTimerRef.current);
+      silenceTimerRef.current = null;
+    }
+    if (maxRecordingTimerRef.current !== null) {
+      clearTimeout(maxRecordingTimerRef.current);
+    }
+
+    recordedChunksRef.current = [];
+    speechDetectedRef.current = false;
+    speechCandidateAtRef.current = null;
+    listeningStartMsRef.current = Date.now();
+    setListeningDurationMs(0);
+    setInterimTranscript("");
+    setErrorMessage(null);
+
+    try {
+      recorder.start(CHUNK_INTERVAL_MS);
+      setVoiceState("listening");
+      voiceStateRef.current = "listening";
+      setActivity({ type: "listening" });
+      startMicLevelLoop();
+      maxRecordingTimerRef.current = setTimeout(
+        finalizeRecording,
+        MAX_RECORDING_MS,
+      );
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Could not resume listening.";
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setActivity({ type: "error", message });
+      setErrorMessage(message);
+    }
+  }, [finalizeRecording, setActivity, startMicLevelLoop]);
+
+  restartListeningRef.current = restartListening;
 
   // ---------------------------------------------------------------------------
   // startVoice
@@ -593,10 +641,15 @@ export function VoiceSessionProvider({
       };
 
       recorder.onstop = () => {
-        const chunks = recordedChunksRef.current;
+        const hadSpeech = speechDetectedRef.current;
+        const chunks = [...recordedChunksRef.current];
         recordedChunksRef.current = [];
-        if (chunks.length > 0) {
+        if (!activeRef.current) return;
+        if (hadSpeech && chunks.length > 0) {
           void sendForTranscription(chunks);
+        } else {
+          setErrorMessage("I didn't catch that. Keep speaking naturally.");
+          restartListeningRef.current();
         }
       };
 
@@ -608,23 +661,7 @@ export function VoiceSessionProvider({
         setErrorMessage("Recording error. Please try again.");
       };
 
-      recorder.start(CHUNK_INTERVAL_MS);
-      listeningStartMsRef.current = Date.now();
-      setListeningDurationMs(0);
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
-      setActivity({ type: "listening" });
-      startMicLevelLoop();
-
-      // Max recording safety net
-      maxRecordingTimerRef.current = setTimeout(() => {
-        if (
-          voiceStateRef.current === "listening" ||
-          voiceStateRef.current === "speech_detected"
-        ) {
-          finalizeRecording();
-        }
-      }, MAX_RECORDING_MS);
+      restartListeningRef.current();
     } catch (err) {
       console.error("[LiTT Voice] MediaRecorder start failed:", err);
       setVoiceState("error");
@@ -636,10 +673,8 @@ export function VoiceSessionProvider({
   }, [
     cleanup,
     selectedDeviceId,
-    startMicLevelLoop,
     sendForTranscription,
     setActivity,
-    finalizeRecording,
   ]);
 
   // ---------------------------------------------------------------------------
@@ -737,10 +772,14 @@ export function VoiceSessionProvider({
           }
         }
         if (activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          setActivity({ type: "listening" });
-          startMicLevelLoop();
+          if (mediaRecorderRef.current?.state === "inactive") {
+            restartListeningRef.current();
+          } else {
+            setVoiceState("listening");
+            voiceStateRef.current = "listening";
+            setActivity({ type: "listening" });
+            startMicLevelLoop();
+          }
         } else {
           setVoiceState("idle");
           voiceStateRef.current = "idle";
@@ -820,10 +859,14 @@ export function VoiceSessionProvider({
       }
     }
     if (activeRef.current) {
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
-      setActivity({ type: "listening" });
-      startMicLevelLoop();
+      if (mediaRecorderRef.current?.state === "inactive") {
+        restartListeningRef.current();
+      } else {
+        setVoiceState("listening");
+        voiceStateRef.current = "listening";
+        setActivity({ type: "listening" });
+        startMicLevelLoop();
+      }
     }
   }, [stopSpeaking, startMicLevelLoop, setActivity]);
 
@@ -843,9 +886,12 @@ export function VoiceSessionProvider({
     [stopVoice, startVoice],
   );
 
-  const setOnTurn = useCallback((handler: (text: string) => void) => {
-    onTurnRef.current = handler;
-  }, []);
+  const setOnTurn = useCallback(
+    (handler: (text: string) => void | Promise<void>) => {
+      onTurnRef.current = handler;
+    },
+    [],
+  );
 
   // ---------------------------------------------------------------------------
   // Page lifecycle recovery

@@ -266,19 +266,32 @@ export function FloatingChat() {
   }, []);
 
   const openCamera = useCallback(async () => {
+    if (!window.isSecureContext) {
+      showToast(
+        "Camera access requires HTTPS. Open the secure litlabs.net site.",
+      );
+      return;
+    }
     if (!navigator.mediaDevices?.getUserMedia) {
       showToast("Camera access needs a secure HTTPS connection.");
       return;
     }
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: "user" },
+        video: {
+          facingMode: { ideal: "user" },
+          width: { ideal: 1280 },
+          height: { ideal: 720 },
+        },
         audio: false,
       });
       cameraStreamRef.current = stream;
       setCameraMode(true);
       requestAnimationFrame(() => {
-        if (cameraVideoRef.current) cameraVideoRef.current.srcObject = stream;
+        if (cameraVideoRef.current) {
+          cameraVideoRef.current.srcObject = stream;
+          void cameraVideoRef.current.play();
+        }
       });
     } catch (err) {
       const error = err as DOMException;

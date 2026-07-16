@@ -11,19 +11,40 @@ interface CameraSessionProps {
   onSnapshot?: (dataUrl: string) => void;
   onClose?: () => void;
   modelName?: string;
+  initialStream?: MediaStream | null;
+  initialError?: string | null;
 }
 
 export default function CameraSession({
   onSnapshot,
   onClose,
   modelName = "Gemini 2.5 Flash Vision",
+  initialStream = null,
+  initialError = null,
 }: CameraSessionProps) {
   const { resolvedColors: T } = useTheme();
   const { lastError, requestVideo, resetPermission } = useMediaPermissions();
-  const [state, setState] = useState<CameraState>("idle");
+  const [state, setState] = useState<CameraState>(() =>
+    initialStream ? "active" : initialError ? "error" : "idle",
+  );
   const [facingMode, setFacingMode] = useState<"user" | "environment">("user");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  useEffect(() => {
+    if (!initialStream) return;
+    streamRef.current = initialStream;
+    setState("active");
+    const video = videoRef.current;
+    if (video) {
+      video.srcObject = initialStream;
+      void video.play();
+    }
+  }, [initialStream]);
+
+  useEffect(() => {
+    if (initialError) setState("error");
+  }, [initialError]);
 
   const stopStream = useCallback(() => {
     if (streamRef.current) {
@@ -119,7 +140,9 @@ export default function CameraSession({
         <div className="flex items-center gap-2 font-bold">
           <X size={14} /> Camera unavailable
         </div>
-        <p>{lastError?.message || "Could not access the camera."}</p>
+        <p>
+          {initialError || lastError?.message || "Could not access the camera."}
+        </p>
         <div className="flex gap-2">
           <button
             onClick={() => void startCamera()}
