@@ -5,6 +5,12 @@ import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-rea
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
+import {
+  createChatMessageBlock,
+  createThinkingBlock,
+  type BuilderBlock,
+} from "@/app/studio/lib/builder-blocks";
+import BuilderStream from "./BuilderStream";
 import styles from "./ChatShell.module.css";
 
 export type StudioMessage = {
@@ -27,14 +33,6 @@ type Props = {
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
-
-function timeLabel(value?: string | number | Date) {
-  if (!value) return "Now";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
 
 export function ChatShell({
   messages,
@@ -77,6 +75,22 @@ export function ChatShell({
     () => messages.filter((m) => m.role !== "system"),
     [messages],
   );
+
+  const blocks: BuilderBlock[] = useMemo(() => {
+    const list: BuilderBlock[] = visibleMessages.map((m, index) =>
+      createChatMessageBlock(
+        m.role === "user" || m.role === "assistant" ? m.role : "assistant",
+        m.content,
+        m.createdAt,
+        m.id ?? `msg-${index}`,
+      ),
+    );
+    if (sending) {
+      list.push(createThinkingBlock("LiTT is working"));
+    }
+    return list;
+  }, [visibleMessages, sending]);
+
   const voiceActive =
     voiceState !== "idle";
 
@@ -201,54 +215,12 @@ export function ChatShell({
             </button>
           </div>
         )}
-        {visibleMessages.map((message, index) => (
-          <article
-            key={message.id ?? index}
-            className={`${styles.message} ${styles[message.role]}`}
-          >
-            {message.role === "assistant" && (
-              <div className={styles.avatar}>⌁</div>
-            )}
-            <div className={styles.bubble}>
-              <div className={styles.copy}>{message.content}</div>
-              <time>{timeLabel(message.createdAt)}</time>
-              {message.role === "assistant" && (
-                <div className={styles.messageActions}>
-                  <button
-                    onClick={() =>
-                      state === "speaking"
-                        ? stopSpeaking()
-                        : speakText(message.content)
-                    }
-                    aria-label={
-                      state === "speaking"
-                        ? "Stop speaking"
-                        : "Speak this message"
-                    }
-                    aria-pressed={state === "speaking"}
-                  >
-                    {state === "speaking" ? "■ Stop" : "◖ Speak"}
-                  </button>
-                  <button
-                    onClick={() =>
-                      navigator.clipboard.writeText(message.content)
-                    }
-                    aria-label="Copy message to clipboard"
-                  >
-                    ▣ Copy
-                  </button>
-                </div>
-              )}
-            </div>
-          </article>
-        ))}
-        {sending && (
-          <div className={styles.thinking}>
-            <i />
-            <i />
-            <i /> LiTT is working
-          </div>
-        )}
+        <BuilderStream
+          blocks={blocks}
+          isSpeaking={state === "speaking"}
+          onSpeak={speakText}
+          stopSpeaking={stopSpeaking}
+        />
       </section>
 
       {!hideDock && (
