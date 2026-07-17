@@ -1820,7 +1820,12 @@ function LITTTerminalShellInner({
           {/* Scrollable content */}
           <div
             ref={transcriptRef}
-            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
+            className={cn(
+              "relative z-10 min-h-0 flex-1 overflow-y-auto",
+              activeTool === "chat" || activeTool === "builder"
+                ? "px-0 py-0"
+                : "px-4 py-4 sm:px-6",
+            )}
           >
             <div key={activeTool} className="animate-enter">
             {activeTool === "chat" || activeTool === "builder" ? (

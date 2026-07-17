@@ -468,6 +468,6 @@
   left: auto;
   transform: none;
   width: 100%;
-  padding-bottom: 8px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
   flex: 0 0 auto;
 }

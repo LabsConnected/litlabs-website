@@ -243,6 +243,7 @@ export function VoiceSessionProvider({
     null,
   );
   const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const startVoiceRef = useRef<() => Promise<void>>(async () => {});
 
   // Keep mirrors in sync
   useEffect(() => {
@@ -416,11 +417,9 @@ export function VoiceSessionProvider({
         setInterimTranscript("");
         speechDetectedRef.current = false;
         recordedChunksRef.current = [];
-        try {
-          mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
-        } catch {
-          // ignore
-        }
+        // Re-arm with a fresh stream/recorder; a stopped MediaRecorder cannot be restarted.
+        voiceStateRef.current = "idle";
+        void startVoiceRef.current();
         return;
       }
 
@@ -501,11 +500,9 @@ export function VoiceSessionProvider({
           setInterimTranscript("");
           speechDetectedRef.current = false;
           recordedChunksRef.current = [];
-          try {
-            mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
-          } catch {
-            // ignore
-          }
+          // Re-arm with a fresh stream/recorder.
+          voiceStateRef.current = "idle";
+          void startVoiceRef.current();
           return;
         }
 
@@ -651,24 +648,49 @@ export function VoiceSessionProvider({
       return;
     }
 
+    const baseAudio: MediaTrackConstraints = {
+      echoCancellation: { ideal: true },
+      noiseSuppression: { ideal: true },
+      autoGainControl: { ideal: true },
+      channelCount: { ideal: 1 },
+    };
+    let constraints: MediaStreamConstraints = { audio: baseAudio };
+    if (selectedDeviceId) {
+      constraints = {
+        audio: { ...baseAudio, deviceId: { ideal: selectedDeviceId } },
+      };
+    }
+
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-          ...(selectedDeviceId ? { deviceId: selectedDeviceId } : {}),
-        },
-      });
+      stream = await navigator.mediaDevices.getUserMedia(constraints);
     } catch (err: unknown) {
-      const e = err as DOMException;
-      const msg = getUserMediaErrorMessage(e);
-      console.error("[LiTT Voice] getUserMedia error:", e.name, msg);
-      setActivity({ type: "error", message: msg });
-      setErrorMessage(msg);
-      return;
+      const domErr = err as DOMException;
+      // If the stored device is gone or over-constrained, fall back to default mic.
+      if (
+        selectedDeviceId &&
+        (domErr.name === "NotFoundError" ||
+          domErr.name === "OverconstrainedError" ||
+          domErr.name === "DevicesNotFoundError")
+      ) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
+        } catch (fallbackErr: unknown) {
+          const e = fallbackErr as DOMException;
+          const msg = getUserMediaErrorMessage(e);
+          console.error("[LiTT Voice] getUserMedia fallback error:", e.name, msg);
+          setActivity({ type: "error", message: msg });
+          setErrorMessage(msg);
+          return;
+        }
+      } else {
+        const e = err as DOMException;
+        const msg = getUserMediaErrorMessage(e);
+        console.error("[LiTT Voice] getUserMedia error:", e.name, msg);
+        setActivity({ type: "error", message: msg });
+        setErrorMessage(msg);
+        return;
+      }
     }
 
     console.debug("[LiTT Voice] stream id:", stream.id);
@@ -744,6 +766,10 @@ export function VoiceSessionProvider({
     setActivity,
     finalizeRecording,
   ]);
+
+  useEffect(() => {
+    startVoiceRef.current = startVoice;
+  }, [startVoice]);
 
   // ---------------------------------------------------------------------------
   // stopVoice
@@ -835,12 +861,11 @@ export function VoiceSessionProvider({
             // ignore
           }
         } else if (recorder?.state === "inactive" && activeRef.current) {
+          // Restart with a fresh stream/recorder rather than reusing the old one.
           recordedChunksRef.current = [];
-          try {
-            recorder.start(CHUNK_INTERVAL_MS);
-          } catch {
-            // ignore
-          }
+          voiceStateRef.current = "idle";
+          void startVoiceRef.current();
+          return;
         }
         if (activeRef.current) {
           setActivity({ type: "listening" });
