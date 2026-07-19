@@ -77,12 +77,8 @@ const LOCAL_HELP = [
   "    \x1b[33muname -a\x1b[0m            System info",
   "    \x1b[33mnode -v\x1b[0m              Node.js version",
   "    \x1b[33mpnpm -v\x1b[0m              pnpm version",
-  "    \x1b[33mpnpm build\x1b[0m           Simulated production build",
-  "    \x1b[33mpnpm lint\x1b[0m            Simulated ESLint check",
-  "    \x1b[33mpnpm test\x1b[0m            Simulated test run",
-  "    \x1b[33mpnpm dev\x1b[0m             Simulated dev server",
-  "    \x1b[33mnpx tsc --noEmit\x1b[0m     Simulated type-check",
   "    \x1b[33mneofetch\x1b[0m             Tiny system info card",
+  "    \x1b[33mcline --acp\x1b[0m          Launch Cline in the real workspace PTY",
   "",
   "  \x1b[2mFor a real PTY (bash/PS), run \x1b[0m\x1b[33mpnpm terminal:dev\x1b[0m\x1b[2m and click Connect.\x1b[0m",
   "",
@@ -90,7 +86,7 @@ const LOCAL_HELP = [
 
 const LOCAL_FS: Record<string, string> = {
   "/workspace/README.md":
-    "# LiTTree LabStudios\n\nStudio OS for AI agents. Project Loops, real-time terminal, and more.\n",
+    "# LiTTree Lab Studios\n\nStudio OS for AI agents. Project Loops, real-time terminal, and more.\n",
   "/workspace/package.json":
     '{\n  "name": "litlabs-website",\n  "version": "0.1.0",\n  "private": true,\n  "scripts": {\n    "dev": "next dev --turbo",\n    "build": "next build"\n  }\n}\n',
   "/workspace/.env.local":
@@ -119,6 +115,27 @@ const LOCAL_LS: Record<string, string[]> = {
 const LOCAL_PWD = "/workspace";
 const LOCAL_USER = "creator@littree";
 
+const SHADOW_COMMANDS = [
+  "help",
+  "clear",
+  "whoami",
+  "pwd",
+  "ls",
+  "ls /workspace/src",
+  "cat README.md",
+  "node -v",
+  "pnpm -v",
+  "neofetch",
+  "cline --acp",
+];
+
+const PTY_QUICK_ACTIONS = [
+  { label: "Cline", command: "cline --acp", hint: "Start Cline agent mode" },
+  { label: "Git status", command: "git status", hint: "Inspect workspace changes" },
+  { label: "Dev server", command: "pnpm dev", hint: "Start LiTTree locally" },
+  { label: "Tests", command: "pnpm test", hint: "Run the test suite" },
+] as const;
+
 function runLocalCommand(line: string): string[] {
   const trimmed = line.trim();
   if (!trimmed) return [];
@@ -142,85 +159,28 @@ function runLocalCommand(line: string): string[] {
     case "uname":
       if (args[0] === "-a") {
         return [
-          "LiTTree LabStudios 1.0.0 #1 SMP local time zone browser-xterm",
+          "LiTTree-LabStudios 1.0.0 #1 SMP local time zone browser-xterm",
           "Build: xterm.js + node-pty + socket.io",
           "Arch: x86_64 (browser)",
           "Kernel: Vercel Edge / Next.js 16",
         ];
       }
-      return ["LiTTree LabStudios"];
+      return ["LiTTree-LabStudios"];
     case "node":
       if (args[0] === "-v" || args[0] === "--version") return ["v22.22.0"];
-      if (args[0] === "-e") return [args.slice(1).join(" ")];
       return ["node: command not implemented in Local Shell (use Connect for real bash)"];
-    case "npx":
-      if (args[0] === "tsc" && (args[1] === "--noEmit" || !args[1])) {
-        return [
-          "\x1b[32m✓\x1b[0m No type errors found.",
-          "",
-          "\x1b[36mℹ\x1b[0m Simulated type-check (in-browser shell).",
-        ];
-      }
-      return ["npx: command not implemented in Local Shell (use Connect for real bash)"];
-    case "pnpm": {
+    case "pnpm":
       if (args[0] === "-v" || args[0] === "--version") return ["9.15.0"];
-      const sub = args[0];
-      if (sub === "build") {
-        return [
-          "\x1b[32m✓\x1b[0m Compiled successfully in 4.2s",
-          "\x1b[32m✓\x1b[0m Linting passed",
-          "\x1b[32m✓\x1b[0m Generating static pages (42/42)",
-          "\x1b[32m✓\x1b[0m Build completed",
-          "",
-          " \x1b[2mRoute (app)\x1b[0m                              Size  ",
-          "  ┌ ◐ /                                    142 kB",
-          "  ├ ○ /studio                              89 kB",
-          "  ├ ○ /dashboard                           34 kB",
-          "  └ ○ /api/...                             12 kB",
-          "  First Load JS shared                     287 kB",
-          "",
-          "\x1b[36mℹ\x1b[0m Note: This is a simulated build output (in-browser shell).",
-          "\x1b[36mℹ\x1b[0m For real builds, run \x1b[33mpnpm terminal:dev\x1b[0m locally and click Connect.",
-        ];
-      }
-      if (sub === "lint") {
-        return [
-          "\x1b[32m✓\x1b[0m ESLint passed — 0 errors, 3 warnings",
-          "",
-          " \x1b[33m⚠\x1b[0m src/components/MobileBottomNav.tsx:26  z-[100] can be written as z-100",
-          "",
-          "\x1b[36mℹ\x1b[0m Simulated lint output (in-browser shell).",
-        ];
-      }
-      if (sub === "test") {
-        return [
-          " \x1b[36mRUN\x1b[0m  vitest v1.6.0",
-          " ✓ src/lib/__tests__/agents.test.ts (3 tests)",
-          " ✓ src/lib/__tests__/llm.test.ts (5 tests)",
-          " ✓ src/lib/__tests__/auth.test.ts (2 tests)",
-          "",
-          " Test Files  3 passed (3)",
-          "      Tests  10 passed (10)",
-          "",
-          "\x1b[36mℹ\x1b[0m Simulated test output (in-browser shell).",
-        ];
-      }
-      if (sub === "dev") {
-        return [
-          "\x1b[36m▲\x1b[0m Next.js 16.0.0 (Turbopack)",
-          "- Local:        http://localhost:3000",
-          "- Environments: .env.local",
-          "",
-          "\x1b[36mℹ\x1b[0m Simulated dev server (in-browser shell).",
-          "\x1b[36mℹ\x1b[0m For a real dev server, run \x1b[33mpnpm terminal:dev\x1b[0m locally and click Connect.",
-        ];
-      }
-      return ["pnpm: command not implemented in Local Shell (use Connect for real bash)"];
-    }
+      return ["pnpm: command not implemented in Local Shell"];
+    case "cline":
+      return [
+        "Cline needs the real workspace PTY.",
+        "Click the Cline quick action above or Connect to PTY, then run: \x1b[33mcline --acp\x1b[0m",
+      ];
     case "neofetch":
       return [
         "       ╭─────────────────────────╮",
-        "       │ \x1b[36mLiTTree LabStudios\x1b[0m     │",
+        "       │ \x1b[36mLiTTree Lab Studios\x1b[0m     │",
         "       │ \x1b[2m(studio: in-browser)\x1b[0m    │",
         "       ╰─────────────────────────╯",
         "  \x1b[2mOS\x1b[0m      Local LiTT Shell 1.0",
@@ -292,6 +252,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     const localLineRef = useRef<string>("");
     const localHistoryRef = useRef<string[]>([]);
     const localHistIndexRef = useRef<number>(-1);
+    const shadowSuffixRef = useRef<string>("");
 
     const [status, setStatus] = useState<Status>("idle");
     const [error, setError] = useState<string | null>(null);
@@ -327,6 +288,57 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     (data: string) => {
       const term = termRef.current;
       if (!term) return;
+
+      const clearShadow = () => {
+        if (!shadowSuffixRef.current) return;
+        term.write("\x1b[K");
+        shadowSuffixRef.current = "";
+      };
+
+      const renderShadow = () => {
+        const line = localLineRef.current;
+        if (!line) return;
+        const candidates = [
+          ...localHistoryRef.current.slice().reverse(),
+          ...SHADOW_COMMANDS,
+        ];
+        const match = candidates.find(
+          (candidate) => candidate.startsWith(line) && candidate !== line,
+        );
+        if (!match) return;
+        const suffix = match.slice(line.length);
+        shadowSuffixRef.current = suffix;
+        term.write(`\x1b[2m${suffix}\x1b[22m\x1b[${suffix.length}D`);
+      };
+
+      // Tab or right-arrow accepts the visible shadow prediction.
+      if ((data === "\t" || data === "\x1b[C") && shadowSuffixRef.current) {
+        const suffix = shadowSuffixRef.current;
+        clearShadow();
+        localLineRef.current += suffix;
+        term.write(suffix);
+        return;
+      }
+
+      // Command history works like a normal shell in Local mode.
+      if (data === "\x1b[A" || data === "\x1b[B") {
+        clearShadow();
+        const history = localHistoryRef.current;
+        if (!history.length) return;
+        if (data === "\x1b[A") {
+          localHistIndexRef.current = Math.max(0, localHistIndexRef.current - 1);
+        } else {
+          localHistIndexRef.current = Math.min(history.length, localHistIndexRef.current + 1);
+        }
+        term.write(`\r\x1b[K`);
+        writePrompt();
+        localLineRef.current = history[localHistIndexRef.current] || "";
+        term.write(localLineRef.current);
+        renderShadow();
+        return;
+      }
+
+      clearShadow();
       for (const ch of data) {
         const code = ch.charCodeAt(0);
         if (ch === "\r") {
@@ -361,7 +373,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
           term.write("\x1b[2J\x1b[H");
           writePrompt();
         } else if (ch === "\u001b") {
-          // Escape sequences — ignore (no arrow-key history for now)
+          // Other escape sequences are ignored in the local emulator.
         } else if (code === 12) {
           // Ctrl+L (alternate)
           term.write("\x1b[2J\x1b[H");
@@ -371,6 +383,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
           term.write(ch);
         }
       }
+      renderShadow();
     },
     [writePrompt],
   );
@@ -486,7 +499,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
 
   /* ── Connect to terminal-server (remote PTY) ─────────────── */
   const connectRemote = useCallback(async () => {
-    if (status === "connecting" || status === "connected") return;
+    if (status === "connecting" || (modeRef.current === "remote" && status === "connected")) return;
 
     setStatus("connecting");
     setError(null);
@@ -579,6 +592,18 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     }
   }, [status]);
 
+  const runRemoteCommand = useCallback((command: string) => {
+    const term = termRef.current;
+    if (!term) return;
+    if (modeRef.current === "remote" && socketRef.current?.connected) {
+      socketRef.current.emit("terminal:input", command + "\r");
+      return;
+    }
+    pendingRemoteCommandRef.current = command;
+    term.writeln(`\r\n\x1b[36mConnecting to the workspace PTY to run: ${command}\x1b[0m`);
+    void connectRemote();
+  }, [connectRemote]);
+
   /* ── Disconnect ─────────────────────────────────────────────── */
   const disconnect = useCallback(() => {
     socketRef.current?.disconnect();
@@ -605,18 +630,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
   /* ── Expose imperative handle for Builder ───────────────────── */
   useImperativeHandle(ref, () => ({
     runCommand(command: string) {
-      const term = termRef.current;
-      if (!term) return;
-      if (modeRef.current === "remote" && socketRef.current?.connected) {
-        socketRef.current.emit("terminal:input", command + "\r");
-      } else {
-        // Commands initiated by Studio must use the authenticated PTY. Queue
-        // until the socket connects so build/run actions are real executions,
-        // not simulated Local LiTT Shell responses.
-        pendingRemoteCommandRef.current = command;
-        term.writeln(`\r\n\x1b[36mConnecting to workspace to run: ${command}\x1b[0m`);
-        void connectRemote();
-      }
+      runRemoteCommand(command);
       onOutputRef.current?.(command + "\n");
     },
     getSessionId() {
@@ -625,7 +639,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     clear() {
       termRef.current?.clear();
     },
-  }), [connectRemote]);
+  }), [runRemoteCommand]);
 
   /* ── Render ─────────────────────────────────────────────────── */
   const statusColor = useMemo(() => {
@@ -771,6 +785,31 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
         </div>
       )}
 
+      <div className="flex flex-wrap items-center gap-1.5 px-1">
+        <span className="mr-1 text-[9px] font-black uppercase tracking-[.16em]" style={{ color: T.textMuted }}>
+          Run in PTY
+        </span>
+        {PTY_QUICK_ACTIONS.map((action) => (
+          <button
+            key={action.command}
+            type="button"
+            onClick={() => runRemoteCommand(action.command)}
+            title={`${action.hint} · ${action.command}`}
+            className="rounded-lg border px-2.5 py-1 text-[10px] font-bold transition hover:-translate-y-0.5"
+            style={{
+              borderColor: action.label === "Cline" ? `${T.accentColor}66` : `${T.borderColor}30`,
+              backgroundColor: action.label === "Cline" ? `${T.accentColor}20` : `${T.boxBg}aa`,
+              color: action.label === "Cline" ? T.accentColor : T.textMuted,
+            }}
+          >
+            {action.label}
+          </button>
+        ))}
+        <span className="ml-auto hidden text-[9px] md:block" style={{ color: T.textMuted }}>
+          Shadow completion: Tab or →
+        </span>
+      </div>
+
       <div
         ref={containerRef}
         className="min-h-0 flex-1 overflow-hidden rounded-2xl border"
@@ -800,7 +839,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
             </code>{" "}
             for a real bash/PS (requires{" "}
             <code className="font-bold">pnpm terminal:dev</code> running
-            locally).
+            locally). Cline launches with <code className="font-bold">cline --acp</code> on that host.
           </span>
         </div>
       )}
