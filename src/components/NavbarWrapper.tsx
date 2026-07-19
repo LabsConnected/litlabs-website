@@ -3,7 +3,8 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Search, Zap, Coins, Gamepad2, Users, Settings, Store } from "lucide-react";
+import { Bell, Search, Zap, Coins, Gamepad2, Users, Settings, Store, LogIn } from "lucide-react";
+import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -105,6 +106,29 @@ export default function NavbarWrapper() {
         >
           <Bell size={18} />
         </button>
+        {isLoaded && isSignedIn ? (
+          <UserButton
+            afterSignOutUrl="/sign-in"
+            appearance={{
+              elements: {
+                userButtonAvatarBox:
+                  "h-8 w-8 rounded-full border border-white/10",
+              },
+            }}
+          />
+        ) : isLoaded && !isSignedIn ? (
+          <Link
+            href="/sign-in"
+            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors hover:bg-white/5"
+            style={{
+              color: T.accentColor,
+              border: `1px solid ${T.accentColor}40`,
+            }}
+          >
+            <LogIn size={14} />
+            Sign In
+          </Link>
+        ) : null}
       </div>
     </header>
   );
