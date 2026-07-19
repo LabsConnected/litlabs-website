@@ -3,436 +3,116 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect } from "react";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import {
-  Bot,
   ArrowRight,
+  Bot,
+  Check,
+  Code2,
+  Command,
+  Layers3,
+  Palette,
+  Play,
+  Radio,
+  Rocket,
   Sparkles,
-  Shield,
-  GitBranch,
-  Cloud,
+  Workflow,
   Zap,
-  Terminal,
-  Image as ImageIcon,
-  Cpu,
 } from "lucide-react";
+import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 
-const STEPS = [
-  {
-    step: "01",
-    title: "Connect a project",
-    desc: "Link GitHub, pick a repo, and define the outcome you want.",
-    color: "#22d3ee",
-  },
-  {
-    step: "02",
-    title: "Direct your crew",
-    desc: "Describe the work. LiTT Director plans the steps, assigns tools, and asks before acting.",
-    color: "#a855f7",
-  },
-  {
-    step: "03",
-    title: "Review and ship",
-    desc: "Preview changes, approve diffs, verify the result, and deploy or open a PR.",
-    color: "#22c55e",
-  },
+const agents = [
+  { icon: Command, name: "LiTT Code", role: "Orchestrator", copy: "Routes the mission, holds the context, and keeps every specialist moving together.", color: "#c8ff3d" },
+  { icon: Code2, name: "Forge", role: "Engineer", copy: "Builds, reviews, and hardens production software alongside your team.", color: "#6ee7f9" },
+  { icon: Palette, name: "Visionary", role: "Creative Director", copy: "Turns rough ideas into sharp visuals, audio, interfaces, and brand systems.", color: "#9f8cff" },
 ];
 
-const INTEGRATIONS = [
-  { name: "GitHub", icon: GitBranch, color: "#e2e8f0" },
-  { name: "Supabase", icon: Cloud, color: "#3ecf8e" },
-  { name: "Vercel", icon: Zap, color: "#ffffff" },
-  { name: "Clerk", icon: Shield, color: "#6c47ff" },
+const steps = [
+  ["01", "Pick your crew", "Start with a specialist or let LiTT Code assemble the right team for the mission."],
+  ["02", "Connect the work", "Bring prompts, tools, media, and automations together in one visual workspace."],
+  ["03", "Ship the result", "Review the output, publish it, or turn it into a reusable workflow for next time."],
 ];
 
-const CAPABILITIES = [
-  { text: "Conversational project director", icon: Cpu },
-  { text: "Multi-agent task routing", icon: Bot },
-  { text: "Image, audio, and code generation", icon: ImageIcon },
-  { text: "Live diff preview and approval", icon: GitBranch },
-  { text: "Deployment status and build logs", icon: Terminal },
-  { text: "Artifact museum and version history", icon: Sparkles },
-];
-
-const PREVIEW_MESSAGES = [
-  { role: "user", text: "Build a landing page for LiTT Labs." },
-  {
-    role: "director",
-    text: "Got it. I'll scaffold the hero, features, and CTA sections. Reviewing your repo first...",
-  },
-  { role: "tool", text: "✓ Scanned 12 files · Plan ready · Awaiting approval" },
-];
-
-function PublicHeader() {
+function AgentConsole() {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/5 bg-[#06060e]/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-sm font-black text-white"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 to-fuchsia-500">
-            <Bot size={14} className="text-black" />
-          </div>
-          LiTT Labs
-        </Link>
-        <nav className="hidden items-center gap-6 text-xs font-medium text-neutral-400 md:flex">
-          <Link href="/studio" className="transition hover:text-cyan-300">
-            Product
-          </Link>
-          <Link href="/agents" className="transition hover:text-cyan-300">
-            Agents
-          </Link>
-          <Link href="/marketplace" className="transition hover:text-cyan-300">
-            Marketplace
-          </Link>
-          <Link href="/docs" className="transition hover:text-cyan-300">
-            Docs
-          </Link>
-        </nav>
-        <div className="flex items-center gap-2">
-          <Link
-            href="/sign-in"
-            className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
-          >
-            Sign in
-          </Link>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
-          >
-            Start building <ArrowRight size={11} />
-          </Link>
+    <div className="relative mx-auto w-full max-w-xl">
+      <div className="absolute -inset-16 rounded-full bg-violet-500/20 blur-3xl" />
+      <div className="relative overflow-hidden rounded-[28px] border border-white/10 bg-[#141610] p-4 shadow-2xl shadow-black/60 sm:p-6">
+        <div className="flex items-center justify-between border-b border-white/10 pb-4 font-mono text-[10px] uppercase tracking-[0.18em] text-white/45">
+          <span className="flex items-center gap-2"><Sparkles size={13} className="text-[#c8ff3d]" /> Mission control</span>
+          <span className="flex items-center gap-2 text-[#c8ff3d]"><i className="h-1.5 w-1.5 animate-pulse rounded-full bg-[#c8ff3d]" /> Live</span>
         </div>
+        <div className="flex items-center gap-3 py-6">
+          <span className="grid h-11 w-11 place-items-center rounded-xl bg-[#7657ff] text-white"><Rocket size={19} /></span>
+          <div className="min-w-0 flex-1"><span className="block font-mono text-[9px] uppercase tracking-[0.18em] text-white/35">Active mission</span><strong className="mt-1 block truncate text-sm text-white">Launch the Signal campaign</strong></div>
+          <b className="font-mono text-xs text-[#c8ff3d]">72%</b>
+        </div>
+        <div className="mb-4 h-1 overflow-hidden rounded-full bg-white/10"><i className="block h-full w-[72%] rounded-full bg-[#c8ff3d]" /></div>
+        {[
+          ["CD", "Visionary", "Campaign system complete", "Done", "#c8ff3d"],
+          ["FG", "Forge", "Building landing experience", "Working", "#6ee7f9"],
+          ["PL", "Pulse", "12 launch posts queued", "Ready", "#9f8cff"],
+        ].map(([initials, name, task, state, color]) => (
+          <div key={name} className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3.5">
+            <span className="grid h-9 w-9 place-items-center rounded-lg text-[9px] font-black text-[#10110d]" style={{ backgroundColor: color }}>{initials}</span>
+            <div className="min-w-0 flex-1"><strong className="block text-xs text-white">{name}</strong><small className="mt-1 block truncate text-[10px] text-white/40">{task}</small></div>
+            <span className="font-mono text-[9px] text-white/35">{state}</span>
+          </div>
+        ))}
+        <div className="mt-5 flex h-12 items-center gap-3 rounded-xl border border-white/10 px-4 font-mono text-[10px] text-white/30"><Zap size={14} className="text-[#c8ff3d]" /><span className="flex-1">Give your crew a new mission…</span><span>↵</span></div>
       </div>
-    </header>
+      <div className="absolute -bottom-7 -left-4 hidden items-center gap-3 rounded-xl border border-black bg-[#f5f2e9] px-4 py-3 text-[#12130f] shadow-[5px_5px_0_#111] sm:flex">
+        <span className="grid h-7 w-7 place-items-center rounded-full bg-[#c8ff3d]"><Check size={14} strokeWidth={3} /></span>
+        <div><strong className="block text-[10px]">Landing page shipped</strong><small className="text-[9px] opacity-50">Forge · just now</small></div>
+      </div>
+    </div>
   );
 }
 
 function LandingPage() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#06060e] text-[#e2e2e9]">
-      <PublicHeader />
-
-      {/* Background glows */}
-      <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-cyan-500/8 blur-[120px]" />
-        <div className="absolute top-1/3 -right-40 h-[400px] w-[400px] rounded-full bg-fuchsia-500/8 blur-[120px]" />
-        <div className="absolute bottom-1/4 -left-40 h-[400px] w-[400px] rounded-full bg-purple-500/8 blur-[120px]" />
-      </div>
-
-      {/* Hero */}
-      <section className="relative z-10 px-4 pb-20 pt-32 md:pt-44">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-            <Sparkles size={10} />
-            AI operating system for builders
+    <div className="relative overflow-hidden bg-[#f4f1e8] text-[#11120f]">
+      <section className="relative px-4 pb-24 pt-20 sm:px-6 md:pb-32 md:pt-28">
+        <div className="pointer-events-none absolute inset-0 opacity-40" style={{ backgroundImage: "linear-gradient(rgba(17,18,15,.06) 1px,transparent 1px),linear-gradient(90deg,rgba(17,18,15,.06) 1px,transparent 1px)", backgroundSize: "70px 70px" }} />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-16 lg:grid-cols-[1.05fr_.95fr]">
+          <div>
+            <div className="inline-flex items-center gap-2 rounded-full border border-black/15 bg-white/50 px-3 py-2 text-[10px] font-black uppercase tracking-[0.16em]"><i className="h-2 w-2 rounded-full bg-[#c8ff3d] ring-4 ring-[#c8ff3d]/20" /> Public beta is live</div>
+            <h1 className="mt-8 max-w-3xl text-[clamp(4.3rem,8vw,7.6rem)] font-black leading-[0.82] tracking-[-0.075em]">Your AI crew.<br /><span className="font-serif font-normal italic text-[#7559ff]">Always building.</span></h1>
+            <p className="mt-8 max-w-xl text-base leading-8 text-black/60 sm:text-lg">LiTTree brings specialized agents, creative tools, and automated workflows into one connected workspace—so a small team can move like a studio.</p>
+            <div className="mt-9 flex flex-col items-start gap-5 sm:flex-row sm:items-center">
+              <Link href="/sign-up" className="group inline-flex min-h-14 items-center gap-8 rounded-lg border border-black bg-[#c8ff3d] px-6 text-sm font-black shadow-[5px_5px_0_#111] transition hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-[3px_3px_0_#111]">Build your first agent <ArrowRight size={16} className="transition group-hover:translate-x-1" /></Link>
+              <Link href="/studio" className="inline-flex items-center gap-3 border-b border-black py-2 text-sm font-bold"><Play size={14} fill="currentColor" /> See it in action</Link>
+            </div>
+            <div className="mt-10 flex flex-wrap gap-x-7 gap-y-2 text-[11px] font-bold text-black/50"><span className="flex items-center gap-2"><Check size={13} /> Start free</span><span className="flex items-center gap-2"><Check size={13} /> No credit card</span><span className="flex items-center gap-2"><Check size={13} /> Your data stays yours</span></div>
           </div>
+          <AgentConsole />
+        </div>
+      </section>
 
-          <h1 className="mb-6 text-4xl font-black leading-[1.1] tracking-tight text-white md:text-6xl lg:text-7xl">
-            Build, verify, and ship{" "}
-            <span
-              className="bg-clip-text text-transparent"
-              style={{
-                backgroundImage:
-                  "linear-gradient(135deg, #22d3ee 0%, #a855f7 50%, #ec4899 100%)",
-              }}
-            >
-              real digital products
-            </span>
-            <br />
-            with an AI crew.
-          </h1>
+      <section className="border-y border-black/10 bg-[#ece9df] px-4 py-8 sm:px-6">
+        <div className="mx-auto flex max-w-7xl flex-col gap-6 md:flex-row md:items-center md:justify-between"><p className="m-0 font-serif text-base italic text-black/50">One workspace. An unfair amount of momentum.</p><div className="grid grid-cols-2 gap-x-8 gap-y-4 text-[10px] font-black uppercase tracking-[0.16em] text-black/45 sm:flex sm:gap-10"><span>Agents</span><span>Studio</span><span>Automations</span><span>Marketplace</span></div></div>
+      </section>
 
-          <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-neutral-400 md:text-lg">
-            LiTT Labs is a control tower where you connect a project, direct an
-            AI team, review actual changes, and deploy — instead of chatting
-            into the void.
-          </p>
-
-          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-7 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.35)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.5)]"
-            >
-              Start building free <ArrowRight size={16} />
-            </Link>
-            <Link
-              href="/studio"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/20 hover:bg-white/8"
-            >
-              <Terminal size={14} className="text-cyan-400" />
-              Open Studio
-            </Link>
-          </div>
-
-          <div className="mt-8 text-[11px] text-neutral-600">
-            Free during beta · No credit card required
+      <section className="px-4 py-24 sm:px-6 md:py-32">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-8 lg:grid-cols-2 lg:items-end"><div><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7559ff]">The platform</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">From idea to impact,<br />without the busywork.</h2></div><p className="max-w-lg text-sm leading-7 text-black/55 lg:justify-self-end">Every part of your process gets an intelligent co-pilot—connected, coordinated, and ready to move from a clear mission to finished work.</p></div>
+          <div className="mt-16 grid gap-4 lg:grid-cols-2">
+            <article className="relative min-h-[560px] overflow-hidden rounded-2xl border border-black bg-[#dfe6d9] p-8 sm:p-11 lg:row-span-2 lg:min-h-[760px]"><span className="font-mono text-[9px] font-bold tracking-[0.16em]">01 / ORCHESTRATE</span><h3 className="mt-20 max-w-xl text-4xl font-black leading-[1] tracking-[-0.055em] sm:text-5xl">Give the mission.<br />Your crew handles the rest.</h3><p className="mt-6 max-w-md text-sm leading-7 text-black/55">Coordinate multiple specialists from one command center. Set the outcome, review the work, and stay in control of every decision.</p><div className="absolute bottom-10 left-8 right-8 flex items-center justify-between border-y border-black/15 py-10 font-mono text-[9px] font-bold tracking-widest sm:left-11 sm:right-11"><span>YOUR IDEA</span><span className="grid h-20 w-20 place-items-center rounded-full bg-[#c8ff3d] text-2xl shadow-[0_0_0_16px_rgba(200,255,61,.22)]">✦</span><span>SHIPPED</span></div></article>
+            <article className="relative min-h-[370px] overflow-hidden rounded-2xl border border-black bg-[#151610] p-8 text-white"><span className="font-mono text-[9px] font-bold tracking-[0.16em] text-white/45">02 / CREATE</span><h3 className="mt-14 text-3xl font-black leading-[1.05] tracking-[-0.05em]">Every creative tool.<br />One fluid workspace.</h3><p className="mt-5 max-w-md text-sm leading-7 text-white/45">Generate images, audio, code, copy, and workflows without breaking your flow.</p><div className="absolute bottom-7 left-8 flex flex-wrap gap-2">{["IMAGE","AUDIO","CODE","WORDS","FLOW"].map(t=><span key={t} className="rounded-full border border-white/15 px-3 py-2 font-mono text-[8px] text-white/55">{t}</span>)}</div></article>
+            <article className="relative min-h-[370px] overflow-hidden rounded-2xl border border-[#7559ff] bg-[#7559ff] p-8 text-white"><span className="font-mono text-[9px] font-bold tracking-[0.16em] text-white/60">03 / CONNECT</span><h3 className="mt-14 text-3xl font-black leading-[1.05] tracking-[-0.05em]">Built around the tools<br />you already use.</h3><p className="mt-5 max-w-md text-sm leading-7 text-white/65">Turn scattered tasks into one visible, reliable system.</p><div className="absolute bottom-7 right-7 flex">{[Workflow,Layers3,Radio,Bot].map((Icon,i)=><span key={i} className="-ml-2 grid h-12 w-12 place-items-center rounded-full border-4 border-[#7559ff] bg-[#f4f1e8] text-[#11120f]"><Icon size={16}/></span>)}</div></article>
           </div>
         </div>
       </section>
 
-      {/* Product preview */}
-      <section className="relative z-10 px-4 pb-20">
-        <div className="mx-auto max-w-5xl">
-          <div className="overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a14] shadow-[0_0_80px_rgba(34,211,238,0.06),0_0_0_1px_rgba(255,255,255,0.04)]">
-            {/* Window chrome */}
-            <div className="flex items-center gap-2 border-b border-white/6 bg-white/2 px-4 py-2.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-amber-500/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-green-500/60" />
-              <div className="ml-3 flex items-center gap-1.5 rounded-md bg-white/4 px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-cyan-400">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
-                LiTT Studio — Mission Active
-              </div>
-            </div>
-
-            <div className="grid min-h-[360px] md:grid-cols-[200px_1fr_180px]">
-              {/* Left sidebar */}
-              <div className="hidden border-r border-white/6 p-4 md:block">
-                <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Project
-                </div>
-                <div className="space-y-2">
-                  {["litlabs-website", "api-routes", "components"].map(
-                    (f, i) => (
-                      <div
-                        key={f}
-                        className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[10px] font-medium ${i === 0 ? "bg-cyan-500/10 text-cyan-300" : "text-neutral-500"}`}
-                      >
-                        <div
-                          className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-cyan-400" : "bg-neutral-700"}`}
-                        />
-                        {f}
-                      </div>
-                    ),
-                  )}
-                </div>
-                <div className="mt-4 mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Agents
-                </div>
-                <div className="space-y-1.5">
-                  {["Director", "Visionary", "Builder"].map((a) => (
-                    <div
-                      key={a}
-                      className="flex items-center gap-2 text-[10px] text-neutral-500"
-                    >
-                      <div className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Main chat */}
-              <div className="flex flex-col justify-end space-y-3 p-5">
-                {PREVIEW_MESSAGES.map((m, i) => (
-                  <div
-                    key={i}
-                    className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}
-                  >
-                    {m.role !== "user" && (
-                      <div
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-black ${m.role === "director" ? "bg-cyan-500/20 text-cyan-300" : "bg-amber-500/20 text-amber-300"}`}
-                      >
-                        {m.role === "director" ? "L" : "✓"}
-                      </div>
-                    )}
-                    <div
-                      className={`max-w-[80%] rounded-xl px-3 py-2 text-[11px] leading-relaxed ${m.role === "user" ? "bg-cyan-500/15 text-cyan-100" : m.role === "tool" ? "border border-green-500/20 bg-green-500/5 font-mono text-green-400" : "bg-white/5 text-neutral-300"}`}
-                    >
-                      {m.text}
-                    </div>
-                  </div>
-                ))}
-                <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/3 px-3 py-2">
-                  <span className="flex-1 text-[11px] text-neutral-500">
-                    Ask LiTT to build, fix, or create...
-                  </span>
-                  <div className="rounded-lg bg-cyan-500/20 p-1.5">
-                    <ArrowRight size={10} className="text-cyan-400" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Right panel */}
-              <div className="hidden border-l border-white/6 p-4 md:block">
-                <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Output
-                </div>
-                <div className="space-y-2">
-                  <div className="rounded-lg bg-green-500/10 px-2 py-1.5 text-[9px] font-bold text-green-400">
-                    ✓ Plan approved
-                  </div>
-                  <div className="rounded-lg bg-cyan-500/10 px-2 py-1.5 text-[9px] font-bold text-cyan-400">
-                    ⟳ Writing files…
-                  </div>
-                  <div className="h-2 w-4/5 rounded bg-white/5" />
-                  <div className="h-2 w-3/5 rounded bg-white/5" />
-                </div>
-                <div className="mt-4 mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Deploy
-                </div>
-                <div className="rounded-lg border border-white/8 bg-white/3 px-2 py-2 text-[9px] text-neutral-500">
-                  Vercel · main · 2s ago
-                </div>
-              </div>
-            </div>
-          </div>
+      <section className="bg-[#151610] px-4 py-24 text-white sm:px-6 md:py-32">
+        <div className="mx-auto max-w-7xl"><div className="flex flex-col justify-between gap-8 sm:flex-row sm:items-end"><div><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#c8ff3d]">Meet the crew</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">Specialists who never<br />lose the thread.</h2></div><Link href="/agents" className="inline-flex w-fit items-center gap-4 border-b border-white/50 py-2 text-sm font-bold">Explore all agents <ArrowRight size={15}/></Link></div>
+          <div className="mt-16 grid gap-4 md:grid-cols-3">{agents.map((agent,index)=>{const Icon=agent.icon;return <article key={agent.name} className="group rounded-2xl border border-white/10 bg-white/[0.025] p-7 transition hover:-translate-y-1 hover:border-white/25"><div className="flex items-center justify-between font-mono text-[9px] text-white/35"><span>0{index+1}</span><span>{agent.role.toUpperCase()}</span></div><div className="mx-auto my-14 grid h-28 w-28 place-items-center rounded-full text-[#11120f] shadow-[0_0_70px_rgba(200,255,61,.12)]" style={{background:`radial-gradient(circle at 35% 30%,white,${agent.color} 65%)`}}><Icon size={31}/></div><h3 className="text-2xl font-black tracking-[-0.04em]">{agent.name}</h3><p className="mt-3 min-h-16 text-sm leading-6 text-white/45">{agent.copy}</p><Link href="/agents" className="mt-7 flex items-center justify-between border-t border-white/10 pt-5 text-xs font-bold text-[#c8ff3d]">Meet this agent <ArrowRight size={14}/></Link></article>})}</div>
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20 md:py-28">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-12 text-center">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-              The loop
-            </div>
-            <h2 className="text-2xl font-black text-white md:text-3xl">
-              How it works
-            </h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              One loop from idea to shipped product.
-            </p>
-          </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div
-                key={s.step}
-                className="group relative overflow-hidden rounded-2xl border border-white/6 bg-white/2 p-6 transition hover:border-white/12"
-                style={{ boxShadow: `0 0 40px ${s.color}08` }}
-              >
-                <div
-                  className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100"
-                  style={{
-                    background: `radial-gradient(circle at 0% 0%, ${s.color}08 0%, transparent 60%)`,
-                  }}
-                />
-                <div
-                  className="mb-5 flex h-9 w-9 items-center justify-center rounded-xl text-xs font-black"
-                  style={{ backgroundColor: `${s.color}15`, color: s.color }}
-                >
-                  {s.step}
-                </div>
-                <h3 className="mb-2 text-sm font-black text-white">
-                  {s.title}
-                </h3>
-                <p className="text-xs leading-relaxed text-neutral-500">
-                  {s.desc}
-                </p>
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
+      <section className="px-4 py-24 sm:px-6 md:py-32"><div className="mx-auto max-w-7xl"><span className="text-[10px] font-black uppercase tracking-[0.2em] text-[#7559ff]">How it works</span><h2 className="mt-5 text-5xl font-black leading-[0.92] tracking-[-0.06em] sm:text-7xl">A bigger team<br />in three small steps.</h2><div className="mt-16 grid gap-10 md:grid-cols-3">{steps.map(([no,title,copy])=><article key={no} className="border-t border-black pt-6"><span className="font-mono text-[10px] font-bold text-[#7559ff]">{no}</span><h3 className="mt-14 text-2xl font-black tracking-[-0.04em]">{title}</h3><p className="mt-4 text-sm leading-7 text-black/55">{copy}</p></article>)}</div></div></section>
 
-      {/* Capabilities */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20 md:py-28">
-        <div className="mx-auto max-w-5xl">
-          <div className="grid gap-12 md:grid-cols-[1fr_1.4fr]">
-            <div>
-              <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                Capabilities
-              </div>
-              <h2 className="text-2xl font-black text-white md:text-3xl">
-                Everything in one OS.
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-neutral-500">
-                One workspace. Every tool your project needs — code, visuals,
-                deployments, agents, memory.
-              </p>
-              <Link
-                href="/studio"
-                className="mt-6 inline-flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/12"
-              >
-                See it live <ArrowRight size={12} />
-              </Link>
-            </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {CAPABILITIES.map(({ text, icon: Icon }) => (
-                <div
-                  key={text}
-                  className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/2 p-3 transition hover:border-cyan-500/15"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10">
-                    <Icon size={13} className="text-cyan-400" />
-                  </div>
-                  <span className="text-xs leading-snug text-neutral-300">
-                    {text}
-                  </span>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* Integrations */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-16">
-        <div className="mx-auto max-w-5xl text-center">
-          <div className="mb-6 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-            Connects to the stack you already use
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            {INTEGRATIONS.map((i) => (
-              <div
-                key={i.name}
-                className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/3 px-4 py-2.5 text-xs font-semibold text-neutral-300 backdrop-blur-sm transition hover:border-white/15"
-              >
-                <i.icon size={13} style={{ color: i.color }} />
-                {i.name}
-              </div>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      {/* Footer CTA */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20">
-        <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-cyan-500/15 bg-linear-to-br from-cyan-500/5 via-transparent to-fuchsia-500/5 p-10 text-center shadow-[0_0_80px_rgba(34,211,238,0.08)] md:p-14">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/8 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-            <Sparkles size={9} /> Beta · Free to start
-          </div>
-          <h2 className="mb-3 text-2xl font-black text-white md:text-3xl">
-            Ready to ship with your AI crew?
-          </h2>
-          <p className="mb-8 text-sm text-neutral-500">
-            Connect your first project in Studio. Your AI crew is standing by.
-          </p>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-8 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.6)]"
-          >
-            Get started free <ArrowRight size={16} />
-          </Link>
-        </div>
-      </section>
-
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-white/5 px-4 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs text-neutral-600 md:flex-row">
-          <div className="flex items-center gap-2 text-sm font-black text-white">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-cyan-400 to-fuchsia-500">
-              <Bot size={11} className="text-black" />
-            </div>
-            LiTT Labs
-          </div>
-          <div className="flex items-center gap-6">
-            <Link href="/docs" className="transition hover:text-white">
-              Docs
-            </Link>
-            <Link href="/privacy" className="transition hover:text-white">
-              Privacy
-            </Link>
-            <Link href="/terms" className="transition hover:text-white">
-              Terms
-            </Link>
-          </div>
-          <div>© {new Date().getFullYear()} LiTTree Labs. Beta.</div>
-        </div>
-      </footer>
+      <section className="px-4 pb-24 sm:px-6 md:pb-32"><div className="mx-auto flex max-w-7xl flex-col justify-between gap-12 overflow-hidden rounded-2xl border border-black bg-[#c8ff3d] p-8 shadow-[8px_8px_0_#111] sm:p-14 lg:flex-row lg:items-center"><div><span className="text-[10px] font-black uppercase tracking-[0.2em]">Ready when you are</span><h2 className="mt-6 text-5xl font-black leading-[0.88] tracking-[-0.07em] sm:text-7xl">Build what’s next.<br /><span className="font-serif font-normal italic">Bring your crew.</span></h2><p className="mt-6 text-sm text-black/60">Your first agent is free. No setup maze, no credit card, no waiting.</p><Link href="/sign-up" className="mt-8 inline-flex min-h-14 items-center gap-8 rounded-lg bg-black px-6 text-sm font-black text-white">Start building for free <ArrowRight size={16}/></Link></div><div className="hidden text-[13rem] font-black leading-none tracking-[-0.18em] lg:block">L<span className="text-5xl text-[#7559ff]">✦</span></div></div></section>
     </div>
   );
 }

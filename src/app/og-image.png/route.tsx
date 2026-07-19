@@ -8,8 +8,7 @@ export function GET() {
   return new ImageResponse(
     <div
       style={{
-        background:
-          "linear-gradient(135deg, #0a0a0f 0%, #0d0d1a 50%, #0f0a1a 100%)",
+        background: "#f4f1e8",
         width: "100%",
         height: "100%",
         display: "flex",
@@ -27,8 +26,8 @@ export function GET() {
           position: "absolute",
           inset: 0,
           backgroundImage:
-            "linear-gradient(rgba(63,63,70,0.15) 1px, transparent 1px), linear-gradient(90deg, rgba(63,63,70,0.15) 1px, transparent 1px)",
-          backgroundSize: "48px 48px",
+            "linear-gradient(rgba(17,18,15,0.08) 1px, transparent 1px), linear-gradient(90deg, rgba(17,18,15,0.08) 1px, transparent 1px)",
+          backgroundSize: "70px 70px",
         }}
       />
       {/* Glow */}
@@ -40,7 +39,7 @@ export function GET() {
           width: 600,
           height: 600,
           background:
-            "radial-gradient(circle, rgba(210,168,255,0.15) 0%, transparent 70%)",
+            "radial-gradient(circle, rgba(117,89,255,0.2) 0%, transparent 70%)",
           borderRadius: "50%",
         }}
       />
@@ -52,7 +51,7 @@ export function GET() {
           width: 500,
           height: 500,
           background:
-            "radial-gradient(circle, rgba(121,192,255,0.12) 0%, transparent 70%)",
+            "radial-gradient(circle, rgba(200,255,61,0.35) 0%, transparent 70%)",
           borderRadius: "50%",
         }}
       />
@@ -70,7 +69,7 @@ export function GET() {
           style={{
             width: 48,
             height: 48,
-            background: "linear-gradient(135deg, #d2a8ff, #ff7b72)",
+            background: "#c8ff3d",
             borderRadius: "50%",
             display: "flex",
             alignItems: "center",
@@ -78,18 +77,18 @@ export function GET() {
             fontSize: 28,
           }}
         >
-          ⚡
+          ✦
         </div>
         <span
           style={{
             fontSize: 20,
             fontWeight: 700,
-            color: "#71717a",
+            color: "#11120f",
             letterSpacing: "0.15em",
             textTransform: "uppercase",
           }}
         >
-          LiTTree-LabStudios
+          LiTTree Labs
         </span>
       </div>
 
@@ -97,40 +96,40 @@ export function GET() {
         style={{
           fontSize: 64,
           fontWeight: 900,
-          color: "#d4d4d8",
+          color: "#11120f",
           textAlign: "center",
           margin: "0 0 24px 0",
           lineHeight: 1.1,
           maxWidth: 900,
         }}
       >
-        Your <span style={{ color: "#d2a8ff" }}>AI Agent</span> Platform
+        Your AI crew. <span style={{ color: "#7559ff" }}>Always building.</span>
       </h1>
 
       <p
         style={{
           fontSize: 24,
-          color: "#71717a",
+          color: "rgba(17,18,15,0.62)",
           textAlign: "center",
           maxWidth: 700,
           margin: 0,
         }}
       >
-        Deploy AI agents · Build workflows · Automate everything
+        Specialized agents, creative tools, and automated workflows in one connected workspace.
       </p>
 
       <div style={{ display: "flex", gap: 16, marginTop: 48 }}>
-        {["6 AI Agents", "No-Code Builder", "Free Beta"].map((tag) => (
+        {["Agents", "Studio", "Automations", "Marketplace"].map((tag) => (
           <div
             key={tag}
             style={{
               padding: "8px 20px",
               borderRadius: 6,
-              border: "1px solid rgba(210,168,255,0.3)",
-              color: "#d2a8ff",
+              border: "1px solid rgba(17,18,15,0.25)",
+              color: "#11120f",
               fontSize: 16,
               fontWeight: 600,
-              background: "rgba(210,168,255,0.08)",
+              background: "rgba(255,255,255,0.5)",
             }}
           >
             {tag}
@@ -142,11 +141,11 @@ export function GET() {
         style={{
           position: "absolute",
           bottom: 32,
-          color: "#3f3f46",
+          color: "rgba(17,18,15,0.45)",
           fontSize: 16,
         }}
       >
-        {new URL(SITE_URL).hostname} · AI Platform
+        {new URL(SITE_URL).hostname} · Your AI crew
       </div>
     </div>,
     size,
