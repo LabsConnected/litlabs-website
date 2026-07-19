@@ -1,942 +1,191 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { AGENTS } from "@/lib/agents";
+import { AGENTS, type Agent } from "@/lib/agents";
 import {
-  Bot,
-  Play,
-  Settings,
   Activity,
-  Zap,
-  Brain,
-  Code,
-  ChevronRight,
-  Clock,
-  CheckCircle,
   AlertCircle,
-  Cpu,
+  ArrowRight,
+  Bot,
+  Brain,
+  CheckCircle2,
+  Clock3,
+  Loader2,
+  Play,
+  Plus,
+  RefreshCw,
   Sparkles,
   Target,
-  Loader2,
+  Users,
   XCircle,
 } from "lucide-react";
 
 type TaskStatus = "queued" | "processing" | "success" | "failed" | "cancelled";
-
-type AgentTask = {
+type Mission = {
   id: string;
+  session_id: string;
   assigned_to: string;
   dispatcher: string;
-  task_input: { prompt?: string; title?: string; [k: string]: unknown };
-  task_output: Record<string, unknown> | null;
+  task_input: { prompt?: string; context?: Record<string, unknown>; agentSlug?: string };
+  task_output?: { text?: string; critical_fault?: string };
   status: TaskStatus;
-  result_summary: string | null;
   created_at: string;
   updated_at: string;
 };
 
-type LoadState = "loading" | "loaded" | "error";
+const CORE_AGENTS = [AGENTS.litt].filter(Boolean);
 
-function routeObjective(objective: string): {
-  agentId: string;
-  agentName: string;
-  reason: string;
-} {
-  const lower = objective.toLowerCase();
-  const codeKeywords = [
-    "fix", "debug", "code", "build", "deploy", "test", "mobile",
-    "navigation", "ui", "api", "database", "refactor", "type",
-    "component", "route", "server", "auth", "supabase", "stripe",
-  ];
-  const directorKeywords = [
-    "plan", "strategy", "launch", "market", "coordinate", "research",
-    "content", "copy", "brand", "design", "social", "growth", "seo",
-    "analytics", "creative", "image", "video", "music", "audio",
-  ];
+function routeTask(_task: string) { return AGENTS.litt; }
 
-  const codeScore = codeKeywords.filter((k) => lower.includes(k)).length;
-  const directorScore = directorKeywords.filter((k) => lower.includes(k)).length;
-
-  if (codeScore >= directorScore && codeScore > 0) {
-    return {
-      agentId: "littcode",
-      agentName: "LiTT-Code",
-      reason: "Engineering, debugging, and implementation required",
-    };
-  }
-  if (directorScore > 0) {
-    return {
-      agentId: "littlebit",
-      agentName: "LiTTle-Bit",
-      reason: "Strategic planning and coordination required",
-    };
-  }
-  return {
-    agentId: "littlebit",
-    agentName: "LiTTle-Bit",
-    reason: "Task analysis and routing required",
-  };
-}
-
-function statusLabel(status: TaskStatus): string {
+function statusMeta(status: TaskStatus) {
   switch (status) {
-    case "queued": return "Queued";
-    case "processing": return "Running";
-    case "success": return "Completed";
-    case "failed": return "Failed";
-    case "cancelled": return "Cancelled";
-    default: return status;
+    case "processing": return { label: "Running", color: "#22d3ee", icon: Activity };
+    case "success": return { label: "Completed", color: "#34d399", icon: CheckCircle2 };
+    case "failed": return { label: "Failed", color: "#fb7185", icon: XCircle };
+    case "cancelled": return { label: "Cancelled", color: "#94a3b8", icon: XCircle };
+    default: return { label: "Queued", color: "#fbbf24", icon: Clock3 };
   }
 }
 
-function statusColor(status: TaskStatus): string {
-  switch (status) {
-    case "queued": return "#f59e0b";
-    case "processing": return "#22d3ee";
-    case "success": return "#10b981";
-    case "failed": return "#ef4444";
-    case "cancelled": return "#64748b";
-    default: return "#64748b";
-  }
-}
-
-function statusIcon(status: TaskStatus, size = 12) {
-  switch (status) {
-    case "queued": return <Clock size={size} />;
-    case "processing": return <Loader2 size={size} className="animate-spin" />;
-    case "success": return <CheckCircle size={size} />;
-    case "failed": return <AlertCircle size={size} />;
-    case "cancelled": return <XCircle size={size} />;
-    default: return <Clock size={size} />;
-  }
-}
-
-function timeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  return `${days}d ago`;
+function relativeTime(value: string) {
+  const seconds = Math.max(0, Math.floor((Date.now() - new Date(value).getTime()) / 1000));
+  if (seconds < 60) return "just now";
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ago`;
+  if (seconds < 86400) return `${Math.floor(seconds / 3600)}h ago`;
+  return `${Math.floor(seconds / 86400)}d ago`;
 }
 
 export default function AgentsPageClient() {
   const { resolvedColors: T } = useTheme();
   const router = useRouter();
   const [command, setCommand] = useState("");
-  const [routing, setRouting] = useState<{
-    agentId: string;
-    agentName: string;
-    reason: string;
-  } | null>(null);
-  const [tasks, setTasks] = useState<AgentTask[]>([]);
-  const [loadState, setLoadState] = useState<LoadState>("loading");
+  const [selectedAgent, setSelectedAgent] = useState<string>("auto");
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [installedCount, setInstalledCount] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
 
-  const agents = Object.values(AGENTS).filter((a) => a.id !== "pixel-forge");
-  const littCode = agents.find((a) => a.id === "littcode");
-  const littleBit = agents.find((a) => a.id === "littlebit");
-
-  const fetchTasks = useCallback(async () => {
-    try {
-      const res = await fetch("/api/agent-tasks", { cache: "no-store" });
-      if (!res.ok) throw new Error();
-      const data = await res.json();
-      setTasks(data.tasks || []);
-      setLoadState("loaded");
-    } catch {
-      setLoadState("error");
+  const loadData = useCallback(async (quiet = false) => {
+    if (!quiet) setLoading(true);
+    const [tasksResult, agentsResult] = await Promise.allSettled([
+      fetch("/api/agent-tasks", { cache: "no-store" }).then(async (response) => {
+        if (!response.ok) throw new Error("Could not load missions");
+        return response.json();
+      }),
+      fetch("/api/user-agents", { cache: "no-store" }).then((response) => response.ok ? response.json() : { agents: [] }),
+    ]);
+    if (tasksResult.status === "fulfilled") {
+      setMissions(tasksResult.value.tasks || []);
+      setError(null);
+    } else {
+      setError(tasksResult.reason instanceof Error ? tasksResult.reason.message : "Could not load missions");
     }
+    if (agentsResult.status === "fulfilled") setInstalledCount(agentsResult.value.agents?.length || 0);
+    setLoading(false);
   }, []);
 
   useEffect(() => {
-    fetchTasks();
-    const interval = setInterval(fetchTasks, 10000);
-    return () => clearInterval(interval);
-  }, [fetchTasks]);
+    void loadData();
+    const timer = window.setInterval(() => void loadData(true), 10_000);
+    return () => window.clearInterval(timer);
+  }, [loadData]);
 
-  const handleCommandSubmit = async () => {
-    const objective = command.trim();
-    if (!objective || submitting) return;
-
-    const route = routeObjective(objective);
-    setRouting(route);
+  const submitMission = async () => {
+    const prompt = command.trim();
+    if (prompt.length < 4 || submitting) return;
+    const agent = selectedAgent === "auto" ? routeTask(prompt) : AGENTS[selectedAgent];
+    if (!agent) return;
     setSubmitting(true);
-    setSubmitError(null);
-
+    setError(null);
     try {
-      const res = await fetch("/api/agent-tasks", {
+      const response = await fetch("/api/agent-tasks", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          assignedTo: route.agentId,
-          dispatcher: "user",
-          taskInput: {
-            prompt: objective,
-            title: objective.slice(0, 80),
-          },
+          sessionId: crypto.randomUUID(),
+          assignedTo: agent.id,
+          dispatcher: selectedAgent === "auto" ? "litt" : "user",
+          taskInput: { prompt, context: { source: "agents-page" }, agentSlug: agent.id },
+          meta: { source: "crew-command-center" },
         }),
       });
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.error || "Failed to create mission");
-      }
-
-      await fetchTasks();
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || "Mission could not be queued");
       setCommand("");
-
-      setTimeout(() => {
-        router.push(
-          `/studio?agent=${route.agentId}&mission=${encodeURIComponent(objective)}`,
-        );
-      }, 1500);
-    } catch (err) {
-      setSubmitError(
-        err instanceof Error ? err.message : "Failed to create mission",
-      );
+      await loadData(true);
+    } catch (missionError) {
+      setError(missionError instanceof Error ? missionError.message : "Mission could not be queued");
     } finally {
       setSubmitting(false);
     }
   };
 
-  const getAgentForTask = (task: AgentTask) => {
-    const id = task.assigned_to.toLowerCase();
-    return agents.find((a) => a.id === id) || null;
-  };
+  const activeMissions = useMemo(() => missions.filter((mission) => mission.status === "queued" || mission.status === "processing"), [missions]);
+  const completedMissions = useMemo(() => missions.filter((mission) => mission.status === "success").length, [missions]);
 
-  const tasksForAgent = (agentId: string) =>
-    tasks.filter((t) => t.assigned_to.toLowerCase() === agentId);
-
-  const activeTaskForAgent = (agentId: string) => {
-    const agentTasks = tasksForAgent(agentId);
-    return agentTasks.find((t) => t.status === "processing")
-      || agentTasks.find((t) => t.status === "queued")
-      || null;
+  const openInStudio = (agent: Agent, prompt = "") => {
+    const params = new URLSearchParams({ tool: "chat", agent: agent.id });
+    if (prompt) params.set("mission", prompt);
+    router.push(`/studio?${params.toString()}`);
   };
 
   return (
-    <main
-      className="h-full overflow-y-auto pb-20 relative"
-      style={{
-        backgroundColor: T.bgColor,
-        color: T.textColor,
-        backgroundImage: `radial-gradient(circle at 20% 50%, ${T.accentColor}08 0%, transparent 50%), radial-gradient(circle at 80% 80%, ${T.linkColor}06 0%, transparent 50%)`,
-      }}
-    >
-      {/* Circuit tree background decoration */}
-      <div className="absolute inset-0 overflow-hidden pointer-events-none">
-        <div
-          className="absolute top-20 left-10 w-64 h-64 opacity-10"
-          style={{ color: T.accentColor }}
-        >
-          <Brain size={256} />
-        </div>
-        <div
-          className="absolute bottom-20 right-10 w-48 h-48 opacity-10"
-          style={{ color: T.linkColor }}
-        >
-          <Cpu size={192} />
-        </div>
-      </div>
-
-      {/* Header with universal command */}
-      <section className="max-w-7xl mx-auto px-4 pt-8 pb-6 relative z-10">
-        <div className="flex items-center gap-3 mb-6">
-          <div
-            className="w-12 h-12 rounded-2xl flex items-center justify-center"
-            style={{
-              background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`,
-              boxShadow: `0 0 20px ${T.accentColor}40`,
-            }}
-          >
-            <Bot size={24} className="text-white" />
+    <main className="relative h-full overflow-y-auto pb-24" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+      <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 15% 15%, ${T.accentColor}10, transparent 32%), radial-gradient(circle at 85% 40%, ${T.linkColor}0b, transparent 30%)` }} />
+      <div className="relative mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
+        <header className="relative min-h-56 overflow-hidden rounded-3xl border p-5 sm:min-h-64 sm:p-8" style={{ borderColor: `${T.accentColor}30`, backgroundColor: "#050805" }}>
+          <Image src="/brand/litt-mascot-character-sheet.png" alt="LiTT character poses" fill priority className="object-cover opacity-80" style={{ objectPosition: "58% 24%" }} />
+          <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(3,7,5,.98)_0%,rgba(3,7,5,.88)_38%,rgba(3,7,5,.2)_72%,rgba(3,7,5,.55)_100%)]" />
+          <div className="relative z-10 flex max-w-xl items-center gap-3">
+            <div className="grid h-12 w-12 place-items-center rounded-2xl" style={{ background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`, boxShadow: `0 0 28px ${T.accentColor}30` }}><Users size={22} color="#fff" /></div>
+            <div><p className="text-[9px] font-black uppercase tracking-[.22em] text-lime-300">Meet LiTT</p><h1 className="text-2xl font-black text-white sm:text-4xl">Your AI Crew</h1><p className="mt-2 max-w-md text-xs leading-5 text-white/60">LiTT directs the mission, chooses the right specialist, and keeps the work moving from idea to result.</p></div>
           </div>
-          <div>
-            <h1
-              className="text-3xl font-black"
-              style={{ color: T.headerColor }}
-            >
-              Your AI Crew
-            </h1>
-            <p className="text-sm mt-1" style={{ color: T.textMuted }}>
-              Direct the right agent, monitor active missions, and continue work
-              inside Studio.
-            </p>
+          <div className="absolute bottom-5 left-5 z-10 flex gap-2 sm:bottom-8 sm:left-8">
+            <button onClick={() => void loadData()} className="rounded-xl border p-2.5" style={{ borderColor: `${T.borderColor}35`, color: T.textMuted }} aria-label="Refresh missions"><RefreshCw size={14} className={loading ? "animate-spin" : ""} /></button>
+            <Link href="/studio?intent=agent" className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black" style={{ borderColor: `${T.borderColor}35`, color: T.textColor }}><Plus size={14} /> Create agent</Link>
           </div>
-        </div>
+        </header>
 
-        {/* Universal command input */}
-        <div className="relative">
-          <div
-            className="rounded-2xl border p-4"
-            style={{
-              backgroundColor: T.boxBg + "90",
-              borderColor: T.borderColor + "30",
-              backdropFilter: "blur(10px)",
-            }}
-          >
-            <label
-              className="block text-xs font-black uppercase tracking-wider mb-2"
-              style={{ color: T.textMuted }}
-            >
-              What do you need done?
-            </label>
-            <div className="flex gap-3">
-              <input
-                id="agents-command"
-                name="agentsCommand"
-                type="text"
-                value={command}
-                onChange={(e) => setCommand(e.target.value)}
-                onKeyPress={(e) => e.key === "Enter" && handleCommandSubmit()}
-                placeholder="Build a page, fix code, create content, plan a launch…"
-                className="flex-1 bg-transparent border-none outline-none text-base placeholder:opacity-50"
-                style={{ color: T.textColor }}
-              />
-              <div className="flex gap-2">
-                <button
-                  onClick={handleCommandSubmit}
-                  className="px-4 py-2 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.accentColor,
-                    color: "#000",
-                  }}
-                >
-                  Assign Automatically
-                </button>
-                <Link
-                  href="/studio"
-                  className="px-4 py-2 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.bgColor + "60",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}30`,
-                  }}
-                >
-                  Open Studio
-                </Link>
-                <Link
-                  href="/studio"
-                  className="px-4 py-2 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: "rgba(255,255,255,0.1)",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}20`,
-                  }}
-                >
-                  Create Agent
-                </Link>
-              </div>
-            </div>
+        <section className="overflow-hidden rounded-3xl border p-4 sm:p-6" style={{ background: `linear-gradient(135deg, ${T.boxBg}, ${T.accentColor}08)`, borderColor: `${T.accentColor}30` }}>
+          <div className="flex flex-wrap items-center justify-between gap-3"><div><h2 className="text-lg font-black" style={{ color: T.headerColor }}>Start a mission</h2><p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>Auto-route it or choose the exact agent.</p></div><div className="flex gap-2 text-[9px]"><span className="rounded-full border px-2.5 py-1" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}>{activeMissions.length} active</span><span className="rounded-full border px-2.5 py-1" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}>{completedMissions} completed</span><span className="rounded-full border px-2.5 py-1" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}>{installedCount + CORE_AGENTS.length} available</span></div></div>
+          <div className="mt-5 flex flex-wrap gap-2">
+            {[{ id: "auto", name: "LiTT auto", icon: Sparkles }, ...CORE_AGENTS.map((agent) => ({ id: agent.id, name: agent.name, icon: Brain }))].map((option) => { const Icon = option.icon; const active = selectedAgent === option.id; return <button key={option.id} onClick={() => setSelectedAgent(option.id)} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-[10px] font-bold" style={{ borderColor: active ? T.accentColor : `${T.borderColor}30`, backgroundColor: active ? `${T.accentColor}15` : `${T.bgColor}55`, color: active ? T.accentColor : T.textMuted }}><Icon size={13} />{option.name}</button>; })}
           </div>
-
-          {/* Submit error */}
-          {submitError && (
-            <div
-              className="absolute top-full left-0 right-0 mt-2 p-3 rounded-xl z-20"
-              style={{
-                backgroundColor: T.boxBg,
-                border: `1px solid #ef444440`,
-              }}
-            >
-              <div className="flex items-center gap-2 text-sm" style={{ color: "#ef4444" }}>
-                <AlertCircle size={16} />
-                {submitError}
-              </div>
-            </div>
-          )}
-
-          {/* Routing result overlay */}
-          {routing && (
-            <div
-              className="absolute top-full left-0 right-0 mt-2 p-3 rounded-xl z-20"
-              style={{
-                backgroundColor: T.boxBg,
-                border: `1px solid ${T.accentColor}40`,
-                boxShadow: `0 4px 20px ${T.accentColor}20`,
-              }}
-            >
-              <div className="flex items-center gap-2">
-                <Target size={16} style={{ color: T.accentColor }} />
-                <span className="text-sm font-bold">
-                  Assigned to {routing.agentName}
-                </span>
-                <span className="text-xs" style={{ color: T.textMuted }}>
-                  • {routing.reason}
-                </span>
-                {submitting && (
-                  <span className="text-xs" style={{ color: T.accentColor }}>
-                    <Loader2 size={12} className="inline animate-spin" /> Creating mission…
-                  </span>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Agent cards */}
-      <section className="max-w-7xl mx-auto px-4 mt-8 relative z-10">
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-          {/* LiTT-Code Card */}
-          {littCode && (
-            <div
-              className="group rounded-3xl border p-6 relative overflow-hidden transition-all duration-300 hover:scale-[1.02]"
-              style={{
-                backgroundColor: T.boxBg + "90",
-                borderColor: "#22d3ee30",
-                backgroundImage: `linear-gradient(135deg, #22d3ee08 0%, transparent 100%)`,
-              }}
-            >
-              {/* Status ring */}
-              <div className="absolute top-4 right-4">
-                <div className="relative">
-                  <div
-                    className="w-3 h-3 rounded-full animate-pulse"
-                    style={{
-                      backgroundColor: "#22d3ee",
-                      boxShadow: `0 0 12px #22d3ee`,
-                    }}
-                  />
-                  <div
-                    className="absolute inset-0 w-3 h-3 rounded-full animate-ping"
-                    style={{ backgroundColor: "#22d3ee" }}
-                  />
-                </div>
-              </div>
-
-              {/* Agent header */}
-              <div className="flex items-start gap-4 mb-4">
-                <div
-                  className="w-16 h-16 rounded-2xl flex items-center justify-center"
-                  style={{
-                    background: `linear-gradient(135deg, #22d3ee, #0891b2)`,
-                    boxShadow: `0 0 20px #22d3ee40`,
-                  }}
-                >
-                  <Code size={28} className="text-white" />
-                </div>
-                <div className="flex-1">
-                  <h2
-                    className="text-2xl font-black"
-                    style={{ color: T.headerColor }}
-                  >
-                    LiTT-Code
-                  </h2>
-                  <p
-                    className="text-sm font-bold uppercase tracking-wider"
-                    style={{ color: "#22d3ee" }}
-                  >
-                    Engineering Agent
-                  </p>
-                  <p className="text-xs mt-1" style={{ color: T.textMuted }}>
-                    Ready · Qwen Code
-                  </p>
-                </div>
-              </div>
-
-              {/* Capabilities */}
-              <div className="mb-4">
-                <p
-                  className="text-xs font-black uppercase tracking-wider mb-2"
-                  style={{ color: T.textMuted }}
-                >
-                  Capabilities
-                </p>
-                <p className="text-sm" style={{ color: T.textColor }}>
-                  Builds, debugs, reviews, deploys
-                </p>
-              </div>
-
-              {/* Current activity from real tasks */}
-              <div className="mb-4">
-                <p
-                  className="text-xs font-black uppercase tracking-wider mb-2"
-                  style={{ color: T.textMuted }}
-                >
-                  Current Activity
-                </p>
-                {(() => {
-                  const active = activeTaskForAgent("littcode");
-                  if (!active) {
-                    return (
-                      <div
-                        className="rounded-lg p-3 text-xs"
-                        style={{
-                          backgroundColor: "#22d3ee08",
-                          border: "1px solid #22d3ee20",
-                          color: T.textMuted,
-                        }}
-                      >
-                        No active mission
-                      </div>
-                    );
-                  }
-                  return (
-                    <div
-                      className="rounded-lg p-3"
-                      style={{
-                        backgroundColor: "#22d3ee08",
-                        border: `1px solid ${statusColor(active.status)}30`,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold truncate max-w-[70%]">
-                          {active.task_input?.title || active.task_input?.prompt || "Untitled mission"}
-                        </span>
-                        <span className="text-xs flex items-center gap-1" style={{ color: statusColor(active.status) }}>
-                          {statusIcon(active.status)} {statusLabel(active.status)}
-                        </span>
-                      </div>
-                      <p className="text-xs" style={{ color: T.textMuted }}>
-                        {timeAgo(active.created_at)}
-                      </p>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => router.push(`/studio?agent=littcode`)}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: "#22d3ee15",
-                    color: "#22d3ee",
-                    border: "1px solid #22d3ee30",
-                  }}
-                >
-                  <Play size={14} /> Start Mission
-                </button>
-                <button
-                  onClick={() => router.push(`/studio?agent=littcode&configure=true`)}
-                  className="px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.bgColor + "60",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}30`,
-                  }}
-                >
-                  <Settings size={14} />
-                </button>
-                <button
-                  onClick={() => router.push(`/studio?agent=littcode&activity=true`)}
-                  className="px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.bgColor + "60",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}30`,
-                  }}
-                >
-                  <Activity size={14} />
-                </button>
-              </div>
-            </div>
-          )}
-
-          {/* LiTTle-Bit Card */}
-          {littleBit && (
-            <div
-              className="group rounded-3xl border p-6 relative overflow-hidden transition-all duration-300 hover:scale-[1.02]"
-              style={{
-                backgroundColor: T.boxBg + "90",
-                borderColor: "#f9731630",
-                backgroundImage: `linear-gradient(135deg, #f9731608 0%, transparent 100%)`,
-              }}
-            >
-              {/* Status ring */}
-              <div className="absolute top-4 right-4">
-                <div className="relative">
-                  <div
-                    className="w-3 h-3 rounded-full animate-pulse"
-                    style={{
-                      backgroundColor: "#f97316",
-                      boxShadow: `0 0 12px #f97316`,
-                    }}
-                  />
-                  <div
-                    className="absolute inset-0 w-3 h-3 rounded-full animate-ping"
-                    style={{ backgroundColor: "#f97316" }}
-                  />
-                </div>
-              </div>
-
-              {/* Agent header */}
-              <div className="flex items-start gap-4 mb-4">
-                <div
-                  className="w-16 h-16 rounded-2xl overflow-hidden relative flex items-center justify-center"
-                  style={{
-                    background: `linear-gradient(135deg, #f97316, #ea580c)`,
-                    boxShadow: `0 0 20px #f9731640`,
-                  }}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src="/brand/litt-mascot-hero.png"
-                    alt="LiTTle-Bit"
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      width: "100%",
-                      height: "100%",
-                      objectFit: "cover",
-                    }}
-                  />
-                </div>
-                <div className="flex-1">
-                  <h2
-                    className="text-2xl font-black"
-                    style={{ color: T.headerColor }}
-                  >
-                    LiTTle-Bit
-                  </h2>
-                  <p
-                    className="text-sm font-bold uppercase tracking-wider"
-                    style={{ color: "#f97316" }}
-                  >
-                    Director Agent
-                  </p>
-                  <p className="text-xs mt-1" style={{ color: T.textMuted }}>
-                    Ready · Auto Router
-                  </p>
-                </div>
-              </div>
-
-              {/* Capabilities */}
-              <div className="mb-4">
-                <p
-                  className="text-xs font-black uppercase tracking-wider mb-2"
-                  style={{ color: T.textMuted }}
-                >
-                  Capabilities
-                </p>
-                <p className="text-sm" style={{ color: T.textColor }}>
-                  Plans, researches, coordinates, creates
-                </p>
-              </div>
-
-              {/* Current activity from real tasks */}
-              <div className="mb-4">
-                <p
-                  className="text-xs font-black uppercase tracking-wider mb-2"
-                  style={{ color: T.textMuted }}
-                >
-                  Current Activity
-                </p>
-                {(() => {
-                  const active = activeTaskForAgent("littlebit");
-                  if (!active) {
-                    return (
-                      <div
-                        className="rounded-lg p-3 text-xs"
-                        style={{
-                          backgroundColor: "#f9731608",
-                          border: "1px solid #f9731620",
-                          color: T.textMuted,
-                        }}
-                      >
-                        No active mission
-                      </div>
-                    );
-                  }
-                  return (
-                    <div
-                      className="rounded-lg p-3"
-                      style={{
-                        backgroundColor: "#f9731608",
-                        border: `1px solid ${statusColor(active.status)}30`,
-                      }}
-                    >
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-sm font-bold truncate max-w-[70%]">
-                          {active.task_input?.title || active.task_input?.prompt || "Untitled mission"}
-                        </span>
-                        <span className="text-xs flex items-center gap-1" style={{ color: statusColor(active.status) }}>
-                          {statusIcon(active.status)} {statusLabel(active.status)}
-                        </span>
-                      </div>
-                      <p className="text-xs" style={{ color: T.textMuted }}>
-                        {timeAgo(active.created_at)}
-                      </p>
-                    </div>
-                  );
-                })()}
-              </div>
-
-              {/* Actions */}
-              <div className="flex gap-2">
-                <button
-                  onClick={() => router.push(`/studio?agent=littlebit`)}
-                  className="flex-1 flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: "#f9731615",
-                    color: "#f97316",
-                    border: "1px solid #f9731630",
-                  }}
-                >
-                  <Play size={14} /> Start Mission
-                </button>
-                <button
-                  onClick={() => router.push(`/studio?agent=littlebit&configure=true`)}
-                  className="px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.bgColor + "60",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}30`,
-                  }}
-                >
-                  <Settings size={14} />
-                </button>
-                <button
-                  onClick={() => router.push(`/studio?agent=littlebit&activity=true`)}
-                  className="px-3 py-2.5 rounded-xl text-sm font-black transition-all hover:opacity-90"
-                  style={{
-                    backgroundColor: T.bgColor + "60",
-                    color: T.textColor,
-                    border: `1px solid ${T.borderColor}30`,
-                  }}
-                >
-                  <Activity size={14} />
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </section>
-
-      {/* Active Missions */}
-      <section className="max-w-7xl mx-auto px-4 mt-8 relative z-10">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
-            Active Missions
-          </h2>
-          <Link
-            href="/studio?missions=true"
-            className="text-sm font-bold flex items-center gap-1"
-            style={{ color: T.accentColor }}
-          >
-            View All <ChevronRight size={14} />
-          </Link>
-        </div>
-
-        {loadState === "loading" && (
-          <div
-            className="rounded-2xl border p-8 text-center"
-            style={{
-              backgroundColor: T.boxBg + "40",
-              borderColor: T.borderColor + "20",
-            }}
-          >
-            <Loader2 size={24} className="mx-auto mb-3 animate-spin" style={{ color: T.accentColor }} />
-            <p className="text-sm" style={{ color: T.textMuted }}>
-              Loading missions…
-            </p>
+          <div className="mt-3 flex flex-col gap-3 sm:flex-row">
+            <textarea value={command} onChange={(event) => setCommand(event.target.value)} onKeyDown={(event) => { if ((event.ctrlKey || event.metaKey) && event.key === "Enter") void submitMission(); }} rows={3} placeholder="Describe an outcome: fix mobile navigation, research a launch plan, review my API…" className="min-h-24 flex-1 resize-none rounded-2xl border bg-transparent px-4 py-3 text-sm outline-none" style={{ borderColor: `${T.borderColor}35`, color: T.textColor }} />
+            <button onClick={() => void submitMission()} disabled={command.trim().length < 4 || submitting} className="flex min-w-40 items-center justify-center gap-2 rounded-2xl px-5 py-3 text-sm font-black disabled:opacity-40" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>{submitting ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Queue mission</button>
           </div>
-        )}
+          {error && <div className="mt-3 flex items-center gap-2 rounded-xl border border-rose-400/20 bg-rose-400/5 px-3 py-2 text-xs text-rose-300"><AlertCircle size={13} />{error}</div>}
+        </section>
 
-        {loadState === "error" && (
-          <div
-            className="rounded-2xl border p-8 text-center"
-            style={{
-              backgroundColor: T.boxBg + "40",
-              borderColor: "#ef444430",
-            }}
-          >
-            <AlertCircle size={24} className="mx-auto mb-3" style={{ color: "#ef4444" }} />
-            <h3 className="text-lg font-bold mb-2" style={{ color: T.headerColor }}>
-              Could not load missions
-            </h3>
-            <p className="text-sm" style={{ color: T.textMuted }}>
-              The backend may be unavailable. Try again in a moment.
-            </p>
-            <button
-              onClick={fetchTasks}
-              className="mt-4 px-4 py-2 rounded-xl text-sm font-bold"
-              style={{
-                backgroundColor: T.accentColor + "15",
-                color: T.accentColor,
-                border: `1px solid ${T.accentColor}30`,
-              }}
-            >
-              Retry
-            </button>
-          </div>
-        )}
-
-        {loadState === "loaded" && tasks.length === 0 && (
-          <div
-            className="rounded-2xl border p-8 text-center"
-            style={{
-              backgroundColor: T.boxBg + "40",
-              borderColor: T.borderColor + "20",
-            }}
-          >
-            <Target size={32} className="mx-auto mb-3" style={{ color: T.textMuted }} />
-            <h3 className="text-lg font-bold mb-2" style={{ color: T.headerColor }}>
-              No missions yet
-            </h3>
-            <p className="text-sm" style={{ color: T.textMuted }}>
-              Give your crew an objective above and it will appear here.
-            </p>
-          </div>
-        )}
-
-        {loadState === "loaded" && tasks.length > 0 && (
-          <div className="space-y-3">
-            {tasks.map((task) => {
-              const agent = getAgentForTask(task);
-              const agentName = agent?.name || task.assigned_to;
-              const agentColor = agent?.color || T.textMuted;
-              const title = task.task_input?.title || task.task_input?.prompt || "Untitled mission";
-              const desc = task.task_input?.prompt as string || "";
-              return (
-                <div
-                  key={task.id}
-                  className="rounded-2xl border p-4 cursor-pointer transition-all hover:scale-[1.01]"
-                  style={{
-                    backgroundColor: T.boxBg + "60",
-                    borderColor: T.borderColor + "20",
-                  }}
-                  onClick={() =>
-                    router.push(`/studio?agent=${task.assigned_to.toLowerCase()}&mission=${encodeURIComponent(title)}`)
-                  }
-                >
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="flex items-center gap-3">
-                      <span style={{ color: statusColor(task.status) }}>
-                        {statusIcon(task.status)}
-                      </span>
-                      <div>
-                        <h3 className="text-sm font-bold" style={{ color: T.textColor }}>
-                          {title}
-                        </h3>
-                        <p className="text-xs" style={{ color: T.textMuted }}>
-                          <span style={{ color: agentColor }}>{agentName}</span> • {timeAgo(task.created_at)}
-                        </p>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span
-                        className="text-xs font-bold flex items-center gap-1"
-                        style={{ color: statusColor(task.status) }}
-                      >
-                        {statusLabel(task.status)}
-                      </span>
-                    </div>
-                  </div>
-                  {desc && desc !== title && (
-                    <p className="text-xs" style={{ color: T.textMuted }}>
-                      {desc}
-                    </p>
-                  )}
-                  {task.status === "queued" && (
-                    <p className="text-xs mt-1" style={{ color: statusColor(task.status) }}>
-                      Waiting for agent worker to claim this mission
-                    </p>
-                  )}
-                  {task.result_summary && (
-                    <p className="text-xs mt-1" style={{ color: T.textMuted }}>
-                      {task.result_summary}
-                    </p>
-                  )}
-                </div>
-              );
+        <section>
+          <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-black uppercase tracking-[.16em]" style={{ color: T.textMuted }}>Crew</h2><Link href="/marketplace" className="text-[10px] font-bold" style={{ color: T.accentColor }}>Browse agents <ArrowRight size={10} className="inline" /></Link></div>
+          <div className="grid gap-4 lg:grid-cols-2">
+            {CORE_AGENTS.map((agent) => {
+              const Icon = Brain;
+              const agentMissions = missions.filter((mission) => mission.assigned_to === agent.id);
+              const running = agentMissions.find((mission) => mission.status === "processing");
+              const queued = agentMissions.filter((mission) => mission.status === "queued").length;
+              return <article key={agent.id} className="rounded-3xl border p-5" style={{ backgroundColor: `${T.boxBg}cc`, borderColor: `${agent.color}35` }}>
+                <div className="flex items-start gap-4"><div className="relative grid h-14 w-14 shrink-0 place-items-center overflow-hidden rounded-2xl" style={{ background: `linear-gradient(135deg, ${agent.color}dd, ${agent.color}66)`, boxShadow: `0 0 24px ${agent.color}25` }}><Image src="/brand/litt-mascot-hero.png" alt="LiTT" fill className="object-cover" style={{ objectPosition: "50% 13%" }} /></div><div className="min-w-0 flex-1"><div className="flex items-center gap-2"><h3 className="text-xl font-black" style={{ color: T.headerColor }}>{agent.name}</h3><span className={`h-2 w-2 rounded-full ${running ? "animate-pulse bg-cyan-300" : "bg-emerald-400"}`} /></div><p className="text-[10px] font-bold uppercase tracking-wider" style={{ color: agent.color }}>{agent.role}</p><p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>{running ? "Running a mission" : queued ? `${queued} queued` : "Ready"}</p></div></div>
+                <div className="mt-4 flex flex-wrap gap-1.5">{agent.domains.slice(0, 6).map((domain) => <span key={domain} className="rounded-full border px-2 py-1 text-[8px]" style={{ borderColor: `${T.borderColor}25`, color: T.textMuted }}>{domain}</span>)}</div>
+                <div className="mt-4 rounded-xl border p-3" style={{ borderColor: `${T.borderColor}20`, backgroundColor: `${T.bgColor}55` }}><p className="text-[9px] font-black uppercase tracking-wider" style={{ color: T.textMuted }}>{running ? "Current mission" : "Latest activity"}</p><p className="mt-1 truncate text-xs font-bold" style={{ color: T.textColor }}>{running?.task_input?.prompt || agentMissions[0]?.task_input?.prompt || "No missions yet"}</p></div>
+                <div className="mt-4 flex gap-2"><button onClick={() => { setSelectedAgent(agent.id); document.querySelector("textarea")?.focus(); }} className="flex flex-1 items-center justify-center gap-2 rounded-xl px-3 py-2 text-xs font-black" style={{ backgroundColor: `${agent.color}16`, color: agent.color, border: `1px solid ${agent.color}35` }}><Target size={13} /> Assign mission</button><button onClick={() => openInStudio(agent)} className="flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-black" style={{ borderColor: `${T.borderColor}30`, color: T.textColor }}>Open Studio <ArrowRight size={12} /></button></div>
+              </article>;
             })}
           </div>
-        )}
-      </section>
+        </section>
 
-      {/* LiTT Character Sheet */}
-      <section className="max-w-7xl mx-auto px-4 mt-8 relative z-10">
-        <div
-          className="rounded-3xl border p-6 relative overflow-hidden"
-          style={{
-            backgroundColor: T.boxBg + "60",
-            borderColor: T.borderColor + "20",
-          }}
-        >
-          <div className="flex items-center gap-3 mb-4">
-            <Sparkles size={18} style={{ color: T.accentColor }} />
-            <h2 className="text-lg font-black" style={{ color: T.headerColor }}>
-              LiTT Character Sheet
-            </h2>
-          </div>
-          <div className="flex justify-center">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img
-              src="/brand/litt-mascot-character-sheet.png"
-              alt="LiTT mascot character sheet — three poses"
-              style={{
-                maxWidth: "100%",
-                maxHeight: "400px",
-                borderRadius: "16px",
-                objectFit: "contain",
-              }}
-            />
-          </div>
-        </div>
-      </section>
-
-      {/* Final CTA */}
-      <section className="max-w-7xl mx-auto px-4 mt-12 mb-8 relative z-10">
-        <div
-          className="rounded-3xl border p-8 text-center"
-          style={{
-            background: `linear-gradient(135deg, ${T.accentColor}08, ${T.linkColor}06)`,
-            borderColor: T.borderColor + "25",
-          }}
-        >
-          <Sparkles
-            size={24}
-            className="mx-auto mb-3"
-            style={{ color: T.accentColor }}
-          />
-          <h2
-            className="text-xl font-black mb-3"
-            style={{ color: T.headerColor }}
-          >
-            Ready to put your crew to work?
-          </h2>
-          <p
-            className="text-sm mb-6 max-w-md mx-auto"
-            style={{ color: T.textMuted }}
-          >
-            Start a mission and let LiTTle-Bit route the plan while LiTT-Code
-            handles execution.
-          </p>
-          <div className="flex items-center justify-center gap-3">
-            <button
-              onClick={() => setCommand("")}
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-black transition-all hover:opacity-90"
-              style={{
-                backgroundColor: T.accentColor,
-                color: "#000",
-              }}
-            >
-              <Zap size={16} /> Start Mission
-            </button>
-            <Link
-              href="/studio"
-              className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-sm font-black transition-all hover:opacity-90"
-              style={{
-                backgroundColor: T.boxBg + "60",
-                color: T.textColor,
-                border: `1px solid ${T.borderColor}30`,
-              }}
-            >
-              Open Studio
-            </Link>
-          </div>
-        </div>
-      </section>
+        <section>
+          <div className="mb-3 flex items-center justify-between"><div><h2 className="text-sm font-black uppercase tracking-[.16em]" style={{ color: T.textMuted }}>Mission activity</h2><p className="mt-1 text-[9px]" style={{ color: T.textMuted }}>Live queue state from the agent task system. No invented percentages or ETAs.</p></div>{missions.length > 0 && <span className="text-[9px]" style={{ color: T.textMuted }}>{missions.length} total</span>}</div>
+          {loading && missions.length === 0 ? <div className="grid min-h-40 place-items-center rounded-2xl border" style={{ borderColor: `${T.borderColor}25` }}><Loader2 className="animate-spin" size={20} style={{ color: T.accentColor }} /></div> : missions.length === 0 ? <div className="rounded-3xl border border-dashed p-10 text-center" style={{ borderColor: `${T.borderColor}35`, backgroundColor: `${T.boxBg}55` }}><Bot size={28} className="mx-auto opacity-35" /><h3 className="mt-3 text-sm font-black">No real missions yet</h3><p className="mt-1 text-xs" style={{ color: T.textMuted }}>Your first queued mission will appear here and update automatically.</p></div> : <div className="space-y-2">{missions.map((mission) => { const meta = statusMeta(mission.status); const StatusIcon = meta.icon; const agent = AGENTS[mission.assigned_to]; return <article key={mission.id} className="rounded-2xl border p-4" style={{ backgroundColor: `${T.boxBg}aa`, borderColor: `${T.borderColor}25` }}><div className="flex items-start gap-3"><div className="grid h-9 w-9 shrink-0 place-items-center rounded-xl" style={{ backgroundColor: `${meta.color}14`, color: meta.color }}><StatusIcon size={15} className={mission.status === "processing" ? "animate-pulse" : ""} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="max-w-2xl truncate text-xs font-black" style={{ color: T.textColor }}>{mission.task_input?.prompt || "Untitled mission"}</h3><span className="rounded-full px-2 py-0.5 text-[8px] font-black uppercase" style={{ backgroundColor: `${meta.color}14`, color: meta.color }}>{meta.label}</span></div><p className="mt-1 text-[9px]" style={{ color: T.textMuted }}>{agent?.name || mission.assigned_to} · {relativeTime(mission.created_at)}</p>{mission.task_output?.text && <p className="mt-2 line-clamp-2 text-[10px] leading-4" style={{ color: T.textMuted }}>{mission.task_output.text}</p>}{mission.task_output?.critical_fault && <p className="mt-2 text-[10px] text-rose-300">{mission.task_output.critical_fault}</p>}</div>{agent && <button onClick={() => openInStudio(agent, mission.task_input?.prompt)} className="rounded-xl border p-2" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }} aria-label="Continue in Studio"><ArrowRight size={13} /></button>}</div></article>; })}</div>}
+        </section>
+      </div>
     </main>
   );
 }

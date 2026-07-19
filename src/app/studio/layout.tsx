@@ -2,18 +2,7 @@ import type { Metadata } from "next";
 
 export const metadata: Metadata = {
   title: "Studio",
-  description:
-    "AI-powered creative studio. Generate images, videos, music, and code with specialized AI agents.",
-  robots: {
-    index: true,
-    follow: true,
-  },
-  openGraph: {
-    title: "LiTTree LabStudios Studio",
-    description:
-      "AI-powered creative studio. Generate images, videos, music, and code with specialized AI agents.",
-    type: "website",
-  },
+  description: "AI-powered creative studio. Generate images, videos, music, and code with specialized AI agents.",
 };
 
 export default function StudioLayout({
@@ -21,5 +10,5 @@ export default function StudioLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return <div className="h-dvh w-full overflow-hidden">{children}</div>;
+  return children;
 }

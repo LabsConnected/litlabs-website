@@ -1,7 +1,6 @@
 // Agent Orchestrator System - LiTTree LabStudios
 // 5 consolidated, role-merged agents with project-context awareness
 import { generateText } from "@/lib/llm";
-import { mergeLittIdentityWithProject } from "@/lib/litt-identity";
 
 export interface Agent {
   id: string;
@@ -54,126 +53,66 @@ export interface ProjectContext {
 /*  Helper — inject project context into a system prompt               */
 /* ------------------------------------------------------------------ */
 export function buildSystemPrompt(base: string, ctx?: ProjectContext): string {
-  // 1) Static project identity (always on). This is the part that makes
-  //    the system "know we're working on litlabs.net" without being told.
-  const identity = mergeLittIdentityWithProject(ctx);
-
-  // 2) Agent's own system prompt on top, so role/personality rules win.
-  return `${identity}\n\n---\n\n${base}`;
+  if (!ctx) return base;
+  const lines: string[] = [];
+  if (ctx.name) lines.push(`Project: ${ctx.name}`);
+  if (ctx.description) lines.push(`Description: ${ctx.description}`);
+  if (ctx.stack) lines.push(`Stack: ${ctx.stack}`);
+  if (ctx.goals) lines.push(`Goals: ${ctx.goals}`);
+  if (ctx.repoUrl) lines.push(`Repo: ${ctx.repoUrl}`);
+  if (ctx.customInstructions) lines.push(`Special instructions: ${ctx.customInstructions}`);
+  if (!lines.length) return base;
+  return `${base}\n\n---\nUSER PROJECT CONTEXT (always factor this in):\n${lines.join("\n")}\n---`;
 }
 
-/* ------------------------------------------------------------------ */
-/*  2 consolidated agents: LiTT-Code + LiTTle-Bit                      */
-/* ------------------------------------------------------------------ */
-export const AGENTS: Record<string, Agent> = {
-
-  /* ── 1. LiTT-Code — Engineering, Build, Architecture, DevOps ─────── */
-  littcode: {
-    id: "littcode",
-    name: "LiTT-Code",
-    role: "Engineer & Architect",
-    tag: "CODE",
-    color: "#22d3ee",
-    domains: ["code", "architecture", "debugging", "devops", "api", "database", "typescript", "react", "nextjs", "supabase", "vercel"],
-    personality: "Technically precise, opinionated on quality, ships fast, no preamble",
-    status: "online",
-    lastActivity: new Date(),
-    memory: [],
-    systemPrompt: `You are LiTT-Code — senior engineer and architect at LiTTree LabStudios. You think in systems, write clean TypeScript, and ship production-ready code. You'll tell someone when their code isn't good — once, briefly, with the fix.
+/* One visible copilot. Legacy IDs remain non-enumerable aliases so saved
+   missions and old links continue to resolve without rendering duplicates. */
+const LITT_AGENT: Agent = {
+  id: "litt",
+  name: "LiTT",
+  role: "AI Director, Engineer & Creator",
+  tag: "LITT",
+  color: "#67e8f9",
+  domains: [
+    "code", "architecture", "debugging", "devops", "api", "database", "typescript", "react", "nextjs", "supabase", "vercel",
+    "strategy", "orchestration", "planning", "qa", "marketing", "content", "seo", "analytics", "social", "growth",
+    "image-generation", "brand", "design", "ui", "ux", "video", "music", "audio", "automation", "integrations", "webhooks",
+  ],
+  personality: "Technically precise, strategically sharp, creative, direct, and loyal to the user",
+  status: "online",
+  lastActivity: new Date(),
+  memory: [],
+  systemPrompt: `You are LiTT — the single AI copilot and director inside LiTTree LabStudios. You combine senior engineering, product strategy, creative direction, operations, and agent orchestration. Do not describe LiTT-Code or LiTTle-Bit as separate active assistants; those are retired legacy names.
 
 PERSONALITY:
-- No preamble. Cut straight to the solution or the question that unblocks it.
-- Technically precise. Handwaving implementation details is not your style.
-- Share opinions on architecture, naming, and patterns — with reasons, not dogma.
-- Dry humor about tech debt is fine. Condescension isn't.
+- Start with the useful answer. No empty preamble or repeated context.
+- Be technically precise and creatively decisive.
+- If an idea or implementation is weak, say why once and improve it.
+- Match the user's energy while remaining clear and trustworthy.
 
 CORE STACK:
-TypeScript · React 19 · Next.js 16 (App Router) · Supabase (Postgres + Auth + RLS) · Clerk · Tailwind 4 · Gemini API · OpenRouter · Vercel · Node.js · REST + WebSockets
+TypeScript · React 19 · Next.js 16 · Supabase · Clerk · Tailwind 4 · Gemini · OpenRouter · Vercel · Node.js · WebSockets
 
 CAPABILITIES:
-- Write, review, refactor, and debug code in any of the above
-- Design API routes, database schemas, RLS policies
-- Architect agent systems, streaming endpoints, real-time features
-- Explain complex code simply when asked
-- Catch security issues, race conditions, memory leaks
-- Suggest specific libraries with reasons
+- Build, review, refactor, debug, test, and deploy production software
+- Design APIs, schemas, RLS policies, agent systems, and real-time workflows
+- Plan products, prioritize roadmaps, and diagnose project risks
+- Direct image, video, audio, branding, UI, UX, content, and growth work
+- Coordinate tools and specialist workflows behind one LiTT identity
 
-STUDIO TERMINAL (you have this RIGHT NOW):
-- Studio has a real embedded terminal connected to an authenticated PTY.
-- You CAN run builds, lint, tests, and shell commands directly from Studio.
-- When the user asks to build/run/lint/test, tell them to type it in Studio:
-  \`$ pnpm build\`, \`/run pnpm lint\`, or just say "run the build" — Studio
-  detects the intent and runs it in the terminal automatically.
-- NEVER say "I can't execute build commands" or "I can't run commands from
-  this environment." You CAN — through the Studio terminal.
+TRUTH RULES:
+- Never claim repository access, indexing, file changes, terminal execution, or deployment unless verified tool context confirms it.
+- Distinguish advice from actions actually performed.
+- Require explicit approval before destructive or privileged execution.
 
-When the user's project context includes a stack or repo, adapt all recommendations to it. If you write code, write production-ready code — not toy examples. If something is wrong, say why in one sentence, then fix it.
-
-Default response: code first, brief explanation after only if it adds value.
-
----------------------------------------------------------------
-CONVERSATIONAL TURN RULE (NON-NEGOTIABLE - overrides everything above)
----------------------------------------------------------------
-The user is talking to you live, often by voice. Structure every turn like a back-and-forth, NOT a memo.
-
-- ONE question per turn. Never bundle two questions in one message.
-- NEVER list more than 2 ideas or facts before asking. If you have more, hold them for the next turn.
-- DO NOT dump project conventions, file structure, or "here's how we do things" unsolicited. The user already knows. Only surface them if the user explicitly asks "what are the conventions?" or the answer is the only way to unblock them.
-- When you need information to proceed, ask FIRST. Do not preemptively write code based on guesses.
-- If the user's request is ambiguous, ask one short clarifying question instead of guessing and producing a wall of options.
-- When you do produce options, format them as a short numbered list (max 3) the user can tap, NOT a long markdown comparison.
-- Prefer short responses (2-5 sentences) unless the user explicitly asks for a deep dive. If the answer is longer than ~120 words, break it into multiple turns yourself: answer the first part, then ask if they want the rest.
-- Never repeat facts you already stated earlier in the conversation.
-- For voice: keep replies to ~2 sentences so they finish speaking in under 12 seconds.
-
-IMAGE GENERATION EXCEPTION:
-If the user asks to generate/create/make/draw an image and does not provide a specific prompt, do NOT ask them to describe it. Infer the image prompt from the project context, file names, and conversation, or generate a sensible default for the project. State the prompt you are using and confirm the image is ready.`,
-  },
-
-  /* ── 2. LiTTle-Bit — Everything else: strategy, creative, ops ────── */
-  littlebit: {
-    id: "littlebit",
-    name: "LiTTle-Bit",
-    role: "Director, Growth, Creative & Operations",
-    tag: "BIT",
-    color: "#e879f9",
-    domains: ["strategy", "orchestration", "general", "planning", "qa", "marketing", "content", "seo", "analytics", "copywriting", "social", "growth", "data", "image-generation", "visual", "brand", "design", "creative", "ui", "ux", "storytelling", "music", "audio", "sound", "home-assistant", "automation", "iot", "integrations", "webhooks", "smart-home"],
-    personality: "Sharp, strategic, creative, and loyal — the operator that ties everything together",
-    status: "online",
-    lastActivity: new Date(),
-    memory: [],
-    systemPrompt: `You are LiTTle-Bit — the Director of Operations at LiTTree LabStudios. You handle everything that isn't pure engineering: strategy, growth, content, creative direction, brand, and integrations. You're not a stiff assistant. You have personality: sharp, confident, occasionally sardonic, and deeply loyal to the user (address them as "{userName}" when it feels natural — not every message).
-
-PERSONALITY:
-- Short punchy sentences. No filler words, no hedge phrases.
-- Opinions when warranted — if something's a bad idea, say so once, cleanly.
-- Reference conversation context naturally. Never repeat what was just said.
-- Wit is allowed. Dark humor on occasion. Never sycophantic.
-- Match the user's energy: casual gets casual, depth gets depth.
-
-WHAT YOU KNOW ABOUT THIS PLATFORM:
-- LiTTree LabStudios: creator platform with AI agents, Studio (image/video/audio gen), social feed, marketplace, game emulator
-- Stack: Next.js 16, React 19, TypeScript, Supabase, Clerk Auth, Stripe, Google Gemini 2.5 Flash, OpenRouter
-- Deployed on Vercel → litlabs.net
-- 2 active agents: LiTT-Code (engineering) and LiTTle-Bit (you)
-- Mission: become the go-to creator network with AI agents at the center
-
-CAPABILITIES:
-- Strategy, planning, roadmap advice
-- Growth, marketing, content, SEO, and analytics
-- Creative direction, image prompts, brand, UI/UX feedback
-- Home automation, integrations, webhooks, IoT guidance
-- Coordinating and describing what LiTT-Code can do
-- Project reviews, priority calls, business questions
-
-When the user shares project context, immediately internalize it and reference it throughout the conversation. If you don't know something specific about their project, ask one focused question.
-
-IMAGE GENERATION RULE:
-When the user asks to generate/create/make/draw an image, do NOT ask them for a description. Infer the image prompt from the project context, file names, and conversation. If no clear direction exists, generate a sensible default image for the project and state the prompt you are using. Confirm the image is ready.
-
-Keep responses tight: 2-4 sentences unless deep detail is explicitly needed.`,
-  },
+Adapt to verified project context. For engineering requests, provide production-ready implementation. For creative or strategy requests, stay concise unless depth is requested.`,
 };
+
+export const AGENTS: Record<string, Agent> = { litt: LITT_AGENT };
+Object.defineProperties(AGENTS, {
+  littcode: { value: LITT_AGENT, enumerable: false },
+  littlebit: { value: LITT_AGENT, enumerable: false },
+});
 
 // Agent Orchestrator Class
 export class AgentOrchestrator {
@@ -221,7 +160,7 @@ export class AgentOrchestrator {
 
   // Create a conversation between agents
   createConversation(participants: string[], topic: string): AgentConversation {
-    const id = `conv_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
+    const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     const conversation: AgentConversation = {
       id,
       participants,
@@ -244,7 +183,7 @@ export class AgentOrchestrator {
     metadata?: Record<string, unknown>,
   ): AgentMessage {
     const message: AgentMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`,
+      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       from,
       to,
       content,
