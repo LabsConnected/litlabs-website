@@ -167,7 +167,7 @@ export default function RetroArcadePage() {
               name="retroFile"
               type="file"
               className="hidden"
-              accept=".nes,.sfc,.smc,.swc,.bs,.bsa,.fig,.gb,.gbc,.gba,.gen,.md,.smd"
+              accept=".nes,.sfc,.smc,.swc,.bs,.bsx,.bsa,.fig,.gb,.gbc,.gba,.gen,.md,.smd"
               onChange={(event) => {
                 chooseFile(event.target.files?.[0]);
                 event.target.value = "";

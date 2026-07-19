@@ -69,7 +69,7 @@ const EMULATOR_LABS = [
     description:
       "Open DOS programs and shareware bundles you are licensed to use, with local saves and gamepad support.",
     systems: "DOS · Windows 9x",
-    href: "https://js-dos.com/",
+    href: "/games/dos",
     badge: "js-dos",
   },
 ];

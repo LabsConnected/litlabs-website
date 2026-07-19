@@ -16,6 +16,7 @@ const scriptSrcBase = [
   "https://static.cloudflareinsights.com",
   "https://litlabs.net",
   "https://cdn.emulatorjs.org",
+  "https://cdn.dos.zone",
 ];
 
 // 'unsafe-eval' needed by emulatorjs on /games routes in production
@@ -37,9 +38,9 @@ const CSP_DIRECTIVES = [
   "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org",
   `img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://*.fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org${vercelLiveSrc}`,
   "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org",
-  `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://www.google-analytics.com https://*.google-analytics.com${vercelLiveSrc}`,
+  `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://cdn.dos.zone https://www.google-analytics.com https://*.google-analytics.com${vercelLiveSrc}`,
   "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org https://vercel.live https://*.vercel.app",
-  "worker-src 'self' blob: data: https://litlabs.net https://cdn.emulatorjs.org",
+  "worker-src 'self' blob: data: https://litlabs.net https://cdn.emulatorjs.org https://cdn.dos.zone",
   "media-src 'self' blob: data:",
   "object-src 'none'",
   "base-uri 'self'",
