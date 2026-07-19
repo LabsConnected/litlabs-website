@@ -5,18 +5,29 @@ import {
   Camera,
   Mic,
   MicOff,
+  MonitorUp,
   Paperclip,
   Plus,
   Send,
+  Square,
   Loader2,
   Settings2,
+  Image as ImageIcon,
+  Clapperboard,
+  Music2,
+  Hammer,
+  Bot,
+  Terminal as TerminalIcon,
+  X,
+  Upload,
+  Sparkles,
 } from "lucide-react";
 import CameraSession from "./CameraSession";
 import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
-import { useTheme } from "@/context/ThemeContext";
+import type { StudioTool } from "./LITTTerminalShell";
 
 export type ComposerMode = "text" | "camera";
 
@@ -26,27 +37,36 @@ interface MultimodalComposerProps {
   onSend: (value: string, attachments?: string[]) => Promise<string>;
   busy?: boolean;
   modelName?: string;
-  onToolChange?: (tool: string) => void;
+  onRouteTool?: (tool: StudioTool, command?: string) => void;
 }
 
-const SLASH_CHIPS = [
-  { label: "/image", tool: "image" },
-  { label: "/video", tool: "video" },
-  { label: "/audio", tool: "audio" },
-  { label: "/build", tool: "builder" },
-  { label: "/code", tool: "canvas" },
-  { label: "/agent", tool: "agents" },
-] as const;
+const COMMANDS: { command: string; description: string; tool: StudioTool }[] = [
+  { command: "/terminal", description: "Open Terminal", tool: "terminal" },
+  { command: "/run", description: "Run Command", tool: "terminal" },
+  { command: "/image", description: "Generate Image", tool: "image" },
+  { command: "/video", description: "Generate Video", tool: "video" },
+  { command: "/audio", description: "Generate Audio", tool: "audio" },
+  { command: "/build", description: "Build Anything", tool: "builder" },
+  { command: "/code", description: "Generate Code", tool: "builder" },
+  { command: "/agent", description: "Run Agent", tool: "agents" },
+  { command: "/git", description: "Git", tool: "clibridge" },
+  { command: "/docker", description: "Docker", tool: "clibridge" },
+  { command: "/k8s", description: "Kubernetes", tool: "clibridge" },
+  { command: "/aws", description: "AWS", tool: "clibridge" },
+  { command: "/supabase", description: "Supabase", tool: "clibridge" },
+  { command: "/linear", description: "Linear", tool: "clibridge" },
+  { command: "/sentry", description: "Sentry", tool: "clibridge" },
+  { command: "/vercel", description: "Vercel", tool: "clibridge" },
+];
 
-// @voice-statuses
 const STATUS_LABELS: Record<VoiceState, string> = {
-  idle: "Tap to speak",
-  listening: "Listening…",
+  idle: "",
+  listening: "Listening",
   transcribing: "Transcribing…",
-  thinking: "LiTT is thinking…",
-  speaking: "LiTT is speaking…",
-  cooldown: "Voice temporarily unavailable",
-  error: "Voice error",
+  thinking: "Processing…",
+  speaking: "LiTT speaking",
+  cooldown: "Voice limit reached",
+  error: "",
 };
 
 function WaveformBars({ level, active }: { level: number; active: boolean }) {
@@ -77,42 +97,44 @@ export default function MultimodalComposer({
   onSend,
   busy,
   modelName = "Gemini 2.5 Flash",
-  onToolChange,
+  onRouteTool,
 }: MultimodalComposerProps) {
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
   const [showMicSetup, setShowMicSetup] = useState(false);
+  const [createMode, setCreateMode] = useState<"image" | "video" | null>(null);
+  const [createPrompt, setCreatePrompt] = useState("");
+  const [createAspect, setCreateAspect] = useState("16:9");
+  const [createStyle, setCreateStyle] = useState("Cinematic");
+  const [createDuration, setCreateDuration] = useState(4);
+  const [createResolution, setCreateResolution] = useState("720p");
+  const [createReference, setCreateReference] = useState<string | null>(null);
+  const createFileRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   const {
     voiceState,
     micLevel,
-    cooldownRemaining,
+    isMuted,
     startVoice,
     stopVoice,
+    toggleMute,
     interrupt,
-    speakText,
     setOnTurn,
     errorMessage,
     selectedDeviceId,
     availableDevices,
     selectDevice,
   } = useVoiceSession();
-  const { resolvedColors: T } = useTheme();
 
-  // Set turn handler for voice sessions — transcribed speech is sent to the
-  // model and the reply is spoken back so the voice loop is bidirectional.
+  // Set turn handler for voice sessions
   useEffect(() => {
     setOnTurn((text) => {
-      if (!text) return;
-      void onSend(text).then((reply) => {
-        if (reply) speakText(reply);
-      });
+      void onSend(text);
     });
-    return () => setOnTurn(() => {});
-  }, [onSend, setOnTurn, speakText]);
+  }, [onSend, setOnTurn]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -131,91 +153,75 @@ export default function MultimodalComposer({
     )
       return "camera";
     if (
-      /\b(generate an image|create an image|make an image|draw|image of|picture of|photo of|logo for|design a)\b/.test(
-        t,
-      )
-    )
-      return "image";
-    if (
-      /\b(create a video|make a video|generate a video|animate|animation|video of|motion|bring.*to life)\b/.test(
+      /\b(generate|create|make|animate|turn).{0,30}\b(video|movie|clip|animation|motion)\b|\bvideo of\b/.test(
         t,
       )
     )
       return "video";
     if (
-      /\b(generate audio|make music|create music|text to speech|read aloud|voice over|narrate|song)\b/.test(
+      /\b(generate|create|make|design).{0,24}\b(image|picture|photo|logo|poster|cover|artwork)\b|\b(draw|image of)\b/.test(
         t,
       )
     )
+      return "image";
+    if (/\b(generate|create|make|compose).{0,24}\b(audio|music|song|sound|voice|speech)\b/.test(t))
       return "audio";
+    if (/\b(build|create|make).{0,24}\b(app|website|site|dashboard|page|product)\b/.test(t))
+      return "build";
+    if (/\b(write|generate|fix|refactor|debug).{0,24}\b(code|component|function|typescript|javascript|react)\b/.test(t))
+      return "code";
+    if (/\b(open|use|show).{0,16}\bterminal\b|\brun (this )?command\b/.test(t))
+      return "terminal";
+    if (/\b(create|launch|run|build).{0,20}\b(agent|assistant|crew)\b/.test(t))
+      return "agents";
+    if (/\b(show|open|browse|find).{0,20}\b(assets|gallery|files|creations)\b/.test(t))
+      return "assets";
     if (
-      /\b(build a page|create a mission|new mission|start a project|build a website|make a website|create a website|build an app|make an app)\b/.test(
-        t,
-      )
+      /\b(build a page|create a mission|new mission|start a project)\b/.test(t)
     )
       return "mission";
-    if (
-      /\b(write code|generate code|code snippet|function that|class that|component that|refactor)\b/.test(
-        t,
-      )
-    )
-      return "code";
-    if (
-      /\b(launch an agent|run an agent|start an agent|delegate to|agent to)\b/.test(
-        t,
-      )
-    )
-      return "agents";
-    if (
-      /\b(run a command|terminal|execute|shell command|run this)\b/.test(t)
-    )
-      return "terminal";
-    if (
-      /\b(gallery|assets|my images|my videos|my creations)\b/.test(t)
-    )
-      return "gallery";
     return null;
   };
 
   const submit = async (e: FormEvent) => {
     e.preventDefault();
     if (!value.trim() && snapshots.length === 0) return;
+    const trimmed = value.trim();
+    if (trimmed.startsWith("$ ") && onRouteTool) {
+      onRouteTool("terminal", trimmed.slice(2).trim());
+      onChange("");
+      return;
+    }
+    const slashCommand = COMMANDS.find(
+      ({ command }) =>
+        trimmed.toLowerCase() === command ||
+        trimmed.toLowerCase().startsWith(`${command} `),
+    );
+    if (slashCommand && onRouteTool) {
+      if (slashCommand.tool === "image" || slashCommand.tool === "video") {
+        setCreateMode(slashCommand.tool);
+        setCreatePrompt(trimmed.replace(/^\/(image|video)\s*/i, ""));
+        onChange("");
+        return;
+      }
+      onRouteTool(slashCommand.tool, trimmed);
+      onChange("");
+      return;
+    }
     const intent = detectIntent(value);
     if (intent === "camera") {
       setMode("camera");
       onChange("");
       return;
     }
-    if (intent === "image") {
-      onToolChange?.("image");
-      return;
-    }
-    if (intent === "video") {
-      onToolChange?.("video");
-      return;
-    }
-    if (intent === "audio") {
-      onToolChange?.("audio");
-      return;
-    }
     if (intent === "mission") {
-      onToolChange?.("builder");
+      onRouteTool?.("agents", value);
+      onChange("");
       return;
     }
-    if (intent === "code") {
-      onToolChange?.("canvas");
-      return;
-    }
-    if (intent === "agents") {
-      onToolChange?.("agents");
-      return;
-    }
-    if (intent === "terminal") {
-      onToolChange?.("terminal");
-      return;
-    }
-    if (intent === "gallery") {
-      onToolChange?.("gallery");
+    if (intent) {
+      onRouteTool?.(intent as StudioTool, value);
+      onChange("");
       return;
     }
     await onSend(value, snapshots.length ? snapshots : undefined);
@@ -239,38 +245,56 @@ export default function MultimodalComposer({
       case "idle":
         return {
           icon: Mic,
-          color: T.textMuted,
+          color: "text-white/40",
           disabled: false,
           onClick: startVoice,
         };
       case "listening":
         return {
           icon: Mic,
-          color: T.accentColor,
+          color: "text-cyan-400",
           disabled: false,
           onClick: stopVoice,
         };
       case "transcribing":
-      case "thinking":
-      case "speaking":
-      case "cooldown":
         return {
           icon: Loader2,
-          color: T.accentColor,
+          color: "text-cyan-400",
           disabled: true,
           onClick: undefined,
+        };
+      case "thinking":
+        return {
+          icon: Loader2,
+          color: "text-cyan-400",
+          disabled: true,
+          onClick: undefined,
+        };
+      case "speaking":
+        return {
+          icon: Square,
+          color: "text-amber-400",
+          disabled: false,
+          onClick: interrupt,
+        };
+      case "cooldown":
+        return {
+          icon: MicOff,
+          color: "text-amber-400",
+          disabled: false,
+          onClick: startVoice,
         };
       case "error":
         return {
           icon: MicOff,
-          color: "#fb7185",
+          color: "text-red-400",
           disabled: false,
           onClick: startVoice,
         };
       default:
         return {
           icon: Mic,
-          color: T.textMuted,
+          color: "text-white/40",
           disabled: false,
           onClick: startVoice,
         };
@@ -291,7 +315,26 @@ export default function MultimodalComposer({
   };
 
   return (
-    <div className="relative flex min-w-0 flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5">
+    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
+      {createMode && (
+        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
+          <section role="dialog" aria-modal="true" aria-label={`Generate ${createMode}`} className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-[#090a12] shadow-[0_30px_120px_rgba(0,0,0,.8)]">
+            <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+              <div className="flex items-center gap-2 text-sm font-black text-white">{createMode === "image" ? <ImageIcon size={17} className="text-cyan-300" /> : <Clapperboard size={17} className="text-violet-300" />} Generate {createMode === "image" ? "Image" : "Video"}</div>
+              <button type="button" onClick={() => setCreateMode(null)} className="rounded-lg p-1.5 text-white/45 hover:bg-white/8 hover:text-white" aria-label="Close"><X size={16} /></button>
+            </header>
+            <div className="space-y-4 p-4">
+              <label className="block text-[9px] font-black uppercase tracking-[.18em] text-white/45">Prompt<textarea autoFocus value={createPrompt} onChange={(e) => setCreatePrompt(e.target.value)} rows={4} placeholder={`Describe the ${createMode} you want to create…`} className="mt-1.5 w-full resize-none rounded-xl border border-white/12 bg-white/5 p-3 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-white/30 focus:border-cyan-300/45" /></label>
+              <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Aspect ratio</span><div className="mt-1.5 flex flex-wrap gap-2">{["1:1", "16:9", "9:16", "4:3", "3:4"].map((ratio) => <button type="button" key={ratio} onClick={() => setCreateAspect(ratio)} className={`rounded-lg border px-3 py-2 text-[10px] font-bold ${createAspect === ratio ? "border-cyan-300/60 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{ratio}</button>)}</div></div>
+              <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Style</span><div className="mt-1.5 flex flex-wrap gap-2">{(createMode === "image" ? ["None", "LiTLabs brand", "Photorealistic", "Anime", "3D render", "Cinematic"] : ["Cinematic", "Product", "Anime motion", "Slow motion", "Music visualizer"]).map((style) => <button type="button" key={style} onClick={() => setCreateStyle(style)} className={`rounded-full border px-3 py-1.5 text-[9px] font-bold ${createStyle === style ? "border-violet-300/55 bg-violet-300/10 text-violet-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{style}</button>)}</div></div>
+              {createMode === "video" && <div className="grid grid-cols-2 gap-3"><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Duration<select value={createDuration} onChange={(e) => setCreateDuration(Number(e.target.value))} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option value={4}>4 seconds</option><option value={6}>6 seconds</option><option value={8}>8 seconds</option></select></label><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Resolution<select value={createResolution} onChange={(e) => setCreateResolution(e.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option>720p</option><option>1080p</option></select></label></div>}
+              <button type="button" onClick={() => createFileRef.current?.click()} className="flex w-full items-center gap-3 rounded-xl border border-dashed border-white/15 bg-white/[.025] p-3 text-left text-[10px] text-white/55 hover:border-cyan-300/35"><Upload size={15} className="text-cyan-300" /><span><b className="block text-white/80">{createReference ? "Reference image added" : createMode === "video" ? "Add a starting image" : "Add a reference image"}</b>{createReference ? "Click to replace it" : "Optional · keeps character, composition, or brand direction"}</span></button>
+              <input ref={createFileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setCreateReference(String(reader.result)); reader.readAsDataURL(file); }} />
+              <button type="button" disabled={createPrompt.trim().length < 3} onClick={() => { sessionStorage.setItem(`litlabs:${createMode}:draft`, JSON.stringify({ prompt: createPrompt.trim(), aspectRatio: createAspect, style: createStyle, duration: createDuration, resolution: createResolution, referenceImage: createReference })); onRouteTool?.(createMode, createPrompt.trim()); setCreateMode(null); }} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-400 py-3 text-xs font-black text-black disabled:opacity-35"><Sparkles size={14} /> Continue to {createMode === "image" ? "Image" : "Video"} Studio</button>
+            </div>
+          </section>
+        </div>
+      )}
       {/* Mode panels */}
       {mode === "camera" && (
         <div className="mb-2">
@@ -308,34 +351,30 @@ export default function MultimodalComposer({
       )}
 
       {/* Voice status strip */}
-      {voiceState !== "idle" && (
+      {!["idle"].includes(voiceState) && (
         <div
           className={`flex items-center justify-between gap-3 rounded-t-xl border-x border-t px-3 py-1.5 backdrop-blur-md ${
-            voiceState === "error" || voiceState === "cooldown"
+            voiceState === "error"
               ? "border-red-500/20 bg-red-500/5"
               : "border-white/10 bg-black/40"
           }`}
         >
           {/* Left: waveform bars + status text */}
           <div className="flex items-center gap-2">
-            {voiceState === "error" ? (
-              <span className="text-[11px] font-bold text-red-400">
-                {errorMessage || "Voice session error"}
-              </span>
-            ) : voiceState === "cooldown" ? (
-              <span className="text-[11px] font-bold text-amber-400">
-                Voice limit reached. Retry available in {cooldownRemaining}s
-              </span>
-            ) : (
+            {voiceState !== "error" ? (
               <>
                 <WaveformBars
                   level={micLevel}
                   active={voiceState === "listening"}
                 />
-                <span className="text-[11px] font-bold text-white">
+                <span className="text-[11px] font-bold text-white/80">
                   {STATUS_LABELS[voiceState]}
                 </span>
               </>
+            ) : (
+              <span className="text-[11px] font-bold text-red-400">
+                {errorMessage || "Voice session error"}
+              </span>
             )}
           </div>
           {/* Right: controls */}
@@ -343,47 +382,32 @@ export default function MultimodalComposer({
             {voiceState === "speaking" && (
               <button
                 onClick={interrupt}
-                className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-400 hover:bg-amber-400/10"
+                className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-400/10"
               >
                 Interrupt
               </button>
             )}
-            {voiceState === "cooldown" ? (
+            {voiceState !== "error" ? (
               <>
                 <button
-                  onClick={() => {
-                    stopVoice();
-                    void startVoice();
-                  }}
-                  className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-400 hover:bg-amber-400/10"
+                  onClick={toggleMute}
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
                 >
-                  Retry
+                  {isMuted ? "Unmute" : "Mute"}
                 </button>
                 <button
-                  onClick={() => {
-                    stopVoice();
-                    textareaRef.current?.focus();
-                  }}
-                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
-                  style={{ color: T.textMuted }}
+                  onClick={stopVoice}
+                  className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold text-white/60 hover:bg-white/5"
                 >
-                  Use text instead
+                  Stop
                 </button>
               </>
-            ) : voiceState === "error" ? (
+            ) : (
               <button
                 onClick={stopVoice}
                 className="rounded-full border border-red-500/30 px-2.5 py-1 text-[10px] font-bold text-red-400 hover:bg-red-500/10"
               >
                 Dismiss
-              </button>
-            ) : (
-              <button
-                onClick={stopVoice}
-                className="rounded-full border border-white/15 px-2.5 py-1 text-[10px] font-bold hover:bg-white/5"
-                style={{ color: T.textMuted }}
-              >
-                Stop
               </button>
             )}
           </div>
@@ -418,42 +442,13 @@ export default function MultimodalComposer({
         </div>
       )}
 
-      {/* Toolbar */}
-      <div className="scrollbar-hide mb-1 flex max-w-full gap-1 overflow-x-auto overscroll-x-contain pb-1">
-        <button
-          onClick={() => setShowAdd((v) => !v)}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showAdd ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-gray-300 hover:text-cyan-300"}`}
-        >
-          <Plus size={12} /> Add
-        </button>
-        <button
-          onClick={() => setMode(mode === "camera" ? "text" : "camera")}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${mode === "camera" ? "border-cyan-400/60 bg-cyan-400/10 text-cyan-300" : "border-white/10 text-gray-300 hover:text-cyan-300"}`}
-        >
-          <Camera size={12} /> Camera
-        </button>
-        <button
-          onClick={() => fileInputRef.current?.click()}
-          className="flex shrink-0 items-center gap-1.5 rounded-full border border-white/10 px-2.5 py-1.5 text-[11px] font-semibold text-gray-300 hover:text-cyan-300"
-        >
-          <Paperclip size={12} /> Files
-        </button>
-        <button
-          onClick={() => setShowMicSetup((v) => !v)}
-          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showMicSetup ? "border-violet-400/60 bg-violet-400/10 text-violet-200" : "border-white/10 text-gray-300 hover:text-violet-200"}`}
-        >
-          <Settings2 size={12} /> Mic setup
-        </button>
-      </div>
-
-      {/* Mic setup panel */}
       {showMicSetup && (
         <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <strong className="block text-xs text-white">Microphone setup</strong>
               <span className="text-[9px] text-white/40">
-                Select your input device. Click the mic button to start recording.
+                Chrome uses live voice. Firefox records a turn, then transcribes it.
               </span>
             </div>
             <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : availableDevices.length ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>
@@ -484,21 +479,41 @@ export default function MultimodalComposer({
 
       {/* Add sheet */}
       {showAdd && (
-        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-white/3 p-2">
+        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-[#0a0b12]/98 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.55)] sm:grid-cols-5">
+          {[
+            { label: "Image", tool: "image" as StudioTool, icon: ImageIcon, color: "text-cyan-300" },
+            { label: "Video", tool: "video" as StudioTool, icon: Clapperboard, color: "text-violet-300" },
+            { label: "Audio", tool: "audio" as StudioTool, icon: Music2, color: "text-fuchsia-300" },
+            { label: "Build", tool: "build" as StudioTool, icon: Hammer, color: "text-orange-300" },
+            { label: "Agent", tool: "agents" as StudioTool, icon: Bot, color: "text-emerald-300" },
+            { label: "Terminal", tool: "terminal" as StudioTool, icon: TerminalIcon, color: "text-emerald-300" },
+            { label: "Camera", tool: "camera" as StudioTool, icon: Camera, color: "text-cyan-300" },
+            { label: "Screen", tool: "screen" as StudioTool, icon: MonitorUp, color: "text-blue-300" },
+          ].map((item) => (
+            <button
+              key={item.label}
+              onClick={() => {
+                if (item.tool === "image" || item.tool === "video") {
+                  setCreateMode(item.tool);
+                  setCreatePrompt(value.trim());
+                } else {
+                  onRouteTool?.(item.tool);
+                }
+                setShowAdd(false);
+              }}
+              className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5"
+            >
+              <item.icon size={16} className={item.color} /> {item.label}
+            </button>
+          ))}
           <button
             onClick={() => {
-              setMode("camera");
+              fileInputRef.current?.click();
               setShowAdd(false);
             }}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-gray-200 hover:bg-white/5"
+            className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5"
           >
-            <Camera size={16} className="text-cyan-400" /> Camera
-          </button>
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            className="flex flex-col items-center gap-1 rounded-xl p-2 text-[9px] text-gray-200 hover:bg-white/5"
-          >
-            <Paperclip size={16} className="text-cyan-400" /> Files
+            <Paperclip size={16} className="text-cyan-300" /> Files
           </button>
         </div>
       )}
@@ -517,11 +532,17 @@ export default function MultimodalComposer({
       />
 
       {/* Input row */}
-      <div className="flex items-center gap-2 rounded-xl border border-white/15 bg-white/4 px-3 py-2">
+      <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/4 px-2.5 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
+        <button
+          onClick={() => setShowAdd((value) => !value)}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
+          aria-label={showAdd ? "Close tools" : "Add tool or attachment"}
+          title="Tools and attachments"
+        >
+          <Plus size={16} />
+        </button>
         <textarea
           ref={textareaRef}
-          name="litt-composer-message"
-          id="litt-composer-message"
           value={value}
           onChange={(e) => onChange(e.target.value)}
           onKeyDown={(e) => {
@@ -531,25 +552,35 @@ export default function MultimodalComposer({
             }
           }}
           placeholder="Message LiTT..."
-          className="flex-1 resize-none bg-transparent text-sm text-white placeholder:text-neutral-400 outline-none"
+          className="flex-1 resize-none bg-transparent text-sm text-white placeholder-white/40 outline-none"
           style={{ minHeight: "44px", maxHeight: "160px" }}
           rows={1}
         />
+
+        <button
+          onClick={() => setShowMicSetup((value) => !value)}
+          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${showMicSetup ? "bg-violet-400/12 text-violet-200" : "text-white/35 hover:bg-white/8 hover:text-white"}`}
+          aria-label="Microphone setup"
+          title="Microphone setup"
+        >
+          <Settings2 size={15} />
+        </button>
 
         {/* Mic button */}
         <button
           onClick={micButtonState.onClick}
           disabled={micButtonState.disabled}
-          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${
+          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${micButtonState.color} ${
             !micButtonState.disabled && "hover:bg-white/10"
           } ${micButtonState.disabled && "cursor-not-allowed"}`}
-          style={{ ...getMicButtonStyle(), color: micButtonState.color }}
+          style={getMicButtonStyle()}
           aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
         >
           <MicIcon
             size={16}
             className={
-              voiceState === "transcribing" || voiceState === "thinking"
+              voiceState === "transcribing" ||
+              voiceState === "thinking"
                 ? "animate-spin"
                 : ""
             }
@@ -560,25 +591,16 @@ export default function MultimodalComposer({
         <button
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
-          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-gray-300 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send message"
         >
           <Send size={16} />
         </button>
       </div>
 
-      {/* Tool shortcut chips */}
-      <div className="scrollbar-hide flex items-center gap-1.5 overflow-x-auto pb-1">
-        {SLASH_CHIPS.map((chip) => (
-          <button
-            key={chip.tool}
-            onClick={() => onToolChange?.(chip.tool)}
-            className="flex shrink-0 items-center gap-1 rounded-full border border-white/10 bg-white/5 px-2.5 py-1.5 text-[11px] text-gray-200 transition hover:border-cyan-400/30 hover:text-cyan-300"
-            aria-label={`Switch to ${chip.tool} tool`}
-          >
-            <span className="text-cyan-400">{chip.label}</span>
-          </button>
-        ))}
+      <div className="flex items-center justify-between px-1 text-[8px] text-white/25">
+        <span>Press / for exact commands</span>
+        <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
       </div>
     </div>
   );

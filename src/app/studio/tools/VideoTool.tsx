@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
+import { VIDEO_MODELS } from "@/lib/studio-models";
 import {
   Film,
   Wand2,
@@ -13,52 +14,7 @@ import {
   History,
   Clock,
   Sparkles,
-  Upload,
-  Image as ImageIcon,
-  Settings,
-  Shuffle,
-  Type,
-  Hash,
-  Zap,
 } from "lucide-react";
-
-const VIDEO_MODELS = [
-  {
-    id: "veo",
-    label: "Veo",
-    provider: "Google",
-    desc: "High-quality cinematic",
-    cost: 5,
-  },
-  {
-    id: "wan",
-    label: "Wan",
-    provider: "Alibaba",
-    desc: "Fast general purpose",
-    cost: 3,
-  },
-  {
-    id: "wan-pro",
-    label: "Wan Pro",
-    provider: "Alibaba",
-    desc: "Enhanced quality",
-    cost: 4,
-  },
-  {
-    id: "seedance-pro",
-    label: "Seedance Pro",
-    provider: "ByteDance",
-    desc: "Motion mastery",
-    cost: 4,
-  },
-  {
-    id: "ltx-2",
-    label: "LTX-2",
-    provider: "Lightricks",
-    desc: "Realistic scenes",
-    cost: 3,
-  },
-];
 
 const PROMPT_PRESETS = [
   "A cyberpunk street market at night, neon signs flickering, people walking in rain, cinematic slow motion",
@@ -67,53 +23,12 @@ const PROMPT_PRESETS = [
   "Underwater coral reef, tropical fish swimming, sunlight filtering through water, serene",
 ];
 
-const ASPECT_OPTIONS = [
-  { value: "16:9", label: "16:9", width: 1920, height: 1080 },
-  { value: "9:16", label: "9:16", width: 1080, height: 1920 },
-  { value: "1:1", label: "1:1", width: 1080, height: 1080 },
-  { value: "4:3", label: "4:3", width: 1440, height: 1080 },
-];
-
-const RESOLUTION_OPTIONS = [
-  { value: "720p", label: "720p" },
-  { value: "1080p", label: "1080p" },
-  { value: "4K", label: "4K" },
-];
-
-const CAMERA_MOTION_OPTIONS = [
-  { value: "static", label: "Static" },
-  { value: "pan", label: "Pan" },
-  { value: "zoom", label: "Zoom" },
-  { value: "dolly", label: "Dolly" },
-  { value: "orbit", label: "Orbit" },
-];
-
-const MOTION_INTENSITY_OPTIONS = [
-  { value: "subtle", label: "Subtle" },
-  { value: "normal", label: "Normal" },
-  { value: "dynamic", label: "Dynamic" },
-];
-
-const STYLE_PRESETS = [
-  "Cinematic",
-  "Anime",
-  "Realistic",
-  "Cyberpunk",
-  "Fantasy",
-  "Sci-fi",
-  "Documentary",
-  "Noir",
-  "Vintage",
-  "Vaporwave",
-];
-
 const STORAGE_KEY = "litlabs-studio-video-history";
 const MAX_HISTORY = 8;
 
 interface VideoGen {
   id: string;
   prompt: string;
-  enhancedPrompt: string;
   model: string;
   duration: number;
   status: "idle" | "generating" | "succeeded" | "failed";
@@ -121,13 +36,6 @@ interface VideoGen {
   error?: string;
   createdAt: number;
   cost: number;
-  aspectRatio?: string;
-  resolution?: string;
-  cameraMotion?: string;
-  motionIntensity?: string;
-  stylePreset?: string;
-  negativePrompt?: string;
-  seed?: number;
 }
 
 export default function VideoTool() {
@@ -136,28 +44,9 @@ export default function VideoTool() {
   const [model, setModel] = useState("veo");
   const [duration, setDuration] = useState(4);
   const [aspectRatio, setAspectRatio] = useState("16:9");
-  const [resolution, setResolution] = useState("1080p");
-  const [cameraMotion, setCameraMotion] = useState("static");
-  const [motionIntensity, setMotionIntensity] = useState("normal");
-  const [stylePreset, setStylePreset] = useState("Cinematic");
-  const [negativePrompt, setNegativePrompt] = useState("");
-  const [seed, setSeed] = useState(
-    () => Math.floor(Math.random() * 999_999_999) + 1,
-  );
-  const [imageToVideo, setImageToVideo] = useState<File | null>(null);
-  const [imagePreviewUrl, setImagePreviewUrl] = useState<string | null>(null);
-  const imageInputRef = useRef<HTMLInputElement>(null);
-
-  useEffect(() => {
-    if (!imageToVideo) {
-      setImagePreviewUrl(null);
-      return;
-    }
-    const url = URL.createObjectURL(imageToVideo);
-    setImagePreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [imageToVideo]);
-
+  const [resolution, setResolution] = useState("720p");
+  const [motionStyle, setMotionStyle] = useState("Cinematic");
+  const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<VideoGen | null>(null);
@@ -170,7 +59,7 @@ export default function VideoTool() {
       return [];
     }
   });
-
+  // Use WalletContext
   const { balance: coinBalance, refresh: refreshWallet } = useWallet();
 
   const cost = VIDEO_MODELS.find((m) => m.id === model)?.cost || 5;
@@ -181,60 +70,27 @@ export default function VideoTool() {
   }, [refreshWallet]);
 
   useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("litlabs:video:draft");
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string; style?: string; referenceImage?: string | null };
+      if (draft.prompt) setPrompt(draft.prompt);
+      if (draft.duration) setDuration(draft.duration);
+      if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
+      if (draft.resolution) setResolution(draft.resolution);
+      if (draft.style) setMotionStyle(draft.style);
+      if (draft.referenceImage) setReferenceImage(draft.referenceImage);
+      sessionStorage.removeItem("litlabs:video:draft");
+    } catch { /* ignore invalid drafts */ }
+  }, []);
+
+  useEffect(() => {
     if (history.length > 0)
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify(history.slice(0, MAX_HISTORY)),
       );
   }, [history]);
-
-  const buildEnhancedPrompt = useCallback(() => {
-    const parts = [prompt.trim()];
-    if (stylePreset && stylePreset !== "None") {
-      parts.push(`Style: ${stylePreset.toLowerCase()}`);
-    }
-    parts.push(`Aspect ratio: ${aspectRatio}`, `Resolution: ${resolution}`);
-    if (cameraMotion !== "static") {
-      parts.push(`Camera motion: ${cameraMotion}`);
-    }
-    parts.push(`Motion intensity: ${motionIntensity}`);
-    if (negativePrompt.trim()) {
-      parts.push(`Avoid: ${negativePrompt.trim()}`);
-    }
-    if (imageToVideo) {
-      parts.push("Image-to-video transformation from uploaded reference frame");
-    }
-    parts.push(`Seed: ${seed}`);
-    return parts.filter(Boolean).join(". ");
-  }, [
-    prompt,
-    stylePreset,
-    aspectRatio,
-    resolution,
-    cameraMotion,
-    motionIntensity,
-    negativePrompt,
-    imageToVideo,
-    seed,
-  ]);
-
-  const handleRandomizeSeed = () => {
-    setSeed(Math.floor(Math.random() * 999_999_999) + 1);
-  };
-
-  const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] || null;
-    if (file && file.type.startsWith("image/")) {
-      setImageToVideo(file);
-    }
-  };
-
-  const handleClearImage = () => {
-    setImageToVideo(null);
-    if (imageInputRef.current) {
-      imageInputRef.current.value = "";
-    }
-  };
 
   const handleGenerate = useCallback(async () => {
     if (!prompt.trim() || prompt.trim().length < 3) {
@@ -248,23 +104,14 @@ export default function VideoTool() {
     setError(null);
     setIsGenerating(true);
     const id = `vid_${Date.now()}`;
-    const enhancedPrompt = buildEnhancedPrompt();
     const gen: VideoGen = {
       id,
       prompt: prompt.trim(),
-      enhancedPrompt,
       model,
       duration,
       status: "generating",
       createdAt: Date.now(),
       cost,
-      aspectRatio,
-      resolution,
-      cameraMotion,
-      motionIntensity,
-      stylePreset,
-      negativePrompt,
-      seed,
     };
     setCurrent(gen);
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
@@ -274,16 +121,12 @@ export default function VideoTool() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          prompt: enhancedPrompt,
+          prompt: `${prompt.trim()}, ${motionStyle} motion`,
           model,
           duration,
           aspectRatio,
           resolution,
-          cameraMotion,
-          motionIntensity,
-          stylePreset,
-          negativePrompt,
-          seed,
+          referenceImage,
         }),
       });
       if (!res.ok) {
@@ -300,6 +143,7 @@ export default function VideoTool() {
           g.id === id ? { ...g, status: "succeeded", videoUrl } : g,
         ),
       );
+      // Deduct coins via server
       const wres = await fetch("/api/wallet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -337,22 +181,7 @@ export default function VideoTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [
-    prompt,
-    model,
-    duration,
-    aspectRatio,
-    resolution,
-    cameraMotion,
-    motionIntensity,
-    stylePreset,
-    negativePrompt,
-    seed,
-    cost,
-    canAfford,
-    refreshWallet,
-    buildEnhancedPrompt,
-  ]);
+  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, referenceImage, cost, canAfford, refreshWallet]);
 
   const handleDownload = useCallback((url: string) => {
     const a = document.createElement("a");
@@ -407,8 +236,6 @@ export default function VideoTool() {
               Scene Description
             </label>
             <textarea
-              id="video-tool-prompt"
-              name="videoToolPrompt"
               value={prompt}
               onChange={(e) => {
                 setPrompt(e.target.value);
@@ -460,14 +287,9 @@ export default function VideoTool() {
                 >
                   <div className="font-bold flex items-center justify-between">
                     <span>{m.label}</span>
-                    <span className="text-[9px]" style={{ color: T.textMuted }}>
-                      {m.provider}
-                    </span>
+                    <span className="text-[9px] opacity-60">{m.provider}</span>
                   </div>
-                  <div
-                    className="text-[9px] mt-0.5"
-                    style={{ color: T.textMuted }}
-                  >
+                  <div className="text-[9px] opacity-60 mt-0.5">
                     {m.desc} · {m.cost} 🪙
                   </div>
                 </button>
@@ -487,8 +309,6 @@ export default function VideoTool() {
             </label>
             <input
               type="range"
-              id="video-tool-duration"
-              name="videoToolDuration"
               min={2}
               max={8}
               step={1}
@@ -514,288 +334,6 @@ export default function VideoTool() {
             </div>
           </div>
 
-          {/* Generation Settings */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-2"
-              style={{ color: T.textMuted }}
-            >
-              <Settings size={10} /> Generation Settings
-            </div>
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label
-                  className="block text-[9px] font-bold mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Aspect Ratio
-                </label>
-                <select
-                  value={aspectRatio}
-                  onChange={(e) => setAspectRatio(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full px-2 py-1.5 text-[10px] rounded outline-none border disabled:opacity-50"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                  }}
-                >
-                  {ASPECT_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label} ({o.width}×{o.height})
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  className="block text-[9px] font-bold mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Resolution
-                </label>
-                <select
-                  value={resolution}
-                  onChange={(e) => setResolution(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full px-2 py-1.5 text-[10px] rounded outline-none border disabled:opacity-50"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                  }}
-                >
-                  {RESOLUTION_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  className="block text-[9px] font-bold mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Camera Motion
-                </label>
-                <select
-                  value={cameraMotion}
-                  onChange={(e) => setCameraMotion(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full px-2 py-1.5 text-[10px] rounded outline-none border disabled:opacity-50"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                  }}
-                >
-                  {CAMERA_MOTION_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label
-                  className="block text-[9px] font-bold mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Motion Intensity
-                </label>
-                <select
-                  value={motionIntensity}
-                  onChange={(e) => setMotionIntensity(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full px-2 py-1.5 text-[10px] rounded outline-none border disabled:opacity-50"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                  }}
-                >
-                  {MOTION_INTENSITY_OPTIONS.map((o) => (
-                    <option key={o.value} value={o.value}>
-                      {o.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-          </div>
-
-          {/* Style Presets */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-2"
-              style={{ color: T.textMuted }}
-            >
-              <Zap size={10} /> Style Preset
-            </div>
-            <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
-              {STYLE_PRESETS.map((s) => (
-                <button
-                  key={s}
-                  onClick={() => setStylePreset(s)}
-                  disabled={isGenerating}
-                  className="px-2 py-1.5 text-[9px] font-bold rounded border transition-all hover:scale-[1.02] disabled:opacity-50"
-                  style={{
-                    backgroundColor:
-                      stylePreset === s ? T.accentColor + "25" : T.bgColor,
-                    borderColor:
-                      stylePreset === s ? T.accentColor : T.borderColor,
-                    color: stylePreset === s ? T.accentColor : T.textColor,
-                  }}
-                >
-                  {s}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          {/* Negative Prompt */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-1.5"
-              style={{ color: T.textMuted }}
-            >
-              <Type size={10} /> Negative Prompt
-            </label>
-            <textarea
-              id="video-tool-negative-prompt"
-              name="videoToolNegativePrompt"
-              value={negativePrompt}
-              onChange={(e) => setNegativePrompt(e.target.value)}
-              disabled={isGenerating}
-              aria-label="Video negative prompt"
-              title="Video negative prompt"
-              placeholder="Things to avoid: blur, watermark, text, low quality..."
-              rows={2}
-              className="w-full px-3 py-2 text-sm rounded outline-none resize-none disabled:opacity-50"
-              style={{
-                backgroundColor: T.bgColor,
-                border: `1px solid ${T.borderColor}`,
-                color: T.textColor,
-              }}
-            />
-          </div>
-
-          {/* Seed Control */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <label
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-1.5"
-              style={{ color: T.textMuted }}
-            >
-              <Hash size={10} /> Seed
-            </label>
-            <div className="flex items-center gap-2">
-              <input
-                type="number"
-                id="video-tool-seed"
-                name="videoToolSeed"
-                value={seed}
-                onChange={(e) => setSeed(parseInt(e.target.value) || 0)}
-                disabled={isGenerating}
-                min={0}
-                max={999_999_999}
-                className="flex-1 px-3 py-2 text-sm rounded outline-none border disabled:opacity-50"
-                style={{
-                  backgroundColor: T.bgColor,
-                  borderColor: T.borderColor,
-                  color: T.textColor,
-                }}
-              />
-              <button
-                onClick={handleRandomizeSeed}
-                disabled={isGenerating}
-                className="px-2.5 py-2 rounded border text-[10px] font-bold flex items-center gap-1 disabled:opacity-50"
-                style={{
-                  borderColor: T.borderColor,
-                  color: T.textColor,
-                  backgroundColor: T.bgColor,
-                }}
-              >
-                <Shuffle size={10} /> Random
-              </button>
-            </div>
-          </div>
-
-          {/* Image-to-Video Upload */}
-          <div
-            className="border rounded-lg p-3"
-            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-          >
-            <div
-              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-2"
-              style={{ color: T.textMuted }}
-            >
-              <Upload size={10} /> Image-to-Video (Optional)
-            </div>
-            <input
-              ref={imageInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleImageUpload}
-              disabled={isGenerating}
-              className="hidden"
-            />
-            {!imageToVideo ? (
-              <button
-                onClick={() => imageInputRef.current?.click()}
-                disabled={isGenerating}
-                className="w-full py-3 rounded border border-dashed text-[10px] font-bold flex items-center justify-center gap-1.5 disabled:opacity-50"
-                style={{
-                  borderColor: T.borderColor,
-                  color: T.textMuted,
-                  backgroundColor: T.bgColor,
-                }}
-              >
-                <ImageIcon size={12} /> Upload reference image
-              </button>
-            ) : (
-              <div
-                className="relative rounded border overflow-hidden"
-                style={{ borderColor: T.borderColor }}
-              >
-                {imagePreviewUrl && (
-                  // Local object URL preview; next/image is not beneficial here
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={imagePreviewUrl}
-                    alt="Reference"
-                    className="w-full h-28 object-cover"
-                  />
-                )}
-                <button
-                  onClick={handleClearImage}
-                  disabled={isGenerating}
-                  className="absolute top-1 right-1 p-2 rounded border text-[9px] font-bold disabled:opacity-50"
-                  style={{
-                    borderColor: T.borderColor,
-                    color: T.textColor,
-                    backgroundColor: T.bgColor,
-                  }}
-                >
-                  Remove
-                </button>
-              </div>
-            )}
-          </div>
-
           <div
             className="border rounded-lg p-3"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
@@ -815,7 +353,7 @@ export default function VideoTool() {
                     setError(null);
                   }}
                   disabled={isGenerating}
-                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:bg-white/10 disabled:opacity-50 line-clamp-2"
+                  className="w-full text-left text-[10px] px-2 py-1 rounded border hover:opacity-80 disabled:opacity-50 line-clamp-2"
                   style={{
                     backgroundColor: T.bgColor,
                     borderColor: T.borderColor,
@@ -853,9 +391,9 @@ export default function VideoTool() {
             <div
               className="text-[11px] flex items-center gap-1.5 px-3 py-2 rounded border"
               style={{
-                borderColor: T.warning,
-                color: T.warning,
-                backgroundColor: T.warning + "10",
+                borderColor: "#f85149",
+                color: "#f85149",
+                backgroundColor: "#f8514910",
               }}
             >
               <AlertTriangle size={12} />
@@ -881,7 +419,7 @@ export default function VideoTool() {
                 Preview
               </span>
               {current?.status === "succeeded" && (
-                <span className="text-[10px]" style={{ color: T.success }}>
+                <span className="text-[10px]" style={{ color: "#56d364" }}>
                   ● Ready
                 </span>
               )}
@@ -916,25 +454,17 @@ export default function VideoTool() {
                       🎬
                     </div>
                   </div>
-                  <p className="text-sm" style={{ color: T.textColor }}>
-                    Generating video...
-                  </p>
-                  <p
-                    className="text-[10px] mt-1"
-                    style={{ color: T.textMuted }}
-                  >
+                  <p className="text-sm opacity-70">Generating video...</p>
+                  <p className="text-[10px] opacity-50 mt-1">
                     This can take 30-120 seconds
                   </p>
                 </div>
               ) : (
-                <div
-                  className="text-center px-6"
-                  style={{ color: T.textMuted }}
-                >
-                  <div className="text-4xl mb-2" aria-hidden>
-                    🎬
-                  </div>
-                  <p className="text-sm">Your video will appear here</p>
+                <div className="text-center px-6">
+                  <div className="text-4xl mb-2 opacity-30">🎬</div>
+                  <p className="text-sm opacity-60">
+                    Your video will appear here
+                  </p>
                 </div>
               )}
             </div>
@@ -981,18 +511,14 @@ export default function VideoTool() {
               {history.length > 0 && (
                 <button
                   onClick={handleClear}
-                  className="text-[9px]"
-                  style={{ color: T.textMuted }}
+                  className="text-[9px] opacity-60 hover:opacity-100"
                 >
                   Clear
                 </button>
               )}
             </div>
             {history.length === 0 ? (
-              <div
-                className="p-6 text-center text-xs"
-                style={{ color: T.textMuted }}
-              >
+              <div className="p-6 text-center text-xs opacity-50">
                 No videos yet.
               </div>
             ) : (
@@ -1021,8 +547,7 @@ export default function VideoTool() {
                       <div className="w-full h-full flex items-center justify-center">
                         <Loader2
                           size={14}
-                          className="animate-spin"
-                          style={{ color: T.accentColor }}
+                          className="animate-spin opacity-50"
                         />
                       </div>
                     )}

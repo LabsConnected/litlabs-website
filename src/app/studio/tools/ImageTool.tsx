@@ -4,7 +4,6 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import type { CSSProperties } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
-import { useSearchParams } from "next/navigation";
 import {
   Wand2,
   Download,
@@ -313,11 +312,9 @@ const PROVIDER_OPTIONS = [
 
 export default function ImageTool() {
   const { resolvedColors: T } = useTheme();
-  const searchParams = useSearchParams();
-  const initialPrompt = searchParams?.get("prompt") ?? "";
 
   /* ── Prompt state ── */
-  const [prompt, setPrompt] = useState(initialPrompt);
+  const [prompt, setPrompt] = useState("");
   const [negativePrompt, setNegativePrompt] = useState("");
   const [remixMode, setRemixMode] = useState<RemixMode>("reskin");
   const [referenceImage, setReferenceImage] = useState<string | null>(null);
@@ -526,6 +523,20 @@ export default function ImageTool() {
       );
   }, [history]);
 
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem("litlabs:image:draft");
+      if (!raw) return;
+      const draft = JSON.parse(raw) as { prompt?: string; aspectRatio?: string; style?: string; referenceImage?: string | null };
+      if (draft.prompt) setPrompt(draft.prompt);
+      if (["1:1", "4:3", "3:4", "16:9", "9:16"].includes(draft.aspectRatio || "")) setAspectRatio(draft.aspectRatio as typeof aspectRatio);
+      if (draft.style && draft.style !== "None" && draft.style !== "LiTLabs brand") setSelectedStyle(draft.style);
+      if (draft.style === "LiTLabs brand") setSelectedStyle("Cyberpunk neon noir");
+      if (draft.referenceImage) setReferenceImage(draft.referenceImage);
+      sessionStorage.removeItem("litlabs:image:draft");
+    } catch { /* ignore invalid drafts */ }
+  }, []);
+
   // No longer fetch directly here; rely on WalletContext which already fetches /api/wallet and refreshes periodically.
   useEffect(() => {
     // Make sure WalletContext has refreshed at least once
@@ -652,13 +663,6 @@ export default function ImageTool() {
     },
     [addLog],
   );
-
-  const randomizePrompt = useCallback(() => {
-    const p = PROMPT_PRESETS[Math.floor(Math.random() * PROMPT_PRESETS.length)];
-    setPrompt(p);
-    setError(null);
-    addLog("info", "Randomized prompt");
-  }, [addLog]);
 
   const enhancePrompt = useCallback(() => {
     if (!prompt.trim()) return;
@@ -1173,7 +1177,7 @@ export default function ImageTool() {
         {/* Mobile backdrop */}
         {(mobileLeftOpen || mobileRightOpen) && (
           <div
-            className="fixed inset-0 bg-black/40 z-40 md:hidden"
+            className="fixed inset-0 bg-black/40 z-[10000] md:hidden"
             onClick={() => {
               setMobileLeftOpen(false);
               setMobileRightOpen(false);
@@ -1183,7 +1187,7 @@ export default function ImageTool() {
 
         {/* ── LEFT PANEL: Controls ──────────────────────────────────── */}
         <div
-          className={`shrink-0 flex flex-col overflow-hidden transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-50 w-full max-w-[85vw] sm:max-w-[460px] md:w-[var(--left-panel-width)] md:max-w-none shadow-2xl md:shadow-none ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className={`shrink-0 flex flex-col overflow-hidden transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-[10002] w-full max-w-[460px] md:w-[var(--left-panel-width)] md:max-w-none shadow-2xl md:shadow-none ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
           style={{
             "--left-panel-width": `${leftWidth}px`,
             borderRight: `1px solid ${T.borderColor}18`,
@@ -1241,30 +1245,17 @@ export default function ImageTool() {
                   >
                     Prompt
                   </label>
-                  <div className="flex items-center gap-2">
-                    <button
-                      onClick={randomizePrompt}
-                      disabled={isWorking}
-                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
-                      style={{
-                        borderColor: T.accentColor + "40",
-                        color: T.accentColor,
-                      }}
-                    >
-                      <RefreshCw size={8} /> Randomize
-                    </button>
-                    <button
-                      onClick={enhancePrompt}
-                      disabled={!prompt.trim() || isWorking}
-                      className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
-                      style={{
-                        borderColor: T.accentColor + "40",
-                        color: T.accentColor,
-                      }}
-                    >
-                      <Zap size={8} /> Enhance
-                    </button>
-                  </div>
+                  <button
+                    onClick={enhancePrompt}
+                    disabled={!prompt.trim() || isWorking}
+                    className="flex items-center gap-1 h-5 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                    style={{
+                      borderColor: T.accentColor + "40",
+                      color: T.accentColor,
+                    }}
+                  >
+                    <Zap size={8} /> Enhance
+                  </button>
                 </div>
                 <textarea
                   value={prompt}
@@ -2651,7 +2642,7 @@ export default function ImageTool() {
 
             {/* History sidebar (right) */}
             <div
-              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-50 w-full max-w-[85vw] sm:max-w-none ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
+              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-[10000] ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
               style={{
                 width: rightWidth,
                 borderLeft: `1px solid ${T.borderColor}15`,
