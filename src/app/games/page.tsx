@@ -31,6 +31,7 @@ import {
   type Game,
   type GameCategory,
 } from "@/lib/games";
+import QuickPlayLibrary from "@/components/games/QuickPlayLibrary";
 
 const CATEGORIES: {
   id: GameCategory | "all";
@@ -229,6 +230,15 @@ export default function GamesPage() {
             }}
           />
         </div>
+      )}
+
+      {!selectedGame && (
+        <section
+          className="py-6 border-b"
+          style={{ borderColor: `${T.borderColor}50` }}
+        >
+          <QuickPlayLibrary embedded />
+        </section>
       )}
 
       {!selectedGame && (
