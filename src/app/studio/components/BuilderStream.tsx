@@ -28,6 +28,7 @@ import {
   VideoBlock,
   AudioBlock,
 } from "@/app/studio/lib/builder-blocks";
+import { LiTTMessageAvatar, UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import styles from "./ChatShell.module.css";
 
 interface BuilderStreamProps {
@@ -136,30 +137,12 @@ function TerminalBlockView({
   );
 }
 
-function LiTTAvatar() {
-  return (
-    <div className={styles.avatar} aria-label="LiTT">
-      {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img
-        src="/brand/litt-mascot-hero.png"
-        alt="LiTT"
-        style={{
-          width: "100%",
-          height: "100%",
-          objectFit: "cover",
-          borderRadius: "50%",
-        }}
-      />
-    </div>
-  );
+function LiTTAvatar({ size = 34 }: { size?: number }) {
+  return <LiTTMessageAvatar size={size} />;
 }
 
-function UserAvatar() {
-  return (
-    <div className={styles.avatarUser} aria-label="You">
-      You
-    </div>
-  );
+function UserAvatar({ size = 30 }: { size?: number }) {
+  return <UserMessageAvatar size={size} />;
 }
 
 function CopyButton({ text }: { text: string }) {
