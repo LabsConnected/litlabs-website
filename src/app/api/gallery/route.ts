@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 
 function getYoutubeIdFromUrl(rawUrl: string): string | null {
   try {
@@ -175,6 +176,57 @@ function isSupabaseConfigured() {
   );
 }
 
+// List files from Supabase Storage "media" bucket as gallery items
+// Used as fallback when user_media table is empty or doesn't exist
+async function listStorageGallery(): Promise<Array<{
+  id: string;
+  title: string;
+  artist: string;
+  category: string;
+  imageUrl: string;
+  likes: number;
+  isPublic: boolean;
+  createdAt: string;
+  mediaType: string;
+}>> {
+  try {
+    const sb = getAdminSupabase();
+    const { data: files, error } = await sb.storage
+      .from("media")
+      .list(undefined, { limit: 100, sortBy: { column: "created_at", order: "desc" } });
+
+    if (error || !files || files.length === 0) return [];
+
+    const items = files
+      .filter((f) => f.id && !f.id.endsWith(".emptyFolderPlaceholder") && f.metadata)
+      .map((f) => {
+        const fileId = f.id || f.name;
+        const { data: urlData } = sb.storage.from("media").getPublicUrl(fileId);
+        const ext = f.name.split(".").pop()?.toLowerCase() || "";
+        const isVideo = ["mp4", "webm", "mov", "avi"].includes(ext);
+        const isImage = ["jpg", "jpeg", "png", "webp", "gif", "svg", "bmp"].includes(ext);
+        if (!isImage && !isVideo) return null;
+
+        return {
+          id: `storage_${f.id}`,
+          title: f.name.replace(/\.[^/.]+$/, "").replace(/[-_]/g, " ").slice(0, 60) || "Untitled",
+          artist: "Community",
+          category: "gallery",
+          imageUrl: urlData.publicUrl,
+          likes: 0,
+          isPublic: true,
+          createdAt: f.created_at || new Date().toISOString(),
+          mediaType: isVideo ? "video" : "image",
+        };
+      })
+      .filter((item): item is NonNullable<typeof item> => item !== null);
+
+    return items;
+  } catch {
+    return [];
+  }
+}
+
 async function getHandler(req: NextRequest) {
   try {
     const { searchParams } = new URL(req.url);
@@ -229,7 +281,25 @@ async function getHandler(req: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ items: DEMO_GALLERY, mock: true });
+      // Table might not exist yet — try storage fallback
+      if (isAdminSupabaseConfigured()) {
+        const storageItems = await listStorageGallery();
+        if (storageItems.length > 0) {
+          return NextResponse.json({ items: storageItems });
+        }
+      }
+      return NextResponse.json({ items: [], mock: false });
+    }
+
+    if (!data || data.length === 0) {
+      // No rows in user_media — try listing from Supabase Storage
+      if (isAdminSupabaseConfigured()) {
+        const storageItems = await listStorageGallery();
+        if (storageItems.length > 0) {
+          return NextResponse.json({ items: storageItems });
+        }
+      }
+      return NextResponse.json({ items: [], mock: false });
     }
 
     const items = (data || []).map(
@@ -272,6 +342,15 @@ async function getHandler(req: NextRequest) {
 
     return NextResponse.json({ items });
   } catch {
+    // If Supabase is configured, try storage fallback before demo
+    if (isAdminSupabaseConfigured()) {
+      try {
+        const storageItems = await listStorageGallery();
+        if (storageItems.length > 0) {
+          return NextResponse.json({ items: storageItems });
+        }
+      } catch {}
+    }
     return NextResponse.json({ items: DEMO_GALLERY, mock: true });
   }
 }

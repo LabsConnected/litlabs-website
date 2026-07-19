@@ -475,7 +475,7 @@ export default function Gallery() {
           className="w-full px-4 py-2 text-[10px] text-center"
           style={{ backgroundColor: T.accentColor + "20", color: T.accentColor, borderBottom: `1px solid ${T.accentColor}40` }}
         >
-          🛠 Demo gallery — connect Supabase to see real community uploads.
+          🎨 Demo gallery — upload your first creation to start the community gallery.
         </div>
       )}
 
@@ -1520,24 +1520,43 @@ export default function Gallery() {
 
       {filteredItems.length === 0 && (
         <div className="text-center py-20" style={{ color: T.textColor }}>
-          <div className="text-5xl mb-4 opacity-30">🌑</div>
-          <div className="text-sm opacity-50">
-            No creations found in this sector.
+          <div className="text-5xl mb-4 opacity-30">�</div>
+          <div className="text-sm font-bold mb-2" style={{ color: T.headerColor }}>
+            {isMock ? "No uploads yet" : "No creations found in this sector."}
           </div>
-          <button
-            onClick={() => {
-              setSelectedCategory("all");
-              setSearchQuery("");
-            }}
-            className="mt-4 text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all hover:opacity-80"
-            style={{
-              backgroundColor: T.accentColor + "15",
-              color: T.accentColor,
-              border: `1px solid ${T.accentColor}30`,
-            }}
-          >
-            View All Works
-          </button>
+          <div className="text-xs opacity-50 mb-4">
+            {isMock
+              ? "Be the first to share your work with the community."
+              : "Try a different category or search term."}
+          </div>
+          <div className="flex gap-3 justify-center">
+            {!isMock && (
+              <button
+                onClick={() => {
+                  setSelectedCategory("all");
+                  setSearchQuery("");
+                }}
+                className="text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all hover:opacity-80"
+                style={{
+                  backgroundColor: T.accentColor + "15",
+                  color: T.accentColor,
+                  border: `1px solid ${T.accentColor}30`,
+                }}
+              >
+                View All Works
+              </button>
+            )}
+            <button
+              onClick={() => setShowUpload(true)}
+              className="text-xs font-bold uppercase tracking-wider px-4 py-2 rounded-lg transition-all hover:opacity-80"
+              style={{
+                backgroundColor: T.accentColor,
+                color: T.bgColor,
+              }}
+            >
+              Upload Your Work
+            </button>
+          </div>
         </div>
       )}
 
