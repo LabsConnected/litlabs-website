@@ -87,6 +87,7 @@ const nextConfig: NextConfig = {
       "@google/genai",
       "@google/generative-ai",
       "@monaco-editor/react",
+      "monaco-editor",
       "stripe",
       "supermemory",
     ],
