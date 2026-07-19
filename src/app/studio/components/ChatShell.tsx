@@ -13,6 +13,7 @@ import {
 } from "@/app/studio/lib/builder-blocks";
 import BuilderStream from "./BuilderStream";
 import SessionSidebar from "./SessionSidebar";
+import StudioHealthPanel from "./StudioHealthPanel";
 import type { BuilderSession } from "../hooks/useBuilderSessions";
 import styles from "./ChatShell.module.css";
 
@@ -325,6 +326,9 @@ export function ChatShell({
 
       {!hideDock && (
         <footer className={styles.dock}>
+          <div className="px-3 pt-2 pb-1">
+            <StudioHealthPanel />
+          </div>
           <div className={styles.quickActions} aria-label="Quick commands">
             {actions.map((action) => (
               <button key={action} onClick={() => setDraft(`${action} `)}>
