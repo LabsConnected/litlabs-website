@@ -70,20 +70,23 @@ async function deleteHandler() {
       .eq("id", user.id);
 
     if (deleteError) {
-      // Error deleting user:
       return NextResponse.json(
         { error: "Failed to delete account" },
         { status: 500 },
       );
     }
 
-    // Note: Clerk user deletion should be done via Clerk Dashboard
-    // or use Clerk's API to delete the user completely
-    // This endpoint deletes local Supabase data only
+    // Also delete the Clerk user so they can no longer sign in
+    try {
+      const clerk = await clerkClient();
+      await clerk.users.deleteUser(clerkId);
+    } catch {
+      // Clerk deletion failed — Supabase data is already gone.
+      // The user may still exist in Clerk but their LiTT data is wiped.
+    }
 
     return NextResponse.json({
-      message: "Account data deleted successfully",
-      note: "Your Clerk authentication account must be deleted separately via Clerk Dashboard",
+      message: "Account deleted successfully",
     });
   } catch {
     // Error deleting account:
