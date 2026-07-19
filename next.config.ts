@@ -20,11 +20,11 @@ const scriptSrcBase = [
 
 if (isDev) {
   scriptSrcBase.push("'unsafe-eval'");
-  // Vercel Toolbar only needed in dev/preview
-  scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
 }
+// Vercel injects vercel.live feedback script on all deployments
+scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
 
-const vercelLiveSrc = isDev ? " https://vercel.live https://*.vercel.app" : "";
+const vercelLiveSrc = " https://vercel.live https://*.vercel.app";
 
 const CSP_DIRECTIVES = [
   "default-src 'self'",
