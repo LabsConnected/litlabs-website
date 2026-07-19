@@ -7,7 +7,7 @@ import { ArrowLeft, Expand, Gamepad2, HardDrive, Keyboard, LockKeyhole, RotateCc
 import { detectSatellaview, getRetroGame, getRetroSystem, readRomAsBase64, updateRetroGame, type RetroGameRecord } from "@/lib/retro-arcade";
 import { RetroControlsModal } from "@/components/games/RetroControlsModal";
 
-const EMULATOR_DATA_PATH = "https://cdn.emulatorjs.org/stable/data/";
+const EMULATOR_DATA_PATH = "https://cdn.emulatorjs.org/4.2.1/data/";
 
 /** A safe literal that survives JSON serialization inside an HTML attribute. */
 function escapeForScript(value: string): string {
