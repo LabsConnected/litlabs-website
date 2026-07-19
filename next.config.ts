@@ -24,7 +24,7 @@ if (isDev) {
   scriptSrcBase.push("'unsafe-eval'");
 }
 
-const scriptSrcGames = [...scriptSrcBase, "'unsafe-eval'"];
+const scriptSrcGames = [...scriptSrcBase, "'unsafe-eval'", "'wasm-unsafe-eval'"];
 // Vercel injects vercel.live feedback script on all deployments
 scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
 
