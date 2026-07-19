@@ -243,6 +243,8 @@ export function VoiceSessionProvider({
   const recordedChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
   const ttsCancelledRef = useRef(false);
+  const ttsQueueRef = useRef<HTMLAudioElement[]>([]);
+  const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const rafRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const maxRecordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
@@ -832,6 +834,10 @@ export function VoiceSessionProvider({
 
   const stopSpeaking = useCallback(() => {
     ttsCancelledRef.current = true;
+    if (ttsFetchAbortRef.current) {
+      ttsFetchAbortRef.current.abort();
+      ttsFetchAbortRef.current = null;
+    }
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
     }
@@ -842,6 +848,13 @@ export function VoiceSessionProvider({
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
+    ttsQueueRef.current.forEach((a) => {
+      a.onended = null;
+      a.onerror = null;
+      a.pause();
+      if (a.src.startsWith("blob:")) URL.revokeObjectURL(a.src);
+    });
+    ttsQueueRef.current = [];
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -855,6 +868,7 @@ export function VoiceSessionProvider({
 
       stopSpeaking();
       ttsCancelledRef.current = false;
+      ttsQueueRef.current = [];
 
       if (pendingListenRestartRef.current) {
         clearTimeout(pendingListenRestartRef.current);
@@ -882,7 +896,6 @@ export function VoiceSessionProvider({
             // ignore
           }
         } else if (recorder?.state === "inactive" && activeRef.current) {
-          // Restart with a fresh stream/recorder rather than reusing the old one.
           recordedChunksRef.current = [];
           voiceStateRef.current = "idle";
           void startVoiceRef.current();
@@ -897,19 +910,28 @@ export function VoiceSessionProvider({
         }
       };
 
-      fetch("/api/tts", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text, voice: "aoede" }),
-      })
-        .then(async (res) => {
+      // Split text into sentence-level chunks for faster first-audio.
+      // The first chunk plays immediately while subsequent chunks are
+      // fetched in the background and queued for seamless playback.
+      const chunks = splitTextIntoChunks(text, 220);
+      const abortCtrl = new AbortController();
+      ttsFetchAbortRef.current = abortCtrl;
+      let firstPlayed = false;
+      let allFailed = true;
+
+      const fetchChunk = async (chunk: string): Promise<HTMLAudioElement | null> => {
+        if (ttsCancelledRef.current || abortCtrl.signal.aborted) return null;
+        try {
+          const res = await fetch("/api/tts", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ text: chunk, voice: "aoede" }),
+            signal: abortCtrl.signal,
+          });
           if (!res.ok) {
             const data = await res.json().catch(() => ({}));
             const raw =
-              typeof data.error === "string"
-                ? data.error
-                : `TTS ${res.status}`;
-
+              typeof data.error === "string" ? data.error : `TTS ${res.status}`;
             if (
               res.status === 429 ||
               /rate limit|too many requests|429|resource_exhausted/i.test(raw)
@@ -920,57 +942,83 @@ export function VoiceSessionProvider({
                   ? data.retryAfter
                   : retryAfter || 60;
               enterCooldown(seconds);
-              return;
             }
-
-            throw new Error(raw);
+            return null;
           }
-
           const blob = await res.blob();
-          markTiming("TTS_first_audio");
+          if (ttsCancelledRef.current || abortCtrl.signal.aborted) return null;
           const src = URL.createObjectURL(blob);
-          const audio = new Audio(src);
-          currentAudioRef.current = audio;
+          return new Audio(src);
+        } catch {
+          return null;
+        }
+      };
 
-          audio.onended = () => {
-            URL.revokeObjectURL(src);
-            if (currentAudioRef.current === audio) {
-              currentAudioRef.current = null;
-            }
+      const playFromQueue = () => {
+        if (ttsCancelledRef.current) return;
+        const audio = ttsQueueRef.current.shift();
+        if (!audio) {
+          // Queue empty — if we already played something, we're done.
+          // If not, fall back to browser TTS for the whole text.
+          if (allFailed) {
+            fallbackSynth(text, onSpeechEnd);
+          } else {
             onSpeechEnd();
-          };
-
-          audio.onerror = () => {
-            URL.revokeObjectURL(src);
-            if (currentAudioRef.current === audio) {
-              currentAudioRef.current = null;
-            }
-            if (ttsCancelledRef.current) return;
-            console.warn(
-              "[LiTT Voice] HTMLAudio error — falling back to speechSynthesis",
-            );
-            fallbackSynth(text, onSpeechEnd);
-          };
-
-          try {
-            await audio.play();
-            markTiming("playback_started");
-          } catch (err) {
-            URL.revokeObjectURL(src);
-            if (ttsCancelledRef.current) return;
-            console.warn("[LiTT Voice] audio.play() blocked:", err);
-            fallbackSynth(text, onSpeechEnd);
           }
-        })
-        .catch((err) => {
-          if (ttsCancelledRef.current) return;
-          console.warn(
-            "[LiTT Voice] /api/tts failed:",
-            err,
-            "— falling back to speechSynthesis",
-          );
-          fallbackSynth(text, onSpeechEnd);
+          return;
+        }
+        allFailed = false;
+        currentAudioRef.current = audio;
+
+        audio.onended = () => {
+          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+          if (currentAudioRef.current === audio) {
+            currentAudioRef.current = null;
+          }
+          playFromQueue();
+        };
+
+        audio.onerror = () => {
+          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+          if (currentAudioRef.current === audio) {
+            currentAudioRef.current = null;
+          }
+          playFromQueue();
+        };
+
+        audio.play().catch(() => {
+          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+          if (currentAudioRef.current === audio) {
+            currentAudioRef.current = null;
+          }
+          playFromQueue();
         });
+      };
+
+      // Process chunks: fetch first, play immediately, then fetch rest
+      // sequentially while earlier chunks play.
+      (async () => {
+        for (let i = 0; i < chunks.length; i++) {
+          if (ttsCancelledRef.current || abortCtrl.signal.aborted) return;
+
+          const audio = await fetchChunk(chunks[i]);
+          if (!audio) continue;
+
+          ttsQueueRef.current.push(audio);
+
+          if (!firstPlayed) {
+            firstPlayed = true;
+            markTiming("TTS_first_audio");
+            markTiming("playback_started");
+            playFromQueue();
+          }
+        }
+      })().catch(() => {
+        // If the entire fetch chain fails, fall back to browser TTS
+        if (!ttsCancelledRef.current && !firstPlayed) {
+          fallbackSynth(text, onSpeechEnd);
+        }
+      });
     },
     [stopSpeaking, startMicLevelLoop, setActivity, enterCooldown, markTiming],
   );
@@ -1173,4 +1221,31 @@ function fallbackSynth(text: string, onEnd: () => void) {
   utt.onend = onEnd;
   utt.onerror = onEnd;
   window.speechSynthesis.speak(utt);
+}
+
+function splitTextIntoChunks(text: string, maxLen: number): string[] {
+  if (text.length <= maxLen) return [text];
+
+  const sentences: string[] = [];
+  let current = "";
+
+  const pushCurrent = () => {
+    if (current.trim()) sentences.push(current.trim());
+    current = "";
+  };
+
+  for (let i = 0; i < text.length; i++) {
+    current += text[i];
+    if (/[.!?]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1]))) {
+      if (current.length >= maxLen) {
+        pushCurrent();
+      }
+    }
+    if (current.length >= maxLen) {
+      pushCurrent();
+    }
+  }
+  pushCurrent();
+
+  return sentences.length > 0 ? sentences : [text];
 }

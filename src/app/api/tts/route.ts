@@ -115,7 +115,7 @@ async function handler(req: NextRequest) {
   );
 }
 
-export const POST = withRateLimit(handler, 20, 60);
+export const POST = withRateLimit(handler, 60, 60);
 
 /* ------------------------------------------------------------------ */
 /*  ElevenLabs                                                         */

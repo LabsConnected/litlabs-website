@@ -50,12 +50,6 @@ const VOICES = [
   { value: "Orus", label: "Orus", desc: "Steady · Male" },
 ];
 
-function audioSrcFromBase64(input: string): string {
-  if (!input) return "";
-  if (input.startsWith("data:")) return input;
-  return `data:audio/wav;base64,${input}`;
-}
-
 export function FloatingChat() {
   const { profile } = useProfile();
   const { tokens } = useTheme();
@@ -427,35 +421,66 @@ export function FloatingChat() {
       return true;
     };
 
-    try {
-      const res = await fetch("/api/media/generate-audio", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, voice }),
-      });
-      const data = await res.json();
-      if (!res.ok || data.error) throw new Error(data.error || "TTS failed");
+    // Split into sentence chunks for faster first-audio
+    const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim());
+    const chunks = sentences.length > 0 ? sentences : [text];
+    const queue: HTMLAudioElement[] = [];
+    let cancelled = false;
+    let firstPlayed = false;
 
-      const audioSrc = audioSrcFromBase64(data.audioBase64);
-      if (!audioSrc) throw new Error("No audio source returned");
-
-      const audio = new Audio(audioSrc);
+    const playNext = () => {
+      if (cancelled) return;
+      const audio = queue.shift();
+      if (!audio) {
+        setSpeaking(null);
+        audioRef.current = null;
+        return;
+      }
       audioRef.current = audio;
       audio.onended = () => {
-        setSpeaking(null);
-        audioRef.current = null;
+        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+        playNext();
       };
       audio.onerror = () => {
-        setSpeaking(null);
-        audioRef.current = null;
+        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+        playNext();
       };
-      await audio.play();
+      audio.play().catch(() => {
+        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
+        playNext();
+      });
+    };
+
+    try {
+      for (let i = 0; i < chunks.length; i++) {
+        if (cancelled) return;
+        const chunk = chunks[i].trim();
+        if (!chunk) continue;
+
+        const res = await fetch("/api/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: chunk, voice }),
+        });
+        if (!res.ok) throw new Error(`TTS ${res.status}`);
+        const blob = await res.blob();
+        if (cancelled) return;
+        const src = URL.createObjectURL(blob);
+        const audio = new Audio(src);
+        queue.push(audio);
+
+        if (!firstPlayed) {
+          firstPlayed = true;
+          playNext();
+        }
+      }
     } catch (err) {
+      if (cancelled) return;
       const msg = err instanceof Error ? err.message : "TTS failed";
-      if (!fallbackToBrowserTTS()) {
+      if (!firstPlayed && !fallbackToBrowserTTS()) {
         showToast(`Voice error: ${msg}`, { type: "speak", text, idx });
       }
-      setSpeaking(null);
+      if (!firstPlayed) setSpeaking(null);
     }
   };
 
