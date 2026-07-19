@@ -77,6 +77,11 @@ const LOCAL_HELP = [
   "    \x1b[33muname -a\x1b[0m            System info",
   "    \x1b[33mnode -v\x1b[0m              Node.js version",
   "    \x1b[33mpnpm -v\x1b[0m              pnpm version",
+  "    \x1b[33mpnpm build\x1b[0m           Simulated production build",
+  "    \x1b[33mpnpm lint\x1b[0m            Simulated ESLint check",
+  "    \x1b[33mpnpm test\x1b[0m            Simulated test run",
+  "    \x1b[33mpnpm dev\x1b[0m             Simulated dev server",
+  "    \x1b[33mnpx tsc --noEmit\x1b[0m     Simulated type-check",
   "    \x1b[33mneofetch\x1b[0m             Tiny system info card",
   "",
   "  \x1b[2mFor a real PTY (bash/PS), run \x1b[0m\x1b[33mpnpm terminal:dev\x1b[0m\x1b[2m and click Connect.\x1b[0m",
@@ -146,10 +151,72 @@ function runLocalCommand(line: string): string[] {
       return ["LiTTree LabStudios"];
     case "node":
       if (args[0] === "-v" || args[0] === "--version") return ["v22.22.0"];
+      if (args[0] === "-e") return [args.slice(1).join(" ")];
       return ["node: command not implemented in Local Shell (use Connect for real bash)"];
-    case "pnpm":
+    case "npx":
+      if (args[0] === "tsc" && (args[1] === "--noEmit" || !args[1])) {
+        return [
+          "\x1b[32m✓\x1b[0m No type errors found.",
+          "",
+          "\x1b[36mℹ\x1b[0m Simulated type-check (in-browser shell).",
+        ];
+      }
+      return ["npx: command not implemented in Local Shell (use Connect for real bash)"];
+    case "pnpm": {
       if (args[0] === "-v" || args[0] === "--version") return ["9.15.0"];
-      return ["pnpm: command not implemented in Local Shell"];
+      const sub = args[0];
+      if (sub === "build") {
+        return [
+          "\x1b[32m✓\x1b[0m Compiled successfully in 4.2s",
+          "\x1b[32m✓\x1b[0m Linting passed",
+          "\x1b[32m✓\x1b[0m Generating static pages (42/42)",
+          "\x1b[32m✓\x1b[0m Build completed",
+          "",
+          " \x1b[2mRoute (app)\x1b[0m                              Size  ",
+          "  ┌ ◐ /                                    142 kB",
+          "  ├ ○ /studio                              89 kB",
+          "  ├ ○ /dashboard                           34 kB",
+          "  └ ○ /api/...                             12 kB",
+          "  First Load JS shared                     287 kB",
+          "",
+          "\x1b[36mℹ\x1b[0m Note: This is a simulated build output (in-browser shell).",
+          "\x1b[36mℹ\x1b[0m For real builds, run \x1b[33mpnpm terminal:dev\x1b[0m locally and click Connect.",
+        ];
+      }
+      if (sub === "lint") {
+        return [
+          "\x1b[32m✓\x1b[0m ESLint passed — 0 errors, 3 warnings",
+          "",
+          " \x1b[33m⚠\x1b[0m src/components/MobileBottomNav.tsx:26  z-[100] can be written as z-100",
+          "",
+          "\x1b[36mℹ\x1b[0m Simulated lint output (in-browser shell).",
+        ];
+      }
+      if (sub === "test") {
+        return [
+          " \x1b[36mRUN\x1b[0m  vitest v1.6.0",
+          " ✓ src/lib/__tests__/agents.test.ts (3 tests)",
+          " ✓ src/lib/__tests__/llm.test.ts (5 tests)",
+          " ✓ src/lib/__tests__/auth.test.ts (2 tests)",
+          "",
+          " Test Files  3 passed (3)",
+          "      Tests  10 passed (10)",
+          "",
+          "\x1b[36mℹ\x1b[0m Simulated test output (in-browser shell).",
+        ];
+      }
+      if (sub === "dev") {
+        return [
+          "\x1b[36m▲\x1b[0m Next.js 16.0.0 (Turbopack)",
+          "- Local:        http://localhost:3000",
+          "- Environments: .env.local",
+          "",
+          "\x1b[36mℹ\x1b[0m Simulated dev server (in-browser shell).",
+          "\x1b[36mℹ\x1b[0m For a real dev server, run \x1b[33mpnpm terminal:dev\x1b[0m locally and click Connect.",
+        ];
+      }
+      return ["pnpm: command not implemented in Local Shell (use Connect for real bash)"];
+    }
     case "neofetch":
       return [
         "       ╭─────────────────────────╮",

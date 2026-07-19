@@ -1133,6 +1133,31 @@ function LITTTerminalShellInner({
             },
           })),
         );
+
+        // Post-processing: detect and override "I can't build/execute" refusals.
+        // The system prompt already says NEVER to say this, but some models
+        // (especially Gemini) ignore it. Same pattern as the image refusal filter.
+        const buildRefusal =
+          /\b(can't|cannot|unable to|don't have|do not have|won't|will not)\b.*\b(execute|run|build|perform|carry out)\b.*\b(command|build|shell|terminal|from here|from this)\b/i.test(
+            fullText,
+          ) ||
+          /\bI (?:can't|cannot|am unable to|don't have)\b.*\b(?:build|run|execute|compile|lint|test)\b/i.test(
+            fullText,
+          );
+        if (buildRefusal) {
+          fullText =
+            "Yes, I can — through the Studio terminal. Type any of these:\n\n- `$ pnpm build` — runs a production build\n- `$ pnpm lint` — runs ESLint\n- `$ pnpm test` — runs Vitest\n- `$ npx tsc --noEmit` — type-check\n- `/run <any command>` — runs any shell command\n\nOr just tell me what you want to build and I'll run it.";
+          setMessages((current) => {
+            if (placeholderIndex >= current.length) return current;
+            const next = current.slice();
+            next[placeholderIndex] = {
+              ...next[placeholderIndex],
+              content: fullText,
+            };
+            return next;
+          });
+        }
+
         return fullText;
       } catch (error) {
         const isAbort =
