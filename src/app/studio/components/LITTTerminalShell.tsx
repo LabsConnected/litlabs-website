@@ -55,9 +55,9 @@ import {
   Eraser,
 } from "lucide-react";
 import Link from "next/link";
-import StudioHybridWorkspace, {
-  type StudioWorkspaceMode,
-} from "./StudioHybridWorkspace";
+import StudioCommandDeck, {
+  type StudioCommandDeckMode,
+} from "./StudioCommandDeck";
 
 import dynamic from "next/dynamic";
 
@@ -320,7 +320,7 @@ function LITTTerminalShellInner({
       })),
     [messages],
   );
-  const hybridMode: StudioWorkspaceMode = (() => {
+  const hybridMode: StudioCommandDeckMode = (() => {
     const value = searchParams?.get("mode");
     return value === "code" || value === "media" || value === "command"
       ? value
@@ -328,7 +328,7 @@ function LITTTerminalShellInner({
   })();
 
   const setHybridMode = useCallback(
-    (mode: StudioWorkspaceMode) => {
+    (mode: StudioCommandDeckMode) => {
       const params = new URLSearchParams(searchParams?.toString() ?? "");
       params.set("mode", mode);
       router.replace(`/studio?${params.toString()}`, { scroll: false });
@@ -1543,7 +1543,7 @@ function LITTTerminalShellInner({
           />
 
           {/* Stage header */}
-          <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0">
+          <div className={`relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0 ${hybridWorkspaceEnabled ? "hidden" : ""}`}>
             <div className="flex items-center gap-3">
               <Link
                 href="/"
@@ -1674,7 +1674,7 @@ function LITTTerminalShellInner({
 
           {/* Scrollable content */}
           {hybridWorkspaceEnabled ? (
-            <StudioHybridWorkspace
+            <StudioCommandDeck
               mode={hybridMode}
               onModeChangeAction={setHybridMode}
               activeProjectId={activeProjectId}
