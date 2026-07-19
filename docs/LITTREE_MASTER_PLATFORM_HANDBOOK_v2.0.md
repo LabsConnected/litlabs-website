@@ -1,6 +1,6 @@
 # LiTTree LabStudios — MASTER PLATFORM HANDBOOK
 
-> **Version 1.0** · July 19, 2026
+> **Version 2.0** · July 19, 2026
 > **Repository target:** `LabsConnected/litlabs-website`
 > **Canonical workspace:** `/studio` — one unified Builder
 > **Base branch:** `main` (all implementation work must occur on a safe feature branch)
@@ -18,7 +18,7 @@ Production architecture · Unified Studio · Real terminal · Settings · Integr
 | Canonical workspace | `/studio` — one unified Builder |
 | Repository | `LabsConnected/litlabs-website` |
 | Base branch | `main`; all implementation work must occur on a safe feature branch |
-| Version | 1.0 |
+| Version | 2.0 |
 | Status | Canonical implementation handbook |
 | Review cadence | Update after every shipped architecture phase or major route redesign |
 
@@ -553,7 +553,7 @@ export type SandboxSession = {
   id: string;
   projectId: string;
   ownerId: string;
-  provider: "e2b" | "other";
+  provider: "node-pty" | "e2b" | "other";
   providerSandboxId: string;
   terminalPid?: number;
   state: SandboxState;
@@ -2120,6 +2120,6 @@ The strongest next move is not another visual overhaul. It is to **complete the 
 
 ---
 
-*End of Master Platform Handbook v1.0 — `LabsConnected/litlabs-website` — July 19, 2026.*
+*End of Master Platform Handbook v2.0 — `LabsConnected/litlabs-website` — July 19, 2026.*
 
 
