@@ -625,7 +625,7 @@ function MarketplaceInner() {
     return (
       <div
         style={{
-          backgroundColor: T?.bgColor || "#0a0a0f",
+          backgroundColor: "transparent",
           minHeight: "100dvh",
           display: "flex",
           alignItems: "center",
@@ -670,7 +670,7 @@ function MarketplaceInner() {
     <div
       className="marketplace-page flex min-h-dvh flex-col"
       style={{
-        backgroundColor: T.bgColor,
+        backgroundColor: "transparent",
         color: T.textColor,
         position: "relative",
       }}
@@ -2421,7 +2421,7 @@ export default function Marketplace() {
       fallback={
         <div
           className="min-h-dvh flex items-center justify-center"
-          style={{ backgroundColor: "#0a0a0f" }}
+          style={{ backgroundColor: "transparent" }}
         >
           <div className="text-center">
             <div className="text-3xl mb-4 animate-pulse">⚡</div>
