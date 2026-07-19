@@ -48,7 +48,10 @@ import {
   Film,
   Music,
   Hammer,
+  Home,
+  ChevronLeft,
 } from "lucide-react";
+import Link from "next/link";
 
 import dynamic from "next/dynamic";
 
@@ -854,14 +857,23 @@ function LITTTerminalShellInner({
         const data = (await res.json()) as {
           response?: string;
           agent?: { name?: string };
+          imageUrl?: string;
+          imagePrompt?: string;
+          imageProvider?: string;
         };
         const reply = data.response || "I'm on it.";
+        const assistantMessage: Message = data.imageUrl
+          ? {
+              role: "assistant",
+              content: reply,
+              createdAt: Date.now(),
+              type: "image",
+              mediaUrl: data.imageUrl,
+            }
+          : { role: "assistant", content: reply, createdAt: Date.now() };
         setAgentChats((prev) => ({
           ...prev,
-          [agent.id]: [
-            ...(prev[agent.id] || []),
-            { role: "assistant", content: reply, createdAt: Date.now() },
-          ],
+          [agent.id]: [...(prev[agent.id] || []), assistantMessage],
         }));
         return reply;
       } catch (err) {
@@ -1388,9 +1400,17 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Stage header — hidden on mobile to avoid duplicate with global header */}
-          <div className="relative z-10 hidden min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:flex sm:border-0 sm:px-6 sm:pt-5">
+          {/* Stage header */}
+          <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0">
             <div className="flex items-center gap-3">
+              <Link
+                href="/"
+                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Back to home"
+                title="Back to home"
+              >
+                <ChevronLeft size={16} />
+              </Link>
               <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
                 <TerminalIcon size={16} className="text-cyan-400" />
               </div>
@@ -1405,7 +1425,15 @@ function LITTTerminalShellInner({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-2 text-[10px]">
+            <div className="flex items-center gap-3 text-[10px]">
+              <Link
+                href="/"
+                className="hidden items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white sm:flex"
+                aria-label="Go to homepage"
+              >
+                <Home size={12} />
+                <span>Home</span>
+              </Link>
               <UserButton
                 afterSignOutUrl="/sign-in"
                 appearance={{
