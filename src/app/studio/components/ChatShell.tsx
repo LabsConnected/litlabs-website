@@ -72,8 +72,10 @@ export function ChatShell({
   embedded = false,
   hideDock = false,
   builderMode = false,
-  _onNewChat,
-  _onRegenerate,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onNewChat,
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  onRegenerate,
   sessions,
   activeSessionId,
   onSelectSession,
