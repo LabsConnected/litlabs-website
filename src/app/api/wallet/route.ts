@@ -53,6 +53,38 @@ async function postHandler(req: NextRequest) {
       );
     }
 
+    /* Credit coins (tier activation, rewards, etc.) */
+    if (body.type === "credit") {
+      const amount = typeof body.amount === "number" ? body.amount : 0;
+      const reason = typeof body.reason === "string" ? body.reason.trim() : "";
+      if (!Number.isSafeInteger(amount) || amount <= 0 || amount > 1_000_000) {
+        return NextResponse.json(
+          { error: "amount must be a positive number" },
+          { status: 400 },
+        );
+      }
+      if (reason.length < 3) {
+        return NextResponse.json(
+          { error: "reason is required" },
+          { status: 400 },
+        );
+      }
+      const wallet = await adjustWalletBalance({
+        clerkId,
+        amount,
+        type: "earn",
+        reason,
+        idempotencyKey: `credit:${clerkId}:${reason}:${Date.now()}`,
+      });
+      return NextResponse.json({
+        message: `${amount} LiTBit Coins credited`,
+        balance: wallet.balance,
+        credited: amount,
+        reason,
+        replayed: wallet.replayed,
+      });
+    }
+
     /* Spend coins */
     if (body.type === "spend") {
       const amount = typeof body.amount === "number" ? body.amount : 0;
@@ -89,7 +121,7 @@ async function postHandler(req: NextRequest) {
 
     if (body.type !== "daily") {
       return NextResponse.json(
-        { error: "Invalid type. Use 'daily' or 'spend'" },
+        { error: "Invalid type. Use 'daily', 'credit', or 'spend'" },
         { status: 400 },
       );
     }

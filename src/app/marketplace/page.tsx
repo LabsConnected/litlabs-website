@@ -1663,7 +1663,7 @@ function MarketplaceInner() {
                 fontWeight: "bold",
               }}
             >
-              💎 SPEND YOUR COINS
+              💎 BETA FEATURES (ALL FREE)
             </div>
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
               {SPEND_FEATURES.map((feat) => (
@@ -1721,35 +1721,17 @@ function MarketplaceInner() {
                   >
                     <span
                       style={{
-                        color: "gold",
+                        color: "#22d3ee",
                         fontSize: "16px",
                         fontWeight: "bold",
                       }}
                     >
-                      {formatLbc(feat.cost)}
+                      FREE
                     </span>
                     <button
-                      onClick={async () => {
-                        if (litBitCoins < feat.cost) {
-                          showToast(
-                            `Need ${formatLbc(feat.cost)}. You have ${formatLbc(litBitCoins)}`,
-                            "error",
-                          );
-                          return;
-                        }
-                        const newBal = await spendWallet(
-                          feat.cost,
-                          `marketplace_feature:${feat.title}`,
-                        );
-                        if (newBal === null) {
-                          showToast(
-                            "Transaction failed. Could not deduct coins.",
-                            "error",
-                          );
-                          return;
-                        }
+                      onClick={() => {
                         showToast(
-                          `${feat.action} ${feat.title}. -${formatLbc(feat.cost)}. Balance: ${formatLbc(newBal)}`,
+                          `✅ ${feat.action} ${feat.title} — Free during beta!`,
                           "success",
                         );
                       }}
