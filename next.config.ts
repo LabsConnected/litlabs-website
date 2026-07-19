@@ -18,9 +18,12 @@ const scriptSrcBase = [
   "https://cdn.emulatorjs.org",
 ];
 
+// 'unsafe-eval' needed by emulatorjs on /games routes in production
 if (isDev) {
   scriptSrcBase.push("'unsafe-eval'");
 }
+
+const scriptSrcGames = [...scriptSrcBase, "'unsafe-eval'"];
 // Vercel injects vercel.live feedback script on all deployments
 scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
 
@@ -35,7 +38,7 @@ const CSP_DIRECTIVES = [
   `img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://*.fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org${vercelLiveSrc}`,
   "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org",
   `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://www.google-analytics.com https://*.google-analytics.com${vercelLiveSrc}`,
-  "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org",
+  "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org https://vercel.live https://*.vercel.app",
   "worker-src 'self' blob: data: https://litlabs.net https://cdn.emulatorjs.org",
   "media-src 'self' blob: data:",
   "object-src 'none'",
@@ -44,6 +47,15 @@ const CSP_DIRECTIVES = [
   "frame-ancestors 'none'",
   "upgrade-insecure-requests",
 ].join("; ");
+
+// Relaxed CSP for /games routes — emulatorjs requires unsafe-eval
+const CSP_DIRECTIVES_GAMES = CSP_DIRECTIVES.replace(
+  `script-src ${scriptSrcBase.join(" ")}`,
+  `script-src ${scriptSrcGames.join(" ")}`,
+).replace(
+  `script-src-elem ${scriptSrcBase.join(" ")}`,
+  `script-src-elem ${scriptSrcGames.join(" ")}`,
+);
 
 const nextConfig: NextConfig = {
   // ============================================
@@ -177,6 +189,16 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=0, must-revalidate",
+          },
+        ],
+      },
+      // Relaxed CSP for /games routes — emulatorjs requires unsafe-eval
+      {
+        source: "/games/(.*)",
+        headers: [
+          {
+            key: "Content-Security-Policy",
+            value: CSP_DIRECTIVES_GAMES,
           },
         ],
       },
