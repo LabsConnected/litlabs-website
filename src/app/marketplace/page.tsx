@@ -420,37 +420,29 @@ function MarketplaceInner() {
 
   const buyPack = async (pack: (typeof TIER_PACKAGES)[0]) => {
     if (!isSignedIn || !userId) {
-      showToast("Please sign in to purchase.", "error");
+      showToast("Please sign in to get started.", "error");
       return;
     }
     try {
-      const res = await fetch("/api/stripe/checkout", {
+      const res = await fetch("/api/wallet", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          mode: "subscription",
-          priceId: pack.priceId || "",
-          priceData: {
-            amount: pack.price * 100,
-            currency: "usd",
-            name: `${pack.label} Membership`,
-            description: `${pack.features.slice(0, 2).join(", ")}`,
-          },
-          metadata: {
-            clerk_id: userId,
-            tier: pack.tier,
-            coin_amount: String(pack.coins),
-          },
+          type: "credit",
+          amount: pack.coins,
+          reason: `tier:${pack.tier}`,
         }),
       });
       const data = await res.json();
-      if (data.url) {
-        window.location.assign(data.url);
+      if (res.ok) {
+        setLiTTCoins(data.balance);
+        setCurrentPlan(pack.tier);
+        showToast(`✅ ${pack.label} tier activated! +${pack.coins} LBC added.`, "success");
       } else {
-        showToast(data.error || "Checkout failed. Try again.", "error");
+        showToast(data.error || "Failed to activate tier. Try again.", "error");
       }
     } catch {
-      showToast("Network error during checkout.", "error");
+      showToast("Network error. Try again.", "error");
     }
   };
 
