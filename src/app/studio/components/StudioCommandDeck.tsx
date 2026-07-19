@@ -26,8 +26,10 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "./studio-command-deck.module.css";
+
+const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 loader.config({ monaco });
 
@@ -89,8 +91,8 @@ function clampPanelSize(panel: PanelId, value: unknown): number {
     : DEFAULT_LAYOUT.sizes[panel];
 }
 
-function Panel({ title, icon: Icon, children, className = "", action, panelId, collapsed, onCollapseAction, style }: { title: string; icon: LucideIcon; children: ReactNode; className?: string; action?: ReactNode; panelId?: PanelId; collapsed?: boolean; onCollapseAction?: () => void; style?: CSSProperties }) {
-  return <section className={`${styles.panel} ${className} ${collapsed ? styles.collapsed : ""}`} style={style} data-deck-panel={panelId}><header className={styles.panelHeader}><span className={styles.panelTitle}><Icon size={13} /> {title}</span><div className={styles.panelActions}>{action}{onCollapseAction && <button onClick={onCollapseAction} aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} title={`${collapsed ? "Expand" : "Collapse"} panel`}>{collapsed ? "+" : "−"}</button>}</div></header>{!collapsed && children}</section>;
+function Panel({ title, icon: Icon, children, className = "", action, panelId, collapsed, onCollapseAction, style, dataMobileId }: { title: string; icon: LucideIcon; children: ReactNode; className?: string; action?: ReactNode; panelId?: PanelId; collapsed?: boolean; onCollapseAction?: () => void; style?: CSSProperties; dataMobileId?: string }) {
+  return <section className={`${styles.panel} ${className} ${collapsed ? styles.collapsed : ""}`} style={style} data-deck-panel={panelId} data-mobile-id={dataMobileId}><header className={styles.panelHeader}><span className={styles.panelTitle}><Icon size={13} /> {title}</span><div className={styles.panelActions}>{action}{onCollapseAction && <button onClick={onCollapseAction} aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} title={`${collapsed ? "Expand" : "Collapse"} panel`}>{collapsed ? "+" : "−"}</button>}</div></header>{!collapsed && children}</section>;
 }
 
 function TerminalStrip({ collapsed, onCollapseAction, onOpenTerminalAction, style }: { collapsed: boolean; onCollapseAction: () => void; onOpenTerminalAction: () => void; style?: CSSProperties }) {
@@ -119,8 +121,9 @@ function EmptyState({ title, description, actionLabel, onAction, secondaryLabel 
 export default function StudioCommandDeck({ mode, onModeChangeAction, activeProjectId, onOpenProjectsAction, onOpenTerminalAction, conversation }: DeckProps) {
   const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
   const [draft, setDraft] = useState("// Demo draft — connect a project to edit real files.\nexport const studioMode = \"code\";\n");
+  const [mobilePanel, setMobilePanel] = useState<"editor" | "explorer" | "preview" | "review">("editor");
 
-  useEffect(() => {
+  useIsoLayoutEffect(() => {
     try {
       const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}") as Partial<LayoutState>;
       if (saved.version === 2) {
@@ -173,18 +176,19 @@ export default function StudioCommandDeck({ mode, onModeChangeAction, activeProj
         <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
       </header>
 
-      {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle}>
-        <Panel title="Explorer" icon={FolderOpen} panelId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
+      {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
+        <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
+        <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
           {activeProjectId ? <div className={styles.fileTree}><div className={styles.fileRow}><FileCode2 size={13} /> File index loading is unavailable</div></div> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
         </Panel>
         {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
         <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
-          <Panel title="Editor" icon={Braces} style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><MonacoEditor height="100%" language="typescript" value={draft} theme="vs-dark" onChange={(value) => setDraft(value ?? "")} options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }} /></div></Panel>
+          <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><MonacoEditor height="100%" language="typescript" value={draft} theme="vs-dark" onChange={(value) => setDraft(value ?? "")} options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }} /></div></Panel>
           {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
-          <Panel title="Live preview" icon={Monitor} panelId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
+          <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
         </div>
         {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
-        <Panel title="Review" icon={GitBranch} panelId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
+        <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
         {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
         <TerminalStrip collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} onOpenTerminalAction={onOpenTerminalAction} style={{ gridColumn: "1 / -1", gridRow: 3 }} />
       </div>}
