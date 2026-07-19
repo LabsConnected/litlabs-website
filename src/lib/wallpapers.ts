@@ -3,6 +3,7 @@
 
 export type WallpaperId =
   | 'default' | 'gradient' | 'mesh' | 'dark' | 'custom'
+  | 'afterglow' | 'liquid-signal' | 'biolume-canopy'
   | 'nebula' | 'cyberpunk' | 'aurora' | 'matrix' | 'sunset'
   | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass'
   | 'lava' | 'crystal' | 'tokyo' | 'solar' | 'honeycomb';
@@ -18,6 +19,45 @@ export interface Wallpaper {
 }
 
 export const WALLPAPERS: Wallpaper[] = [
+  {
+    id: 'afterglow',
+    name: 'LiTT Afterglow',
+    description: 'Violet auroras over a city of tomorrow',
+    category: 'tech',
+    preview: 'linear-gradient(180deg, transparent 35%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp") center / cover no-repeat',
+    fullStyle: {
+      backgroundImage: 'linear-gradient(115deg, rgba(2, 3, 14, .48), rgba(2, 3, 14, .16) 58%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp")',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+    }
+  },
+  {
+    id: 'liquid-signal',
+    name: 'Liquid Signal',
+    description: 'Iridescent glass sculpted in deep space',
+    category: 'abstract',
+    preview: 'linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, .35)), url("/wallpapers/liquid-signal.webp") center / cover no-repeat',
+    fullStyle: {
+      backgroundImage: 'linear-gradient(110deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .12) 62%, rgba(0, 0, 0, .32)), url("/wallpapers/liquid-signal.webp")',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+    }
+  },
+  {
+    id: 'biolume-canopy',
+    name: 'Biolume Canopy',
+    description: 'A quiet world glowing beyond midnight',
+    category: 'nature',
+    preview: 'linear-gradient(180deg, transparent 35%, rgba(1, 8, 20, .38)), url("/wallpapers/biolume-canopy.webp") center / cover no-repeat',
+    fullStyle: {
+      backgroundImage: 'linear-gradient(110deg, rgba(1, 7, 18, .48), rgba(1, 7, 18, .12) 58%, rgba(1, 7, 18, .4)), url("/wallpapers/biolume-canopy.webp")',
+      backgroundSize: 'cover',
+      backgroundPosition: 'center',
+      backgroundAttachment: 'fixed',
+    }
+  },
   {
     id: 'default',
     name: 'Midnight',

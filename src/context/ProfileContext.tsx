@@ -10,28 +10,9 @@ import {
   ReactNode,
 } from "react";
 import { useAppUser } from "@/hooks/useClerkAuth";
+import type { WallpaperId } from "@/lib/wallpapers";
 
-export type WallpaperId =
-  | "default"
-  | "gradient"
-  | "mesh"
-  | "dark"
-  | "custom"
-  | "nebula"
-  | "cyberpunk"
-  | "aurora"
-  | "matrix"
-  | "sunset"
-  | "ocean"
-  | "forest"
-  | "cosmic"
-  | "minimal"
-  | "glass"
-  | "lava"
-  | "crystal"
-  | "tokyo"
-  | "solar"
-  | "honeycomb";
+export type { WallpaperId } from "@/lib/wallpapers";
 
 export interface UserProfile {
   displayName: string;
