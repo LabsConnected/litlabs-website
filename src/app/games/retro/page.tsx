@@ -20,6 +20,7 @@ import {
   X,
 } from "lucide-react";
 import PageShell from "@/components/PageShell";
+import QuickPlayLibrary from "@/components/games/QuickPlayLibrary";
 import {
   addRetroGame,
   deleteRetroGame,
@@ -224,6 +225,27 @@ export default function RetroArcadePage() {
           </aside>
 
           <section className="min-w-0 space-y-4">
+            <QuickPlayLibrary
+              onAdded={(recordId) => {
+                listRetroGames()
+                  .then(setGames)
+                  .catch((error) =>
+                    setMessage(
+                      error instanceof Error
+                        ? error.message
+                        : "Could not refresh your arcade.",
+                    ),
+                  );
+                setMessage(
+                  "Quick Play cartridge added. Launching the player…",
+                );
+                // The library fetch above keeps the list fresh; the router
+                // push happens inside the component, so this is a no-op
+                // safety net.
+                void recordId;
+              }}
+            />
+
             {recent && (
               <Link
                 href={`/games/retro/play/${recent.id}`}
