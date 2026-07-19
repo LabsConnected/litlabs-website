@@ -506,9 +506,9 @@ export default function Gallery() {
                   src={featured.imageUrl}
                   alt={featured.title}
                   fill
-                  quality={90}
                   className="object-cover transition-transform duration-[2s] ease-out group-hover:scale-105"
                   priority
+                  unoptimized
                   sizes="100vw"
                   onError={() =>
                     setBrokenImages((prev) =>
@@ -690,8 +690,8 @@ export default function Gallery() {
                         src={item.imageUrl}
                         alt={item.title}
                         fill
-                        quality={80}
                         className="object-cover"
+                        unoptimized
                         sizes="180px"
                         onError={() =>
                           setBrokenImages((prev) =>
@@ -1329,8 +1329,8 @@ export default function Gallery() {
                       src={item.imageUrl}
                       alt={item.title}
                       fill
-                      quality={90}
                       className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
+                      unoptimized
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
                       onError={() =>
                         setBrokenImages((prev) =>

@@ -99,9 +99,8 @@ export default function Lightbox({
           alt={current.alt || "Gallery image"}
           width={2048}
           height={2048}
-          quality={95}
           className="max-w-full max-h-[70vh] object-contain rounded-lg"
-          sizes="90vw"
+          unoptimized
           priority
         />
         {current.caption && (
