@@ -3,6 +3,9 @@
 import dynamic from "next/dynamic";
 import { loader } from "@monaco-editor/react";
 import * as monaco from "monaco-editor";
+// editor.all registers all Monaco services (undoRedoService, modelService, etc.)
+// that editor.main (the default entry) may not include when tree-shaken by Turbopack
+import "monaco-editor/esm/vs/editor/editor.all";
 import {
   Activity,
   Bell,
@@ -31,6 +34,8 @@ import styles from "./studio-command-deck.module.css";
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
+// Use locally bundled monaco-editor instead of jsDelivr CDN
+// The side-effect import of editor.all above ensures all services are registered
 loader.config({ monaco });
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
