@@ -92,7 +92,7 @@ export default function ImageLightbox({
 
   // Reset zoom/position when image changes
   useEffect(() => {
-    setZoom(1); // eslint-disable-line react-hooks/set-state-in-effect -- intentional reset on image change
+    setZoom(1);
     setPosition({ x: 0, y: 0 });
     setRotation(0);
     setFlip(false);

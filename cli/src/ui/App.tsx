@@ -1,5 +1,4 @@
 import React, { useState } from "react";
-import process from "node:process";
 import { Box, Text, useApp, useInput } from "ink";
 import TextInput from "ink-text-input";
 import Spinner from "ink-spinner";

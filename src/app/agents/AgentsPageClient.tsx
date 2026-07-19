@@ -167,7 +167,6 @@ export default function AgentsPageClient() {
           <div className="mb-3 flex items-center justify-between"><h2 className="text-sm font-black uppercase tracking-[.16em]" style={{ color: T.textMuted }}>Crew</h2><Link href="/marketplace" className="text-[10px] font-bold" style={{ color: T.accentColor }}>Browse agents <ArrowRight size={10} className="inline" /></Link></div>
           <div className="grid gap-4 lg:grid-cols-2">
             {CORE_AGENTS.map((agent) => {
-              const Icon = Brain;
               const agentMissions = missions.filter((mission) => mission.assigned_to === agent.id);
               const running = agentMissions.find((mission) => mission.status === "processing");
               const queued = agentMissions.filter((mission) => mission.status === "queued").length;

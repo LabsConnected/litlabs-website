@@ -553,7 +553,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             }}
           >
             <header className="flex shrink-0 items-center gap-3 border-b px-4 py-4" style={{ borderColor: resolvedColors.borderColor + "25" }}>
-              {profile?.avatarUrl ? <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={profile.avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" /></> : <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>}
+              {profile?.avatarUrl ? <Image src={profile.avatarUrl} alt="" width={44} height={44} className="h-11 w-11 rounded-full object-cover" unoptimized /> : <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>}
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-black" style={{ color: resolvedColors.textColor }}>{profile?.displayName || "Member"}</div><div className="truncate text-[10px]" style={{ color: resolvedColors.textMuted }}>@{profile?.username || "creator"}</div></div>
               <button onClick={() => setMobileOpen(false)} className="rounded-xl p-2" style={{ color: resolvedColors.textMuted }} aria-label="Close menu"><X size={18} /></button>
             </header>

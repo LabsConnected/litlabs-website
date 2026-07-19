@@ -265,7 +265,7 @@ function LITTTerminalShellInner({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
   const [micSetupOpen, setMicSetupOpen] = useState(false);
-  const [terminalBlocks, setTerminalBlocks] = useState<TerminalBlock[]>([]);
+  const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const terminalRef = useRef<TerminalToolHandle | null>(null);
   const activeTerminalBlockRef = useRef<string | null>(null);
   type ActiveCommand = {
