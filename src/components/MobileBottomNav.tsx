@@ -23,53 +23,42 @@ export default function MobileBottomNav() {
     <>
       <nav
         aria-label="Mobile navigation"
-        className="mobile-bottom-nav md:hidden fixed bottom-0 left-0 right-0 z-50 border-t backdrop-blur-xl"
-        style={{ borderColor: `${T.borderColor}20` }}
+        className="mobile-bottom-nav md:hidden fixed z-[100] overflow-hidden rounded-2xl border backdrop-blur-xl"
+        style={{
+          borderColor: `${T.borderColor}35`,
+          boxShadow: "0 14px 45px rgba(0,0,0,.48)",
+        }}
       >
         <div
-          className="flex items-center justify-around px-2 py-1"
-          style={{ backgroundColor: `${T.bgColor}ee` }}
+          className="flex items-center justify-around px-1 py-1.5"
+          style={{ backgroundColor: `${T.bgColor}f2` }}
         >
           {primary.map((item) => {
             const Icon = item.icon;
             const active = item.href !== "#" && isActive(item.href);
-            const isStudio = item.label === "Studio";
             return (
               <Link
                 key={item.label}
                 href={item.href}
-                className={`relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all ${isStudio ? "-mt-5" : ""}`}
+                className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition-all"
                 style={{
-                  color: active
-                    ? T.accentColor
-                    : isStudio
-                      ? T.bgColor
-                      : T.textMuted,
+                  color: active ? T.accentColor : T.textMuted,
                 }}
               >
-                {active && !isStudio && (
+                {active && (
                   <span
                     className="absolute inset-0 rounded-xl opacity-15"
                     style={{ backgroundColor: T.accentColor }}
                   />
                 )}
-                {isStudio ? (
-                  <span
-                    className="grid h-12 w-12 place-items-center rounded-full shadow-[0_0_24px_rgba(139,92,246,.5)]"
-                    style={{ backgroundColor: T.accentColor }}
-                  >
-                    <Icon size={24} aria-hidden="true" />
-                  </span>
-                ) : (
-                  <Icon size={20} aria-hidden="true" />
-                )}
+                <Icon size={20} aria-hidden="true" />
                 <span className="text-[9px] font-black">{item.label}</span>
               </Link>
             );
           })}
           <button
             onClick={toggle}
-            className="relative flex min-w-14 flex-col items-center gap-0.5 px-2 py-2 rounded-xl transition-all"
+            className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition-all"
             style={{
               color: T.textMuted,
             }}

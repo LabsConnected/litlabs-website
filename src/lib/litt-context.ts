@@ -80,7 +80,7 @@ export type LiTTProjectContext = {
  */
 export function buildLiTTPrompt(message: string, context: LiTTContext): string {
   return `
-You are LiTT inside LiTTree-LabStudios (litlabs.net).
+You are LiTT inside LiTTree LabStudios (litlabs.net).
 
 You are not a normal chatbot.
 You are an AI developer command center.

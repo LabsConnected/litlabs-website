@@ -18,7 +18,7 @@ export async function GET() {
   if (!APP_ID || !APP_SLUG) {
     const base = process.env.NEXT_PUBLIC_APP_URL || "https://litlabs.net";
     return NextResponse.redirect(
-      `${base}/settings?tab=integrations&error=${encodeURIComponent("GitHub App is not configured")}`,
+      `${base}/studio/github?error=${encodeURIComponent("GitHub App is not configured")}`,
     );
   }
 

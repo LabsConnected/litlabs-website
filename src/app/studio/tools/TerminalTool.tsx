@@ -25,8 +25,10 @@
  */
 
 import {
+  forwardRef,
   useCallback,
   useEffect,
+  useImperativeHandle,
   useMemo,
   useRef,
   useState,
@@ -83,7 +85,7 @@ const LOCAL_HELP = [
 
 const LOCAL_FS: Record<string, string> = {
   "/workspace/README.md":
-    "# LiTTree Lab Studios\n\nStudio OS for AI agents. Project Loops, real-time terminal, and more.\n",
+    "# LiTTree LabStudios\n\nStudio OS for AI agents. Project Loops, real-time terminal, and more.\n",
   "/workspace/package.json":
     '{\n  "name": "litlabs-website",\n  "version": "0.1.0",\n  "private": true,\n  "scripts": {\n    "dev": "next dev --turbo",\n    "build": "next build"\n  }\n}\n',
   "/workspace/.env.local":
@@ -135,13 +137,13 @@ function runLocalCommand(line: string): string[] {
     case "uname":
       if (args[0] === "-a") {
         return [
-          "LiTTree-LabStudios 1.0.0 #1 SMP local time zone browser-xterm",
+          "LiTTree LabStudios 1.0.0 #1 SMP local time zone browser-xterm",
           "Build: xterm.js + node-pty + socket.io",
           "Arch: x86_64 (browser)",
           "Kernel: Vercel Edge / Next.js 16",
         ];
       }
-      return ["LiTTree-LabStudios"];
+      return ["LiTTree LabStudios"];
     case "node":
       if (args[0] === "-v" || args[0] === "--version") return ["v22.22.0"];
       return ["node: command not implemented in Local Shell (use Connect for real bash)"];
@@ -151,7 +153,7 @@ function runLocalCommand(line: string): string[] {
     case "neofetch":
       return [
         "       ╭─────────────────────────╮",
-        "       │ \x1b[36mLiTTree Lab Studios\x1b[0m     │",
+        "       │ \x1b[36mLiTTree LabStudios\x1b[0m     │",
         "       │ \x1b[2m(studio: in-browser)\x1b[0m    │",
         "       ╰─────────────────────────╯",
         "  \x1b[2mOS\x1b[0m      Local LiTT Shell 1.0",
@@ -197,25 +199,57 @@ function runLocalCommand(line: string): string[] {
 
 /* ── React component ─────────────────────────────────────────── */
 
-export default function TerminalTool() {
-  const { resolvedColors: T } = useTheme();
+export interface TerminalToolHandle {
+  runCommand: (command: string) => void;
+  getSessionId: () => string | null;
+  clear: () => void;
+}
 
-  const containerRef = useRef<HTMLDivElement | null>(null);
-  const termRef = useRef<Terminal | null>(null);
-  const fitRef = useRef<FitAddon | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+type TerminalToolProps = {
+  initialMode?: Mode;
+  onOutput?: (data: string) => void;
+  onSessionChange?: (sessionId: string | null) => void;
+};
 
-  // Local shell state
-  const localLineRef = useRef<string>("");
-  const localHistoryRef = useRef<string[]>([]);
-  const localHistIndexRef = useRef<number>(-1);
+const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
+  function TerminalTool({ initialMode = "local", onOutput, onSessionChange }, ref) {
+    const { resolvedColors: T } = useTheme();
 
-  const [status, setStatus] = useState<Status>("idle");
-  const [error, setError] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>("local");
-  const [sessionId, setSessionId] = useState<string | null>(null);
+    const containerRef = useRef<HTMLDivElement | null>(null);
+    const termRef = useRef<Terminal | null>(null);
+    const fitRef = useRef<FitAddon | null>(null);
+    const socketRef = useRef<Socket | null>(null);
+    const pendingRemoteCommandRef = useRef<string | null>(null);
 
-  const writePrompt = useCallback(() => {
+    // Local shell state
+    const localLineRef = useRef<string>("");
+    const localHistoryRef = useRef<string[]>([]);
+    const localHistIndexRef = useRef<number>(-1);
+
+    const [status, setStatus] = useState<Status>("idle");
+    const [error, setError] = useState<string | null>(null);
+    const [mode, setMode] = useState<Mode>(initialMode);
+    const [sessionId, setSessionId] = useState<string | null>(null);
+
+    const modeRef = useRef(mode);
+    const sessionIdRef = useRef(sessionId);
+    const onOutputRef = useRef(onOutput);
+    const onSessionChangeRef = useRef(onSessionChange);
+
+    useEffect(() => {
+      modeRef.current = mode;
+    }, [mode]);
+    useEffect(() => {
+      sessionIdRef.current = sessionId;
+    }, [sessionId]);
+    useEffect(() => {
+      onOutputRef.current = onOutput;
+    }, [onOutput]);
+    useEffect(() => {
+      onSessionChangeRef.current = onSessionChange;
+    }, [onSessionChange]);
+
+    const writePrompt = useCallback(() => {
     if (!termRef.current) return;
     termRef.current.write(
       `\x1b[36m${LOCAL_USER}\x1b[0m:\x1b[34m${LOCAL_PWD}\x1b[0m$ `,
@@ -236,8 +270,12 @@ export default function TerminalTool() {
           if (line.trim().length > 0) {
             localHistoryRef.current.push(line);
             localHistIndexRef.current = localHistoryRef.current.length;
+            onOutputRef.current?.(line + "\n");
             const output = runLocalCommand(line);
-            for (const o of output) term.writeln(o);
+            for (const o of output) {
+              term.writeln(o);
+              onOutputRef.current?.(o + "\n");
+            }
           }
           writePrompt();
         } else if (code === 127) {
@@ -275,6 +313,7 @@ export default function TerminalTool() {
     setStatus("connected");
     setError(null);
     setSessionId(null);
+    onSessionChangeRef.current?.(null);
     for (const line of LOCAL_WELCOME) term.writeln(line);
     term.write(`\x1b[36m${LOCAL_USER}\x1b[0m:\x1b[34m${LOCAL_PWD}\x1b[0m$ `);
   }, []);
@@ -424,19 +463,29 @@ export default function TerminalTool() {
             rows: termRef.current.rows,
           });
         }
+        const pendingCommand = pendingRemoteCommandRef.current;
+        if (pendingCommand) {
+          socket.emit("terminal:input", pendingCommand + "\r");
+          pendingRemoteCommandRef.current = null;
+        }
       });
 
       socket.on("session:ready", (payload: { sessionId?: string }) => {
-        if (payload?.sessionId) setSessionId(payload.sessionId);
+        if (payload?.sessionId) {
+          setSessionId(payload.sessionId);
+          onSessionChangeRef.current?.(payload.sessionId);
+        }
       });
 
       socket.on("terminal:output", (data: string) => {
         termRef.current?.write(data);
+        onOutputRef.current?.(data);
       });
 
       socket.on("terminal:error", (msg: string) => {
         termRef.current?.writeln(`\r\n\x1b[31m⚠ ${msg}\x1b[0m\r\n`);
         setError(msg);
+        onOutputRef.current?.(msg + "\n");
       });
 
       socket.on("disconnect", (reason) => {
@@ -444,6 +493,7 @@ export default function TerminalTool() {
         termRef.current?.writeln(
           `\r\n\x1b[33m⚡ Disconnected: ${reason}\x1b[0m\r\n`,
         );
+        onSessionChangeRef.current?.(null);
       });
 
       socket.on("connect_error", (err) => {
@@ -452,6 +502,7 @@ export default function TerminalTool() {
         termRef.current?.writeln(
           `\r\n\x1b[31m✗ Connection error: ${err.message}\x1b[0m\r\n`,
         );
+        onOutputRef.current?.(err.message + "\n");
       });
     } catch (err) {
       const message = err instanceof Error ? err.message : "Connection failed";
@@ -483,6 +534,31 @@ export default function TerminalTool() {
       socketRef.current = null;
     };
   }, []);
+
+  /* ── Expose imperative handle for Builder ───────────────────── */
+  useImperativeHandle(ref, () => ({
+    runCommand(command: string) {
+      const term = termRef.current;
+      if (!term) return;
+      if (modeRef.current === "remote" && socketRef.current?.connected) {
+        socketRef.current.emit("terminal:input", command + "\r");
+      } else {
+        // Commands initiated by Studio must use the authenticated PTY. Queue
+        // until the socket connects so build/run actions are real executions,
+        // not simulated Local LiTT Shell responses.
+        pendingRemoteCommandRef.current = command;
+        term.writeln(`\r\n\x1b[36mConnecting to workspace to run: ${command}\x1b[0m`);
+        void connectRemote();
+      }
+      onOutputRef.current?.(command + "\n");
+    },
+    getSessionId() {
+      return sessionIdRef.current;
+    },
+    clear() {
+      termRef.current?.clear();
+    },
+  }), [connectRemote]);
 
   /* ── Render ─────────────────────────────────────────────────── */
   const statusColor = useMemo(() => {
@@ -663,4 +739,6 @@ export default function TerminalTool() {
       )}
     </div>
   );
-}
+});
+
+export default TerminalTool;

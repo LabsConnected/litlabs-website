@@ -255,7 +255,7 @@ export default function AgentPage() {
             </div>
           </div>
           <div className="mt-auto pt-4 border-t" style={{ borderColor: T.borderColor + "20" }}>
-            <Link href="/studio?tool=agents"
+            <Link href="/studio"
               className="block w-full py-2 rounded-xl text-xs font-black text-center transition-all hover:scale-[1.02]"
               style={{ backgroundColor: agent.color + "20", color: agent.color, border: `1px solid ${agent.color}30` }}>
               Open in Studio Terminal

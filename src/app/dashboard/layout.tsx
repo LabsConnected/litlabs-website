@@ -10,7 +10,7 @@ export const metadata: Metadata = {
     follow: true,
   },
   openGraph: {
-    title: "LiTTree-LabStudios Dashboard",
+    title: "LiTTree LabStudios Dashboard",
     description:
       "Your personal LiTT command center. Direct your agents, track real workspace stats, and ship what matters.",
     type: "website",

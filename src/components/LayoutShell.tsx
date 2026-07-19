@@ -62,7 +62,7 @@ export default function LayoutShell({
         <AnimatedBackgroundWrapper />
         <div className="relative z-10 flex h-dvh w-full max-w-full flex-col overflow-hidden">
           {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
-          <main className="flex h-full min-h-0 w-full min-w-0 flex-col overflow-hidden">
+          <main className="flex min-h-0 w-full min-w-0 flex-1 flex-col overflow-hidden">
             {children}
           </main>
           <CookieConsent />
@@ -78,7 +78,7 @@ export default function LayoutShell({
       <div className="relative z-10 flex min-h-dvh flex-col">
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <TopNavbar />
-        <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden pb-[calc(4.5rem+env(safe-area-inset-bottom))] md:pb-0">
+        <main className="flex-1 w-full max-w-full min-w-0 overflow-x-hidden pb-[calc(88px+env(safe-area-inset-bottom))] md:pb-0">
           {children}
         </main>
         <FloatingChat />

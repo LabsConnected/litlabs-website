@@ -1,14 +1,40 @@
 import type { NextConfig } from "next";
 
+const isDev = process.env.NODE_ENV === "development";
+
+const scriptSrcBase = [
+  "'self'",
+  "'unsafe-inline'",
+  "https://*.clerk.com",
+  "https://clerk.litlabs.net",
+  "https://*.clerk.accounts.dev",
+  "https://js.clerk.dev",
+  "https://accounts.google.com",
+  "https://www.googletagmanager.com",
+  "https://challenges.cloudflare.com",
+  "https://cdn-cgi.cloudflare.com",
+  "https://static.cloudflareinsights.com",
+  "https://litlabs.net",
+  "https://cdn.emulatorjs.org",
+];
+
+if (isDev) {
+  scriptSrcBase.push("'unsafe-eval'");
+  // Vercel Toolbar only needed in dev/preview
+  scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
+}
+
+const vercelLiveSrc = isDev ? " https://vercel.live https://*.vercel.app" : "";
+
 const CSP_DIRECTIVES = [
   "default-src 'self'",
-  "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://*.vercel.app https://cdn.emulatorjs.org",
-  "script-src-elem 'self' 'unsafe-inline' 'unsafe-eval' https://*.clerk.com https://clerk.litlabs.net https://*.clerk.accounts.dev https://js.clerk.dev https://accounts.google.com https://www.googletagmanager.com https://challenges.cloudflare.com https://cdn-cgi.cloudflare.com https://static.cloudflareinsights.com https://litlabs.net https://vercel.live https://*.vercel.app https://cdn.emulatorjs.org",
+  `script-src ${scriptSrcBase.join(" ")}`,
+  `script-src-elem ${scriptSrcBase.join(" ")}`,
   "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org",
-  "img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://*.fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://vercel.live https://*.vercel.app https://cdn.emulatorjs.org",
+  `img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://*.fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org${vercelLiveSrc}`,
   "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org",
-  "connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://vercel.live https://*.vercel.app https://cdn.emulatorjs.org https://www.google-analytics.com https://*.google-analytics.com",
+  `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://www.google-analytics.com https://*.google-analytics.com${vercelLiveSrc}`,
   "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org",
   "worker-src 'self' blob: data: https://litlabs.net https://cdn.emulatorjs.org",
   "media-src 'self' blob: data:",
@@ -203,13 +229,25 @@ const nextConfig: NextConfig = {
 
   async redirects() {
     return [
-      { source: "/builder", destination: "/studio", permanent: true },
-      {
-        source: "/generate",
-        destination: "/studio?tool=image",
-        permanent: false,
-      },
-      { source: "/flow", destination: "/studio?tool=flow", permanent: false },
+      // Legacy Builder/Studio routes → unified /studio (temporary while architecture evolves)
+      { source: "/builder", destination: "/studio", permanent: false },
+      { source: "/ai-builder", destination: "/studio", permanent: false },
+      { source: "/chat", destination: "/studio", permanent: false },
+      { source: "/code", destination: "/studio?intent=code", permanent: false },
+      { source: "/litt", destination: "/studio", permanent: false },
+      { source: "/litt-terminal", destination: "/studio?panel=terminal", permanent: false },
+      { source: "/flow", destination: "/studio?intent=loop", permanent: false },
+      { source: "/generate", destination: "/studio?intent=image", permanent: false },
+      { source: "/studio/image", destination: "/studio?intent=image", permanent: false },
+
+      // Legacy agent routes → /agents or /studio
+      { source: "/agent", destination: "/agents", permanent: false },
+      { source: "/agent-chat", destination: "/studio?intent=agent", permanent: false },
+
+      // Retired pages — permanent redirects
+      { source: "/creator", destination: "/dashboard", permanent: true },
+      { source: "/landing", destination: "/", permanent: true },
+      { source: "/login", destination: "/sign-in", permanent: true },
     ];
   },
 

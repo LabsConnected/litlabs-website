@@ -5,7 +5,7 @@
 * automatically injected into every LLM call.
 *
 * Goal: the assistant should always know — without being told — that it is
-* operating inside the **litlabs.net / LiTTree-LabStudios** codebase, what the
+* operating inside the **litlabs.net / LiTTree LabStudios** codebase, what the
 * stack is, where the subsystems live, and which commands/conventions to use.
 *
 * Two layers:
@@ -25,7 +25,7 @@
 
 export const LITLABS_IDENTITY = `# PROJECT IDENTITY (always active)
 
-You are operating INSIDE the **litlabs.net / LiTTree-LabStudios** codebase.
+You are operating INSIDE the **litlabs.net / LiTTree LabStudios** codebase.
 This is the ONLY project you are working on with the user right now. When the
 user says "we", "the app", "our system", "the site", "this", "the project",
 "our code", "our stack" — they mean **litlabs.net**. Never invent or assume
@@ -96,6 +96,23 @@ a different project.
 - **prds/** — product requirement docs · **prompts/** — agent prompt templates
   · **docs/** — engineering notes · **scripts/** — ops scripts
 
+## Studio terminal capabilities (you have these RIGHT NOW)
+- Studio has a **real embedded terminal** connected to an authenticated PTY.
+- You CAN run builds, lint, tests, and shell commands directly from Studio.
+- When the user asks you to build, run, lint, or test something, tell them to
+  type it as a command in Studio:
+  - \`$ pnpm build\` or \`/run pnpm build\` — runs a build in the terminal
+  - \`$ pnpm lint\` or \`/run pnpm lint\` — runs lint
+  - \`$ pnpm test\` or \`/run pnpm test\` — runs tests
+  - \`$ <any command>\` or \`/run <any command>\` — runs any shell command
+- Natural language also works: "run the build", "build the project",
+  "build from here" — Studio detects the intent and runs \`pnpm build\`
+  automatically in the terminal panel.
+- \`/terminal\` opens or focuses the terminal panel.
+- NEVER say "I can't execute build commands" or "I can't run commands from
+  this environment." You CAN — through the Studio terminal. Tell the user to
+  type the command or say it naturally.
+
 ## Commands (use these exact forms)
 - Dev server: \`pnpm dev\` (Turbopack on :3000) · fallback \`pnpm dev:webpack\`
 - Build: \`pnpm build\` · Lint: \`pnpm lint\` · Test: \`pnpm test\` (Vitest + jsdom)
@@ -141,7 +158,7 @@ a different project.
 /* ------------------------------------------------------------------ */
 
 export const LITLABS_IDENTITY_SNIPPET =
-  "litlabs.net · LiTTree-LabStudios · Next.js 16 / React 19 / TS strict · Supabase · Vercel · pnpm 9 · " +
+  "litlabs.net · LiTTree LabStudios · Next.js 16 / React 19 / TS strict · Supabase · Vercel · pnpm 9 · " +
   "the only project we're working on right now.";
 
 /* ------------------------------------------------------------------ */

@@ -170,7 +170,7 @@ export default function PersonalDashboard({
       items.push({
         label:
           task.error || `${task.agent?.display_name || "Agent"} task failed`,
-        href: "/studio?tool=agents",
+        href: "/studio",
         tone: "#fb7185",
       }),
     );
@@ -399,13 +399,13 @@ export default function PersonalDashboard({
                   </p>
                   <div className="mt-2 flex gap-2">
                     <Link
-                      href="/studio?tool=agents"
+                      href="/studio"
                       className="rounded-lg bg-white/5 px-2 py-1 text-[9px] font-bold"
                     >
                       Review
                     </Link>
                     <Link
-                      href="/studio?tool=agents"
+                      href="/studio"
                       className="rounded-lg bg-cyan-400/10 px-2 py-1 text-[9px] font-bold text-cyan-300"
                     >
                       Open in Studio
@@ -417,7 +417,7 @@ export default function PersonalDashboard({
               data.agents.slice(0, 4).map((entry) => (
                 <Link
                   key={entry.id}
-                  href="/studio?tool=agents"
+                  href="/studio"
                   className="flex items-center justify-between rounded-xl border border-white/8 p-3"
                 >
                   <span>
@@ -449,10 +449,10 @@ export default function PersonalDashboard({
             {[
               {
                 label: "Generate image",
-                href: "/studio?tool=image",
+                href: "/studio",
                 icon: ImageIcon,
               },
-              { label: "Run an agent", href: "/studio?tool=agents", icon: Bot },
+              { label: "Run an agent", href: "/studio", icon: Bot },
               { label: "Open projects", href: "/projects", icon: FolderKanban },
               { label: "Deployments", href: "/deployments", icon: Rocket },
               { label: "Facebook post", href: "/facebook", icon: Send },
@@ -479,13 +479,13 @@ export default function PersonalDashboard({
               data?.projects.filter((p) => p.status !== "offline").length ?? 0,
               "/projects",
             ],
-            ["Running agents", activeTasks.length, "/studio?tool=agents"],
-            ["Tasks completed", completedTasks.length, "/studio?tool=agents"],
+            ["Running agents", activeTasks.length, "/studio"],
+            ["Tasks completed", completedTasks.length, "/studio"],
             ["Credits", balance ?? "—", "/wallet"],
             ["Deployments", data?.deployments.length ?? 0, "/deployments"],
             ["Assets", data?.media.length ?? 0, "/gallery"],
             ["Storage", "View", "/gallery"],
-            ["Time saved", `${timeSaved}m`, "/studio?tool=agents"],
+            ["Time saved", `${timeSaved}m`, "/studio"],
           ].map(([label, value, href]) => (
             <Link
               key={label}
@@ -562,7 +562,7 @@ export default function PersonalDashboard({
                 id: task.id,
                 label: `${task.agent?.display_name || "Agent"} completed a task`,
                 time: task.completed_at || task.created_at,
-                href: "/studio?tool=agents",
+                href: "/studio",
               })),
               ...(data?.media.map((item) => ({
                 id: item.id,

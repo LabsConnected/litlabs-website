@@ -455,7 +455,7 @@ function Footer() {
             Terms
           </Link>
         </div>
-        <div>{("\u00A9 " + new Date().getFullYear() + " LiTTree Labs. Beta.")}</div>
+        <div>{("\u00A9 " + new Date().getFullYear() + " LiTTree LabStudios. Beta.")}</div>
       </div>
     </footer>
   );

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
@@ -195,7 +195,7 @@ function defaultConfig(
 
 function toYAML(nodes: PipelineNode[]): string {
   const lines: string[] = [
-    "# LiTTree-LabStudios Pipeline Protocol",
+    "# LiTTree LabStudios Pipeline Protocol",
     `# Generated: ${new Date().toISOString()}`,
     `# ${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}`,
     "",

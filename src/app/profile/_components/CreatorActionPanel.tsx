@@ -5,7 +5,7 @@ import { Sparkles, FolderPlus, Bot, Image as ImageIcon } from "lucide-react";
 
 const ACTIONS = [
   { label: "New Project", href: "/projects/new", icon: FolderPlus, color: "#a855f7" },
-  { label: "Generate", href: "/studio?tool=image", icon: ImageIcon, color: "#30e7ff" },
+  { label: "Generate", href: "/studio", icon: ImageIcon, color: "#30e7ff" },
   { label: "Create Agent", href: "/agents/new", icon: Bot, color: "#ec4899" },
   { label: "Open Studio", href: "/studio", icon: Sparkles, color: "#34d399" },
 ];

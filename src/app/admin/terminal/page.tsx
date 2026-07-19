@@ -141,7 +141,7 @@ export default function AdminTerminal() {
     {
       id: makeId(),
       type: "info",
-      text: "LiTTree-LabStudios Admin Terminal — commands run as the server OS user.",
+      text: "LiTTree LabStudios Admin Terminal — commands run as the server OS user.",
       ts: Date.now(),
     },
     {

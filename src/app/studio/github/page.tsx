@@ -1,19 +1,30 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { Loader2, ArrowRight, AlertCircle } from "lucide-react";
+import { Loader2, ArrowRight, AlertCircle, CheckCircle2 } from "lucide-react";
+
+interface Installation {
+  id: number;
+  account: string | null;
+  repositorySelection: string;
+  repositoriesUrl: string;
+}
 
 export default function GitHubSetupPage() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { tokens } = useTheme();
-  const [status, setStatus] = useState<
-    "loading" | "ready" | "unconfigured" | "error"
-  >("loading");
+  const [loading, setLoading] = useState(true);
+  const [installations, setInstallations] = useState<Installation[]>([]);
   const [error, setError] = useState<string | null>(null);
+  const [unconfigured, setUnconfigured] = useState(false);
+
+  const installedParam = searchParams.get("installed");
+  const errorParam = searchParams.get("error");
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -22,24 +33,32 @@ export default function GitHubSetupPage() {
       return;
     }
 
-    // Check if the GitHub App is configured on the server.
+    if (errorParam) {
+      setError(errorParam);
+      setLoading(false);
+      return;
+    }
+
     fetch("/api/github/installations")
       .then(async (res) => {
         if (res.status === 503) {
-          setStatus("unconfigured");
+          setUnconfigured(true);
+          setLoading(false);
           return;
         }
         if (!res.ok) {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "GitHub connection failed");
         }
-        setStatus("ready");
+        const data = await res.json();
+        setInstallations(data.installations || []);
+        setLoading(false);
       })
       .catch((err) => {
-        setStatus("error");
         setError(err instanceof Error ? err.message : "Unknown error");
+        setLoading(false);
       });
-  }, [isLoaded, isSignedIn, router]);
+  }, [isLoaded, isSignedIn, router, errorParam]);
 
   const startInstall = () => {
     window.location.href = "/api/github/install";
@@ -82,17 +101,29 @@ export default function GitHubSetupPage() {
           deploy repositories on your behalf.
         </p>
 
-        {status === "loading" && (
+        {installedParam && (
+          <div
+            className="mb-4 flex items-center justify-center gap-2 rounded-xl border p-3 text-xs font-bold"
+            style={{
+              borderColor: `${tokens.primary}40`,
+              backgroundColor: `${tokens.primary}10`,
+              color: tokens.primary,
+            }}
+          >
+            <CheckCircle2 size={14} /> GitHub App installed (ID: {installedParam})
+          </div>
+        )}
+
+        {loading && (
           <div
             className="flex items-center justify-center gap-2 text-xs"
             style={{ color: tokens.textMuted }}
           >
-            <Loader2 size={14} className="animate-spin" /> Checking
-            configuration…
+            <Loader2 size={14} className="animate-spin" /> Checking configuration…
           </div>
         )}
 
-        {status === "unconfigured" && (
+        {unconfigured && (
           <div className="space-y-4 text-left">
             <div
               className="rounded-xl border border-dashed p-4 text-xs"
@@ -110,7 +141,7 @@ export default function GitHubSetupPage() {
             </div>
             <button
               onClick={() =>
-                window.open("https://github.com/settings/developers", "_blank")
+                window.open("https://github.com/organizations/LabsConnected/settings/apps", "_blank")
               }
               className="w-full rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
               style={{
@@ -118,27 +149,47 @@ export default function GitHubSetupPage() {
                 color: tokens.text,
               }}
             >
-              Open GitHub Developer Settings
+              Open GitHub App Settings
             </button>
           </div>
         )}
 
-        {status === "ready" && (
-          <button
-            onClick={startInstall}
-            className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
-            style={{ backgroundColor: tokens.primary, color: tokens.text }}
-          >
-            Install GitHub App <ArrowRight size={14} />
-          </button>
-        )}
+        {!loading && !unconfigured && (
+          <div className="space-y-4">
+            {installations.length > 0 && (
+              <div className="space-y-2 text-left">
+                {installations.map((inst) => (
+                  <div
+                    key={inst.id}
+                    className="flex items-center gap-2 rounded-xl border p-3 text-xs"
+                    style={{ borderColor: `${tokens.primary}30`, color: tokens.text }}
+                  >
+                    <CheckCircle2 size={14} style={{ color: tokens.primary }} />
+                    <span className="font-bold">{inst.account || "Unknown"}</span>
+                    <span style={{ color: tokens.textMuted }}>
+                      ({inst.repositorySelection})
+                    </span>
+                  </div>
+                ))}
+              </div>
+            )}
 
-        {status === "error" && (
-          <div
-            className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs"
-            style={{ color: tokens.warning }}
-          >
-            {error}
+            {error && (
+              <div
+                className="rounded-xl border border-red-500/30 bg-red-500/10 p-3 text-xs"
+                style={{ color: tokens.warning }}
+              >
+                {error}
+              </div>
+            )}
+
+            <button
+              onClick={startInstall}
+              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
+              style={{ backgroundColor: tokens.primary, color: tokens.text }}
+            >
+              {installations.length > 0 ? "Reinstall GitHub App" : "Install GitHub App"} <ArrowRight size={14} />
+            </button>
           </div>
         )}
 

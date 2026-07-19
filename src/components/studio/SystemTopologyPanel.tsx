@@ -264,13 +264,13 @@ export default function SystemTopologyPanel({
             {initializing ? "Initializing…" : "Initialize project"}
           </button>
           <button
-            onClick={() => router.push("/studio?tool=terminal")}
+            onClick={() => router.push("/studio")}
             className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold"
           >
             Open terminal
           </button>
           <button
-            onClick={() => router.push("/studio?tool=builder")}
+            onClick={() => router.push("/studio")}
             className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold"
           >
             Open builder

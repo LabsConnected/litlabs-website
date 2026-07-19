@@ -9,6 +9,7 @@ import {
   Plus,
   Send,
   Loader2,
+  Settings2,
 } from "lucide-react";
 import CameraSession from "./CameraSession";
 import {
@@ -81,6 +82,7 @@ export default function MultimodalComposer({
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [showMicSetup, setShowMicSetup] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
@@ -94,6 +96,9 @@ export default function MultimodalComposer({
     speakText,
     setOnTurn,
     errorMessage,
+    selectedDeviceId,
+    availableDevices,
+    selectDevice,
   } = useVoiceSession();
   const { resolvedColors: T } = useTheme();
 
@@ -126,15 +131,49 @@ export default function MultimodalComposer({
     )
       return "camera";
     if (
-      /\b(generate an image|create an image|make an image|draw|image of)\b/.test(
+      /\b(generate an image|create an image|make an image|draw|image of|picture of|photo of|logo for|design a)\b/.test(
         t,
       )
     )
       return "image";
     if (
-      /\b(build a page|create a mission|new mission|start a project)\b/.test(t)
+      /\b(create a video|make a video|generate a video|animate|animation|video of|motion|bring.*to life)\b/.test(
+        t,
+      )
+    )
+      return "video";
+    if (
+      /\b(generate audio|make music|create music|text to speech|read aloud|voice over|narrate|song)\b/.test(
+        t,
+      )
+    )
+      return "audio";
+    if (
+      /\b(build a page|create a mission|new mission|start a project|build a website|make a website|create a website|build an app|make an app)\b/.test(
+        t,
+      )
     )
       return "mission";
+    if (
+      /\b(write code|generate code|code snippet|function that|class that|component that|refactor)\b/.test(
+        t,
+      )
+    )
+      return "code";
+    if (
+      /\b(launch an agent|run an agent|start an agent|delegate to|agent to)\b/.test(
+        t,
+      )
+    )
+      return "agents";
+    if (
+      /\b(run a command|terminal|execute|shell command|run this)\b/.test(t)
+    )
+      return "terminal";
+    if (
+      /\b(gallery|assets|my images|my videos|my creations)\b/.test(t)
+    )
+      return "gallery";
     return null;
   };
 
@@ -148,11 +187,35 @@ export default function MultimodalComposer({
       return;
     }
     if (intent === "image") {
-      window.location.href = "/studio/image";
+      onToolChange?.("image");
+      return;
+    }
+    if (intent === "video") {
+      onToolChange?.("video");
+      return;
+    }
+    if (intent === "audio") {
+      onToolChange?.("audio");
       return;
     }
     if (intent === "mission") {
-      window.location.href = "/studio?tool=agents";
+      onToolChange?.("builder");
+      return;
+    }
+    if (intent === "code") {
+      onToolChange?.("canvas");
+      return;
+    }
+    if (intent === "agents") {
+      onToolChange?.("agents");
+      return;
+    }
+    if (intent === "terminal") {
+      onToolChange?.("terminal");
+      return;
+    }
+    if (intent === "gallery") {
+      onToolChange?.("gallery");
       return;
     }
     await onSend(value, snapshots.length ? snapshots : undefined);
@@ -375,7 +438,49 @@ export default function MultimodalComposer({
         >
           <Paperclip size={12} /> Files
         </button>
+        <button
+          onClick={() => setShowMicSetup((v) => !v)}
+          className={`flex shrink-0 items-center gap-1.5 rounded-full border px-2.5 py-1.5 text-[11px] font-semibold ${showMicSetup ? "border-violet-400/60 bg-violet-400/10 text-violet-200" : "border-white/10 text-gray-300 hover:text-violet-200"}`}
+        >
+          <Settings2 size={12} /> Mic setup
+        </button>
       </div>
+
+      {/* Mic setup panel */}
+      {showMicSetup && (
+        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
+          <div className="mb-2 flex items-center justify-between gap-3">
+            <div>
+              <strong className="block text-xs text-white">Microphone setup</strong>
+              <span className="text-[9px] text-white/40">
+                Select your input device. Click the mic button to start recording.
+              </span>
+            </div>
+            <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : availableDevices.length ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>
+              {voiceState === "error" ? "Needs attention" : availableDevices.length ? "Mic detected" : "Permission needed"}
+            </span>
+          </div>
+          <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-white/35" htmlFor="studio-mic-device">
+            Input device
+          </label>
+          <select
+            id="studio-mic-device"
+            value={selectedDeviceId || ""}
+            onChange={(event) => selectDevice(event.target.value)}
+            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-violet-300/50"
+          >
+            <option value="">System default microphone</option>
+            {availableDevices.map((device, index) => (
+              <option key={device.deviceId} value={device.deviceId}>
+                {device.label || `Microphone ${index + 1}`}
+              </option>
+            ))}
+          </select>
+          <p className="mt-2 text-[9px] leading-4 text-white/40">
+            If no device appears, click the mic once and choose Allow. In Firefox, use the microphone icon beside the address bar to reset a blocked permission.
+          </p>
+        </div>
+      )}
 
       {/* Add sheet */}
       {showAdd && (

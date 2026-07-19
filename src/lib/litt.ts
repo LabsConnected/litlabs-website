@@ -1,4 +1,4 @@
-import { supabase } from "./supabase";
+import { getAdminSupabase } from "./supabase-admin";
 
 export type NotificationType =
   | "sale"
@@ -53,7 +53,7 @@ class Jarvis {
     const results: boolean[] = [];
 
     try {
-      await supabase.from("notifications").insert({
+      await getAdminSupabase().from("notifications").insert({
         user_id: payload.userId || null,
         type: payload.type,
         priority: payload.priority,
@@ -123,7 +123,7 @@ class Jarvis {
             inline: true,
           }))
         : [],
-      footer: { text: `LiTTree Labs \u2022 ${payload.priority.toUpperCase()}` },
+      footer: { text: `LiTTree LabStudios \u2022 ${payload.priority.toUpperCase()}` },
     };
 
     try {
@@ -167,7 +167,7 @@ class Jarvis {
     }
 
     try {
-      const subscriptions = await supabase
+      const subscriptions = await getAdminSupabase()
         .from("push_subscriptions")
         .select("subscription")
         .eq("user_id", payload.userId || "");
@@ -213,7 +213,7 @@ class Jarvis {
           Authorization: `Bearer ${this.config.resendApiKey}`,
         },
         body: JSON.stringify({
-          from: "Jarvis <notifications@litlabs.net>",
+          from: "LiTT <notifications@litlabs.net>",
           to: this.config.adminEmail,
           subject: `[${payload.priority.toUpperCase()}] ${payload.title}`,
           html: `
@@ -221,7 +221,7 @@ class Jarvis {
             <p>${payload.body}</p>
             ${payload.data ? `<pre>${JSON.stringify(payload.data, null, 2)}</pre>` : ""}
             <hr />
-            <p style="color: #888; font-size: 12px;">LiTTree Labs Notification System</p>
+            <p style="color: #888; font-size: 12px;">LiTTree LabStudios Notification System</p>
           `,
         }),
       });

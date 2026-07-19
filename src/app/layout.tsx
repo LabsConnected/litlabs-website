@@ -34,7 +34,7 @@ export const viewport: Viewport = {
   themeColor: "#1a1210",
 };
 
-const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
+const META_TITLE = "LiTTree LabStudios — AI Agents for Creators";
 const META_DESC =
   "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
 
@@ -42,7 +42,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTTree-LabStudios",
+    template: "%s | LiTTree LabStudios",
   },
   description: META_DESC,
   keywords: [
@@ -55,14 +55,14 @@ export const metadata: Metadata = {
     "automation",
     "artificial intelligence",
     "NoCode",
-    "LiTTree-LabStudios",
+    "LiTTree LabStudios",
     "LiTLabs",
     "litlabs.net",
     "AI platform",
   ],
-  authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
-  creator: "LiTTree-LabStudios",
-  publisher: "LiTTree-LabStudios",
+  authors: [{ name: "LiTTree LabStudios", url: SITE_URL }],
+  creator: "LiTTree LabStudios",
+  publisher: "LiTTree LabStudios",
   robots: {
     index: true,
     follow: true,
@@ -72,7 +72,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree-LabStudios",
+    siteName: "LiTTree LabStudios",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -102,7 +102,23 @@ export const metadata: Metadata = {
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+const clerkSecret = process.env.CLERK_SECRET_KEY;
 const hasClerk = !!clerkKey && clerkKey.length > 10;
+
+if (process.env.NODE_ENV === "production") {
+  if (clerkKey && clerkKey.startsWith("pk_test_")) {
+    console.error(
+      "[CONFIG] Clerk production instance is using a DEVELOPMENT publishable key (pk_test_). " +
+        "Create a production instance in Clerk Dashboard and set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY to the pk_live_ key in Vercel environment variables.",
+    );
+  }
+  if (clerkSecret && clerkSecret.startsWith("sk_test_")) {
+    console.error(
+      "[CONFIG] Clerk production instance is using a DEVELOPMENT secret key (sk_test_). " +
+        "Create a production instance in Clerk Dashboard and set CLERK_SECRET_KEY to the sk_live_ key in Vercel environment variables.",
+    );
+  }
+}
 
 const clerkAppearance = {
   variables: {

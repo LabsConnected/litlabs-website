@@ -16,18 +16,26 @@ export async function GET() {
     );
   }
 
+  let installationIds: number[] = [];
   try {
     const { data: rows, error } = await supabaseAdmin
       .from("github_installations")
       .select("installation_id")
       .eq("user_id", userId);
-    if (error) throw error;
-
-    const installationIds = (rows || []).map((r: { installation_id: number }) => r.installation_id);
-    if (installationIds.length === 0) {
-      return NextResponse.json({ installations: [] });
+    if (error) {
+      console.error("[github/installations] Supabase error:", error.message);
+    } else {
+      installationIds = (rows || []).map((r: { installation_id: number }) => r.installation_id);
     }
+  } catch (err) {
+    console.error("[github/installations] Table query failed:", err instanceof Error ? err.message : err);
+  }
 
+  if (installationIds.length === 0) {
+    return NextResponse.json({ installations: [] });
+  }
+
+  try {
     const app = await getAppOctokit();
     const installations = await Promise.all(
       installationIds.map(async (id: number) => {

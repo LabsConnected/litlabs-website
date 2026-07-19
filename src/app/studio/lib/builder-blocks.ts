@@ -60,10 +60,18 @@ export interface PreviewBlock extends BuilderBaseBlock {
 
 export interface TerminalBlock extends BuilderBaseBlock {
   type: "terminal";
+  sessionId?: string;
   command: string;
   output?: string;
+  status:
+    | "queued"
+    | "running"
+    | "success"
+    | "failed"
+    | "disconnected";
   exitCode?: number;
   durationMs?: number;
+  startedBy: "user" | "litt";
 }
 
 export interface ImageBlock extends BuilderBaseBlock {
@@ -71,6 +79,11 @@ export interface ImageBlock extends BuilderBaseBlock {
   url: string;
   alt?: string;
   prompt?: string;
+  provider?: string;
+  model?: string;
+  aspectRatio?: string;
+  generationTimeMs?: number;
+  status?: "generating" | "completed" | "failed";
 }
 
 export interface VideoBlock extends BuilderBaseBlock {
@@ -146,4 +159,54 @@ export function createThinkingBlock(
   id = "thinking",
 ): ThinkingBlock {
   return { type: "thinking", id, content };
+}
+
+export function createTerminalBlock(
+  command: string,
+  startedBy: TerminalBlock["startedBy"] = "user",
+  id?: string,
+): TerminalBlock {
+  return {
+    type: "terminal",
+    id: id ?? `term-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    command,
+    status: "queued",
+    startedBy,
+    timestamp: Date.now(),
+  };
+}
+
+export function updateTerminalBlock(
+  block: TerminalBlock,
+  patch: Partial<Omit<TerminalBlock, "id" | "type">>,
+): TerminalBlock {
+  return { ...block, ...patch };
+}
+
+export function createImageBlock(
+  url: string,
+  opts?: {
+    prompt?: string;
+    provider?: string;
+    model?: string;
+    aspectRatio?: string;
+    generationTimeMs?: number;
+    status?: ImageBlock["status"];
+    alt?: string;
+  },
+  id?: string,
+): ImageBlock {
+  return {
+    type: "image",
+    id: id ?? `img-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    url,
+    prompt: opts?.prompt,
+    provider: opts?.provider,
+    model: opts?.model,
+    aspectRatio: opts?.aspectRatio,
+    generationTimeMs: opts?.generationTimeMs,
+    status: opts?.status ?? "completed",
+    alt: opts?.alt,
+    timestamp: Date.now(),
+  };
 }

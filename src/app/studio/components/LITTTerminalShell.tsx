@@ -6,17 +6,14 @@ import {
   useEffect,
   useCallback,
   useMemo,
-  type ComponentType,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
-import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
 import { AGENTS } from "@/lib/agents";
-import { AGENT_AVATAR_META } from "@/lib/avatars";
 export type StudioTool =
   | "chat"
   | "image"
@@ -34,76 +31,36 @@ export type StudioTool =
 
 
 import {
-  Terminal,
-  FolderKanban,
+  Terminal as TerminalIcon,
   Bot,
-  FolderOpen,
-  Settings,
+  Paperclip,
   Send,
   Plus,
-  Upload,
   Camera,
   ScreenShare,
   Mic,
   MicOff,
   X,
-  Sparkles,
-  LayoutGrid,
-  Zap,
-  Copy,
-  Check,
   Square,
   Loader2,
+  Settings2,
   Image as ImageIcon,
   Film,
   Music,
   Hammer,
-  Code,
-  Rocket,
-  Menu,
 } from "lucide-react";
 
 import dynamic from "next/dynamic";
 
-const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
 const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
-const ReactMarkdown = dynamic(() => import("react-markdown"), {
-  ssr: false,
-  loading: () => <span className="text-gray-300">…</span>,
-});
-const PersonaSwitcher = dynamic(
-  () =>
-    import("@/components/terminal/PersonaSwitcher").then(
-      (m) => m.PersonaSwitcher,
-    ),
-  { ssr: false },
-);
 import {
   PersonaProvider,
   usePersona,
 } from "@/components/terminal/PersonaContext";
 
-const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
-const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
-const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
-const PipelineTool = dynamic(() => import("../tools/PipelineTool"), {
-  ssr: false,
-});
-const GalleryTool = dynamic(() => import("../tools/GalleryTool"), {
-  ssr: false,
-});
-const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
-const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
-  ssr: false,
-});
-const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
-const LoopsTool = dynamic(() => import("../tools/LoopsTool"), { ssr: false });
-const TerminalTool = dynamic(() => import("../tools/TerminalTool"), {
-  ssr: false,
-  loading: () => (
-    <div className="p-4 text-xs text-neutral-500">Loading terminal…</div>
-  ),
-});
+import TerminalToolDirect, {
+  type TerminalToolHandle,
+} from "../tools/TerminalTool";
 
 const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
 const ImageGenPopover = dynamic(() => import("./ImageGenPopover"), {
@@ -128,209 +85,25 @@ type Attachment = {
   type: string;
 };
 
-type ToolRailItem = {
+type TerminalBlock = {
   id: string;
-  label: string;
-  icon: typeof Terminal;
-  tool?: StudioTool;
-  href?: string;
-  drawer?: "projects";
+  command: string;
+  startedBy: "user" | "litt";
+  status: "running" | "completed" | "error";
+  output?: string;
 };
 
-const TOOL_RAIL: ToolRailItem[] = [
-  { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
-  { id: "projects", label: "Projects", icon: FolderKanban, drawer: "projects" },
-  { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
-  { id: "video", label: "Video", icon: Film, tool: "video" },
-  { id: "audio", label: "Audio", icon: Music, tool: "audio" },
-  { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
-  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
-  { id: "pipeline", label: "Pipeline", icon: LayoutGrid, tool: "pipeline" },
-  { id: "loops", label: "Loops", icon: Zap, tool: "loops" },
-  { id: "space", label: "Space", icon: Rocket, tool: "space" },
-  { id: "clibridge", label: "CLI", icon: Terminal, tool: "clibridge" },
-  { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
-];
-
-
-const SLASH_CHIPS: {
-  id: string;
-  label: string;
-  desc: string;
-  tool: StudioTool;
-}[] = [
-  { id: "image", label: "/image", desc: "Generate Image", tool: "image" },
-  { id: "video", label: "/video", desc: "Generate Video", tool: "video" },
-  { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
-  { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
-  { id: "code", label: "/code", desc: "Generate Code", tool: "canvas" },
-  { id: "agent", label: "/agent", desc: "Run Agent", tool: "builder" },
-  { id: "terminal", label: "/terminal", desc: "Open Terminal", tool: "terminal" },
-];
-
-const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
-
-const AGENT_QUICK: Record<string, string[]> = {
-  littcode: [
-    "Write a React component for a chat interface",
-    "Debug: TypeError cannot read property of undefined",
-    "Explain async/await vs Promises",
-  ],
-  littlebit: [
-    "Build me an agent system for my business",
-    "Create a 30-day AI roadmap for me",
-    "Write 5 viral Twitter threads about AI",
-    "Generate a prompt for album cover art",
-    "Create a brand color palette for a tech startup",
-    "Set up an automation: lights on at sunset",
-    "Create a webhook integration for my app",
-  ],
-};
-
-const TOOL_COMPONENTS: Record<
-  Exclude<StudioTool, "chat" | "agents" | "builder">,
-  ComponentType
-> = {
-  image: ImageTool,
-  video: VideoTool,
-  audio: AudioTool,
-  terminal: TerminalTool,
-  pipeline: PipelineTool,
-  gallery: GalleryTool,
-  canvas: CanvasTool,
-  clibridge: CLIBridgeTool,
-  space: SpaceTool,
-  loops: LoopsTool,
-};
-
-
-const PLUGINS = [
-  "git",
-  "docker",
-  "k8s",
-  "aws",
-  "supabase",
-  "linear",
-  "sentry",
-  "vercel",
-];
-
-function CopyButton({ text }: { text: string }) {
-  const [copied, setCopied] = useState(false);
-  const handleCopy = async () => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1500);
-    } catch {}
+function createTerminalBlock(command: string, startedBy: "user" | "litt"): TerminalBlock {
+  return {
+    id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+    command,
+    startedBy,
+    status: "running",
   };
-  return (
-    <button
-      onClick={handleCopy}
-      className="flex items-center gap-1 text-[9px] transition hover:text-cyan-400"
-      title="Copy"
-    >
-      {copied ? (
-        <Check size={10} aria-hidden="true" />
-      ) : (
-        <Copy size={10} aria-hidden="true" />
-      )}
-      {copied ? "Copied" : "Copy"}
-    </button>
-  );
 }
 
-function LiTTAvatar({ size = 80 }: { size?: number }) {
-  return (
-    <div
-      className="relative grid shrink-0 place-items-center"
-      style={{ width: size, height: size }}
-    >
-      {/* Outer glow */}
-      <div
-        className="absolute inset-0 rounded-full blur-xl"
-        style={{
-          background:
-            "radial-gradient(circle, rgba(34,211,238,0.35) 0%, transparent 70%)",
-          transform: "scale(1.4)",
-        }}
-      />
-      {/* Rotating ring */}
-      <div
-        className="absolute inset-0 rounded-full"
-        style={{
-          border: "1.5px solid rgba(34,211,238,0.25)",
-          boxShadow:
-            "0 0 24px rgba(34,211,238,0.15), inset 0 0 24px rgba(34,211,238,0.08)",
-          animation: "spin 12s linear infinite",
-        }}
-      />
-      <div
-        className="absolute inset-[8px] rounded-full"
-        style={{
-          background:
-            "radial-gradient(circle at 30% 30%, rgba(34,211,238,0.18) 0%, rgba(6,182,212,0.05) 50%, transparent 80%)",
-          border: "1px solid rgba(34,211,238,0.15)",
-        }}
-      />
-      <Bot size={size * 0.45} className="relative z-10 text-cyan-400" />
-    </div>
-  );
-}
-
-function Waveform({ active = true }: { active?: boolean }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return;
-    const dpr = window.devicePixelRatio || 1;
-    const width = canvas.clientWidth;
-    const height = canvas.clientHeight;
-    canvas.width = width * dpr;
-    canvas.height = height * dpr;
-    ctx.scale(dpr, dpr);
-    let raf = 0;
-    let t = 0;
-    const draw = () => {
-      t += 0.08;
-      ctx.clearRect(0, 0, width, height);
-      if (!active) {
-        raf = requestAnimationFrame(draw);
-        return;
-      }
-      const bars = 48;
-      const barW = width / bars;
-      const gradient = ctx.createLinearGradient(0, 0, width, 0);
-      gradient.addColorStop(0, "rgba(34,211,238,0.1)");
-      gradient.addColorStop(0.5, "rgba(34,211,238,0.8)");
-      gradient.addColorStop(1, "rgba(34,211,238,0.1)");
-      ctx.fillStyle = gradient;
-      for (let i = 0; i < bars; i++) {
-        const x = i * barW + barW * 0.2;
-        const w = barW * 0.6;
-        const center = height / 2;
-        const amp =
-          Math.sin(t + i * 0.4) * 0.5 +
-          Math.sin(t * 1.6 + i * 0.15) * 0.25 +
-          0.4;
-        const h = Math.max(2, Math.abs(amp) * height * 0.75);
-        ctx.fillRect(x, center - h / 2, w, h);
-      }
-      raf = requestAnimationFrame(draw);
-    };
-    draw();
-    return () => cancelAnimationFrame(raf);
-  }, [active]);
-  return (
-    <canvas
-      ref={canvasRef}
-      aria-label="Voice waveform"
-      className="h-10 w-full"
-      style={{ opacity: active ? 1 : 0.4 }}
-    />
-  );
+function updateTerminalBlock(block: TerminalBlock, updates: Partial<TerminalBlock>): TerminalBlock {
+  return { ...block, ...updates };
 }
 
 function TelemetryBar() {
@@ -447,7 +220,7 @@ function AttachmentStrip({
 }
 
 function LITTTerminalShellInner({
-  activeTool = "builder",
+  activeTool: _activeTool = "builder",
   onToolChangeAction,
 }: {
   activeTool?: StudioTool;
@@ -467,18 +240,31 @@ function LITTTerminalShellInner({
     setOnTurn,
     setActivity,
   } = useVoiceSession();
-  const { persona } = usePersona();
-  const [messages, setMessages] = useState<Message[]>([]);
+  const { persona, switchPersona } = usePersona();
+  const [messages, setMessages] = useState<Message[]>(() => {
+    if (typeof window === "undefined") return [];
+    try {
+      const stored = localStorage.getItem("litlab-builder-messages");
+      if (stored) {
+        const parsed = JSON.parse(stored);
+        if (Array.isArray(parsed)) return parsed as Message[];
+      }
+    } catch {}
+    return [];
+  });
   const [busy, setBusy] = useState(false);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
-  const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
   const [plusMenuOpen, setPlusMenuOpen] = useState(false);
-  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [imageGenOpen, setImageGenOpen] = useState(false);
   const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+  const [micSetupOpen, setMicSetupOpen] = useState(false);
+  const [terminalBlocks, setTerminalBlocks] = useState<TerminalBlock[]>([]);
+  const terminalRef = useRef<TerminalToolHandle | null>(null);
+  const activeTerminalBlockRef = useRef<string | null>(null);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -486,7 +272,7 @@ function LITTTerminalShellInner({
     payload?: Record<string, unknown>;
   };
   const [activeCommands, setActiveCommands] = useState<ActiveCommand[]>([]);
-  const [agentId, setAgentId] = useState<keyof typeof AGENTS>("littcode");
+  const [agentId] = useState<keyof typeof AGENTS>("littcode");
   const [agentChats, setAgentChats] = useState<Record<string, Message[]>>({});
   const [pendingAgentQuery, setPendingAgentQuery] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -496,22 +282,17 @@ function LITTTerminalShellInner({
   const abortRef = useRef<AbortController | null>(null);
   const prevPersonaRef = useRef(persona.id);
 
-  const displayName = profile?.displayName || "Operator";
-  const agentList = useMemo(() => Object.values(AGENTS), []);
+  // Persist Builder messages so the stream survives refresh
+  useEffect(() => {
+    try {
+      localStorage.setItem("litlab-builder-messages", JSON.stringify(messages));
+    } catch {}
+  }, [messages]);
+
   const activeAgent = useMemo(
     () => AGENTS[agentId] || AGENTS.littcode,
     [agentId],
   );
-  const activeAgentAvatar = useMemo(
-    () => AGENT_AVATAR_META[agentId] || AGENT_AVATAR_META.littcode,
-    [agentId],
-  );
-  const ActiveTool = useMemo<ComponentType | null>(() => {
-    // chat, agents, and builder have dedicated rendering branches.
-    if (activeTool === "chat" || activeTool === "agents" || activeTool === "builder")
-      return null;
-    return TOOL_COMPONENTS[activeTool];
-  }, [activeTool]);
   const agentMessages = useMemo(
     () => agentChats[activeAgent.id] || [],
     [agentChats, activeAgent.id],
@@ -523,10 +304,12 @@ function LITTTerminalShellInner({
         role: m.role as "user" | "assistant",
         content: m.content,
         createdAt: m.createdAt,
+        type: m.type,
+        mediaUrl: m.mediaUrl,
+        status: m.status,
       })),
     [messages],
   );
-  const isAgentEmpty = agentMessages.length === 0;
   const micActive = voiceState !== "idle";
   const micDisabled =
     voiceState === "transcribing" ||
@@ -552,6 +335,36 @@ function LITTTerminalShellInner({
     const urlProject = searchParams?.get("project");
     if (urlProject && urlProject !== activeProjectId) {
       setActiveProjectId(urlProject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Respect ?agent= param to switch persona and ?mission= to pre-load prompt
+  useEffect(() => {
+    const urlAgent = searchParams?.get("agent");
+    const urlMission = searchParams?.get("mission");
+    if (urlAgent && (urlAgent === "littcode" || urlAgent === "littlebit")) {
+      if (persona.id !== urlAgent) {
+        switchPersona(urlAgent);
+      }
+    }
+    if (urlMission) {
+      const missionPrompt = decodeURIComponent(urlMission);
+      setMessages((prev) => {
+        const hasMission = prev.some(
+          (m) => m.role === "user" && m.content === missionPrompt,
+        );
+        if (hasMission) return prev;
+        return [
+          ...prev,
+          { role: "user", content: missionPrompt, createdAt: Date.now() },
+        ];
+      });
+      // Clean the mission param after consuming it
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("mission");
+      const query = params.toString();
+      router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
@@ -673,43 +486,60 @@ function LITTTerminalShellInner({
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
-  // Helpers: route message adds/updates to the correct state depending on
-  // whether we're in agents mode (agentChats) or chat mode (messages).
   const addToolMessage = useCallback(
     (msg: Message) => {
-      if (activeTool === "agents") {
-        setAgentChats((prev) => ({
-          ...prev,
-          [activeAgent.id]: [...(prev[activeAgent.id] || []), msg],
-        }));
-      } else {
-        setMessages((prev) => [...prev, msg]);
-      }
+      setMessages((prev) => [...prev, msg]);
     },
-    [activeTool, activeAgent.id],
+    [],
   );
 
   const updateLastToolMessage = useCallback(
     (updates: Partial<Message>) => {
-      if (activeTool === "agents") {
-        setAgentChats((prev) => {
-          const msgs = [...(prev[activeAgent.id] || [])];
-          if (msgs.length > 0) {
-            msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], ...updates };
-          }
-          return { ...prev, [activeAgent.id]: msgs };
-        });
-      } else {
-        setMessages((current) => {
-          if (current.length === 0) return current;
-          const next = current.slice();
-          next[next.length - 1] = { ...next[next.length - 1], ...updates };
-          return next;
-        });
+      setMessages((current) => {
+        if (current.length === 0) return current;
+        const next = current.slice();
+        next[next.length - 1] = { ...next[next.length - 1], ...updates };
+        return next;
+      });
+    },
+    [],
+  );
+
+  const executeTerminalCommand = useCallback(
+    (command: string, startedBy: "user" | "litt" = "user") => {
+      const block = createTerminalBlock(command, startedBy);
+      activeTerminalBlockRef.current = block.id;
+      setTerminalBlocks((prev) => [...prev, block]);
+      setTerminalDrawerOpen(true);
+
+      setTerminalBlocks((prev) =>
+        prev.map((b) =>
+          b.id === block.id ? updateTerminalBlock(b, { status: "running" }) : b,
+        ),
+      );
+
+      const handle = terminalRef.current;
+      if (handle) {
+        handle.runCommand(command);
       }
     },
-    [activeTool, activeAgent.id],
+    [],
   );
+
+  const handleTerminalOutput = useCallback((data: string) => {
+    const blockId = activeTerminalBlockRef.current;
+    if (!blockId) return;
+    setTerminalBlocks((prev) =>
+      prev.map((block) =>
+        block.id === blockId
+          ? updateTerminalBlock(block, {
+              status: "running",
+              output: `${block.output || ""}${data}`.slice(-12000),
+            })
+          : block,
+      ),
+    );
+  }, []);
 
   // Run slash commands like /image, /audio, /video inline in the chat
   const runSlashCommand = useCallback(
@@ -775,8 +605,8 @@ function LITTTerminalShellInner({
         return true;
       }
 
-      // In agents mode, show the user's command as a user message first
-      if (activeTool === "agents") {
+      // Show the user's command as a user message first
+      {
         addToolMessage({
           role: "user",
           content: text,
@@ -796,7 +626,7 @@ function LITTTerminalShellInner({
         }
         addToolMessage({
           role: "assistant",
-          content: `Generating image: "${prompt}"…`,
+          content: prompt,
           createdAt: Date.now(),
           type: "image",
           status: "pending",
@@ -808,17 +638,19 @@ function LITTTerminalShellInner({
             body: JSON.stringify({
               prompt,
               format: "image",
-              providerId: "gemini",
+              providerId: "pollinations",
               width: 1024,
               height: 1024,
+              aspectRatio: "1:1",
             }),
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || "Image generation failed");
           updateLastToolMessage({
-            content: `Generated image: ${prompt}`,
+            content: prompt,
             mediaUrl: data.downloadUrl,
             status: "complete",
+            type: "image",
           });
         } catch (err) {
           updateLastToolMessage({
@@ -971,26 +803,22 @@ function LITTTerminalShellInner({
       }
 
       if (cmd === "terminal") {
-        onToolChangeAction?.("terminal");
-        addToolMessage({
-          role: "assistant",
-          content: prompt
-            ? `Switched to the Terminal. Command queued: ${prompt}`
-            : "Switched to the Terminal.",
-          createdAt: Date.now(),
-        });
+        setTerminalDrawerOpen(true);
+        if (prompt) {
+          executeTerminalCommand(prompt, "user");
+        }
         return true;
       }
 
       return false;
     },
     [
-      activeTool,
       addToolMessage,
       updateLastToolMessage,
       onToolChangeAction,
       activeAgent.id,
       activeAgent.name,
+      executeTerminalCommand,
     ],
   );
 
@@ -1055,14 +883,14 @@ function LITTTerminalShellInner({
     [activeAgent, setActivity],
   );
 
-  // Route a pending /agent query once the shell switches to agent mode
+  // Route a pending /agent query
   useEffect(() => {
-    if (activeTool === "agents" && pendingAgentQuery) {
+    if (pendingAgentQuery) {
       const query = pendingAgentQuery;
       setPendingAgentQuery("");
       void sendAgent(query || "...");
     }
-  }, [activeTool, pendingAgentQuery, sendAgent]);
+  }, [pendingAgentQuery, sendAgent]);
 
   const send = useCallback(
     async (value: string, attachmentsArg?: string[]) => {
@@ -1071,25 +899,37 @@ function LITTTerminalShellInner({
         attachmentsArg ?? attachments.map((a) => a.url).filter(Boolean);
       if ((!text && !attachList.length) || busy) return "";
 
-      if (activeTool === "agents") {
-        setBusy(true);
+      // Terminal commands: "$ command" or "/run command"
+      const termMatch = text.match(/^\$\s+(.+)/) || text.match(/^\/run\s+(.+)/i);
+      if (termMatch) {
+        const cmd = termMatch[1].trim();
+        executeTerminalCommand(cmd, "user");
         setInput("");
-        setAttachments((prev) => (attachmentsArg ? prev : []));
-        setActivity({ type: "thinking" });
-
-        // Handle slash commands inline before falling back to the agent API
-        if (text && (await runSlashCommand(text))) {
-          setBusy(false);
-          setActivity({ type: "idle" });
-          return "";
-        }
-
-        const agentText = text.replace(/^\/agent\s*/i, "").trim();
-        const reply = await sendAgent(agentText || "(image attachment)");
-        return reply;
+        setAttachments([]);
+        return "";
       }
 
       const userMessage = text || "(image attachment)";
+
+      // Let creators ask for the common project build in plain English. Keep
+      // this deliberately narrow so ordinary discussion never executes code.
+      const buildIntent = /^(?:please\s+)?(?:run|start|do)\s+(?:the\s+)?build\b/i.test(text)
+        || /^(?:please\s+)?build\s+(?:the\s+)?(?:project|app|site|repo|from here)\b/i.test(text);
+      if (buildIntent) {
+        setMessages((current) => [
+          ...current,
+          { role: "user", content: text, createdAt: Date.now() },
+          {
+            role: "assistant",
+            content: "Running the project build in the Studio terminal. You can watch it live below.",
+            createdAt: Date.now(),
+          },
+        ]);
+        executeTerminalCommand("pnpm build", "litt");
+        setInput("");
+        setAttachments([]);
+        return "Running the project build in the Studio terminal.";
+      }
 
       // Multimodal snapshots go through the Gemini image-chat path because the
       // unified streaming endpoint does not accept image data yet.
@@ -1320,12 +1160,11 @@ function LITTTerminalShellInner({
       busy,
       messages,
       attachments,
-      activeTool,
-      sendAgent,
       profile.displayName,
       persona.id,
       setActivity,
       runSlashCommand,
+      executeTerminalCommand,
     ],
   );
 
@@ -1365,18 +1204,6 @@ function LITTTerminalShellInner({
     }
   };
 
-  const handleChip = (chip: string) => {
-    // /image opens the inline image generation popover instead of just
-    // inserting the slash command text.
-    if (chip === "/image") {
-      setImageGenOpen(true);
-      return;
-    }
-    setInput((prev) => {
-      const base = prev.replace(/\s+/g, " ").trim();
-      return base ? `${base} ${chip} ` : `${chip} `;
-    });
-  };
 
   const closeCommand = (id: string) => {
     setActiveCommands((prev) => prev.filter((c) => c.id !== id));
@@ -1393,24 +1220,6 @@ function LITTTerminalShellInner({
 
   const plusActions = [
     {
-      id: "upload",
-      label: "Upload",
-      icon: Upload,
-      onClick: () => fileInputRef.current?.click(),
-    },
-    {
-      id: "camera",
-      label: "Camera",
-      icon: Camera,
-      onClick: () => setCameraOpen(true),
-    },
-    {
-      id: "screen",
-      label: "Screen capture",
-      icon: ScreenShare,
-      onClick: handleScreenCapture,
-    },
-    {
       id: "image",
       label: "Image",
       icon: ImageIcon,
@@ -1420,43 +1229,64 @@ function LITTTerminalShellInner({
       id: "video",
       label: "Video",
       icon: Film,
-      onClick: () => onToolChangeAction?.("video"),
+      onClick: () => {
+        setInput("/video ");
+        textInputRef.current?.focus();
+      },
     },
     {
       id: "audio",
       label: "Audio",
       icon: Music,
-      onClick: () => onToolChangeAction?.("audio"),
+      onClick: () => {
+        setInput("/audio ");
+        textInputRef.current?.focus();
+      },
     },
     {
       id: "build",
       label: "Build",
       icon: Hammer,
-      onClick: () => onToolChangeAction?.("builder"),
-    },
-    {
-      id: "code",
-      label: "Code",
-      icon: Code,
-      onClick: () => onToolChangeAction?.("canvas"),
-    },
-    {
-      id: "plugins",
-      label: "Plugins",
-      icon: LayoutGrid,
-      onClick: () => setPluginsOpen(true),
-    },
-    {
-      id: "assets",
-      label: "Assets",
-      icon: FolderOpen,
-      onClick: () => onToolChangeAction?.("gallery"),
+      onClick: () => {
+        setInput("/build ");
+        textInputRef.current?.focus();
+      },
     },
     {
       id: "agent",
-      label: "Add agent/skill",
+      label: "Agent",
       icon: Bot,
-      onClick: () => onToolChangeAction?.("agents"),
+      onClick: () => {
+        setInput("/agent ");
+        textInputRef.current?.focus();
+      },
+    },
+    {
+      id: "terminal",
+      label: "Terminal",
+      icon: TerminalIcon,
+      onClick: () => {
+        setInput("/terminal ");
+        textInputRef.current?.focus();
+      },
+    },
+    {
+      id: "camera",
+      label: "Camera",
+      icon: Camera,
+      onClick: () => setCameraOpen(true),
+    },
+    {
+      id: "screen",
+      label: "Screen",
+      icon: ScreenShare,
+      onClick: handleScreenCapture,
+    },
+    {
+      id: "files",
+      label: "Files",
+      icon: Paperclip,
+      onClick: () => fileInputRef.current?.click(),
     },
   ];
 
@@ -1539,147 +1369,6 @@ function LITTTerminalShellInner({
 
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
-        {/* Mobile sidebar backdrop */}
-        {mobileSidebarOpen && (
-          <div
-            className="fixed inset-0 z-90 bg-black/60 md:hidden"
-            onClick={() => setMobileSidebarOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-        {/* LEFT RAIL */}
-        <aside
-          className={cn(
-            "shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-white/5 bg-[#05050a]/80 py-3 w-44",
-            mobileSidebarOpen
-              ? "fixed inset-y-0 left-0 z-100 flex md:relative md:inset-auto"
-              : "hidden md:flex",
-          )}
-        >
-          <div className="mb-1 flex items-center gap-2 px-3 pb-2 pt-1">
-            <span className="grid h-7 w-7 place-items-center rounded-md bg-cyan-500/10 text-cyan-400">
-              <Sparkles size={14} />
-            </span>
-            <span className="text-sm font-black tracking-wide text-white">LITT</span>
-          </div>
-
-          {TOOL_RAIL.map((item) => {
-            const Icon = item.icon;
-            const active = item.tool ? activeTool === item.tool : false;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  if (item.drawer === "projects") {
-                    setProjectDrawerOpen(true);
-                  } else if (item.href) {
-                    router.push(item.href);
-                  } else if (item.tool) {
-                    onToolChangeAction?.(item.tool);
-                  }
-                  setMobileSidebarOpen(false);
-                }}
-                aria-label={item.label}
-                className={cn(
-                  "group relative flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm transition-all duration-200",
-                  active
-                    ? "bg-cyan-500/10 text-cyan-300"
-                    : "text-gray-400 hover:bg-white/5 hover:text-white",
-                )}
-                title={item.label}
-              >
-                {active && (
-                  <span className="absolute left-0 top-1/2 h-4 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
-                )}
-                <Icon
-                  size={17}
-                  className={
-                    active
-                      ? "text-cyan-400"
-                      : "text-gray-300 group-hover:text-white"
-                  }
-                  aria-hidden="true"
-                />
-                <span className="font-medium">{item.label}</span>
-              </button>
-            );
-          })}
-
-          {activeTool === "agents" && (
-            <>
-              <div className="w-full border-t border-white/5" />
-              <div className="flex w-full flex-col gap-1 px-2">
-                <div className="px-1 text-[8px] font-bold uppercase tracking-widest text-gray-500">
-                  Agents
-                </div>
-                {agentList.map((agent) => {
-                  const avatar =
-                    AGENT_AVATAR_META[agent.id] || AGENT_AVATAR_META.littcode;
-                  const isActive = activeAgent.id === agent.id;
-                  return (
-                    <button
-                      key={agent.id}
-                      onClick={() =>
-                        setAgentId(agent.id as keyof typeof AGENTS)
-                      }
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
-                        isActive ? "bg-cyan-500/10" : "hover:bg-white/5",
-                      )}
-                    >
-                      <span className="text-base">{avatar.emoji}</span>
-                      <span
-                        className={cn(
-                          "text-[10px] font-bold",
-                          isActive ? "text-cyan-400" : "text-gray-300",
-                        )}
-                      >
-                        {agent.name}
-                      </span>
-                      <span
-                        className="ml-auto h-1.5 w-1.5 rounded-full"
-                        style={{
-                          backgroundColor: agent.color,
-                          opacity: isActive ? 1 : 0.4,
-                        }}
-                      />
-                    </button>
-                  );
-                })}
-                <div className="px-1 pt-2 text-[8px] font-bold uppercase tracking-widest text-gray-500">
-                  Sessions
-                </div>
-                {Object.keys(agentChats).length === 0 && (
-                  <div className="px-1 text-[9px] text-gray-500">
-                    No sessions yet
-                  </div>
-                )}
-                {Object.keys(agentChats).map((id) => {
-                  const agent = AGENTS[id] || activeAgent;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => setAgentId(id as keyof typeof AGENTS)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/5",
-                        activeAgent.id === id ? "bg-cyan-500/5" : "",
-                      )}
-                    >
-                      <span className="text-[10px] text-gray-300">
-                        {agent.name} ({agentChats[id]?.length || 0})
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          <div className="mt-auto w-full border-t border-white/5 px-2 pt-2">
-            <PersonaSwitcher />
-          </div>
-        </aside>
-
         {/* MAIN STAGE */}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Ambient background - simplified on mobile to reduce paint */}
@@ -1699,50 +1388,20 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Stage header */}
-          <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:border-0 sm:px-6 sm:pt-5">
+          {/* Stage header — hidden on mobile to avoid duplicate with global header */}
+          <div className="relative z-10 hidden min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:flex sm:border-0 sm:px-6 sm:pt-5">
             <div className="flex items-center gap-3">
-              <button
-                onClick={() => setMobileSidebarOpen((v) => !v)}
-                aria-label="Toggle sidebar"
-                className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 md:hidden"
-              >
-                <Menu size={16} />
-              </button>
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10"
-                style={
-                  activeTool === "agents"
-                    ? {
-                        borderColor: `${activeAgent.color}40`,
-                        backgroundColor: `${activeAgent.color}10`,
-                      }
-                    : {}
-                }
-              >
-                {activeTool === "agents" ? (
-                  <span className="text-base">{activeAgentAvatar.emoji}</span>
-                ) : (
-                  <Terminal size={16} className="text-cyan-400" />
-                )}
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
+                <TerminalIcon size={16} className="text-cyan-400" />
               </div>
               <div>
                 <div className="text-sm font-black tracking-wide text-white">
-                  {activeTool === "agents"
-                    ? "Agent Console"
-                    : activeTool === "builder" ||
-                        activeTool === "chat" ||
-                        activeTool === "image"
-                      ? "Builder"
-                      : activeTool.charAt(0).toUpperCase() +
-                        activeTool.slice(1)}
+                  Builder
                 </div>
                 <div className="hidden text-[10px] text-gray-300 sm:block">
-                  {activeTool === "agents"
-                    ? `${activeAgent.name} · ${activeAgent.role}`
-                    : activeProjectId
-                      ? `Project · ${activeProjectId.slice(0, 12)}`
-                      : "Your intelligent workspace. One command away."}
+                  {activeProjectId
+                    ? `Project · ${activeProjectId.slice(0, 12)}`
+                    : "Your intelligent workspace. One command away."}
                 </div>
               </div>
             </div>
@@ -1764,13 +1423,6 @@ function LITTTerminalShellInner({
               <CameraSession
                 compact
                 onSnapshot={(url) => {
-                  if (
-                    activeTool !== "builder" &&
-                    activeTool !== "chat" &&
-                    activeTool !== "image"
-                  ) {
-                    onToolChangeAction?.("builder");
-                  }
                   void send("Describe what you see.", [url]).then(
                     (reply) => {
                       if (reply) speakText(reply);
@@ -1783,21 +1435,6 @@ function LITTTerminalShellInner({
               />
             </div>
           )}
-
-          {/* Inline image generation popover — opened from the + menu */}
-          <ImageGenPopover
-            open={imageGenOpen}
-            onClose={() => setImageGenOpen(false)}
-            initialPrompt={input}
-            onInsert={(url, name) => {
-              setAttachments((prev) =>
-                [
-                  ...prev,
-                  { url, name, type: "image/png" },
-                ].slice(0, 8),
-              );
-            }}
-          />
 
           {/* Project drawer — opened from the Projects rail item */}
           <ProjectDrawer
@@ -1812,7 +1449,6 @@ function LITTTerminalShellInner({
                 searchParams?.toString() ?? "",
               );
               params.set("project", projectId);
-              params.set("tool", "builder");
               router.push(`/studio?${params.toString()}`, { scroll: false });
             }}
           />
@@ -1820,220 +1456,26 @@ function LITTTerminalShellInner({
           {/* Scrollable content */}
           <div
             ref={transcriptRef}
-            className={cn(
-              "relative z-10 min-h-0 flex-1 overflow-y-auto",
-              activeTool === "chat" || activeTool === "builder"
-                ? "px-0 py-0"
-                : "px-4 py-4 sm:px-6",
-            )}
+            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-0 py-0"
           >
-            <div key={activeTool} className="animate-enter">
-            {activeTool === "chat" || activeTool === "builder" ? (
-              <ChatShell
-                embedded
-                hideDock={false}
-                builderMode={activeTool === "builder"}
-                messages={chatMessages}
-                sending={busy}
-                systemLines={[]}
-                onSend={handleChatSend}
-                onToolSelect={onToolChangeAction}
-                onOpenImageGen={() => setImageGenOpen(true)}
-              />
-            ) : activeTool === "agents" ? (
-              isAgentEmpty ? (
-                <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
-                  <div className="text-4xl sm:text-5xl">
-                    {activeAgentAvatar.emoji}
-                  </div>
-                  <div
-                    className="text-sm font-bold"
-                    style={{ color: activeAgent.color }}
-                  >
-                    {activeAgent.name}
-                  </div>
-                  <div className="text-xs text-gray-300">
-                    {activeAgent.role}
-                  </div>
-                  <div className="text-xs max-w-sm text-center text-gray-400">
-                    {activeAgent.personality}
-                  </div>
-                  <div className="grid w-full max-w-xs grid-cols-1 gap-2 sm:max-w-lg sm:grid-cols-2">
-                    {(AGENT_QUICK[activeAgent.id] || [])
-                      .slice(0, 3)
-                      .map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => void send(q)}
-                          className="rounded-xl border p-3 text-left text-sm transition-all hover:scale-[1.02] sm:text-xs"
-                          style={{
-                            borderColor: activeAgent.color + "40",
-                            color: activeAgent.color,
-                            backgroundColor: activeAgent.color + "10",
-                          }}
-                        >
-                          {q}
-                        </button>
-                      ))}
-                  </div>
-                  <div className="flex flex-wrap items-center justify-center gap-1.5 pt-2">
-                    <span className="text-[10px] text-gray-500">Quick actions:</span>
-                    {SLASH_CHIPS.filter((c) => c.id !== "agent").map((chip) => (
-                      <button
-                        key={chip.id}
-                        onClick={() => void send(chip.label + " ")}
-                        className="flex items-center gap-1 rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] text-gray-300 transition hover:border-cyan-500/30 hover:text-cyan-400"
-                      >
-                        <span className="text-cyan-500">{chip.label}</span>
-                        <span className="hidden text-gray-400 sm:inline">{chip.desc}</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                  {agentMessages.map((message, index) => {
-                    const isUser = message.role === "user";
-                    return (
-                      <div
-                        key={index}
-                        className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-                      >
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                            isUser
-                              ? "border border-orange-500/20 bg-orange-500/10"
-                              : "border border-cyan-500/20 bg-cyan-500/10"
-                          }`}
-                          style={
-                            !isUser
-                              ? {
-                                  borderColor: activeAgent.color + "40",
-                                  backgroundColor: activeAgent.color + "10",
-                                }
-                              : undefined
-                          }
-                        >
-                          {isUser ? (
-                            <span className="text-[10px] font-bold text-orange-400">
-                              {displayName.slice(0, 1).toUpperCase()}
-                            </span>
-                          ) : (
-                            <span
-                              className="text-[10px] font-bold"
-                              style={{ color: activeAgent.color }}
-                            >
-                              {activeAgentAvatar.initials}
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          className={`flex max-w-[85%] flex-col ${
-                            isUser ? "items-end" : "items-start"
-                          }`}
-                        >
-                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
-                            {message.type === "error" ? (
-                              <div className="text-xs leading-relaxed text-rose-300">
-                                {message.content}
-                              </div>
-                            ) : (
-                              <>
-                                {message.mediaUrl && message.type === "image" && (
-                                  // eslint-disable-next-line @next/next/no-img-element
-                                  <img
-                                    src={message.mediaUrl}
-                                    alt={message.content}
-                                    className="mb-2 max-h-64 w-full rounded-lg object-cover"
-                                  />
-                                )}
-                                {message.mediaUrl && message.type === "video" && (
-                                  <video
-                                    src={message.mediaUrl}
-                                    controls
-                                    className="mb-2 max-h-64 w-full rounded-lg"
-                                  />
-                                )}
-                                {message.mediaUrl && message.type === "audio" && (
-                                  <audio
-                                    src={
-                                      message.mediaUrl.startsWith("data:")
-                                        ? message.mediaUrl
-                                        : `data:audio/mp3;base64,${message.mediaUrl}`
-                                    }
-                                    controls
-                                    className="mb-2 w-full"
-                                  />
-                                )}
-                                {message.status === "pending" && (
-                                  <div className="flex items-center gap-2 text-gray-300">
-                                    <Loader2 size={12} className="animate-spin" />
-                                    <span>{message.content}</span>
-                                  </div>
-                                )}
-                                {message.status !== "pending" && (
-                                  <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
-                                    <ReactMarkdown>{message.content}</ReactMarkdown>
-                                  </div>
-                                )}
-                              </>
-                            )}
-                          </div>
-                          <div className="mt-1 flex items-center gap-2 px-1">
-                            <span className="text-[9px] text-gray-300">
-                              {message.createdAt
-                                ? new Date(
-                                    message.createdAt,
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : ""}
-                            </span>
-                            {!isUser && message.content && (
-                              <>
-                                <CopyButton text={message.content} />
-                                <button
-                                  onClick={() => speakText(message.content)}
-                                  className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
-                                >
-                                  <Zap size={10} /> Speak
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {busy && (
-                    <div
-                      className="flex items-center gap-2 text-[10px]"
-                      style={{ color: activeAgent.color }}
-                    >
-                      <Loader2 size={12} className="animate-spin" />
-                      {activeAgent.name} is thinking…
-                    </div>
-                  )}
-                </div>
-              )
-            ) : ActiveTool ? (
-              <ActiveTool />
-            ) : (
-              <div className="flex h-full items-center justify-center text-xs text-gray-300">
-                Tool not available
-              </div>
-            )}
-            </div>
+            <ChatShell
+              embedded
+              hideDock
+              builderMode={true}
+              messages={chatMessages}
+              sending={busy}
+              systemLines={[]}
+              onSend={handleChatSend}
+              onToolSelect={onToolChangeAction}
+              onOpenImageGen={() => setImageGenOpen(true)}
+            />
           </div>
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
-          {activeTool !== "builder" && (
-            <>
-              {/* COMMAND BAR — single persistent bottom composer */}
-              <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-md sm:px-6 sm:py-3">
-            <div className="mx-auto flex max-w-4xl flex-col gap-1.5">
+          {/* COMMAND BAR — centered floating creative dock */}
+              <div className="relative z-20 shrink-0 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 sm:px-6 sm:py-3">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-1.5 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
                 <div className="flex items-center gap-2 px-1 text-[11px]">
@@ -2077,6 +1519,27 @@ function LITTTerminalShellInner({
                 attachments={attachments}
                 onRemove={removeAttachment}
               />
+
+              {/* Mic setup panel — sits directly beside the mic button */}
+              {micSetupOpen && (
+                <div className="mb-1 rounded-xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
+                  <div className="mb-2 flex items-center justify-between gap-3">
+                    <div>
+                      <strong className="block text-xs text-white">Microphone setup</strong>
+                      <span className="text-[9px] text-white/40">
+                        Click the mic to start. Tap again to stop.
+                      </span>
+                    </div>
+                    <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : voiceState === "idle" ? "bg-amber-400/10 text-amber-300" : "bg-emerald-400/10 text-emerald-300"}`}>
+                      {voiceState === "error" ? "Needs attention" : voiceState === "idle" ? "Ready" : "Active"}
+                    </span>
+                  </div>
+                  <p className="text-[9px] leading-4 text-white/40">
+                    If the mic doesn&apos;t respond, click it once and choose Allow in the browser prompt. In Firefox, use the microphone icon beside the address bar to reset a blocked permission.
+                  </p>
+                </div>
+              )}
+
               <div className="flex items-end gap-2 sm:items-center">
                 {/* + button — single, opens bottom sheet */}
                 <div className="relative">
@@ -2164,7 +1627,7 @@ function LITTTerminalShellInner({
                         : "Ask LiTT anything..."
                     }
                     rows={1}
-                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                    className="max-h-32 min-h-11 w-full resize-none rounded-2xl border border-white/15 bg-white/4 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none transition-all placeholder:text-gray-400 focus:border-cyan-300/30 focus:bg-white/5 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
                   {/* Contextual send/stop button inside textarea */}
                   <button
@@ -2186,6 +1649,16 @@ function LITTTerminalShellInner({
                     )}
                   </button>
                 </div>
+
+                {/* Mic setup gear — sits directly beside the mic button */}
+                <button
+                  aria-label="Microphone setup"
+                  title="Microphone setup"
+                  onClick={() => setMicSetupOpen((v) => !v)}
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${micSetupOpen ? "border-violet-400/40 bg-violet-400/10 text-violet-300" : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"}`}
+                >
+                  <Settings2 size={15} aria-hidden="true" />
+                </button>
 
                 {/* Mic button — tap to start, tap again to cancel */}
                 <button
@@ -2212,59 +1685,10 @@ function LITTTerminalShellInner({
                 </button>
               </div>
 
-              {/* Slash + plugin chips: secondary actions, hidden on mobile
-                  (they live in the + menu there) to keep the composer compact. */}
-              <div className="hidden items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none sm:flex [&::-webkit-scrollbar]:hidden">
-                {SLASH_CHIPS.map((chip) => (
-                  <button
-                    key={chip.id}
-                    onClick={() => handleChip(chip.label)}
-                    className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
-                  >
-                    <span className="text-cyan-500">{chip.label}</span>
-                    <span className="hidden text-gray-400 sm:inline">
-                      {chip.desc}
-                    </span>
-                  </button>
-                ))}
-                {activeTool === "agents" && (
-                  <button
-                    onClick={() =>
-                      setAgentId(
-                        activeAgent.id === "littcode"
-                          ? "littlebit"
-                          : "littcode",
-                      )
-                    }
-                    className="flex shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-[11px] transition"
-                    style={{
-                      borderColor: activeAgent.color + "40",
-                      backgroundColor: activeAgent.color + "10",
-                      color: activeAgent.color,
-                    }}
-                  >
-                    <span>{activeAgentAvatar.emoji}</span>
-                    <span>{activeAgent.name}</span>
-                  </button>
-                )}
-                <div className="flex items-center gap-1 pl-1 sm:pl-2">
-                  {PLUGINS.slice(0, 4).map((plugin) => (
-                    <button
-                      key={plugin}
-                      onClick={() => handleChip(`/${plugin}`)}
-                      aria-label={`/${plugin} plugin command`}
-                      className="shrink-0 rounded-md px-1.5 py-1 text-[11px] font-mono text-gray-300 transition hover:text-white"
-                    >
-                      /{plugin}
-                    </button>
-                  ))}
-                  <span
-                    title="More plugins coming soon"
-                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-gray-300 opacity-40"
-                  >
-                    +8
-                  </span>
-                </div>
+              {/* Compact command hint — slash commands still work when typed manually */}
+              <div className="flex items-center justify-between px-1 text-[9px] text-white/25">
+                <span>Press / for exact commands</span>
+                <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
               </div>
             </div>
 
@@ -2274,8 +1698,6 @@ function LITTTerminalShellInner({
               onActivate={activateCommand}
             />
           </div>
-            </>
-          )}
 
           {/* FOOTER TELEMETRY */}
           <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">
@@ -2287,196 +1709,54 @@ function LITTTerminalShellInner({
               </span>
             </div>
           </div>
-        </main>
 
-        {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
-        {pluginsOpen && (
+          {/* Persistent terminal drawer. It stays mounted so PTY sessions and
+              command history survive closing and reopening the panel. */}
           <div
-            className="fixed inset-0 z-90 bg-black/60 md:hidden"
-            onClick={() => setPluginsOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-        <aside
-          className={cn(
-            "shrink-0 flex-col border-l border-white/5 bg-[#05050a]/80",
-            pluginsOpen
-              ? "fixed inset-y-0 right-0 z-100 flex w-[80%] md:relative md:inset-auto md:w-64 lg:relative"
-              : activeTool === "agents"
-                ? "hidden w-64 lg:flex"
-                : "hidden",
-          )}
-        >
-          {pluginsOpen ? (
-            <PluginPanel onClose={() => setPluginsOpen(false)} />
-          ) : activeTool === "agents" ? (
-            <div className="flex h-full flex-col overflow-y-auto">
-              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
-                  Agent Details
-                </span>
-                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  ONLINE
-                </div>
-              </div>
-
-              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
-                <div className="text-5xl">{activeAgentAvatar.emoji}</div>
-                <div className="text-center">
-                  <div className="text-sm font-black text-white">
-                    {activeAgent.name}
+            className={`fixed inset-0 z-50 flex items-end justify-center transition ${terminalDrawerOpen ? "pointer-events-auto bg-black/50 backdrop-blur-sm" : "pointer-events-none bg-transparent"}`}
+            onClick={() => setTerminalDrawerOpen(false)}
+            aria-hidden={!terminalDrawerOpen}
+          >
+              <div
+                className={`relative flex h-[72dvh] max-h-[760px] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#05050a] shadow-2xl transition-transform duration-300 ${terminalDrawerOpen ? "translate-y-0" : "translate-y-full"}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+                  <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
+                    <TerminalIcon size={14} /> Terminal
                   </div>
-                  <div className="text-[10px] text-gray-300">
-                    {activeAgent.role}
-                  </div>
-                </div>
-                <div className="text-center text-[10px] text-gray-400">
-                  {activeAgent.personality}
-                </div>
-                <div className="flex w-full flex-wrap justify-center gap-1">
-                  {activeAgent.domains.slice(0, 6).map((domain) => (
-                    <span
-                      key={domain}
-                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300"
-                    >
-                      {domain}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Activity
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-300">
-                  {busy
-                    ? `${activeAgent.name} is thinking…`
-                    : `Last active ${activeAgent.lastActivity || "just now"}`}
-                  <div className="mt-2 flex items-center gap-2 text-[9px] text-gray-400">
-                    <span>{agentMessages.length} messages</span>
-                    <span>·</span>
-                    <span>
-                      {activeAgent.memory.length > 0
-                        ? "Memory attached"
-                        : "No memory"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Runs
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
-                  No active runs
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Artifacts
-                </div>
-                <div className="flex flex-1 rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
-                  Agent artifacts will appear here
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
-                  LITT Presence
-                </span>
-                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  ONLINE
-                </div>
-              </div>
-
-              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
-                <LiTTAvatar size={90} />
-                <div className="text-center">
-                  <div className="text-sm font-black text-white">
-                    {persona.name}
-                  </div>
-                  <div className="flex items-center justify-center gap-2 text-[10px] text-gray-300">
-                    <span style={{ color: persona.color }}>{persona.tag}</span>
-                    <span>·</span>
-                    <span>Omni</span>
-                    <span>·</span>
-                    <span>128K Context</span>
-                  </div>
-                </div>
-                <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2">
-                  <span className="text-[10px] font-bold text-gray-300">
-                    Voice
-                  </span>
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: persona.color }}
+                  <button
+                    onClick={() => setTerminalDrawerOpen(false)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Close terminal"
                   >
-                    {persona.name}
-                  </span>
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    {micActive ? "Listening" : "Live"}
-                  </span>
+                    ✕
+                  </button>
+                </div>
+                <div className="min-h-0 flex-1">
+                  <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
                 </div>
               </div>
-
-              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Speaking Now
-                </div>
-                <Waveform active={busy || micActive} />
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Recent Transcript
-                </div>
-                <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/2 p-3">
-                  {messages.length === 0 ? (
-                    <div className="text-[10px] leading-relaxed text-gray-300">
-                      Hey, I am {persona.name}.
-                      <br />
-                      Need help building something?
-                      <br />
-                      <br />I can see your workspace and talk you through it.
-                    </div>
-                  ) : (
-                    messages.slice(-6).map((m, i) => (
-                      <div
-                        key={i}
-                        className={`flex items-start gap-2 text-[10px] ${
-                          m.role === "user" ? "text-gray-300" : "text-cyan-400"
-                        }`}
-                      >
-                        <span className="mt-0.5 shrink-0 text-[8px] text-gray-300">
-                          {m.role === "user" ? "You" : "LITT"}
-                        </span>
-                        <span className="line-clamp-3">{m.content}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Quick Replies
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {QUICK_START.map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => void send(q)}
-                      className="rounded-full border border-white/10 bg-white/3 px-2.5 py-1 text-[10px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
-                    >
-                      {q}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </>
-          )}
-        </aside>
+          </div>
+        </main>
       </div>
+
+      {/* Image generation popover — rendered outside overflow-hidden main so fixed positioning works */}
+      <ImageGenPopover
+        open={imageGenOpen}
+        onClose={() => setImageGenOpen(false)}
+        initialPrompt={input}
+        onInsert={(url, _name) => {
+          addToolMessage({
+            role: "assistant",
+            content: input || "Generated image",
+            createdAt: Date.now(),
+            type: "image",
+            mediaUrl: url,
+            status: "complete",
+          });
+        }}
+      />
     </div>
   );
 }

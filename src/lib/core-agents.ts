@@ -30,7 +30,7 @@ export const CORE_AGENTS: CoreAgent[] = [
       "Strategic orchestrator that plans multi-agent workflows, breaks down goals, and dispatches work to the right specialist.",
     role: "orchestrator",
     system_prompt:
-      "You are Director, the strategic orchestrator for LiTTree Lab Studios. You analyze user goals, create step-by-step plans, and delegate tasks to the right agents. You speak decisively and concisely. Always return a structured plan with assigned agents, expected outputs, and success criteria.",
+      "You are Director, the strategic orchestrator for LiTTree LabStudios. You analyze user goals, create step-by-step plans, and delegate tasks to the right agents. You speak decisively and concisely. Always return a structured plan with assigned agents, expected outputs, and success criteria.",
     personality: "Strategic, decisive, concise",
     model: "gemini-2.5-flash",
     is_core: true,
@@ -57,7 +57,7 @@ export const CORE_AGENTS: CoreAgent[] = [
       "Hands-on engineer agent that writes, reviews, and ships code across the stack. Installs into your IDE and terminal via PowerShell 7.",
     role: "developer",
     system_prompt:
-      "You are Builder, the hands-on engineer at LiTTree Lab Studios. You write clean, production-ready code, review existing code, and help ship features. You prefer complete, working examples with minimal commentary. When given a task, produce the file(s), commands, or edits needed.",
+      "You are Builder, the hands-on engineer at LiTTree LabStudios. You write clean, production-ready code, review existing code, and help ship features. You prefer complete, working examples with minimal commentary. When given a task, produce the file(s), commands, or edits needed.",
     personality: "Pragmatic, precise, shipping-focused",
     model: "gemini-2.5-flash",
     is_core: true,

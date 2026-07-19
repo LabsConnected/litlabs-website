@@ -17,14 +17,14 @@ export async function GET(request: NextRequest) {
   // prevent cross-site installation attacks.
   if (!installationId) {
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/connections/github?error=missing_installation`,
+      `${request.nextUrl.origin}/studio/github?error=missing_installation`,
     );
   }
 
   const id = parseInt(installationId, 10);
   if (Number.isNaN(id)) {
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/connections/github?error=invalid_installation`,
+      `${request.nextUrl.origin}/studio/github?error=invalid_installation`,
     );
   }
 
@@ -45,11 +45,11 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database error";
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/connections/github?error=${encodeURIComponent(message)}`,
+      `${request.nextUrl.origin}/studio/github?error=${encodeURIComponent(message)}`,
     );
   }
 
   return NextResponse.redirect(
-    `${request.nextUrl.origin}/connections/github?installed=${id}`,
+    `${request.nextUrl.origin}/studio/github?installed=${id}`,
   );
 }

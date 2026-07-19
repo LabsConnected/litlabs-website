@@ -293,7 +293,7 @@ function SidebarContent({
 
   const [showPersonalize, setShowPersonalize] = useState(false);
   const [aiQuery, setAiQuery] = useState("");
-  const [jarvisFocused, setJarvisFocused] = useState(false);
+  const [aiFocused, setAiFocused] = useState(false);
 
   const isActive = useCallback(
     (href?: string) => {
@@ -351,7 +351,7 @@ function SidebarContent({
     return pinnedFirst;
   }, [pinned]);
 
-  const handleJarvisSubmit = (e: React.FormEvent) => {
+  const handleAiSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!aiQuery.trim()) return;
     // Best-effort navigation: search all nav items and match label
@@ -380,7 +380,7 @@ function SidebarContent({
           <Link href="/dashboard" className="flex items-center gap-2">
             {!collapsed && (
               <span className="text-xs font-bold uppercase tracking-widest" style={{ color: T.accentColor }}>
-                LiTTree OS
+                LiTTree
               </span>
             )}
             {collapsed && <Home size={16} style={{ color: T.accentColor }} />}
@@ -445,25 +445,25 @@ function SidebarContent({
             </div>
             <div className="flex-1 min-w-0">
               <div className="text-sm font-bold truncate" style={{ color: T.textColor }}>
-                {profile?.displayName || user.firstName || user.username || "Creator"}
+                {profile?.displayName || user.firstName || user.username || "Member"}
               </div>
               <div className="text-xs truncate" style={{ color: T.textMuted }}>
-                @{user.username || "litree"}
+                @{user.username || "user"}
               </div>
             </div>
           </Link>
         </div>
       )}
 
-      {/* Jarvis / AI assistant */}
+      {/* LiTT / AI assistant */}
       {!collapsed && (
         <div className="px-3 py-3 border-b" style={{ borderColor: `${T.borderColor}30` }}>
-          <form onSubmit={handleJarvisSubmit} className="relative">
+          <form onSubmit={handleAiSubmit} className="relative">
             <div
               className="flex items-center gap-2 px-3 py-2 rounded-lg border text-sm transition-all"
               style={{
                 backgroundColor: T.boxBg,
-                borderColor: jarvisFocused ? T.accentColor : `${T.borderColor}30`,
+                borderColor: aiFocused ? T.accentColor : `${T.borderColor}30`,
                 color: T.textMuted,
               }}
             >
@@ -471,17 +471,17 @@ function SidebarContent({
               <input
                 value={aiQuery}
                 onChange={(e) => setAiQuery(e.target.value)}
-                onFocus={() => setJarvisFocused(true)}
-                onBlur={() => setJarvisFocused(false)}
-                placeholder="Ask Jarvis..."
+                onFocus={() => setAiFocused(true)}
+                onBlur={() => setAiFocused(false)}
+                placeholder="Ask LiTT..."
                 className="bg-transparent border-none outline-none flex-1 min-w-0 text-xs"
                 style={{ color: T.textColor }}
               />
-              <button type="submit" aria-label="Submit Jarvis query" className="p-1 rounded hover:bg-white/10" style={{ color: T.accentColor }}>
+              <button type="submit" aria-label="Submit LiTT query" className="p-1 rounded hover:bg-white/10" style={{ color: T.accentColor }}>
                 <Send size={14} />
               </button>
             </div>
-            {jarvisFocused && (
+            {aiFocused && (
               <div
                 className="absolute left-0 right-0 top-full mt-1 z-50 rounded-lg border shadow-xl p-2 space-y-1"
                 style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}

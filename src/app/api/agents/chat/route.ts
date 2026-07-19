@@ -132,7 +132,7 @@ async function persistMemory(
 
 function buildDirectorPrompt(userName: string): string {
   const name = userName || "the user";
-  return `You are LiTT Director — ${name}'s personal AI crew chief inside LiTTree-LabStudios.
+  return `You are LiTT Director — ${name}'s personal AI crew chief inside LiTTree LabStudios.
 
 === PROJECT CONTEXT (repo files, docs, schema) ===
 ${PROJECT_CONTEXT}
@@ -170,8 +170,8 @@ export async function POST(req: NextRequest) {
     const directorPrompt = buildDirectorPrompt(userName);
 
     const projectContext: ProjectContext = {
-      name: "LiTTree-LabStudios",
-      description: "litlabs.net / LiTTree-LabStudios multi-agent creative workspace",
+      name: "LiTTree LabStudios",
+      description: "litlabs.net / LiTTree LabStudios multi-agent creative workspace",
       stack: "Next.js 16 + React 19 + TypeScript + Tailwind CSS v4 + Turbopack",
       repoUrl: "https://github.com/LabsConnected/litlabs-website",
       customInstructions: PROJECT_CONTEXT,

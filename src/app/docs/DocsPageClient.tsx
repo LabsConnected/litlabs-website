@@ -68,7 +68,7 @@ export default function DocsPageClient() {
             className="max-w-2xl text-base leading-relaxed opacity-65 md:text-lg"
             style={{ color: T.textColor }}
           >
-            LiTTree-LabStudios is organized around one loop: choose an agent,
+            LiTTree LabStudios is organized around one loop: choose an agent,
             create in Studio, automate the repeatable parts, and ship the
             result to your audience or marketplace.
           </p>

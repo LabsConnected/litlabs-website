@@ -78,7 +78,7 @@ export default function ProjectsPage() {
                 className="text-2xl font-black sm:text-3xl"
                 style={{ color: T.headerColor }}
               >
-                LiTTree Lab Studios
+                LiTTree LabStudios
               </h2>
               <p
                 className="mt-2 max-w-2xl text-sm leading-relaxed"

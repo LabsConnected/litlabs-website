@@ -8,7 +8,7 @@ export default function StudioImagePage() {
   const { resolvedColors: T } = useTheme();
   const router = useRouter();
   useEffect(() => {
-    router.replace("/studio?tool=image");
+    router.replace("/studio");
   }, [router]);
   return (
     <div className="min-h-dvh bg-[#050505] flex items-center justify-center">

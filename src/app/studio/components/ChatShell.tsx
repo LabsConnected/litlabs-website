@@ -1,13 +1,14 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
+import { ArrowUpRight, Clapperboard, Image as ImageIcon, Sparkles } from "lucide-react";
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
 import {
   createChatMessageBlock,
   createThinkingBlock,
+  createImageBlock,
   type BuilderBlock,
 } from "@/app/studio/lib/builder-blocks";
 import BuilderStream from "./BuilderStream";
@@ -18,6 +19,12 @@ export type StudioMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt?: string | number | Date;
+  type?: "text" | "image" | "video" | "audio" | "error";
+  mediaUrl?: string;
+  status?: string;
+  provider?: string;
+  aspectRatio?: string;
+  generationTimeMs?: number;
 };
 
 type Props = {
@@ -47,6 +54,7 @@ export function ChatShell({
 }: Props) {
   const [draft, setDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
+  const [busySeconds, setBusySeconds] = useState(0);
   const {
     voiceState,
     state,
@@ -77,14 +85,29 @@ export function ChatShell({
   );
 
   const blocks: BuilderBlock[] = useMemo(() => {
-    const list: BuilderBlock[] = visibleMessages.map((m, index) =>
-      createChatMessageBlock(
+    const list: BuilderBlock[] = visibleMessages.map((m, index) => {
+      const id = m.id ?? `msg-${index}`;
+      // If the message has a mediaUrl and image type, render as ImageBlock
+      if (m.mediaUrl && (m.type === "image" || m.type === "video")) {
+        return createImageBlock(
+          m.mediaUrl,
+          {
+            prompt: m.content,
+            provider: m.provider,
+            aspectRatio: m.aspectRatio,
+            generationTimeMs: m.generationTimeMs,
+            status: m.status === "pending" ? "generating" : m.status === "error" ? "failed" : "completed",
+          },
+          id,
+        );
+      }
+      return createChatMessageBlock(
         m.role === "user" || m.role === "assistant" ? m.role : "assistant",
         m.content,
         m.createdAt,
-        m.id ?? `msg-${index}`,
-      ),
-    );
+        id,
+      );
+    });
     if (sending) {
       list.push(createThinkingBlock("LiTT is working"));
     }
@@ -99,6 +122,18 @@ export function ChatShell({
     voiceState === "thinking" ||
     voiceState === "speaking" ||
     voiceState === "cooldown";
+
+  useEffect(() => {
+    if (!sending) {
+      setBusySeconds(0);
+      return;
+    }
+    const started = Date.now();
+    const timer = window.setInterval(() => {
+      setBusySeconds(Math.floor((Date.now() - started) / 1000));
+    }, 500);
+    return () => window.clearInterval(timer);
+  }, [sending]);
 
   useEffect(() => {
     setOnTurn(async (text) => {
@@ -160,59 +195,64 @@ export function ChatShell({
       <section className={styles.messages} aria-live="polite">
         {visibleMessages.length === 0 && !sending && (
           <div className={styles.home}>
-            <div className={styles.heroMark} aria-hidden="true">
-              <Sparkles size={22} />
-            </div>
-            <p className={styles.eyebrow}>LiTT is ready</p>
-            <h1>What do you want to create?</h1>
-            <p className={styles.intro}>
-              Start with an idea. Your AI crew will help you make it real.
-            </p>
+            <section className={styles.creativeHero}>
+              <div className={styles.creativeEngine} />
+              <div className={styles.creativeGlow} />
+              <div className={styles.creativeOverlay} />
 
-            <div className={styles.createGrid}>
-              <button onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}>
-                <span className={styles.actionIcon}><ImageIcon size={21} /></span>
-                <span><b>Create an image</b><small>Generate art, ads, and product visuals</small></span>
-                <ArrowRight size={17} aria-hidden="true" />
-              </button>
-              <button onClick={() => builderMode ? setDraft("/build ") : onToolSelect?.("builder")}>
-                <span className={styles.actionIcon}><Code2 size={21} /></span>
-                <span><b>Build an app</b><small>Turn a plain-English idea into working code</small></span>
-                <ArrowRight size={17} aria-hidden="true" />
-              </button>
-              <button onClick={() => builderMode ? setDraft("/agent ") : onToolSelect?.("builder")}>
-                <span className={styles.actionIcon}><Bot size={21} /></span>
-                <span><b>Launch an agent</b><small>Delegate research, coding, and repeat work</small></span>
-                <ArrowRight size={17} aria-hidden="true" />
-              </button>
-            </div>
-
-            <div className={styles.homeGrid}>
-              <section className={styles.homePanel}>
-                <div className={styles.panelHeading}>
-                  <span>Recent projects</span>
-                  <button className={styles.viewAll} onClick={() => onToolSelect?.("builder")}>View all</button>
+              <div className={styles.creativeContent}>
+                <div className={styles.creativeBadge}>
+                  <span className={styles.creativeBadgeDot} />
+                  LiTT creative engine
                 </div>
-                <button className={styles.projectRow} onClick={() => onToolSelect?.("builder")}>
-                  <span className={styles.projectBadge}>LL</span>
-                  <span><b>LiTTree Lab Studios</b><small>Updated today</small></span>
-                  <ArrowRight size={15} aria-hidden="true" />
+                <h1 className={styles.creativeTitle}>
+                  Make something
+                  <span className={styles.creativeTitleGradient}>
+                    impossible to ignore.
+                  </span>
+                </h1>
+                <p className={styles.creativeDesc}>
+                  Describe the shot once. Create the image, bring it to life,
+                  and keep building with LiTT in the same conversation.
+                </p>
+
+                <div className={styles.creativeActions}>
+                  <button
+                    onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}
+                    className={styles.creativeBtnPrimary}
+                  >
+                    <span className={styles.creativeBtnIcon}><ImageIcon size={17} /></span>
+                    <span><b>Create an image</b><small>Art, logos, products</small></span>
+                    <ArrowUpRight size={15} />
+                  </button>
+                  <button
+                    onClick={() => builderMode ? setDraft("/video ") : onToolSelect?.("video")}
+                    className={styles.creativeBtnSecondary}
+                  >
+                    <span className={styles.creativeBtnIconViolet}><Clapperboard size={17} /></span>
+                    <span><b>Create a video</b><small>Animate any idea</small></span>
+                    <ArrowUpRight size={15} />
+                  </button>
+                </div>
+              </div>
+
+              <div className={styles.creativeFooter}>
+                <Sparkles size={11} /> Image · Video · Motion
+              </div>
+            </section>
+
+            <div className={styles.promptStarters}>
+              <span className={styles.promptStartersLabel}>Try</span>
+              {["A cinematic product shot", "Turn my photo into a video", "Design a bold album cover", "Make a logo move"].map((item) => (
+                <button
+                  key={item}
+                  onClick={() => setDraft(item)}
+                  className={styles.promptStarter}
+                >
+                  {item}
                 </button>
-              </section>
-
-              <section className={styles.homePanel}>
-                <div className={styles.panelHeading}><span>Your AI crew</span><i>Online</i></div>
-                <div className={styles.agentRow}>
-                  <span className={styles.agentAvatar}>Li</span>
-                  <span><b>LiTT</b><small>Director · ready to help</small></span>
-                  <span className={styles.statusDot} aria-label="Online" />
-                </div>
-              </section>
+              ))}
             </div>
-
-            <button className={styles.askButton} onClick={() => setDraft("Help me create ")}>
-              <Sparkles size={15} aria-hidden="true" /> Ask LiTT anything
-            </button>
           </div>
         )}
         <BuilderStream
@@ -220,6 +260,7 @@ export function ChatShell({
           isSpeaking={state === "speaking"}
           onSpeak={speakText}
           stopSpeaking={stopSpeaking}
+          busySeconds={busySeconds}
         />
       </section>
 

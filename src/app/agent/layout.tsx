@@ -3,7 +3,7 @@ import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   title: "Agent",
-  description: "Autonomous agent interface for LiTTree Lab Studios.",
+  description: "Autonomous agent interface for LiTTree LabStudios.",
 };
 
 export default function AgentLayout({

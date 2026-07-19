@@ -1564,7 +1564,7 @@ export default function Gallery() {
 
       {/* ── Floating Create Button ── */}
       <Link
-        href="/studio?tool=image"
+        href="/studio"
         style={{
           position: "fixed",
           bottom: "24px",

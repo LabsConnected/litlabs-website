@@ -5,7 +5,6 @@ import { createPortal } from "react-dom";
 import { useProfile } from "@/context/ProfileContext";
 import { useTheme } from "@/context/ThemeContext";
 import {
-  MessageCircle,
   X,
   Send,
   Loader2,
@@ -62,7 +61,7 @@ function audioSrcFromBase64(input: string): string {
 export function FloatingChat() {
   const { profile } = useProfile();
   const { tokens } = useTheme();
-  const userName = profile?.displayName || "Creator";
+  const userName = profile?.displayName || "Member";
   const [chatOpen, setChatOpen] = useState(false);
   const [cameraMode, setCameraMode] = useState(false);
   const [cameraDock, setCameraDock] = useState<"left" | "right">("right");
@@ -603,10 +602,21 @@ export function FloatingChat() {
       <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
         <div className="flex items-center gap-2">
           <div
-            className="flex h-7 w-7 items-center justify-center rounded-full text-xs font-black"
-            style={{ background: tokens.primary, color: "#0a0a0f" }}
+            className="relative flex h-7 w-7 items-center justify-center overflow-hidden rounded-full"
+            style={{ background: tokens.primary }}
           >
-            L
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img
+              src="/brand/litt-mascot-hero.png"
+              alt="LiTT"
+              style={{
+                position: "absolute",
+                inset: 0,
+                width: "100%",
+                height: "100%",
+                objectFit: "cover",
+              }}
+            />
           </div>
           <div>
             <div className="text-xs font-black text-neutral-100">
@@ -1036,7 +1046,7 @@ export function FloatingChat() {
         )}
       <button
         onClick={openLauncher}
-        className="chat-launcher flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95"
+        className="chat-launcher relative flex h-12 w-12 items-center justify-center rounded-full shadow-lg transition-all hover:scale-110 active:scale-95 overflow-hidden"
         style={{
           background: tokens.primary,
           color: "#0a0a0f",
@@ -1044,7 +1054,18 @@ export function FloatingChat() {
         }}
         aria-label="Open LiTT Assistant"
       >
-        <MessageCircle size={22} />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
+          src="/brand/litt-mascot-hero.png"
+          alt="LiTT"
+          style={{
+            position: "absolute",
+            inset: 0,
+            width: "100%",
+            height: "100%",
+            objectFit: "cover",
+          }}
+        />
         {!chatOpen && (
           <span className="absolute -top-1 -right-1 flex h-3 w-3">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />

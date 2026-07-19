@@ -2,6 +2,8 @@
 
 import { useEffect, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { useProfile } from "@/context/ProfileContext";
+import { getWallpaperById } from "@/lib/wallpapers";
 
 interface Orb {
   x: number;
@@ -61,8 +63,12 @@ export default function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const scanlineRef = useRef<HTMLDivElement>(null);
   const { theme, resolvedColors } = useTheme();
+  const { profile } = useProfile();
   const colorsRef = useRef(resolvedColors);
   const mode = theme.backgroundMode || "constellation";
+  const wallpaper = getWallpaperById(profile.wallpaper);
+  const customWallpaper = profile.wallpaper === "custom" && profile.customWallpaperUrl;
+  const showWallpaper = profile.wallpaper !== "mesh" && (profile.wallpaper !== "custom" || customWallpaper);
 
   useEffect(() => {
     colorsRef.current = resolvedColors;
@@ -422,7 +428,24 @@ export default function AnimatedBackground() {
 
   return (
     <>
-      {mode === "constellation" ? (
+      {showWallpaper ? (
+        <div
+          className="fixed inset-0 pointer-events-none"
+          style={{
+            zIndex: 0,
+            backgroundColor: resolvedColors.bgColor,
+            ...(customWallpaper
+              ? {
+                  backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
+                  backgroundSize: "cover",
+                  backgroundPosition: "center",
+                  backgroundAttachment: "fixed",
+                }
+              : wallpaper.fullStyle),
+            transition: "background 0.5s ease",
+          }}
+        />
+      ) : mode === "constellation" ? (
         <canvas
           ref={canvasRef}
           style={{

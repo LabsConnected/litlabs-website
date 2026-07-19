@@ -90,7 +90,7 @@ export default function LibraryFilesPage() {
       <div className="max-w-5xl mx-auto px-4 py-6 space-y-6">
         <div className="flex flex-wrap gap-3">
           <Link
-            href="/studio?tool=upload"
+            href="/studio"
             className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
             style={{ backgroundColor: T.accentColor, color: T.bgColor }}
           >

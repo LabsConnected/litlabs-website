@@ -19,7 +19,7 @@ function StudioHub() {
 
   if (!isLoaded) {
     return (
-      <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
+      <div className="relative flex h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
         <div className="relative flex flex-col items-center gap-4">
           <div className="relative">
             <div className="absolute inset-0 animate-ping rounded-full bg-cyan-400/20" />
@@ -51,7 +51,7 @@ function StudioHub() {
 
   if (!isSignedIn) {
     return (
-      <div className="relative flex min-h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
+      <div className="relative flex h-dvh items-center justify-center overflow-hidden bg-[#030308] p-6">
         <div className="relative flex flex-col items-center gap-6 text-center">
           <div className="relative">
             <div className="absolute inset-0 animate-ping rounded-full bg-cyan-400/20" />
@@ -97,7 +97,7 @@ export default function StudioPage() {
   return (
     <Suspense
       fallback={
-        <div className="min-h-dvh grid place-items-center bg-[#030308]">
+        <div className="h-dvh grid place-items-center bg-[#030308]">
           <Loader2 className="h-6 w-6 animate-spin text-cyan-400" />
         </div>
       }

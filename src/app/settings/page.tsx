@@ -2,14 +2,17 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Image from "next/image";
 import { useTheme, useCrtToggle } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
+import { useWallet } from "@/context/WalletContext";
 import PageShell from "@/components/PageShell";
+import CLIBridgeTool from "@/app/studio/tools/CLIBridgeTool";
 import type { SkinPreset, AccentColor } from "@/context/ThemeContext";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
 import type { UserProfile } from "@/context/ProfileContext";
+import { WALLPAPERS, type WallpaperId } from "@/lib/wallpapers";
+import Link from "next/link";
 import {
   User,
   ChevronLeft,
@@ -18,21 +21,20 @@ import {
   Check,
   Camera,
   Shield,
-  Lock,
   LogOut,
   LayoutGrid,
   Bot,
-  Mic,
-  Volume2,
   ExternalLink,
   Bell,
   Palette,
   CreditCard,
-  X,
   Trash2,
-  RefreshCw,
   CheckCircle2,
-  Sparkles,
+  Key,
+  Coins,
+  Terminal,
+  ShieldCheck,
+  Upload,
 } from "lucide-react";
 
 // ------------------------------------------------------------------
@@ -40,16 +42,14 @@ import {
 // ------------------------------------------------------------------
 
 type TabId =
-  | "profile"
   | "account"
   | "workspace"
-  | "ai"
-  | "voice"
-  | "integrations"
-  | "notifications"
   | "appearance"
+  | "ai"
+  | "agents"
+  | "notifications"
   | "billing"
-  | "privacy";
+  | "advanced";
 
 type SaveStatus = "idle" | "saving" | "saved" | "error";
 
@@ -328,87 +328,6 @@ function completionPct(profile: UserProfile): number {
 }
 
 // ------------------------------------------------------------------
-// Mic level meter
-// ------------------------------------------------------------------
-
-function MicLevel({ active }: { active: boolean }) {
-  const [level, setLevel] = useState(0);
-  const [error, setError] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const ctxRef = useRef<AudioContext | null>(null);
-  const analyserRef = useRef<AnalyserNode | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  const stop = useCallback(() => {
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    analyserRef.current = null;
-    ctxRef.current?.close();
-    ctxRef.current = null;
-    streamRef.current?.getTracks().forEach((t) => t.stop());
-    streamRef.current = null;
-    setRunning(false);
-    setLevel(0);
-  }, []);
-
-  const start = useCallback(async () => {
-    stop();
-    setError(null);
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      streamRef.current = stream;
-      const ctx = new AudioContext();
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 64;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
-      ctxRef.current = ctx;
-      analyserRef.current = analyser;
-      setRunning(true);
-
-      const data = new Uint8Array(analyser.frequencyBinCount);
-      const tick = () => {
-        if (!analyserRef.current) return;
-        analyserRef.current.getByteFrequencyData(data);
-        const avg = data.reduce((a, b) => a + b, 0) / data.length;
-        setLevel(Math.min(100, (avg / 255) * 100));
-        rafRef.current = requestAnimationFrame(tick);
-      };
-      tick();
-    } catch {
-      setError("Microphone permission denied");
-    }
-  }, [stop]);
-
-  useEffect(() => {
-    if (active && !running) start();
-    if (!active) stop();
-    return () => stop();
-  }, [active, start, stop, running]);
-
-  return (
-    <div className="space-y-2">
-      <div className="flex h-4 items-center gap-0.5 overflow-hidden rounded-full bg-white/10 p-0.5">
-        {Array.from({ length: 16 }).map((_, i) => {
-          const threshold = (i + 1) * (100 / 16);
-          return (
-            <div
-              key={i}
-              className="flex-1 rounded-sm transition-all duration-75"
-              style={{
-                backgroundColor: level >= threshold ? "#34d399" : "rgba(255,255,255,0.06)",
-                height: `${Math.min(100, 20 + level * 0.8)}%`,
-              }}
-            />
-          );
-        })}
-      </div>
-      {error && <div className="text-xs text-red-400">{error}</div>}
-    </div>
-  );
-}
-
-// ------------------------------------------------------------------
 // Main page
 // ------------------------------------------------------------------
 
@@ -420,9 +339,10 @@ export default function SettingsPage() {
   const { profile, updateProfile } = useProfile();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { user } = useAppUser();
+  const { balance } = useWallet();
 
   const [mounted, setMounted] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabId>("profile");
+  const [activeTab, setActiveTab] = useState<TabId>("account");
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [saveError, setSaveError] = useState<string | null>(null);
 
@@ -458,7 +378,6 @@ export default function SettingsPage() {
   const [website, setWebsite] = useState(profile.website);
   const [location, setLocation] = useState(profile.location);
   const [avatarUrl, setAvatarUrl] = useState(profile.avatarUrl || "");
-  const [isPublic, setIsPublic] = useState(true);
   const [uploadingAvatar, setUploadingAvatar] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
 
@@ -585,73 +504,6 @@ export default function SettingsPage() {
   ];
 
   // ------------------------------------------------------------------
-  // Voice state
-  // ------------------------------------------------------------------
-
-  const [micActive, setMicActive] = useState(false);
-  const [selectedVoice, setSelectedVoice] = useStoredState("litlabs-voice-selected", "");
-  const [voiceSpeed, setVoiceSpeed] = useStoredState("litlabs-voice-speed", 1.0);
-  const [voicePitch, setVoicePitch] = useStoredState("litlabs-voice-pitch", 1.0);
-  const [autoListen, setAutoListen] = useStoredState("litlabs-voice-auto-listen", false);
-  const [autoSpeak, setAutoSpeak] = useStoredState("litlabs-voice-auto-speak", true);
-  const [removeMarkdown, setRemoveMarkdown] = useStoredState("litlabs-voice-remove-markdown", true);
-  const [keepMic, setKeepMic] = useStoredState("litlabs-voice-keep-mic", false);
-  const [cameraPermission, setCameraPermission] = useStoredState("litlabs-camera-permission", "prompt");
-  const [ttsSpeaking, setTtsSpeaking] = useState(false);
-
-  const testVoice = useCallback(() => {
-    if (typeof window === "undefined" || !window.speechSynthesis) return;
-    window.speechSynthesis.cancel();
-    const u = new SpeechSynthesisUtterance(
-      "LiTT online. Voice test complete. Adjust speed and pitch to tune how I sound.",
-    );
-    u.rate = voiceSpeed;
-    u.pitch = voicePitch;
-    if (selectedVoice) {
-      const voice = window.speechSynthesis.getVoices().find((v) => v.name === selectedVoice);
-      if (voice) u.voice = voice;
-    }
-    u.onstart = () => setTtsSpeaking(true);
-    u.onend = () => setTtsSpeaking(false);
-    window.speechSynthesis.speak(u);
-  }, [selectedVoice, voiceSpeed, voicePitch]);
-
-  // ------------------------------------------------------------------
-  // Integrations state
-  // ------------------------------------------------------------------
-
-  const [integrationStatus, setIntegrationStatus] = useState<Record<string, "connected" | "missing" | "unknown">>({});
-  const [integrationLoading, setIntegrationLoading] = useState(true);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetch("/api/integrations/status")
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
-        if (cancelled || !data?.integrations) return;
-        const map: Record<string, "connected" | "missing" | "unknown"> = {};
-        for (const item of data.integrations as { id: string; status: string }[]) {
-          map[item.id] = item.status === "connected" ? "connected" : "missing";
-        }
-        setIntegrationStatus(map);
-      })
-      .catch(() => {})
-      .finally(() => setIntegrationLoading(false));
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  const INTEGRATIONS = [
-    { id: "github", name: "GitHub", desc: "Repositories, branches, commits, and pull requests", connect: "/api/github/install", color: "#24292e" },
-    { id: "vercel", name: "Vercel", desc: "Deployments and previews", connect: null, color: "#000" },
-    { id: "google", name: "Google", desc: "Drive, Gmail, and YouTube", connect: null, color: "#4285f4" },
-    { id: "figma", name: "Figma", desc: "Design files and comments", connect: null, color: "#f24e1e" },
-    { id: "x", name: "X", desc: "Posts and social sharing", connect: null, color: "#0f1419" },
-    { id: "meta", name: "Meta", desc: "Facebook and Instagram", connect: null, color: "#1877f2" },
-  ];
-
-  // ------------------------------------------------------------------
   // Notifications state
   // ------------------------------------------------------------------
 
@@ -665,6 +517,42 @@ export default function SettingsPage() {
   // ------------------------------------------------------------------
   // Appearance state
   // ------------------------------------------------------------------
+
+  const [uploadingWallpaper, setUploadingWallpaper] = useState(false);
+  const [wallpaperError, setWallpaperError] = useState<string | null>(null);
+  const wallpaperInputRef = useRef<HTMLInputElement>(null);
+
+  const selectWallpaper = useCallback((wallpaper: WallpaperId) => {
+    updateProfile({ wallpaper });
+  }, [updateProfile]);
+
+  const uploadWallpaper = useCallback(async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+    setWallpaperError(null);
+    if (!file.type.startsWith("image/")) {
+      setWallpaperError("Choose a JPG, PNG, WebP, or GIF image.");
+      return;
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      setWallpaperError("Wallpaper images must be 10 MB or smaller.");
+      return;
+    }
+    setUploadingWallpaper(true);
+    try {
+      const formData = new FormData();
+      formData.append("file", file);
+      const response = await fetch("/api/upload", { method: "POST", body: formData });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok || !data.url) throw new Error(data.error || "Upload failed");
+      updateProfile({ wallpaper: "custom", customWallpaperUrl: data.url });
+    } catch (error) {
+      setWallpaperError(error instanceof Error ? error.message : "Wallpaper upload failed");
+    } finally {
+      setUploadingWallpaper(false);
+      if (wallpaperInputRef.current) wallpaperInputRef.current.value = "";
+    }
+  }, [updateProfile]);
 
   const [density, setDensity] = useStoredState<"compact" | "comfortable" | "spacious">("litlabs-ui-density", "comfortable");
   const [animations, setAnimations] = useStoredState<"minimal" | "reduced" | "normal">("litlabs-ui-animations", "normal");
@@ -710,49 +598,19 @@ export default function SettingsPage() {
   ];
 
   // ------------------------------------------------------------------
-  // Billing state
-  // ------------------------------------------------------------------
-
-  const [plan, setPlan] = useState<{ plan: string; credits?: number; period_end?: string } | null>(null);
-  const [billingLoading, setBillingLoading] = useState(false);
-
-  useEffect(() => {
-    if (!isSignedIn || !user?.id) return;
-    setBillingLoading(true);
-    Promise.all([
-      fetch(`/api/users/${user.id}/plan`).then((r) => (r.ok ? r.json() : null)),
-      fetch("/api/wallet").then((r) => (r.ok ? r.json() : null)).catch(() => null),
-    ])
-      .then(([planData, walletData]) => {
-        if (planData?.plan) {
-          setPlan({ ...planData, credits: walletData?.balance ?? 0 });
-        }
-      })
-      .finally(() => setBillingLoading(false));
-  }, [isSignedIn, user?.id]);
-
-  // ------------------------------------------------------------------
-  // Privacy state
-  // ------------------------------------------------------------------
-
-  const [analyticsEnabled, setAnalyticsEnabled] = useStoredState("litlabs-privacy-analytics", false);
-  const [publicProfile, setPublicProfile] = useStoredState("litlabs-privacy-public-profile", true);
-  const [dataMemory, setDataMemory] = useStoredState("litlabs-privacy-memory", true);
-
-  // ------------------------------------------------------------------
   // Render helpers
   // ------------------------------------------------------------------
 
   const saveButton = (
     <Button
       onClick={() => {
-        if (activeTab === "profile") saveProfile();
+        if (activeTab === "account") saveProfile();
         else {
           setSaveStatus("saved");
           setTimeout(() => setSaveStatus("idle"), 1500);
         }
       }}
-      disabled={activeTab === "profile" ? !profileDirty || saveStatus === "saving" : saveStatus === "saving"}
+      disabled={activeTab === "account" ? !profileDirty || saveStatus === "saving" : saveStatus === "saving"}
       T={T}
     >
       {saveStatus === "saving" ? <Loader2 size={14} className="animate-spin" /> : saveStatus === "saved" ? <Check size={14} /> : <Save size={14} />}
@@ -790,12 +648,13 @@ export default function SettingsPage() {
   // Sections
   // ------------------------------------------------------------------
 
-  const ProfileSection = (
+  const AccountSection = (
     <div className="space-y-4">
+      {/* Clerk identity header */}
       <Card T={T}>
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-base font-black" style={{ color: T.headerColor }}>
-            Profile photo
+            Account
           </h2>
           <div className="text-xs" style={{ color: T.textMuted }}>
             {profileCompletion}% complete
@@ -809,16 +668,47 @@ export default function SettingsPage() {
           />
         </div>
 
-        <div className="flex items-center gap-4">
-          <div className="relative h-20 w-20 overflow-hidden rounded-full border-2" style={{ borderColor: T.accentColor }}>
+        {/* Large profile photo preview with Clerk identity */}
+        <div className="mb-6 flex flex-col gap-4 rounded-2xl border border-white/10 bg-black/15 p-4 sm:flex-row sm:items-center">
+          <div
+            className="grid h-20 w-20 shrink-0 place-items-center overflow-hidden rounded-2xl border-2 border-white/15 bg-linear-to-br from-cyan-400/25 to-violet-500/25 text-2xl font-black"
+            aria-label="Profile photo preview"
+          >
             {avatarUrl ? (
-              <Image src={avatarUrl} alt="Avatar" fill className="object-cover" unoptimized />
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={avatarUrl} alt="Profile" className="h-full w-full object-cover" />
             ) : (
-              <div className="grid h-full w-full place-items-center text-xl font-black" style={{ backgroundColor: `${T.boxBg}`, color: T.accentColor }}>
-                {(displayName?.[0] || user?.firstName?.[0] || "C").toUpperCase()}
-              </div>
+              (displayName || user?.firstName?.[0] || "L").slice(0, 1).toUpperCase()
             )}
           </div>
+          <div className="min-w-0 flex-1">
+            <div className="text-base font-black" style={{ color: T.textColor }}>
+              {displayName || user?.fullName || "Your account"}
+            </div>
+            <div className="mt-0.5 text-xs" style={{ color: T.textMuted }}>
+              @{username || user?.username || "member"}
+              {user?.primaryEmailAddress?.emailAddress
+                ? ` · ${user.primaryEmailAddress.emailAddress}`
+                : ""}
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              {user?.imageUrl && avatarUrl !== user.imageUrl && (
+                <button
+                  onClick={() => setAvatarUrl(user.imageUrl || "")}
+                  className="rounded-xl border border-cyan-300/25 bg-cyan-300/8 px-3 py-2 text-[10px] font-bold text-cyan-200"
+                >
+                  Use account photo
+                </button>
+              )}
+              <span className="rounded-xl border border-white/10 px-3 py-2 text-[10px] text-white/45">
+                Sign-in and security are managed by your account provider
+              </span>
+            </div>
+          </div>
+        </div>
+
+        {/* Profile photo upload controls */}
+        <div className="flex items-center gap-4">
           <div className="flex flex-wrap gap-2">
             <Button
               onClick={() => fileRef.current?.click()}
@@ -837,10 +727,6 @@ export default function SettingsPage() {
               <Trash2 size={14} />
               Remove
             </Button>
-            <Button variant="secondary" disabled T={T}>
-              <Sparkles size={14} />
-              Generate AI
-            </Button>
           </div>
           <input
             ref={fileRef}
@@ -852,118 +738,72 @@ export default function SettingsPage() {
         </div>
       </Card>
 
+      {/* Extended profile info */}
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Public profile
+        <h2 className="mb-1 text-base font-black" style={{ color: T.headerColor }}>
+          Public Profile
         </h2>
+        <p className="mb-4 text-xs" style={{ color: T.textMuted }}>
+          Extended profile information stored by LiTTree. Account identity comes from your sign-in provider.
+        </p>
         <div className="grid gap-4 sm:grid-cols-2">
           <Input label="Display name" value={displayName} onChange={setDisplayName} T={T} placeholder="Your name" />
-          <Input label="Username" value={username} onChange={setUsername} T={T} placeholder="your_username" />
+          <Input label="Username" value={username} onChange={setUsername} T={T} placeholder="username" />
           <div className="sm:col-span-2">
             <TextArea label="Bio" value={bio} onChange={setBio} T={T} placeholder="Tell the community who you are…" />
           </div>
           <Input label="Website" value={website} onChange={setWebsite} T={T} placeholder="https://yoursite.com" />
           <Input label="Location" value={location} onChange={setLocation} T={T} placeholder="City, Country" />
-        </div>
-        <div className="mt-4">
-          <Toggle label="Public profile" description="Allow others to view your profile" checked={isPublic} onChange={setIsPublic} T={T} />
+          <div className="sm:col-span-2">
+            <Input label="Avatar URL" value={avatarUrl} onChange={setAvatarUrl} T={T} placeholder="https://..." />
+          </div>
         </div>
       </Card>
 
+      {/* Account security */}
       <Card T={T}>
-        <h2 className="mb-3 text-base font-black" style={{ color: T.headerColor }}>
-          Preview
+        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
+          Security
         </h2>
-        <div className="flex items-center gap-3 rounded-xl border p-3" style={{ borderColor: `${T.borderColor}30` }}>
-          <div className="relative h-12 w-12 overflow-hidden rounded-full" style={{ backgroundColor: T.boxBg }}>
-            {avatarUrl ? (
-              <Image src={avatarUrl} alt="Avatar" fill className="object-cover" unoptimized />
-            ) : (
-              <div className="grid h-full w-full place-items-center text-lg font-black" style={{ color: T.accentColor }}>
-                {(displayName?.[0] || "C").toUpperCase()}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between rounded-xl border p-3" style={{ borderColor: `${T.borderColor}30` }}>
+            <div>
+              <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                Email
               </div>
-            )}
-          </div>
-          <div>
-            <div className="font-bold" style={{ color: T.textColor }}>
-              {displayName || "Your name"}
+              <div className="text-xs" style={{ color: T.textMuted }}>
+                {user?.primaryEmailAddress?.emailAddress || "Not set"}
+              </div>
             </div>
-            <div className="text-xs" style={{ color: T.textMuted }}>
-              @{username || "username"} · {location}
-            </div>
-            <div className="mt-0.5 text-xs" style={{ color: T.textMuted }}>
-              {bio}
+            <div className="flex items-center gap-1 text-xs" style={{ color: "#34d399" }}>
+              <CheckCircle2 size={12} />
+              Verified
             </div>
           </div>
+          <div className="flex items-center justify-between rounded-xl border p-3" style={{ borderColor: `${T.borderColor}30` }}>
+            <div>
+              <div className="text-sm font-bold" style={{ color: T.textColor }}>
+                Password & MFA
+              </div>
+              <div className="text-xs" style={{ color: T.textMuted }}>
+                Managed by your account provider
+              </div>
+            </div>
+            <Button variant="secondary" disabled T={T}>
+              <Shield size={14} />
+              Manage
+            </Button>
+          </div>
+          <form action="/api/auth/logout" method="POST">
+            <Button variant="danger" type="submit" T={T}>
+              <LogOut size={14} />
+              Sign out everywhere
+            </Button>
+          </form>
         </div>
       </Card>
 
       {SaveStatusBar}
-    </div>
-  );
-
-  const AccountSection = (
-    <div className="space-y-4">
-      <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Email address
-        </h2>
-        <Input
-          label="Email"
-          value={user?.primaryEmailAddress?.emailAddress || ""}
-          readOnly
-          T={T}
-        />
-        <div className="mt-3 flex items-center gap-2 text-xs" style={{ color: "#34d399" }}>
-          <CheckCircle2 size={12} />
-          Verified
-        </div>
-      </Card>
-
-      <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Password
-        </h2>
-        <p className="mb-3 text-xs" style={{ color: T.textMuted }}>
-          Password and multi-factor authentication are managed through Clerk.
-        </p>
-        <Button variant="secondary" disabled T={T}>
-          <Shield size={14} />
-          Manage in Clerk
-        </Button>
-      </Card>
-
-      <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Connected login methods
-        </h2>
-        <div className="rounded-xl border p-3 text-sm" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}>
-          No connected providers available.
-        </div>
-      </Card>
-
-      <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Active sessions
-        </h2>
-        <div className="flex items-center justify-between rounded-xl border p-3" style={{ borderColor: `${T.borderColor}30` }}>
-          <div>
-            <div className="text-sm font-bold" style={{ color: T.textColor }}>
-              This device
-            </div>
-            <div className="text-[10px]" style={{ color: T.textMuted }}>
-              Current session
-            </div>
-          </div>
-          <span className="h-2.5 w-2.5 rounded-full bg-green-400" />
-        </div>
-        <form action="/api/auth/logout" method="POST" className="mt-4">
-          <Button variant="danger" type="submit" T={T}>
-            <LogOut size={14} />
-            Sign out everywhere
-          </Button>
-        </form>
-      </Card>
     </div>
   );
 
@@ -1022,175 +862,42 @@ export default function SettingsPage() {
     </div>
   );
 
-  const VoiceSection = (
+  const AgentsSection = (
     <div className="space-y-4">
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Microphone
-        </h2>
-        <div className="mb-3 flex items-center justify-between">
-          <div className="text-sm" style={{ color: T.textColor }}>
-            Status
+        <div className="mb-5 flex items-start gap-3">
+          <div className="grid h-11 w-11 place-items-center rounded-2xl bg-violet-400/10 text-violet-300">
+            <Bot size={19} />
           </div>
-          <div className="text-xs" style={{ color: "#34d399" }}>
-            Permission granted
+          <div>
+            <h2 className="text-base font-black" style={{ color: T.headerColor }}>Your AI crew</h2>
+            <p className="mt-1 text-xs" style={{ color: T.textMuted }}>
+              Configure agents where they work instead of duplicating their controls in Settings.
+            </p>
           </div>
         </div>
-        <Select
-          label="Input device"
-          value="default"
-          onChange={() => {}}
-          options={[{ value: "default", label: "Default microphone" }]}
-          T={T}
-        />
-        <div className="my-4">
-          <MicLevel active={micActive} />
-        </div>
-        <div className="flex gap-2">
-          <Button onClick={() => setMicActive(true)} disabled={micActive} T={T}>
-            <Mic size={14} />
-            Test microphone
-          </Button>
-          <Button onClick={() => setMicActive(false)} variant="secondary" disabled={!micActive} T={T}>
-            <X size={14} />
-            Stop
-          </Button>
-        </div>
-        <div className="mt-4 space-y-3">
-          <Toggle label="Automatically detect when I stop speaking" checked={autoListen} onChange={setAutoListen} T={T} />
-          <Toggle label="LiTT responds aloud" checked={autoSpeak} onChange={setAutoSpeak} T={T} />
-          <Toggle label="Remove markdown before speech" checked={removeMarkdown} onChange={setRemoveMarkdown} T={T} />
-          <Toggle label="Keep microphone active between replies" checked={keepMic} onChange={setKeepMic} T={T} />
+        <div className="grid gap-3">
+          <Link href="/agents" className="rounded-2xl border border-white/10 bg-white/3 p-4 transition hover:bg-white/6">
+            <strong className="block text-sm" style={{ color: T.textColor }}>Manage agents</strong>
+            <span className="mt-1 block text-xs" style={{ color: T.textMuted }}>Roles, tools, instructions, and crew status</span>
+          </Link>
+          <Link href="/studio?intent=agent" className="rounded-2xl border border-white/10 bg-white/3 p-4 transition hover:bg-white/6">
+            <strong className="block text-sm" style={{ color: T.textColor }}>Launch an agent in Studio</strong>
+            <span className="mt-1 block text-xs" style={{ color: T.textMuted }}>Keep the run beside your active conversation</span>
+          </Link>
         </div>
       </Card>
-
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          LiTT voice
-        </h2>
-        <div className="grid gap-4 sm:grid-cols-3">
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
-              Voice
-            </label>
-            <select
-              value={selectedVoice}
-              onChange={(e) => setSelectedVoice(e.target.value)}
-              className="w-full rounded-xl border px-3 py-2.5 text-sm outline-none"
-              style={{ backgroundColor: `${T.boxBg}60`, borderColor: `${T.borderColor}40`, color: T.textColor }}
-            >
-              <option value="">Default</option>
-              {typeof window !== "undefined" && window.speechSynthesis?.getVoices().map((v) => (
-                <option key={v.name} value={v.name}>
-                  {v.name}
-                </option>
-              ))}
-            </select>
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
-              Speed {voiceSpeed.toFixed(1)}x
-            </label>
-            <input
-              type="range"
-              min={0.5}
-              max={2}
-              step={0.1}
-              value={voiceSpeed}
-              onChange={(e) => setVoiceSpeed(parseFloat(e.target.value))}
-              className="w-full accent-current"
-              style={{ accentColor: T.accentColor }}
-            />
-          </div>
-          <div className="space-y-1.5">
-            <label className="text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
-              Pitch {(voicePitch * 100 - 100).toFixed(0)}%
-            </label>
-            <input
-              type="range"
-              min={0.5}
-              max={1.5}
-              step={0.05}
-              value={voicePitch}
-              onChange={(e) => setVoicePitch(parseFloat(e.target.value))}
-              className="w-full accent-current"
-              style={{ accentColor: T.accentColor }}
-            />
-          </div>
+        <h2 className="mb-2 text-base font-black" style={{ color: T.headerColor }}>How LiTT routing works</h2>
+        <p className="text-xs leading-5" style={{ color: T.textMuted }}>
+          Studio now understands image, video, audio, build, code, terminal, asset, and agent requests in normal language. You can still use slash commands when you want exact control.
+        </p>
+        <div className="mt-4 grid grid-cols-2 gap-2 text-[10px]">
+          {["Creative direction", "Code & build", "Research", "Automation", "Media creation", "Project memory"].map((capability) => (
+            <div key={capability} className="rounded-xl border border-white/10 bg-black/15 px-3 py-2 text-white/65">{capability}</div>
+          ))}
         </div>
-        <Button onClick={testVoice} disabled={ttsSpeaking} className="mt-4" T={T}>
-          {ttsSpeaking ? <Loader2 size={14} className="animate-spin" /> : <Volume2 size={14} />}
-          Test voice
-        </Button>
       </Card>
-
-      <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Camera
-        </h2>
-        <Select
-          label="Camera permission"
-          value={cameraPermission}
-          onChange={setCameraPermission}
-          options={[
-            { value: "prompt", label: "Ask each time" },
-            { value: "allowed", label: "Always allow" },
-            { value: "denied", label: "Deny" },
-          ]}
-          T={T}
-        />
-      </Card>
-    </div>
-  );
-
-  const IntegrationsSection = (
-    <div className="space-y-4">
-      {integrationLoading && (
-        <div className="text-sm" style={{ color: T.textMuted }}>
-          <Loader2 size={14} className="mr-2 inline animate-spin" />
-          Loading integration status…
-        </div>
-      )}
-      {INTEGRATIONS.map((item) => {
-        const status = integrationStatus[item.id] || "missing";
-        const connected = status === "connected";
-        return (
-          <Card key={item.id} T={T}>
-            <div className="flex items-start justify-between gap-3">
-              <div className="flex items-center gap-3">
-                <div
-                  className="grid h-10 w-10 shrink-0 place-items-center rounded-xl text-xs font-black text-white"
-                  style={{ backgroundColor: item.color }}
-                >
-                  {item.name.slice(0, 2).toUpperCase()}
-                </div>
-                <div>
-                  <div className="font-bold" style={{ color: T.textColor }}>
-                    {item.name}
-                  </div>
-                  <div className="text-xs" style={{ color: T.textMuted }}>
-                    {item.desc}
-                  </div>
-                </div>
-              </div>
-              <div className="shrink-0">
-                {item.connect ? (
-                  <a href={item.connect}>
-                    <Button variant={connected ? "secondary" : "primary"} T={T}>
-                      {connected ? <Check size={14} /> : <ExternalLink size={14} />}
-                      {connected ? "Manage" : "Connect"}
-                    </Button>
-                  </a>
-                ) : (
-                  <Button variant="secondary" disabled T={T}>
-                    Not configured
-                  </Button>
-                )}
-              </div>
-            </div>
-          </Card>
-        );
-      })}
     </div>
   );
 
@@ -1237,6 +944,100 @@ export default function SettingsPage() {
       </Card>
 
       <Card T={T}>
+        <div className="mb-4 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h2 className="text-base font-black" style={{ color: T.headerColor }}>
+              Workspace Wallpaper
+            </h2>
+            <p className="mt-1 max-w-2xl text-xs" style={{ color: T.textMuted }}>
+              Choose a built-in scene or upload your own image. Your wallpaper follows you across LiTTree and keeps a readability overlay above busy images.
+            </p>
+          </div>
+          <div className="flex gap-2">
+            <input
+              ref={wallpaperInputRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif"
+              className="hidden"
+              onChange={uploadWallpaper}
+            />
+            <button
+              type="button"
+              onClick={() => wallpaperInputRef.current?.click()}
+              disabled={uploadingWallpaper}
+              className="flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black transition hover:opacity-85 disabled:opacity-50"
+              style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+            >
+              {uploadingWallpaper ? <Loader2 size={14} className="animate-spin" /> : <Upload size={14} />}
+              {uploadingWallpaper ? "Uploading" : "Upload your own"}
+            </button>
+            {profile.customWallpaperUrl && (
+              <button
+                type="button"
+                onClick={() => updateProfile({ wallpaper: "mesh", customWallpaperUrl: null })}
+                className="rounded-xl border p-2.5 transition hover:opacity-80"
+                style={{ borderColor: T.borderColor + "40", color: T.textMuted }}
+                aria-label="Remove custom wallpaper"
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+
+        {wallpaperError && (
+          <div className="mb-4 rounded-xl border px-4 py-3 text-xs" style={{ borderColor: "#ef444455", backgroundColor: "#ef444410", color: "#fca5a5" }}>
+            {wallpaperError}
+          </div>
+        )}
+
+        {profile.customWallpaperUrl && (
+          <button
+            type="button"
+            onClick={() => selectWallpaper("custom")}
+            className="relative mb-4 h-44 w-full overflow-hidden rounded-2xl border text-left sm:h-52"
+            style={{ borderColor: profile.wallpaper === "custom" ? T.accentColor : T.borderColor + "40" }}
+          >
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={profile.customWallpaperUrl} alt="Your custom wallpaper" className="h-full w-full object-cover" />
+            <div className="absolute inset-0 bg-linear-to-t from-black/80 via-black/10 to-transparent" />
+            <div className="absolute bottom-4 left-4">
+              <div className="text-sm font-black text-white">Your wallpaper</div>
+              <div className="text-[10px] text-white/60">Custom upload · click to apply</div>
+            </div>
+            {profile.wallpaper === "custom" && <Check className="absolute right-4 top-4 rounded-full bg-black/60 p-1 text-white" size={24} />}
+          </button>
+        )}
+
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+          {WALLPAPERS.filter((wallpaper) => wallpaper.id !== "custom").map((wallpaper) => {
+            const active = profile.wallpaper === wallpaper.id;
+            return (
+              <button
+                key={wallpaper.id}
+                type="button"
+                onClick={() => selectWallpaper(wallpaper.id)}
+                className="group overflow-hidden rounded-2xl border text-left transition hover:-translate-y-0.5"
+                style={{ borderColor: active ? T.accentColor : T.borderColor + "30", backgroundColor: T.bgColor + "55" }}
+              >
+                <div className="relative h-24" style={{ background: wallpaper.preview }}>
+                  <div className="absolute inset-0 bg-linear-to-t from-black/45 to-transparent" />
+                  {active && <Check className="absolute right-2 top-2 rounded-full bg-black/50 p-1 text-white" size={21} />}
+                </div>
+                <div className="p-3">
+                  <div className="text-xs font-black" style={{ color: T.textColor }}>{wallpaper.name}</div>
+                  <div className="mt-1 line-clamp-2 text-[9px] leading-4" style={{ color: T.textMuted }}>{wallpaper.description}</div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+        <p className="mt-4 text-[10px]" style={{ color: T.textMuted }}>
+          Tip: wide images at 1920×1080 or larger look best. Upload limit: 10 MB.
+        </p>
+      </Card>
+
+      <Card T={T}>
         <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
           Interface
         </h2>
@@ -1273,106 +1074,124 @@ export default function SettingsPage() {
   const BillingSection = (
     <div className="space-y-4">
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Current plan
-        </h2>
-        {billingLoading ? (
-          <div className="text-sm" style={{ color: T.textMuted }}>
-            <Loader2 size={14} className="mr-2 inline animate-spin" />
-            Loading…
-          </div>
-        ) : plan ? (
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <span className="text-sm" style={{ color: T.textMuted }}>
-                Plan
-              </span>
-              <span className="rounded-full px-3 py-1 text-xs font-black uppercase" style={{ backgroundColor: `${T.accentColor}20`, color: T.accentColor }}>
-                {plan.plan}
-              </span>
-            </div>
-            <div className="flex items-center justify-between">
-              <span className="text-sm" style={{ color: T.textMuted }}>
-                Credits
-              </span>
-              <span className="font-bold" style={{ color: T.textColor }}>
-                {plan.credits?.toLocaleString() ?? 0}
-              </span>
-            </div>
-            {plan.period_end && (
-              <div className="flex items-center justify-between">
-                <span className="text-sm" style={{ color: T.textMuted }}>
-                  Renews
-                </span>
-                <span className="text-sm" style={{ color: T.textColor }}>
-                  {new Date(plan.period_end).toLocaleDateString()}
-                </span>
-              </div>
-            )}
-            <Button variant="secondary" T={T}>
-              <CreditCard size={14} />
-              Manage subscription
-            </Button>
-          </div>
-        ) : (
-          <div className="text-sm" style={{ color: T.textMuted }}>
-            No billing information available.
-          </div>
-        )}
+        <div className="text-[10px] font-black uppercase tracking-[.2em]" style={{ color: T.textMuted }}>Available balance</div>
+        <div className="mt-2 text-4xl font-black" style={{ color: T.headerColor }}>
+          {balance.toLocaleString()} <span className="text-lg" style={{ color: T.accentColor }}>LiTBits</span>
+        </div>
+        <p className="mt-2 max-w-xl text-xs leading-5" style={{ color: T.textMuted }}>
+          LiTBits power image, video, audio, and agent runs. The balance shown here comes from the same wallet used throughout Studio.
+        </p>
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link href="/wallet" className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-xs font-black" style={{ backgroundColor: T.accentColor, color: T.bgColor }}>
+            <Coins size={14} />
+            Open wallet
+          </Link>
+          <Link href="/pricing" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-xs font-black" style={{ color: T.textColor }}>
+            View plans
+          </Link>
+        </div>
       </Card>
+
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Usage
-        </h2>
-        <div className="rounded-xl border p-4 text-center text-sm" style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}>
-          Usage details coming soon.
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-xs font-bold" style={{ color: T.textMuted }}>Current plan</span>
+          <span className="rounded-full border border-emerald-300/20 bg-emerald-300/8 px-3 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-300">
+            {String(user?.publicMetadata?.plan || "Free")}
+          </span>
+        </div>
+        <div className="mt-5 space-y-3 text-xs text-white/60">
+          <div className="flex justify-between border-b border-white/8 pb-3"><span>Account</span><span className="max-w-[60%] truncate text-white/85">{user?.primaryEmailAddress?.emailAddress || "Signed in"}</span></div>
+          <div className="flex justify-between border-b border-white/8 pb-3"><span>Currency</span><span className="text-white/85">LiTBits</span></div>
+          <div className="flex justify-between"><span>Usage scope</span><span className="text-white/85">All Studio tools</span></div>
         </div>
       </Card>
     </div>
   );
 
-  const PrivacySection = (
+  const AdvancedSection = (
     <div className="space-y-4">
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Privacy & Data
-        </h2>
-        <div className="space-y-3">
-          <Toggle label="Product analytics" description="Help improve LiTTreeLabStudios with usage analytics" checked={analyticsEnabled} onChange={setAnalyticsEnabled} T={T} />
-          <Toggle label="Public profile" description="Your profile is visible to others" checked={publicProfile} onChange={setPublicProfile} T={T} />
-          <Toggle label="Memory" description="Allow LiTT to remember context across sessions" checked={dataMemory} onChange={setDataMemory} T={T} />
+        <div className="flex items-start gap-3">
+          <div
+            className="h-10 w-10 shrink-0 rounded-2xl flex items-center justify-center border"
+            style={{
+              backgroundColor: `${T.accentColor}14`,
+              borderColor: `${T.accentColor}35`,
+              color: T.accentColor,
+            }}
+          >
+            <Terminal size={18} />
+          </div>
+          <div>
+            <h2 className="text-base font-black" style={{ color: T.headerColor }}>
+              CLI Tools
+            </h2>
+            <p className="text-xs mt-1 leading-relaxed" style={{ color: T.textMuted }}>
+              Launch Qwen, Hermes, Gemini, OpenClaw, or a shell from the same bridge used
+              in Studio. Access is limited to authorized admin accounts.
+            </p>
+          </div>
         </div>
       </Card>
 
       <Card T={T}>
-        <h2 className="mb-4 text-base font-black" style={{ color: T.headerColor }}>
-          Data
-        </h2>
-        <div className="flex flex-wrap gap-2">
-          <Button variant="secondary" disabled T={T}>
-            <RefreshCw size={14} />
-            Export my data
-          </Button>
-          <Button variant="danger" disabled T={T}>
-            <Trash2 size={14} />
-            Delete account
-          </Button>
+        <h3 className="mb-3 text-sm font-black" style={{ color: T.headerColor }}>
+          Connected Surfaces
+        </h3>
+        <div className="grid gap-3">
+          {[
+            { href: "/studio", label: "Studio Tools", desc: "Open the full creative workspace.", icon: LayoutGrid },
+            { href: "/admin/terminal", label: "Admin Terminal", desc: "Jump to the dedicated terminal view.", icon: Terminal },
+            { href: "/admin", label: "Admin Console", desc: "Review health, live activity, and platform controls.", icon: ShieldCheck },
+          ].map((item) => {
+            const Icon = item.icon;
+            return (
+              <Link
+                key={item.href}
+                href={item.href}
+                className="flex items-center gap-3 rounded-2xl border px-4 py-3 transition-all hover:opacity-90"
+                style={{
+                  backgroundColor: `${T.boxBg}55`,
+                  borderColor: `${T.borderColor}30`,
+                }}
+              >
+                <Icon size={16} style={{ color: T.accentColor }} />
+                <span className="min-w-0">
+                  <span className="block text-sm font-black" style={{ color: T.textColor }}>
+                    {item.label}
+                  </span>
+                  <span className="block text-xs mt-0.5" style={{ color: T.textMuted }}>
+                    {item.desc}
+                  </span>
+                </span>
+                <ExternalLink size={14} className="ml-auto shrink-0 opacity-60" style={{ color: T.textMuted }} />
+              </Link>
+            );
+          })}
         </div>
       </Card>
+
+      <div
+        className="min-h-[400px] overflow-hidden rounded-2xl border"
+        style={{
+          backgroundColor: `${T.boxBg}60`,
+          borderColor: `${T.borderColor}30`,
+        }}
+      >
+        <CLIBridgeTool />
+      </div>
     </div>
   );
 
   const sections: Record<TabId, React.ReactNode> = {
-    profile: ProfileSection,
     account: AccountSection,
     workspace: WorkspaceSection,
-    ai: AiModelsSection,
-    voice: VoiceSection,
-    integrations: IntegrationsSection,
-    notifications: NotificationsSection,
     appearance: AppearanceSection,
+    ai: AiModelsSection,
+    agents: AgentsSection,
+    notifications: NotificationsSection,
     billing: BillingSection,
-    privacy: PrivacySection,
+    advanced: AdvancedSection,
   };
 
   return (
@@ -1437,14 +1256,12 @@ export default function SettingsPage() {
 }
 
 const TABS: { id: TabId; label: string; icon: React.ElementType }[] = [
-  { id: "profile", label: "Profile", icon: User },
-  { id: "account", label: "Account", icon: Shield },
-  { id: "workspace", label: "Workspace", icon: LayoutGrid },
-  { id: "ai", label: "AI & Models", icon: Bot },
-  { id: "voice", label: "Voice & Camera", icon: Mic },
-  { id: "integrations", label: "Integrations", icon: ExternalLink },
-  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "account", label: "Account", icon: User },
+  { id: "workspace", label: "Studio", icon: LayoutGrid },
   { id: "appearance", label: "Appearance", icon: Palette },
-  { id: "billing", label: "Billing", icon: CreditCard },
-  { id: "privacy", label: "Privacy", icon: Lock },
+  { id: "ai", label: "AI Models", icon: Key },
+  { id: "agents", label: "Agents", icon: Bot },
+  { id: "notifications", label: "Notifications", icon: Bell },
+  { id: "billing", label: "Billing & Credits", icon: CreditCard },
+  { id: "advanced", label: "Advanced", icon: Terminal },
 ];

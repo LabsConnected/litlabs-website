@@ -376,7 +376,7 @@ export default function ImageGenPopover({
                     onClick={handleInsert}
                     className="flex flex-1 items-center justify-center gap-1.5 rounded-lg bg-cyan-500/15 px-3 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/25"
                   >
-                    <Send size={13} /> Insert into chat
+                    <Send size={13} /> Add to Builder
                   </button>
                   <a
                     href={resultUrl}

@@ -9,6 +9,7 @@ import {
   useCallback,
   ReactNode,
 } from "react";
+import { useAppUser } from "@/hooks/useClerkAuth";
 
 export type WallpaperId =
   | "default"
@@ -66,7 +67,7 @@ export interface UserProfile {
 }
 
 const defaultProfile: UserProfile = {
-  displayName: "Creator",
+  displayName: "Member",
   username: "creator",
   bio: "Welcome to your creator dashboard. Build agents, generate content, and connect with the community.",
   mood: "creative",
@@ -125,6 +126,13 @@ function profileToApi(p: UserProfile) {
 }
 
 export function ProfileProvider({ children }: { children: ReactNode }) {
+  const { user: accountUser, isLoaded: accountLoaded } = useAppUser();
+  const accountUserId = accountUser?.id;
+  const accountFullName = accountUser?.fullName;
+  const accountFirstName = accountUser?.firstName;
+  const accountUsername = accountUser?.username;
+  const accountEmail = accountUser?.primaryEmailAddress?.emailAddress;
+  const accountImageUrl = accountUser?.imageUrl;
   const [profile, setProfile] = useState<UserProfile>(defaultProfile);
   const [loading, setLoading] = useState(true);
   const [hydrated, setHydrated] = useState(false);
@@ -144,6 +152,28 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
     setHydrated(true);
   }, []);
 
+  // Clerk owns account identity. LiTTree only layers public profile details on top.
+  useEffect(() => {
+    if (!accountLoaded || !accountUserId) return;
+    setProfile((prev) => ({
+      ...prev,
+      displayName:
+        accountFullName || accountFirstName || prev.displayName,
+      username:
+        accountUsername || accountEmail?.split("@")[0] ||
+        prev.username,
+      avatarUrl: accountImageUrl || prev.avatarUrl,
+    }));
+  }, [
+    accountLoaded,
+    accountUserId,
+    accountFullName,
+    accountFirstName,
+    accountUsername,
+    accountEmail,
+    accountImageUrl,
+  ]);
+
   // Load from API on mount
   useEffect(() => {
     if (initialLoadDone.current) return;
@@ -156,12 +186,13 @@ export function ProfileProvider({ children }: { children: ReactNode }) {
           const api = data.user;
           setProfile((prev) => ({
             ...prev,
-            displayName: api.name || prev.displayName,
+            displayName:
+              api.name && api.name !== "Member" ? api.name : prev.displayName,
             username: api.username || prev.username,
             bio: api.bio ?? prev.bio,
             location: api.location ?? prev.location,
             website: api.website ?? prev.website,
-            avatarUrl: api.avatar_url ?? prev.avatarUrl,
+            avatarUrl: api.avatar_url || prev.avatarUrl,
           }));
         }
       })

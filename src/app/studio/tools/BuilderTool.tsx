@@ -166,7 +166,7 @@ export default function BuilderTool({
             </div>
             <Link href="/projects" className="mt-3 grid grid-cols-[40px_1fr_18px] items-center gap-3 rounded-xl p-1 text-white">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-300 text-[10px] font-black text-black">LL</span>
-              <span><b className="block text-sm">LiTTree Lab Studios</b><small className="mt-1 block text-[10px]" style={{ color: T.textMuted }}>Updated today</small></span>
+              <span><b className="block text-sm">LiTTree LabStudios</b><small className="mt-1 block text-[10px]" style={{ color: T.textMuted }}>Updated today</small></span>
               <ArrowRight size={15} aria-hidden="true" />
             </Link>
           </section>

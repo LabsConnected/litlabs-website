@@ -123,7 +123,7 @@ export default function GamesPage() {
 
   const studioImageHref = useMemo(() => {
     const prompt = searchQuery.trim() || randomPrompt();
-    return `/studio?tool=image&prompt=${encodeURIComponent(prompt)}`;
+    return `/studio?prompt=${encodeURIComponent(prompt)}`;
   }, [searchQuery]);
 
   const handleToggleFav = useCallback((gameId: string) => {
@@ -170,7 +170,7 @@ export default function GamesPage() {
               <Wand2 size={14} /> Build in Studio
             </button>
             <a
-              href="/studio?tool=pipeline"
+              href="/studio"
               className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
               style={{ borderColor: `${T.borderColor}40`, color: T.textColor }}
             >

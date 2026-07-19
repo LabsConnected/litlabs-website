@@ -11,7 +11,36 @@ import { sanitizeProviderError } from "@/lib/provider-error";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  return NextResponse.json({ status: "ok", ready: true });
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json(
+      { error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+  try {
+    const { data: tasks, error } = await supabaseAdmin
+      .from("agent_tasks")
+      .select("*")
+      .eq("user_id", userId)
+      .order("created_at", { ascending: false })
+      .limit(50);
+
+    if (error) {
+      console.error("Failed to fetch agent_tasks", error);
+      return NextResponse.json(
+        { error: "Failed to load missions" },
+        { status: 500 },
+      );
+    }
+
+    return NextResponse.json({ tasks: tasks || [] });
+  } catch {
+    return NextResponse.json(
+      { error: "Failed to load missions" },
+      { status: 500 },
+    );
+  }
 }
 
 export async function POST(request: Request) {
@@ -30,7 +59,7 @@ export async function POST(request: Request) {
       taskInput,
       meta = {},
     } = body as {
-      sessionId: string;
+      sessionId?: string;
       workflowId?: string;
       assignedTo: string;
       dispatcher: string;
@@ -58,10 +87,11 @@ export async function POST(request: Request) {
     }
 
     // 3. Resolve sequence order mapping
+    const effectiveSessionId = sessionId || crypto.randomUUID();
     const { count, error: countError } = await supabaseAdmin
       .from("agent_tasks")
       .select("*", { count: "exact", head: true })
-      .eq("session_id", sessionId);
+      .eq("session_id", effectiveSessionId);
 
     if (countError) {
       console.error("Failed to compute sequence order", countError);
@@ -75,7 +105,7 @@ export async function POST(request: Request) {
 
     // 4. Commit the validated record to the live cluster
     const taskPayload = {
-      session_id: sessionId,
+      session_id: effectiveSessionId,
       workflow_id: workflowId || null,
       assigned_to: assignedTo,
       dispatcher,
@@ -83,6 +113,7 @@ export async function POST(request: Request) {
       task_output: {},
       status: "queued",
       sequence_order: nextOrder,
+      user_id: userId,
     };
 
     const { data: task, error: txError } = await supabaseAdmin
