@@ -47,9 +47,8 @@ function AgentConsole() {
         </div>
         <div className="mb-4 h-1 overflow-hidden rounded-full bg-white/10"><i className="block h-full w-[72%] rounded-full bg-[#c8ff3d]" /></div>
         {[
-          ["CD", "Visionary", "Campaign system complete", "Done", "#c8ff3d"],
-          ["FG", "Forge", "Building landing experience", "Working", "#6ee7f9"],
-          ["PL", "Pulse", "12 launch posts queued", "Ready", "#9f8cff"],
+          ["LB", "LiTTle-Bit", "Campaign system complete", "Done", "#f97316"],
+          ["LC", "LiTT-Code", "Building landing experience", "Working", "#22d3ee"],
         ].map(([initials, name, task, state, color]) => (
           <div key={name} className="mb-2 flex items-center gap-3 rounded-xl border border-white/10 bg-white/[0.025] p-3.5">
             <span className="grid h-9 w-9 place-items-center rounded-lg text-[9px] font-black text-[#10110d]" style={{ backgroundColor: color }}>{initials}</span>
@@ -61,7 +60,7 @@ function AgentConsole() {
       </div>
       <div className="absolute -bottom-7 -left-4 hidden items-center gap-3 rounded-xl border border-black bg-[#f5f2e9] px-4 py-3 text-[#12130f] shadow-[5px_5px_0_#111] sm:flex">
         <span className="grid h-7 w-7 place-items-center rounded-full bg-[#c8ff3d]"><Check size={14} strokeWidth={3} /></span>
-        <div><strong className="block text-[10px]">Landing page shipped</strong><small className="text-[9px] opacity-50">Forge · just now</small></div>
+        <div><strong className="block text-[10px]">Landing page shipped</strong><small className="text-[9px] opacity-50">LiTT-Code · just now</small></div>
       </div>
     </div>
   );
