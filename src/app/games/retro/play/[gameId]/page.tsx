@@ -34,6 +34,8 @@ function buildPlayerDocument(opts: {
     `window.EJS_startOnLoaded = true;`,
     `window.EJS_alignStartButton = "center";`,
     `window.EJS_color = ${JSON.stringify(opts.color)};`,
+    `window.EJS_cacheConfig = { enabled: false };`,
+    `window.EJS_onGameStart = ()=>{try{clearTimeout(window.__littEjsWatchdog);parent.postMessage({source:"ejs",type:"started"},"*")}catch(_){}};`,
   ];
   if (opts.biosUrl) {
     configLines.push(`window.EJS_biosUrl = ${JSON.stringify(opts.biosUrl)};`);
@@ -45,6 +47,7 @@ function buildPlayerDocument(opts: {
   // can render a real reason instead of staying on "Chapter loaded."
   configLines.push(
     `window.addEventListener("error",(e)=>{try{parent.postMessage({source:"ejs",type:"error",message:(e&&e.message)||"emulator error"},"*")}catch(_){}});`,
+    `window.addEventListener("unhandledrejection",(e)=>{try{const r=e&&e.reason;parent.postMessage({source:"ejs",type:"error",message:(r&&r.message)||String(r||"emulator promise rejected")},"*")}catch(_){}});`,
   );
   // Let the parent know when the iframe document has finished loading so the
   // watchdog can be cleared. If loader.js never runs, the timeout in the
@@ -55,7 +58,7 @@ function buildPlayerDocument(opts: {
   // If the loader hangs without ever dispatching load, warn the parent after
   // a generous interval so the user isn't stuck on a blank screen.
   configLines.push(
-    `setTimeout(()=>{try{parent.postMessage({source:"ejs",type:"error",message:"The emulator loader is taking too long. The CDN may be blocked or the core failed to download."},"*")}catch(_){}},40000);`,
+    `window.__littEjsWatchdog=setTimeout(()=>{try{parent.postMessage({source:"ejs",type:"error",message:"The emulator loader is taking too long. The CDN may be blocked or the core failed to download."},"*")}catch(_){}},40000);`,
   );
   const config = configLines.join("\n");
   return `<!doctype html>
@@ -121,6 +124,9 @@ export default function RetroPlayerPage() {
         }
       }
       if (data.type === "ready") {
+        setEmulatorTimeout(false);
+      }
+      if (data.type === "started") {
         setEmulatorReady(true);
         setEmulatorTimeout(false);
         if (loadTimeoutRef.current) {
@@ -145,7 +151,7 @@ export default function RetroPlayerPage() {
     return buildPlayerDocument({
       core: emulatorCore,
       gameUrl: romDataUrl,
-      gameName: game.title,
+      gameName: game.fileName,
       gameId: game.id,
       color: system?.color ?? "#a78bfa",
       biosUrl: isSatellaview && biosDataUrl ? biosDataUrl : undefined,
@@ -164,7 +170,7 @@ export default function RetroPlayerPage() {
     if (!srcDoc) return;
     loadTimeoutRef.current = setTimeout(() => {
       setEmulatorTimeout(true);
-    }, 25000);
+    }, 40000);
     return () => {
       if (loadTimeoutRef.current) {
         clearTimeout(loadTimeoutRef.current);
