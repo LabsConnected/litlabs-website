@@ -1,12 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { orchestrator, type ProjectContext } from "@/lib/agents";
-import { generateText } from "@/lib/llm";
+import { generateText, streamText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { Supermemory } from "supermemory";
 import { sanitizeProviderError } from "@/lib/provider-error";
+
+export const runtime = "nodejs";
+export const maxDuration = 60;
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -311,28 +314,236 @@ Write a 1-2 sentence caption in LiTT Director's voice. Name the prompt you used 
   return `Image ready. Prompt: "${image.imagePrompt}". Tap the image to download or regenerate.`;
 }
 
+/* ------------------------------------------------------------------ */
+/*  Shared setup — runs once, used by both streaming & non-streaming  */
+/* ------------------------------------------------------------------ */
+interface AgentChatContext {
+  userId: string;
+  userName: string;
+  resolvedId: string;
+  agent: ReturnType<typeof orchestrator.getAgent> | null;
+  directorPrompt: string;
+  memoryContext: string;
+  image: ImageResult | null;
+}
+
+async function buildChatContext(
+  userId: string,
+  body: { agentId?: string; message: string },
+): Promise<AgentChatContext> {
+  // Resolve legacy or drawer IDs to the canonical director agent
+  const resolvedId =
+    body.agentId === "litt-director" || body.agentId === "director" || !body.agentId
+      ? "director"
+      : body.agentId;
+
+  // Fetch the user's profile name so the agent can address them personally
+  const userProfile = await getUserByClerkId(userId);
+  const userName = userProfile?.name || "";
+  const directorPrompt = buildDirectorPrompt(userName);
+
+  const agent = orchestrator.getAgent(resolvedId);
+  const recalled = await recallMemories(userId, body.message, 5);
+  const memoryContext = recalled.length
+    ? `RELEVANT MEMORY:\n${recalled.map((m) => `- ${m.content}`).join("\n")}\n`
+    : "";
+
+  // Image intent detection (server-side short-circuit)
+  const image = maybeGenerateImage(body.message);
+
+  return {
+    userId,
+    userName,
+    resolvedId,
+    agent,
+    directorPrompt,
+    memoryContext,
+    image,
+  };
+}
+
+function jsonMeta(ctx: AgentChatContext) {
+  return {
+    agent: ctx.agent
+      ? { id: ctx.agent.id, name: ctx.agent.name, role: ctx.agent.role }
+      : { id: "director", name: "LiTT Director", role: "Director" },
+    userName: ctx.userName,
+    ...(ctx.image
+      ? {
+          imageUrl: ctx.image.imageUrl,
+          imagePrompt: ctx.image.imagePrompt,
+          imageProvider: ctx.image.imageProvider,
+        }
+      : {}),
+  };
+}
+
+function sseHeaders() {
+  return {
+    "Content-Type": "text/event-stream",
+    "Cache-Control": "no-cache, no-transform",
+    Connection: "keep-alive",
+  } as const;
+}
+
+function sseEncode(encoder: TextEncoder, data: unknown) {
+  return encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
+}
+
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  let body: { agentId?: string; message?: string; stream?: boolean };
   try {
-    const { agentId, message } = await req.json();
-    if (!message || typeof message !== "string") {
-      return NextResponse.json({ error: "Missing message" }, { status: 400 });
+    body = await req.json();
+  } catch {
+    return NextResponse.json({ error: "Invalid JSON" }, { status: 400 });
+  }
+  if (!body.message || typeof body.message !== "string") {
+    return NextResponse.json({ error: "Missing message" }, { status: 400 });
+  }
+  const message = body.message;
+  const wantStream = body.stream === true;
+
+  try {
+    const ctx = await buildChatContext(userId, { agentId: body.agentId, message });
+
+    // ----------------------------------------------------------------
+    // Image intent short-circuit (Director or no-agent path):
+    // generate the image ourselves, stream a short Director caption.
+    // ----------------------------------------------------------------
+    if (ctx.image && (ctx.resolvedId === "director" || !ctx.agent)) {
+      const encoder = new TextEncoder();
+      const sse = new ReadableStream({
+        async start(controller) {
+          try {
+            // 1. Meta + image (so the client can render the image immediately)
+            controller.enqueue(sseEncode(encoder, { meta: jsonMeta(ctx) }));
+            if (ctx.image) {
+              controller.enqueue(sseEncode(encoder, {
+                image: {
+                  imageUrl: ctx.image.imageUrl,
+                  imagePrompt: ctx.image.imagePrompt,
+                  imageProvider: ctx.image.imageProvider,
+                },
+              }));
+            }
+            // 2. Stream the caption token-by-token
+            let fullText = "";
+            await streamText(
+              `${ctx.directorPrompt}\n\n${ctx.memoryContext}The user said: "${message}"\nYou just generated an image with this prompt: "${ctx.image?.imagePrompt ?? ""}". Write a 1-2 sentence caption. No markdown, no bullets. Just the caption.`,
+              (chunk) => {
+                const clean = chunk.replace(/\{\{?userName\}?\}/gi, "there");
+                fullText += clean;
+                controller.enqueue(sseEncode(encoder, { text: clean }));
+              },
+              { task: "chat" },
+            );
+            controller.enqueue(sseEncode(encoder, { done: true }));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            // Persist (non-blocking)
+            void persistMemory(userId, `User said: ${message}`, {
+              agentId: ctx.resolvedId,
+              scope: "conversation",
+              source: "agent-chat-image-stream",
+              reason: "user chat (image intent)",
+            });
+            if (fullText) {
+              void persistMemory(userId, `I replied: ${fullText}`, {
+                agentId: ctx.resolvedId,
+                scope: "conversation",
+                source: "agent-chat-image-stream",
+                reason: "director image reply",
+              });
+            }
+          } catch (err) {
+            const { error: msg } = sanitizeProviderError(err);
+            controller.enqueue(sseEncode(encoder, { error: msg }));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(sse, { headers: sseHeaders() });
     }
 
-    // Resolve legacy or drawer IDs to the canonical director agent
-    const resolvedId =
-      agentId === "litt-director" || agentId === "director" || !agentId
-        ? "director"
-        : agentId;
+    // ----------------------------------------------------------------
+    // Director fallback path (no agent registered): stream directly
+    // ----------------------------------------------------------------
+    if (!ctx.agent && ctx.resolvedId === "director") {
+      if (!wantStream) {
+        // Non-streaming fallback (back-compat)
+        const r = await generateText(
+          `${ctx.directorPrompt}\n\n${ctx.memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
+          { task: "chat" },
+        );
+        const response = r.text || "I'm on it.";
+        void persistMemory(userId, `User said: ${message}`, {
+          agentId: ctx.resolvedId,
+          scope: "conversation",
+          source: "agent-chat-fallback",
+          reason: "user chat",
+        });
+        void persistMemory(userId, `I replied: ${response}`, {
+          agentId: ctx.resolvedId,
+          scope: "conversation",
+          source: "agent-chat-fallback",
+          reason: "director reply",
+        });
+        return NextResponse.json({
+          ...jsonMeta(ctx),
+          response,
+        });
+      }
+      // Streaming director
+      const encoder = new TextEncoder();
+      const sse = new ReadableStream({
+        async start(controller) {
+          try {
+            controller.enqueue(sseEncode(encoder, { meta: jsonMeta(ctx) }));
+            let fullText = "";
+            await streamText(
+              `${ctx.directorPrompt}\n\n${ctx.memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
+              (chunk) => {
+                const clean = chunk.replace(/\{\{?userName\}?\}/gi, "there");
+                fullText += clean;
+                controller.enqueue(sseEncode(encoder, { text: clean }));
+              },
+              { task: "chat" },
+            );
+            controller.enqueue(sseEncode(encoder, { done: true }));
+            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
+            void persistMemory(userId, `User said: ${message}`, {
+              agentId: ctx.resolvedId,
+              scope: "conversation",
+              source: "agent-chat-fallback-stream",
+              reason: "user chat",
+            });
+            if (fullText) {
+              void persistMemory(userId, `I replied: ${fullText}`, {
+                agentId: ctx.resolvedId,
+                scope: "conversation",
+                source: "agent-chat-fallback-stream",
+                reason: "director reply",
+              });
+            }
+          } catch (err) {
+            const { error: msg } = sanitizeProviderError(err);
+            controller.enqueue(sseEncode(encoder, { error: msg }));
+          } finally {
+            controller.close();
+          }
+        },
+      });
+      return new Response(sse, { headers: sseHeaders() });
+    }
 
-    // Fetch the user's profile name so the agent can address them personally
-    const userProfile = await getUserByClerkId(userId);
-    const userName = userProfile?.name || "";
-    const directorPrompt = buildDirectorPrompt(userName);
+    if (!ctx.agent) {
+      return NextResponse.json({ error: "Unknown agent" }, { status: 404 });
+    }
 
     const projectContext: ProjectContext = {
       name: "LiTTree LabStudios",
@@ -342,101 +553,21 @@ export async function POST(req: NextRequest) {
       customInstructions: PROJECT_CONTEXT,
     };
 
-    const agent = orchestrator.getAgent(resolvedId);
-    const recalled = await recallMemories(userId, message, 5);
-    const memoryContext = recalled.length
-      ? `RELEVANT MEMORY:\n${recalled.map((m) => `- ${m.content}`).join("\n")}\n`
-      : "";
-
     // ----------------------------------------------------------------
-    // Image intent short-circuit: if the user asked for an image, we
-    // generate it ourselves (Pollinations Flux, free, no key) and
-    // ask the LLM only for a short Director-style caption. This avoids
-    // the agent refusing with "I can't generate images" because the
-    // image is generated server-side, not by the LLM.
+    // Specialty agent path (littcode, etc.) — uses orchestrator's
+    // simulateAgentResponse (which calls the LLM internally). This is
+    // currently non-streaming. For "make things quicker" the win is
+    // mainly the Director, so we keep this path JSON for now.
     // ----------------------------------------------------------------
-    const image = maybeGenerateImage(message);
-    if (image && (resolvedId === "director" || !agent)) {
-      const caption = await composeImageCaption(
-        message,
-        image,
-        directorPrompt,
-        memoryContext,
-      );
-      void persistMemory(userId, `User said: ${message}`, {
-        agentId: resolvedId,
-        scope: "conversation",
-        source: "agent-chat-image",
-        reason: "user chat (image intent)",
-      });
-      void persistMemory(userId, `I replied: ${caption}`, {
-        agentId: resolvedId,
-        scope: "conversation",
-        source: "agent-chat-image",
-        reason: "director image reply",
-      });
-      if (!agent) {
-        return NextResponse.json({
-          agent: { id: "director", name: "LiTT Director", role: "Director" },
-          response: caption,
-          userName,
-          imageUrl: image.imageUrl,
-          imagePrompt: image.imagePrompt,
-          imageProvider: image.imageProvider,
-        });
-      }
-      // fall through to the agent path below — we still pass imageUrl along
-    }
-
-    if (!agent && resolvedId === "director") {
-      // Fallback: create a minimal director agent if not initialized
-      const r = await generateText(
-        `${directorPrompt}\n\n${memoryContext}USER: ${message}\n\nRespond as LiTT Director. Be direct and useful.`,
-        { task: "chat" },
-      );
-      const response = r.text || "I'm on it.";
-      // Persist the fallback chat turn as well.
-      void persistMemory(userId, `User said: ${message}`, {
-        agentId: resolvedId,
-        scope: "conversation",
-        source: "agent-chat-fallback",
-        reason: "user chat",
-      });
-      void persistMemory(userId, `I replied: ${response}`, {
-        agentId: resolvedId,
-        scope: "conversation",
-        source: "agent-chat-fallback",
-        reason: "director reply",
-      });
-      return NextResponse.json({
-        agent: { id: "director", name: "LiTT Director", role: "Director" },
-        response,
-        userName,
-        ...(image
-          ? {
-              imageUrl: image.imageUrl,
-              imagePrompt: image.imagePrompt,
-              imageProvider: image.imageProvider,
-            }
-          : {}),
-      });
-    }
-    if (!agent) {
-      return NextResponse.json({ error: "Unknown agent" }, { status: 404 });
-    }
-
-    orchestrator.addToMemory(resolvedId, `User said: ${message}`);
+    orchestrator.addToMemory(ctx.resolvedId, `User said: ${message}`);
     let response = await orchestrator.simulateAgentResponse(
-      resolvedId,
+      ctx.resolvedId,
       message,
-      memoryContext,
+      ctx.memoryContext,
       projectContext,
     );
 
-    // If image intent was detected, prepend the caption + ensure the agent
-    // didn't just refuse. If the agent refused or asked for a description,
-    // override with our caption so the user actually gets the image.
-    if (image) {
+    if (ctx.image) {
       const looksLikeRefusal = /\b(can't|cannot|unable|don't have|do not have|won't|will not)\b.*\b(generate|create|make|draw|render|produce)\b.*\b(image|picture|photo|illustration|art|logo|icon|visual|graphic)\b/i.test(
         response,
       );
@@ -446,47 +577,38 @@ export async function POST(req: NextRequest) {
       if (looksLikeRefusal || asksForDescription) {
         response = await composeImageCaption(
           message,
-          image,
-          directorPrompt,
-          memoryContext,
+          ctx.image,
+          ctx.directorPrompt,
+          ctx.memoryContext,
         );
       } else {
         response = `${response}\n\n${await composeImageCaption(
           message,
-          image,
-          directorPrompt,
-          memoryContext,
+          ctx.image,
+          ctx.directorPrompt,
+          ctx.memoryContext,
         )}`;
       }
     }
 
-    orchestrator.addToMemory(resolvedId, `I replied: ${response}`);
+    orchestrator.addToMemory(ctx.resolvedId, `I replied: ${response}`);
 
-    // Persist to durable Supabase + Supermemory memory (non-blocking).
     void persistMemory(userId, `User said: ${message}`, {
-      agentId: resolvedId,
+      agentId: ctx.resolvedId,
       scope: "conversation",
       source: "agent-chat",
       reason: "user chat",
     });
     void persistMemory(userId, `I replied: ${response}`, {
-      agentId: resolvedId,
+      agentId: ctx.resolvedId,
       scope: "conversation",
       source: "agent-chat",
       reason: "director reply",
     });
 
     return NextResponse.json({
-      agent: { id: agent.id, name: agent.name, role: agent.role },
+      ...jsonMeta(ctx),
       response,
-      userName,
-      ...(image
-        ? {
-            imageUrl: image.imageUrl,
-            imagePrompt: image.imagePrompt,
-            imageProvider: image.imageProvider,
-          }
-        : {}),
     });
   } catch (error) {
     console.error("[api/agents/chat] error:", error);

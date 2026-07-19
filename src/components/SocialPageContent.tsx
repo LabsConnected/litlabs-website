@@ -213,7 +213,7 @@ export default function SocialPageContent() {
   return (
     <div
       className="min-h-full pb-8"
-      style={{ backgroundColor: C.bgColor, color: C.textColor }}
+      style={{ backgroundColor: "transparent", color: C.textColor }}
     >
       {/* Toast */}
       {toast && (

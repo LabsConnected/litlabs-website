@@ -9,7 +9,7 @@ export default function DashboardView() {
   return (
     <div
       className="flex min-h-dvh"
-      style={{ backgroundColor: T.bgColor, color: T.textColor }}
+      style={{ backgroundColor: "transparent", color: T.textColor }}
     >
       <main className="flex-1 min-w-0 overflow-y-auto p-4 lg:p-6">
         <div className="mx-auto w-full max-w-7xl">

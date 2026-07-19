@@ -135,7 +135,7 @@ export default function AgentsPageClient() {
   };
 
   return (
-    <main className="relative h-full overflow-y-auto pb-24" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+    <main className="relative h-full overflow-y-auto pb-24" style={{ backgroundColor: "transparent", color: T.textColor }}>
       <div className="pointer-events-none absolute inset-0" style={{ background: `radial-gradient(circle at 15% 15%, ${T.accentColor}10, transparent 32%), radial-gradient(circle at 85% 40%, ${T.linkColor}0b, transparent 30%)` }} />
       <div className="relative mx-auto max-w-7xl space-y-6 px-4 py-6 sm:py-8">
         <header className="relative min-h-56 overflow-hidden rounded-3xl border p-5 sm:min-h-64 sm:p-8" style={{ borderColor: `${T.accentColor}30`, backgroundColor: "#050805" }}>
