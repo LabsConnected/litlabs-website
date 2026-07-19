@@ -50,6 +50,9 @@ import {
   Hammer,
   Home,
   ChevronLeft,
+  Trash2,
+  MessageSquarePlus,
+  Eraser,
 } from "lucide-react";
 import Link from "next/link";
 
@@ -508,6 +511,81 @@ function LITTTerminalShellInner({
     [],
   );
 
+  /* ---------------------------------------------------------------- */
+  /*  Streaming agent chat — token-by-token SSE from /api/agents/chat  */
+  /* ---------------------------------------------------------------- */
+  const streamAgentChat = useCallback(
+    async (params: {
+      agentId: string;
+      message: string;
+      onText: (chunk: string, fullText: string) => void;
+      onImage?: (image: {
+        imageUrl: string;
+        imagePrompt: string;
+        imageProvider: string;
+      }) => void;
+    }): Promise<string> => {
+      const res = await fetch("/api/agents/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          agentId: params.agentId,
+          message: params.message,
+          stream: true,
+        }),
+      });
+      if (!res.ok || !res.body) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(
+          (err as { error?: string; detail?: string }).error ||
+            (err as { error?: string; detail?: string }).detail ||
+            "Agent service error",
+        );
+      }
+      const reader = res.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = "";
+      let fullText = "";
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        const chunks = buffer.split("\n\n");
+        buffer = chunks.pop() ?? "";
+        for (const raw of chunks) {
+          const trimmed = raw.trim();
+          if (!trimmed.startsWith("data:")) continue;
+          const payload = trimmed.slice(5).trim();
+          if (!payload || payload === "[DONE]") continue;
+          let json: {
+            text?: string;
+            image?: {
+              imageUrl: string;
+              imagePrompt: string;
+              imageProvider: string;
+            };
+            error?: string;
+          };
+          try {
+            json = JSON.parse(payload);
+          } catch {
+            continue;
+          }
+          if (typeof json.text === "string") {
+            fullText += json.text;
+            params.onText(json.text, fullText);
+          } else if (json.image && params.onImage) {
+            params.onImage(json.image);
+          } else if (json.error) {
+            throw new Error(json.error);
+          }
+        }
+      }
+      return fullText;
+    },
+    [],
+  );
+
   const executeTerminalCommand = useCallback(
     (command: string, startedBy: "user" | "litt" = "user") => {
       const block = createTerminalBlock(command, startedBy);
@@ -571,29 +649,24 @@ function LITTTerminalShellInner({
           status: "pending",
         });
         try {
-          const res = await fetch("/api/agents/chat", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              agentId: activeAgent.id,
-              message: prompt,
-            }),
+          await streamAgentChat({
+            agentId: activeAgent.id,
+            message: prompt,
+            onText: (_chunk, fullText) => {
+              updateLastToolMessage({
+                content: fullText,
+                status: "generating",
+              });
+            },
+            onImage: (image) => {
+              updateLastToolMessage({
+                type: "image",
+                mediaUrl: image.imageUrl,
+                status: "complete",
+              });
+            },
           });
-          if (!res.ok) {
-            const err = await res.json().catch(() => ({}));
-            throw new Error(
-              err.error || err.detail || "Agent service error",
-            );
-          }
-          const data = (await res.json()) as {
-            response?: string;
-            agent?: { name?: string };
-          };
-          const reply = data.response || "I'm on it.";
-          updateLastToolMessage({
-            content: reply,
-            status: "complete",
-          });
+          updateLastToolMessage({ status: "complete" });
         } catch (err) {
           const msg =
             err instanceof Error
@@ -819,14 +892,6 @@ function LITTTerminalShellInner({
         try {
           localStorage.removeItem("litlab-builder-messages");
         } catch {}
-        addToolMessage({
-          role: "assistant",
-          content:
-            cmd === "clear"
-              ? "Chat cleared. What's next?"
-              : "New conversation started. What are we building?",
-          createdAt: Date.now(),
-        });
         return true;
       }
 
@@ -851,65 +916,59 @@ function LITTTerminalShellInner({
         content: text || "(image attachment)",
         createdAt: Date.now(),
       };
+      // Append user message + an empty assistant placeholder that the SSE
+      // stream will fill in token-by-token. Perceived time-to-first-token
+      // drops from "wait for the full reply" to "wait for the first chunk".
       setAgentChats((prev) => ({
         ...prev,
-        [agent.id]: [...(prev[agent.id] || []), userMessage],
+        [agent.id]: [
+          ...(prev[agent.id] || []),
+          userMessage,
+          { role: "assistant", content: "", createdAt: Date.now() + 1 },
+        ],
       }));
       setBusy(true);
       setActivity({ type: "thinking" });
 
-      try {
-        const res = await fetch("/api/agents/chat", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            agentId: agent.id,
-            message: text || "Describe what you see.",
-          }),
+      const updateLast = (patch: Partial<Message>) => {
+        setAgentChats((prev) => {
+          const list = prev[agent.id] || [];
+          if (list.length === 0) return prev;
+          const next = list.slice();
+          next[next.length - 1] = { ...next[next.length - 1], ...patch };
+          return { ...prev, [agent.id]: next };
         });
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          throw new Error(err.error || err.detail || "Agent service error");
-        }
-        const data = (await res.json()) as {
-          response?: string;
-          agent?: { name?: string };
-          imageUrl?: string;
-          imagePrompt?: string;
-          imageProvider?: string;
-        };
-        const reply = data.response || "I'm on it.";
-        const assistantMessage: Message = data.imageUrl
-          ? {
-              role: "assistant",
-              content: reply,
-              createdAt: Date.now(),
+      };
+
+      let reply = "";
+      try {
+        reply = await streamAgentChat({
+          agentId: agent.id,
+          message: text || "Describe what you see.",
+          onText: (_chunk, fullText) => {
+            updateLast({ content: fullText, status: "generating" });
+          },
+          onImage: (image) => {
+            updateLast({
               type: "image",
-              mediaUrl: data.imageUrl,
-            }
-          : { role: "assistant", content: reply, createdAt: Date.now() };
-        setAgentChats((prev) => ({
-          ...prev,
-          [agent.id]: [...(prev[agent.id] || []), assistantMessage],
-        }));
+              mediaUrl: image.imageUrl,
+              status: "complete",
+            });
+          },
+        });
+        updateLast({ status: "complete" });
         return reply;
       } catch (err) {
-        const reply =
+        const fallback =
           err instanceof Error ? err.message : "Agent service unavailable";
-        setAgentChats((prev) => ({
-          ...prev,
-          [agent.id]: [
-            ...(prev[agent.id] || []),
-            { role: "assistant", content: reply, createdAt: Date.now() },
-          ],
-        }));
-        return reply;
+        updateLast({ content: fallback, type: "error", status: "error" });
+        return fallback;
       } finally {
         setBusy(false);
         setActivity({ type: "idle" });
       }
     },
-    [activeAgent, setActivity],
+    [activeAgent, setActivity, streamAgentChat],
   );
 
   // Route a pending /agent query
@@ -1467,7 +1526,56 @@ function LITTTerminalShellInner({
                 </div>
               </div>
             </div>
-            <div className="flex items-center gap-3 text-[10px]">
+            <div className="flex items-center gap-2 text-[10px]">
+              <button
+                onClick={() => {
+                  setMessages([]);
+                  setActiveCommands([]);
+                  try {
+                    localStorage.removeItem("litlab-builder-messages");
+                  } catch {}
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="New chat"
+                title="New chat"
+              >
+                <MessageSquarePlus size={12} />
+                <span className="hidden sm:inline">New</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (messages.length && window.confirm("Clear all messages in this chat?")) {
+                    setMessages([]);
+                    setActiveCommands([]);
+                    try {
+                      localStorage.removeItem("litlab-builder-messages");
+                    } catch {}
+                  }
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                aria-label="Clear chat"
+                title="Clear chat"
+              >
+                <Eraser size={12} />
+                <span className="hidden sm:inline">Clear</span>
+              </button>
+              <button
+                onClick={() => {
+                  if (messages.length && window.confirm("Delete this chat and start fresh?")) {
+                    setMessages([]);
+                    setActiveCommands([]);
+                    try {
+                      localStorage.removeItem("litlab-builder-messages");
+                    } catch {}
+                  }
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-red-400/70 transition hover:bg-red-500/10 hover:text-red-400"
+                aria-label="Delete chat"
+                title="Delete chat"
+              >
+                <Trash2 size={12} />
+                <span className="hidden sm:inline">Delete</span>
+              </button>
               <Link
                 href="/"
                 className="hidden items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white sm:flex"
