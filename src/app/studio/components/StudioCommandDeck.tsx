@@ -24,7 +24,7 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "./studio-command-deck.module.css";
 
 const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
@@ -54,8 +54,30 @@ const RAIL: RailItem[] = [
 
 const LAYOUT_KEY = "litt-command-deck-layout";
 
-function Panel({ title, icon: Icon, children, className = "", action }: { title: string; icon: LucideIcon; children: ReactNode; className?: string; action?: ReactNode }) {
-  return <section className={`${styles.panel} ${className}`}><header className={styles.panelHeader}><span className={styles.panelTitle}><Icon size={13} /> {title}</span><div className={styles.panelActions}>{action}</div></header>{children}</section>;
+type PanelId = "explorer" | "preview" | "review" | "terminal";
+type LayoutState = {
+  previewDevice: "desktop" | "tablet" | "mobile";
+  rightTab: "activity" | "agents" | "git";
+  collapsed: Record<PanelId, boolean>;
+  sizes: Partial<Record<PanelId, number>>;
+};
+
+const DEFAULT_LAYOUT: LayoutState = {
+  previewDevice: "desktop",
+  rightTab: "activity",
+  collapsed: { explorer: false, preview: false, review: false, terminal: false },
+  sizes: {},
+};
+
+function Panel({ title, icon: Icon, children, className = "", action, panelId, collapsed, onCollapseAction, onResizeAction, style }: { title: string; icon: LucideIcon; children: ReactNode; className?: string; action?: ReactNode; panelId?: PanelId; collapsed?: boolean; onCollapseAction?: () => void; onResizeAction?: (id: PanelId, size: number) => void; style?: CSSProperties }) {
+  const ref = useRef<HTMLElement>(null);
+  useEffect(() => {
+    if (!panelId || !onResizeAction || !ref.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => onResizeAction(panelId, Math.round(entry.contentRect.width)));
+    observer.observe(ref.current);
+    return () => observer.disconnect();
+  }, [onResizeAction, panelId]);
+  return <section ref={ref} className={`${styles.panel} ${className} ${collapsed ? styles.collapsed : ""}`} style={style} data-deck-panel={panelId}><header className={styles.panelHeader}><span className={styles.panelTitle}><Icon size={13} /> {title}</span><div className={styles.panelActions}>{action}{onCollapseAction && <button onClick={onCollapseAction} aria-label={`${collapsed ? "Expand" : "Collapse"} ${title}`} title={`${collapsed ? "Expand" : "Collapse"} panel`}>{collapsed ? "+" : "−"}</button>}</div></header>{!collapsed && children}</section>;
 }
 
 function EmptyState({ title, description, actionLabel, onAction, secondaryLabel }: { title: string; description: string; actionLabel?: string; onAction?: () => void; secondaryLabel?: string }) {
@@ -63,18 +85,33 @@ function EmptyState({ title, description, actionLabel, onAction, secondaryLabel 
 }
 
 export default function StudioCommandDeck({ mode, onModeChangeAction, activeProjectId, onOpenProjectsAction, onOpenTerminalAction, conversation }: DeckProps) {
-  const [previewDevice, setPreviewDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
-  const [rightTab, setRightTab] = useState<"activity" | "agents" | "git">("activity");
+  const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
+  const terminalLayoutRef = useRef<HTMLDivElement>(null);
   const [draft, setDraft] = useState("// Demo draft — connect a project to edit real files.\nexport const studioMode = \"code\";\n");
 
   useEffect(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}") as { previewDevice?: typeof previewDevice; rightTab?: typeof rightTab };
-      if (saved.previewDevice === "desktop" || saved.previewDevice === "tablet" || saved.previewDevice === "mobile") setPreviewDevice(saved.previewDevice);
-      if (saved.rightTab === "activity" || saved.rightTab === "agents" || saved.rightTab === "git") setRightTab(saved.rightTab);
+      const saved = JSON.parse(localStorage.getItem(LAYOUT_KEY) ?? "{}") as Partial<LayoutState>;
+      if (saved.previewDevice === "desktop" || saved.previewDevice === "tablet" || saved.previewDevice === "mobile") {
+        setLayout({ ...DEFAULT_LAYOUT, ...saved, collapsed: { ...DEFAULT_LAYOUT.collapsed, ...saved.collapsed }, sizes: saved.sizes ?? {} });
+      }
     } catch {}
   }, []);
-  useEffect(() => { localStorage.setItem(LAYOUT_KEY, JSON.stringify({ previewDevice, rightTab })); }, [previewDevice, rightTab]);
+  useEffect(() => { localStorage.setItem(LAYOUT_KEY, JSON.stringify(layout)); }, [layout]);
+  useEffect(() => { localStorage.setItem("litt-command-deck-mode", mode); }, [mode]);
+  useEffect(() => {
+    if (!terminalLayoutRef.current || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(([entry]) => setLayout((current) => {
+      const width = Math.round(entry.contentRect.width);
+      return current.sizes.terminal === width ? current : { ...current, sizes: { ...current.sizes, terminal: width } };
+    }));
+    observer.observe(terminalLayoutRef.current);
+    return () => observer.disconnect();
+  }, []);
+
+  const setCollapsed = (panel: PanelId) => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, [panel]: !current.collapsed[panel] } }));
+  const setPanelSize = (panel: PanelId, size: number) => setLayout((current) => current.sizes[panel] === size ? current : ({ ...current, sizes: { ...current.sizes, [panel]: size } }));
+  const resetLayout = () => setLayout(DEFAULT_LAYOUT);
 
   const selectRail = (id: RailItem["id"]) => {
     if (id === "code" || id === "media" || id === "command") onModeChangeAction(id);
@@ -82,6 +119,7 @@ export default function StudioCommandDeck({ mode, onModeChangeAction, activeProj
     if (id === "terminal") onOpenTerminalAction();
   };
   const projectLabel = activeProjectId ? `Project ${activeProjectId.slice(0, 8)}` : "No project";
+  const panelStyle = (panel: PanelId): CSSProperties | undefined => layout.sizes[panel] ? { width: `${layout.sizes[panel]}px` } : undefined;
 
   return <section className={styles.deck}>
     <aside className={styles.rail} aria-label="Studio tools">{RAIL.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}</aside>
@@ -95,19 +133,19 @@ export default function StudioCommandDeck({ mode, onModeChangeAction, activeProj
           <span className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
           <span className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
         </div>
-        <div className={styles.actions}><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
+        <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
       </header>
 
       {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`}>
-        <Panel title="Explorer" icon={FolderOpen} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
+        <Panel title="Explorer" icon={FolderOpen} panelId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} onResizeAction={setPanelSize} style={panelStyle("explorer")} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
           {activeProjectId ? <div className={styles.fileTree}><div className={styles.fileRow}><FileCode2 size={13} /> File index loading is unavailable</div></div> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
         </Panel>
         <div className={styles.stack}>
           <Panel title="Editor" icon={Braces} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><MonacoEditor height="100%" language="typescript" value={draft} theme="vs-dark" onChange={(value) => setDraft(value ?? "")} options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }} /></div></Panel>
-          <Panel title="Live preview" icon={Monitor} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={previewDevice === device} onClick={() => setPreviewDevice(device)}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
+          <Panel title="Live preview" icon={Monitor} panelId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} onResizeAction={setPanelSize} style={panelStyle("preview")} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
         </div>
-        <Panel title="Review" icon={GitBranch} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={rightTab === tab} onClick={() => setRightTab(tab)}>{tab}</button>)}</div>{rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
-        <div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Problems</button><button>Output</button><button>Tests</button></div><button className={styles.button} onClick={onOpenTerminalAction}><Terminal size={12} /> Open terminal</button></div>
+        <Panel title="Review" icon={GitBranch} panelId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} onResizeAction={setPanelSize} style={panelStyle("review")} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
+        <div ref={terminalLayoutRef} className={`${styles.terminalStrip} ${layout.collapsed.terminal ? styles.terminalCollapsed : ""}`} style={panelStyle("terminal")} data-deck-panel="terminal"><div className={styles.terminalTabs}><button>Terminal</button><button>Problems</button><button>Output</button><button>Tests</button></div><div className="flex gap-1"><button className={styles.iconButton} onClick={() => setCollapsed("terminal")} aria-label="Collapse terminal" title="Collapse terminal">{layout.collapsed.terminal ? "+" : "−"}</button><button className={styles.button} onClick={onOpenTerminalAction}><Terminal size={12} /> Open terminal</button></div></div>
       </div>}
 
       {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." /></Panel></aside><div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Output</button></div><button className={styles.button} onClick={onOpenTerminalAction}>Open terminal</button></div></div>}
