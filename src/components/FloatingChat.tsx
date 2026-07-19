@@ -425,7 +425,7 @@ export function FloatingChat() {
     const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim());
     const chunks = sentences.length > 0 ? sentences : [text];
     const queue: HTMLAudioElement[] = [];
-    let cancelled = false;
+    const cancelled = false;
     let firstPlayed = false;
 
     const playNext = () => {
@@ -867,7 +867,7 @@ export function FloatingChat() {
         }}
         aria-label="Open LiTT Assistant"
       >
-        <Image src="/brand/litt-mascot-hero.png" alt="Open LiTT Assistant" fill className="object-cover" style={{ objectPosition: "50% 13%" }} />
+        <Image src="/brand/litt-mascot-hero.png" alt="Open LiTT Assistant" fill className="object-cover" style={{ objectPosition: "50% 30%" }} />
         {!chatOpen && (
           <span className="absolute -top-1 -right-1 flex h-3 w-3">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />

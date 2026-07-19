@@ -1,9 +1,10 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
 import {
+  Check,
   Download,
   ExternalLink,
   Info,
@@ -19,7 +20,8 @@ import {
   quickPlayLicenseLabel,
   type QuickPlayGame,
 } from "@/lib/retro-quickplay";
-import { addRetroGame, getRetroSystem } from "@/lib/retro-arcade";
+import { addRetroGame, findQuickPlayInstall, getRetroSystem } from "@/lib/retro-arcade";
+import RetroArtwork from "@/components/games/retro/RetroArtwork";
 
 type Status =
   | { kind: "idle" }
@@ -45,14 +47,40 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
   const [status, setStatus] = useState<Record<string, Status>>({});
   const [activeInfo, setActiveInfo] = useState<string | null>(null);
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    let active = true;
+    Promise.all(
+      QUICK_PLAY_LIBRARY.map(async (game) => {
+        const existing = await findQuickPlayInstall(game.id);
+        return existing ? game.id : null;
+      }),
+    ).then((ids) => {
+      if (!active) return;
+      setInstalledIds(new Set(ids.filter((id): id is string => id !== null)));
+    });
+    return () => { active = false; };
+  }, []);
 
   async function addAndPlay(game: QuickPlayGame) {
     if (busyId) return;
     setBusyId(game.id);
     setStatus((current) => ({ ...current, [game.id]: { kind: "loading" } }));
     try {
+      const existing = await findQuickPlayInstall(game.id);
+      if (existing) {
+        setStatus((current) => ({ ...current, [game.id]: { kind: "idle" } }));
+        onAdded?.(existing.id, game);
+        router.push(`/games/retro/play/${existing.id}`);
+        return;
+      }
       const file = await downloadQuickPlayRom(game);
-      const record = await addRetroGame(file, game.title, game.system);
+      const record = await addRetroGame(file, game.title, game.system, {
+        quickPlayId: game.id,
+        subtitle: game.tagline,
+      });
+      setInstalledIds((prev) => new Set(prev).add(game.id));
       setStatus((current) => ({ ...current, [game.id]: { kind: "idle" } }));
       onAdded?.(record.id, game);
       router.push(`/games/retro/play/${record.id}`);
@@ -122,36 +150,26 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
               key={game.id}
               className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e16] transition hover:-translate-y-0.5 hover:border-white/20"
             >
-              <div
-                className="relative flex h-24 items-center gap-4 overflow-hidden px-4"
-                style={{
-                  background: `radial-gradient(circle at 15% 20%, ${game.accent}33, transparent 55%), linear-gradient(145deg,#181826,#0a0a10)`,
-                }}
-              >
+              <div className="relative aspect-[3/4] overflow-hidden">
+                <RetroArtwork
+                  system={game.system}
+                  title={game.title}
+                  subtitle={game.tagline}
+                  accent={game.accent}
+                  ratio="cover"
+                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                />
                 <span
-                  className="grid h-12 w-12 shrink-0 place-items-center rounded-xl text-2xl"
-                  style={{
-                    backgroundColor: `${game.accent}22`,
-                    color: game.accent,
-                  }}
-                  aria-hidden
-                >
-                  {game.glyph}
-                </span>
-                <div className="min-w-0">
-                  <h3 className="truncate text-sm font-black text-white">
-                    {game.title}
-                  </h3>
-                  <p className="mt-0.5 truncate text-[11px] text-white/55">
-                    {game.tagline}
-                  </p>
-                </div>
-                <span
-                  className="absolute right-3 top-3 rounded-md border border-white/10 bg-black/40 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider"
+                  className="absolute right-2 top-2 rounded-md border border-white/10 bg-black/60 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider backdrop-blur-sm"
                   style={{ color: system.color }}
                 >
                   {system.shortName}
                 </span>
+                {installedIds.has(game.id) && (
+                  <span className="absolute left-2 top-2 inline-flex items-center gap-1 rounded-md border border-emerald-400/30 bg-emerald-400/20 px-1.5 py-0.5 text-[9px] font-black uppercase tracking-wider text-emerald-200 backdrop-blur-sm">
+                    <Check size={9} /> Installed
+                  </span>
+                )}
               </div>
 
               <div className="space-y-3 p-4">
@@ -202,12 +220,17 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
                     onClick={() => addAndPlay(game)}
                     disabled={isBusy}
                     className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white py-2 text-xs font-black text-black transition hover:bg-white/90 disabled:cursor-not-allowed disabled:opacity-60"
-                    aria-label={`Add ${game.title} to my arcade and play`}
+                    aria-label={installedIds.has(game.id) ? `Play ${game.title}` : `Add ${game.title} to my arcade and play`}
                   >
                     {isBusy ? (
                       <>
                         <Loader2 size={13} className="animate-spin" />
                         Fetching…
+                      </>
+                    ) : installedIds.has(game.id) ? (
+                      <>
+                        <Play size={13} fill="currentColor" />
+                        Play
                       </>
                     ) : (
                       <>

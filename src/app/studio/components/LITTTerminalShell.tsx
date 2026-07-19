@@ -1646,6 +1646,10 @@ function LITTTerminalShellInner({
               onSend={handleChatSend}
               onToolSelect={onToolChangeAction}
               onOpenImageGen={() => setImageGenOpen(true)}
+              onPromptSelectAction={(prompt) => {
+                setInput(prompt);
+                requestAnimationFrame(() => textInputRef.current?.focus());
+              }}
             />
           </div>
 

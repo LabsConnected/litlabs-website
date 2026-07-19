@@ -80,7 +80,7 @@ export function LiTTMessageAvatar({ size = 32 }: { size?: number }) {
           src="/brand/litt-mascot-hero.png"
           alt=""
           className="h-full w-full object-cover drop-shadow-[0_0_6px_rgba(103,232,249,.6)]"
-          style={{ objectPosition: "50% 13%" }}
+          style={{ objectPosition: "50% 30%" }}
           onError={() => setImageFailed(true)}
         />
       ) : (
