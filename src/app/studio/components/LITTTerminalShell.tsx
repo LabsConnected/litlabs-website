@@ -1394,7 +1394,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1545,7 +1545,7 @@ function LITTTerminalShellInner({
 
           {/* COMMAND BAR — centered floating creative dock */}
               <div className="relative z-20 shrink-0 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 sm:px-6 sm:py-3">
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-1.5 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
+            <div className="mx-auto flex w-full max-w-4xl flex-col gap-1.5 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/80 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
                 <div className="flex items-center gap-2 px-1 text-[11px]">
@@ -1592,7 +1592,7 @@ function LITTTerminalShellInner({
 
               {/* Mic setup panel — sits directly beside the mic button */}
               {micSetupOpen && (
-                <div className="mb-1 rounded-xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
+                <div className="mb-1 rounded-xl border border-violet-300/20 bg-[#0b0c16]/85 p-3 shadow-2xl">
                   <div className="mb-2 flex items-center justify-between gap-3">
                     <div>
                       <strong className="block text-xs text-white">Microphone setup</strong>
@@ -1770,7 +1770,7 @@ function LITTTerminalShellInner({
           </div>
 
           {/* FOOTER TELEMETRY */}
-          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">
+          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/70 backdrop-blur-md">
             <TelemetryBar />
             <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-gray-400">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>

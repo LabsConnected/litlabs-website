@@ -315,7 +315,7 @@ export default function MultimodalComposer({
   };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
+    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/80 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
       {createMode && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
           <section role="dialog" aria-modal="true" aria-label={`Generate ${createMode}`} className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-[#090a12] shadow-[0_30px_120px_rgba(0,0,0,.8)]">
@@ -443,7 +443,7 @@ export default function MultimodalComposer({
       )}
 
       {showMicSetup && (
-        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
+        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16]/85 p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <strong className="block text-xs text-white">Microphone setup</strong>
@@ -479,7 +479,7 @@ export default function MultimodalComposer({
 
       {/* Add sheet */}
       {showAdd && (
-        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-[#0a0b12]/98 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.55)] sm:grid-cols-5">
+        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-[#0a0b12]/85 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.55)] sm:grid-cols-5">
           {[
             { label: "Image", tool: "image" as StudioTool, icon: ImageIcon, color: "text-cyan-300" },
             { label: "Video", tool: "video" as StudioTool, icon: Clapperboard, color: "text-violet-300" },
