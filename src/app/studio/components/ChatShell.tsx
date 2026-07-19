@@ -12,6 +12,8 @@ import {
   type BuilderBlock,
 } from "@/app/studio/lib/builder-blocks";
 import BuilderStream from "./BuilderStream";
+import SessionSidebar from "./SessionSidebar";
+import type { BuilderSession } from "../hooks/useBuilderSessions";
 import styles from "./ChatShell.module.css";
 
 export type StudioMessage = {
@@ -37,13 +39,32 @@ type Props = {
   embedded?: boolean;
   hideDock?: boolean;
   builderMode?: boolean;
+  selectedModel?: string;
+  busy?: boolean;
+  onNewChat?: () => void;
+  onRegenerate?: () => void;
+  onRouteTool?: (tool: StudioTool, command?: string) => void;
+  requestedTool?: StudioTool;
+  pendingCommand?: string;
+  initialPrompt?: string;
+  sessions?: BuilderSession[];
+  activeSessionId?: string;
+  onSelectSession?: (id: string) => void;
+  onNewSession?: () => void;
+  onRenameSession?: (id: string, title: string) => void;
+  onPinSession?: (id: string) => void;
+  onDuplicateSession?: (session: BuilderSession) => void;
+  onDeleteSession?: (id: string) => void;
+  onDeleteAllSessions?: () => void;
+  shellAction?: { id: number; type: "terminal" | "sessions" } | null;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
 
 export function ChatShell({
   messages,
-  sending = false,
+  sending: sendingProp = false,
+  busy: busyProp,
   systemLines = [],
   onSend,
   onToolSelect,
@@ -51,8 +72,22 @@ export function ChatShell({
   embedded = false,
   hideDock = false,
   builderMode = false,
+  _onNewChat,
+  _onRegenerate,
+  sessions,
+  activeSessionId,
+  onSelectSession,
+  onNewSession,
+  onRenameSession,
+  onPinSession,
+  onDuplicateSession,
+  onDeleteSession,
+  onDeleteAllSessions,
+  shellAction,
 }: Props) {
+  const sending = busyProp ?? sendingProp;
   const [draft, setDraft] = useState("");
+  const [sessionsOpen, setSessionsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [busySeconds, setBusySeconds] = useState(0);
   const {
@@ -151,10 +186,31 @@ export function ChatShell({
     await onSend(text);
   }
 
+  useEffect(() => {
+    if (!shellAction) return;
+    if (shellAction.type === "terminal") setSessionsOpen(false);
+    if (shellAction.type === "sessions") setSessionsOpen(true);
+  }, [shellAction]);
+
   return (
     <main
       className={embedded ? `${styles.shell} ${styles.embedded}` : styles.shell}
     >
+      {sessions && (
+        <SessionSidebar
+          sessions={sessions}
+          activeId={activeSessionId || ""}
+          onSelect={onSelectSession || (() => {})}
+          onNew={onNewSession || (() => {})}
+          onRename={onRenameSession || (() => {})}
+          onPin={onPinSession || (() => {})}
+          onDuplicate={onDuplicateSession || (() => {})}
+          onDelete={onDeleteSession || (() => {})}
+          onDeleteAll={onDeleteAllSessions || (() => {})}
+          open={sessionsOpen}
+          onOpenChange={setSessionsOpen}
+        />
+      )}
       {!embedded && (
         <header className={styles.header}>
           <div className={styles.brand}>
