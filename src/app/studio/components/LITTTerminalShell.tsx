@@ -55,6 +55,9 @@ import {
   Eraser,
 } from "lucide-react";
 import Link from "next/link";
+import StudioHybridWorkspace, {
+  type StudioWorkspaceMode,
+} from "./StudioHybridWorkspace";
 
 import dynamic from "next/dynamic";
 
@@ -268,6 +271,7 @@ function LITTTerminalShellInner({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
   const [micSetupOpen, setMicSetupOpen] = useState(false);
+  const [hybridWorkspaceEnabled, setHybridWorkspaceEnabled] = useState(false);
   const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const terminalRef = useRef<TerminalToolHandle | null>(null);
   const activeTerminalBlockRef = useRef<string | null>(null);
@@ -316,12 +320,49 @@ function LITTTerminalShellInner({
       })),
     [messages],
   );
+  const hybridMode: StudioWorkspaceMode = (() => {
+    const value = searchParams?.get("mode");
+    return value === "code" || value === "media" || value === "command"
+      ? value
+      : "command";
+  })();
+
+  const setHybridMode = useCallback(
+    (mode: StudioWorkspaceMode) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("mode", mode);
+      router.replace(`/studio?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
+
   const micActive = voiceState !== "idle";
   const micDisabled =
     voiceState === "transcribing" ||
     voiceState === "thinking" ||
     voiceState === "speaking" ||
     voiceState === "cooldown";
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void fetch("/api/studio/feature", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const payload = (await response.json()) as { enabled?: boolean };
+        return payload.enabled === true;
+      })
+      .then((enabled) => {
+        if (!cancelled) setHybridWorkspaceEnabled(enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setHybridWorkspaceEnabled(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
@@ -1632,26 +1673,53 @@ function LITTTerminalShellInner({
           />
 
           {/* Scrollable content */}
-          <div
-            ref={transcriptRef}
-            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-0 py-0"
-          >
-            <ChatShell
-              embedded
-              hideDock
-              builderMode={true}
-              messages={chatMessages}
-              sending={busy}
-              systemLines={[]}
-              onSend={handleChatSend}
-              onToolSelect={onToolChangeAction}
-              onOpenImageGen={() => setImageGenOpen(true)}
-              onPromptSelectAction={(prompt) => {
-                setInput(prompt);
-                requestAnimationFrame(() => textInputRef.current?.focus());
-              }}
+          {hybridWorkspaceEnabled ? (
+            <StudioHybridWorkspace
+              mode={hybridMode}
+              onModeChangeAction={setHybridMode}
+              activeProjectId={activeProjectId}
+              onOpenProjectsAction={() => setProjectDrawerOpen(true)}
+              onOpenTerminalAction={() => setTerminalDrawerOpen(true)}
+              conversation={
+                <ChatShell
+                  embedded
+                  hideDock
+                  builderMode={true}
+                  messages={chatMessages}
+                  sending={busy}
+                  systemLines={[]}
+                  onSend={handleChatSend}
+                  onToolSelect={onToolChangeAction}
+                  onOpenImageGen={() => setImageGenOpen(true)}
+                  onPromptSelectAction={(prompt) => {
+                    setInput(prompt);
+                    requestAnimationFrame(() => textInputRef.current?.focus());
+                  }}
+                />
+              }
             />
-          </div>
+          ) : (
+            <div
+              ref={transcriptRef}
+              className="relative z-10 min-h-0 flex-1 overflow-y-auto px-0 py-0"
+            >
+              <ChatShell
+                embedded
+                hideDock
+                builderMode={true}
+                messages={chatMessages}
+                sending={busy}
+                systemLines={[]}
+                onSend={handleChatSend}
+                onToolSelect={onToolChangeAction}
+                onOpenImageGen={() => setImageGenOpen(true)}
+                onPromptSelectAction={(prompt) => {
+                  setInput(prompt);
+                  requestAnimationFrame(() => textInputRef.current?.focus());
+                }}
+              />
+            </div>
+          )}
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
