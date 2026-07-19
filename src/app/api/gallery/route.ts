@@ -34,7 +34,7 @@ function getVideoThumbnailUrl(rawUrl: string): string | null {
   return null;
 }
 
-function pollinationsUrl(prompt: string, width = 1600, height = 1200): string {
+function pollinationsUrl(prompt: string, width = 2048, height = 2048): string {
   const encoded = encodeURIComponent(prompt);
   return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
 }

@@ -2,7 +2,6 @@
 export const dynamic = "force-dynamic";
 
 import { useState, useEffect, useCallback } from "react";
-import Link from "next/link";
 import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
@@ -507,9 +506,10 @@ export default function Gallery() {
                   src={featured.imageUrl}
                   alt={featured.title}
                   fill
+                  quality={90}
                   className="object-cover transition-transform duration-[2s] ease-out group-hover:scale-105"
                   priority
-                  unoptimized
+                  sizes="100vw"
                   onError={() =>
                     setBrokenImages((prev) =>
                       new Set(prev).add(featured.imageUrl),
@@ -690,8 +690,8 @@ export default function Gallery() {
                         src={item.imageUrl}
                         alt={item.title}
                         fill
+                        quality={80}
                         className="object-cover"
-                        unoptimized
                         sizes="180px"
                         onError={() =>
                           setBrokenImages((prev) =>
@@ -1329,9 +1329,9 @@ export default function Gallery() {
                       src={item.imageUrl}
                       alt={item.title}
                       fill
+                      quality={90}
                       className="object-cover transition-transform duration-700 ease-out group-hover:scale-110"
                       sizes="(max-width: 640px) 100vw, (max-width: 1024px) 50vw, 33vw"
-                      unoptimized
                       onError={() =>
                         setBrokenImages((prev) =>
                           new Set(prev).add(item.imageUrl),
@@ -1561,32 +1561,6 @@ export default function Gallery() {
         onNext={handleLightboxNext}
         onPrev={handleLightboxPrev}
       />
-
-      {/* ── Floating Create Button ── */}
-      <Link
-        href="/studio"
-        style={{
-          position: "fixed",
-          bottom: "24px",
-          right: "24px",
-          width: "56px",
-          height: "56px",
-          borderRadius: "50%",
-          backgroundColor: T.linkColor,
-          color: "white",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: "24px",
-          textDecoration: "none",
-          boxShadow: `0 4px 16px ${T.linkColor}40`,
-          zIndex: 50,
-          cursor: "pointer",
-        }}
-        title="AI Image Generator"
-      >
-        🎨
-      </Link>
 
       <style>{`
         ::-webkit-scrollbar { width: 6px; }
