@@ -19,6 +19,14 @@ export interface RetroGameRecord {
   lastPlayedAt?: number;
   launches: number;
   favorite: boolean;
+  /** Optional custom artwork stored as a data URL or blob URL. */
+  customArtworkUrl?: string;
+  /** Optional accent color override for generated artwork. */
+  artworkAccent?: string;
+  /** Optional subtitle / tagline shown on artwork. */
+  subtitle?: string;
+  /** Optional Quick Play source id, used to prevent duplicate installs. */
+  quickPlayId?: string;
 }
 
 export const RETRO_SYSTEMS: RetroSystem[] = [
@@ -32,7 +40,7 @@ export const RETRO_SYSTEMS: RetroSystem[] = [
 
 const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 
 function openRetroDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -47,6 +55,12 @@ function openRetroDatabase(): Promise<IDBDatabase> {
         const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
         store.createIndex("lastPlayedAt", "lastPlayedAt");
         store.createIndex("system", "system");
+        store.createIndex("quickPlayId", "quickPlayId");
+      } else if (request.result.version < 2) {
+        const store = request.transaction!.objectStore(STORE_NAME);
+        if (!store.indexNames.contains("quickPlayId")) {
+          store.createIndex("quickPlayId", "quickPlayId");
+        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -79,7 +93,12 @@ export function getRetroSystem(id: RetroSystemId): RetroSystem {
   return RETRO_SYSTEMS.find((system) => system.id === id) ?? RETRO_SYSTEMS[0];
 }
 
-export async function addRetroGame(file: File, title: string, system: RetroSystemId): Promise<RetroGameRecord> {
+export async function addRetroGame(
+  file: File,
+  title: string,
+  system: RetroSystemId,
+  options?: { quickPlayId?: string; subtitle?: string; customArtworkUrl?: string },
+): Promise<RetroGameRecord> {
   const record: RetroGameRecord = {
     id: crypto.randomUUID(),
     title: title.trim() || titleFromFileName(file.name),
@@ -90,6 +109,9 @@ export async function addRetroGame(file: File, title: string, system: RetroSyste
     addedAt: Date.now(),
     launches: 0,
     favorite: false,
+    quickPlayId: options?.quickPlayId,
+    subtitle: options?.subtitle,
+    customArtworkUrl: options?.customArtworkUrl,
   };
   const db = await openRetroDatabase();
   try {
@@ -128,6 +150,20 @@ export async function updateRetroGame(id: string, patch: Partial<Omit<RetroGameR
     const updated = { ...current, ...patch };
     await requestResult(store.put(updated));
     return updated;
+  } finally {
+    db.close();
+  }
+}
+
+/** Check whether a Quick Play game has already been imported. */
+export async function findQuickPlayInstall(quickPlayId: string): Promise<RetroGameRecord | undefined> {
+  const db = await openRetroDatabase();
+  try {
+    const index = db.transaction(STORE_NAME).objectStore(STORE_NAME).index("quickPlayId");
+    return await requestResult(index.get(quickPlayId)) as RetroGameRecord | undefined;
+  } catch {
+    const all = await requestResult(db.transaction(STORE_NAME).objectStore(STORE_NAME).getAll()) as RetroGameRecord[];
+    return all.find((g) => g.quickPlayId === quickPlayId);
   } finally {
     db.close();
   }

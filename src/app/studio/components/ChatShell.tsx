@@ -36,6 +36,7 @@ type Props = {
   onSend: (text: string) => string | Promise<string | void>;
   onToolSelect?: (tool: StudioTool) => void;
   onOpenImageGen?: () => void;
+  onPromptSelectAction?: (prompt: string) => void;
   embedded?: boolean;
   hideDock?: boolean;
   builderMode?: boolean;
@@ -69,6 +70,7 @@ export function ChatShell({
   onSend,
   onToolSelect,
   onOpenImageGen,
+  onPromptSelectAction,
   embedded = false,
   hideDock = false,
   builderMode = false,
@@ -304,7 +306,7 @@ export function ChatShell({
               {["A cinematic product shot", "Turn my photo into a video", "Design a bold album cover", "Make a logo move"].map((item) => (
                 <button
                   key={item}
-                  onClick={() => setDraft(item)}
+                  onClick={() => onPromptSelectAction ? onPromptSelectAction(item) : setDraft(item)}
                   className={styles.promptStarter}
                 >
                   {item}

@@ -8,19 +8,19 @@ import {
   ChevronRight,
   Gamepad2,
   HardDrive,
-  Heart,
-  Library,
   LockKeyhole,
-  Play,
   Search,
   ShieldCheck,
-  Sparkles,
-  Trash2,
   Upload,
   X,
 } from "lucide-react";
 import PageShell from "@/components/PageShell";
 import QuickPlayLibrary from "@/components/games/QuickPlayLibrary";
+import RetroHero from "@/components/games/retro/RetroHero";
+import RetroShelf from "@/components/games/retro/RetroShelf";
+import RetroGameCard from "@/components/games/retro/RetroGameCard";
+import RetroSystemFilters from "@/components/games/retro/RetroSystemFilters";
+import RetroArtworkDialog from "@/components/games/retro/RetroArtworkDialog";
 import {
   addRetroGame,
   deleteRetroGame,
@@ -124,9 +124,33 @@ export default function RetroArcadePage() {
       favorite: !game.favorite,
     });
     setGames((current) =>
-      current.map((item) => (item.id === updated.id ? item : item)),
+      current.map((item) => (item.id === updated.id ? updated : item)),
     );
   }
+
+  async function refreshGames() {
+    try {
+      const fresh = await listRetroGames();
+      setGames(fresh);
+    } catch {
+      // keep stale list
+    }
+  }
+
+  const [artworkGame, setArtworkGame] = useState<RetroGameRecord | null>(null);
+
+  const favoriteGames = useMemo(() => games.filter((g) => g.favorite), [games]);
+  const recentGames = useMemo(
+    () => [...games].sort((a, b) => (b.lastPlayedAt ?? 0) - (a.lastPlayedAt ?? 0)).slice(0, 12),
+    [games],
+  );
+  const systemCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const game of games) {
+      counts[game.system] = (counts[game.system] ?? 0) + 1;
+    }
+    return counts;
+  }, [games]);
 
   async function removeGame(game: RetroGameRecord) {
     if (!window.confirm(`Remove ${game.title} from this browser?`)) return;
@@ -177,101 +201,39 @@ export default function RetroArcadePage() {
           </div>
         </header>
 
-        <div className="mx-auto grid max-w-[1500px] gap-4 p-4 lg:grid-cols-[240px_minmax(0,1fr)_280px] lg:p-6">
-          <aside className="space-y-4">
-            <section className="rounded-2xl border border-white/10 bg-white/[.035] p-3 backdrop-blur">
-              <div className="mb-3 px-2 text-[10px] font-black uppercase tracking-[.22em] text-white/40">
-                Your collection
-              </div>
-              <button
-                onClick={() => setSystemFilter("all")}
-                className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === "all" ? "bg-fuchsia-500/15 text-fuchsia-300" : "text-white/60 hover:bg-white/5 hover:text-white"}`}
-              >
-                <span className="flex items-center gap-2">
-                  <Library size={15} /> All systems
-                </span>
-                <span>{games.length}</span>
-              </button>
-              {RETRO_SYSTEMS.map((system) => (
-                <button
-                  key={system.id}
-                  onClick={() => setSystemFilter(system.id)}
-                  className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === system.id ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/5 hover:text-white"}`}
-                >
-                  <span className="flex items-center gap-2">
-                    <i
-                      className="h-2 w-2 rounded-full"
-                      style={{
-                        background: system.color,
-                        boxShadow: `0 0 10px ${system.color}`,
-                      }}
-                    />
-                    {system.shortName}
-                  </span>
-                  <span>
-                    {games.filter((game) => game.system === system.id).length}
-                  </span>
-                </button>
-              ))}
-            </section>
-            <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-4">
-              <ShieldCheck className="mb-2 text-emerald-300" size={20} />
-              <h2 className="text-sm font-black">Private by default</h2>
-              <p className="mt-1 text-xs leading-5 text-white/45">
-                ROM files stay in this browser&apos;s IndexedDB. LiTT does not
-                upload or provide copyrighted games.
-              </p>
-            </section>
-          </aside>
+        <div className="mx-auto max-w-[1500px] space-y-6 p-4 lg:p-6">
+          {recent && <RetroHero game={recent} />}
 
-          <section className="min-w-0 space-y-4">
-            <QuickPlayLibrary
-              onAdded={(recordId) => {
-                listRetroGames()
-                  .then(setGames)
-                  .catch((error) =>
-                    setMessage(
-                      error instanceof Error
-                        ? error.message
-                        : "Could not refresh your arcade.",
-                    ),
-                  );
-                setMessage(
-                  "Quick Play cartridge added. Launching the player…",
-                );
-                // The library fetch above keeps the list fresh; the router
-                // push happens inside the component, so this is a no-op
-                // safety net.
-                void recordId;
-              }}
+          {favoriteGames.length > 0 && (
+            <RetroShelf
+              title="Favorites"
+              subtitle="Your starred cartridges"
+              games={favoriteGames}
+              onToggleFavorite={toggleFavorite}
+              onRemove={removeGame}
+              onManageArtwork={(g) => setArtworkGame(g)}
             />
+          )}
 
-            {recent && (
-              <Link
-                href={`/games/retro/play/${recent.id}`}
-                className="group relative flex min-h-40 overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-linear-to-br from-violet-950 via-[#15101e] to-cyan-950 p-6 shadow-[0_25px_80px_rgba(0,0,0,.35)]"
-              >
-                <div className="relative z-10 flex max-w-xl flex-col justify-end">
-                  <span className="mb-2 text-[10px] font-black uppercase tracking-[.25em] text-fuchsia-300">
-                    Continue playing
-                  </span>
-                  <h2 className="text-3xl font-black">{recent.title}</h2>
-                  <p className="mt-2 text-sm text-white/50">
-                    {getRetroSystem(recent.system).name} · Stored locally
-                  </p>
-                  <span className="mt-4 flex w-fit items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">
-                    <Play size={15} fill="currentColor" /> Resume chapter
-                  </span>
-                </div>
-                <div className="absolute -right-8 -top-20 h-72 w-72 rounded-full bg-fuchsia-500/20 blur-3xl transition group-hover:bg-fuchsia-500/30" />
-                <Gamepad2
-                  className="absolute right-10 top-1/2 -translate-y-1/2 text-white/[.07]"
-                  size={180}
-                />
-              </Link>
-            )}
+          {recentGames.length > 0 && (
+            <RetroShelf
+              title="Recently played"
+              subtitle="Jump back in"
+              games={recentGames}
+              onToggleFavorite={toggleFavorite}
+              onRemove={removeGame}
+              onManageArtwork={(g) => setArtworkGame(g)}
+            />
+          )}
 
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <QuickPlayLibrary
+            onAdded={() => {
+              refreshGames();
+              setMessage("Quick Play cartridge added. Launching the player…");
+            }}
+          />
+
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
                 <h2 className="text-lg font-black">
                   {systemFilter === "all"
@@ -295,149 +257,84 @@ export default function RetroArcadePage() {
               </label>
             </div>
 
-            {message && (
-              <div className="flex items-center justify-between rounded-xl border border-cyan-400/15 bg-cyan-400/[.06] px-4 py-3 text-sm text-cyan-100">
-                <span>{message}</span>
-                <button onClick={() => setMessage(null)} aria-label="Dismiss">
-                  <X size={16} />
-                </button>
-              </div>
-            )}
+          <RetroSystemFilters
+            active={systemFilter}
+            onChange={setSystemFilter}
+            counts={systemCounts}
+            totalCount={games.length}
+          />
 
-            {loading ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {[1, 2, 3].map((item) => (
-                  <div
-                    key={item}
-                    className="h-56 animate-pulse rounded-2xl bg-white/5"
-                  />
-                ))}
-              </div>
-            ) : visibleGames.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                {visibleGames.map((game) => {
-                  const system = getRetroSystem(game.system);
-                  return (
-                    <article
-                      key={game.id}
-                      className="group overflow-hidden rounded-2xl border border-white/10 bg-[#101017] transition hover:-translate-y-1 hover:border-white/20"
-                    >
-                      <Link
-                        href={`/games/retro/play/${game.id}`}
-                        className="relative flex h-32 items-center justify-center overflow-hidden"
-                        style={{
-                          background: `radial-gradient(circle at 50% 20%, ${system.color}33, transparent 55%), linear-gradient(145deg,#181824,#09090d)`,
-                        }}
-                      >
-                        <span className="select-none text-5xl font-black tracking-tighter text-white/10">
-                          {system.shortName}
-                        </span>
-                        <span
-                          className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-black"
-                          style={{ color: system.color }}
-                        >
-                          {system.shortName}
-                        </span>
-                        <span className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:opacity-100">
-                          <Play size={16} fill="currentColor" />
-                        </span>
-                      </Link>
-                      <div className="p-4">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <h3 className="truncate font-black">
-                              {game.title}
-                            </h3>
-                            <p className="mt-1 truncate text-xs text-white/35">
-                              {formatRomSize(game.size)} · {game.launches}{" "}
-                              {game.launches === 1 ? "launch" : "launches"}
-                            </p>
-                          </div>
-                          <button
-                            onClick={() => toggleFavorite(game)}
-                            className={`p-1.5 ${game.favorite ? "text-pink-400" : "text-white/25 hover:text-white"}`}
-                            aria-label="Favorite"
-                          >
-                            <Heart
-                              size={16}
-                              fill={game.favorite ? "currentColor" : "none"}
-                            />
-                          </button>
-                        </div>
-                        <div className="mt-4 flex gap-2">
-                          <Link
-                            href={`/games/retro/play/${game.id}`}
-                            className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white/10 py-2 text-xs font-black hover:bg-white/15"
-                          >
-                            <Play size={13} /> Play
-                          </Link>
-                          <button
-                            onClick={() => removeGame(game)}
-                            className="rounded-lg border border-white/10 px-3 text-white/30 hover:border-red-400/30 hover:text-red-300"
-                            aria-label="Remove"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </div>
-                      </div>
-                    </article>
-                  );
-                })}
-              </div>
-            ) : (
-              <button
-                onClick={() => inputRef.current?.click()}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  chooseFile(event.dataTransfer.files[0]);
-                }}
-                className="flex min-h-72 w-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/15 bg-white/[.025] p-8 text-center transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/[.03]"
-              >
-                <span className="mb-4 rounded-2xl bg-fuchsia-500/10 p-4 text-fuchsia-300">
-                  <Upload size={28} />
-                </span>
-                <h3 className="text-lg font-black">
-                  {games.length
-                    ? "No games match that filter"
-                    : "Build your private arcade"}
-                </h3>
-                <p className="mt-2 max-w-md text-sm leading-6 text-white/40">
-                  {games.length
-                    ? "Try another system or search."
-                    : "Drop a legally obtained ROM here or choose a file. It stays on this device and launches as a real playable game."}
-                </p>
-                {!games.length && (
-                  <span className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">
-                    Choose ROM
-                  </span>
-                )}
+          {message && (
+            <div className="flex items-center justify-between rounded-xl border border-cyan-400/15 bg-cyan-400/[.06] px-4 py-3 text-sm text-cyan-100">
+              <span>{message}</span>
+              <button onClick={() => setMessage(null)} aria-label="Dismiss">
+                <X size={16} />
               </button>
-            )}
-          </section>
+            </div>
+          )}
 
-          <aside className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5">
-              <Sparkles className="mb-3 text-violet-300" />
-              <div className="text-[10px] font-black uppercase tracking-[.22em] text-violet-300">
-                LiTT Companion
-              </div>
-              <h2 className="mt-2 text-lg font-black">
-                {games.length === 0
-                  ? "Your cabinet is ready."
-                  : recent
-                    ? `Welcome back, player.`
-                    : "Pick your first chapter."}
-              </h2>
-              <p className="mt-2 text-sm leading-6 text-white/45">
-                {games.length === 0
-                  ? "Add your first game and I’ll organize it by system automatically."
-                  : recent
-                    ? `${recent.title} is ready where you left it. Your library never leaves this browser.`
-                    : `You have ${games.length} ${games.length === 1 ? "game" : "games"} across ${systemsOwned} ${systemsOwned === 1 ? "system" : "systems"}.`}
+          {loading ? (
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {[1, 2, 3, 4, 5].map((item) => (
+                <div
+                  key={item}
+                  className="aspect-3/4 animate-pulse rounded-2xl bg-white/5"
+                />
+              ))}
+            </div>
+          ) : visibleGames.length > 0 ? (
+            <div className="grid gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
+              {visibleGames.map((game) => (
+                <RetroGameCard
+                  key={game.id}
+                  game={game}
+                  onToggleFavorite={toggleFavorite}
+                  onRemove={removeGame}
+                  onManageArtwork={(g) => setArtworkGame(g)}
+                />
+              ))}
+            </div>
+          ) : (
+            <button
+              onClick={() => inputRef.current?.click()}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                chooseFile(event.dataTransfer.files[0]);
+              }}
+              className="flex min-h-72 w-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/15 bg-white/[.025] p-8 text-center transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/[.03]"
+            >
+              <span className="mb-4 rounded-2xl bg-fuchsia-500/10 p-4 text-fuchsia-300">
+                <Upload size={28} />
+              </span>
+              <h3 className="text-lg font-black">
+                {games.length
+                  ? "No games match that filter"
+                  : "Build your private arcade"}
+              </h3>
+              <p className="mt-2 max-w-md text-sm leading-6 text-white/40">
+                {games.length
+                  ? "Try another system or search."
+                  : "Drop a legally obtained ROM here or choose a file. It stays on this device and launches as a real playable game."}
+              </p>
+              {!games.length && (
+                <span className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">
+                  Choose ROM
+                </span>
+              )}
+            </button>
+          )}
+
+          <div className="grid gap-3 sm:grid-cols-3">
+            <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-4">
+              <ShieldCheck className="mb-2 text-emerald-300" size={20} />
+              <h2 className="text-sm font-black">Private by default</h2>
+              <p className="mt-1 text-xs leading-5 text-white/45">
+                ROM files stay in this browser&apos;s IndexedDB. LiTT does not
+                upload or provide copyrighted games.
               </p>
             </section>
-            <section className="rounded-2xl border border-white/10 bg-white/[.035] p-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[.035] p-4">
               <div className="flex items-center justify-between">
                 <h2 className="text-sm font-black">Arcade progress</h2>
                 <span className="text-xs text-white/35">
@@ -451,7 +348,7 @@ export default function RetroArcadePage() {
                   /3
                 </span>
               </div>
-              <div className="mt-4 space-y-3">
+              <div className="mt-3 space-y-2">
                 {[
                   ["First cartridge", "Add one game", games.length > 0],
                   [
@@ -463,9 +360,9 @@ export default function RetroArcadePage() {
                 ].map(([title, detail, done]) => (
                   <div key={String(title)} className="flex items-center gap-3">
                     <span
-                      className={`flex h-8 w-8 items-center justify-center rounded-full ${done ? "bg-emerald-400/15 text-emerald-300" : "bg-white/5 text-white/20"}`}
+                      className={`flex h-7 w-7 items-center justify-center rounded-full ${done ? "bg-emerald-400/15 text-emerald-300" : "bg-white/5 text-white/20"}`}
                     >
-                      {done ? <Check size={15} /> : <LockKeyhole size={13} />}
+                      {done ? <Check size={13} /> : <LockKeyhole size={12} />}
                     </span>
                     <div>
                       <div className="text-xs font-bold">{title}</div>
@@ -475,7 +372,7 @@ export default function RetroArcadePage() {
                 ))}
               </div>
             </section>
-            <section className="rounded-2xl border border-white/10 bg-white/[.025] p-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[.025] p-4">
               <HardDrive size={18} className="mb-2 text-cyan-300" />
               <h2 className="text-sm font-black">Supported now</h2>
               <p className="mt-2 text-xs leading-5 text-white/40">
@@ -484,12 +381,12 @@ export default function RetroArcadePage() {
               </p>
               <button
                 onClick={() => inputRef.current?.click()}
-                className="mt-4 flex items-center gap-1 text-xs font-black text-cyan-300"
+                className="mt-3 flex items-center gap-1 text-xs font-black text-cyan-300"
               >
                 Import a game <ChevronRight size={13} />
               </button>
             </section>
-          </aside>
+          </div>
         </div>
 
         {pending && (
@@ -590,6 +487,18 @@ export default function RetroArcadePage() {
           </div>
         )}
       </main>
+
+      {artworkGame && (
+        <RetroArtworkDialog
+          game={artworkGame}
+          open={!!artworkGame}
+          onClose={() => setArtworkGame(null)}
+          onUpdated={() => {
+            setArtworkGame(null);
+            refreshGames();
+          }}
+        />
+      )}
     </PageShell>
   );
 }

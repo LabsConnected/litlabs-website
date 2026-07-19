@@ -50,9 +50,7 @@ export interface QuickPlayGame {
   licenseUrl: string;
   /** Link to the project's home page (optional). */
   homeUrl?: string;
-  /** Emoji or short glyph for the card thumbnail. */
-  glyph: string;
-  /** Accent color for the card. */
+  /** Accent color for the card and generated artwork. */
   accent: string;
 }
 
@@ -73,7 +71,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "public-domain",
     licenseUrl: "https://github.com/AlecDouglas/AlecDouglas.github.io",
     homeUrl: "https://github.com/AlecDouglas/AlecDouglas.github.io",
-    glyph: "🚀",
     accent: "#ff4d67",
   },
   {
@@ -92,7 +89,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "public-domain",
     licenseUrl: "https://github.com/presslab-us/D-Pad-Hero",
     homeUrl: "https://github.com/presslab-us/D-Pad-Hero",
-    glyph: "🎵",
     accent: "#f97316",
   },
   {
@@ -110,7 +106,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "public-domain",
     licenseUrl: "https://github.com/jstanden/powder",
     homeUrl: "http://www.danieldefoe.com/powder/",
-    glyph: "🗡️",
     accent: "#a3e635",
   },
   {
@@ -129,7 +124,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "mit",
     licenseUrl: "https://github.com/rafaelvcaetano/2048gb/blob/main/LICENSE",
     homeUrl: "https://github.com/rafaelvcaetano/2048gb",
-    glyph: "🧩",
     accent: "#fbbf24",
   },
   {
@@ -148,7 +142,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "mit",
     licenseUrl: "https://github.com/rafaelvcaetano/2048gb/blob/main/LICENSE",
     homeUrl: "https://github.com/rafaelvcaetano/2048gb",
-    glyph: "🟧",
     accent: "#f59e0b",
   },
   {
@@ -167,7 +160,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "mit",
     licenseUrl: "https://github.com/rafaelvcaetano/2048gba",
     homeUrl: "https://github.com/rafaelvcaetano/2048gba",
-    glyph: "🎮",
     accent: "#38bdf8",
   },
   {
@@ -186,7 +178,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "freeware",
     licenseUrl: "https://github.com/mega-cat-labs/tanglewood-demo",
     homeUrl: "https://www.megacatstudios.com/",
-    glyph: "🌳",
     accent: "#22d3ee",
   },
   {
@@ -205,7 +196,6 @@ export const QUICK_PLAY_LIBRARY: QuickPlayGame[] = [
     license: "public-domain",
     licenseUrl: "https://github.com/snesdev/jupiter-demo",
     homeUrl: "https://github.com/snesdev/jupiter-demo",
-    glyph: "🪐",
     accent: "#a78bfa",
   },
 ];
