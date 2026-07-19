@@ -548,7 +548,7 @@ function LITTTerminalShellInner({
   const runSlashCommand = useCallback(
     async (text: string) => {
       const match = text.match(
-        /^\/(image|audio|video|build|code|agent|terminal)\s*(.*)/i,
+        /^\/(image|audio|video|build|code|agent|terminal|clear|new)\s*(.*)/i,
       );
       if (!match) return false;
       const [, cmd, raw] = match;
@@ -810,6 +810,23 @@ function LITTTerminalShellInner({
         if (prompt) {
           executeTerminalCommand(prompt, "user");
         }
+        return true;
+      }
+
+      if (cmd === "clear" || cmd === "new") {
+        setMessages([]);
+        setActiveCommands([]);
+        try {
+          localStorage.removeItem("litlab-builder-messages");
+        } catch {}
+        addToolMessage({
+          role: "assistant",
+          content:
+            cmd === "clear"
+              ? "Chat cleared. What's next?"
+              : "New conversation started. What are we building?",
+          createdAt: Date.now(),
+        });
         return true;
       }
 
