@@ -143,8 +143,10 @@
   position: absolute;
   inset: 0;
   background-image: url('/brand/litt-mascot-hero.png');
-  background-position: center;
+  background-position: center 20%;
   background-size: cover;
+  background-repeat: no-repeat;
+  opacity: 0.85;
   animation: creativeDrift 18s ease-in-out infinite;
   will-change: transform;
 }
@@ -770,6 +772,11 @@
 }
 .mic.listening {
   animation: micPulse 1.4s ease-in-out infinite;
+}
+.mic.cooldown {
+  color: #f59e0b !important;
+  background: rgba(245, 158, 11, 0.15) !important;
+  cursor: pointer;
 }
 .send {
   background: var(--orange) !important;

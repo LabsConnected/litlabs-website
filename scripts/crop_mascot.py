@@ -28,3 +28,12 @@ print(f"Cropped size: {cropped.size}")
 cropped.save(DST, format="PNG", optimize=True)
 print(f"Saved to: {DST}")
 print(f"File size: {DST.stat().st_size:,} bytes")
+
+# Square avatar crop focused on the helmet/face for small circular avatars.
+AVATAR = Path(r"c:\Users\litbi\CascadeProjects\litlab\public\brand\litt-mascot-avatar.png")
+face_left, face_top, face_right, face_bottom = 260, 50, 860, 650
+avatar = img.crop((face_left, face_top, face_right, face_bottom))
+print(f"Avatar crop size: {avatar.size}")
+avatar.save(AVATAR, format="PNG", optimize=True)
+print(f"Saved avatar to: {AVATAR}")
+print(f"Avatar file size: {AVATAR.stat().st_size:,} bytes")

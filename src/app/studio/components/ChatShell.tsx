@@ -1,7 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import { ArrowUpRight, Clapperboard, Image as ImageIcon, Sparkles } from "lucide-react";
+import { ArrowUp, ArrowUpRight, Clapperboard, Image as ImageIcon, Mic, Sparkles } from "lucide-react";
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { cn } from "@/lib/utils";
@@ -159,8 +159,7 @@ export function ChatShell({
   const micDisabled =
     voiceState === "transcribing" ||
     voiceState === "thinking" ||
-    voiceState === "speaking" ||
-    voiceState === "cooldown";
+    voiceState === "speaking";
 
   useEffect(() => {
     if (!sending) {
@@ -360,26 +359,40 @@ export function ChatShell({
             />
             <button
               type="button"
-              className={cn(styles.mic, voiceState === "listening" && styles.listening)}
+              className={cn(
+                styles.mic,
+                voiceState === "listening" && styles.listening,
+                voiceState === "cooldown" && styles.cooldown,
+              )}
               disabled={micDisabled}
               aria-label={
-                micDisabled
-                  ? "Voice busy"
-                  : voiceActive
-                    ? "Stop voice input"
-                    : "Start voice input"
+                voiceState === "cooldown"
+                  ? "Voice limit reached — click to reset"
+                  : micDisabled
+                    ? "Voice busy"
+                    : voiceActive
+                      ? "Stop voice input"
+                      : "Start voice input"
               }
-              title={micDisabled ? "Voice busy" : voiceActive ? "Stop voice" : "Voice input"}
+              title={
+                voiceState === "cooldown"
+                  ? "Voice limit reached — click to reset"
+                  : micDisabled
+                    ? "Voice busy"
+                    : voiceActive
+                      ? "Stop voice"
+                      : "Voice input"
+              }
               onClick={() => {
                 if (micDisabled) return;
-                if (voiceActive) {
+                if (voiceState === "cooldown" || voiceActive) {
                   stopVoice();
                 } else {
                   void startVoice();
                 }
               }}
             >
-              🎙
+              <Mic size={18} />
             </button>
             <button
               className={styles.send}
@@ -387,7 +400,7 @@ export function ChatShell({
               aria-label="Send message"
               title="Send"
             >
-              ➤
+              <ArrowUp size={18} />
             </button>
           </form>
         </footer>
