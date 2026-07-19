@@ -3,7 +3,7 @@
 import { useState, useEffect } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { Bell, Search, Zap, Coins, Gamepad2, Users, Settings } from "lucide-react";
+import { Bell, Search, Zap, Coins, Gamepad2, Users, Settings, Store } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -15,6 +15,7 @@ const desktopLinks = [
   ["Gallery", "/gallery"],
   ["Games", "/games"],
   ["Social", "/social"],
+  ["Marketplace", "/marketplace"],
   ["Settings", "/settings"],
 ] as const;
 
@@ -56,6 +57,7 @@ export default function NavbarWrapper() {
               >
                 {label === "Games" && <Gamepad2 size={12} />}
                 {label === "Social" && <Users size={12} />}
+                {label === "Marketplace" && <Store size={12} />}
                 {label === "Settings" && <Settings size={12} />}
                 {label}
               </Link>

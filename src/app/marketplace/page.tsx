@@ -20,14 +20,12 @@ import {
   WandSparkles,
 } from "lucide-react";
 
-function formatPrice(cents: number): string {
-  if (cents === 0) return "FREE";
-  return `${cents.toLocaleString()} LBC`;
+function formatPrice(_cents: number): string {
+  return "FREE";
 }
 
-function formatUsdPrice(price: number): string {
-  if (price === 0) return "Free";
-  return `$${Number.isInteger(price) ? price.toFixed(0) : price.toFixed(2)}/mo`;
+function formatUsdPrice(_price: number): string {
+  return "Free";
 }
 
 function formatLbc(amount: number): string {
@@ -76,8 +74,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-starter",
     coins: 500,
-    price: 5,
-    priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
+    price: 0,
+    priceId: "",
     label: "Starter",
     tier: "starter",
     popular: true,
@@ -91,8 +89,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-pro",
     coins: 1500,
-    price: 19.99,
-    priceId: "price_1TogZdJ53kgx4fp56g6bewkx",
+    price: 0,
+    priceId: "",
     label: "Pro",
     tier: "pro",
     popular: false,
@@ -107,8 +105,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-elite",
     coins: 5000,
-    price: 50,
-    priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
+    price: 0,
+    priceId: "",
     label: "Elite",
     tier: "elite",
     popular: false,
@@ -549,45 +547,7 @@ function MarketplaceInner() {
       const agent = agents.find((a) => a.id === agentId);
       if (!agent) return;
 
-      if (agent.price_cents > 0) {
-        // Paid agents: redirect to Stripe checkout
-        if (!isSignedIn || !userId) {
-          showToast("Please sign in to purchase this agent.", "error");
-          return;
-        }
-        try {
-          const res = await fetch("/api/stripe/checkout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: "payment",
-              priceData: {
-                amount: agent.price_cents * 100, // 1 LBC = $0.01 → price_cents * 100 = USD cents
-                currency: "usd",
-                name: `${agent.name} — Agent License`,
-                description: `One-time purchase: ${agent.name} (${agent.price_cents} LBC)`,
-              },
-              metadata: {
-                clerk_id: userId,
-                agent_slug: agent.slug,
-                agent_id: agent.id,
-                type: "agent_purchase",
-              },
-            }),
-          });
-          const data = await res.json();
-          if (data.url) {
-            window.location.href = data.url;
-          } else {
-            showToast(data.error || "Checkout failed. Try again.", "error");
-          }
-        } catch {
-          showToast("Network error during checkout.", "error");
-        }
-        return;
-      }
-
-      // Free agent — install via API
+      // Beta: all agents are free — install via API
       try {
         const res = await fetch("/api/user-agents", {
           method: "POST",
@@ -1472,7 +1432,7 @@ function MarketplaceInner() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
               {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
                 const isCurrent = currentPlan === tier.tier;
-                const missingPrice = !tier.priceId && tier.price > 0;
+                const missingPrice = false;
                 return (
                   <div
                     key={tier.id}
@@ -1577,30 +1537,17 @@ function MarketplaceInner() {
                     >
                       {tier.features.slice(0, 3).join(" • ")}
                     </div>
-                    {missingPrice && (
-                      <div
-                        style={{
-                          color: "#ff6b6b",
-                          fontSize: "10px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        ⚠ Stripe price ID missing — update in code/env
-                      </div>
-                    )}
                     <button
                       onClick={() =>
-                        !isCurrent && !missingPrice && buyPack(tier)
+                        !isCurrent && buyPack(tier)
                       }
-                      disabled={isCurrent || missingPrice}
+                      disabled={isCurrent}
                       style={{
                         width: "100%",
                         padding: "12px",
                         backgroundColor: isCurrent
                           ? "#22d3ee"
-                          : missingPrice
-                            ? "#444"
-                            : tier.popular
+                          : tier.popular
                               ? "gold"
                               : T.linkColor,
                         color: isCurrent
@@ -1612,16 +1559,14 @@ function MarketplaceInner() {
                         fontWeight: "bold",
                         fontSize: "13px",
                         cursor:
-                          isCurrent || missingPrice ? "not-allowed" : "pointer",
+                          isCurrent ? "not-allowed" : "pointer",
                         borderRadius: "6px",
-                        opacity: isCurrent || missingPrice ? 0.7 : 1,
+                        opacity: isCurrent ? 0.7 : 1,
                       }}
                     >
                       {isCurrent
                         ? "Current Plan"
-                        : missingPrice
-                          ? "Not Configured"
-                          : tier.popular
+                        : tier.popular
                             ? "⚡ Get Best Value"
                             : "Get " + tier.label}
                     </button>
@@ -2032,11 +1977,7 @@ function MarketplaceInner() {
                   <button
                     onClick={() => {
                       installAgent(previewAgent.id);
-                      if (
-                        previewAgent.price_cents === 0 ||
-                        litBitCoins >= previewAgent.price_cents
-                      )
-                        setPreviewAgent(null);
+                      setPreviewAgent(null);
                     }}
                     style={{
                       flex: 1,
@@ -2048,9 +1989,7 @@ function MarketplaceInner() {
                       fontWeight: "bold",
                     }}
                   >
-                    {previewAgent.price_cents === 0
-                      ? "🚀 Install Free"
-                      : "🪙 Buy — " + formatPrice(previewAgent.price_cents)}
+                    🚀 Install Free
                   </button>
                 )}
                 <Link
@@ -2474,7 +2413,7 @@ function AgentCard({
                 color: "#000",
               }}
             >
-              {agent.price_cents === 0 ? "Install Free" : "Buy Now"}
+              Install Free
             </button>
           )}
         </div>
