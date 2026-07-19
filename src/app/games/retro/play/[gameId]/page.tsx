@@ -202,8 +202,8 @@ export default function RetroPlayerPage() {
     <main className="min-h-dvh bg-[radial-gradient(circle_at_50%_-10%,rgba(168,85,247,.18),transparent_30%),#050507] text-white">
       <header className="border-b border-white/10 bg-black/40 px-4 py-3 backdrop-blur-xl">
         <div className="mx-auto flex max-w-[1600px] items-center justify-between gap-4">
-          <div className="flex min-w-0 items-center gap-3"><Link href="/games/retro" className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"><ArrowLeft size={18}/></Link><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-black" style={{ background: `${system.color}20`, color: system.color }}>{system.shortName}</span><div className="min-w-0"><h1 className="truncate text-sm font-black sm:text-base">{game.title}</h1><p className="truncate text-[11px] text-white/35">LiTT Retro Arcade · local session{isSatellaview && " · Satellaview / BS‑X"}</p></div></div>
-          <button onClick={enterFullscreen} className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black hover:bg-white/10"><Expand size={15}/><span className="hidden sm:inline">Fullscreen</span></button>
+          <div className="flex min-w-0 items-center gap-3"><Link href="/games/retro" aria-label="Back to Retro Arcade" className="rounded-xl border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white"><ArrowLeft size={18}/></Link><span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl font-black" style={{ background: `${system.color}20`, color: system.color }}>{system.shortName}</span><div className="min-w-0"><h1 className="truncate text-sm font-black sm:text-base">{game.title}</h1><p className="truncate text-[11px] text-white/50">LiTT Retro Arcade · local session{isSatellaview && " · Satellaview / BS‑X"}</p></div></div>
+          <button onClick={enterFullscreen} aria-label="Enter fullscreen" className="flex shrink-0 items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-3 py-2 text-xs font-black hover:bg-white/10"><Expand size={15}/><span className="hidden sm:inline">Fullscreen</span></button>
         </div>
       </header>
 
@@ -213,19 +213,19 @@ export default function RetroPlayerPage() {
             <iframe key={romDataUrl + "|" + (biosDataUrl ?? "")} title={`${game.title} emulator`} srcDoc={srcDoc} className="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock" allow="autoplay; fullscreen; gamepad" allowFullScreen />
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[.025] px-4 py-3">
-            <div className="flex flex-wrap gap-4 text-[11px] text-white/40">
+            <div className="flex flex-wrap gap-4 text-[11px] text-white/55">
               <span className="flex items-center gap-1.5"><Gamepad2 size={13}/> Gamepad ready</span>
               <button
                 type="button"
                 onClick={() => setShowControls(true)}
-                className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-white/40 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-fuchsia-400/50"
+                className="flex items-center gap-1.5 rounded-md px-1.5 py-0.5 text-white/55 transition hover:bg-white/10 hover:text-white focus:outline-none focus:ring-2 focus:ring-fuchsia-400/50"
                 aria-label={`Open ${system.name} keyboard controls`}
               >
                 <Keyboard size={13}/> Keyboard controls
               </button>
               <span className="flex items-center gap-1.5"><HardDrive size={13}/> Save states in player menu</span>
             </div>
-            <button onClick={() => window.location.reload()} className="flex items-center gap-1.5 text-xs font-bold text-white/50 hover:text-white"><RotateCcw size={13}/> Reload player</button>
+            <button onClick={() => window.location.reload()} aria-label="Reload emulator player" className="flex items-center gap-1.5 text-xs font-bold text-white/50 hover:text-white"><RotateCcw size={13}/> Reload player</button>
           </div>
           {emulatorError && <div className="mt-3 flex items-start gap-3 rounded-2xl border border-rose-400/20 bg-rose-400/[.06] px-4 py-3 text-xs text-rose-100"><span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-rose-400"/><div><b className="block text-rose-200">Emulator reported an error</b><span className="text-rose-100/80">{emulatorError}</span></div></div>}
         </section>
@@ -245,7 +245,7 @@ export default function RetroPlayerPage() {
           )}
           <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5"><div className="absolute -right-8 -top-8 h-28 w-28 rounded-full bg-fuchsia-500/20 blur-3xl"/><Sparkles className="text-violet-300" size={20}/><div className="mt-3 text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">
             {emulatorError ? "Emulator trouble." : emulatorTimeout ? "Emulator is taking a while." : emulatorReady ? "Chapter loaded." : "Loading cartridge…"}
-          </h2><p className="mt-2 text-sm leading-6 text-white/45">
+          </h2><p className="mt-2 text-sm leading-6 text-white/55">
             {emulatorError
               ? emulatorError
               : emulatorTimeout
@@ -254,8 +254,8 @@ export default function RetroPlayerPage() {
                   ? `Your ${system.shortName} cartridge is running locally. Open the emulator menu for saves, control mapping, cheats, screenshots, and other supported tools.`
                   : `Starting ${system.shortName} core and loading your local cartridge into the player…`}
           </p></section>
-          <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5"><h2 className="text-sm font-black">Session details</h2><dl className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-3"><dt className="text-white/35">System</dt><dd className="text-right font-bold">{system.name}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/35">Core</dt><dd className="text-right font-bold">{emulatorCore}</dd></div>{isSatellaview && <div className="flex justify-between gap-3"><dt className="text-white/35">Mode</dt><dd className="text-right font-bold text-cyan-200">Satellaview / BS‑X</dd></div>}<div className="flex justify-between gap-3"><dt className="text-white/35">Launches</dt><dd className="font-bold">{game.launches}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/35">Storage</dt><dd className="font-bold text-emerald-300">This browser</dd></div></dl></section>
-          <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-5"><ShieldCheck className="text-emerald-300" size={19}/><h2 className="mt-3 text-sm font-black">Private play</h2><p className="mt-2 text-xs leading-5 text-white/40">The ROM and BIOS were loaded from this browser only — the data stays in memory as a base64 URL inside the emulator iframe. LiTT does not upload the file.</p></section>
+          <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5"><h2 className="text-sm font-black">Session details</h2><dl className="mt-4 space-y-3 text-xs"><div className="flex justify-between gap-3"><dt className="text-white/50">System</dt><dd className="text-right font-bold">{system.name}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/50">Core</dt><dd className="text-right font-bold">{emulatorCore}</dd></div>{isSatellaview && <div className="flex justify-between gap-3"><dt className="text-white/50">Mode</dt><dd className="text-right font-bold text-cyan-200">Satellaview / BS‑X</dd></div>}<div className="flex justify-between gap-3"><dt className="text-white/50">Launches</dt><dd className="font-bold">{game.launches}</dd></div><div className="flex justify-between gap-3"><dt className="text-white/50">Storage</dt><dd className="font-bold text-emerald-300">This browser</dd></div></dl></section>
+          <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/[.04] p-5"><ShieldCheck className="text-emerald-300" size={19}/><h2 className="mt-3 text-sm font-black">Private play</h2><p className="mt-2 text-xs leading-5 text-white/50">The ROM and BIOS were loaded from this browser only — the data stays in memory as a base64 URL inside the emulator iframe. LiTT does not upload the file.</p></section>
         </aside>
       </div>
 
