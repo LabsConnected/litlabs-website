@@ -1697,14 +1697,6 @@ function LITTTerminalShellInner({
             ? `Project ${activeProjectId.slice(0, 10)}`
             : "No project selected"
         }
-        voiceActive={voiceState !== "idle"}
-        onVoiceAction={() => {
-          if (voiceState === "idle") {
-            void startVoice();
-          } else {
-            stopVoice();
-          }
-        }}
       />
 
       {/* ── BODY ── */}
@@ -2136,7 +2128,7 @@ function LITTTerminalShellInner({
 
           {/* COMMAND BAR — fixed above bottom nav on mobile, static on desktop */}
           <div
-            className="fixed inset-x-2 bottom-[calc(69px+env(safe-area-inset-bottom))] z-[75] shrink-0 px-0 pt-1 pb-1 md:static md:inset-auto md:bottom-0 md:px-6 md:py-3"
+            className="fixed inset-x-1 bottom-[calc(52px+env(safe-area-inset-bottom))] z-[75] shrink-0 px-0 pt-1 pb-0.5 md:static md:inset-auto md:bottom-0 md:px-6 md:py-3"
             style={{
               display: mobileStudioView === "terminal" ? "none" : undefined,
             }}
@@ -2278,19 +2270,19 @@ function LITTTerminalShellInner({
                     onKeyDown={handleKeyDown}
                     aria-label="Message LITT"
                     placeholder={
-                      micActive
-                        ? voiceState === "speaking"
-                          ? "LiTT is speaking..."
-                          : voiceState === "transcribing"
-                            ? "Transcribing..."
-                            : voiceState === "thinking"
-                              ? "LiTT is thinking..."
-                              : voiceState === "listening"
-                                ? "Listening..."
-                                : voiceState === "cooldown"
-                                  ? "Voice temporarily unavailable"
+                      voiceState === "cooldown"
+                        ? "Type a message — voice will return shortly"
+                        : micActive
+                          ? voiceState === "speaking"
+                            ? "LiTT is speaking..."
+                            : voiceState === "transcribing"
+                              ? "Transcribing..."
+                              : voiceState === "thinking"
+                                ? "LiTT is thinking..."
+                                : voiceState === "listening"
+                                  ? "Listening..."
                                   : "Voice active..."
-                        : "Ask LiTT anything..."
+                          : "Ask LiTT anything..."
                     }
                     rows={1}
                     className="max-h-32 min-h-[44px] w-full resize-none rounded-2xl border border-white/15 bg-white/4 py-2.5 pl-3 pr-12 text-[16px] leading-5 text-neutral-100 outline-none transition-all placeholder:text-gray-400 focus:border-cyan-300/30 focus:bg-white/5 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"

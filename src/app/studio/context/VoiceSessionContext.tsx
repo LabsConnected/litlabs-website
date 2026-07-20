@@ -487,7 +487,7 @@ export function VoiceSessionProvider({
           ) {
             const { retryAfter } = sanitizeProviderError(new Error(raw));
             const seconds =
-              typeof err.retryAfter === "number" ? err.retryAfter : retryAfter || 60;
+              typeof err.retryAfter === "number" ? err.retryAfter : retryAfter || 15;
             enterCooldown(seconds);
             return;
           }
@@ -940,7 +940,7 @@ export function VoiceSessionProvider({
               const seconds =
                 typeof data.retryAfter === "number"
                   ? data.retryAfter
-                  : retryAfter || 60;
+                  : retryAfter || 15;
               enterCooldown(seconds);
             }
             return null;

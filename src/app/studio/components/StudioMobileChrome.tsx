@@ -6,7 +6,6 @@ import {
   FolderOpen,
   Menu,
   MessageCircle,
-  Mic,
   Monitor,
   Terminal,
   Workflow,
@@ -25,8 +24,6 @@ type Props = {
   activeView: StudioMobileView;
   onViewChange: (view: StudioMobileView) => void;
   projectLabel: string;
-  voiceActive: boolean;
-  onVoiceAction: () => void;
 };
 
 const studioViews = [
@@ -51,8 +48,6 @@ export default function StudioMobileChrome({
   activeView,
   onViewChange,
   projectLabel,
-  voiceActive,
-  onVoiceAction,
 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -83,19 +78,6 @@ export default function StudioMobileChrome({
             </span>
           </div>
         </div>
-
-        <button
-          type="button"
-          onClick={onVoiceAction}
-          className={`grid h-9 w-9 place-items-center rounded-lg border ${
-            voiceActive
-              ? "border-cyan-300/40 bg-cyan-400/15 text-cyan-200"
-              : "border-white/10 bg-white/5 text-white/65"
-          }`}
-          aria-label={voiceActive ? "End live voice" : "Start live voice"}
-        >
-          <Mic size={17} />
-        </button>
       </header>
 
       {/* Drawer — global site navigation */}
@@ -141,7 +123,7 @@ export default function StudioMobileChrome({
 
       {/* Bottom Studio nav — single navigation bar */}
       <nav
-        className="fixed inset-x-2 bottom-[max(6px,env(safe-area-inset-bottom))] z-[80] grid grid-cols-5 rounded-2xl border border-white/10 bg-[#040817]/96 p-1.5 shadow-2xl backdrop-blur-xl md:hidden"
+        className="fixed inset-x-1 bottom-[max(4px,env(safe-area-inset-bottom))] z-[80] grid grid-cols-5 rounded-xl border border-white/10 bg-[#040817]/96 p-1 backdrop-blur-xl md:hidden"
         aria-label="Studio workspace"
       >
         {studioViews.map(({ id, label, icon: Icon }) => (
@@ -150,9 +132,9 @@ export default function StudioMobileChrome({
             type="button"
             data-active={activeView === id}
             onClick={() => onViewChange(id)}
-            className="grid place-items-center gap-0.5 rounded-xl py-1.5 text-[8px] font-bold text-white/40 data-[active=true]:bg-cyan-400/10 data-[active=true]:text-cyan-300"
+            className="grid place-items-center gap-0.5 rounded-lg py-1 text-[8px] font-bold text-white/40 data-[active=true]:bg-cyan-400/10 data-[active=true]:text-cyan-300"
           >
-            <Icon size={16} />
+            <Icon size={15} />
             <span>{label}</span>
           </button>
         ))}
