@@ -380,7 +380,7 @@
 /* Mobile message bubble limits and conversation padding */
 @media (max-width: 700px) {
   .shell.embedded .messages {
-    padding: 8px 8px calc(110px + env(safe-area-inset-bottom));
+    padding: 8px 8px calc(120px + env(safe-area-inset-bottom));
   }
   .bubble {
     max-width: 84%;
@@ -971,8 +971,8 @@
     min-height: 0;
   }
   .shell.embedded .messages {
-    padding: 8px 8px calc(110px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(110px + env(safe-area-inset-bottom));
+    padding: 8px 8px calc(120px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(120px + env(safe-area-inset-bottom));
   }
   .shell.embedded .creativeHero {
     display: none;

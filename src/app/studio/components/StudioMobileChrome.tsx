@@ -3,12 +3,7 @@
 import Link from "next/link";
 import {
   Bot,
-  FolderOpen,
   Menu,
-  MessageCircle,
-  Monitor,
-  Terminal,
-  Workflow,
   X,
 } from "lucide-react";
 import { useState } from "react";
@@ -21,18 +16,8 @@ export type StudioMobileView =
   | "terminal";
 
 type Props = {
-  activeView: StudioMobileView;
-  onViewChange: (view: StudioMobileView) => void;
   projectLabel: string;
 };
-
-const studioViews = [
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "build", label: "Build", icon: Workflow },
-  { id: "files", label: "Files", icon: FolderOpen },
-  { id: "preview", label: "Preview", icon: Monitor },
-  { id: "terminal", label: "Terminal", icon: Terminal },
-] as const;
 
 const globalLinks = [
   ["Dashboard", "/dashboard"],
@@ -45,8 +30,6 @@ const globalLinks = [
 ] as const;
 
 export default function StudioMobileChrome({
-  activeView,
-  onViewChange,
   projectLabel,
 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
@@ -121,24 +104,7 @@ export default function StudioMobileChrome({
         </div>
       )}
 
-      {/* Bottom Studio nav — single navigation bar */}
-      <nav
-        className="fixed inset-x-1 bottom-[max(4px,env(safe-area-inset-bottom))] z-[80] grid grid-cols-5 rounded-xl border border-white/10 bg-[#040817]/96 p-1 backdrop-blur-xl md:hidden"
-        aria-label="Studio workspace"
-      >
-        {studioViews.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            type="button"
-            data-active={activeView === id}
-            onClick={() => onViewChange(id)}
-            className="grid place-items-center gap-0.5 rounded-lg py-1 text-[8px] font-bold text-white/40 data-[active=true]:bg-cyan-400/10 data-[active=true]:text-cyan-300"
-          >
-            <Icon size={15} />
-            <span>{label}</span>
-          </button>
-        ))}
-      </nav>
+      {/* Bottom nav is now rendered inside the unified bottom shell in LITTTerminalShell */}
     </>
   );
 }

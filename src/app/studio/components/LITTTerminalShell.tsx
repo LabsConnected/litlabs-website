@@ -1688,10 +1688,8 @@ function LITTTerminalShellInner({
         onChange={handleFiles}
       />
 
-      {/* Mobile Studio chrome — top bar + drawer + bottom nav */}
+      {/* Mobile Studio chrome — top bar + drawer */}
       <StudioMobileChrome
-        activeView={mobileStudioView}
-        onViewChange={setMobileStudioView}
         projectLabel={
           activeProjectId
             ? `Project ${activeProjectId.slice(0, 10)}`
@@ -2126,14 +2124,14 @@ function LITTTerminalShellInner({
             </div>
           )}
 
-          {/* COMMAND BAR — fixed above bottom nav on mobile, static on desktop */}
+          {/* MOBILE BOTTOM SHELL — composer + nav in one fixed container */}
           <div
-            className="fixed inset-x-1 bottom-[calc(52px+env(safe-area-inset-bottom))] z-[75] shrink-0 px-0 pt-1 pb-0.5 md:static md:inset-auto md:bottom-0 md:px-6 md:py-3"
+            className="fixed inset-x-0 bottom-0 z-[75] flex flex-col gap-0 border-t border-white/10 bg-[#040817]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:static md:inset-auto md:bottom-0 md:border-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
             style={{
               display: mobileStudioView === "terminal" ? "none" : undefined,
             }}
           >
-            <div className="mx-auto flex w-full flex-col gap-1.5 rounded-2xl border border-white/10 bg-[#060a16]/94 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.45)] backdrop-blur-xl sm:max-w-4xl sm:rounded-t-2xl sm:p-2.5">
+            <div className="mx-auto flex w-full flex-col gap-1.5 p-2 sm:max-w-4xl sm:rounded-2xl sm:border sm:border-white/10 sm:bg-[#060a16]/94 sm:p-2.5 sm:shadow-[0_-18px_60px_rgba(0,0,0,.45)] sm:backdrop-blur-xl">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
                 <div className="flex items-center gap-2 px-1 text-[11px]">
@@ -2355,6 +2353,31 @@ function LITTTerminalShellInner({
               onClose={closeCommand}
               onActivate={activateCommand}
             />
+
+            {/* Mobile bottom nav — inside the shell, below composer */}
+            <nav
+              className="grid grid-cols-5 border-t border-white/5 pt-1 md:hidden"
+              aria-label="Studio workspace"
+            >
+              {([
+                { id: "chat", icon: MessageCircle, label: "Chat" },
+                { id: "build", icon: Workflow, label: "Build" },
+                { id: "files", icon: FolderOpen, label: "Files" },
+                { id: "preview", icon: Monitor, label: "Preview" },
+                { id: "terminal", icon: TerminalIcon, label: "Terminal" },
+              ] as const).map((item) => (
+                <button
+                  key={item.id}
+                  type="button"
+                  data-active={mobileStudioView === item.id}
+                  onClick={() => setMobileStudioView(item.id)}
+                  className="grid place-items-center gap-0.5 py-1 text-[8px] font-bold text-white/40 data-[active=true]:bg-cyan-400/10 data-[active=true]:text-cyan-300"
+                >
+                  <item.icon size={15} />
+                  <span>{item.label}</span>
+                </button>
+              ))}
+            </nav>
           </div>
 
           {/* FOOTER TELEMETRY */}
