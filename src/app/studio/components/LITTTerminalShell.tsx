@@ -67,6 +67,9 @@ import dynamic from "next/dynamic";
 
 const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
 const LiveVoiceBar = dynamic(() => import("./LiveVoiceBar").then(m => m.LiveVoiceBar), { ssr: false });
+import StudioMobileChrome, {
+  type StudioMobileView,
+} from "./StudioMobileChrome";
 import {
   PersonaProvider,
   usePersona,
@@ -343,8 +346,7 @@ function LITTTerminalShellInner({
   const prevPersonaRef = useRef(persona.id);
 
   // ─── Mobile Studio: one screen at a time ───
-  type MobileStudioView = "chat" | "mission" | "files" | "preview" | "terminal";
-  const [mobileStudioView, setMobileStudioView] = useState<MobileStudioView>("chat");
+  const [mobileStudioView, setMobileStudioView] = useState<StudioMobileView>("chat");
 
   // ─── Visual viewport: keep composer above mobile keyboard ───
   useEffect(() => {
@@ -1686,10 +1688,29 @@ function LITTTerminalShellInner({
         onChange={handleFiles}
       />
 
+      {/* Mobile Studio chrome — top bar + drawer + bottom nav */}
+      <StudioMobileChrome
+        activeView={mobileStudioView}
+        onViewChange={setMobileStudioView}
+        projectLabel={
+          activeProjectId
+            ? `Project ${activeProjectId.slice(0, 10)}`
+            : "No project selected"
+        }
+        voiceActive={voiceState !== "idle"}
+        onVoiceAction={() => {
+          if (voiceState === "idle") {
+            void startVoice();
+          } else {
+            stopVoice();
+          }
+        }}
+      />
+
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* MAIN STAGE */}
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden pt-[52px] md:pt-0">
           {/* Ambient background - simplified on mobile to reduce paint */}
           <div
             className="pointer-events-none absolute inset-0 hidden opacity-50 sm:block"
@@ -1839,80 +1860,71 @@ function LITTTerminalShellInner({
 
           {/* Scrollable content */}
           {hybridWorkspaceEnabled ? (
-            <StudioCommandDeck
-              mode={hybridMode}
-              onModeChangeAction={setHybridMode}
-              activeProjectId={activeProjectId}
-              onOpenProjectsAction={() => setProjectDrawerOpen(true)}
-              onOpenTerminalAction={() => setTerminalDrawerOpen(true)}
-              conversation={
-                <>
-                  {Object.values(toolActivity).length > 0 && (
-                    <div className="flex flex-wrap gap-2 px-3 pt-2">
-                      {Object.values(toolActivity).map((activity) => (
-                        <span
-                          key={activity.tool}
-                          className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
-                        >
-                          {activity.status === "running" && "\u25CB "}
-                          {activity.status === "complete" && "\u2713 "}
-                          {activity.status === "error" && "\u00D7 "}
-                          {activity.message}
-                        </span>
-                      ))}
-                    </div>
-                  )}
-                  {pendingProposals.length > 0 && (
-                    <div className="flex flex-col gap-2 px-3 pt-2">
-                      {pendingProposals.map((proposal) => (
-                        <div
-                          key={proposal.id}
-                          className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
-                        >
-                          <div className="flex items-center justify-between gap-2">
-                            <span className="text-[11px] font-bold text-white">{proposal.title}</span>
-                            <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                              proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
-                              proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
-                              "bg-red-400/15 text-red-300"
-                            }`}>{proposal.risk} risk</span>
-                          </div>
-                          <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
-                          <div className="mt-2 flex flex-wrap gap-1">
-                            {proposal.files.map((f) => (
-                              <span key={f.path} className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-gray-400">
-                                {f.operation}: {f.path}
-                              </span>
-                            ))}
-                          </div>
-                          <div className="mt-2 flex gap-2">
-                            {proposalStatuses[proposal.id] === "applying" ? (
-                              <span className="text-[10px] text-cyan-300">Applying…</span>
-                            ) : proposalStatuses[proposal.id] === "complete" ? (
-                              <span className="text-[10px] text-green-300">Applied ✓</span>
-                            ) : proposalStatuses[proposal.id] === "error" ? (
-                              <span className="text-[10px] text-red-300">Failed ✗</span>
-                            ) : (
-                              <>
-                                <button
-                                  onClick={() => approveProposal(proposal)}
-                                  className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
-                                >
-                                  Apply
-                                </button>
-                                <button
-                                  onClick={() => rejectProposal(proposal)}
-                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
-                                >
-                                  Reject
-                                </button>
-                              </>
-                            )}
-                          </div>
+            <>
+              {/* Mobile chat view — full-screen conversation, no deck */}
+              <div
+                className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden"
+                style={{ display: mobileStudioView === "chat" ? "flex" : "none" }}
+              >
+                {Object.values(toolActivity).length > 0 && (
+                  <div className="flex flex-wrap gap-2 px-3 pt-2">
+                    {Object.values(toolActivity).map((activity) => (
+                      <span
+                        key={activity.tool}
+                        className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
+                      >
+                        {activity.status === "running" && "\u25CB "}
+                        {activity.status === "complete" && "\u2713 "}
+                        {activity.status === "error" && "\u00D7 "}
+                        {activity.message}
+                      </span>
+                    ))}
+                  </div>
+                )}
+                {pendingProposals.length > 0 && (
+                  <div className="flex flex-col gap-2 px-3 pt-2">
+                    {pendingProposals.map((proposal) => (
+                      <div
+                        key={proposal.id}
+                        className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
+                      >
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-[11px] font-bold text-white">{proposal.title}</span>
+                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                            proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
+                            proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
+                            "bg-red-400/15 text-red-300"
+                          }`}>{proposal.risk} risk</span>
                         </div>
-                      ))}
-                    </div>
-                  )}
+                        <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
+                        <div className="mt-2 flex gap-2">
+                          {proposalStatuses[proposal.id] === "applying" ? (
+                            <span className="text-[10px] text-cyan-300">Applying…</span>
+                          ) : proposalStatuses[proposal.id] === "complete" ? (
+                            <span className="text-[10px] text-green-300">Applied ✓</span>
+                          ) : proposalStatuses[proposal.id] === "error" ? (
+                            <span className="text-[10px] text-red-300">Failed ✗</span>
+                          ) : (
+                            <>
+                              <button
+                                onClick={() => approveProposal(proposal)}
+                                className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
+                              >
+                                Apply
+                              </button>
+                              <button
+                                onClick={() => rejectProposal(proposal)}
+                                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
+                              >
+                                Reject
+                              </button>
+                            </>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
                 <ChatShell
                   embedded
                   hideDock
@@ -1929,9 +1941,120 @@ function LITTTerminalShellInner({
                     requestAnimationFrame(() => textInputRef.current?.focus());
                   }}
                 />
-                </>
-              }
-            />
+              </div>
+
+              {/* Mobile terminal view — full-screen */}
+              {mobileStudioView === "terminal" && (
+                <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden">
+                  <TerminalToolDirect
+                    ref={terminalRef}
+                    onOutput={handleTerminalOutput}
+                  />
+                </div>
+              )}
+
+              {/* StudioCommandDeck — desktop always, mobile for build/files/preview */}
+              <div
+                className="min-h-0 flex-1 overflow-hidden"
+                style={{
+                  display: mobileStudioView === "chat" || mobileStudioView === "terminal" ? "none" : "flex",
+                }}
+              >
+                <StudioCommandDeck
+                  mode={mobileStudioView === "files" ? "code" : mobileStudioView === "preview" ? "code" : mobileStudioView === "build" ? "command" : hybridMode}
+                  onModeChangeAction={setHybridMode}
+                  activeProjectId={activeProjectId}
+                  onOpenProjectsAction={() => setProjectDrawerOpen(true)}
+                  onOpenTerminalAction={() => setMobileStudioView("terminal")}
+                  conversation={
+                    <>
+                      {Object.values(toolActivity).length > 0 && (
+                        <div className="flex flex-wrap gap-2 px-3 pt-2">
+                          {Object.values(toolActivity).map((activity) => (
+                            <span
+                              key={activity.tool}
+                              className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
+                            >
+                              {activity.status === "running" && "\u25CB "}
+                              {activity.status === "complete" && "\u2713 "}
+                              {activity.status === "error" && "\u00D7 "}
+                              {activity.message}
+                            </span>
+                          ))}
+                        </div>
+                      )}
+                      {pendingProposals.length > 0 && (
+                        <div className="flex flex-col gap-2 px-3 pt-2">
+                          {pendingProposals.map((proposal) => (
+                            <div
+                              key={proposal.id}
+                              className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
+                            >
+                              <div className="flex items-center justify-between gap-2">
+                                <span className="text-[11px] font-bold text-white">{proposal.title}</span>
+                                <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                                  proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
+                                  proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
+                                  "bg-red-400/15 text-red-300"
+                                }`}>{proposal.risk} risk</span>
+                              </div>
+                              <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
+                              <div className="mt-2 flex flex-wrap gap-1">
+                                {proposal.files.map((f) => (
+                                  <span key={f.path} className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-gray-400">
+                                    {f.operation}: {f.path}
+                                  </span>
+                                ))}
+                              </div>
+                              <div className="mt-2 flex gap-2">
+                                {proposalStatuses[proposal.id] === "applying" ? (
+                                  <span className="text-[10px] text-cyan-300">Applying…</span>
+                                ) : proposalStatuses[proposal.id] === "complete" ? (
+                                  <span className="text-[10px] text-green-300">Applied ✓</span>
+                                ) : proposalStatuses[proposal.id] === "error" ? (
+                                  <span className="text-[10px] text-red-300">Failed ✗</span>
+                                ) : (
+                                  <>
+                                    <button
+                                      onClick={() => approveProposal(proposal)}
+                                      className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
+                                    >
+                                      Apply
+                                    </button>
+                                    <button
+                                      onClick={() => rejectProposal(proposal)}
+                                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
+                                    >
+                                      Reject
+                                    </button>
+                                  </>
+                                )}
+                              </div>
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    <ChatShell
+                      embedded
+                      hideDock
+                      manageVoiceTurns={false}
+                      builderMode={true}
+                      messages={chatMessages}
+                      sending={busy}
+                      systemLines={[]}
+                      onSend={handleChatSend}
+                      onToolSelect={onToolChangeAction}
+                      onOpenImageGen={() => setImageGenOpen(true)}
+                      onPromptSelectAction={(prompt) => {
+                        setInput(prompt);
+                        requestAnimationFrame(() => textInputRef.current?.focus());
+                      }}
+                    />
+                    </>
+                  }
+                />
+              </div>
+            </>
           ) : (
             <div
               ref={transcriptRef}
@@ -1956,31 +2079,7 @@ function LITTTerminalShellInner({
             </div>
           )}
 
-          {/* Mobile tool rail removed in favor of the global bottom nav. */}
-
-          {/* Mobile Studio dock — one screen at a time */}
-          <nav
-            className="fixed left-2 right-2 z-40 grid grid-cols-5 rounded-[13px] border border-white/10 bg-[#030815]/95 p-1.5 backdrop-blur-xl sm:hidden"
-            style={{ bottom: "calc(76px + env(safe-area-inset-bottom))" }}
-          >
-            {([
-              { id: "chat", icon: MessageCircle, label: "Chat" },
-              { id: "mission", icon: Workflow, label: "Build" },
-              { id: "files", icon: FolderOpen, label: "Files" },
-              { id: "preview", icon: Monitor, label: "Preview" },
-              { id: "terminal", icon: TerminalIcon, label: "Terminal" },
-            ] as const).map((item) => (
-              <button
-                key={item.id}
-                data-active={mobileStudioView === item.id}
-                onClick={() => setMobileStudioView(item.id)}
-                className="grid place-items-center gap-1 rounded-[9px] py-1.5 text-[8px] text-gray-500"
-              >
-                <item.icon size={17} />
-                {item.label}
-              </button>
-            ))}
-          </nav>
+          {/* Mobile dock is now handled by StudioMobileChrome */}
 
           {/* Gemini Live Voice (speech-to-speech) — behind feature flag */}
           {process.env.NEXT_PUBLIC_STUDIO_LIVE_VOICE_ENABLED === "true" && (
@@ -2035,10 +2134,12 @@ function LITTTerminalShellInner({
             </div>
           )}
 
-          {/* COMMAND BAR — centered floating creative dock */}
+          {/* COMMAND BAR — fixed above bottom nav on mobile, static on desktop */}
           <div
-            className="sticky bottom-0 z-50 shrink-0 px-2 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3"
-            style={{ position: "sticky" }}
+            className="fixed inset-x-2 bottom-[calc(69px+env(safe-area-inset-bottom))] z-[75] shrink-0 px-0 pt-1 pb-1 md:static md:inset-auto md:bottom-0 md:px-6 md:py-3"
+            style={{
+              display: mobileStudioView === "terminal" ? "none" : undefined,
+            }}
           >
             <div className="mx-auto flex w-full flex-col gap-1.5 rounded-2xl border border-white/10 bg-[#060a16]/94 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.45)] backdrop-blur-xl sm:max-w-4xl sm:rounded-t-2xl sm:p-2.5">
               {/* Compact voice state strip — replaces the old giant panel */}
@@ -2192,7 +2293,7 @@ function LITTTerminalShellInner({
                         : "Ask LiTT anything..."
                     }
                     rows={1}
-                    className="max-h-32 min-h-11 w-full resize-none rounded-2xl border border-white/15 bg-white/4 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none transition-all placeholder:text-gray-400 focus:border-cyan-300/30 focus:bg-white/5 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                    className="max-h-32 min-h-[44px] w-full resize-none rounded-2xl border border-white/15 bg-white/4 py-2.5 pl-3 pr-12 text-[16px] leading-5 text-neutral-100 outline-none transition-all placeholder:text-gray-400 focus:border-cyan-300/30 focus:bg-white/5 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
                   {/* Contextual send/stop button inside textarea */}
                   <button

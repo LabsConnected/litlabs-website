@@ -1,6 +1,6 @@
 "use client";
 
-import { FormEvent, useEffect, useMemo, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowUp, ArrowUpRight, Clapperboard, Image as ImageIcon, Mic, Sparkles } from "lucide-react";
 import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
@@ -97,6 +97,14 @@ export function ChatShell({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [busySeconds, setBusySeconds] = useState(0);
+  const bottomRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    bottomRef.current?.scrollIntoView({
+      behavior: sending ? "auto" : "smooth",
+      block: "end",
+    });
+  }, [messages, sending]);
   const {
     voiceState,
     state,
@@ -356,6 +364,7 @@ export function ChatShell({
           stopSpeaking={stopSpeaking}
           busySeconds={busySeconds}
         />
+        <div ref={bottomRef} />
       </section>
 
       {!hideDock && (
