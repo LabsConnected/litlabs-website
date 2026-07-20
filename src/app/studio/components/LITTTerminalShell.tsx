@@ -1752,7 +1752,9 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* EXCLUSIVE branch: hybrid (Command Deck) vs legacy. Never both. */}
+          {/* EXCLUSIVE branch: hybrid (Command Deck) vs legacy. Never both.
+              When hybridWorkspaceEnabled, render ONLY StudioCommandDeck with the single ChatShell passed as `conversation`.
+              No other ChatShell, no legacy stage chat, no extra aside chat. */}
           <div className="relative z-10 min-h-0 flex-1 overflow-hidden">
             {hybridWorkspaceEnabled ? (
               <StudioCommandDeck

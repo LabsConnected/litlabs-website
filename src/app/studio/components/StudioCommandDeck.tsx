@@ -150,50 +150,76 @@ export default function StudioCommandDeck({ mode, onModeChangeAction, activeProj
     if (id === "files") onOpenProjectsAction();
     if (id === "terminal") onOpenTerminalAction();
   };
+  // Always-on 3-column layout when conversation is provided: rail | workspace | conversation (360-420px)
+  const hasConversation = !!conversation;
+
+  // When a dedicated conversation is provided by the parent, collapse the internal review panel
+  // so the workspace column doesn't grow an extra right sidebar next to the LiTT conversation.
+  const effectiveCollapsed = {
+    ...layout.collapsed,
+    review: hasConversation ? true : layout.collapsed.review,
+  };
+
   const projectLabel = activeProjectId ? `Project ${activeProjectId.slice(0, 8)}` : "No project";
-  const explorerW = layout.collapsed.explorer ? 42 : layout.sizes.explorer;
-  const reviewW = layout.collapsed.review ? 42 : layout.sizes.review;
-  const previewH = layout.collapsed.preview ? 42 : layout.sizes.preview;
-  const terminalH = layout.collapsed.terminal ? 42 : layout.sizes.terminal;
-  const codeGridStyle: CSSProperties = { gridTemplateColumns: `${explorerW}px ${layout.collapsed.explorer ? 0 : 6}px minmax(0,1fr) ${layout.collapsed.review ? 0 : 6}px ${reviewW}px`, gridTemplateRows: `minmax(0,1fr) ${layout.collapsed.terminal ? 0 : 6}px ${terminalH}px` };
-  const stackGridStyle: CSSProperties = { gridTemplateRows: `minmax(0,1fr) ${layout.collapsed.preview ? 0 : 6}px ${previewH}px` };
+  const explorerW = effectiveCollapsed.explorer ? 42 : layout.sizes.explorer;
+  const reviewW = effectiveCollapsed.review ? 42 : layout.sizes.review;
+  const previewH = effectiveCollapsed.preview ? 42 : layout.sizes.preview;
+  const terminalH = effectiveCollapsed.terminal ? 42 : layout.sizes.terminal;
+  const codeGridStyle: CSSProperties = { gridTemplateColumns: `${explorerW}px ${effectiveCollapsed.explorer ? 0 : 6}px minmax(0,1fr) ${effectiveCollapsed.review ? 0 : 6}px ${reviewW}px`, gridTemplateRows: `minmax(0,1fr) ${effectiveCollapsed.terminal ? 0 : 6}px ${terminalH}px` };
+  const stackGridStyle: CSSProperties = { gridTemplateRows: `minmax(0,1fr) ${effectiveCollapsed.preview ? 0 : 6}px ${previewH}px` };
 
-  return <section className={styles.deck}>
-    <aside className={styles.rail} aria-label="Studio tools">{RAIL.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}</aside>
-    <div className={styles.workspace}>
-      <header className={styles.commandBar}>
-        <div className={styles.brand}><span className={styles.brandMark}><Sparkles size={15} /></span><span>LiTT</span></div>
-        <div className={styles.modules}>
-          <button className={styles.module} onClick={onOpenProjectsAction}><FolderOpen size={12} /><strong>{projectLabel}</strong><ChevronDown size={11} /></button>
-          <span className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
-          <span className={styles.module}><Monitor size={12} />Preview <strong>Unavailable</strong></span>
-          <span className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
-          <span className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
+  const deckStyle = hasConversation
+    ? ({ display: 'grid', gridTemplateColumns: '56px minmax(0, 1fr) minmax(360px, 420px)', width: '100%', height: '100%', minWidth: 0, minHeight: 0, overflow: 'hidden' } as React.CSSProperties)
+    : undefined;
+
+  return (
+    <section className={styles.deck} style={deckStyle}>
+      <aside className={styles.rail} aria-label="Studio tools">{RAIL.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}</aside>
+
+      {/* Workspace area (mode-specific content) */}
+      <div className={styles.workspace} style={hasConversation ? { minWidth: 0, minHeight: 0, overflow: 'hidden' } : undefined}>
+        <header className={styles.commandBar}>
+          <div className={styles.brand}><span className={styles.brandMark}><Sparkles size={15} /></span><span>LiTT</span></div>
+          <div className={styles.modules}>
+            <button className={styles.module} onClick={onOpenProjectsAction}><FolderOpen size={12} /><strong>{projectLabel}</strong><ChevronDown size={11} /></button>
+            <span className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
+            <span className={styles.module}><Monitor size={12} />Preview <strong>Unavailable</strong></span>
+            <span className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
+            <span className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
+          </div>
+          <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
+        </header>
+
+        {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
+          <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
+          <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
+            {activeProjectId ? <div className={styles.fileTree}><div className={styles.fileRow}><FileCode2 size={13} /> File index loading is unavailable</div></div> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
+          </Panel>
+          {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
+          <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
+            <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><StudioMonacoEditor value={draft} onChange={setDraft} /></div></Panel>
+            {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
+            <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
+          </div>
+          {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
+          <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
+          {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
+          <TerminalStrip collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} onOpenTerminalAction={onOpenTerminalAction} style={{ gridColumn: "1 / -1", gridRow: 3 }} />
+        </div>}
+
+        {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." /></Panel></aside><div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Output</button></div><button className={styles.button} onClick={onOpenTerminalAction}>Open terminal</button></div></div>}
+
+        {mode === "command" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Mission command center" icon={Workflow}><div className={styles.modeHeroCompact}><div className={styles.modeHeroIntro}><h2>Mission control</h2><p>Connect a project or describe what you want LiTT to build.</p><div className={styles.emptyActions}><button className={styles.button} onClick={onOpenProjectsAction}>Select Project</button><button className={`${styles.button} ${styles.buttonSecondary}`}>Start Mission</button></div></div><div className={styles.workflowSteps}><span className={styles.workflowStep}>Inspect</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Plan</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Execute</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Review</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Deploy</span></div></div></Panel><aside className={styles.modeSidebar}><Panel title="System activity" icon={Activity}><div className={styles.activityTimeline}><div className={styles.activityItem}><Activity size={13} /> Waiting for project connection</div><div className={styles.activityItem}><Cloud size={13} /> Services will appear after verification</div><div className={styles.activityItem}><Bot size={13} /> Agent events will appear during missions</div></div></Panel></aside><div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Problems</button><button>Output</button><button>Tests</button></div><div className={styles.terminalPlaceholder}>Terminal session not started. Select a project and open an authenticated session.</div><div className="flex gap-1"><button className={styles.iconButton} onClick={onOpenTerminalAction} aria-label="Open terminal" title="Open terminal"><Terminal size={12} /> Open</button></div></div></div>}
+
+        <nav className={styles.bottomNav} aria-label="Studio tools">{RAIL.slice(0, 6).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-active={id === mode}><Icon size={16} /><span>{label}</span></button>)}</nav>
+      </div>
+
+      {/* Dedicated conversation column on the right (always when provided) */}
+      {conversation && (
+        <div className={styles.conversationPanel} style={{ minWidth: 360, maxWidth: 420, minHeight: 0, overflow: 'hidden', borderLeft: '1px solid rgba(255,255,255,0.08)' }}>
+          {conversation}
         </div>
-        <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
-      </header>
-
-      {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
-        <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
-        <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project"><FolderOpen size={13} /></button>}>
-          {activeProjectId ? <div className={styles.fileTree}><div className={styles.fileRow}><FileCode2 size={13} /> File index loading is unavailable</div></div> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
-        </Panel>
-        {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
-        <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
-          <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><StudioMonacoEditor value={draft} onChange={setDraft} /></div></Panel>
-          {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
-          <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
-        </div>
-        {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
-        <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
-        {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
-        <TerminalStrip collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} onOpenTerminalAction={onOpenTerminalAction} style={{ gridColumn: "1 / -1", gridRow: 3 }} />
-      </div>}
-
-      {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." /></Panel></aside><div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Output</button></div><button className={styles.button} onClick={onOpenTerminalAction}>Open terminal</button></div></div>}
-
-      {mode === "command" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Mission command center" icon={Workflow}><div className={styles.modeHeroCompact}><div className={styles.modeHeroIntro}><h2>Mission control</h2><p>Connect a project or describe what you want LiTT to build.</p><div className={styles.emptyActions}><button className={styles.button} onClick={onOpenProjectsAction}>Select Project</button><button className={`${styles.button} ${styles.buttonSecondary}`}>Start Mission</button></div></div><div className={styles.workflowSteps}><span className={styles.workflowStep}>Inspect</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Plan</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Execute</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Review</span><span className={styles.workflowArrow}>→</span><span className={styles.workflowStep}>Deploy</span></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Conversation" icon={Bot}><div className={styles.conversationWrap}>{conversation}</div></Panel><Panel title="System activity" icon={Activity}><div className={styles.activityTimeline}><div className={styles.activityItem}><Activity size={13} /> Waiting for project connection</div><div className={styles.activityItem}><Cloud size={13} /> Services will appear after verification</div><div className={styles.activityItem}><Bot size={13} /> Agent events will appear during missions</div></div></Panel></aside><div className={styles.terminalStrip}><div className={styles.terminalTabs}><button>Terminal</button><button>Problems</button><button>Output</button><button>Tests</button></div><div className={styles.terminalPlaceholder}>Terminal session not started. Select a project and open an authenticated session.</div><div className="flex gap-1"><button className={styles.iconButton} onClick={onOpenTerminalAction} aria-label="Open terminal" title="Open terminal"><Terminal size={12} /></button></div></div></div>}
-      <nav className={styles.bottomNav} aria-label="Studio tools">{RAIL.slice(0, 6).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-active={id === mode}><Icon size={16} /><span>{label}</span></button>)}</nav>
-    </div>
-  </section>;
+      )}
+    </section>
+  );
 }
