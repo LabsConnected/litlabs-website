@@ -285,6 +285,7 @@ function LITTTerminalShellInner({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
   const [micSetupOpen, setMicSetupOpen] = useState(false);
+  const [hybridWorkspaceEnabled, setHybridWorkspaceEnabled] = useState(false);
   const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const terminalRef = useRef<TerminalToolHandle | null>(null);
   const activeTerminalBlockRef = useRef<string | null>(null);
@@ -423,7 +424,23 @@ function LITTTerminalShellInner({
     voiceState === "speaking" ||
     voiceState === "cooldown";
 
-  // Hybrid workspace surfaces are always-on; the API flag is only for labeling "live" vs "demo" inside panels.
+  // Fetch hybrid workspace flag. When true, render ONLY the integrated Command Deck path (single ChatShell, single terminal, single composer).
+  useEffect(() => {
+    let cancelled = false;
+    void fetch("/api/studio/feature", { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) return false;
+        const payload = (await response.json()) as { enabled?: boolean };
+        return payload.enabled === true;
+      })
+      .then((enabled) => {
+        if (!cancelled) setHybridWorkspaceEnabled(enabled);
+      })
+      .catch(() => {
+        if (!cancelled) setHybridWorkspaceEnabled(false);
+      });
+    return () => { cancelled = true; };
+  }, []);
 
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
@@ -1735,72 +1752,39 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Content area — flex-1 so deck/chat fill space and composer flows below on desktop */}
-          <div className="relative z-10 min-h-0 flex-1 flex flex-col lg:flex-row overflow-hidden">
-            {/* Mobile chat view — full-screen conversation, no deck */}
-            <div
-              className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden"
-              style={{ display: mobileStudioView === "chat" ? "flex" : "none" }}
-            >
-                {Object.values(toolActivity).length > 0 && (
-                  <div className="flex flex-wrap gap-2 px-3 pt-2">
-                    {Object.values(toolActivity).map((activity) => (
-                      <span
-                        key={activity.tool}
-                        className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
-                      >
-                        {activity.status === "running" && "\u25CB "}
-                        {activity.status === "complete" && "\u2713 "}
-                        {activity.status === "error" && "\u00D7 "}
-                        {activity.message}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {pendingProposals.length > 0 && (
-                  <div className="flex flex-col gap-2 px-3 pt-2">
-                    {pendingProposals.map((proposal) => (
-                      <div
-                        key={proposal.id}
-                        className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
-                      >
-                        <div className="flex items-center justify-between gap-2">
-                          <span className="text-[11px] font-bold text-white">{proposal.title}</span>
-                          <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                            proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
-                            proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
-                            "bg-red-400/15 text-red-300"
-                          }`}>{proposal.risk} risk</span>
-                        </div>
-                        <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
-                        <div className="mt-2 flex gap-2">
-                          {proposalStatuses[proposal.id] === "applying" ? (
-                            <span className="text-[10px] text-cyan-300">Applying…</span>
-                          ) : proposalStatuses[proposal.id] === "complete" ? (
-                            <span className="text-[10px] text-green-300">Applied ✓</span>
-                          ) : proposalStatuses[proposal.id] === "error" ? (
-                            <span className="text-[10px] text-red-300">Failed ✗</span>
-                          ) : (
-                            <>
-                              <button
-                                onClick={() => approveProposal(proposal)}
-                                className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
-                              >
-                                Apply
-                              </button>
-                              <button
-                                onClick={() => rejectProposal(proposal)}
-                                className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
-                              >
-                                Reject
-                              </button>
-                            </>
-                          )}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                )}
+          {/* EXCLUSIVE branch: hybrid (Command Deck) vs legacy. Never both. */}
+          <div className="relative z-10 min-h-0 flex-1 overflow-hidden">
+            {hybridWorkspaceEnabled ? (
+              <StudioCommandDeck
+                mode={hybridMode}
+                onModeChangeAction={setHybridMode}
+                activeProjectId={activeProjectId}
+                onOpenProjectsAction={() => setProjectDrawerOpen(true)}
+                onOpenTerminalAction={() => setTerminalDrawerOpen(true)}
+                conversation={
+                  <ChatShell
+                    embedded
+                    hideDock
+                    manageVoiceTurns={false}
+                    builderMode={true}
+                    messages={chatMessages}
+                    sending={busy}
+                    systemLines={[]}
+                    onSend={handleChatSend}
+                    onToolSelect={onToolChangeAction}
+                    onOpenImageGen={() => setImageGenOpen(true)}
+                    onPromptSelectAction={(prompt) => {
+                      setInput(prompt);
+                      requestAnimationFrame(() => textInputRef.current?.focus());
+                    }}
+                  />
+                }
+              />
+            ) : (
+              <div
+                ref={transcriptRef}
+                className="relative z-10 h-full overflow-y-auto px-0 py-0"
+              >
                 <ChatShell
                   embedded
                   hideDock
@@ -1818,142 +1802,8 @@ function LITTTerminalShellInner({
                   }}
                 />
               </div>
-
-              {/* Mobile terminal view — full-screen */}
-              {mobileStudioView === "terminal" && (
-                <div className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden">
-                  <TerminalToolDirect
-                    ref={terminalRef}
-                    onOutput={handleTerminalOutput}
-                  />
-                </div>
-              )}
-
-              {/* StudioCommandDeck — desktop always visible; on mobile shown only for build/files/preview */}
-              <div
-                className={`min-h-0 flex-1 overflow-hidden ${["chat","terminal"].includes(mobileStudioView) ? "hidden sm:flex" : "flex"}`}
-              >
-                <StudioCommandDeck
-                  mode={mobileStudioView === "files" ? "code" : mobileStudioView === "preview" ? "code" : mobileStudioView === "build" ? "command" : hybridMode}
-                  onModeChangeAction={setHybridMode}
-                  activeProjectId={activeProjectId}
-                  onOpenProjectsAction={() => setProjectDrawerOpen(true)}
-                  onOpenTerminalAction={() => setMobileStudioView("terminal")}
-                  conversation={
-                    <>
-                      {Object.values(toolActivity).length > 0 && (
-                        <div className="flex flex-wrap gap-2 px-3 pt-2">
-                          {Object.values(toolActivity).map((activity) => (
-                            <span
-                              key={activity.tool}
-                              className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
-                            >
-                              {activity.status === "running" && "\u25CB "}
-                              {activity.status === "complete" && "\u2713 "}
-                              {activity.status === "error" && "\u00D7 "}
-                              {activity.message}
-                            </span>
-                          ))}
-                        </div>
-                      )}
-                      {pendingProposals.length > 0 && (
-                        <div className="flex flex-col gap-2 px-3 pt-2">
-                          {pendingProposals.map((proposal) => (
-                            <div
-                              key={proposal.id}
-                              className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
-                            >
-                              <div className="flex items-center justify-between gap-2">
-                                <span className="text-[11px] font-bold text-white">{proposal.title}</span>
-                                <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
-                                  proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
-                                  proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
-                                  "bg-red-400/15 text-red-300"
-                                }`}>{proposal.risk} risk</span>
-                              </div>
-                              <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
-                              <div className="mt-2 flex flex-wrap gap-1">
-                                {proposal.files.map((f) => (
-                                  <span key={f.path} className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-gray-400">
-                                    {f.operation}: {f.path}
-                                  </span>
-                                ))}
-                              </div>
-                              <div className="mt-2 flex gap-2">
-                                {proposalStatuses[proposal.id] === "applying" ? (
-                                  <span className="text-[10px] text-cyan-300">Applying…</span>
-                                ) : proposalStatuses[proposal.id] === "complete" ? (
-                                  <span className="text-[10px] text-green-300">Applied ✓</span>
-                                ) : proposalStatuses[proposal.id] === "error" ? (
-                                  <span className="text-[10px] text-red-300">Failed ✗</span>
-                                ) : (
-                                  <>
-                                    <button
-                                      onClick={() => approveProposal(proposal)}
-                                      className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
-                                    >
-                                      Apply
-                                    </button>
-                                    <button
-                                      onClick={() => rejectProposal(proposal)}
-                                      className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
-                                    >
-                                      Reject
-                                    </button>
-                                  </>
-                                )}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                      {/* Hide duplicate chat inside deck on desktop; persistent side chat is below */}
-                      <div className="lg:hidden">
-                        <ChatShell
-                          embedded
-                          hideDock
-                          manageVoiceTurns={false}
-                          builderMode={true}
-                          messages={chatMessages}
-                          sending={busy}
-                          systemLines={[]}
-                          onSend={handleChatSend}
-                          onToolSelect={onToolChangeAction}
-                          onOpenImageGen={() => setImageGenOpen(true)}
-                          onPromptSelectAction={(prompt) => {
-                            setInput(prompt);
-                            requestAnimationFrame(() => textInputRef.current?.focus());
-                          }}
-                        />
-                      </div>
-                    </>
-                  }
-                />
-              </div>
-
-              {/* Persistent chat pane on desktop (lg+), next to deck */}
-              <aside className="hidden lg:flex lg:flex-col w-80 lg:w-96 border-l border-white/10 bg-[#05070f] overflow-hidden">
-                <div className="px-3 py-2 text-[10px] font-bold text-white/50 border-b border-white/10">Chat</div>
-                <div className="min-h-0 flex-1 overflow-y-auto">
-                  <ChatShell
-                    embedded
-                    hideDock
-                    manageVoiceTurns={false}
-                    builderMode={true}
-                    messages={chatMessages}
-                    sending={busy}
-                    systemLines={[]}
-                    onSend={handleChatSend}
-                    onToolSelect={onToolChangeAction}
-                    onOpenImageGen={() => setImageGenOpen(true)}
-                    onPromptSelectAction={(prompt) => {
-                      setInput(prompt);
-                      requestAnimationFrame(() => textInputRef.current?.focus());
-                    }}
-                  />
-                </div>
-              </aside>
-            </div>
+            )}
+          </div>
 
           {/* Mobile dock is now handled by StudioMobileChrome */}
 
@@ -2014,7 +1864,9 @@ function LITTTerminalShellInner({
           <div
             className="fixed inset-x-0 bottom-0 z-[75] flex flex-col gap-0 border-t border-white/10 bg-[#040817]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:static md:inset-auto md:bottom-0 md:border-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
             style={{
-              display: mobileStudioView === "terminal" ? "none" : undefined,
+              // Hide shell only in legacy mode when forcing a full-screen terminal view.
+              // In hybrid the terminal is a drawer overlay; composer must stay.
+              display: (!hybridWorkspaceEnabled && mobileStudioView === "terminal") ? "none" : undefined,
             }}
           >
             <div className="mx-auto flex w-full flex-col gap-1.5 p-2 sm:max-w-4xl sm:rounded-2xl sm:border sm:border-white/10 sm:bg-[#060a16]/94 sm:p-2.5 sm:shadow-[0_-18px_60px_rgba(0,0,0,.45)] sm:backdrop-blur-xl">
