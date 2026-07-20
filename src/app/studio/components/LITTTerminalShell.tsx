@@ -1698,100 +1698,7 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Stage header — desktop only; mobile uses StudioMobileChrome top bar */}
-          <div className="relative z-10 hidden sm:flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0">
-            <div className="flex items-center gap-3">
-              <Link
-                href="/"
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="Back to home"
-                title="Back to home"
-              >
-                <ChevronLeft size={16} />
-              </Link>
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
-                <TerminalIcon size={16} className="text-cyan-400" />
-              </div>
-              <div>
-                <div className="text-sm font-black tracking-wide text-white">
-                  Builder
-                </div>
-                <div className="hidden text-[10px] text-gray-300 sm:block">
-                  {activeProjectId
-                    ? `Project · ${activeProjectId.slice(0, 12)}`
-                    : "Your intelligent workspace. One command away."}
-                </div>
-              </div>
-            </div>
-            <div className="flex items-center gap-2 text-[10px]">
-              <button
-                onClick={() => {
-                  setMessages([]);
-                  setActiveCommands([]);
-                  try {
-                    localStorage.removeItem("litlab-builder-messages");
-                  } catch {}
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="New chat"
-                title="New chat"
-              >
-                <MessageSquarePlus size={12} />
-                <span className="hidden sm:inline">New</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (messages.length && window.confirm("Clear all messages in this chat?")) {
-                    setMessages([]);
-                    setActiveCommands([]);
-                    try {
-                      localStorage.removeItem("litlab-builder-messages");
-                    } catch {}
-                  }
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white"
-                aria-label="Clear chat"
-                title="Clear chat"
-              >
-                <Eraser size={12} />
-                <span className="hidden sm:inline">Clear</span>
-              </button>
-              <button
-                onClick={() => {
-                  if (messages.length && window.confirm("Delete this chat and start fresh?")) {
-                    setMessages([]);
-                    setActiveCommands([]);
-                    try {
-                      localStorage.removeItem("litlab-builder-messages");
-                    } catch {}
-                  }
-                }}
-                className="flex items-center gap-1.5 rounded-lg border border-red-500/20 bg-red-500/5 px-2.5 py-1.5 text-red-400/70 transition hover:bg-red-500/10 hover:text-red-400"
-                aria-label="Delete chat"
-                title="Delete chat"
-              >
-                <Trash2 size={12} />
-                <span className="hidden sm:inline">Delete</span>
-              </button>
-              <Link
-                href="/"
-                className="hidden items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-gray-400 transition hover:bg-white/10 hover:text-white sm:flex"
-                aria-label="Go to homepage"
-              >
-                <Home size={12} />
-                <span>Home</span>
-              </Link>
-              <UserButton
-                afterSignOutUrl="/sign-in"
-                appearance={{
-                  elements: {
-                    userButtonAvatarBox:
-                      "h-7 w-7 rounded-full border border-white/10",
-                  },
-                }}
-              />
-            </div>
-          </div>
+          {/* Stage header retired — desktop workspace chrome is inside StudioCommandDeck; mobile uses StudioMobileChrome top bar. */}
 
           {cameraOpen && (
             <div className="absolute right-4 top-14 z-60 w-64 sm:top-16">
@@ -1828,8 +1735,8 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Scrollable content — always the integrated hybrid surfaces (desktop deck + mobile stacked views) */}
-          <>
+          {/* Content area — flex-1 so deck/chat fill space and composer flows below on desktop */}
+          <div className="relative z-10 min-h-0 flex-1 flex flex-col lg:flex-row overflow-hidden">
             {/* Mobile chat view — full-screen conversation, no deck */}
             <div
               className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden"
@@ -2000,27 +1907,53 @@ function LITTTerminalShellInner({
                           ))}
                         </div>
                       )}
-                    <ChatShell
-                      embedded
-                      hideDock
-                      manageVoiceTurns={false}
-                      builderMode={true}
-                      messages={chatMessages}
-                      sending={busy}
-                      systemLines={[]}
-                      onSend={handleChatSend}
-                      onToolSelect={onToolChangeAction}
-                      onOpenImageGen={() => setImageGenOpen(true)}
-                      onPromptSelectAction={(prompt) => {
-                        setInput(prompt);
-                        requestAnimationFrame(() => textInputRef.current?.focus());
-                      }}
-                    />
+                      {/* Hide duplicate chat inside deck on desktop; persistent side chat is below */}
+                      <div className="lg:hidden">
+                        <ChatShell
+                          embedded
+                          hideDock
+                          manageVoiceTurns={false}
+                          builderMode={true}
+                          messages={chatMessages}
+                          sending={busy}
+                          systemLines={[]}
+                          onSend={handleChatSend}
+                          onToolSelect={onToolChangeAction}
+                          onOpenImageGen={() => setImageGenOpen(true)}
+                          onPromptSelectAction={(prompt) => {
+                            setInput(prompt);
+                            requestAnimationFrame(() => textInputRef.current?.focus());
+                          }}
+                        />
+                      </div>
                     </>
                   }
                 />
               </div>
-            </>
+
+              {/* Persistent chat pane on desktop (lg+), next to deck */}
+              <aside className="hidden lg:flex lg:flex-col w-80 lg:w-96 border-l border-white/10 bg-[#05070f] overflow-hidden">
+                <div className="px-3 py-2 text-[10px] font-bold text-white/50 border-b border-white/10">Chat</div>
+                <div className="min-h-0 flex-1 overflow-y-auto">
+                  <ChatShell
+                    embedded
+                    hideDock
+                    manageVoiceTurns={false}
+                    builderMode={true}
+                    messages={chatMessages}
+                    sending={busy}
+                    systemLines={[]}
+                    onSend={handleChatSend}
+                    onToolSelect={onToolChangeAction}
+                    onOpenImageGen={() => setImageGenOpen(true)}
+                    onPromptSelectAction={(prompt) => {
+                      setInput(prompt);
+                      requestAnimationFrame(() => textInputRef.current?.focus());
+                    }}
+                  />
+                </div>
+              </aside>
+            </div>
 
           {/* Mobile dock is now handled by StudioMobileChrome */}
 
