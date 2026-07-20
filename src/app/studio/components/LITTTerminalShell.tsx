@@ -275,6 +275,45 @@ function LITTTerminalShellInner({
   const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const terminalRef = useRef<TerminalToolHandle | null>(null);
   const activeTerminalBlockRef = useRef<string | null>(null);
+
+  // ─── Studio Chat Context (sent with every chat turn) ───
+  type StudioChatContext = {
+    projectId: string | null;
+    studioMode: "code" | "media" | "command";
+    activeWindowId: string | null;
+    activeFilePath: string | null;
+    selectedAssetPath: string | null;
+    currentRoute: string;
+  };
+
+  type ToolActivity = {
+    tool: string;
+    status: "running" | "complete" | "error";
+    message: string;
+  };
+
+  type BuilderProposal = {
+    id: string;
+    title: string;
+    summary: string;
+    risk: "low" | "medium" | "high";
+    files: Array<{
+      path: string;
+      operation: "edit" | "create" | "delete";
+      preview?: string;
+    }>;
+    tool: string;
+    args: Record<string, unknown>;
+    requiresApproval: true;
+  };
+
+  const [activeBuilderWindow, setActiveBuilderWindow] = useState<StudioChatContext["activeWindowId"]>("conversation");
+  const [activeFilePath, setActiveFilePath] = useState<string | null>(null);
+  const [selectedAssetPath, setSelectedAssetPath] = useState<string | null>(null);
+  const [toolActivity, setToolActivity] = useState<Record<string, ToolActivity>>({});
+  const [pendingProposals, setPendingProposals] = useState<BuilderProposal[]>([]);
+  const [proposalStatuses, setProposalStatuses] = useState<Record<string, "applying" | "complete" | "error">>({});
+
   type ActiveCommand = {
     id: string;
     label: string;
@@ -1158,7 +1197,18 @@ function LITTTerminalShellInner({
       ]);
 
       let fullText = "";
+      setToolActivity({});
       try {
+        const studioContext: StudioChatContext = {
+          projectId: activeProjectId,
+          studioMode: hybridMode,
+          activeWindowId: activeBuilderWindow,
+          activeFilePath,
+          selectedAssetPath,
+          currentRoute: typeof window !== "undefined"
+            ? `${window.location.pathname}${window.location.search}`
+            : "/studio",
+        };
         const response = await fetch("/api/chat/unified", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -1170,6 +1220,7 @@ function LITTTerminalShellInner({
             stream: true,
             userName: profile.displayName || "Creator",
             images: attachList,
+            context: studioContext,
           }),
           signal: controller.signal,
         });
@@ -1200,7 +1251,26 @@ function LITTTerminalShellInner({
                 text?: string;
                 error?: string;
                 done?: boolean;
+                tool?: string;
+                status?: "running" | "complete" | "error";
+                message?: string;
+                proposal?: BuilderProposal;
               };
+              if (json.tool && json.status) {
+                setToolActivity((current) => ({
+                  ...current,
+                  [json.tool!]: {
+                    tool: json.tool!,
+                    status: json.status!,
+                    message: json.message ?? json.tool!,
+                  },
+                }));
+                continue;
+              }
+              if (json.proposal) {
+                setPendingProposals((current) => [...current, json.proposal!]);
+                continue;
+              }
               if (typeof json.text === "string" && json.text.length > 0) {
                 fullText += json.text;
                 setMessages((current) => {
@@ -1319,6 +1389,11 @@ function LITTTerminalShellInner({
       setActivity,
       runSlashCommand,
       executeTerminalCommand,
+      activeProjectId,
+      hybridMode,
+      activeBuilderWindow,
+      activeFilePath,
+      selectedAssetPath,
     ],
   );
 
@@ -1339,6 +1414,56 @@ function LITTTerminalShellInner({
     },
     [send],
   );
+
+  // ─── Builder Proposal execution ───
+  const approveProposal = useCallback(
+    async (proposal: BuilderProposal) => {
+      setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "applying" }));
+      try {
+        const response = await fetch("/api/agent-tool", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            tool: proposal.tool,
+            args: {
+              ...proposal.args,
+              projectId: activeProjectId,
+              _confirmed: true,
+            },
+          }),
+        });
+        const result = await response.json();
+        if (!response.ok) {
+          setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "error" }));
+          throw new Error(result.error ?? "Action failed");
+        }
+        setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "complete" }));
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: result.message ?? "Change applied.",
+            createdAt: Date.now(),
+          },
+        ]);
+      } catch (err) {
+        setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "error" }));
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: "assistant" as const,
+            content: err instanceof Error ? err.message : "Action failed.",
+            createdAt: Date.now(),
+          },
+        ]);
+      }
+    },
+    [activeProjectId],
+  );
+
+  const rejectProposal = useCallback((proposal: BuilderProposal) => {
+    setPendingProposals((prev) => prev.filter((p) => p.id !== proposal.id));
+  }, []);
 
   const handleSend = () => {
     if (busy) {
@@ -1681,6 +1806,73 @@ function LITTTerminalShellInner({
               onOpenProjectsAction={() => setProjectDrawerOpen(true)}
               onOpenTerminalAction={() => setTerminalDrawerOpen(true)}
               conversation={
+                <>
+                  {Object.values(toolActivity).length > 0 && (
+                    <div className="flex flex-wrap gap-2 px-3 pt-2">
+                      {Object.values(toolActivity).map((activity) => (
+                        <span
+                          key={activity.tool}
+                          className="rounded-lg border border-cyan-400/15 bg-cyan-400/5 px-2 py-1 text-[10px] text-cyan-100"
+                        >
+                          {activity.status === "running" && "\u25CB "}
+                          {activity.status === "complete" && "\u2713 "}
+                          {activity.status === "error" && "\u00D7 "}
+                          {activity.message}
+                        </span>
+                      ))}
+                    </div>
+                  )}
+                  {pendingProposals.length > 0 && (
+                    <div className="flex flex-col gap-2 px-3 pt-2">
+                      {pendingProposals.map((proposal) => (
+                        <div
+                          key={proposal.id}
+                          className="rounded-xl border border-violet-400/20 bg-violet-400/5 p-3"
+                        >
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-[11px] font-bold text-white">{proposal.title}</span>
+                            <span className={`rounded px-1.5 py-0.5 text-[9px] font-bold ${
+                              proposal.risk === "low" ? "bg-green-400/15 text-green-300" :
+                              proposal.risk === "medium" ? "bg-amber-400/15 text-amber-300" :
+                              "bg-red-400/15 text-red-300"
+                            }`}>{proposal.risk} risk</span>
+                          </div>
+                          <p className="mt-1 text-[10px] text-gray-400">{proposal.summary}</p>
+                          <div className="mt-2 flex flex-wrap gap-1">
+                            {proposal.files.map((f) => (
+                              <span key={f.path} className="rounded bg-white/5 px-1.5 py-0.5 text-[9px] text-gray-400">
+                                {f.operation}: {f.path}
+                              </span>
+                            ))}
+                          </div>
+                          <div className="mt-2 flex gap-2">
+                            {proposalStatuses[proposal.id] === "applying" ? (
+                              <span className="text-[10px] text-cyan-300">Applying…</span>
+                            ) : proposalStatuses[proposal.id] === "complete" ? (
+                              <span className="text-[10px] text-green-300">Applied ✓</span>
+                            ) : proposalStatuses[proposal.id] === "error" ? (
+                              <span className="text-[10px] text-red-300">Failed ✗</span>
+                            ) : (
+                              <>
+                                <button
+                                  onClick={() => approveProposal(proposal)}
+                                  className="rounded-lg border border-cyan-400/25 bg-cyan-400/10 px-3 py-1 text-[10px] font-bold text-cyan-100 hover:bg-cyan-400/20"
+                                >
+                                  Apply
+                                </button>
+                                <button
+                                  onClick={() => rejectProposal(proposal)}
+                                  className="rounded-lg border border-white/10 bg-white/5 px-3 py-1 text-[10px] font-bold text-gray-400 hover:bg-white/10"
+                                >
+                                  Reject
+                                </button>
+                              </>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 <ChatShell
                   embedded
                   hideDock
@@ -1696,6 +1888,7 @@ function LITTTerminalShellInner({
                     requestAnimationFrame(() => textInputRef.current?.focus());
                   }}
                 />
+                </>
               }
             />
           ) : (

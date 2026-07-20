@@ -36,6 +36,15 @@ const HISTORY_LIMIT = 12;
  * 4. Legacy: { from, to, message } (defaults to agent mode)
  */
 
+interface StudioChatContext {
+  projectId: string | null;
+  studioMode: "code" | "media" | "command";
+  activeWindowId: string | null;
+  activeFilePath: string | null;
+  selectedAssetPath: string | null;
+  currentRoute: string;
+}
+
 interface UnifiedChatRequest {
   mode?: "agent" | "llm" | "simple";
   from?: string;
@@ -49,6 +58,7 @@ interface UnifiedChatRequest {
   provider?: string;
   stream?: boolean;
   simulateResponse?: boolean;
+  context?: StudioChatContext;
 }
 
 function buildPrompt(
@@ -157,6 +167,64 @@ async function handleAgentChat(body: UnifiedChatRequest) {
   });
 }
 
+function buildStudioContextBlock(context?: StudioChatContext): string {
+  if (!context) return "";
+  return [
+    "=== ACTIVE STUDIO CONTEXT ===",
+    `Selected project: ${context.projectId ?? "none"}`,
+    `Studio mode: ${context.studioMode}`,
+    `Active window: ${context.activeWindowId ?? "none"}`,
+    `Active file: ${context.activeFilePath ?? "none"}`,
+    `Selected asset: ${context.selectedAssetPath ?? "none"}`,
+    `Current route: ${context.currentRoute}`,
+    "=== END ACTIVE STUDIO CONTEXT ===",
+  ].join("\n");
+}
+
+const BUILDER_ACTION_POLICY = `
+You are operating inside LiTT Builder.
+
+ACTION-FIRST RULES:
+
+1. Treat normal language as Builder instructions.
+   Examples: "make the logo move", "fix this mobile menu", "make the terminal bigger"
+
+2. Do not respond with a raw list of candidate files.
+
+3. Resolve targets using this order:
+   a. selected asset or active file
+   b. active Builder window
+   c. current route
+   d. imported components rendered by the current route
+   e. code-search relevance and usage frequency
+   f. public asset names only as the final signal
+
+4. When one target is clearly most likely:
+   - state the assumption briefly
+   - inspect the relevant code
+   - propose the exact change
+
+5. Ask one short clarification only when two or more targets
+   are similarly likely. Offer no more than two choices.
+
+6. Read-only inspection tools may run automatically.
+
+7. File edits, commands, builds, tests, and deployments require
+   an approval proposal before execution.
+
+8. Never claim a file was changed, command was run, or build passed
+   unless a verified tool result confirms it.
+
+9. Keep progress inside chat:
+   Inspecting → Planning → Ready for approval → Applying → Verified.
+
+10. After completing work, report:
+   - what changed
+   - files affected
+   - validation results
+   - Undo action when available
+`.trim();
+
 async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   const {
     agentSlug = DEFAULT_AGENT_SLUG,
@@ -164,6 +232,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     history = [],
     provider,
     stream = false,
+    context,
   } = body;
 
   if (!message || typeof message !== "string") {
@@ -246,10 +315,11 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   // System prompt = static project identity + agent's own prompt + memory.
   // We re-use withLittIdentity so the identity block lands in front, same as
   // every other LLM call.
+  const studioContextBlock = buildStudioContextBlock(context);
   const systemPrompt = withLittIdentity(
-    [PROJECT_CONTEXT, agent.systemPrompt, memories.length > 0
+    [PROJECT_CONTEXT, studioContextBlock, BUILDER_ACTION_POLICY, agent.systemPrompt, memories.length > 0
       ? `--- Long-term memory (relevant past context) ---\n${memories.join("\n")}\n--- End memory ---`
-      : ""].join("\n\n"),
+      : ""].filter(Boolean).join("\n\n"),
   );
   messages.push({ role: "system", content: systemPrompt });
   for (const h of history.slice(-HISTORY_LIMIT)) {
