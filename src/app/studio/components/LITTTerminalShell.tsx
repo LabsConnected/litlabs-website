@@ -285,7 +285,6 @@ function LITTTerminalShellInner({
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
   const [micSetupOpen, setMicSetupOpen] = useState(false);
-  const [hybridWorkspaceEnabled, setHybridWorkspaceEnabled] = useState(false);
   const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
   const terminalRef = useRef<TerminalToolHandle | null>(null);
   const activeTerminalBlockRef = useRef<string | null>(null);
@@ -424,26 +423,7 @@ function LITTTerminalShellInner({
     voiceState === "speaking" ||
     voiceState === "cooldown";
 
-  useEffect(() => {
-    let cancelled = false;
-
-    void fetch("/api/studio/feature", { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) return false;
-        const payload = (await response.json()) as { enabled?: boolean };
-        return payload.enabled === true;
-      })
-      .then((enabled) => {
-        if (!cancelled) setHybridWorkspaceEnabled(enabled);
-      })
-      .catch(() => {
-        if (!cancelled) setHybridWorkspaceEnabled(false);
-      });
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
+  // Hybrid workspace surfaces are always-on; the API flag is only for labeling "live" vs "demo" inside panels.
 
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
@@ -1718,8 +1698,8 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Stage header */}
-          <div className={`relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0 ${hybridWorkspaceEnabled ? "hidden" : ""}`}>
+          {/* Stage header — desktop only; mobile uses StudioMobileChrome top bar */}
+          <div className="relative z-10 hidden sm:flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:px-6 sm:pt-5 sm:border-0">
             <div className="flex items-center gap-3">
               <Link
                 href="/"
@@ -1848,14 +1828,13 @@ function LITTTerminalShellInner({
             }}
           />
 
-          {/* Scrollable content */}
-          {hybridWorkspaceEnabled ? (
-            <>
-              {/* Mobile chat view — full-screen conversation, no deck */}
-              <div
-                className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden"
-                style={{ display: mobileStudioView === "chat" ? "flex" : "none" }}
-              >
+          {/* Scrollable content — always the integrated hybrid surfaces (desktop deck + mobile stacked views) */}
+          <>
+            {/* Mobile chat view — full-screen conversation, no deck */}
+            <div
+              className="flex min-h-0 flex-1 flex-col overflow-hidden sm:hidden"
+              style={{ display: mobileStudioView === "chat" ? "flex" : "none" }}
+            >
                 {Object.values(toolActivity).length > 0 && (
                   <div className="flex flex-wrap gap-2 px-3 pt-2">
                     {Object.values(toolActivity).map((activity) => (
@@ -1943,12 +1922,9 @@ function LITTTerminalShellInner({
                 </div>
               )}
 
-              {/* StudioCommandDeck — desktop always, mobile for build/files/preview */}
+              {/* StudioCommandDeck — desktop always visible; on mobile shown only for build/files/preview */}
               <div
-                className="min-h-0 flex-1 overflow-hidden"
-                style={{
-                  display: mobileStudioView === "chat" || mobileStudioView === "terminal" ? "none" : "flex",
-                }}
+                className={`min-h-0 flex-1 overflow-hidden ${["chat","terminal"].includes(mobileStudioView) ? "hidden sm:flex" : "flex"}`}
               >
                 <StudioCommandDeck
                   mode={mobileStudioView === "files" ? "code" : mobileStudioView === "preview" ? "code" : mobileStudioView === "build" ? "command" : hybridMode}
@@ -2045,29 +2021,6 @@ function LITTTerminalShellInner({
                 />
               </div>
             </>
-          ) : (
-            <div
-              ref={transcriptRef}
-              className="relative z-10 min-h-0 flex-1 overflow-y-auto px-0 py-0"
-            >
-              <ChatShell
-                embedded
-                hideDock
-                manageVoiceTurns={false}
-                builderMode={true}
-                messages={chatMessages}
-                sending={busy}
-                systemLines={[]}
-                onSend={handleChatSend}
-                onToolSelect={onToolChangeAction}
-                onOpenImageGen={() => setImageGenOpen(true)}
-                onPromptSelectAction={(prompt) => {
-                  setInput(prompt);
-                  requestAnimationFrame(() => textInputRef.current?.focus());
-                }}
-              />
-            </div>
-          )}
 
           {/* Mobile dock is now handled by StudioMobileChrome */}
 

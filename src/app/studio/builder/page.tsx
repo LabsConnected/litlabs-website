@@ -1,5 +1,6 @@
-import BuilderShell from "@/components/builder/BuilderShell";
+import { redirect } from "next/navigation";
 
 export default function StudioBuilderPage() {
-  return <BuilderShell />;
+  // Canonical Studio is /studio. Preserve any query params (e.g., ?mode=code&project=...)
+  redirect("/studio");
 }
