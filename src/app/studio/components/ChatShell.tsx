@@ -41,6 +41,7 @@ type Props = {
   embedded?: boolean;
   hideDock?: boolean;
   builderMode?: boolean;
+  manageVoiceTurns?: boolean;
   selectedModel?: string;
   busy?: boolean;
   onNewChat?: () => void;
@@ -75,6 +76,7 @@ export function ChatShell({
   embedded = false,
   hideDock = false,
   builderMode = false,
+  manageVoiceTurns,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
   onNewChat,
   // eslint-disable-next-line @typescript-eslint/no-unused-vars
@@ -174,13 +176,16 @@ export function ChatShell({
     return () => window.clearInterval(timer);
   }, [sending]);
 
+  const shouldManageVoice = manageVoiceTurns ?? !embedded;
+
   useEffect(() => {
+    if (!shouldManageVoice) return;
     setOnTurn(async (text) => {
       const reply = await onSend(text);
       if (typeof reply === "string") speakText(reply);
     });
     return () => setOnTurn(() => {});
-  }, [onSend, setOnTurn, speakText]);
+  }, [shouldManageVoice, onSend, setOnTurn, speakText]);
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -255,64 +260,93 @@ export function ChatShell({
       <section className={styles.messages} aria-live="polite">
         {visibleMessages.length === 0 && !sending && (
           <div className={styles.home}>
-            <section className={styles.creativeHero}>
-              <div className={styles.creativeEngine} />
-              <div className={styles.creativeGlow} />
-              <div className={styles.creativeOverlay} />
-
-              <div className={styles.creativeContent}>
-                <div className={styles.creativeBadge}>
-                  <span className={styles.creativeBadgeDot} />
-                  LiTT creative engine
+            {embedded ? (
+              <section className={styles.compactWelcome}>
+                <div className={styles.compactAvatar}>
+                  <Sparkles size={18} />
                 </div>
-                <h1 className={styles.creativeTitle}>
-                  Make something
-                  <span className={styles.creativeTitleGradient}>
-                    impossible to ignore.
-                  </span>
-                </h1>
-                <p className={styles.creativeDesc}>
-                  Describe the shot once. Create the image, bring it to life,
-                  and keep building with LiTT in the same conversation.
-                </p>
-
-                <div className={styles.creativeActions}>
-                  <button
-                    onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}
-                    className={styles.creativeBtnPrimary}
-                  >
-                    <span className={styles.creativeBtnIcon}><ImageIcon size={17} /></span>
-                    <span><b>Create an image</b><small>Art, logos, products</small></span>
-                    <ArrowUpRight size={15} />
+                <div>
+                  <span className={styles.compactEyebrow}>LiTT Builder</span>
+                  <h2>What are we building?</h2>
+                  <p>
+                    Describe the outcome. LiTT will inspect the project,
+                    propose changes, and wait for approval before applying them.
+                  </p>
+                </div>
+                <div className={styles.compactActions}>
+                  <button onClick={() => onPromptSelectAction?.("Inspect this project and tell me what needs attention.")}>
+                    Inspect project
                   </button>
-                  <button
-                    onClick={() => builderMode ? setDraft("/video ") : onToolSelect?.("video")}
-                    className={styles.creativeBtnSecondary}
-                  >
-                    <span className={styles.creativeBtnIconViolet}><Clapperboard size={17} /></span>
-                    <span><b>Create a video</b><small>Animate any idea</small></span>
-                    <ArrowUpRight size={15} />
+                  <button onClick={() => onPromptSelectAction?.("Help me build a new feature.")}>
+                    Start a build
+                  </button>
+                  <button onClick={() => onOpenImageGen?.()}>
+                    Create media
                   </button>
                 </div>
-              </div>
+              </section>
+            ) : (
+              <>
+                <section className={styles.creativeHero}>
+                  <div className={styles.creativeEngine} />
+                  <div className={styles.creativeGlow} />
+                  <div className={styles.creativeOverlay} />
 
-              <div className={styles.creativeFooter}>
-                <Sparkles size={11} /> Image · Video · Motion
-              </div>
-            </section>
+                  <div className={styles.creativeContent}>
+                    <div className={styles.creativeBadge}>
+                      <span className={styles.creativeBadgeDot} />
+                      LiTT creative engine
+                    </div>
+                    <h1 className={styles.creativeTitle}>
+                      Make something
+                      <span className={styles.creativeTitleGradient}>
+                        impossible to ignore.
+                      </span>
+                    </h1>
+                    <p className={styles.creativeDesc}>
+                      Describe the shot once. Create the image, bring it to life,
+                      and keep building with LiTT in the same conversation.
+                    </p>
 
-            <div className={styles.promptStarters}>
-              <span className={styles.promptStartersLabel}>Try</span>
-              {["A cinematic product shot", "Turn my photo into a video", "Design a bold album cover", "Make a logo move"].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => onPromptSelectAction ? onPromptSelectAction(item) : setDraft(item)}
-                  className={styles.promptStarter}
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
+                    <div className={styles.creativeActions}>
+                      <button
+                        onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}
+                        className={styles.creativeBtnPrimary}
+                      >
+                        <span className={styles.creativeBtnIcon}><ImageIcon size={17} /></span>
+                        <span><b>Create an image</b><small>Art, logos, products</small></span>
+                        <ArrowUpRight size={15} />
+                      </button>
+                      <button
+                        onClick={() => builderMode ? setDraft("/video ") : onToolSelect?.("video")}
+                        className={styles.creativeBtnSecondary}
+                      >
+                        <span className={styles.creativeBtnIconViolet}><Clapperboard size={17} /></span>
+                        <span><b>Create a video</b><small>Animate any idea</small></span>
+                        <ArrowUpRight size={15} />
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className={styles.creativeFooter}>
+                    <Sparkles size={11} /> Image · Video · Motion
+                  </div>
+                </section>
+
+                <div className={styles.promptStarters}>
+                  <span className={styles.promptStartersLabel}>Try</span>
+                  {["A cinematic product shot", "Turn my photo into a video", "Design a bold album cover", "Make a logo move"].map((item) => (
+                    <button
+                      key={item}
+                      onClick={() => onPromptSelectAction ? onPromptSelectAction(item) : setDraft(item)}
+                      className={styles.promptStarter}
+                    >
+                      {item}
+                    </button>
+                  ))}
+                </div>
+              </>
+            )}
           </div>
         )}
         <BuilderStream

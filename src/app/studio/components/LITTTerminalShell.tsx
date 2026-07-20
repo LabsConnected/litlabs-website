@@ -53,6 +53,10 @@ import {
   Trash2,
   MessageSquarePlus,
   Eraser,
+  MessageCircle,
+  Workflow,
+  FolderOpen,
+  Monitor,
 } from "lucide-react";
 import Link from "next/link";
 import StudioCommandDeck, {
@@ -243,6 +247,12 @@ function LITTTerminalShellInner({
     voiceState,
     errorMessage,
     cooldownRemaining,
+    micLevel,
+    interimTranscript,
+    transcript,
+    isMuted,
+    toggleMute,
+    interrupt,
     speakText,
     startVoice,
     stopVoice,
@@ -330,6 +340,35 @@ function LITTTerminalShellInner({
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevPersonaRef = useRef(persona.id);
+
+  // ─── Mobile Studio: one screen at a time ───
+  type MobileStudioView = "chat" | "mission" | "files" | "preview" | "terminal";
+  const [mobileStudioView, setMobileStudioView] = useState<MobileStudioView>("chat");
+
+  // ─── Visual viewport: keep composer above mobile keyboard ───
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const viewport = window.visualViewport;
+    const root = document.documentElement;
+
+    const updateViewport = () => {
+      const height = viewport?.height ?? window.innerHeight;
+      const offset = viewport?.offsetTop ?? 0;
+      root.style.setProperty("--studio-visible-height", `${height}px`);
+      root.style.setProperty("--studio-viewport-top", `${offset}px`);
+    };
+
+    updateViewport();
+    viewport?.addEventListener("resize", updateViewport);
+    viewport?.addEventListener("scroll", updateViewport);
+    window.addEventListener("resize", updateViewport);
+
+    return () => {
+      viewport?.removeEventListener("resize", updateViewport);
+      viewport?.removeEventListener("scroll", updateViewport);
+      window.removeEventListener("resize", updateViewport);
+    };
+  }, []);
 
   // Persist Builder messages so the stream survives refresh
   useEffect(() => {
@@ -1619,8 +1658,8 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent text-neutral-100"
-      style={{ color: T.textColor }}
+      className="flex min-h-0 w-full flex-col overflow-hidden bg-transparent text-neutral-100"
+      style={{ color: T.textColor, height: "var(--studio-visible-height, 100dvh)" }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
       <input
@@ -1876,6 +1915,7 @@ function LITTTerminalShellInner({
                 <ChatShell
                   embedded
                   hideDock
+                  manageVoiceTurns={false}
                   builderMode={true}
                   messages={chatMessages}
                   sending={busy}
@@ -1899,6 +1939,7 @@ function LITTTerminalShellInner({
               <ChatShell
                 embedded
                 hideDock
+                manageVoiceTurns={false}
                 builderMode={true}
                 messages={chatMessages}
                 sending={busy}
@@ -1916,9 +1957,76 @@ function LITTTerminalShellInner({
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
+          {/* Mobile Studio dock — one screen at a time */}
+          <nav
+            className="fixed left-2 right-2 z-40 grid grid-cols-5 rounded-[13px] border border-white/10 bg-[#030815]/95 p-1.5 backdrop-blur-xl sm:hidden"
+            style={{ bottom: "calc(76px + env(safe-area-inset-bottom))" }}
+          >
+            {([
+              { id: "chat", icon: MessageCircle, label: "Chat" },
+              { id: "mission", icon: Workflow, label: "Build" },
+              { id: "files", icon: FolderOpen, label: "Files" },
+              { id: "preview", icon: Monitor, label: "Preview" },
+              { id: "terminal", icon: TerminalIcon, label: "Terminal" },
+            ] as const).map((item) => (
+              <button
+                key={item.id}
+                data-active={mobileStudioView === item.id}
+                onClick={() => setMobileStudioView(item.id)}
+                className="grid place-items-center gap-1 rounded-[9px] py-1.5 text-[8px] text-gray-500"
+              >
+                <item.icon size={17} />
+                {item.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Live voice bar */}
+          {micActive && (
+            <div className="flex items-center gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2 sm:mx-6 sm:mb-1">
+              <div className="flex h-7 items-end gap-[2px]">
+                {Array.from({ length: 10 }).map((_, index) => (
+                  <span
+                    key={index}
+                    className="w-[2px] rounded-full bg-cyan-300 transition-all"
+                    style={{
+                      height: `${Math.max(4, (micLevel ?? 0) * 26 * ((index % 4) + 1) / 4)}px`,
+                    }}
+                  />
+                ))}
+              </div>
+              <div className="min-w-0 flex-1">
+                <strong className="block text-[10px] uppercase tracking-wider text-cyan-200">
+                  {voiceState === "listening" && "Listening live"}
+                  {voiceState === "transcribing" && "Understanding"}
+                  {voiceState === "thinking" && "LiTT is thinking"}
+                  {voiceState === "speaking" && "LiTT is speaking"}
+                  {voiceState === "cooldown" && `Voice paused · ${cooldownRemaining}s`}
+                </strong>
+                <p className="truncate text-xs text-white/65">
+                  {interimTranscript || transcript || "Speak naturally. Pause when you finish."}
+                </p>
+              </div>
+              <button onClick={toggleMute} className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/10">
+                {isMuted ? "Unmute" : "Mute"}
+              </button>
+              {voiceState === "speaking" && (
+                <button onClick={interrupt} className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/10">
+                  Interrupt
+                </button>
+              )}
+              <button onClick={stopVoice} className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/10">
+                End
+              </button>
+            </div>
+          )}
+
           {/* COMMAND BAR — centered floating creative dock */}
-              <div className="relative z-20 shrink-0 px-3 pb-[calc(0.5rem+env(safe-area-inset-bottom))] pt-1.5 sm:px-6 sm:py-3">
-            <div className="mx-auto flex w-full max-w-4xl flex-col gap-1.5 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/80 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
+          <div
+            className="sticky bottom-0 z-50 shrink-0 px-2 pt-1.5 pb-[max(0.5rem,env(safe-area-inset-bottom))] sm:px-6 sm:py-3"
+            style={{ position: "sticky" }}
+          >
+            <div className="mx-auto flex w-full flex-col gap-1.5 rounded-2xl border border-white/10 bg-[#060a16]/94 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.45)] backdrop-blur-xl sm:max-w-4xl sm:rounded-t-2xl sm:p-2.5">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
                 <div className="flex items-center gap-2 px-1 text-[11px]">
