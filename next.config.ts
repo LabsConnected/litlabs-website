@@ -86,8 +86,6 @@ const nextConfig: NextConfig = {
       "@aws-sdk/s3-request-presigner",
       "@google/genai",
       "@google/generative-ai",
-      "@monaco-editor/react",
-      "monaco-editor",
       "stripe",
       "supermemory",
     ],
