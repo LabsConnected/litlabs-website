@@ -66,6 +66,7 @@ import StudioCommandDeck, {
 import dynamic from "next/dynamic";
 
 const CameraSession = dynamic(() => import("./CameraSession"), { ssr: false });
+const LiveVoiceBar = dynamic(() => import("./LiveVoiceBar").then(m => m.LiveVoiceBar), { ssr: false });
 import {
   PersonaProvider,
   usePersona,
@@ -1981,7 +1982,20 @@ function LITTTerminalShellInner({
             ))}
           </nav>
 
-          {/* Live voice bar */}
+          {/* Gemini Live Voice (speech-to-speech) — behind feature flag */}
+          {process.env.NEXT_PUBLIC_STUDIO_LIVE_VOICE_ENABLED === "true" && (
+            <div className="px-2 sm:px-6 sm:pb-1">
+              <LiveVoiceBar
+                onTranscript={(text, isFinal) => {
+                  if (isFinal && text.trim()) {
+                    void send(text);
+                  }
+                }}
+              />
+            </div>
+          )}
+
+          {/* Batch voice bar (fallback) */}
           {micActive && (
             <div className="flex items-center gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2 sm:mx-6 sm:mb-1">
               <div className="flex h-7 items-end gap-[2px]">
