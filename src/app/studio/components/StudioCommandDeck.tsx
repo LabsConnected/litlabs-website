@@ -1,11 +1,6 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import { loader } from "@monaco-editor/react";
-import * as monaco from "monaco-editor";
-// editor.all registers all Monaco services (undoRedoService, modelService, etc.)
-// that editor.main (the default entry) may not include when tree-shaken by Turbopack
-import "monaco-editor/esm/vs/editor/editor.all";
 import {
   Activity,
   Bell,
@@ -34,11 +29,8 @@ import styles from "./studio-command-deck.module.css";
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
-// Use locally bundled monaco-editor instead of jsDelivr CDN
-// The side-effect import of editor.all above ensures all services are registered
-loader.config({ monaco });
-
-const MonacoEditor = dynamic(() => import("@monaco-editor/react"), { ssr: false });
+// Monaco is isolated in StudioMonacoEditor so Media/Command modes don't pay its bundle cost
+const StudioMonacoEditor = dynamic(() => import("./StudioMonacoEditor"), { ssr: false });
 
 export type StudioCommandDeckMode = "code" | "media" | "command";
 
@@ -188,7 +180,7 @@ export default function StudioCommandDeck({ mode, onModeChangeAction, activeProj
         </Panel>
         {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
         <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
-          <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><MonacoEditor height="100%" language="typescript" value={draft} theme="vs-dark" onChange={(value) => setDraft(value ?? "")} options={{ automaticLayout: true, minimap: { enabled: false }, fontSize: 13, scrollBeyondLastLine: false }} /></div></Panel>
+          <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft"><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor"><Maximize2 size={13} /></button></>}><div className={styles.editor}><StudioMonacoEditor value={draft} onChange={setDraft} /></div></Panel>
           {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
           <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
         </div>
