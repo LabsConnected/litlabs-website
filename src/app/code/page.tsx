@@ -69,49 +69,11 @@ export default function HomePage() {
     </div>
   );
 }`,
-  "/src/lib/agents.ts": `export interface Agent {
-  id: string;
-  name: string;
-  role: string;
-  systemPrompt: string;
-  model?: string;
-  temperature?: number;
-}
-
-export interface AgentMessage {
-  role: 'user' | 'assistant' | 'system';
-  content: string;
-  timestamp: number;
-}
-
-export interface AgentConversation {
-  id: string;
-  agentId: string;
-  messages: AgentMessage[];
-  createdAt: number;
-  updatedAt: number;
-}
-
-export class AgentOrchestrator {
-  private agents: Map<string, Agent> = new Map();
-  private conversations: Map<string, AgentConversation> = new Map();
-
-  registerAgent(agent: Agent): void {
-    this.agents.set(agent.id, agent);
-  }
-
-  async sendMessage(agentId: string, content: string): Promise<AgentMessage> {
-    const agent = this.agents.get(agentId);
-    if (!agent) throw new Error(\`Agent \${agentId} not found\`);
-    
-    // Process message through Gemini API
-    return {
-      role: 'assistant',
-      content: 'Processing...',
-      timestamp: Date.now(),
-    };
-  }
-}`,
+  "/src/lib/agents.ts": `// Canonical source lives in src/lib/agents.ts
+// (export class AgentOrchestrator + export const orchestrator)
+// This demo stub avoids duplicating the live implementation.
+export { AgentOrchestrator, orchestrator } from '@/lib/agents';
+`, 
   "/package.json": `{
   "name": "litlabs",
   "version": "2.0.0",

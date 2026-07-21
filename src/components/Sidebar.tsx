@@ -17,7 +17,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
-  Sparkles,
   TerminalSquare,
   X,
   Zap,
@@ -26,12 +25,11 @@ import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
 import { COLLAPSED_KEY, NAV_GROUPS, type NavGroup } from "@/lib/navigation";
+import LiTTStatusCard from "@/components/dashboard/LiTTStatusCard";
 
 interface SidebarProps {
   open?: boolean;
   onClose?: () => void;
-  collapsed?: boolean;
-  onCollapseChange?: () => void;
 }
 
 const QUICK_TOOLS = [
@@ -130,7 +128,7 @@ function SidebarContent({
       </header>
 
       <div className="sidebar-scroll flex-1 overflow-y-auto px-2.5 pb-3">
-        {!collapsed && <LiTTAgentCard onClose={onClose} T={T} />}
+        {!collapsed && <LiTTStatusCard onClose={onClose} T={T} />}
 
         <SectionLabel collapsed={collapsed}>Quick access</SectionLabel>
         <div className={collapsed ? "grid gap-1.5" : "grid grid-cols-4 gap-1.5"}>
@@ -197,28 +195,6 @@ function SidebarContent({
   );
 }
 
-function LiTTAgentCard({ onClose, T }: { onClose?: () => void; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  return (
-    <section className="relative mt-3 overflow-hidden rounded-2xl border p-2" style={{ borderColor: `${T.accentColor}38`, backgroundColor: `${T.boxBg}bb` }}>
-      <div className="relative h-24 overflow-hidden rounded-xl border bg-cover bg-center" style={{ borderColor: `${T.borderColor}20`, backgroundImage: "linear-gradient(to top, rgba(5,6,12,.95), rgba(5,6,12,.08)), url('/api/artwork/void-entity')" }}>
-        <span className="absolute left-2 top-2 rounded-full border bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wider text-violet-200" style={{ borderColor: `${T.accentColor}45` }}>LiTT</span>
-        <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-emerald-400/25 bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase text-emerald-300"><span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" /> Online</span>
-        <div className="absolute inset-x-2 bottom-2">
-          <b className="block text-[10px] text-white">Your AI building partner</b>
-          <span className="text-[7px] text-white/55">Project-aware · voice · vision · code</span>
-        </div>
-      </div>
-      <div className="mt-2 flex h-5 items-end gap-[2px] overflow-hidden rounded-lg border bg-black/25 px-2 py-1" style={{ borderColor: `${T.borderColor}18` }}>
-        {Array.from({ length: 30 }).map((_, index) => (
-          <span key={index} className="w-[2px] rounded-full" style={{ height: `${22 + ((index * 19) % 72)}%`, opacity: 0.45 + ((index * 7) % 45) / 100, background: `linear-gradient(${T.accentColor}, ${T.linkColor})` }} />
-        ))}
-      </div>
-      <Link href="/studio?tool=chat" onClick={onClose} className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[8px] font-black uppercase tracking-[.12em] transition-colors hover:bg-white/5" style={{ borderColor: `${T.accentColor}35`, backgroundColor: `${T.accentColor}12`, color: T.headerColor }}>
-        <Sparkles size={10} /> Ask LiTT anything
-      </Link>
-    </section>
-  );
-}
 
 function SectionLabel({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
   return <div className={`mb-1.5 mt-4 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1"}`} style={{ color: "rgba(255,255,255,.32)" }}>{collapsed ? "•••" : children}</div>;
@@ -249,18 +225,13 @@ function SystemStatus({ collapsed, T }: { collapsed: boolean; T: ReturnType<type
   );
 }
 
-export default function Sidebar({
-  collapsed: externalCollapsed,
-  onCollapseChange,
-}: SidebarProps) {
+export default function Sidebar(_props: SidebarProps) {
   const { resolvedColors: T } = useTheme();
-  const [internalCollapsed, setInternalCollapsed] = useState(() =>
+  const [collapsed, setCollapsed] = useState(() =>
     typeof window !== "undefined" && localStorage.getItem(COLLAPSED_KEY) === "true",
   );
-  const collapsed = externalCollapsed ?? internalCollapsed;
   const toggleCollapse = () => {
-    if (onCollapseChange) return onCollapseChange();
-    setInternalCollapsed((current) => {
+    setCollapsed((current) => {
       const next = !current;
       localStorage.setItem(COLLAPSED_KEY, String(next));
       return next;

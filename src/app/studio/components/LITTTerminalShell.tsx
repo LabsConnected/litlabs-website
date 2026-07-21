@@ -8,7 +8,6 @@ import {
   useMemo,
 } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
@@ -48,17 +47,8 @@ import {
   Film,
   Music,
   Hammer,
-  Home,
-  ChevronLeft,
-  Trash2,
-  MessageSquarePlus,
-  Eraser,
-  MessageCircle,
-  Workflow,
   FolderOpen,
-  Monitor,
 } from "lucide-react";
-import Link from "next/link";
 import StudioCommandDeck, {
   type StudioCommandDeckMode,
 } from "./StudioCommandDeck";
@@ -75,11 +65,29 @@ import {
   usePersona,
 } from "@/components/terminal/PersonaContext";
 
+// Module-scoped dev-only composer mount diagnostic.
+// Must be defined outside the component so its type is stable across renders.
+function DevComposerMount() {
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const key = "__littStudioComposerCount";
+    const scope = window as typeof window & Record<string, number>;
+    scope[key] = (scope[key] ?? 0) + 1;
+    if (scope[key] > 1) {
+      console.error("[LiTT Studio] Multiple outer composers mounted");
+    }
+    return () => {
+      scope[key] = Math.max(0, (scope[key] ?? 1) - 1);
+    };
+  }, []);
+  return null;
+}
+
 import TerminalToolDirect, {
   type TerminalToolHandle,
 } from "../tools/TerminalTool";
 
-const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
+const ChatShell = dynamic(() => import("./ChatShell").then((mod) => ({ default: mod.ChatShell })), { ssr: false });
 const ImageGenPopover = dynamic(() => import("./ImageGenPopover"), {
   ssr: false,
 });
@@ -88,6 +96,7 @@ const ProjectDrawer = dynamic(() => import("./ProjectDrawer"), {
 });
 
 type Message = {
+  id: string;
   role: "user" | "assistant";
   content: string;
   createdAt?: number;
@@ -95,6 +104,26 @@ type Message = {
   mediaUrl?: string;
   status?: string;
 };
+
+type NewMessage = Omit<Message, "id" | "createdAt"> & {
+  id?: string;
+  createdAt?: number;
+};
+
+function createMessageId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
+function makeMessage(message: NewMessage): Message {
+  return {
+    ...message,
+    id: message.id ?? createMessageId(),
+    createdAt: message.createdAt ?? Date.now(),
+  };
+}
 
 type Attachment = {
   url: string; // data URL
@@ -270,7 +299,15 @@ function LITTTerminalShellInner({
       const stored = localStorage.getItem("litlab-builder-messages");
       if (stored) {
         const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) return parsed as Message[];
+        if (Array.isArray(parsed)) {
+          return parsed.map((message) =>
+            makeMessage({
+              ...message,
+              id:
+                typeof message.id === "string" ? message.id : undefined,
+            }),
+          );
+        }
       }
     } catch {}
     return [];
@@ -284,6 +321,10 @@ function LITTTerminalShellInner({
   const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+
+  // Focus refs for terminal drawer (a11y)
+  const terminalDrawerRef = useRef<HTMLDivElement>(null);
+  const terminalCloseRef = useRef<HTMLButtonElement>(null);
   const [micSetupOpen, setMicSetupOpen] = useState(false);
   const [hybridWorkspaceEnabled, setHybridWorkspaceEnabled] = useState(false);
   const [, setTerminalBlocks] = useState<TerminalBlock[]>([]);
@@ -391,7 +432,7 @@ function LITTTerminalShellInner({
   const chatMessages = useMemo(
     () =>
       messages.map((m) => ({
-        id: `${m.role}-${m.createdAt ?? Math.random()}`,
+        id: m.id,
         role: m.role as "user" | "assistant",
         content: m.content,
         createdAt: m.createdAt,
@@ -401,6 +442,10 @@ function LITTTerminalShellInner({
       })),
     [messages],
   );
+
+  // Single source of truth for mobile terminal focus in hybrid mode.
+  const mobileTerminalFocused =
+    hybridWorkspaceEnabled && mobileStudioView === "terminal";
   const hybridMode: StudioCommandDeckMode = (() => {
     const value = searchParams?.get("mode");
     return value === "code" || value === "media" || value === "command"
@@ -442,6 +487,83 @@ function LITTTerminalShellInner({
     return () => { cancelled = true; };
   }, []);
 
+  // Dev-only: detect duplicate terminal drawer mounts
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const key = "__littTerminalDrawerCount";
+    // Dev-only global counter storage. Use a typed intersection to avoid `any`.
+    const w = window as typeof window & Record<string, number>;
+    w[key] = (w[key] ?? 0) + 1;
+    if (w[key] > 1) {
+      console.error("[LiTT Studio] Multiple terminal drawers mounted");
+    }
+    return () => {
+      w[key] = Math.max(0, (w[key] ?? 1) - 1);
+    };
+  }, []);
+
+  // Dev-only: detect duplicate shell mounts
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const key = "__littTerminalShellCount";
+    // Dev-only global counter storage. Use a typed intersection to avoid `any`.
+    const w = window as typeof window & Record<string, number>;
+    w[key] = (w[key] ?? 0) + 1;
+    if (w[key] > 1) {
+      console.error("[LiTT Studio] Multiple LITTTerminalShell mounted");
+    }
+    return () => {
+      w[key] = Math.max(0, (w[key] ?? 1) - 1);
+    };
+  }, []);
+
+  // Stash last focused element to restore on close
+  const lastFocusedRef = useRef<HTMLElement | null>(null);
+
+  // Terminal drawer: inert when closed + focus + Escape
+  useEffect(() => {
+    const node = terminalDrawerRef.current;
+    if (node) {
+      if (terminalDrawerOpen) {
+        node.removeAttribute("inert");
+      } else {
+        node.setAttribute("inert", "");
+      }
+    }
+  }, [terminalDrawerOpen]);
+
+  useEffect(() => {
+    if (terminalDrawerOpen) {
+      // capture current focus before moving into the dialog
+      lastFocusedRef.current = (document.activeElement as HTMLElement) ?? null;
+
+      const onKey = (e: KeyboardEvent) => {
+        if (e.key === "Escape") {
+          setTerminalDrawerOpen(false);
+        }
+      };
+      document.addEventListener("keydown", onKey);
+
+      // Move focus into the dialog
+      requestAnimationFrame(() => {
+        terminalCloseRef.current?.focus();
+      });
+
+      return () => {
+        document.removeEventListener("keydown", onKey);
+      };
+    } else {
+      // restore previous focus when closed
+      const el = lastFocusedRef.current;
+      if (el && typeof el.focus === "function") {
+        // microtask to allow inert removal to settle
+        setTimeout(() => el.focus(), 0);
+      }
+    }
+  }, [terminalDrawerOpen]);
+
+  // DevComposerMount is hoisted to module scope below for stable component identity across renders.
+
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
     if (searchParams?.get("openImage") === "1") {
@@ -482,7 +604,7 @@ function LITTTerminalShellInner({
         if (hasMission) return prev;
         return [
           ...prev,
-          { role: "user", content: missionPrompt, createdAt: Date.now() },
+          { id: createMessageId(), role: "user", content: missionPrompt, createdAt: Date.now() },
         ];
       });
       // Clean the mission param after consuming it
@@ -511,6 +633,7 @@ function LITTTerminalShellInner({
     setMessages((prev) => [
       ...prev,
       {
+        id: createMessageId(),
         role: "assistant",
         content: `--- Switched to ${persona.name} ---`,
         createdAt: Date.now(),
@@ -611,12 +734,9 @@ function LITTTerminalShellInner({
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
 
-  const addToolMessage = useCallback(
-    (msg: Message) => {
-      setMessages((prev) => [...prev, msg]);
-    },
-    [],
-  );
+  const addToolMessage = useCallback((message: NewMessage) => {
+    setMessages((current) => [...current, makeMessage(message)]);
+  }, []);
 
   const updateLastToolMessage = useCallback(
     (updates: Partial<Message>) => {
@@ -710,7 +830,16 @@ function LITTTerminalShellInner({
       const block = createTerminalBlock(command, startedBy);
       activeTerminalBlockRef.current = block.id;
       setTerminalBlocks((prev) => [...prev, block]);
-      setTerminalDrawerOpen(true);
+
+      // In hybrid mode: reveal the docked terminal inside StudioCommandDeck.
+      // In legacy: fall back to the drawer.
+      if (hybridWorkspaceEnabled) {
+        setHybridMode("command");
+        setMobileStudioView("terminal");
+        setActiveBuilderWindow("terminal");
+      } else {
+        setTerminalDrawerOpen(true);
+      }
 
       setTerminalBlocks((prev) =>
         prev.map((b) =>
@@ -723,7 +852,7 @@ function LITTTerminalShellInner({
         handle.runCommand(command);
       }
     },
-    [],
+    [hybridWorkspaceEnabled, setHybridMode, setMobileStudioView, setActiveBuilderWindow],
   );
 
   const handleTerminalOutput = useCallback((data: string) => {
@@ -754,6 +883,7 @@ function LITTTerminalShellInner({
       if (cmd === "agent") {
         if (!prompt) {
           addToolMessage({
+            id: createMessageId(),
             role: "assistant",
             content:
               "Add a prompt after `/agent`, e.g. `/agent review my React component`.",
@@ -762,6 +892,7 @@ function LITTTerminalShellInner({
           return true;
         }
         addToolMessage({
+          id: createMessageId(),
           role: "assistant",
           content: `Asking ${activeAgent.name}…`,
           createdAt: Date.now(),
@@ -803,6 +934,7 @@ function LITTTerminalShellInner({
       // Show the user's command as a user message first
       {
         addToolMessage({
+          id: createMessageId(),
           role: "user",
           content: text,
           createdAt: Date.now(),
@@ -812,6 +944,7 @@ function LITTTerminalShellInner({
       if (cmd === "image") {
         if (!prompt) {
           addToolMessage({
+            id: createMessageId(),
             role: "assistant",
             content:
               "Add a prompt after `/image`, e.g. `/image a futuristic city at sunset`.",
@@ -820,6 +953,7 @@ function LITTTerminalShellInner({
           return true;
         }
         addToolMessage({
+          id: createMessageId(),
           role: "assistant",
           content: prompt,
           createdAt: Date.now(),
@@ -861,10 +995,7 @@ function LITTTerminalShellInner({
       if (cmd === "audio") {
         if (!prompt) {
           addToolMessage({
-            role: "assistant",
-            content:
-              "Add a prompt after `/audio`, e.g. `/audio a cinematic sci-fi trailer voiceover`.",
-            createdAt: Date.now(),
+            id: createMessageId(), role: "assistant", content: "Add a prompt after `/audio`, e.g. `/audio a cinematic sci-fi trailer voiceover`.", createdAt: Date.now(),
           });
           return true;
         }
@@ -998,7 +1129,13 @@ function LITTTerminalShellInner({
       }
 
       if (cmd === "terminal") {
-        setTerminalDrawerOpen(true);
+        if (hybridWorkspaceEnabled) {
+          setHybridMode("command");
+          setMobileStudioView("terminal");
+          setActiveBuilderWindow("terminal");
+        } else {
+          setTerminalDrawerOpen(true);
+        }
         if (prompt) {
           executeTerminalCommand(prompt, "user");
         }
@@ -1023,6 +1160,11 @@ function LITTTerminalShellInner({
       activeAgent.id,
       activeAgent.name,
       executeTerminalCommand,
+      streamAgentChat,
+      hybridWorkspaceEnabled,
+      setHybridMode,
+      setMobileStudioView,
+      setActiveBuilderWindow,
     ],
   );
 
@@ -1030,11 +1172,11 @@ function LITTTerminalShellInner({
     async (value: string) => {
       const text = value.trim();
       const agent = activeAgent;
-      const userMessage: Message = {
+      const userMessage = makeMessage({
         role: "user",
         content: text || "(image attachment)",
-        createdAt: Date.now(),
-      };
+      });
+      const assistantPlaceholderId = createMessageId();
       // Append user message + an empty assistant placeholder that the SSE
       // stream will fill in token-by-token. Perceived time-to-first-token
       // drops from "wait for the full reply" to "wait for the first chunk".
@@ -1043,7 +1185,7 @@ function LITTTerminalShellInner({
         [agent.id]: [
           ...(prev[agent.id] || []),
           userMessage,
-          { role: "assistant", content: "", createdAt: Date.now() + 1 },
+          { id: assistantPlaceholderId, role: "assistant", content: "", createdAt: Date.now() + 1 },
         ],
       }));
       setBusy(true);
@@ -1087,7 +1229,7 @@ function LITTTerminalShellInner({
         setActivity({ type: "idle" });
       }
     },
-    [activeAgent, setActivity, streamAgentChat],
+    [activeAgent, setActivity, streamAgentChat, setBusy, makeMessage, setAgentChats],
   );
 
   // Route a pending /agent query
@@ -1125,8 +1267,9 @@ function LITTTerminalShellInner({
       if (buildIntent) {
         setMessages((current) => [
           ...current,
-          { role: "user", content: text, createdAt: Date.now() },
+          { id: createMessageId(), role: "user", content: text, createdAt: Date.now() },
           {
+            id: createMessageId(),
             role: "assistant",
             content: "Running the project build in the Studio terminal. You can watch it live below.",
             createdAt: Date.now(),
@@ -1148,6 +1291,7 @@ function LITTTerminalShellInner({
         setMessages((current) => [
           ...current,
           {
+            id: createMessageId(),
             role: "user" as const,
             content: userMessage,
             createdAt: Date.now(),
@@ -1180,11 +1324,10 @@ function LITTTerminalShellInner({
             "I\u2019m ready. Tell me what we\u2019re building.";
           setMessages((current) => [
             ...current,
-            {
+            makeMessage({
               role: "assistant" as const,
               content: reply,
-              createdAt: Date.now(),
-            },
+            }),
           ]);
           return reply;
         } catch (error) {
@@ -1192,11 +1335,10 @@ function LITTTerminalShellInner({
             error instanceof Error ? error.message : "LiTT is reconnecting";
           setMessages((current) => [
             ...current,
-            {
+            makeMessage({
               role: "assistant" as const,
               content: reply,
-              createdAt: Date.now(),
-            },
+            }),
           ]);
           return reply;
         } finally {
@@ -1209,9 +1351,11 @@ function LITTTerminalShellInner({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
+      const assistantMessageId = createMessageId();
       setMessages((current) => [
         ...current,
-        { role: "user" as const, content: userMessage, createdAt: Date.now() },
+        makeMessage({ role: "user", content: userMessage }),
+        { id: assistantMessageId, role: "assistant" as const, content: "", createdAt: Date.now() },
       ]);
       setBusy(true);
       setInput("");
@@ -1227,13 +1371,6 @@ function LITTTerminalShellInner({
 
       const controller = new AbortController();
       abortRef.current = controller;
-
-      // Insert a streaming placeholder for the assistant turn
-      const placeholderIndex = messages.length + 1; // +1 for the user message we just appended
-      setMessages((current) => [
-        ...current,
-        { role: "assistant" as const, content: "", createdAt: Date.now() },
-      ]);
 
       let fullText = "";
       setToolActivity({});
@@ -1312,15 +1449,13 @@ function LITTTerminalShellInner({
               }
               if (typeof json.text === "string" && json.text.length > 0) {
                 fullText += json.text;
-                setMessages((current) => {
-                  if (placeholderIndex >= current.length) return current;
-                  const next = current.slice();
-                  next[placeholderIndex] = {
-                    ...next[placeholderIndex],
-                    content: fullText,
-                  };
-                  return next;
-                });
+                setMessages((current) =>
+                  current.map((message) =>
+                    message.id === assistantMessageId
+                      ? { ...message, content: fullText }
+                      : message,
+                  ),
+                );
               } else if (typeof json.error === "string") {
                 throw new Error(json.error);
               }
@@ -1373,15 +1508,13 @@ function LITTTerminalShellInner({
         if (buildRefusal) {
           fullText =
             "Yes, I can — through the Studio terminal. Type any of these:\n\n- `$ pnpm build` — runs a production build\n- `$ pnpm lint` — runs ESLint\n- `$ pnpm test` — runs Vitest\n- `$ npx tsc --noEmit` — type-check\n- `/run <any command>` — runs any shell command\n\nOr just tell me what you want to build and I'll run it.";
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content: fullText,
-            };
-            return next;
-          });
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantMessageId
+                ? { ...message, content: fullText }
+                : message,
+            ),
+          );
         }
 
         return fullText;
@@ -1389,29 +1522,24 @@ function LITTTerminalShellInner({
         const isAbort =
           error instanceof DOMException && error.name === "AbortError";
         if (isAbort) {
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            const cur = next[placeholderIndex];
-            const stamp = cur.content
-              ? `${cur.content}\n\n_(cancelled)_`
-              : "_(cancelled)_";
-            next[placeholderIndex] = { ...cur, content: stamp };
-            return next;
-          });
+          setMessages((current) =>
+            current.map((message) =>
+              message.id === assistantMessageId
+                ? { ...message, content: message.content ? `${message.content}\n\n_(cancelled)_` : "_(cancelled)_" }
+                : message,
+            ),
+          );
           return "";
         }
         const reply =
           error instanceof Error ? error.message : "LiTT is reconnecting";
-        setMessages((current) => {
-          if (placeholderIndex >= current.length) return current;
-          const next = current.slice();
-          next[placeholderIndex] = {
-            ...next[placeholderIndex],
-            content: reply,
-          };
-          return next;
-        });
+        setMessages((current) =>
+          current.map((message) =>
+            message.id === assistantMessageId
+              ? { ...message, content: reply }
+              : message,
+          ),
+        );
         return reply;
       } finally {
         setBusy(false);
@@ -1433,6 +1561,13 @@ function LITTTerminalShellInner({
       activeBuilderWindow,
       activeFilePath,
       selectedAssetPath,
+      streamAgentChat,
+      setMessages,
+      setBusy,
+      setInput,
+      setAttachments,
+      setToolActivity,
+      abortRef,
     ],
   );
 
@@ -1479,21 +1614,19 @@ function LITTTerminalShellInner({
         setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "complete" }));
         setMessages((prev) => [
           ...prev,
-          {
+          makeMessage({
             role: "assistant" as const,
             content: result.message ?? "Change applied.",
-            createdAt: Date.now(),
-          },
+          }),
         ]);
       } catch (err) {
         setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "error" }));
         setMessages((prev) => [
           ...prev,
-          {
+          makeMessage({
             role: "assistant" as const,
             content: err instanceof Error ? err.message : "Action failed.",
-            createdAt: Date.now(),
-          },
+          }),
         ]);
       }
     },
@@ -1548,8 +1681,8 @@ function LITTTerminalShellInner({
       label: "Video",
       icon: Film,
       onClick: () => {
-        setInput("/video ");
-        textInputRef.current?.focus();
+        setHybridMode("media");
+        setActiveBuilderWindow("preview");
       },
     },
     {
@@ -1557,8 +1690,8 @@ function LITTTerminalShellInner({
       label: "Audio",
       icon: Music,
       onClick: () => {
-        setInput("/audio ");
-        textInputRef.current?.focus();
+        setHybridMode("media");
+        setActiveBuilderWindow("preview");
       },
     },
     {
@@ -1566,8 +1699,13 @@ function LITTTerminalShellInner({
       label: "Build",
       icon: Hammer,
       onClick: () => {
-        setInput("/build ");
-        textInputRef.current?.focus();
+        if (hybridWorkspaceEnabled) {
+          setHybridMode("command");
+          setMobileStudioView("build");
+          setActiveBuilderWindow("mission");
+        } else {
+          onToolChangeAction?.("builder");
+        }
       },
     },
     {
@@ -1575,8 +1713,8 @@ function LITTTerminalShellInner({
       label: "Agent",
       icon: Bot,
       onClick: () => {
-        setInput("/agent ");
-        textInputRef.current?.focus();
+        setHybridMode("command");
+        setActiveBuilderWindow("agents");
       },
     },
     {
@@ -1584,8 +1722,9 @@ function LITTTerminalShellInner({
       label: "Terminal",
       icon: TerminalIcon,
       onClick: () => {
-        setInput("/terminal ");
-        textInputRef.current?.focus();
+        setHybridMode("command");
+        setMobileStudioView("terminal");
+        setActiveBuilderWindow("terminal");
       },
     },
     {
@@ -1601,10 +1740,19 @@ function LITTTerminalShellInner({
       onClick: handleScreenCapture,
     },
     {
-      id: "files",
-      label: "Files",
+      id: "attach",
+      label: "Attach",
       icon: Paperclip,
       onClick: () => fileInputRef.current?.click(),
+    },
+    {
+      id: "files",
+      label: "Project Files",
+      icon: FolderOpen,
+      onClick: () => {
+        setMobileStudioView("files");
+        setActiveBuilderWindow("files");
+      },
     },
   ];
 
@@ -1692,6 +1840,20 @@ function LITTTerminalShellInner({
             ? `Project ${activeProjectId.slice(0, 10)}`
             : "No project selected"
         }
+        activeView={mobileStudioView}
+        onViewChange={(view) => {
+          setMobileStudioView(view);
+          const windowMap: Record<StudioMobileView, string> = {
+            chat: "conversation",
+            build: "mission",
+            files: "files",
+            preview: "preview",
+            terminal: "terminal",
+          };
+          setActiveBuilderWindow(windowMap[view]);
+        }}
+        voiceActive={micActive}
+        onVoiceAction={toggleMic}
       />
 
       {/* ── BODY ── */}
@@ -1762,7 +1924,11 @@ function LITTTerminalShellInner({
                 onModeChangeAction={setHybridMode}
                 activeProjectId={activeProjectId}
                 onOpenProjectsAction={() => setProjectDrawerOpen(true)}
-                onOpenTerminalAction={() => setTerminalDrawerOpen(true)}
+                mobileView={mobileStudioView}
+                onMobileViewChange={setMobileStudioView}
+                onActiveWindowChange={setActiveBuilderWindow}
+                onActiveFileChange={setActiveFilePath}
+                onSelectedAssetChange={setSelectedAssetPath}
                 conversation={
                   <ChatShell
                     embedded
@@ -1779,7 +1945,15 @@ function LITTTerminalShellInner({
                       setInput(prompt);
                       requestAnimationFrame(() => textInputRef.current?.focus());
                     }}
+                    toolActivity={Object.values(toolActivity)}
+                    proposals={pendingProposals}
+                    proposalStatuses={proposalStatuses}
+                    onApproveProposal={approveProposal}
+                    onRejectProposal={rejectProposal}
                   />
+                }
+                terminal={
+                  <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
                 }
               />
             ) : (
@@ -1866,11 +2040,16 @@ function LITTTerminalShellInner({
           <div
             className="fixed inset-x-0 bottom-0 z-[75] flex flex-col gap-0 border-t border-white/10 bg-[#040817]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:static md:inset-auto md:bottom-0 md:border-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
             style={{
-              // Hide shell only in legacy mode when forcing a full-screen terminal view.
-              // In hybrid the terminal is a drawer overlay; composer must stay.
-              display: (!hybridWorkspaceEnabled && mobileStudioView === "terminal") ? "none" : undefined,
+              // Legacy: hide when terminal is the selected mobile view.
+              // Hybrid: hide when the docked terminal is focused as the full workspace surface.
+              display:
+                (!hybridWorkspaceEnabled && mobileStudioView === "terminal") || mobileTerminalFocused
+                  ? "none"
+                  : undefined,
             }}
           >
+            {/* Dev-only: count mounts of the outer (single) composer surface */}
+            {process.env.NODE_ENV === "development" && <DevComposerMount />}
             <div className="mx-auto flex w-full flex-col gap-1.5 p-2 sm:max-w-4xl sm:rounded-2xl sm:border sm:border-white/10 sm:bg-[#060a16]/94 sm:p-2.5 sm:shadow-[0_-18px_60px_rgba(0,0,0,.45)] sm:backdrop-blur-xl">
               {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
@@ -2094,30 +2273,7 @@ function LITTTerminalShellInner({
               onActivate={activateCommand}
             />
 
-            {/* Mobile bottom nav — inside the shell, below composer */}
-            <nav
-              className="grid grid-cols-5 border-t border-white/5 pt-1 md:hidden"
-              aria-label="Studio workspace"
-            >
-              {([
-                { id: "chat", icon: MessageCircle, label: "Chat" },
-                { id: "build", icon: Workflow, label: "Build" },
-                { id: "files", icon: FolderOpen, label: "Files" },
-                { id: "preview", icon: Monitor, label: "Preview" },
-                { id: "terminal", icon: TerminalIcon, label: "Terminal" },
-              ] as const).map((item) => (
-                <button
-                  key={item.id}
-                  type="button"
-                  data-active={mobileStudioView === item.id}
-                  onClick={() => setMobileStudioView(item.id)}
-                  className="grid place-items-center gap-0.5 py-1 text-[8px] font-bold text-white/40 data-[active=true]:bg-cyan-400/10 data-[active=true]:text-cyan-300"
-                >
-                  <item.icon size={15} />
-                  <span>{item.label}</span>
-                </button>
-              ))}
-            </nav>
+            {/* Mobile bottom nav is provided by StudioMobileChrome (single source of truth). No duplicate nav here. */}
           </div>
 
           {/* FOOTER TELEMETRY */}
@@ -2131,34 +2287,48 @@ function LITTTerminalShellInner({
             </div>
           </div>
 
-          {/* Persistent terminal drawer. It stays mounted so PTY sessions and
-              command history survive closing and reopening the panel. */}
-          <div
-            className={`fixed inset-0 z-50 flex items-end justify-center transition ${terminalDrawerOpen ? "pointer-events-auto bg-black/50 backdrop-blur-sm" : "pointer-events-none bg-transparent"}`}
-            onClick={() => setTerminalDrawerOpen(false)}
-            aria-hidden={!terminalDrawerOpen}
-          >
-              <div
-                className={`relative flex h-[72dvh] max-h-[760px] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#05050a] shadow-2xl transition-transform duration-300 ${terminalDrawerOpen ? "translate-y-0" : "translate-y-full"}`}
-                onClick={(e) => e.stopPropagation()}
-              >
-                <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
-                  <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
-                    <TerminalIcon size={14} /> Terminal
-                  </div>
-                  <button
-                    onClick={() => setTerminalDrawerOpen(false)}
-                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
-                    aria-label="Close terminal"
-                  >
-                    ✕
-                  </button>
+          {/* Persistent terminal drawer (legacy path only).
+              Suppressed while hybrid Command Deck is enabled to keep exactly one TerminalToolDirect instance.
+              Use inert for the non-interactive state to avoid aria-hidden focusability violations. */}
+          {!hybridWorkspaceEnabled && (
+            <div
+              ref={terminalDrawerRef}
+              role={terminalDrawerOpen ? "dialog" : undefined}
+              aria-modal={terminalDrawerOpen ? true : undefined}
+              aria-label={terminalDrawerOpen ? "Studio terminal" : undefined}
+              aria-hidden={!terminalDrawerOpen ? true : undefined}
+              inert={!terminalDrawerOpen ? true : undefined}
+              className={`fixed inset-0 z-50 flex items-end justify-center transition ${terminalDrawerOpen ? "visible pointer-events-auto bg-black/50 backdrop-blur-sm" : "invisible pointer-events-none"}`}
+              onClick={() => setTerminalDrawerOpen(false)}
+            >
+                <div
+                  className={`relative flex h-[72dvh] max-h-[760px] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#05050a] shadow-2xl transition-transform duration-300 ${terminalDrawerOpen ? "translate-y-0" : "translate-y-full"}`}
+                  onClick={(e) => e.stopPropagation()}
+                  inert={!terminalDrawerOpen ? true : undefined}
+                >
+                  {terminalDrawerOpen && (
+                    <>
+                      <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+                        <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
+                          <TerminalIcon size={14} /> Terminal
+                        </div>
+                        <button
+                          ref={terminalCloseRef}
+                          onClick={() => setTerminalDrawerOpen(false)}
+                          className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                          aria-label="Close terminal"
+                        >
+                          ✕
+                        </button>
+                      </div>
+                      <div className="min-h-0 flex-1">
+                        <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
+                      </div>
+                    </>
+                  )}
                 </div>
-                <div className="min-h-0 flex-1">
-                  <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
-                </div>
-              </div>
-          </div>
+            </div>
+          )}
         </main>
       </div>
 
@@ -2171,7 +2341,6 @@ function LITTTerminalShellInner({
           addToolMessage({
             role: "assistant",
             content: input || "Generated image",
-            createdAt: Date.now(),
             type: "image",
             mediaUrl: url,
             status: "complete",

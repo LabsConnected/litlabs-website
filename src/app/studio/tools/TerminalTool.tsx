@@ -847,4 +847,25 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
   );
 });
 
-export default TerminalTool;
+// Dev-only mount counter wrapper. Uses forwardRef so callers can pass ref (e.g. terminalRef).
+const TerminalToolWithCounters = forwardRef<TerminalToolHandle, TerminalToolProps>((props, ref) => {
+  // Dev-only: count mounts of the actual terminal surface
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    const key = "__littTerminalToolDirectCount";
+    const w = window as unknown as Record<string, number>;
+    w[key] = (w[key] ?? 0) + 1;
+    if (w[key] > 1) {
+      console.error("[LiTT Studio] Multiple TerminalToolDirect mounted");
+    }
+    return () => {
+      w[key] = Math.max(0, (w[key] ?? 1) - 1);
+    };
+  }, []);
+
+  return <TerminalTool {...props} ref={ref} />;
+});
+
+TerminalToolWithCounters.displayName = "TerminalToolDirect";
+
+export default TerminalToolWithCounters;

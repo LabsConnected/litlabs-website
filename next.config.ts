@@ -1,46 +1,65 @@
 import type { NextConfig } from "next";
 
-const isDev = process.env.NODE_ENV === "development";
+// Note: 'unsafe-eval' / 'wasm-unsafe-eval' are unconditional below (needed for blob workers,
+// Turbopack dev chunks, Clerk preview bundles, and emulatorjs). The prior `isDev` guard
+// was removed; this declaration is intentionally deleted to satisfy the unused-var lint
+// (allowed unused vars must match /^_/u).
 
 const scriptSrcBase = [
   "'self'",
   "'unsafe-inline'",
+  "'unsafe-eval'", // Turbopack, blob workers, Clerk bundles, etc.
+  "'wasm-unsafe-eval'",
+  "https://litlabs.net",
+  "https://*.litlabs.net",
+  // Clerk (prod + preview/dev instances + their npm CDN bundles)
   "https://*.clerk.com",
   "https://clerk.litlabs.net",
   "https://*.clerk.accounts.dev",
+  "https://eternal-chow-60.clerk.accounts.dev",
   "https://js.clerk.dev",
+  // Google / GTM / GA
   "https://accounts.google.com",
   "https://www.googletagmanager.com",
+  "https://*.google-analytics.com",
+  // Cloudflare (challenges + cdn-cgi on own domain + insights)
   "https://challenges.cloudflare.com",
   "https://cdn-cgi.cloudflare.com",
+  "https://litlabs.net/cdn-cgi",
   "https://static.cloudflareinsights.com",
-  "https://litlabs.net",
+  // Vercel (live feedback, insights, speed-insights, chunks, RSC, .well-known)
+  "https://vercel.com",
+  "https://*.vercel.com",
+  "https://vercel.live",
+  "https://*.vercel.app",
+  "https://litlabs.net/_vercel",
+  "https://litlabs.net/_next",
+  "https://*.vercel.com/_vercel",
+  // Emulator / legacy
   "https://cdn.emulatorjs.org",
   "https://cdn.dos.zone",
 ];
 
-// 'unsafe-eval' needed by emulatorjs on /games routes in production
-if (isDev) {
-  scriptSrcBase.push("'unsafe-eval'");
+const scriptSrcGames = [...scriptSrcBase, "'unsafe-eval'", "'wasm-unsafe-eval'"];
+
+// Ensure vercel injected scripts are allowed on all routes
+if (!scriptSrcBase.includes("https://vercel.live")) {
+  scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
 }
 
-const scriptSrcGames = [...scriptSrcBase, "'unsafe-eval'", "'wasm-unsafe-eval'"];
-// Vercel injects vercel.live feedback script on all deployments
-scriptSrcBase.push("https://vercel.live", "https://*.vercel.app");
-
-const vercelLiveSrc = " https://vercel.live https://*.vercel.app";
+const vercelLiveSrc = " https://vercel.live https://*.vercel.app https://vercel.com https://*.vercel.com https://litlabs.net/_vercel https://litlabs.net/_next";
 
 const CSP_DIRECTIVES = [
   "default-src 'self'",
   `script-src ${scriptSrcBase.join(" ")}`,
-  `script-src-elem ${scriptSrcBase.join(" ")}`,
+  `script-src-elem ${scriptSrcBase.join(" ")} https://eternal-chow-60.clerk.accounts.dev https://litlabs.net/cdn-cgi`,
   "script-src-attr 'none'",
   "style-src 'self' 'unsafe-inline' https://*.clerk.com https://cdn.emulatorjs.org",
   `img-src 'self' data: blob: https://images.unsplash.com https://*.supabase.co https://image.pollinations.ai https://img.clerk.com https://images.clerk.dev https://fal.media https://*.fal.media https://storage.googleapis.com https://img.youtube.com https://*.googleusercontent.com https://lh3.googleusercontent.com https://avatars.githubusercontent.com https://upload.wikimedia.org https://placehold.co https://vercel.com https://cdn.emulatorjs.org${vercelLiveSrc}`,
   "font-src 'self' data: https://*.clerk.com https://cdn.emulatorjs.org",
-  `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://cdn.dos.zone https://raw.githubusercontent.com https://github.com https://api.github.com https://www.google-analytics.com https://*.google-analytics.com${vercelLiveSrc}`,
-  "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org https://vercel.live https://*.vercel.app",
-  "worker-src 'self' blob: data: https://litlabs.net https://cdn.emulatorjs.org https://cdn.dos.zone",
+  `connect-src 'self' blob: data: https://*.clerk.com https://*.clerk.accounts.dev https://eternal-chow-60.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai https://*.fal.run wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://*.cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app https://cdn.emulatorjs.org https://cdn.dos.zone https://raw.githubusercontent.com https://github.com https://api.github.com https://www.google-analytics.com https://*.google-analytics.com https://litlabs.net/_vercel https://litlabs.net/_next https://litlabs.net/.well-known${vercelLiveSrc}`,
+  "frame-src 'self' data: blob: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://eternal-chow-60.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io https://cdn.emulatorjs.org https://vercel.live https://*.vercel.app",
+  "worker-src 'self' blob: data: https://litlabs.net https://*.litlabs.net https://*.vercel.com https://vercel.live https://cdn.emulatorjs.org https://cdn.dos.zone",
   "media-src 'self' blob: data:",
   "object-src 'none'",
   "base-uri 'self'",
@@ -180,6 +199,12 @@ const nextConfig: NextConfig = {
           },
           {
             key: "Content-Security-Policy",
+            value: CSP_DIRECTIVES,
+          },
+          // Also emit Report-Only with the same policy so reports are evaluated against our allow-list
+          // (instead of any minimal platform-injected report-only like "script-src 'unsafe-inline' 'unsafe-eval'" or "connect-src 'none'")
+          {
+            key: "Content-Security-Policy-Report-Only",
             value: CSP_DIRECTIVES,
           },
           {

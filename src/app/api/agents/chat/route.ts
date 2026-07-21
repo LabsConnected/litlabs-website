@@ -164,6 +164,46 @@ If a request requires approval or is ambiguous, ask one clear question. Prefer a
 }
 
 /* ------------------------------------------------------------------ */
+/*  Task history — writes a row to agent_tasks so the Base Station     */
+/*  mission feed has a real history (Phase 2 added the columns; this   */
+/*  is what actually populates them). Non-blocking like the memory     */
+/*  persistence above.                                                  */
+/* ------------------------------------------------------------------ */
+
+function recordTaskHistory(input: {
+  userId: string;
+  agentId: string;
+  message: string;
+  response: string;
+  status: "success" | "failed";
+  source: string;
+}) {
+  // Fire-and-forget. The page does not wait on this; the Base Station
+  // mission feed reads the row on the next refresh.
+  void (async () => {
+    try {
+      const sessionId = crypto.randomUUID();
+      await supabaseAdmin.from("agent_tasks").insert({
+        session_id: sessionId,
+        assigned_to: input.agentId,
+        dispatcher: "user",
+        task_input: {
+          prompt: input.message,
+          context: { source: input.source },
+          agentSlug: input.agentId,
+        },
+        task_output: { text: input.response },
+        status: input.status,
+        source: input.source,
+        completed_at: new Date().toISOString(),
+      });
+    } catch (err) {
+      console.error("[api/agents/chat] recordTaskHistory failed:", err);
+    }
+  })();
+}
+
+/* ------------------------------------------------------------------ */
 /*  Image intent detection + generation (server-side)                  */
 /* ------------------------------------------------------------------ */
 
@@ -604,6 +644,19 @@ export async function POST(req: NextRequest) {
       scope: "conversation",
       source: "agent-chat",
       reason: "director reply",
+    });
+
+    // Phase 3.2: record this exchange in agent_tasks so the Base Station
+    // mission feed (which reads completed_at / source / output_tokens /
+    // cost_credits from Phase 2.2) has real history. Status reflects whether
+    // the reply came back as a refusal fallback or a real response.
+    recordTaskHistory({
+      userId,
+      agentId: ctx.resolvedId,
+      message,
+      response,
+      status: "success",
+      source: "agents-detail",
     });
 
     return NextResponse.json({

@@ -22,7 +22,7 @@ const PUBLIC_PATHS = [
 ];
 
 // Routes that render their own bottom navigation / floating chrome
-const SELF_CONTAINED_CHROME = ["/games/cloud"];
+const SELF_CONTAINED_CHROME = ["/games/cloud", "/agents"];
 
 function isPublicPath(path: string) {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));

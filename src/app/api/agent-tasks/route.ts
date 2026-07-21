@@ -11,13 +11,14 @@ import { sanitizeProviderError } from "@/lib/provider-error";
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+  // Authenticated only. Per Autonomic Worker Reliability spec:
+  // - Do not weaken task APIs for banner polling.
+  // - Public health data will be served from /api/system/autonomic-health.
   const { userId } = await auth();
   if (!userId) {
-    return NextResponse.json(
-      { error: "Unauthorized" },
-      { status: 401 },
-    );
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+
   try {
     const { data: tasks, error } = await supabaseAdmin
       .from("agent_tasks")
@@ -27,7 +28,7 @@ export async function GET() {
       .limit(50);
 
     if (error) {
-      console.error("Failed to fetch agent_tasks", error);
+      console.error("[api/agent-tasks] Supabase query failed:", error.message);
       return NextResponse.json(
         { error: "Failed to load missions" },
         { status: 500 },
@@ -35,7 +36,8 @@ export async function GET() {
     }
 
     return NextResponse.json({ tasks: tasks || [] });
-  } catch {
+  } catch (err) {
+    console.error("[api/agent-tasks] Unhandled error in GET:", err);
     return NextResponse.json(
       { error: "Failed to load missions" },
       { status: 500 },

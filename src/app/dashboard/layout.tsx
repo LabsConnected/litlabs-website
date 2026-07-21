@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
   title: "Dashboard",
@@ -11,5 +12,10 @@ export default function DashboardLayout({
 }: {
   children: React.ReactNode;
 }) {
-  return children;
+  return (
+    <>
+      <AutonomicLoopBanner />
+      {children}
+    </>
+  );
 }

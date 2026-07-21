@@ -57,8 +57,6 @@ const leftNavLinks = [
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-const agentsLink = { href: "/agents", label: "Agents", icon: BrainCircuit };
-const AgentsIcon = agentsLink.icon;
 
 /* ------------------------------------------------------------------ */
 /*  Utility items for mobile / user dropdown                           */
@@ -291,32 +289,6 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
 
-            {/* Agents ΓÇö dedicated quick-access icon on the far right */}
-            <Link
-              href={agentsLink.href}
-              className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
-              style={{
-                border: `1px solid ${
-                  isActive(agentsLink.href)
-                    ? resolvedColors.accentColor
-                    : resolvedColors.accentColor + "30"
-                }`,
-                color: resolvedColors.accentColor,
-                backgroundColor: isActive(agentsLink.href)
-                  ? resolvedColors.accentColor + "25"
-                  : resolvedColors.accentColor + "08",
-                boxShadow: isActive(agentsLink.href)
-                  ? `0 0 12px ${resolvedColors.accentColor}50`
-                  : "none",
-              }}
-              title={agentsLink.label}
-              aria-label={agentsLink.label}
-            >
-              <AgentsIcon
-                size={17}
-                strokeWidth={isActive(agentsLink.href) ? 2.5 : 2}
-              />
-            </Link>
 
             {/* Notification bell */}
             <div className="relative" ref={notifRef}>

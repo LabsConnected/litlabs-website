@@ -11,8 +11,6 @@ import { ArrowLeft, Circle, Loader2, Terminal, Command, HelpCircle, Clock } from
 
 type ChatMessage = { role: "user" | "agent" | "system"; text: string; isCommand?: boolean };
 
-const KONAMI_CODE = ["ArrowUp", "ArrowUp", "ArrowDown", "ArrowDown", "ArrowLeft", "ArrowRight", "ArrowLeft", "ArrowRight", "b", "a"] as const;
-
 export default function AgentPage() {
   const params = useParams();
   const slug = params.slug as string;
@@ -25,9 +23,6 @@ export default function AgentPage() {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [sending, setSending] = useState(false);
   
-  // Konami code easter egg
-  const [konamiSequence, setKonamiSequence] = useState<string[]>([]);
-  const [easterEggUnlocked, setEasterEggUnlocked] = useState(false);
   const [terminalInput, setTerminalInput] = useState("");
   const [commandHistory, setCommandHistory] = useState<string[]>([]);
   const [historyIndex, setHistoryIndex] = useState(-1);
@@ -39,27 +34,6 @@ export default function AgentPage() {
   useEffect(() => {
     if (isLoaded && !isSignedIn) router.push(`/sign-in?redirect_url=/agents/${slug}`);
   }, [isLoaded, isSignedIn, router, slug]);
-
-  // Konami code easter egg detection
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key;
-      const newSequence = [...konamiSequence, key].slice(-10);
-      setKonamiSequence(newSequence);
-      
-      if (newSequence.join(",") === KONAMI_CODE.join(",")) {
-        setEasterEggUnlocked(true);
-        setMessages((prev) => [...prev, { 
-          role: "system", 
-          text: "🎮 KONAMI CODE ACTIVATED! Secret mode unlocked. You've discovered the hidden agent protocol. Type /matrix or /vault for bonus commands.",
-          isCommand: true
-        }]);
-      }
-    };
-    
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [konamiSequence]);
 
   // Focus terminal input on mount
   useEffect(() => {
@@ -112,12 +86,19 @@ export default function AgentPage() {
     if (sending) return;
     setSending(true);
     try {
-      const res = await fetch("/api/gemini/chat", {
+      // Phase 3: route through /api/agents/chat (the unified, project-aware,
+      // failover-enabled route) instead of the legacy /api/gemini/chat. The
+      // route accepts `agentId` (canonical id, e.g. "litt" or "spark"),
+      // applies project context + memory recall, and dispatches to the
+      // matching entry in `AGENTS` from src/lib/agents.ts. For Phase 4 the
+      // route will be upgraded to SSE streaming; for now we use JSON.
+      const res = await fetch("/api/agents/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: agent.id,
+          agentId: agent.id,
           message: text,
+          stream: false,
           history: messages
             .filter((m) => m.role === "user" || m.role === "agent")
             .map((m) => ({
@@ -203,19 +184,6 @@ export default function AgentPage() {
           <span className="text-[9px] font-bold" style={{ color: agent.color }}>ONLINE</span>
         </div>
       </div>
-
-      {/* Easter egg indicator */}
-      {easterEggUnlocked && (
-        <div className="px-5 py-2 border-b animate-pulse"
-          style={{ 
-            borderColor: "#00ff00", 
-            backgroundColor: "rgba(0, 255, 0, 0.1)" 
-          }}>
-          <div className="text-[10px] font-mono text-center" style={{ color: "#00ff00" }}>
-            🎮 SECRET MODE ACTIVATED - Type /matrix or /vault
-          </div>
-        </div>
-      )}
 
       {/* Two-column layout */}
       <div className="flex flex-1 overflow-hidden">

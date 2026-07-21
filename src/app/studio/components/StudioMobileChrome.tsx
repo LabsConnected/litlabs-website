@@ -17,6 +17,10 @@ export type StudioMobileView =
 
 type Props = {
   projectLabel: string;
+  activeView?: StudioMobileView;
+  onViewChange?: (view: StudioMobileView) => void;
+  voiceActive?: boolean;
+  onVoiceAction?: () => void;
 };
 
 const globalLinks = [
@@ -31,8 +35,16 @@ const globalLinks = [
 
 export default function StudioMobileChrome({
   projectLabel,
+  activeView = "chat",
+  onViewChange,
+  voiceActive = false,
+  onVoiceAction,
 }: Props) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+
+  const handleView = (v: StudioMobileView) => {
+    onViewChange?.(v);
+  };
 
   return (
     <>
@@ -60,6 +72,35 @@ export default function StudioMobileChrome({
               {projectLabel}
             </span>
           </div>
+        </div>
+
+        {/* Compact mobile view switcher (single source of truth) */}
+        <div className="ml-auto flex items-center gap-1 pr-1 md:hidden">
+          {([
+            { id: "chat" as const, label: "Chat" },
+            { id: "build" as const, label: "Build" },
+            { id: "files" as const, label: "Files" },
+            { id: "preview" as const, label: "Prev" },
+            { id: "terminal" as const, label: "Term" },
+          ]).map((v) => (
+            <button
+              key={v.id}
+              type="button"
+              data-active={activeView === v.id}
+              onClick={() => handleView(v.id)}
+              className="rounded-md border border-white/10 px-2 py-0.5 text-[9px] font-bold text-white/60 data-[active=true]:border-cyan-400/60 data-[active=true]:text-cyan-300"
+            >
+              {v.label}
+            </button>
+          ))}
+          <button
+            type="button"
+            onClick={onVoiceAction}
+            className={`ml-1 rounded-md border px-2 py-0.5 text-[9px] font-bold ${voiceActive ? "border-emerald-400 text-emerald-300" : "border-white/10 text-white/60"}`}
+            aria-pressed={voiceActive}
+          >
+            {voiceActive ? "Mic" : "Mic"}
+          </button>
         </div>
       </header>
 

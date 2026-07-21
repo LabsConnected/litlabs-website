@@ -12,12 +12,10 @@ type CheckResult = {
   detail?: string;
 };
 
-const CHECK_ENDPOINTS: Array<{ id: string; label: string; url: string }> = [
-  { id: "director", label: "Director planner", url: "/api/director/plan" },
-  { id: "agents", label: "Agent roster", url: "/api/agents" },
-  { id: "memory", label: "Memory store", url: "/api/memory" },
-  { id: "agent-tasks", label: "Task intake", url: "/api/agent-tasks" },
-];
+// Single source of truth for autonomic system health.
+// Old per-endpoint probes are intentionally removed — they only proved "URL answered",
+// not that the worker/leases/execution are alive.
+const HEALTH_ENDPOINT = "/api/system/autonomic-health";
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -134,8 +132,23 @@ export default function AutonomicLoopBanner() {
   // without triggering re-renders. Cancelled on unmount.
   const abortRef = useRef<AbortController | null>(null);
 
+  // Real health snapshot from the worker surface
+  type HealthSnapshot = {
+    status: "online" | "degraded" | "offline";
+    api?: string;
+    database?: string;
+    queue?: string;
+    worker?: string;
+    memory?: string;
+    queuedTasks?: number;
+    runningTasks?: number;
+    failedTasks?: number;
+    lastWorkerHeartbeat?: string | null;
+    lastSuccessfulTask?: string | null;
+    version?: string;
+  };
+
   const runChecks = useCallback(async () => {
-    // Cancel any prior probe so we never setState on a stale cycle.
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -143,55 +156,46 @@ export default function AutonomicLoopBanner() {
     setState("checking");
     const signal = controller.signal;
 
-    const results: CheckResult[] = await Promise.all(
-      CHECK_ENDPOINTS.map(async (endpoint) => {
-        try {
-          const res = await fetch(endpoint.url, {
-            method: "GET",
-            signal,
-            cache: "no-store",
-          });
-          if (signal.aborted) {
-            return {
-              id: endpoint.id,
-              label: endpoint.label,
-              ok: false,
-              detail: "aborted",
-            };
-          }
-          return {
-            id: endpoint.id,
-            label: endpoint.label,
-            ok: res.ok,
-            detail: `${res.status}`,
-          };
-        } catch (err) {
-          if ((err as { name?: string })?.name === "AbortError") {
-            return {
-              id: endpoint.id,
-              label: endpoint.label,
-              ok: false,
-              detail: "aborted",
-            };
-          }
-          return {
-            id: endpoint.id,
-            label: endpoint.label,
-            ok: false,
-            detail: err instanceof Error ? err.message : "unreachable",
-          };
-        }
-      }),
-    );
+    try {
+      const res = await fetch(HEALTH_ENDPOINT, {
+        method: "GET",
+        signal,
+        cache: "no-store",
+      });
 
-    if (signal.aborted) return;
+      if (signal.aborted) return;
 
-    setChecks(results);
-    const okCount = results.filter((r) => r.ok).length;
-    if (okCount === results.length) setState("ok");
-    else if (okCount === 0) setState("down");
-    else setState("degraded");
-    setLastChecked(new Date());
+      if (!res.ok) {
+        // Treat non-2xx as degraded signal (endpoint itself is reachable but system unhappy)
+        setChecks([{ id: "health", label: "Autonomic health", ok: false, detail: `${res.status}` }]);
+        setState("degraded");
+        setLastChecked(new Date());
+        return;
+      }
+
+      const h = (await res.json()) as HealthSnapshot;
+
+      // Map canonical status to banner state
+      const mapped: LoopState =
+        h.status === "online" ? "ok" : h.status === "degraded" ? "degraded" : "down";
+
+      // Build a compact set of indicators for the expanded row
+      const items: CheckResult[] = [
+        { id: "worker", label: "Worker", ok: h.worker === "online", detail: h.worker || "unknown" },
+        { id: "database", label: "Database", ok: h.database === "online", detail: h.database || "unknown" },
+        { id: "queue", label: "Queue", ok: h.queue === "online", detail: h.queue || "unknown" },
+        { id: "memory", label: "Memory", ok: h.memory === "online", detail: h.memory || "unconfigured" },
+      ];
+
+      setChecks(items);
+      setState(mapped);
+      setLastChecked(new Date());
+    } catch (err) {
+      if ((err as { name?: string })?.name === "AbortError") return;
+      setChecks([{ id: "health", label: "Autonomic health", ok: false, detail: "unreachable" }]);
+      setState("down");
+      setLastChecked(new Date());
+    }
   }, []);
 
   useEffect(() => {
@@ -301,7 +305,12 @@ export default function AutonomicLoopBanner() {
           style={{ borderTop: `1px solid ${tokens.border}30` }}
         >
           {checks.length === 0
-            ? CHECK_ENDPOINTS.map((e) => (
+            ? [
+                { id: "worker", label: "Worker" },
+                { id: "database", label: "Database" },
+                { id: "queue", label: "Queue" },
+                { id: "memory", label: "Memory" },
+              ].map((e) => (
                 <div
                   key={e.id}
                   className="flex items-center gap-2 text-[10px] font-mono"

@@ -30,6 +30,21 @@ export type StudioMessage = {
   generationTimeMs?: number;
 };
 
+// Canonical proposal type (must be declared before Props so the prop signatures can reference it).
+// This shape mirrors the parent shell's BuilderProposal so handlers are directly assignable.
+export type BuilderProposal = {
+  id: string;
+  title: string;
+  summary: string;
+  risk: "low" | "medium" | "high";
+  files: Array<{ path: string; operation: "edit" | "create" | "delete"; preview?: string }>;
+  tool: string;
+  args: Record<string, unknown>;
+  requiresApproval: true;
+  // Defensive: some call sites defensively read .action when formatting result messages.
+  action?: string;
+};
+
 type Props = {
   messages: StudioMessage[];
   sending?: boolean;
@@ -60,6 +75,12 @@ type Props = {
   onDeleteSession?: (id: string) => void;
   onDeleteAllSessions?: () => void;
   shellAction?: { id: number; type: "terminal" | "sessions" } | null;
+  // Builder context for proposals and live tool activity (wired from parent shell)
+  toolActivity?: Array<{ tool: string; status: "running" | "complete" | "error"; message: string }>;
+  proposals?: BuilderProposal[];
+  proposalStatuses?: Record<string, "applying" | "complete" | "error">;
+  onApproveProposal?: (p: BuilderProposal) => void | Promise<void>;
+  onRejectProposal?: (p: BuilderProposal) => void;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
@@ -91,6 +112,11 @@ export function ChatShell({
   onDeleteSession,
   onDeleteAllSessions,
   shellAction,
+  toolActivity,
+  proposals,
+  proposalStatuses,
+  onApproveProposal,
+  onRejectProposal,
 }: Props) {
   const sending = busyProp ?? sendingProp;
   const [draft, setDraft] = useState("");
@@ -185,6 +211,21 @@ export function ChatShell({
   }, [sending]);
 
   const shouldManageVoice = manageVoiceTurns ?? !embedded;
+
+  // Dev-only: detect duplicate top-level ChatShell mounts (ignore embedded inner instances)
+  useEffect(() => {
+    if (process.env.NODE_ENV !== "development") return;
+    if (embedded || hideDock) return; // count only "outer" shells
+    const key = "__littChatShellCount";
+    const w = window as typeof window & Record<string, number>;
+    w[key] = (w[key] ?? 0) + 1;
+    if (w[key] > 1) {
+      console.error("[LiTT Studio] Multiple top-level ChatShell mounted");
+    }
+    return () => {
+      w[key] = Math.max(0, (w[key] ?? 1) - 1);
+    };
+  }, [embedded, hideDock]);
 
   useEffect(() => {
     if (!shouldManageVoice) return;
@@ -357,6 +398,58 @@ export function ChatShell({
             )}
           </div>
         )}
+        {/* Builder surface: proposals + tool activity (visible when builderMode + data present) */}
+        {builderMode && ((proposals && proposals.length > 0) || (toolActivity && toolActivity.length > 0)) && (
+          <div className="mx-3 mb-2 rounded-xl border border-white/10 bg-white/5 p-2 text-[11px]">
+            {toolActivity && toolActivity.length > 0 && (
+              <div className="mb-2">
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-white/60">Tool activity</div>
+                <div className="space-y-1">
+                  {toolActivity.map((a, i) => (
+                    <div key={i} className="flex items-center gap-2 rounded border border-white/10 bg-black/30 px-2 py-1">
+                      <span className="font-mono text-cyan-400">{a.tool}</span>
+                      <span className="opacity-70">{a.status}</span>
+                      <span className="truncate opacity-70">{a.message}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+            {proposals && proposals.length > 0 && (
+              <div>
+                <div className="mb-1 text-[10px] font-bold uppercase tracking-wider text-white/60">Proposals</div>
+                <div className="space-y-1">
+                  {proposals.map((p) => {
+                    const st = proposalStatuses?.[p.id];
+                    return (
+                      <div key={p.id} className="rounded border border-white/10 bg-black/30 p-2">
+                        <div className="font-medium">{p.title || p.summary || p.tool || "Proposal"}</div>
+                        {p.summary && <div className="text-[10px] opacity-70">{p.summary}</div>}
+                        <div className="mt-1 flex items-center gap-2">
+                          <button
+                            className="rounded border border-emerald-500/40 px-2 py-0.5 text-emerald-300 hover:bg-emerald-500/10"
+                            disabled={st === "applying"}
+                            onClick={() => onApproveProposal?.(p)}
+                          >
+                            {st === "applying" ? "Applying…" : "Approve"}
+                          </button>
+                          <button
+                            className="rounded border border-rose-500/40 px-2 py-0.5 text-rose-300 hover:bg-rose-500/10"
+                            onClick={() => onRejectProposal?.(p)}
+                          >
+                            Reject
+                          </button>
+                          {st && <span className="text-[10px] opacity-60">{st}</span>}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         <BuilderStream
           blocks={blocks}
           isSpeaking={state === "speaking"}

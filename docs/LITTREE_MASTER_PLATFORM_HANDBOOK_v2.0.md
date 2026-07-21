@@ -1,47 +1,108 @@
 # LiTTree LabStudios — MASTER PLATFORM HANDBOOK
 
-> **Version 2.0** · July 19, 2026
-> **Repository target:** `LabsConnected/litlabs-website`
-> **Canonical workspace:** `/studio` — one unified Builder
-> **Base branch:** `main` (all implementation work must occur on a safe feature branch)
+**OFFICIAL — VERSION 2.1**  
+**July 20, 2026**
 
-Production architecture · Unified Studio · Real terminal · Settings · Integrations · Retro Game Cloud · Safety · Delivery
+**Repository:** `LabsConnected/litlabs-website`  
+**Canonical Workspace:** `/studio` (one unified Builder)  
+**Base Branch:** `main` — all work **must** be done on a safe feature branch
+
+This is the **canonical reference** for architecture, implementation, safety, and delivery for LiTTree LabStudios.
 
 ---
 
 ## Document Control
 
-| Field | Value |
-| --- | --- |
-| Document owner | LiTTree LabStudios |
-| Primary product | litlabs.net |
-| Canonical workspace | `/studio` — one unified Builder |
-| Repository | `LabsConnected/litlabs-website` |
-| Base branch | `main`; all implementation work must occur on a safe feature branch |
-| Version | 2.0 |
-| Status | Canonical implementation handbook |
-| Review cadence | Update after every shipped architecture phase or major route redesign |
+| Field                  | Value |
+|------------------------|-------|
+| Document owner         | LiTTree LabStudios |
+| Primary product        | litlabs.net |
+| Canonical workspace    | `/studio` — one unified Builder |
+| Repository             | `LabsConnected/litlabs-website` |
+| Base branch            | `main`; all work on safe feature branches only |
+| Version                | 2.1 |
+| Status                 | Official Master Platform Handbook |
+| Review cadence         | After every shipped architecture phase, major route redesign, or execution-provider change |
 
-### Change-Control Rule
+### Change-Control & Anti-Free-Balling Rule
 
-This handbook is designed to stop "free-balling": no agent should invent architecture, create duplicate pages, claim a connection without verifying it, or redesign approved interfaces before auditing the actual repository. Every major implementation starts with an audit, uses a safe branch, changes one phase, validates the repository, reports results, and stops.
+This handbook **stops "free-balling"**. No agent or developer may:
+- Invent architecture
+- Create duplicate pages or composers
+- Claim connections without backend verification
+- Redesign approved interfaces without an audit
 
-### Handbook Objectives
+**Every implementation must follow the locked protocol:**
+Audit → Safe branch → One narrow phase → Validate (typecheck/lint/test/build + responsive) → Report → **STOP** for human authorization.
 
-1. **One product truth:** LiTTree is a unified AI operating system for creators, with Studio as the execution center.
-2. **One execution truth:** A terminal UI is not a terminal; real command execution requires an authenticated isolated PTY and a shared project sandbox.
-3. **One state truth:** Every status shown in the interface must be derived from real backend state.
-4. **One safety truth:** Read and test actions may be automatic; external, destructive, financial, production, and privileged actions require policy and approval.
-5. **One delivery truth:** A phase is not complete until type checking, linting, build validation, targeted tests, and responsive review pass.
+---
 
-### How To Use This Handbook
+## Core Truths (Non-Negotiable)
 
-- **Chapters 1–5** — Product direction
-- **Chapters 6–15** — Technical implementation
-- **Chapters 16–20** — Operations and safety
-- **Appendices A–D** — Copy-ready instructions for coding agents, type contracts, checklists, and glossary
+| Truth | Statement |
+|-------|-----------|
+| **One Product Truth** | LiTTree is a unified AI operating system for creators. **Studio** is the single execution center. |
+| **One Execution Truth** | A terminal UI is not a terminal. Real command execution requires an **authenticated isolated PTY** and a shared project sandbox. |
+| **One State Truth** | Every status in the UI ("Connected", "Ready", "Running", etc.) **must** be derived from real backend state. |
+| **One Safety Truth** | Read/test actions may be automatic. External, destructive, financial, production, and privileged actions **require explicit policy + user approval**. |
+| **One Delivery Truth** | A phase is not complete until `pnpm typecheck`, `pnpm lint`, `pnpm test`, `pnpm build`, and responsive review have passed with zero exit codes on the actual repo scripts. |
 
-Do not attempt every phase in one uncontrolled change set.
+---
+
+## System Lockdown Protocol (How to Keep the Agent & Project in Sync)
+
+To ensure the agent and project stay true to this handbook:
+
+1. **Lead with the Master Contracts** — Always feed the agent the exact contracts from Appendix A (especially the Master Contract and the Execution Spine prompt).
+2. **Enforce Phase-Zero Audit** — Before any code change, the agent must produce a written audit of current routes, components, persistence, providers, and the exact files it will touch.
+3. **Micro-Manage Phases** — One phase at a time. Authorize → Implement → Validate → Report → **STOP**.
+4. **Protect Core Architecture**:
+   - No standalone Next.js replacements.
+   - Exactly **one** persistent composer in Studio.
+   - No client-side Owner Mode.
+   - Real state only.
+5. **Demand the Validation Gate** — Force the agent to run the repo's real commands and report exit codes + screenshots (390px + 1440px).
+
+### Master Initialization Prompt (Copy-Paste at Start of Every Session)
+
+```
+You are operating inside the LabsConnected/litlabs-website repository, canonical workspace /studio.
+
+You are bound by the LiTTree Master Platform Handbook v2.1.
+
+CRITICAL DIRECTIVES:
+- One Product: Studio is the single unified Builder. No duplicate Code/Terminal/Preview/Media pages.
+- One Composer: Maintain exactly one persistent command composer.
+- Real State Only: Never output "Connected", "Ready", "Running", etc. unless actively verified by the backend.
+- No Standalones: Never overwrite the repository with a disconnected demo. Merge into the existing approved Builder shell.
+- Branch Discipline: Work only on a safe feature branch. Never touch main.
+
+OPERATIONAL PROTOCOL (you must follow this loop and STOP):
+1. Audit — Read current files and report exact state + files you will change.
+2. Branch — Confirm you are on a safe feature branch.
+3. Code — Implement only the authorized narrow scope.
+4. Validate — Run pnpm typecheck, pnpm lint, pnpm test, pnpm build and report exit codes.
+5. Report & Stop — Output changed files, migrations, command results, risks, and wait for explicit human authorization before the next phase.
+```
+
+**For AI Agents & Coding Sessions (BINDING)**
+- Always start the session by pasting the prompt above + the full Appendix A Master Contract.
+- Never skip the Audit step.
+- One phase, validate with the repo's actual scripts, report, STOP.
+- Violations (duplicate composers, fake states, un-audited edits) are out-of-scope and must be rejected.
+
+---
+
+**BINDING STATUS**: This handbook (v2.1) + the embedded Master Contracts + the project rules in `.clinerules` / `.cursorrules` / `AGENTS.md` (where present) are the single source of truth. All agents and contributors are required to follow the lockdown protocol.
+
+## How To Use This Handbook
+
+- **Chapters 1–5**: Product direction and non-negotiables (read first).
+- **Chapters 6–15**: Technical implementation details.
+- **Chapters 16–20**: Operations, safety, observability, and roadmap.
+- **Appendices A–D**: Copy-ready agent contracts, types, checklists, and glossary.
+
+**Rule:** Do not attempt the entire roadmap in one change set. One phase. Validate. Stop.
 
 ---
 
@@ -69,7 +130,7 @@ Do not attempt every phase in one uncontrolled change set.
 | 18 | Persistence, Data Model, and Realtime |
 | 19 | Observability, Performance, and Cost Control |
 | 20 | Delivery Roadmap and Definition of Done |
-| A | Master Coding-Agent Contract |
+| A | Master Coding-Agent Contract (Binding) |
 | B | Canonical Types and API Contracts |
 | C | Phase Checklists and Acceptance Tests |
 | D | Glossary and Decision Log |
@@ -78,10 +139,10 @@ Do not attempt every phase in one uncontrolled change set.
 
 ## North-Star Experience
 
-> *Connect one repository, open one verified isolated terminal, run `pwd`, edit one file, run checks, view the preview, review the diff, and create a pull request—without leaving Builder.*
+> *Connect one repository, open one verified isolated terminal, run `pwd`, edit one file, run checks, view the preview, review the diff, and create a pull request — without leaving Builder.*
 
 | User Question | LiTTree Must Prove |
-| --- | --- |
+|---------------|--------------------|
 | Can it access my project? | Show the connected repository, installation, branch, permissions, and project health. |
 | Does it understand my stack? | Show detected framework, package manager, runtime versions, database, and deployment provider. |
 | Can it actually run code? | Open a verified PTY and return real output, exit code, duration, and errors. |
@@ -91,6 +152,105 @@ Do not attempt every phase in one uncontrolled change set.
 | Can I return later? | Persist project, missions, messages, files, approvals, and resumable runtime state. |
 | What is happening now? | Stream honest progress, logs, current process, timing, and failure state. |
 | How much will it cost? | Show usage, plan limits, model/provider status, and compute consumption. |
+
+---
+
+# 1. Executive Product Direction
+
+## 1.1 Product Vision
+
+LiTTree LabStudios is a **unified AI operating system** for creators and developers. Value comes from one cohesive workspace where a user can connect a real project, talk to LiTT, generate media, edit code, run real terminal commands, preview, review, approve, deploy, and return later without losing state.
+
+**North-Star Proof:** One repo → one verified PTY → real `pwd` → edit → checks → preview → diff review → PR, all inside the Builder.
+
+## 1.2 Core Product Promises (User Questions → What LiTTree Must Prove)
+
+| User Question | LiTTree Must Prove |
+|---------------|--------------------|
+| Can it access my project? | Show connected repo, installation, branch, permissions, health. |
+| Does it understand my stack? | Show detected framework, package manager, runtimes, DB, deployment. |
+| Can it actually run code? | Open verified PTY and return real output, exit code, duration, errors. |
+| Can it fix problems? | inspect → plan → execute → test → diff → preview → approve. |
+| Will it damage my repository? | Branch isolation, checkpoints, diff review, permissions, limits, undo. |
+| What is happening now? | Stream honest progress, logs, timing, and failure state. |
+
+---
+
+# 2. Non-Negotiable Product Principles
+
+## 2.1 Operating Principles
+
+| Principle | Operational Requirement |
+|-----------|--------------------------|
+| Studio is the center | Do not create separate Code/Terminal/Preview/Media pages when an inline block, drawer, or panel will work. |
+| One composer | Exactly one persistent command composer in Studio. |
+| Real state only | No "Connected/Ready/Running" labels unless backend-verified. |
+| Audit before edit | Inspect existing routes, components, persistence, and state before proposing changes. |
+| One phase at a time | Narrow scope → validation gate → report → explicit stop. |
+| Safe by default | Read/test automatic. Gate production/destructive/financial/privileged actions. |
+| Durable state | localStorage is a cache/draft only. |
+| Graceful failure | Normalize provider errors. Show actionable states. Never pretend 402 is a 500. |
+| Mobile is first-class | All primary workflows must work at 390px with 44px targets. |
+
+## 2.2 Forbidden Patterns
+
+- Duplicating pages or composers because "the agent didn't audit".
+- Client-side Owner Mode.
+- Exposing secrets or long-lived tokens to the browser.
+- Running project commands on the Vercel host filesystem.
+- Calling a browser-only xterm "a real terminal".
+- Bundling copyrighted commercial game art.
+- Changing main directly.
+
+---
+
+# Keeping the Agent & Project True to Word (System Lockdown)
+
+**This is the operational contract for all AI agents and human contributors.**
+
+## How to Keep the System Locked In (5 Steps)
+
+1. **Lead with the Master Contracts**  
+   Start every session by pasting the "Master Initialization Prompt" (above) + the full Appendix A Master Contract.
+
+2. **Enforce Phase-Zero Audit**  
+   The agent must first produce a written audit of current routes, components, persistence, providers, and the exact files it intends to change.  
+   **Rule:** No accurate audit → no edits allowed.
+
+3. **Micro-Manage the Delivery Loop**  
+   One narrow phase at a time:
+
+   | Step | Your Instruction | Agent Must Deliver |
+   |------|------------------|--------------------|
+   | 1 | "Initiate Phase Zero Audit for [X]" | Current state report + exact files + branch plan |
+   | 2 | "Audit approved. Create feature branch." | Branch confirmation + scoped implementation only |
+   | 3 | "Run global validation." | Exit codes for pnpm typecheck / lint / test / build + screenshots |
+   | 4 | Manual review | Agent waits in STOP state |
+   | 5 | "Validation passed. Create PR." | PR link + full report, then STOP |
+
+4. **Protect the Core Architecture**  
+   - Studio is the **single** unified workspace. No duplicate Code/Terminal/Preview/Media pages or composers.  
+   - Exactly **one** persistent composer.  
+   - No client-side Owner Mode.  
+   - No standalone Next.js replacements over the repo.  
+   - **Real state only** — never hardcode "Connected", "Ready", etc.
+
+5. **Demand the Validation Gate**  
+   Agent must execute the repo's actual scripts and show zero exit codes:
+   ```bash
+   pnpm typecheck
+   pnpm lint
+   pnpm test
+   pnpm build
+   ```
+   UI changes: prove 390px and 1440px behavior.
+
+**Pre-Merge Verification Checklist**
+- [ ] Real PTY: `pwd` returns actual working directory (not simulated xterm)
+- [ ] Only one composer in Studio
+- [ ] No secrets/tokens in browser
+- [ ] Provider errors are truthful (402 stays 402)
+- [ ] All status labels come from backend verification
 
 ---
 
@@ -2120,6 +2280,19 @@ The strongest next move is not another visual overhaul. It is to **complete the 
 
 ---
 
-*End of Master Platform Handbook v2.0 — `LabsConnected/litlabs-website` — July 19, 2026.*
+---
+
+## What's New in v2.1 (Official Polish)
+
+- Elevated executive front matter with scannable tables and authoritative tone (per Gemini recommendations).
+- Added explicit **System Lockdown Protocol** and **Master Initialization Prompt** to keep agents and the project strictly aligned.
+- Made "Phase-Zero Audit + one phase at a time + validate + STOP" the binding process.
+- Updated all references to Version 2.1 and official status.
+- Removed duplication and placeholder text for clean, professional flow.
+- The full technical chapters (1–20) and Appendices A–D remain the authoritative implementation reference.
+
+**This document + the embedded Master Contracts + project rules (`.clinerules`, `.cursorrules`, `AGENTS.md`) are the single source of truth.**
+
+*End of Official Master Platform Handbook v2.1 — `LabsConnected/litlabs-website` — July 20, 2026.*
 
 

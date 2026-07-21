@@ -11,7 +11,6 @@ import {
   FolderOpen,
   TerminalSquare,
   Bot,
-  SquareTerminal,
   Palette,
   Boxes,
   Sparkles,
@@ -112,14 +111,6 @@ export const TOOLS: ToolDef[] = [
     icon: Bot,
     group: "Extras",
     component: Lazy(() => import("./tools/AgentTool")),
-  },
-  {
-    id: "agents-terminal",
-    label: "Agent Terminal",
-    desc: "Multi-agent console",
-    icon: SquareTerminal,
-    group: "Extras",
-    component: Lazy(() => import("./tools/AgentsTerminalTool")),
   },
   {
     id: "color",

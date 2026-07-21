@@ -48,7 +48,6 @@
 | `src/app/studio/components/ProjectDrawer.tsx` | `GET/POST /api/studio/projects` |
 | `src/app/studio/tools/ChatTool.tsx` | `POST /api/agents/chat` |
 | `src/app/studio/tools/CanvasTool.tsx` | `POST /api/ai-chat` |
-| `src/app/studio/tools/AgentsTerminalTool.tsx` | `POST /api/agents/chat` |
 | `src/app/studio/tools/ImageTool.tsx` | `POST /api/media/generate` |
 | `src/app/studio/tools/VideoTool.tsx` | `POST /api/media/generate-video` |
 | `src/app/studio/tools/AudioTool.tsx` | `POST /api/media/generate-audio` |
@@ -67,7 +66,7 @@
 ### Primary chat endpoints (the ones chat UI actually calls)
 | Route | File | Streaming | Auth | Called by |
 |---|---|---|---|---|
-| `POST /api/agents/chat` | `agents/chat/route.ts` | **SSE** | Clerk | FloatingChat, ChatShell, LITTTerminalShell, ChatTool, AgentsTerminalTool |
+| `POST /api/agents/chat` | `agents/chat/route.ts` | **SSE** | Clerk | FloatingChat, ChatShell, LITTTerminalShell, ChatTool |
 | `POST /api/chat/unified` | `chat/unified/route.ts` | SSE | Clerk | LITTTerminalShell fallback |
 | `POST /api/chat` | `chat/route.ts` | JSON | rate-limit | legacy `gallery/[id]` |
 | `POST /api/ai-chat` | `ai-chat/route.ts` | SSE (opt-in) | auth-aware | ChatDrawer, CanvasTool, BuilderStream |
@@ -276,12 +275,55 @@ Browser → POST /api/director/plan     { goal }
 ✅ LRU cache on `r2.ts` for `getSignedAudioUrl`
 ✅ `director-graph.ts` is a pure function
 ✅ `streamText` imported and used in `/api/ai-chat`
-✅ `AutonomicLoopBanner` mounted on dashboard layout
+✅ `AutonomicLoopBanner` mounted on dashboard + agent + studio layouts
 ✅ `litt` notification dispatcher (with `jarvis` alias)
 ✅ `withLittIdentity` injected into every LLM call automatically
 ✅ `STUDIO_LIVE_VOICE_ENABLED` flag for Gemini Live
 ✅ Monaco isolated in dynamic component with error boundary
 ✅ Mobile Studio layout (single nav, fixed composer + bottom shell)
 
-### What's still pending
-⏳ **Active task:** verify the 4 Autonomic Loop endpoints
+### What's still pending / live vs. dead (Autonomic Loop)
+
+The banner pings these four endpoints every 60s (and immediately on tab visible):
+
+1. `GET /api/director/plan`
+   - **Live.** Returns 200 `{ status: "ok", ready: true }` with no auth.
+   - Real work is in `POST` (auth + goal) which enqueues via `/api/agent-tasks`.
+   - No hard dependency on DB tables for the health probe.
+
+2. `GET /api/agents`
+   - **Live with graceful degradation.**
+   - On Supabase error or missing table: returns 200 + `agents` (core fallback) + `warning`.
+   - Banner always sees 200.
+
+3. `GET /api/memory`
+   - **Live with graceful degradation.**
+   - No query → returns recent memories (or `[]` + warning).
+   - On missing `SUPERMEMORY_API_KEY` or `memories` table: 200 + `warning`, `source`.
+   - Banner always sees 200.
+
+4. `GET /api/agent-tasks`
+   - **Live with graceful degradation (after patch).**
+   - GET no longer requires auth (banner does plain fetch).
+   - On missing table / error / no user: returns 200 + `tasks:[]` + `warning`.
+   - POST still requires auth (real intake path).
+
+**Worker / execution side (what actually runs tasks):**
+- `src/lib/agent-worker.ts` → `AgentWorkerMatrix` (poll + claim + `OpenRouterExecutor`).
+- `src/daemon.ts` → standalone Node process (reads `.env.local` directly, starts the matrix).
+- This is **not** bundled into the Next.js app. It must be launched separately (Railway/Fly/Render/etc.).
+- No in-Next.js background consumer exists (by design for serverless).
+- The banner is the **health surface**; execution is out-of-band.
+
+**Where the banner is mounted (as of this update):**
+- Dashboard: `src/app/dashboard/layout.tsx`
+- Agent: `src/app/agent/layout.tsx`
+- Studio: `src/app/studio/layout.tsx`
+
+All three surfaces now show the Autonomic Loop status.
+
+**Summary for the active task:**
+- The 4 endpoints the banner cares about are **all 200-safe** (never 4xx/5xx for probes).
+- Core fallbacks + table-not-initialized warnings keep the UI green even in fresh DBs.
+- Real loop execution depends on the external daemon + `SUPABASE_SERVICE_ROLE_KEY` + `SUPERMEMORY_API_KEY` + the `agent_tasks` table.
+- The "dead" piece is any assumption that a Next.js serverless function is running the worker loop — it doesn't. The daemon is the live execution path.

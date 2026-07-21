@@ -10,5 +10,8 @@ export default function StudioLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Studio must not mount the full AutonomicLoopBanner.
+  // Per Autonomic Worker Reliability pass: only a compact worker indicator (if present)
+  // belongs inside the existing Builder header (StudioCommandDeck), not as a layout banner.
   return children;
 }

@@ -35,7 +35,9 @@ export function useGeminiLiveVoice(
   const outputNodeRef = useRef<AudioWorkletNode | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
   const optionsRef = useRef(options);
-  optionsRef.current = options;
+  useEffect(() => {
+    optionsRef.current = options;
+  }, [options]);
 
   const stop = useCallback(() => {
     if (wsRef.current) {
