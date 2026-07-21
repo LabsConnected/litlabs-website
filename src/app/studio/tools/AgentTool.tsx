@@ -9,6 +9,7 @@ type AgentToolProps = {
   onOpenAgentChatAction?: (agentId: AgentId) => void;
   onAssignMissionAction?: (agentId: AgentId) => void;
   onOpenTerminalAction?: (agentId: AgentId) => void;
+  busyAgentId?: AgentId | null;
 };
 
 export default function AgentTool({
@@ -17,6 +18,7 @@ export default function AgentTool({
   onOpenAgentChatAction = () => {},
   onAssignMissionAction = () => {},
   onOpenTerminalAction = () => {},
+  busyAgentId = null,
 }: AgentToolProps) {
   return (
     <BaseStationShell
@@ -26,6 +28,7 @@ export default function AgentTool({
       onOpenAgentChatAction={onOpenAgentChatAction}
       onAssignMissionAction={onAssignMissionAction}
       onOpenTerminalAction={onOpenTerminalAction}
+      busyAgentId={busyAgentId}
     />
   );
 }

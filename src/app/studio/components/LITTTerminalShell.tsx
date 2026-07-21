@@ -66,6 +66,7 @@ import GeminiModelPicker, {
   DEFAULT_GEMINI_MODEL,
   type ChatModelSelection,
 } from "./GeminiModelPicker";
+import AgentPicker from "./AgentPicker";
 import {
   PersonaProvider,
   usePersona,
@@ -299,29 +300,37 @@ function LITTTerminalShellInner({
     setActivity,
   } = useVoiceSession();
   const { persona, switchPersona } = usePersona();
+  const agentId: AgentId = searchParams?.get("agent") === "spark" ? "spark" : "litt";
   const MESSAGE_STORAGE_KEY = "litlab-builder-messages-v3";
-  const [messages, setMessages] = useState<Message[]>(() => {
-    if (typeof window === "undefined") return [];
+  const AGENT_CHAT_STORAGE_KEY = "litt-studio-agent-chats-v1";
+  const [agentChats, setAgentChats] = useState<Record<string, Message[]>>(() => {
+    if (typeof window === "undefined") return { litt: [], spark: [] };
     try {
       // One-time cleanup of legacy storage keys.
       localStorage.removeItem("litlab-builder-messages");
       localStorage.removeItem("litlab-builder-messages-v2");
-      const stored = localStorage.getItem(MESSAGE_STORAGE_KEY);
+      localStorage.removeItem(MESSAGE_STORAGE_KEY);
+      const stored = localStorage.getItem(AGENT_CHAT_STORAGE_KEY);
       if (stored) {
-        const parsed = JSON.parse(stored);
-        if (Array.isArray(parsed)) {
-          return parsed.map((message) =>
-            makeMessage({
-              ...message,
-              id:
-                typeof message.id === "string" ? message.id : undefined,
-            }),
-          );
-        }
+        const parsed = JSON.parse(stored) as Partial<Record<string, Message[]>>;
+        return {
+          litt: Array.isArray(parsed.litt) ? parsed.litt.map((m) => makeMessage({ ...m, id: typeof m.id === "string" ? m.id : undefined })) : [],
+          spark: Array.isArray(parsed.spark) ? parsed.spark.map((m) => makeMessage({ ...m, id: typeof m.id === "string" ? m.id : undefined })) : [],
+        };
       }
     } catch {}
-    return [];
+    return { litt: [], spark: [] };
   });
+  const updateActiveAgentMessages = useCallback(
+    (updater: Message[] | ((current: Message[]) => Message[])) => {
+      setAgentChats((current) => {
+        const currentMessages = current[agentId] ?? [];
+        const nextMessages = typeof updater === "function" ? updater(currentMessages) : updater;
+        return { ...current, [agentId]: nextMessages };
+      });
+    },
+    [agentId, setAgentChats],
+  );
   const [busy, setBusy] = useState(false);
   const [selectedModel, setSelectedModel] = useState<ChatModelSelection>(DEFAULT_GEMINI_MODEL);
   const [input, setInput] = useState("");
@@ -405,15 +414,13 @@ function LITTTerminalShellInner({
     payload?: Record<string, unknown>;
   };
   const [activeCommands, setActiveCommands] = useState<ActiveCommand[]>([]);
-  const agentId: AgentId = searchParams?.get("agent") === "spark" ? "spark" : "litt";
-  const [agentChats, setAgentChats] = useState<Record<string, Message[]>>({});
   const [pendingAgentQuery, setPendingAgentQuery] = useState("");
+  const [agentToast, setAgentToast] = useState<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
-  const prevPersonaRef = useRef(persona.id);
 
   // ─── Mobile Studio: one screen at a time ───
   const [mobileStudioView, setMobileStudioView] = useState<StudioMobileView>("chat");
@@ -443,12 +450,12 @@ function LITTTerminalShellInner({
     };
   }, []);
 
-  // Persist Builder messages so the stream survives refresh
+  // Persist per-agent chat histories
   useEffect(() => {
     try {
-      localStorage.setItem(MESSAGE_STORAGE_KEY, JSON.stringify(messages));
+      localStorage.setItem(AGENT_CHAT_STORAGE_KEY, JSON.stringify(agentChats));
     } catch {}
-  }, [messages]);
+  }, [agentChats]);
 
   const activeAgent = useMemo(
     () => AGENTS[agentId] || AGENTS.litt,
@@ -460,7 +467,7 @@ function LITTTerminalShellInner({
   );
   const chatMessages = useMemo(
     () =>
-      messages.map((m) => ({
+      agentMessages.map((m) => ({
         id: m.id,
         role: m.role as "user" | "assistant",
         content: m.content,
@@ -469,7 +476,7 @@ function LITTTerminalShellInner({
         mediaUrl: m.mediaUrl,
         status: m.status,
       })),
-    [messages],
+    [agentMessages],
   );
 
   // Single source of truth for mobile terminal focus in hybrid mode.
@@ -508,10 +515,19 @@ function LITTTerminalShellInner({
       params.set("agent", nextAgentId);
       switchPersona(nextAgentId === "spark" ? "littlebit" : "littcode");
       setActiveBuilderWindow("agents");
+      const agentName = AGENTS[nextAgentId]?.name ?? nextAgentId;
+      setAgentToast(`Switched to ${agentName}`);
       router.replace(`/studio?${params.toString()}`, { scroll: false });
     },
     [router, searchParams, switchPersona],
   );
+
+  // Auto-dismiss agent toast after 2.5s
+  useEffect(() => {
+    if (!agentToast) return;
+    const timer = setTimeout(() => setAgentToast(null), 2500);
+    return () => clearTimeout(timer);
+  }, [agentToast]);
 
   const micActive = voiceState !== "idle";
   const micDisabled =
@@ -651,7 +667,7 @@ function LITTTerminalShellInner({
     }
     if (urlMission) {
       const missionPrompt = decodeURIComponent(urlMission);
-      setMessages((prev) => {
+      updateActiveAgentMessages((prev) => {
         const hasMission = prev.some(
           (m) => m.role === "user" && m.content === missionPrompt,
         );
@@ -675,26 +691,9 @@ function LITTTerminalShellInner({
     if (el) {
       el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
     }
-  }, [messages, busy]);
+  }, [agentMessages, busy]);
 
-  // Insert a divider when the user switches persona
-  useEffect(() => {
-    if (prevPersonaRef.current === persona.id) return;
-    if (messages.length === 0) {
-      prevPersonaRef.current = persona.id;
-      return;
-    }
-    setMessages((prev) => [
-      ...prev,
-      {
-        id: createMessageId(),
-        role: "assistant",
-        content: `--- Switched to ${persona.name} ---`,
-        createdAt: Date.now(),
-      },
-    ]);
-    prevPersonaRef.current = persona.id;
-  }, [persona, messages.length]);
+  // Persona switch is silent — no divider message injected into chat history.
 
   // Esc cancels an in-flight request
   useEffect(() => {
@@ -789,19 +788,19 @@ function LITTTerminalShellInner({
   }, []);
 
   const addToolMessage = useCallback((message: NewMessage) => {
-    setMessages((current) => [...current, makeMessage(message)]);
-  }, []);
+    updateActiveAgentMessages((current) => [...current, makeMessage(message)]);
+  }, [updateActiveAgentMessages]);
 
   const updateLastToolMessage = useCallback(
     (updates: Partial<Message>) => {
-      setMessages((current) => {
+      updateActiveAgentMessages((current) => {
         if (current.length === 0) return current;
         const next = current.slice();
         next[next.length - 1] = { ...next[next.length - 1], ...updates };
         return next;
       });
     },
-    [],
+    [updateActiveAgentMessages],
   );
 
   /* ---------------------------------------------------------------- */
@@ -1183,11 +1182,8 @@ function LITTTerminalShellInner({
       }
 
       if (cmd === "clear" || cmd === "new") {
-        setMessages([]);
+        updateActiveAgentMessages([]);
         setActiveCommands([]);
-        try {
-          localStorage.removeItem(MESSAGE_STORAGE_KEY);
-        } catch {}
         return true;
       }
 
@@ -1205,6 +1201,7 @@ function LITTTerminalShellInner({
       setHybridMode,
       setMobileStudioView,
       setActiveBuilderWindow,
+      updateActiveAgentMessages,
     ],
   );
 
@@ -1305,7 +1302,7 @@ function LITTTerminalShellInner({
       const buildIntent = /^(?:please\s+)?(?:run|start|do)\s+(?:the\s+)?build\b/i.test(text)
         || /^(?:please\s+)?build\s+(?:the\s+)?(?:project|app|site|repo|from here)\b/i.test(text);
       if (buildIntent) {
-        setMessages((current) => [
+        updateActiveAgentMessages((current) => [
           ...current,
           { id: createMessageId(), role: "user", content: text, createdAt: Date.now() },
           {
@@ -1324,11 +1321,11 @@ function LITTTerminalShellInner({
       // Multimodal snapshots go through the Gemini image-chat path because the
       // unified streaming endpoint does not accept image data yet.
       if (attachList.length > 0) {
-        const historyForApi = messages.map((m) => ({
+        const historyForApi = agentMessages.map((m) => ({
           role: m.role as "user" | "assistant",
           content: m.content,
         }));
-        setMessages((current) => [
+        updateActiveAgentMessages((current) => [
           ...current,
           {
             id: createMessageId(),
@@ -1364,7 +1361,7 @@ function LITTTerminalShellInner({
           const reply =
             data.response ||
             "I\u2019m ready. Tell me what we\u2019re building.";
-          setMessages((current) => [
+          updateActiveAgentMessages((current) => [
             ...current,
             makeMessage({
               role: "assistant" as const,
@@ -1375,7 +1372,7 @@ function LITTTerminalShellInner({
         } catch (error) {
           const reply =
             error instanceof Error ? error.message : "LiTT is reconnecting";
-          setMessages((current) => [
+          updateActiveAgentMessages((current) => [
             ...current,
             makeMessage({
               role: "assistant" as const,
@@ -1389,12 +1386,12 @@ function LITTTerminalShellInner({
         }
       }
 
-      const historyForApi = messages.map((m) => ({
+      const historyForApi = agentMessages.map((m) => ({
         role: m.role as "user" | "assistant",
         content: m.content,
       }));
       const assistantMessageId = createMessageId();
-      setMessages((current) => [
+      updateActiveAgentMessages((current) => [
         ...current,
         makeMessage({ role: "user", content: userMessage }),
         { id: assistantMessageId, role: "assistant" as const, content: "", createdAt: Date.now() },
@@ -1493,7 +1490,7 @@ function LITTTerminalShellInner({
               }
               if (typeof json.text === "string" && json.text.length > 0) {
                 fullText += json.text;
-                setMessages((current) =>
+                updateActiveAgentMessages((current) =>
                   current.map((message) =>
                     message.id === assistantMessageId
                       ? { ...message, content: fullText }
@@ -1552,7 +1549,7 @@ function LITTTerminalShellInner({
         if (buildRefusal) {
           fullText =
             "Yes, I can — through the Studio terminal. Type any of these:\n\n- `$ pnpm build` — runs a production build\n- `$ pnpm lint` — runs ESLint\n- `$ pnpm test` — runs Vitest\n- `$ npx tsc --noEmit` — type-check\n- `/run <any command>` — runs any shell command\n\nOr just tell me what you want to build and I'll run it.";
-          setMessages((current) =>
+          updateActiveAgentMessages((current) =>
             current.map((message) =>
               message.id === assistantMessageId
                 ? { ...message, content: fullText }
@@ -1566,7 +1563,7 @@ function LITTTerminalShellInner({
         const isAbort =
           error instanceof DOMException && error.name === "AbortError";
         if (isAbort) {
-          setMessages((current) =>
+          updateActiveAgentMessages((current) =>
             current.map((message) =>
               message.id === assistantMessageId
                 ? { ...message, content: message.content ? `${message.content}\n\n_(cancelled)_` : "_(cancelled)_" }
@@ -1577,7 +1574,7 @@ function LITTTerminalShellInner({
         }
         const reply =
           error instanceof Error ? error.message : "LiTT is reconnecting";
-        setMessages((current) =>
+        updateActiveAgentMessages((current) =>
           current.map((message) =>
             message.id === assistantMessageId
               ? { ...message, content: reply }
@@ -1593,7 +1590,7 @@ function LITTTerminalShellInner({
     },
     [
       busy,
-      messages,
+      agentMessages,
       attachments,
       profile.displayName,
       agentId,
@@ -1606,7 +1603,7 @@ function LITTTerminalShellInner({
       activeBuilderWindow,
       activeFilePath,
       selectedAssetPath,
-      setMessages,
+      updateActiveAgentMessages,
       setBusy,
       setInput,
       setAttachments,
@@ -1642,6 +1639,7 @@ function LITTTerminalShellInner({
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
+            agentId,
             tool: proposal.tool,
             args: {
               ...proposal.args,
@@ -1656,7 +1654,7 @@ function LITTTerminalShellInner({
           throw new Error(result.error ?? "Action failed");
         }
         setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "complete" }));
-        setMessages((prev) => [
+        updateActiveAgentMessages((prev) => [
           ...prev,
           makeMessage({
             role: "assistant" as const,
@@ -1665,7 +1663,7 @@ function LITTTerminalShellInner({
         ]);
       } catch (err) {
         setProposalStatuses((prev) => ({ ...prev, [proposal.id]: "error" }));
-        setMessages((prev) => [
+        updateActiveAgentMessages((prev) => [
           ...prev,
           makeMessage({
             role: "assistant" as const,
@@ -1674,7 +1672,7 @@ function LITTTerminalShellInner({
         ]);
       }
     },
-    [activeProjectId],
+    [activeProjectId, agentId, updateActiveAgentMessages],
   );
 
   const rejectProposal = useCallback((proposal: BuilderProposal) => {
@@ -1758,6 +1756,7 @@ function LITTTerminalShellInner({
       icon: Bot,
       onClick: () => {
         setHybridMode("command");
+        setCommandSurface("agents");
         setActiveBuilderWindow("agents");
       },
     },
@@ -1853,6 +1852,12 @@ function LITTTerminalShellInner({
       className="flex min-h-0 w-full flex-col overflow-hidden bg-transparent text-neutral-100"
       style={{ color: T.textColor, height: "var(--studio-visible-height, 100dvh)" }}
     >
+      {/* Agent switch toast — silent atomic switch feedback */}
+      {agentToast && (
+        <div className="pointer-events-none fixed left-1/2 top-16 z-200 -translate-x-1/2 rounded-xl border border-white/15 bg-[#0b0f1a]/95 px-4 py-2 text-xs font-bold text-white shadow-2xl backdrop-blur-xl">
+          {agentToast}
+        </div>
+      )}
       {/* Hidden file input — driven by the toolbar buttons */}
       <input
         ref={fileInputRef}
@@ -1900,6 +1905,7 @@ function LITTTerminalShellInner({
           <header className="relative z-20 flex items-center gap-2 border-b border-white/10 bg-[#040817]/95 px-3 py-2 backdrop-blur-xl md:hidden">
             <span className="text-xs font-black text-white">LiTT</span>
             <GeminiModelPicker value={selectedModel} onChange={chooseModel} />
+            <AgentPicker value={agentId} onChange={selectStudioAgent} />
             <button
               type="button"
               onClick={() => setProjectDrawerOpen(true)}
@@ -1978,9 +1984,15 @@ function LITTTerminalShellInner({
                 onCommandSurfaceChangeAction={setCommandSurface}
                 selectedAgentId={agentId}
                 onSelectAgentAction={selectStudioAgent}
-                onOpenAgentChatAction={selectStudioAgent}
+                onOpenAgentChatAction={(selectedAgent) => {
+                  selectStudioAgent(selectedAgent);
+                  setMobileStudioView("chat");
+                  setActiveBuilderWindow("conversation");
+                }}
                 onAssignMissionAction={(selectedAgent) => {
                   selectStudioAgent(selectedAgent);
+                  setMobileStudioView("chat");
+                  setActiveBuilderWindow("conversation");
                   setInput(`Assign a mission to ${AGENTS[selectedAgent]?.name ?? selectedAgent}: `);
                   requestAnimationFrame(() => textInputRef.current?.focus());
                 }}
@@ -1989,6 +2001,7 @@ function LITTTerminalShellInner({
                   setMobileStudioView("terminal");
                   setActiveBuilderWindow("terminal");
                 }}
+                busyAgentId={busy ? agentId : null}
                 mobileView={mobileStudioView}
                 onMobileViewChange={setMobileStudioView}
                 onActiveWindowChange={setActiveBuilderWindow}

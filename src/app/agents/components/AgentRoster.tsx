@@ -19,9 +19,18 @@ const AGENT_ORDER: ReadonlyArray<"litt" | "spark"> = ["litt", "spark"];
 interface AgentRosterProps {
   selectedAgentId: AgentId | null;
   onSelectAgentAction: (agentId: AgentId) => void;
+  busyAgentId?: AgentId | null;
 }
 
-export default function AgentRoster({ selectedAgentId, onSelectAgentAction }: AgentRosterProps) {
+type RuntimeStatus = "available" | "working" | "offline";
+
+const STATUS_CONFIG: Record<RuntimeStatus, { color: string; label: string; pulse: boolean }> = {
+  available: { color: "#22c55e", label: "Available", pulse: false },
+  working: { color: "#f59e0b", label: "Working", pulse: true },
+  offline: { color: "#6b7280", label: "Offline", pulse: false },
+};
+
+export default function AgentRoster({ selectedAgentId, onSelectAgentAction, busyAgentId }: AgentRosterProps) {
   const { resolvedColors: T } = useTheme();
   return (
     <section
@@ -47,6 +56,8 @@ export default function AgentRoster({ selectedAgentId, onSelectAgentAction }: Ag
           const agent = AGENTS[id];
           if (!agent) return null;
           const Icon = id === "spark" ? SparkIcon : Bot;
+          const status: RuntimeStatus = busyAgentId === id ? "working" : "available";
+          const statusCfg = STATUS_CONFIG[status];
           return (
             <button
               key={id}
@@ -73,9 +84,9 @@ export default function AgentRoster({ selectedAgentId, onSelectAgentAction }: Ag
                     {agent.name}
                   </span>
                   <span className="flex items-center gap-1">
-                    <Circle size={5} className="pointer-events-none fill-current animate-pulse" style={{ color: "#22c55e" }} aria-hidden="true" />
-                    <span className="text-[8px] font-bold uppercase" style={{ color: "#22c55e" }}>
-                      on
+                    <Circle size={5} className={`pointer-events-none fill-current ${statusCfg.pulse ? "animate-pulse" : ""}`} style={{ color: statusCfg.color }} aria-hidden="true" />
+                    <span className="text-[8px] font-bold uppercase" style={{ color: statusCfg.color }}>
+                      {statusCfg.label}
                     </span>
                   </span>
                 </div>

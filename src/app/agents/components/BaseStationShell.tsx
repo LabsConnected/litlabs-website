@@ -40,6 +40,7 @@ interface BaseStationShellProps {
   onOpenAgentChatAction?: (agentId: AgentId) => void;
   onAssignMissionAction?: (agentId: AgentId) => void;
   onOpenTerminalAction?: (agentId: AgentId) => void;
+  busyAgentId?: AgentId | null;
 }
 
 export default function BaseStationShell({
@@ -49,6 +50,7 @@ export default function BaseStationShell({
   onOpenAgentChatAction,
   onAssignMissionAction,
   onOpenTerminalAction,
+  busyAgentId,
 }: BaseStationShellProps) {
   const { resolvedColors: T } = useTheme();
   const { saving } = useStationLayout();
@@ -86,7 +88,7 @@ export default function BaseStationShell({
               LiTT Base Station
             </h1>
             <p className="text-[9px]" style={{ color: T.textMuted }}>
-              2 agents online · Systems operational
+              2 agents available · Systems operational
             </p>
           </div>
           <StationSettings saving={saving} />
@@ -98,7 +100,7 @@ export default function BaseStationShell({
             }}
           >
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />
-            Online
+            Available
           </div>
         </header>}
 
@@ -118,7 +120,7 @@ export default function BaseStationShell({
                 backdropFilter: "blur(18px)",
               }}
             >
-              <AgentRoster selectedAgentId={selectedAgent} onSelectAgentAction={selectAgent} />
+              <AgentRoster selectedAgentId={selectedAgent} onSelectAgentAction={selectAgent} busyAgentId={busyAgentId} />
               <SparkCustomizer />
             </aside>
 

@@ -27,8 +27,10 @@ import {
 import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "./studio-command-deck.module.css";
 import GeminiModelPicker, { type ChatModelSelection } from "./GeminiModelPicker";
+import AgentPicker from "./AgentPicker";
 import AgentTool from "../tools/AgentTool";
 import type { AgentId } from "@/app/agents/store/stationStore";
+import { AGENTS } from "@/lib/agents";
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
@@ -58,6 +60,7 @@ type DeckProps = {
   onOpenAgentChatAction: (agentId: AgentId) => void;
   onAssignMissionAction: (agentId: AgentId) => void;
   onOpenAgentTerminalAction: (agentId: AgentId) => void;
+  busyAgentId?: AgentId | null;
   conversation: ReactNode;
   terminal: ReactNode;
   // Controlled mobile surface (chat | build | files | preview | terminal).
@@ -124,17 +127,38 @@ function DockedTerminal({
   terminal,
   collapsed,
   onCollapseAction,
+  agentName,
+  agentColor,
 }: {
   terminal: ReactNode;
   collapsed: boolean;
   onCollapseAction: () => void;
+  agentName?: string;
+  agentColor?: string;
 }) {
   return (
     <section
       className={`${styles.dockedTerminal} ${collapsed ? styles.dockedTerminalCollapsed : ""}`}
     >
       <header className={styles.dockedTerminalHeader}>
-        <span className={styles.terminalLabel}>Terminal</span>
+        <span className={styles.terminalLabel}>
+          Terminal
+          {agentName && (
+            <span
+              className="ml-2 inline-flex items-center gap-1 rounded px-1.5 py-0.5 text-[9px] font-bold"
+              style={{
+                color: agentColor ?? "#29e4ff",
+                backgroundColor: `${agentColor ?? "#29e4ff"}15`,
+              }}
+            >
+              <span
+                className="h-1.5 w-1.5 rounded-full"
+                style={{ backgroundColor: agentColor ?? "#29e4ff" }}
+              />
+              {agentName}
+            </span>
+          )}
+        </span>
 
         <button
           type="button"
@@ -208,6 +232,7 @@ export default function StudioCommandDeck({
   onOpenAgentChatAction,
   onAssignMissionAction,
   onOpenAgentTerminalAction,
+  busyAgentId,
   conversation,
   terminal,
   mobileView,
@@ -220,6 +245,11 @@ export default function StudioCommandDeck({
   const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
   const [draft, setDraft] = useState("// Demo draft — connect a project to edit real files.\nexport const studioMode = \"code\";\n");
   const [mobilePanel, setMobilePanel] = useState<"editor" | "explorer" | "preview" | "review">("editor");
+
+  // Agent context for terminal header
+  const activeAgentInfo = AGENTS[selectedAgentId ?? "litt"];
+  const terminalAgentName = activeAgentInfo?.name;
+  const terminalAgentColor = activeAgentInfo?.color;
 
   // Mobile: when true, the docked terminal becomes the full workspace surface (chat/composer hidden, bottom nav stays)
   const [mobileTerminalFocus, setMobileTerminalFocus] = useState(false);
@@ -395,6 +425,7 @@ export default function StudioCommandDeck({
       <header className={styles.commandBar}>
         <div className={styles.brand}><span className={styles.brandMark}><Sparkles className="pointer-events-none" size={15} aria-hidden="true" /></span><span>LiTT</span></div>
         <GeminiModelPicker value={selectedModel} onChange={onModelChange} />
+        <AgentPicker value={selectedAgentId ?? "litt"} onChange={onSelectAgentAction} />
         <div className={styles.modules}>
           <button data-module="project" className={styles.module} onClick={onOpenProjectsAction}><FolderOpen className="pointer-events-none" size={12} aria-hidden="true" /><strong>{projectLabel}</strong><ChevronDown className="pointer-events-none" size={11} aria-hidden="true" /></button>
           <span data-module="branch" className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
@@ -422,10 +453,10 @@ export default function StudioCommandDeck({
           {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
           <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." actionLabel="Open agents" onAction={() => selectRail('agents')} />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." actionLabel="Open project" onAction={onOpenProjectsAction} />}</Panel>
           {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
-          <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} />
+          <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} />
         </div>}
 
-        {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p><button className={styles.button} onClick={() => selectRail('command')}>Plan prompt</button></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p><button className={styles.button} onClick={() => selectRail('command')}>Queue render</button></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p><button className={styles.button} onClick={() => selectRail('files')}>Open library</button></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} /></div>}
+        {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p><button className={styles.button} onClick={() => selectRail('command')}>Plan prompt</button></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p><button className={styles.button} onClick={() => selectRail('command')}>Queue render</button></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p><button className={styles.button} onClick={() => selectRail('files')}>Open library</button></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} /></div>}
 
         {mode === "command" && commandSurface === "mission" && (
           <div className={`${styles.main} ${styles.commandModeMain}`}>
@@ -481,7 +512,7 @@ export default function StudioCommandDeck({
               </Panel>
             </aside>
 
-            <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} />
+            <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} />
           </div>
         )}
 
@@ -494,12 +525,15 @@ export default function StudioCommandDeck({
                 onOpenAgentChatAction={onOpenAgentChatAction}
                 onAssignMissionAction={onAssignMissionAction}
                 onOpenTerminalAction={onOpenAgentTerminalAction}
+                busyAgentId={busyAgentId}
               />
             </div>
             <DockedTerminal
               terminal={terminal}
               collapsed={layout.collapsed.terminal}
               onCollapseAction={() => setCollapsed("terminal")}
+              agentName={terminalAgentName}
+              agentColor={terminalAgentColor}
             />
           </div>
         )}
