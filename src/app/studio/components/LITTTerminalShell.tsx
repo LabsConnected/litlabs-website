@@ -112,6 +112,14 @@ type Message = {
   status?: string;
 };
 
+type StudioActivityEvent = {
+  id: string;
+  type: "project" | "workspace" | "agent" | "terminal" | "preview" | "mission" | "git" | "deployment";
+  status: "info" | "running" | "success" | "warning" | "error";
+  message: string;
+  createdAt: number;
+};
+
 type NewMessage = Omit<Message, "id" | "createdAt"> & {
   id?: string;
   createdAt?: number;
@@ -340,6 +348,13 @@ function LITTTerminalShellInner({
   const [imageGenOpen, setImageGenOpen] = useState(false);
   const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
+  const [projectName, setProjectName] = useState<string | null>(null);
+  const [projectStatus, setProjectStatus] = useState<"none" | "loading" | "connected" | "error">("none");
+  const [branchName, setBranchName] = useState<string | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<"unavailable" | "provisioning" | "ready" | "error">("unavailable");
+  const [previewStatus, setPreviewStatus] = useState<"unavailable" | "starting" | "ready" | "error">("unavailable");
+  const [servicesStatus, setServicesStatus] = useState<"disconnected" | "connecting" | "connected" | "degraded">("disconnected");
+  const [activityEvents, setActivityEvents] = useState<StudioActivityEvent[]>([]);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
 
   useEffect(() => {
@@ -644,14 +659,68 @@ function LITTTerminalShellInner({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
 
-  // Sync active project from URL ?project=ID
+  // Helper to push activity events
+  const pushActivity = useCallback((event: Omit<StudioActivityEvent, "id" | "createdAt">) => {
+    setActivityEvents((prev) => [
+      { ...event, id: createMessageId(), createdAt: Date.now() },
+      ...prev.slice(0, 19),
+    ]);
+  }, []);
+
+  // Sync active project from URL ?project=ID and fetch metadata
   useEffect(() => {
     const urlProject = searchParams?.get("project");
-    if (urlProject && urlProject !== activeProjectId) {
-      setActiveProjectId(urlProject);
+    if (!urlProject) {
+      setActiveProjectId(null);
+      setProjectName(null);
+      setProjectStatus("none");
+      setBranchName(null);
+      setWorkspaceStatus("unavailable");
+      setPreviewStatus("unavailable");
+      return;
     }
+    if (urlProject === activeProjectId && projectStatus !== "none") return;
+
+    let cancelled = false;
+    setActiveProjectId(urlProject);
+    setProjectStatus("loading");
+    pushActivity({ type: "project", status: "info", message: `Loading project ${urlProject}…` });
+
+    void fetch(`/api/studio/projects`)
+      .then(async (res) => {
+        if (!res.ok) throw new Error("Failed to fetch projects");
+        const data = (await res.json()) as { projects?: Array<{ id: string; name: string; github_branch: string | null; github_default_branch: string | null; scan_status: string }> };
+        const project = data.projects?.find((p) => p.id === urlProject);
+        if (cancelled) return;
+        if (!project) {
+          setProjectStatus("error");
+          setProjectName(urlProject);
+          pushActivity({ type: "project", status: "error", message: `Project ${urlProject} not found` });
+          return;
+        }
+        setProjectName(project.name);
+        setProjectStatus("connected");
+        const branch = project.github_branch || project.github_default_branch || null;
+        setBranchName(branch);
+        setWorkspaceStatus("unavailable");
+        setPreviewStatus("unavailable");
+        setServicesStatus("disconnected");
+        pushActivity({ type: "project", status: "success", message: `Project selected: ${project.name}` });
+        pushActivity({ type: "workspace", status: "warning", message: "Workspace not prepared" });
+        pushActivity({ type: "agent", status: "info", message: `${activeAgent.name} available` });
+        pushActivity({ type: "terminal", status: "info", message: "Local shell ready" });
+        pushActivity({ type: "preview", status: "warning", message: "Preview requires runtime" });
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setProjectStatus("error");
+        setProjectName(urlProject);
+        pushActivity({ type: "project", status: "error", message: "Failed to load project metadata" });
+      });
+
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchParams]);
+  }, [searchParams, pushActivity]);
 
   // Respect ?agent= param to switch persona and ?mission= to pre-load prompt
   useEffect(() => {
@@ -1911,7 +1980,7 @@ function LITTTerminalShellInner({
               onClick={() => setProjectDrawerOpen(true)}
               className="ml-auto max-w-28 truncate rounded-lg border border-white/10 px-2 py-1 text-[10px] font-bold text-white/70"
             >
-              {activeProjectId ? "Project selected" : "No project"}
+              {projectName ?? (activeProjectId ? "Project" : "No project")}
             </button>
           </header>
           {/* Ambient background - simplified on mobile to reduce paint */}
@@ -1957,12 +2026,8 @@ function LITTTerminalShellInner({
             onClose={() => setProjectDrawerOpen(false)}
             activeProjectId={activeProjectId}
             onSelect={(projectId) => {
-              setActiveProjectId(projectId);
               setProjectDrawerOpen(false);
-              // Update URL with project param
-              const params = new URLSearchParams(
-                searchParams?.toString() ?? "",
-              );
+              const params = new URLSearchParams(searchParams?.toString() ?? "");
               params.set("project", projectId);
               router.push(`/studio?${params.toString()}`, { scroll: false });
             }}
@@ -1977,7 +2042,31 @@ function LITTTerminalShellInner({
                 mode={hybridMode}
                 onModeChangeAction={setHybridMode}
                 activeProjectId={activeProjectId}
+                projectName={projectName}
+                projectStatus={projectStatus}
+                branchName={branchName}
+                workspaceStatus={workspaceStatus}
+                previewStatus={previewStatus}
+                servicesStatus={servicesStatus}
+                activityEvents={activityEvents}
                 onOpenProjectsAction={() => setProjectDrawerOpen(true)}
+                onInspectProjectAction={() => {
+                  if (!projectName) return;
+                  setInput(`Inspect ${projectName} and identify the highest-priority issues.`);
+                  setMobileStudioView("chat");
+                  setActiveBuilderWindow("conversation");
+                  requestAnimationFrame(() => textInputRef.current?.focus());
+                }}
+                onStartBuildAction={() => {
+                  if (!projectName) return;
+                  setInput(`Plan and build the following for ${projectName}: `);
+                  setMobileStudioView("chat");
+                  setActiveBuilderWindow("conversation");
+                  requestAnimationFrame(() => textInputRef.current?.focus());
+                }}
+                onCreateMediaAction={() => {
+                  setHybridMode("media");
+                }}
                 selectedModel={selectedModel}
                 onModelChange={chooseModel}
                 commandSurface={commandSurface}
@@ -2263,21 +2352,23 @@ function LITTTerminalShellInner({
                     value={input}
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    aria-label="Message LITT"
+                    aria-label={`Message ${activeAgent.name}`}
                     placeholder={
                       voiceState === "cooldown"
                         ? "Type a message — voice will return shortly"
                         : micActive
                           ? voiceState === "speaking"
-                            ? "LiTT is speaking..."
+                            ? `${activeAgent.name} is speaking...`
                             : voiceState === "transcribing"
                               ? "Transcribing..."
                               : voiceState === "thinking"
-                                ? "LiTT is thinking..."
+                                ? `${activeAgent.name} is thinking...`
                                 : voiceState === "listening"
                                   ? "Listening..."
                                   : "Voice active..."
-                          : "Ask LiTT anything..."
+                          : agentId === "spark"
+                            ? "Ask Spark to create, design or direct…"
+                            : "Ask LiTT to build, debug or plan…"
                     }
                     rows={1}
                     className="max-h-32 min-h-[44px] w-full resize-none rounded-2xl border border-white/15 bg-white/4 py-2.5 pl-3 pr-12 text-[16px] leading-5 text-neutral-100 outline-none transition-all placeholder:text-gray-400 focus:border-cyan-300/30 focus:bg-white/5 focus:shadow-[0_0_0_3px_rgba(34,211,238,0.08)] sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"

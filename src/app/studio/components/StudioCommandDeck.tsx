@@ -46,11 +46,29 @@ if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
 export type StudioCommandDeckMode = "code" | "media" | "command";
 export type CommandSurface = "mission" | "agents";
 
+type StudioActivityEvent = {
+  id: string;
+  type: "project" | "workspace" | "agent" | "terminal" | "preview" | "mission" | "git" | "deployment";
+  status: "info" | "running" | "success" | "warning" | "error";
+  message: string;
+  createdAt: number;
+};
+
 type DeckProps = {
   mode: StudioCommandDeckMode;
   onModeChangeAction: (mode: StudioCommandDeckMode) => void;
   activeProjectId: string | null;
+  projectName: string | null;
+  projectStatus: "none" | "loading" | "connected" | "error";
+  branchName: string | null;
+  workspaceStatus: "unavailable" | "provisioning" | "ready" | "error";
+  previewStatus: "unavailable" | "starting" | "ready" | "error";
+  servicesStatus: "disconnected" | "connecting" | "connected" | "degraded";
+  activityEvents: StudioActivityEvent[];
   onOpenProjectsAction: () => void;
+  onInspectProjectAction?: () => void;
+  onStartBuildAction?: () => void;
+  onCreateMediaAction?: () => void;
   selectedModel: ChatModelSelection;
   onModelChange: (model: ChatModelSelection) => void;
   commandSurface: CommandSurface;
@@ -63,8 +81,6 @@ type DeckProps = {
   busyAgentId?: AgentId | null;
   conversation: ReactNode;
   terminal: ReactNode;
-  // Controlled mobile surface (chat | build | files | preview | terminal).
-  // The parent (LITTTerminalShell) owns the single source of truth.
   mobileView?: "chat" | "build" | "files" | "preview" | "terminal";
   onMobileViewChange?: (view: "chat" | "build" | "files" | "preview" | "terminal") => void;
   onMobileTerminalFocusChange?: (focused: boolean) => void;
@@ -129,12 +145,16 @@ function DockedTerminal({
   onCollapseAction,
   agentName,
   agentColor,
+  projectName,
+  workspaceLabel,
 }: {
   terminal: ReactNode;
   collapsed: boolean;
   onCollapseAction: () => void;
   agentName?: string;
   agentColor?: string;
+  projectName?: string | null;
+  workspaceLabel?: string;
 }) {
   return (
     <section
@@ -158,6 +178,26 @@ function DockedTerminal({
               {agentName}
             </span>
           )}
+          {projectName && (
+            <span className="ml-2 text-[9px] text-white/40">
+              Project: {projectName}
+            </span>
+          )}
+          {workspaceLabel && (
+            <span
+              className="ml-2 text-[9px] font-bold"
+              style={{
+                color:
+                  workspaceLabel === "Ready" ? "#43f59b" :
+                  workspaceLabel === "Error" ? "#ef4444" :
+                  workspaceLabel === "Provisioning…" ? "#29e4ff" :
+                  "#facc15",
+              }}
+            >
+              Workspace: {workspaceLabel}
+            </span>
+          )}
+          <span className="ml-2 text-[9px] text-white/30">Shell: Local</span>
         </span>
 
         <button
@@ -222,7 +262,17 @@ export default function StudioCommandDeck({
   mode,
   onModeChangeAction,
   activeProjectId,
+  projectName,
+  projectStatus,
+  branchName,
+  workspaceStatus,
+  previewStatus,
+  servicesStatus,
+  activityEvents,
   onOpenProjectsAction,
+  onInspectProjectAction,
+  onStartBuildAction,
+  onCreateMediaAction,
   selectedModel,
   onModelChange,
   commandSurface,
@@ -383,7 +433,11 @@ export default function StudioCommandDeck({
     review: hasConversation ? true : layout.collapsed.review,
   };
 
-  const projectLabel = activeProjectId ? `Project ${activeProjectId.slice(0, 8)}` : "No project";
+  const projectLabel = projectStatus === "loading" ? "Loading…" : projectName ?? (activeProjectId ? `Project ${activeProjectId.slice(0, 8)}` : "No project");
+  const branchLabel = branchName ?? (activeProjectId ? "Pending workspace" : "No branch");
+  const previewLabel = previewStatus === "ready" ? "Ready" : previewStatus === "starting" ? "Starting…" : previewStatus === "error" ? "Error" : "Requires runtime";
+  const servicesLabel = servicesStatus === "connected" ? "Connected" : servicesStatus === "connecting" ? "Connecting…" : servicesStatus === "degraded" ? "Degraded" : "Disconnected";
+  const workspaceLabel = workspaceStatus === "ready" ? "Ready" : workspaceStatus === "provisioning" ? "Provisioning…" : workspaceStatus === "error" ? "Error" : "Not prepared";
   const explorerW = effectiveCollapsed.explorer ? 42 : layout.sizes.explorer;
   const reviewW = effectiveCollapsed.review ? 42 : layout.sizes.review;
   const previewH = effectiveCollapsed.preview ? 42 : layout.sizes.preview;
@@ -428,11 +482,11 @@ export default function StudioCommandDeck({
         <AgentPicker value={selectedAgentId ?? "litt"} onChange={onSelectAgentAction} />
         <div className={styles.modules}>
           <button data-module="project" className={styles.module} onClick={onOpenProjectsAction}><FolderOpen className="pointer-events-none" size={12} aria-hidden="true" /><strong>{projectLabel}</strong><ChevronDown className="pointer-events-none" size={11} aria-hidden="true" /></button>
-          <span data-module="branch" className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
+          <span data-module="branch" className={styles.module}><GitBranch size={12} />Branch <strong>{branchLabel}</strong></span>
           <span className={styles.statusDivider} aria-hidden="true" />
-          <span data-module="preview" className={styles.module}><Monitor size={12} />Preview <strong>Unavailable</strong></span>
-          <span data-module="services" className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
-          <span data-module="credits" className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
+          <span data-module="preview" className={styles.module}><Monitor size={12} />Preview <strong>{previewLabel}</strong></span>
+          <span data-module="services" className={styles.module}><Cloud size={12} />Services <strong>{servicesLabel}</strong></span>
+          <span data-module="credits" className={styles.module}><Sparkles size={12} />Credits <strong>9,999</strong></span>
         </div>
         <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
       </header>
@@ -453,7 +507,7 @@ export default function StudioCommandDeck({
           {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
           <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." actionLabel="Open agents" onAction={() => selectRail('agents')} />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." actionLabel="Open project" onAction={onOpenProjectsAction} />}</Panel>
           {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
-          <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} />
+          <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} projectName={projectName} workspaceLabel={workspaceLabel} />
         </div>}
 
         {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p><button className={styles.button} onClick={() => selectRail('command')}>Plan prompt</button></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p><button className={styles.button} onClick={() => selectRail('command')}>Queue render</button></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p><button className={styles.button} onClick={() => selectRail('files')}>Open library</button></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} /></div>}
@@ -467,24 +521,55 @@ export default function StudioCommandDeck({
             >
               <div className={styles.modeHeroCompact}>
                 <div className={styles.modeHeroIntro}>
-                  <h2>Mission control</h2>
-                  <p>
-                    Connect a project or describe what you want LiTT to build.
-                  </p>
-                  <div className={styles.emptyActions}>
-                    <button className={styles.button} onClick={onOpenProjectsAction}>
-                      Select Project
-                    </button>
-                    <button
-                      className={`${styles.button} ${styles.buttonSecondary}`}
-                      disabled={!activeProjectId}
-                    >
-                      Start Mission
-                    </button>
-                  </div>
+                  {projectStatus === "none" && (
+                    <>
+                      <h2>Mission control</h2>
+                      <p>No project selected. Connect or create a project before starting a mission.</p>
+                      <div className={styles.emptyActions}>
+                        <button className={styles.button} onClick={onOpenProjectsAction}>Select Project</button>
+                      </div>
+                    </>
+                  )}
+                  {projectStatus === "loading" && (
+                    <>
+                      <h2>Loading project…</h2>
+                      <p>Fetching project metadata and checking workspace status.</p>
+                    </>
+                  )}
+                  {projectStatus === "error" && (
+                    <>
+                      <h2>Project error</h2>
+                      <p>Failed to load project metadata. Try selecting the project again.</p>
+                      <div className={styles.emptyActions}>
+                        <button className={styles.button} onClick={onOpenProjectsAction}>Select Project</button>
+                      </div>
+                    </>
+                  )}
+                  {projectStatus === "connected" && workspaceStatus !== "ready" && (
+                    <>
+                      <h2>{projectName} is connected</h2>
+                      <p>Prepare its workspace so {terminalAgentName} can inspect files, run project commands and create verified changes.</p>
+                      <div className={styles.emptyActions}>
+                        <button className={styles.button} disabled>Prepare Workspace</button>
+                        <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onInspectProjectAction}>Inspect Metadata</button>
+                        <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onCreateMediaAction}>Create Media</button>
+                      </div>
+                    </>
+                  )}
+                  {projectStatus === "connected" && workspaceStatus === "ready" && (
+                    <>
+                      <h2>Ready to build</h2>
+                      <p>Describe the outcome or start a guided mission in {projectName}.</p>
+                      <div className={styles.emptyActions}>
+                        <button className={styles.button} onClick={onStartBuildAction}>Start Mission</button>
+                        <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onInspectProjectAction}>Inspect Project</button>
+                        <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onCreateMediaAction}>Create Media</button>
+                      </div>
+                    </>
+                  )}
                 </div>
                 <div className={styles.workflowSteps}>
-                  {["Inspect", "Plan", "Execute", "Review", "Deploy"].map((step, index, steps) => (
+                  {["Inspect", "Plan", "Approve", "Execute", "Verify", "Deploy"].map((step, index, steps) => (
                     <span key={step} style={{ display: "contents" }}>
                       <span className={styles.workflowStep}>{step}</span>
                       {index < steps.length - 1 && (
@@ -499,20 +584,40 @@ export default function StudioCommandDeck({
             <aside className={`${styles.modeSidebar} ${styles.commandSidebar}`}>
               <Panel title="System activity" icon={Activity}>
                 <div className={styles.activityTimeline}>
-                  <div className={styles.activityItem}>
-                    <Activity size={13} /> Waiting for project connection
-                  </div>
-                  <div className={styles.activityItem}>
-                    <Cloud size={13} /> Services will appear after verification
-                  </div>
-                  <div className={styles.activityItem}>
-                    <Bot size={13} /> Agent events will appear during missions
-                  </div>
+                  {activityEvents.length === 0 && (
+                    <div className={styles.activityItem}>
+                      <Activity size={13} /> No activity yet. Select a project to begin.
+                    </div>
+                  )}
+                  {activityEvents.map((event) => (
+                    <div
+                      key={event.id}
+                      className={styles.activityItem}
+                      style={{
+                        borderLeftColor:
+                          event.status === "error" ? "rgba(239,68,68,.4)" :
+                          event.status === "warning" ? "rgba(251,191,36,.4)" :
+                          event.status === "success" ? "rgba(67,245,155,.4)" :
+                          event.status === "running" ? "rgba(41,228,255,.4)" :
+                          "rgba(126,151,218,.2)",
+                      }}
+                    >
+                      {event.type === "project" && <FolderOpen size={13} />}
+                      {event.type === "workspace" && <Cloud size={13} />}
+                      {event.type === "agent" && <Bot size={13} />}
+                      {event.type === "terminal" && <Terminal size={13} />}
+                      {event.type === "preview" && <Monitor size={13} />}
+                      {event.type === "mission" && <Workflow size={13} />}
+                      {event.type === "git" && <GitBranch size={13} />}
+                      {event.type === "deployment" && <Sparkles size={13} />}
+                      <span>{event.message}</span>
+                    </div>
+                  ))}
                 </div>
               </Panel>
             </aside>
 
-            <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} />
+            <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} projectName={projectName} workspaceLabel={workspaceLabel} />
           </div>
         )}
 
@@ -534,6 +639,8 @@ export default function StudioCommandDeck({
               onCollapseAction={() => setCollapsed("terminal")}
               agentName={terminalAgentName}
               agentColor={terminalAgentColor}
+              projectName={projectName}
+              workspaceLabel={workspaceLabel}
             />
           </div>
         )}
@@ -546,7 +653,31 @@ export default function StudioCommandDeck({
           Example: on mobile, only render conversation when mobileView === "chat". */}
       {(mobileView ? mobileView === "chat" : true) && showConversation && (
         <div className={styles.conversationPanel}>
-          {conversation}
+          <div className="flex items-center gap-2 border-b border-white/8 px-3 py-2 shrink-0">
+            <span
+              className="h-2 w-2 rounded-full shrink-0"
+              style={{ backgroundColor: terminalAgentColor ?? "#29e4ff" }}
+            />
+            <div className="min-w-0 flex-1">
+              <div className="text-xs font-bold text-white truncate">{terminalAgentName ?? "LiTT"}</div>
+              <div className="text-[9px] text-white/40 truncate">
+                {activeAgentInfo?.role ?? "AI Assistant"}
+                {projectName ? ` · ${projectName}` : ""}
+              </div>
+            </div>
+            <span
+              className="text-[9px] font-bold rounded px-1.5 py-0.5"
+              style={{
+                color: busyAgentId ? "#facc15" : "#43f59b",
+                backgroundColor: busyAgentId ? "#facc1515" : "#43f59b15",
+              }}
+            >
+              {busyAgentId ? "Working" : "Available"}
+            </span>
+          </div>
+          <div className="min-h-0 flex-1 overflow-hidden">
+            {conversation}
+          </div>
         </div>
       )}
     </section>
