@@ -4,83 +4,181 @@ import Link from "next/link";
 import { Sparkles } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
+type LiTTStatusCardProps = {
+  onClose?: () => void;
+  className?: string;
+};
+
+const WAVE_BARS = Array.from({ length: 28 }, (_, index) => ({
+  id: index,
+  height: 28 + ((index * 19) % 68),
+  opacity: 0.45 + ((index * 7) % 45) / 100,
+  delay: `${(index % 8) * 70}ms`,
+}));
+
 /**
- * Shared "LiTT is online" promo card.
+ * Shared LiTT presence card.
  *
- * Extracted from `src/components/Sidebar.tsx` (Phase 1 cleanup) so the same
- * visual treatment can be used in the LiTT Base Station without duplicating
- * the markup. The card is a self-contained promotional surface — it does not
- * own any state. Callers may pass an `onClose` to dismiss it (e.g. inside the
- * mobile drawer).
+ * Displays LiTT's availability and provides a direct entry point into Studio.
+ * The component owns no application state and can safely be reused inside
+ * sidebars, drawers, dashboards, and Base Station surfaces.
  */
 export default function LiTTStatusCard({
   onClose,
-  T,
-}: {
-  onClose?: () => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
+  className = "",
+}: LiTTStatusCardProps) {
+  const { resolvedColors: T } = useTheme();
+
   return (
     <section
-      className="relative mt-3 overflow-hidden rounded-2xl border p-2"
+      aria-label="LiTT AI assistant status"
+      className={[
+        "relative mt-3 overflow-hidden rounded-2xl border p-2.5",
+        "shadow-[0_14px_45px_rgba(0,0,0,0.25)]",
+        className,
+      ].join(" ")}
       style={{
-        borderColor: `${T.accentColor}38`,
-        backgroundColor: `${T.boxBg}bb`,
+        borderColor: `${T.accentColor}40`,
+        background: `
+          linear-gradient(
+            145deg,
+            ${T.boxBg}f2 0%,
+            ${T.boxBg}c9 62%,
+            ${T.accentColor}10 100%
+          )
+        `,
       }}
     >
       <div
-        className="relative h-24 overflow-hidden rounded-xl border bg-cover bg-center"
+        className="group relative min-h-32 overflow-hidden rounded-xl border bg-cover bg-center"
         style={{
-          borderColor: `${T.borderColor}20`,
-          backgroundImage:
-            "linear-gradient(to top, rgba(5,6,12,.95), rgba(5,6,12,.08)), url('/api/artwork/void-entity')",
+          borderColor: `${T.borderColor}28`,
+          backgroundImage: `
+            linear-gradient(
+              to top,
+              rgba(4, 5, 12, 0.98) 0%,
+              rgba(4, 5, 12, 0.72) 38%,
+              rgba(4, 5, 12, 0.12) 100%
+            ),
+            url("/api/artwork/void-entity")
+          `,
         }}
       >
-        <span
-          className="absolute left-2 top-2 rounded-full border bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase tracking-wider text-violet-200"
-          style={{ borderColor: `${T.accentColor}45` }}
-        >
-          LiTT
-        </span>
-        <span className="absolute right-2 top-2 flex items-center gap-1 rounded-full border border-emerald-400/25 bg-black/65 px-1.5 py-0.5 text-[7px] font-black uppercase text-emerald-300">
-          <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />{" "}
-          Online
-        </span>
-        <div className="absolute inset-x-2 bottom-2">
-          <b className="block text-[10px] text-white">Your AI building partner</b>
-          <span className="text-[7px] text-white/55">
-            Project-aware · voice · vision · code
+        <div
+          aria-hidden="true"
+          className="absolute inset-0 opacity-70"
+          style={{
+            background: `
+              radial-gradient(
+                circle at 70% 20%,
+                ${T.accentColor}35,
+                transparent 42%
+              )
+            `,
+          }}
+        />
+
+        <div className="relative flex items-start justify-between gap-2 p-2.5">
+          <span
+            className="rounded-full border bg-black/65 px-2 py-1 text-[9px] font-black uppercase tracking-[0.16em] text-violet-100 backdrop-blur-md"
+            style={{
+              borderColor: `${T.accentColor}55`,
+            }}
+          >
+            LiTT
+          </span>
+
+          <span className="flex items-center gap-1.5 rounded-full border border-emerald-400/30 bg-black/65 px-2 py-1 text-[9px] font-black uppercase tracking-[0.12em] text-emerald-300 backdrop-blur-md">
+            <span
+              aria-hidden="true"
+              className="h-2 w-2 rounded-full bg-emerald-400 shadow-[0_0_10px_rgba(52,211,153,0.85)] motion-safe:animate-pulse"
+            />
+            Online
           </span>
         </div>
+
+        <div className="absolute inset-x-0 bottom-0 p-3">
+          <p className="text-sm font-black leading-tight text-white">
+            Your AI building partner
+          </p>
+
+          <p className="mt-1 text-[10px] font-medium leading-relaxed text-white/65">
+            Project-aware · Voice · Vision · Code
+          </p>
+        </div>
       </div>
+
       <div
-        className="mt-2 flex h-5 items-end gap-[2px] overflow-hidden rounded-lg border bg-black/25 px-2 py-1"
-        style={{ borderColor: `${T.borderColor}18` }}
+        aria-hidden="true"
+        className="mt-2.5 flex h-8 items-end justify-center gap-[3px] overflow-hidden rounded-lg border bg-black/30 px-2.5 py-1.5"
+        style={{
+          borderColor: `${T.borderColor}22`,
+        }}
       >
-        {Array.from({ length: 30 }).map((_, index) => (
+        {WAVE_BARS.map((bar) => (
           <span
-            key={index}
-            className="w-[2px] rounded-full"
+            key={bar.id}
+            className={[
+              "w-[3px] min-w-[3px] rounded-full",
+              "origin-bottom",
+              "motion-safe:animate-[litt-wave_1.35s_ease-in-out_infinite]",
+            ].join(" ")}
             style={{
-              height: `${22 + ((index * 19) % 72)}%`,
-              opacity: 0.45 + ((index * 7) % 45) / 100,
-              background: `linear-gradient(${T.accentColor}, ${T.linkColor})`,
+              height: `${bar.height}%`,
+              opacity: bar.opacity,
+              animationDelay: bar.delay,
+              background: `linear-gradient(to top, ${T.accentColor}, ${T.linkColor})`,
+              boxShadow: `0 0 8px ${T.accentColor}35`,
             }}
           />
         ))}
       </div>
+
       <Link
         href="/studio?tool=chat"
         onClick={onClose}
-        className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-lg border px-2 py-1.5 text-[8px] font-black uppercase tracking-[.12em] transition-colors hover:bg-white/5"
+        aria-label="Open LiTT chat in Studio"
+        className={[
+          "mt-2.5 flex min-h-10 w-full items-center justify-center gap-2",
+          "rounded-xl border px-3 py-2",
+          "text-[10px] font-black uppercase tracking-[0.13em]",
+          "transition duration-200",
+          "hover:-translate-y-0.5 hover:brightness-110",
+          "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-offset-2",
+          "focus-visible:ring-offset-black",
+          "active:translate-y-0",
+        ].join(" ")}
         style={{
-          borderColor: `${T.accentColor}35`,
-          backgroundColor: `${T.accentColor}12`,
+          borderColor: `${T.accentColor}45`,
+          background: `
+            linear-gradient(
+              135deg,
+              ${T.accentColor}20,
+              ${T.linkColor}12
+            )
+          `,
           color: T.headerColor,
+          boxShadow: `0 8px 24px ${T.accentColor}12`,
         }}
       >
-        <Sparkles size={10} /> Ask LiTT anything
+        <Sparkles aria-hidden="true" size={14} strokeWidth={2.4} />
+        Ask LiTT anything
       </Link>
+
+      <style jsx>{`
+        @keyframes litt-wave {
+          0%,
+          100% {
+            transform: scaleY(0.35);
+            filter: brightness(0.85);
+          }
+
+          50% {
+            transform: scaleY(1);
+            filter: brightness(1.25);
+          }
+        }
+      `}</style>
     </section>
   );
 }

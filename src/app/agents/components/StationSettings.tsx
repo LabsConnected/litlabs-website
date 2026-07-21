@@ -44,14 +44,17 @@ export default function StationSettings({ saving }: StationSettingsProps) {
               key={id}
               type="button"
               onClick={() => setMode(id)}
-              className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider transition-all"
+              aria-pressed={active}
+              className="flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[10px] font-black uppercase tracking-wider transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2"
               style={{
                 borderColor: active ? T.accentColor : `${T.borderColor}30`,
                 backgroundColor: active ? `${T.accentColor}22` : "transparent",
                 color: active ? T.accentColor : T.textMuted,
+                boxShadow: active ? `0 0 14px ${T.accentColor}30` : undefined,
+                outlineColor: T.accentColor,
               }}
             >
-              <Icon size={10} /> {label}
+              <Icon size={10} className="pointer-events-none" aria-hidden="true" /> {label}
             </button>
           );
         })}
@@ -63,7 +66,7 @@ export default function StationSettings({ saving }: StationSettingsProps) {
         className="flex items-center gap-1.5 text-[9px] font-bold uppercase tracking-wider"
         style={{ color: saving ? T.accentColor : T.textMuted }}
       >
-        <Save size={10} className={saving ? "animate-pulse" : ""} />
+        <Save size={10} className={`pointer-events-none ${saving ? "animate-pulse" : ""}`} aria-hidden="true" />
         {saving ? "Saving…" : "Saved"}
       </div>
 
@@ -71,15 +74,13 @@ export default function StationSettings({ saving }: StationSettingsProps) {
         <button
           type="button"
           onClick={() => {
-            saveToLocalStorage();
-            // Trigger an explicit "save" pulse by re-applying the current layout.
             resetLayout();
             saveToLocalStorage();
           }}
           className="flex items-center gap-1 rounded-full border px-2.5 py-1 text-[10px] font-bold transition-all"
           style={{ borderColor: `${T.borderColor}30`, color: T.textMuted }}
         >
-          <RotateCcw size={10} /> Reset
+          <RotateCcw size={10} className="pointer-events-none" aria-hidden="true" /> Reset
         </button>
       </div>
     </section>

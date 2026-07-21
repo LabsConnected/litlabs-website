@@ -24,8 +24,11 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useCallback, useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "./studio-command-deck.module.css";
+import GeminiModelPicker, { type ChatModelSelection } from "./GeminiModelPicker";
+import AgentTool from "../tools/AgentTool";
+import type { AgentId } from "@/app/agents/store/stationStore";
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
@@ -34,17 +37,27 @@ const StudioMonacoEditor = dynamic(() => import("./StudioMonacoEditor"), { ssr: 
 
 // Dev-only: detect duplicate deck mounts (must run at module scope for the component root)
 if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
-  const w = window as typeof window & Record<string, number>;
+  const _w = window as typeof window & Record<string, number>;
   // will be incremented in the component effect below
 }
 
 export type StudioCommandDeckMode = "code" | "media" | "command";
+export type CommandSurface = "mission" | "agents";
 
 type DeckProps = {
   mode: StudioCommandDeckMode;
   onModeChangeAction: (mode: StudioCommandDeckMode) => void;
   activeProjectId: string | null;
   onOpenProjectsAction: () => void;
+  selectedModel: ChatModelSelection;
+  onModelChange: (model: ChatModelSelection) => void;
+  commandSurface: CommandSurface;
+  onCommandSurfaceChangeAction: (surface: CommandSurface) => void;
+  selectedAgentId: AgentId | null;
+  onSelectAgentAction: (agentId: AgentId) => void;
+  onOpenAgentChatAction: (agentId: AgentId) => void;
+  onAssignMissionAction: (agentId: AgentId) => void;
+  onOpenAgentTerminalAction: (agentId: AgentId) => void;
   conversation: ReactNode;
   terminal: ReactNode;
   // Controlled mobile surface (chat | build | files | preview | terminal).
@@ -60,9 +73,9 @@ type DeckProps = {
 type RailItem = { id: StudioCommandDeckMode | "files" | "agents" | "terminal" | "settings"; label: string; icon: LucideIcon };
 
 const RAIL: RailItem[] = [
+  { id: "command", label: "Mission", icon: Workflow },
   { id: "code", label: "Code", icon: Code2 },
   { id: "media", label: "Media", icon: Video },
-  { id: "command", label: "Command", icon: Workflow },
   { id: "files", label: "Files", icon: FolderOpen },
   { id: "agents", label: "Agents", icon: Bot },
   { id: "terminal", label: "Terminal", icon: Terminal },
@@ -121,12 +134,7 @@ function DockedTerminal({
       className={`${styles.dockedTerminal} ${collapsed ? styles.dockedTerminalCollapsed : ""}`}
     >
       <header className={styles.dockedTerminalHeader}>
-        <div className={styles.terminalTabs}>
-          <button data-active="true">Terminal</button>
-          <button>Problems</button>
-          <button>Output</button>
-          <button>Tests</button>
-        </div>
+        <span className={styles.terminalLabel}>Terminal</span>
 
         <button
           type="button"
@@ -186,124 +194,28 @@ function EmptyState({ title, description, actionLabel, onAction, secondaryLabel 
   return <div className={styles.empty}><div className={styles.emptyCard}><CircleAlert size={18} className="mx-auto mb-2 text-cyan-200" /><h3>{title}</h3><p>{description}</p>{actionLabel && onAction && <div className={styles.emptyActions}><button className={styles.button} onClick={onAction}>{actionLabel}</button>{secondaryLabel && <button className={`${styles.button} ${styles.buttonSecondary}`} disabled>{secondaryLabel}</button>}</div>}</div></div>;
 }
 
-// Compact worker status for the Studio header only.
-// Uses the real /api/system/autonomic-health (no task content, no auth bypass).
-function WorkerStatus() {
-  type WState = "checking" | "online" | "degraded" | "offline";
-  const [state, setState] = useState<WState>("checking");
-  const [detail, setDetail] = useState<string>("");
-  const [open, setOpen] = useState(false);
-  const [data, setData] = useState<null | {
-    queued?: number; running?: number; failed?: number;
-    lastHeartbeat?: string | null; lastSuccess?: string | null;
-  }>(null);
-
-  const fetchHealth = useCallback(async () => {
-    try {
-      const res = await fetch("/api/system/autonomic-health", { cache: "no-store" });
-      if (!res.ok) { setState("degraded"); return; }
-      const j = await res.json() as {
-        worker?: string; status?: string;
-        queuedTasks?: number; runningTasks?: number; failedTasks?: number;
-        lastWorkerHeartbeat?: string | null; lastSuccessfulTask?: string | null;
-      };
-      const w = (j.worker || j.status || "offline").toLowerCase();
-      const mapped: WState = w === "online" ? "online" : w === "degraded" ? "degraded" : "offline";
-      setState(mapped);
-      setData({
-        queued: j.queuedTasks,
-        running: j.runningTasks,
-        failed: j.failedTasks,
-        lastHeartbeat: j.lastWorkerHeartbeat ?? null,
-        lastSuccess: j.lastSuccessfulTask ?? null,
-      });
-      setDetail(`worker: ${j.worker || "unknown"}`);
-    } catch {
-      setState("offline");
-      setDetail("unreachable");
-    }
-  }, []);
-
-  useEffect(() => {
-    let alive = true;
-    let vis = typeof document === "undefined" ? true : !document.hidden;
-
-    const onVis = () => {
-      const next = !document.hidden;
-      if (next === vis) return;
-      vis = next;
-      if (vis && alive) void fetchHealth();
-    };
-    document.addEventListener("visibilitychange", onVis);
-
-    void fetchHealth();
-    const id = setInterval(() => { if (vis && alive) void fetchHealth(); }, 30000);
-
-    return () => {
-      alive = false;
-      clearInterval(id);
-      document.removeEventListener("visibilitychange", onVis);
-    };
-  }, [fetchHealth]);
-
-  const color =
-    state === "online" ? "#22c55e" :
-    state === "degraded" ? "#f59e0b" :
-    state === "offline" ? "#ef4444" : "#888";
-
-  const label = state === "checking" ? "checking" : state;
-
-  return (
-    <div style={{ position: "relative" }}>
-      <button
-        className={styles.module}
-        onClick={() => setOpen(o => !o)}
-        title={detail || "Worker status"}
-        aria-label={`Worker ${label}`}
-        style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
-      >
-        <span aria-hidden style={{ color, fontSize: 10, lineHeight: 1 }}>●</span>
-        <span>Worker {label}</span>
-      </button>
-
-      {open && (
-        <div
-          style={{
-            position: "absolute", top: "100%", left: 0, zIndex: 50,
-            marginTop: 6, minWidth: 220, padding: "8px 10px",
-            background: "#0b0f1a", border: "1px solid rgba(255,255,255,0.1)",
-            borderRadius: 8, fontSize: 11, color: "#ddd", boxShadow: "0 10px 30px rgba(0,0,0,0.4)"
-          }}
-        >
-          <div style={{ marginBottom: 6, opacity: 0.8 }}>Autonomic worker</div>
-          <div>Queued: <strong>{data?.queued ?? "—"}</strong></div>
-          <div>Running: <strong>{data?.running ?? "—"}</strong></div>
-          <div>Failed: <strong>{data?.failed ?? "—"}</strong></div>
-          <div style={{ marginTop: 6, fontSize: 10, opacity: 0.7 }}>
-            Last heartbeat: {data?.lastHeartbeat ? new Date(data.lastHeartbeat).toLocaleTimeString() : "—"}
-          </div>
-          <div style={{ fontSize: 10, opacity: 0.7 }}>
-            Last success: {data?.lastSuccess ? new Date(data.lastSuccess).toLocaleTimeString() : "—"}
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function StudioCommandDeck({
   mode,
   onModeChangeAction,
   activeProjectId,
   onOpenProjectsAction,
+  selectedModel,
+  onModelChange,
+  commandSurface,
+  onCommandSurfaceChangeAction,
+  selectedAgentId,
+  onSelectAgentAction,
+  onOpenAgentChatAction,
+  onAssignMissionAction,
+  onOpenAgentTerminalAction,
   conversation,
   terminal,
   mobileView,
   onMobileViewChange,
   onMobileTerminalFocusChange,
   onActiveWindowChange,
-  onActiveFileChange,
-  onSelectedAssetChange,
+  onActiveFileChange: _onActiveFileChange,
+  onSelectedAssetChange: _onSelectedAssetChange,
 }: DeckProps) {
   const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
   const [draft, setDraft] = useState("// Demo draft — connect a project to edit real files.\nexport const studioMode = \"code\";\n");
@@ -401,6 +313,14 @@ export default function StudioCommandDeck({
   const selectRail = (id: RailItem["id"]) => {
     if (id === "code" || id === "media" || id === "command") {
       onModeChangeAction(id);
+      if (id === "command") onCommandSurfaceChangeAction("mission");
+      setMobileTerminalFocus(false);
+      onMobileTerminalFocusChange?.(false);
+    }
+    if (id === "agents") {
+      onModeChangeAction("command");
+      onCommandSurfaceChangeAction("agents");
+      onActiveWindowChange?.("agents");
       setMobileTerminalFocus(false);
       onMobileTerminalFocusChange?.(false);
     }
@@ -462,23 +382,32 @@ export default function StudioCommandDeck({
 
   return (
     <section className={deckClass} data-mobile-terminal={mobileTerminalFocus ? "true" : "false"}>
-      <aside className={styles.rail} aria-label="Studio tools">{RAIL.map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}</aside>
+      <aside className={styles.rail} aria-label="Studio tools">
+        <div className={styles.railGroup}>
+          {RAIL.slice(0, 3).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}
+        </div>
+        <span className={styles.railDivider} aria-hidden="true" />
+        <div className={styles.railGroup}>
+          {RAIL.slice(3).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}
+        </div>
+      </aside>
+
+      <header className={styles.commandBar}>
+        <div className={styles.brand}><span className={styles.brandMark}><Sparkles className="pointer-events-none" size={15} aria-hidden="true" /></span><span>LiTT</span></div>
+        <GeminiModelPicker value={selectedModel} onChange={onModelChange} />
+        <div className={styles.modules}>
+          <button data-module="project" className={styles.module} onClick={onOpenProjectsAction}><FolderOpen className="pointer-events-none" size={12} aria-hidden="true" /><strong>{projectLabel}</strong><ChevronDown className="pointer-events-none" size={11} aria-hidden="true" /></button>
+          <span data-module="branch" className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
+          <span className={styles.statusDivider} aria-hidden="true" />
+          <span data-module="preview" className={styles.module}><Monitor size={12} />Preview <strong>Unavailable</strong></span>
+          <span data-module="services" className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
+          <span data-module="credits" className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
+        </div>
+        <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
+      </header>
 
       {/* Workspace area (mode-specific content) */}
       <div className={styles.workspace}>
-        <header className={styles.commandBar}>
-          <div className={styles.brand}><span className={styles.brandMark}><Sparkles size={15} /></span><span>LiTT</span></div>
-          <WorkerStatus />
-          <div className={styles.modules}>
-            <button className={styles.module} onClick={onOpenProjectsAction}><FolderOpen size={12} /><strong>{projectLabel}</strong><ChevronDown size={11} /></button>
-            <span className={styles.module}><GitBranch size={12} /><strong>{activeProjectId ? "Branch unavailable" : "No branch"}</strong></span>
-            <span className={styles.module}><Monitor size={12} />Preview <strong>Unavailable</strong></span>
-            <span className={styles.module}><Cloud size={12} />Services <strong>Not connected</strong></span>
-            <span className={styles.module}><Sparkles size={12} />Credits <strong>Unavailable</strong></span>
-          </div>
-          <div className={styles.actions}><button className={styles.iconButton} onClick={resetLayout} aria-label="Reset Studio layout" title="Reset layout">↺</button><button className={styles.iconButton} aria-label="Notifications" title="Notifications"><Bell size={14} /></button><button className={styles.iconButton} aria-label="Profile" title="Profile"><Users size={14} /></button></div>
-        </header>
-
         {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
           <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
           <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><FolderOpen size={13} /></button>}>
@@ -488,17 +417,17 @@ export default function StudioCommandDeck({
           <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
             <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><Maximize2 size={13} /></button></>}><div className={styles.editor}><StudioMonacoEditor value={draft} onChange={setDraft} /></div></Panel>
             {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
-            <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="View requirements" onAction={() => undefined} /></div></Panel>
+            <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="Open project" onAction={onOpenProjectsAction} /></div></Panel>
           </div>
           {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
-          <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." />}</Panel>
+          <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." actionLabel="Open agents" onAction={() => selectRail('agents')} />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." actionLabel="Open project" onAction={onOpenProjectsAction} />}</Panel>
           {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
           <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} />
         </div>}
 
-        {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} /></div>}
+        {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p><button className={styles.button} onClick={() => selectRail('command')}>Plan prompt</button></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p><button className={styles.button} onClick={() => selectRail('command')}>Queue render</button></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p><button className={styles.button} onClick={() => selectRail('files')}>Open library</button></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} /></div>}
 
-        {mode === "command" && (
+        {mode === "command" && commandSurface === "mission" && (
           <div className={`${styles.main} ${styles.commandModeMain}`}>
             <Panel
               title="Mission command center"
@@ -553,6 +482,25 @@ export default function StudioCommandDeck({
             </aside>
 
             <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} />
+          </div>
+        )}
+
+        {mode === "command" && commandSurface === "agents" && (
+          <div className={`${styles.main} ${styles.agentModeMain}`}>
+            <div className={styles.agentWorkspace}>
+              <AgentTool
+                selectedAgentId={selectedAgentId}
+                onSelectAgentAction={onSelectAgentAction}
+                onOpenAgentChatAction={onOpenAgentChatAction}
+                onAssignMissionAction={onAssignMissionAction}
+                onOpenTerminalAction={onOpenAgentTerminalAction}
+              />
+            </div>
+            <DockedTerminal
+              terminal={terminal}
+              collapsed={layout.collapsed.terminal}
+              onCollapseAction={() => setCollapsed("terminal")}
+            />
           </div>
         )}
 

@@ -567,7 +567,7 @@ export function ChatShell({
                 }
               }}
             >
-              <Mic size={18} />
+              <Mic className="pointer-events-none" size={18} aria-hidden="true" />
             </button>
             <button
               className={styles.send}
@@ -575,7 +575,7 @@ export function ChatShell({
               aria-label="Send message"
               title="Send"
             >
-              <ArrowUp size={18} />
+              <ArrowUp className="pointer-events-none" size={18} aria-hidden="true" />
             </button>
           </form>
         </footer>

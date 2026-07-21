@@ -371,7 +371,7 @@ export default function CanvasTool() {
             border: `1px solid ${mobilePanel === "code" ? T.accentColor + "30" : "transparent"}`,
           }}
         >
-          <Code size={12} /> Code
+          <Code className="pointer-events-none" size={12} /> Code
         </button>
         <button
           onClick={() => {
@@ -386,7 +386,7 @@ export default function CanvasTool() {
             border: `1px solid ${mobilePanel === "preview" ? T.accentColor + "30" : "transparent"}`,
           }}
         >
-          <Eye size={12} /> Preview
+          <Eye className="pointer-events-none" size={12} /> Preview
         </button>
       </div>
 
@@ -407,7 +407,7 @@ export default function CanvasTool() {
                     border: `1px solid ${T.accentColor}30`,
                   }}
                 >
-                  <Code size={24} style={{ color: T.accentColor }} />
+                  <Code className="pointer-events-none" size={24} style={{ color: T.accentColor }} />
                 </div>
                 <h3
                   className="text-base font-black mb-2"
@@ -507,7 +507,7 @@ export default function CanvasTool() {
                         border: `1px solid ${T.accentColor}30`,
                       }}
                     >
-                      <FileCode size={10} /> View code
+                      <FileCode className="pointer-events-none" size={10} /> View code
                     </button>
                   )}
                 </div>
@@ -620,7 +620,7 @@ export default function CanvasTool() {
                     border: `1px solid ${activeFile === file.name ? T.accentColor + "30" : "transparent"}`,
                   }}
                 >
-                  <FileCode size={10} /> {file.name}
+                  <FileCode className="pointer-events-none" size={10} /> {file.name}
                 </button>
               ))}
               {generatedFiles.length === 0 && (
@@ -641,7 +641,7 @@ export default function CanvasTool() {
                   color: previewMode === "code" ? T.accentColor : T.textMuted,
                 }}
               >
-                <Code size={13} />
+                <Code className="pointer-events-none" size={13} />
               </button>
               <button
                 onClick={() => setPreviewMode("preview")}
@@ -655,7 +655,7 @@ export default function CanvasTool() {
                     previewMode === "preview" ? T.accentColor : T.textMuted,
                 }}
               >
-                <Eye size={13} />
+                <Eye className="pointer-events-none" size={13} />
               </button>
               {generatedFiles.length > 0 && (
                 <>
@@ -664,27 +664,29 @@ export default function CanvasTool() {
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    {copied ? <Check size={13} /> : <Copy size={13} />}
+                    {copied ? <Check className="pointer-events-none" size={13} aria-hidden="true" /> : <Copy className="pointer-events-none" size={13} aria-hidden="true" />}
                   </button>
                   <button
                     onClick={downloadFile}
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    <Download size={13} />
+                    <Download className="pointer-events-none" size={13} aria-hidden="true" />
                   </button>
                   <button
                     onClick={() => {
                       const win = window.open("", "_blank");
                       if (win) {
-                        win.document.write(getPreviewHtml());
-                        win.document.close();
+                        requestAnimationFrame(() => {
+                          win.document.write(getPreviewHtml());
+                          win.document.close();
+                        });
                       }
                     }}
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    <Play size={13} />
+                    <Play className="pointer-events-none" size={13} aria-hidden="true" />
                   </button>
                 </>
               )}
@@ -702,7 +704,7 @@ export default function CanvasTool() {
                     border: `1px solid ${T.borderColor}30`,
                   }}
                 >
-                  <Terminal size={24} style={{ color: T.textMuted }} />
+                  <Terminal className="pointer-events-none" size={24} style={{ color: T.textMuted }} aria-hidden="true" />
                 </div>
                 <p className="text-xs" style={{ color: T.textMuted }}>
                   Generated code appears here

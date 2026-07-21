@@ -1,251 +1,421 @@
 "use client";
 
-import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useState } from "react";
 import {
-  Bot,
-  ChevronRight,
-  Coins,
-  Crown,
-  Film,
-  FolderOpen,
-  Hammer,
-  Image as ImageIcon,
-  MessageSquare,
-  Music2,
-  PanelLeftClose,
-  PanelLeftOpen,
-  ShieldCheck,
-  TerminalSquare,
-  X,
-  Zap,
-} from "lucide-react";
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { useWallet } from "@/context/WalletContext";
-import { useAppUser, useClerkAuth } from "@/hooks/useClerkAuth";
-import { COLLAPSED_KEY, NAV_GROUPS, type NavGroup } from "@/lib/navigation";
-import LiTTStatusCard from "@/components/dashboard/LiTTStatusCard";
+import { AGENTS } from "@/lib/agents";
+import {
+  useStationStore,
+  moveAgent,
+  type AgentId,
+  type StationMode,
+  type AgentPlacement,
+} from "@/app/agents/store/stationStore";
 
-interface SidebarProps {
-  open?: boolean;
-  onClose?: () => void;
+const AGENT_IDS = ["litt", "spark"] as const satisfies readonly AgentId[];
+const EDGE_PADDING = 56;
+const DRAG_THRESHOLD = 4;
+
+interface Star {
+  x: number;
+  y: number;
+  size: 1 | 2;
+  delay: number;
+  duration: number;
 }
 
-const QUICK_TOOLS = [
-  { label: "Chat", href: "/studio?tool=chat", icon: MessageSquare, color: "#22d3ee" },
-  { label: "Image", href: "/studio?tool=image", icon: ImageIcon, color: "#a78bfa" },
-  { label: "Video", href: "/studio?tool=video", icon: Film, color: "#f472b6" },
-  { label: "Audio", href: "/studio?tool=audio", icon: Music2, color: "#e879f9" },
-  { label: "Build", href: "/studio?tool=builder", icon: Hammer, color: "#fb923c" },
-  { label: "Terminal", href: "/studio?tool=terminal", icon: TerminalSquare, color: "#34d399" },
-  { label: "Agents", href: "/agents", icon: Bot, color: "#c084fc" },
-  { label: "Assets", href: "/gallery", icon: FolderOpen, color: "#2dd4bf" },
-] as const;
+// Deterministic stars prevent hydration mismatch and visual flicker.
+const STARS: readonly Star[] = Array.from({ length: 60 }, (_, index) => {
+  const seedX = Math.sin(index * 12.9898) * 43758.5453;
+  const seedY = Math.sin(index * 78.233) * 43758.5453;
+  const normalizedX = seedX - Math.floor(seedX);
+  const normalizedY = seedY - Math.floor(seedY);
 
-function SidebarContent({
-  collapsed,
-  onClose,
-  onToggleCollapse,
-}: {
-  collapsed: boolean;
-  onClose?: () => void;
-  onToggleCollapse?: () => void;
-}) {
-  const pathname = usePathname();
-  const searchParams = useSearchParams();
+  return {
+    x: normalizedX * 100,
+    y: normalizedY * 100,
+    size: normalizedX > 0.72 ? 2 : 1,
+    delay: (index * 0.13) % 4,
+    duration: 3.2 + normalizedY * 2.4,
+  };
+});
+
+interface StationViewportProps {
+  mode: StationMode;
+  onSelectAgent: (id: AgentId) => void;
+  selectedAgent: AgentId | null;
+}
+
+interface DragState {
+  id: AgentId;
+  pointerId: number;
+  grabOffsetX: number;
+  grabOffsetY: number;
+  startClientX: number;
+  startClientY: number;
+  moved: boolean;
+}
+
+export default function StationViewport({
+  mode,
+  onSelectAgent,
+  selectedAgent,
+}: StationViewportProps) {
   const { resolvedColors: T } = useTheme();
-  const { balance } = useWallet();
-  const { isSignedIn } = useClerkAuth();
-  const { user } = useAppUser();
-  const [plan, setPlan] = useState("free");
+  const layout = useStationStore();
+  const viewportRef = useRef<HTMLDivElement>(null);
+  const dragRef = useRef<DragState | null>(null);
+  const suppressClickRef = useRef<AgentId | null>(null);
+  const parallaxFrameRef = useRef<number | null>(null);
+
+  const [draggingId, setDraggingId] = useState<AgentId | null>(null);
+  const [parallax, setParallax] = useState({ x: 0, y: 0 });
+  const [prefersReducedMotion, setPrefersReducedMotion] = useState(false);
 
   useEffect(() => {
-    if (!isSignedIn || !user?.id) return;
-    let current = true;
-    fetch(`/api/users/${user.id}/plan`)
-      .then((response) => (response.ok ? response.json() : { plan: "free" }))
-      .then((data) => {
-        if (current && data.plan) setPlan(data.plan);
-      })
-      .catch(() => {});
-    return () => {
-      current = false;
-    };
-  }, [isSignedIn, user?.id]);
+    const media = window.matchMedia("(prefers-reduced-motion: reduce)");
+    const updatePreference = () => setPrefersReducedMotion(media.matches);
 
-  const activeHref = useCallback(
-    (href: string) => {
-      const [path, query] = href.split("?");
-      if (pathname !== path) return false;
-      if (!query) return true;
-      const params = new URLSearchParams(query);
-      return Array.from(params.entries()).every(
-        ([key, value]) => searchParams.get(key) === value,
-      );
+    updatePreference();
+    media.addEventListener("change", updatePreference);
+    return () => media.removeEventListener("change", updatePreference);
+  }, []);
+
+  useEffect(() => {
+    if (mode !== "explore" || prefersReducedMotion) {
+      setParallax({ x: 0, y: 0 });
+      return;
+    }
+
+    const viewport = viewportRef.current;
+    if (!viewport) return;
+
+    const handlePointerMove = (event: PointerEvent) => {
+      if (event.pointerType === "touch") return;
+
+      if (parallaxFrameRef.current !== null) {
+        cancelAnimationFrame(parallaxFrameRef.current);
+      }
+
+      parallaxFrameRef.current = requestAnimationFrame(() => {
+        const rect = viewport.getBoundingClientRect();
+        if (rect.width === 0 || rect.height === 0) return;
+
+        const x = Math.max(-0.5, Math.min(0.5, (event.clientX - rect.left) / rect.width - 0.5));
+        const y = Math.max(-0.5, Math.min(0.5, (event.clientY - rect.top) / rect.height - 0.5));
+        setParallax({ x, y });
+      });
+    };
+
+    const resetParallax = () => setParallax({ x: 0, y: 0 });
+
+    viewport.addEventListener("pointermove", handlePointerMove, { passive: true });
+    viewport.addEventListener("pointerleave", resetParallax);
+
+    return () => {
+      if (parallaxFrameRef.current !== null) {
+        cancelAnimationFrame(parallaxFrameRef.current);
+        parallaxFrameRef.current = null;
+      }
+      viewport.removeEventListener("pointermove", handlePointerMove);
+      viewport.removeEventListener("pointerleave", resetParallax);
+    };
+  }, [mode, prefersReducedMotion]);
+
+  const finishDrag = useCallback(() => {
+    const drag = dragRef.current;
+    if (drag?.moved) suppressClickRef.current = drag.id;
+    dragRef.current = null;
+    setDraggingId(null);
+  }, []);
+
+  useEffect(() => {
+    if (!draggingId) return;
+
+    const cancelDrag = () => finishDrag();
+    window.addEventListener("blur", cancelDrag);
+    window.addEventListener("pointerup", cancelDrag);
+    window.addEventListener("pointercancel", cancelDrag);
+
+    return () => {
+      window.removeEventListener("blur", cancelDrag);
+      window.removeEventListener("pointerup", cancelDrag);
+      window.removeEventListener("pointercancel", cancelDrag);
+    };
+  }, [draggingId, finishDrag]);
+
+  const handlePointerDown = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>, id: AgentId) => {
+      if (mode !== "edit" || event.button !== 0) return;
+
+      const tileRect = event.currentTarget.getBoundingClientRect();
+      const tileCenterX = tileRect.left + tileRect.width / 2;
+      const tileCenterY = tileRect.top + tileRect.height / 2;
+
+      dragRef.current = {
+        id,
+        pointerId: event.pointerId,
+        grabOffsetX: event.clientX - tileCenterX,
+        grabOffsetY: event.clientY - tileCenterY,
+        startClientX: event.clientX,
+        startClientY: event.clientY,
+        moved: false,
+      };
+
+      suppressClickRef.current = null;
+      setDraggingId(id);
+      event.currentTarget.setPointerCapture(event.pointerId);
+      event.preventDefault();
     },
-    [pathname, searchParams],
+    [mode],
   );
 
-  const activeGroup = (group: NavGroup) =>
-    pathname === group.href ||
-    (group.href !== "/dashboard" && pathname.startsWith(`${group.href}/`)) ||
-    group.items.some(
-      (item) =>
-        item.href &&
-        (group.label === "Studio" || !item.href.startsWith("/studio")) &&
-        activeHref(item.href),
+  const handlePointerMove = useCallback((event: ReactPointerEvent<HTMLDivElement>) => {
+    const drag = dragRef.current;
+    const viewport = viewportRef.current;
+    if (!drag || !viewport || drag.pointerId !== event.pointerId) return;
+
+    const rect = viewport.getBoundingClientRect();
+    const deltaX = event.clientX - drag.startClientX;
+    const deltaY = event.clientY - drag.startClientY;
+
+    if (!drag.moved && Math.hypot(deltaX, deltaY) >= DRAG_THRESHOLD) {
+      drag.moved = true;
+    }
+
+    if (!drag.moved) return;
+
+    const x = Math.max(
+      EDGE_PADDING,
+      Math.min(rect.width - EDGE_PADDING, event.clientX - rect.left - drag.grabOffsetX),
+    );
+    const y = Math.max(
+      EDGE_PADDING,
+      Math.min(rect.height - EDGE_PADDING, event.clientY - rect.top - drag.grabOffsetY),
     );
 
+    moveAgent(drag.id, { x, y });
+  }, []);
+
+  const handlePointerEnd = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag || drag.pointerId !== event.pointerId) return;
+      finishDrag();
+    },
+    [finishDrag],
+  );
+
+  const handleAgentClick = useCallback(
+    (id: AgentId) => {
+      if (suppressClickRef.current === id) {
+        suppressClickRef.current = null;
+        return;
+      }
+      onSelectAgent(id);
+    },
+    [onSelectAgent],
+  );
+
+  const handleAgentKeyDown = useCallback(
+    (event: KeyboardEvent<HTMLDivElement>, id: AgentId) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      onSelectAgent(id);
+    },
+    [onSelectAgent],
+  );
+
+  const sceneTransform = useMemo(() => {
+    if (prefersReducedMotion) return "rotateX(0deg) rotateY(0deg)";
+    const rotateX = (-parallax.y * 4).toFixed(2);
+    const rotateY = (parallax.x * 4).toFixed(2);
+    return `rotateX(${rotateX}deg) rotateY(${rotateY}deg)`;
+  }, [parallax, prefersReducedMotion]);
+
+  const getTileTransform = useCallback(
+    (id: AgentId, placement: AgentPlacement) => {
+      const isDragging = draggingId === id;
+      const scale = (placement.scale ?? 1) * (isDragging ? 1.06 : 1);
+      const rotation = placement.rotation ?? 0;
+      const depth = isDragging ? 18 : selectedAgent === id ? 8 : 0;
+
+      return `translate3d(-50%, -50%, ${depth}px) rotate(${rotation}deg) scale(${scale})`;
+    },
+    [draggingId, selectedAgent],
+  );
+
   return (
-    <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <header
-        className="flex h-14 shrink-0 items-center border-b px-3"
-        style={{ borderColor: `${T.borderColor}22` }}
-      >
-        <Link href="/dashboard" onClick={onClose} className="flex min-w-0 flex-1 items-center gap-2.5">
+    <div
+      ref={viewportRef}
+      className="relative h-full min-h-[360px] w-full overflow-hidden rounded-3xl border"
+      style={{
+        borderColor: `${T.accentColor}30`,
+        background: `radial-gradient(ellipse at 50% 100%, ${T.accentColor}22, transparent 65%), ${T.boxBg}`,
+        perspective: "900px",
+        perspectiveOrigin: "50% 60%",
+        touchAction: mode === "edit" ? "none" : "pan-x pan-y",
+      }}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerEnd}
+      onPointerCancel={handlePointerEnd}
+    >
+      <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+        {STARS.map((star, index) => (
           <span
-            className="relative grid h-9 w-9 shrink-0 place-items-center rounded-xl border"
-            style={{ backgroundColor: `${T.accentColor}14`, borderColor: `${T.accentColor}35`, color: T.accentColor, boxShadow: `inset 0 0 18px ${T.accentColor}20` }}
-          >
-            <Zap size={17} />
-          </span>
-          {!collapsed && (
-            <span className="min-w-0">
-              <b className="block bg-gradient-to-r from-white via-violet-200 to-fuchsia-400 bg-clip-text text-base font-black tracking-[.16em] text-transparent">LiTT</b>
-              <span className="block text-[8px] font-bold uppercase tracking-[.22em]" style={{ color: T.textMuted }}>Lab Studios</span>
-            </span>
-          )}
-        </Link>
-        {onToggleCollapse && !onClose && (
-          <button onClick={onToggleCollapse} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}>
-            {collapsed ? <PanelLeftOpen size={15} /> : <PanelLeftClose size={15} />}
-          </button>
-        )}
-        {onClose && (
-          <button onClick={onClose} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} aria-label="Close navigation"><X size={16} /></button>
-        )}
-      </header>
+            key={index}
+            className="absolute rounded-full motion-reduce:animate-none"
+            style={{
+              left: `${star.x}%`,
+              top: `${star.y}%`,
+              width: star.size,
+              height: star.size,
+              backgroundColor: "#fff",
+              opacity: 0.5,
+              boxShadow: "0 0 5px rgba(255,255,255,.5)",
+              animation: `lit-station-twinkle ${star.duration}s ease-in-out ${star.delay}s infinite`,
+            }}
+          />
+        ))}
+      </div>
 
-      <div className="sidebar-scroll flex-1 overflow-y-auto px-2.5 pb-3">
-        {!collapsed && <LiTTStatusCard onClose={onClose} T={T} />}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-[-12%] bottom-[-38%] h-[115%]"
+        style={{
+          backgroundImage:
+            "linear-gradient(rgba(255,255,255,.075) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,.075) 1px, transparent 1px)",
+          backgroundSize: "32px 32px",
+          WebkitMaskImage: "linear-gradient(to bottom, transparent 4%, black 38%, transparent 92%)",
+          maskImage: "linear-gradient(to bottom, transparent 4%, black 38%, transparent 92%)",
+          transform: "rotateX(63deg) translateZ(-70px)",
+          transformOrigin: "50% 100%",
+          opacity: 0.5,
+        }}
+      />
 
-        <SectionLabel collapsed={collapsed}>Quick access</SectionLabel>
-        <div className={collapsed ? "grid gap-1.5" : "grid grid-cols-4 gap-1.5"}>
-          {QUICK_TOOLS.map((tool) => {
-            const Icon = tool.icon;
-            const active = activeHref(tool.href);
-            return (
-              <Link
-                key={tool.label}
-                href={tool.href}
-                onClick={onClose}
-                title={tool.label}
-                className={`relative flex min-h-12 flex-col items-center justify-center rounded-xl border transition-all hover:-translate-y-px ${collapsed ? "mx-auto w-11" : ""}`}
+      <div
+        className="relative h-full w-full will-change-transform"
+        style={{
+          transform: sceneTransform,
+          transformStyle: "preserve-3d",
+          transition: draggingId ? "none" : "transform 180ms ease-out",
+        }}
+      >
+        {AGENT_IDS.map((id) => {
+          const agent = AGENTS[id];
+          if (!agent) return null;
+
+          const placement: AgentPlacement = layout.placements[id] ?? { x: 200, y: 200 };
+          const color = layout.colors[id] ?? agent.color;
+          const isSelected = selectedAgent === id;
+          const isDragging = draggingId === id;
+
+          return (
+            <div
+              key={id}
+              role="button"
+              tabIndex={0}
+              aria-pressed={isSelected}
+              aria-label={`${agent.name} — ${agent.role}`}
+              onPointerDown={(event) => handlePointerDown(event, id)}
+              onClick={() => handleAgentClick(id)}
+              onKeyDown={(event) => handleAgentKeyDown(event, id)}
+              className="absolute z-10 flex min-w-[108px] select-none flex-col items-center gap-1 rounded-2xl border p-3 outline-none transition-[box-shadow,border-color,background-color] duration-150 focus-visible:ring-2"
+              style={{
+                left: placement.x,
+                top: placement.y,
+                transform: getTileTransform(id, placement),
+                transformStyle: "preserve-3d",
+                borderColor: isSelected ? color : `${color}55`,
+                backgroundColor: `${color}${isSelected ? "2b" : "1f"}`,
+                boxShadow: isDragging
+                  ? `0 20px 42px ${color}55, 0 0 34px ${color}88, inset 0 0 0 1px ${color}66`
+                  : isSelected
+                    ? `0 10px 28px ${color}44, 0 0 20px ${color}55`
+                    : `0 6px 18px ${color}28, inset 0 0 0 1px ${color}33`,
+                cursor: mode === "edit" ? (isDragging ? "grabbing" : "grab") : "pointer",
+                touchAction: "none",
+                willChange: isDragging ? "transform, left, top" : "auto",
+                // Tailwind focus ring cannot consume a runtime theme color reliably.
+                "--tw-ring-color": color,
+              } as CSSProperties}
+            >
+              <div
+                className="grid h-12 w-12 place-items-center rounded-xl text-[11px] font-black"
                 style={{
-                  backgroundColor: active ? `${tool.color}18` : `${T.boxBg}70`,
-                  borderColor: active ? `${tool.color}60` : `${T.borderColor}18`,
-                  color: tool.color,
-                  boxShadow: active ? `0 0 18px ${tool.color}20` : "none",
+                  backgroundColor: `${color}40`,
+                  color: "#fff",
+                  transform: "translateZ(10px)",
+                  boxShadow: `inset 0 0 8px ${color}66, 0 0 14px ${color}55`,
                 }}
               >
-                <Icon size={15} />
-                {!collapsed && <span className="mt-1 truncate text-[7px] font-bold" style={{ color: T.textMuted }}>{tool.label}</span>}
-              </Link>
-            );
-          })}
+                {agent.tag}
+              </div>
+
+              <div
+                className="text-[10px] font-black"
+                style={{
+                  color,
+                  textShadow: `0 0 8px ${color}55`,
+                  transform: "translateZ(6px)",
+                }}
+              >
+                {agent.name}
+              </div>
+
+              <div
+                className="max-w-[10rem] truncate text-[9px] opacity-70"
+                style={{ color: T.textMuted, transform: "translateZ(3px)" }}
+              >
+                {agent.role}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {mode === "edit" && (
+        <div
+          className="pointer-events-none absolute bottom-3 left-1/2 z-20 -translate-x-1/2 whitespace-nowrap rounded-full border px-3 py-1 text-[9px] font-black uppercase tracking-[.16em]"
+          style={{
+            borderColor: `${T.accentColor}40`,
+            backgroundColor: `${T.bgColor}dd`,
+            color: T.accentColor,
+            backdropFilter: "blur(10px)",
+          }}
+        >
+          Drag to position · click to inspect
         </div>
+      )}
 
-        <SectionLabel collapsed={collapsed}>Main navigation</SectionLabel>
-        <nav className="space-y-1">
-          {NAV_GROUPS.map((group) => {
-            const active = activeGroup(group);
-            return (
-              <Link
-                key={group.label}
-                href={group.href}
-                onClick={onClose}
-                title={group.label}
-                className={`group relative flex h-10 items-center rounded-xl border transition-all ${collapsed ? "mx-auto w-11 justify-center" : "gap-2.5 px-3"}`}
-                style={{
-                  background: active ? `linear-gradient(90deg, ${group.accent}28, ${group.accent}08, transparent)` : "transparent",
-                  borderColor: active ? `${group.accent}38` : "transparent",
-                  color: active ? T.textColor : T.textMuted,
-                  boxShadow: active ? `inset 2px 0 0 ${group.accent}` : "none",
-                }}
-              >
-                <group.icon size={16} style={{ color: group.accent }} />
-                {!collapsed && (
-                  <>
-                    <span className="min-w-0 flex-1 truncate text-[11px] font-bold">{group.label}</span>
-                    {group.label === "Marketplace" && <span className="rounded-full border px-1.5 py-0.5 text-[7px] font-black" style={{ borderColor: `${group.accent}35`, color: group.accent }}>NEW</span>}
-                    <ChevronRight size={12} className="opacity-25 transition-transform group-hover:translate-x-0.5 group-hover:opacity-70" />
-                  </>
-                )}
-              </Link>
-            );
-          })}
-        </nav>
+      <style jsx>{`
+        @keyframes lit-station-twinkle {
+          0%,
+          100% {
+            opacity: 0.2;
+            transform: scale(0.85);
+          }
+          50% {
+            opacity: 0.78;
+            transform: scale(1.15);
+          }
+        }
 
-        {!collapsed && <CreditsCard balance={balance} plan={plan} T={T} />}
-      </div>
-
-      <SystemStatus collapsed={collapsed} T={T} />
+        @media (prefers-reduced-motion: reduce) {
+          span {
+            animation: none !important;
+          }
+        }
+      `}</style>
     </div>
-  );
-}
-
-
-function SectionLabel({ collapsed, children }: { collapsed: boolean; children: React.ReactNode }) {
-  return <div className={`mb-1.5 mt-4 text-[8px] font-black uppercase tracking-[.2em] ${collapsed ? "text-center" : "px-1"}`} style={{ color: "rgba(255,255,255,.32)" }}>{collapsed ? "•••" : children}</div>;
-}
-
-function CreditsCard({ balance, plan, T }: { balance: number; plan: string; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  return (
-    <section className="relative mt-4 overflow-hidden rounded-2xl border p-3" style={{ borderColor: `${T.accentColor}35`, background: `radial-gradient(circle at 90% 20%, ${T.accentColor}24, transparent 35%), ${T.boxBg}` }}>
-      <div className="text-[8px] font-black uppercase tracking-[.18em]" style={{ color: T.textMuted }}>Credits & plan</div>
-      <div className="mt-2 flex items-end justify-between">
-        <div><b className="text-lg text-white">{balance.toLocaleString()} <span className="text-[10px]" style={{ color: T.accentColor }}>LBC</span></b><div className="text-[8px] capitalize" style={{ color: T.textMuted }}>{plan} plan</div></div>
-        <Coins size={24} style={{ color: `${T.accentColor}bb` }} />
-      </div>
-      <div className="mt-2 h-1 overflow-hidden rounded-full bg-white/5"><div className="h-full w-[72%] rounded-full" style={{ background: `linear-gradient(90deg, ${T.accentColor}, ${T.linkColor})` }} /></div>
-      <Link href="/wallet" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border py-2 text-[9px] font-black" style={{ borderColor: `${T.accentColor}35`, backgroundColor: `${T.accentColor}14`, color: T.headerColor }}><Crown size={11} /> Manage credits</Link>
-    </section>
-  );
-}
-
-function SystemStatus({ collapsed, T }: { collapsed: boolean; T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  return (
-    <div className="shrink-0 border-t p-2.5" style={{ borderColor: `${T.borderColor}20` }}>
-      <Link href="/settings" className={`flex items-center rounded-xl border border-emerald-400/10 bg-emerald-400/[.035] ${collapsed ? "justify-center p-2.5" : "gap-2.5 px-2.5 py-2"}`}>
-        <span className="relative grid h-7 w-7 shrink-0 place-items-center rounded-lg bg-emerald-400/10"><ShieldCheck size={14} className="text-emerald-400" /><span className="absolute right-0 top-0 h-2 w-2 rounded-full border-2 border-[#080910] bg-emerald-400" /></span>
-        {!collapsed && <span className="min-w-0"><b className="block text-[8px] uppercase tracking-wider" style={{ color: T.textMuted }}>System status</b><span className="block truncate text-[8px] font-bold text-emerald-400">All systems operational</span></span>}
-      </Link>
-    </div>
-  );
-}
-
-export default function Sidebar(_props: SidebarProps) {
-  const { resolvedColors: T } = useTheme();
-  const [collapsed, setCollapsed] = useState(() =>
-    typeof window !== "undefined" && localStorage.getItem(COLLAPSED_KEY) === "true",
-  );
-  const toggleCollapse = () => {
-    setCollapsed((current) => {
-      const next = !current;
-      localStorage.setItem(COLLAPSED_KEY, String(next));
-      return next;
-    });
-  };
-  const shellStyle = {
-    background: `linear-gradient(180deg, ${T.bgColor}fc, #07060d 60%, ${T.bgColor}fc)`,
-    borderColor: `${T.borderColor}24`,
-    boxShadow: "18px 0 60px rgba(0,0,0,.28)",
-  };
-
-  return (
-    <aside className={`sticky top-0 hidden h-screen shrink-0 flex-col border-r transition-[width] duration-300 md:flex ${collapsed ? "w-[72px]" : "w-[280px]"}`} style={shellStyle}>
-      <SidebarContent collapsed={collapsed} onToggleCollapse={toggleCollapse} />
-    </aside>
   );
 }

@@ -12,6 +12,17 @@ import { ArrowLeft, Circle, Loader2, Terminal, Command, HelpCircle, Clock } from
 type ChatMessage = { role: "user" | "agent" | "system"; text: string; isCommand?: boolean };
 
 export default function AgentPage() {
+  const params = useParams<{ slug: string }>();
+  const router = useRouter();
+
+  useEffect(() => {
+    router.replace(`/agents?agent=${encodeURIComponent(params.slug)}`);
+  }, [params.slug, router]);
+
+  return null;
+}
+
+function LegacyAgentPage() {
   const params = useParams();
   const slug = params.slug as string;
   const { resolvedColors: T } = useTheme();
@@ -409,3 +420,5 @@ export default function AgentPage() {
     </div>
   );
 }
+
+void LegacyAgentPage;

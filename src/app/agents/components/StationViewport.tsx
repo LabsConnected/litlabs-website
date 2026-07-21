@@ -61,12 +61,22 @@ export default function StationViewport({
   const layout = useStationStore();
   const viewportRef = useRef<HTMLDivElement>(null);
   const [parallax, setParallax] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState<{
+  const [draggingId, setDraggingId] = useState<AgentId | null>(null);
+  const dragRef = useRef<{
     id: AgentId;
     pointerId: number;
-    offsetX: number;
-    offsetY: number;
+    startX: number;
+    startY: number;
+    grabOffsetX: number;
+    grabOffsetY: number;
+    tile: HTMLDivElement | null;
+    moved: boolean;
+    vRect: DOMRect;
   } | null>(null);
+  const frameRef = useRef<number | null>(null);
+  const pendingRef = useRef<{ x: number; y: number } | null>(null);
+  const tileRefs = useRef<Record<AgentId, HTMLDivElement | null>>({} as Record<AgentId, HTMLDivElement | null>);
+  const suppressClickRef = useRef(false);
 
   // Pointer-driven parallax (Explore mode). Throttled via rAF so we don't
   // run setState on every mousemove.
@@ -91,60 +101,139 @@ export default function StationViewport({
     };
   }, [mode]);
 
+  const handleAgentClick = useCallback(
+    (id: AgentId) => {
+      if (suppressClickRef.current) {
+        suppressClickRef.current = false;
+        return;
+      }
+      onSelectAgent(id);
+    },
+    [onSelectAgent],
+  );
+
   const onPointerDown = useCallback(
     (e: React.PointerEvent<HTMLDivElement>, id: AgentId) => {
       if (mode !== "edit") return;
-      const rect = e.currentTarget.getBoundingClientRect();
-      setDragging({
+      const tile = tileRefs.current[id];
+      const viewport = viewportRef.current;
+      if (!tile || !viewport) return;
+      const tileRect = tile.getBoundingClientRect();
+      const vRect = viewport.getBoundingClientRect();
+      const centerX = tileRect.left + tileRect.width / 2;
+      const centerY = tileRect.top + tileRect.height / 2;
+
+      dragRef.current = {
         id,
         pointerId: e.pointerId,
-        offsetX: e.clientX - rect.left,
-        offsetY: e.clientY - rect.top,
-      });
-      e.currentTarget.setPointerCapture(e.pointerId);
+        startX: e.clientX,
+        startY: e.clientY,
+        grabOffsetX: e.clientX - centerX,
+        grabOffsetY: e.clientY - centerY,
+        tile,
+        moved: false,
+        vRect,
+      };
+      pendingRef.current = { x: centerX - vRect.left, y: centerY - vRect.top };
+      suppressClickRef.current = false;
+      setDraggingId(id);
+      viewport.setPointerCapture(e.pointerId);
+      e.preventDefault();
     },
     [mode],
   );
 
   const onPointerMove = useCallback(
     (e: React.PointerEvent<HTMLDivElement>) => {
-      if (!dragging) return;
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
       const viewport = viewportRef.current;
       if (!viewport) return;
       const vRect = viewport.getBoundingClientRect();
-      const x = Math.max(40, Math.min(vRect.width - 40, e.clientX - vRect.left - dragging.offsetX));
-      const y = Math.max(40, Math.min(vRect.height - 40, e.clientY - vRect.top - dragging.offsetY));
-      moveAgent(dragging.id, { x, y });
+      const x = Math.max(56, Math.min(vRect.width - 56, e.clientX - vRect.left - drag.grabOffsetX));
+      const y = Math.max(56, Math.min(vRect.height - 56, e.clientY - vRect.top - drag.grabOffsetY));
+
+      if (!drag.moved) {
+        const dx = e.clientX - drag.startX;
+        const dy = e.clientY - drag.startY;
+        if (Math.hypot(dx, dy) > 4) drag.moved = true;
+      }
+
+      pendingRef.current = { x, y };
+      if (frameRef.current === null) {
+        frameRef.current = requestAnimationFrame(() => {
+          frameRef.current = null;
+          const pos = pendingRef.current;
+          const tile = dragRef.current?.tile;
+          if (tile && pos) {
+            tile.style.left = `${pos.x}px`;
+            tile.style.top = `${pos.y}px`;
+          }
+        });
+      }
     },
-    [dragging],
+    [],
   );
 
-  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return;
-    e.currentTarget.releasePointerCapture(dragging.pointerId);
-    setDragging(null);
-  }, [dragging]);
+  const onPointerUp = useCallback(
+    (e: React.PointerEvent<HTMLDivElement>) => {
+      const drag = dragRef.current;
+      if (!drag || e.pointerId !== drag.pointerId) return;
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      const viewport = viewportRef.current;
+      if (viewport) {
+        try {
+          viewport.releasePointerCapture(drag.pointerId);
+        } catch {
+          /* ignore */
+        }
+      }
+      const vRect = viewport?.getBoundingClientRect() ?? drag.vRect;
+      const x = Math.max(56, Math.min(vRect.width - 56, e.clientX - vRect.left - drag.grabOffsetX));
+      const y = Math.max(56, Math.min(vRect.height - 56, e.clientY - vRect.top - drag.grabOffsetY));
+      const tile = drag.tile;
+      if (tile) {
+        tile.style.left = `${x}px`;
+        tile.style.top = `${y}px`;
+      }
+      moveAgent(drag.id, { x, y });
+      suppressClickRef.current = drag.moved;
+      dragRef.current = null;
+      setDraggingId(null);
+    },
+    [],
+  );
 
   // Cancel the drag if the user tabs away mid-drag.
   useEffect(() => {
-    if (!dragging) return;
-    const cancel = () => setDragging(null);
+    if (!draggingId) return;
+    const cancel = () => {
+      if (frameRef.current !== null) {
+        cancelAnimationFrame(frameRef.current);
+        frameRef.current = null;
+      }
+      dragRef.current = null;
+      setDraggingId(null);
+    };
     window.addEventListener("blur", cancel);
     return () => window.removeEventListener("blur", cancel);
-  }, [dragging]);
+  }, [draggingId]);
 
   // Compose the per-tile transform: x/y + scale (drag-emphasis) + rotation +
   // 2.5D depth shift. We push dragged tiles slightly forward (Z) so they
   // hover over their stationary neighbours.
   const tileTransform = useCallback(
     (id: AgentId, placement: AgentPlacement) => {
-      const isDragging = dragging?.id === id;
+      const isDragging = draggingId === id;
       const baseScale = placement.scale ?? 1;
       const scale = isDragging ? baseScale * 1.06 : baseScale;
       const rot = placement.rotation ?? 0;
       return `translate(-50%, -50%) scale(${scale}) rotate(${rot}deg) translateZ(${isDragging ? 12 : 0}px)`;
     },
-    [dragging],
+    [draggingId],
   );
 
   // Parallax: rotate the entire scene a few degrees around its center so
@@ -194,7 +283,22 @@ export default function StationViewport({
         ))}
       </div>
 
-      {/* Grid floor — gives the 2D canvas a sense of depth. */}
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-[8%] top-[7%] h-[30%] rounded-b-[48%] border border-white/10"
+        style={{
+          background: "linear-gradient(180deg, rgba(255,255,255,.08), rgba(255,255,255,0))",
+          boxShadow: "inset 0 -24px 44px rgba(0,0,0,.35)",
+          transform: "translateZ(-40px)",
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute inset-x-0 bottom-0 h-[60%]"
+        style={{
+          background: `linear-gradient(180deg, transparent, ${T.bgColor}66 78%), radial-gradient(ellipse at 50% 100%, ${T.accentColor}2b, transparent 64%)`,
+        }}
+      />
       <div
         aria-hidden
         className="pointer-events-none absolute inset-0"
@@ -206,6 +310,24 @@ export default function StationViewport({
           transform: "rotateX(60deg) translateZ(-50px)",
           transformOrigin: "50% 100%",
           opacity: 0.45,
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute left-[14%] top-[42%] h-28 w-28 rounded-full border"
+        style={{
+          borderColor: `${layout.colors.litt ?? AGENTS.litt?.color ?? T.accentColor}55`,
+          background: `radial-gradient(circle, ${layout.colors.litt ?? AGENTS.litt?.color ?? T.accentColor}18, transparent 68%)`,
+          boxShadow: `0 0 44px ${layout.colors.litt ?? AGENTS.litt?.color ?? T.accentColor}25`,
+        }}
+      />
+      <div
+        aria-hidden
+        className="pointer-events-none absolute right-[14%] top-[52%] h-28 w-28 rounded-full border"
+        style={{
+          borderColor: `${layout.colors.spark ?? AGENTS.spark?.color ?? T.linkColor}55`,
+          background: `radial-gradient(circle, ${layout.colors.spark ?? AGENTS.spark?.color ?? T.linkColor}18, transparent 68%)`,
+          boxShadow: `0 0 44px ${layout.colors.spark ?? AGENTS.spark?.color ?? T.linkColor}25`,
         }}
       />
 
@@ -223,48 +345,62 @@ export default function StationViewport({
           const placement: AgentPlacement = layout.placements[id] ?? { x: 200, y: 200 };
           const color = layout.colors[id] ?? agent.color;
           const isSelected = selectedAgent === id;
-          const isDragging = dragging?.id === id;
           return (
             <div
               key={id}
+              ref={(el) => { tileRefs.current[id] = el; }}
               role="button"
               tabIndex={0}
               aria-label={`${agent.name} — ${agent.role}`}
               onPointerDown={(e) => onPointerDown(e, id)}
-              onClick={() => onSelectAgent(id)}
+              onClick={() => handleAgentClick(id)}
               onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") onSelectAgent(id);
+                if (e.key === "Enter" || e.key === " ") handleAgentClick(id);
               }}
-              className="absolute flex select-none flex-col items-center gap-1 rounded-2xl border p-3 transition-shadow"
+              className="group absolute flex select-none flex-col items-center gap-2 outline-none"
               style={{
                 left: placement.x,
                 top: placement.y,
                 transform: tileTransform(id, placement),
                 transformStyle: "preserve-3d",
-                borderColor: isSelected ? color : `${color}55`,
-                backgroundColor: `${color}1f`,
-                boxShadow: isDragging
-                  ? `0 18px 36px ${color}55, 0 0 32px ${color}88, inset 0 0 0 1px ${color}66`
-                  : isSelected
-                    ? `0 8px 24px ${color}44, 0 0 18px ${color}55`
-                    : `0 6px 16px ${color}28, inset 0 0 0 1px ${color}33`,
                 cursor: mode === "edit" ? "grabbing" : "pointer",
                 touchAction: "none",
-                transitionDuration: "160ms",
+                transition: "box-shadow 160ms ease, transform 160ms ease",
               }}
             >
-              {/* 2.5D badge: a small floating glyph that sits slightly above the tile. */}
               <div
-                className="grid h-12 w-12 place-items-center rounded-xl text-[11px] font-black"
-                style={{
-                  backgroundColor: `${color}40`,
-                  color: "#fff",
-                  transform: "translateZ(8px)",
-                  boxShadow: `inset 0 0 8px ${color}66, 0 0 12px ${color}55`,
-                }}
+                className="relative h-20 w-20 rounded-full"
+                style={{ transform: "translateZ(8px)" }}
               >
-                {agent.tag}
+                <div
+                  className="absolute inset-0 rounded-full"
+                  style={{
+                    background: `radial-gradient(circle, ${color}35 0%, transparent 70%)`,
+                    boxShadow: `inset 0 0 24px ${color}45, 0 0 32px ${color}45`,
+                  }}
+                />
+                <div
+                  className="absolute inset-2 grid place-items-center rounded-full text-lg font-black text-white"
+                  style={{
+                    background: `radial-gradient(circle at 40% 30%, ${color}, ${color}99)`,
+                    boxShadow: `0 0 20px ${color}99`,
+                    animation: "lit-float 3s ease-in-out infinite",
+                  }}
+                >
+                  {agent.tag}
+                </div>
+                <div
+                  className="pointer-events-none absolute -inset-1 rounded-full border-2 transition-opacity"
+                  style={{
+                    borderColor: color,
+                    opacity: isSelected ? 1 : 0.5,
+                    boxShadow: isSelected
+                      ? `0 0 18px ${color}`
+                      : `0 0 8px ${color}55`,
+                  }}
+                />
               </div>
+
               <div
                 className="text-[10px] font-black"
                 style={{
@@ -301,6 +437,10 @@ export default function StationViewport({
         @keyframes lit-station-twinkle {
           0%, 100% { opacity: 0.25; }
           50% { opacity: 0.75; }
+        }
+        @keyframes lit-float {
+          0%, 100% { transform: translateY(0); }
+          50% { transform: translateY(-6px); }
         }
       `}</style>
     </div>

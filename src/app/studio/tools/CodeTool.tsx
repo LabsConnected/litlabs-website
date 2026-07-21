@@ -398,14 +398,14 @@ export default function CodeTool() {
             </span>
             <div className="flex items-center gap-1">
               <button onClick={copyCurrent} className="p-1.5 rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} title="Copy">
-                {copied ? <Check size={12} style={{ color: T.success }} /> : <Copy size={12} />}
+                {copied ? <Check className="pointer-events-none" size={12} style={{ color: T.success }} aria-hidden="true" /> : <Copy className="pointer-events-none" size={12} aria-hidden="true" />}
               </button>
               <button onClick={downloadCurrent} className="p-1.5 rounded-lg hover:bg-white/5" style={{ color: T.textMuted }} title="Download">
-                <Download size={12} />
+                <Download className="pointer-events-none" size={12} aria-hidden="true" />
               </button>
-              <ViewToggle view={view} setView={setView} mode="code" icon={<Code size={12} />} title="Code only" T={T} />
-              <ViewToggle view={view} setView={setView} mode="split" icon={<SplitIcon />} title="Split" T={T} className="hidden md:flex" />
-              <ViewToggle view={view} setView={setView} mode="preview" icon={<Eye size={12} />} title="Preview only" T={T} />
+              <ViewToggle view={view} setView={setView} mode="code" icon={<Code className="pointer-events-none" size={12} />} title="Code only" T={T} />
+              <ViewToggle view={view} setView={setView} mode="split" icon={<SplitIcon className="pointer-events-none" aria-hidden="true" />} title="Split" T={T} className="hidden md:flex" />
+              <ViewToggle view={view} setView={setView} mode="preview" icon={<Eye className="pointer-events-none" size={12} />} title="Preview only" T={T} />
             </div>
           </div>
 
@@ -439,9 +439,9 @@ export default function CodeTool() {
               <span className="text-[10px] font-mono" style={{ color: T.textMuted }}>preview · render-only</span>
             </div>
             <div className="flex items-center gap-1">
-              <ViewToggle view={view} setView={setView} mode="code" icon={<Code size={12} />} title="Code only" T={T} />
-              <ViewToggle view={view} setView={setView} mode="split" icon={<SplitIcon />} title="Split" T={T} />
-              <ViewToggle view={view} setView={setView} mode="preview" icon={<Eye size={12} />} title="Preview only" T={T} />
+              <ViewToggle view={view} setView={setView} mode="code" icon={<Code className="pointer-events-none" size={12} />} title="Code only" T={T} />
+              <ViewToggle view={view} setView={setView} mode="split" icon={<SplitIcon className="pointer-events-none" aria-hidden="true" />} title="Split" T={T} />
+              <ViewToggle view={view} setView={setView} mode="preview" icon={<Eye className="pointer-events-none" size={12} />} title="Preview only" T={T} />
               <button
                 onClick={() => setConsoleOpen((v) => !v)}
                 className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold"
@@ -452,7 +452,7 @@ export default function CodeTool() {
                 }}
                 title="Console"
               >
-                <Terminal size={11} />
+                <Terminal className="pointer-events-none" size={11} aria-hidden="true" />
                 {errorCount > 0 && <span>{errorCount}</span>}
               </button>
               <button
@@ -460,7 +460,7 @@ export default function CodeTool() {
                 className="flex items-center gap-1.5 px-2 py-1 rounded-lg text-[10px] font-bold ml-1"
                 style={{ color: T.textMuted, border: `1px solid ${T.borderColor}30` }}
               >
-                <RefreshCw size={11} /> Reload
+                <RefreshCw className="pointer-events-none" size={11} aria-hidden="true" /> Reload
               </button>
             </div>
           </div>
@@ -501,6 +501,7 @@ function ViewToggle({
 }) {
   return (
     <button
+      type="button"
       onClick={() => setView(mode)}
       className={`p-1.5 rounded-lg ${className}`}
       style={{
@@ -626,9 +627,27 @@ function ConsolePanel({
   );
 }
 
-function SplitIcon() {
+function SplitIcon({
+  className,
+  "aria-hidden": ariaHidden,
+}: {
+  className?: string;
+  "aria-hidden"?: boolean | "true" | "false";
+}) {
   return (
-    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+    <svg
+      width="12"
+      height="12"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2.2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      className={className}
+      aria-hidden={ariaHidden}
+      style={{ pointerEvents: "none" }}
+    >
       <rect x="3" y="4" width="18" height="16" rx="2" />
       <line x1="12" y1="4" x2="12" y2="20" />
     </svg>

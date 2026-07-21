@@ -193,10 +193,16 @@ async function handler(req: NextRequest) {
       .split("User: ")[0]
       .trim();
 
-    const geminiModel =
-      typeof requestedModel === "string" && requestedModel.startsWith("gemini")
-        ? requestedModel
-        : "gemini-2.5-flash";
+    const geminiModels = new Set([
+      "gemini-2.5-flash",
+      "gemini-2.5-pro",
+      process.env.GEMINI_MODEL,
+      process.env.NEXT_PUBLIC_GEMINI_MODEL,
+    ]);
+    const geminiModel = typeof requestedModel === "string" && geminiModels.has(requestedModel)
+      ? requestedModel
+      : "gemini-2.5-flash";
+    const llmProvider = provider === "google" || provider === "auto" ? "gemini" : provider;
 
     // Multimodal path: send image snapshots directly to Gemini
     const imageArray = Array.isArray(images) ? images : [];
@@ -221,9 +227,9 @@ async function handler(req: NextRequest) {
         prompt,
         {
           task: "chat",
-          provider,
+          provider: llmProvider,
           maxTokens: 2048,
-          modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+          modelOverride: llmProvider === "gemini" ? { gemini: geminiModel } : undefined,
         },
         undefined,
       );
@@ -256,9 +262,9 @@ async function handler(req: NextRequest) {
             },
             {
               task: "chat",
-              provider,
+              provider: llmProvider,
               maxTokens: 2048,
-              modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+              modelOverride: llmProvider === "gemini" ? { gemini: geminiModel } : undefined,
             },
           );
           controller.enqueue(

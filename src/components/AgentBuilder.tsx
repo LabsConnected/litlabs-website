@@ -128,11 +128,11 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
-          <Plus size={20} style={{ color: T.accentColor }} />
+          <Plus className="pointer-events-none" size={20} style={{ color: T.accentColor }} aria-hidden="true" />
           <span className="text-lg font-black" style={{ color: T.textColor }}>Agent Builder</span>
         </div>
         <button onClick={onClose} className="p-1 rounded-lg transition-all hover:scale-110" style={{ color: T.textMuted }}>
-          <X size={18} />
+          <X className="pointer-events-none" size={18} aria-hidden="true" />
         </button>
       </div>
 
@@ -198,7 +198,7 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
             className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all disabled:opacity-50"
             style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: "1px solid " + T.accentColor + "30" }}
           >
-            <Wand2 size={14} className={isGenerating ? "animate-spin" : ""} />
+            <Wand2 size={14} className={isGenerating ? "pointer-events-none animate-spin" : "pointer-events-none"} aria-hidden="true" />
             {isGenerating ? "Generating..." : "Auto-Generate from Role"}
           </button>
           <button
@@ -238,7 +238,7 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
                 style={{ backgroundColor: T.bgColor + "40", border: "1px solid " + T.borderColor + "30", color: T.textColor }}
               />
               <button onClick={addTag} className="p-2 rounded-lg" style={{ backgroundColor: T.accentColor + "15", color: T.accentColor }}>
-                <Tag size={14} />
+                <Tag className="pointer-events-none" size={14} aria-hidden="true" />
               </button>
             </div>
             <div className="flex flex-wrap gap-2 mt-2">
@@ -289,7 +289,7 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
                     color: agent.icon === id ? T.accentColor : T.textMuted,
                   }}
                 >
-                  <Icon size={18} />
+                  <Icon className="pointer-events-none" size={18} aria-hidden="true" />
                 </button>
               ))}
             </div>
@@ -334,7 +334,7 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
             <div className="flex items-center gap-3">
               <div className="w-12 h-12 rounded-xl flex items-center justify-center"
                 style={{ backgroundColor: (agent.color || PRESET_COLORS[0]) + "15", border: "1px solid " + (agent.color || PRESET_COLORS[0]) + "30" }}>
-                <SelectedIcon size={22} style={{ color: agent.color || PRESET_COLORS[0] }} />
+                <SelectedIcon className="pointer-events-none" size={22} style={{ color: agent.color || PRESET_COLORS[0] }} aria-hidden="true" />
               </div>
               <div>
                 <div className="font-bold" style={{ color: T.textColor }}>{agent.name || "Agent Name"}</div>
@@ -356,7 +356,7 @@ export default function AgentBuilder({ onAgentCreated, onClose }: AgentBuilderPr
               className="flex-1 flex items-center justify-center gap-2 py-2 rounded-lg text-sm font-bold transition-all"
               style={{ backgroundColor: T.accentColor, color: T.bgColor }}
             >
-              {saved ? <Sparkles size={14} /> : <Save size={14} />}
+              {saved ? <Sparkles className="pointer-events-none" size={14} aria-hidden="true" /> : <Save className="pointer-events-none" size={14} aria-hidden="true" />}
               {saved ? "Saved!" : "Create Agent"}
             </button>
           </div>

@@ -174,3 +174,21 @@ export function useStationStore(): StationLayout {
   }, []);
   return currentLayout;
 }
+
+/**
+ * Subscribe to the station store and return only the `mode` field.
+ * Skips re-renders when the mode has not changed, even if other fields
+ * (placements, skin, colors, etc.) update. Use this when a component
+ * only cares about the current station mode.
+ */
+export function useStationMode(): StationMode {
+  const [mode, setModeState] = useState<StationMode>(currentLayout.mode);
+  useEffect(() => {
+    const unsubscribe = subscribe(() => {
+      const next = currentLayout.mode;
+      setModeState((prev) => (prev === next ? prev : next));
+    });
+    return unsubscribe;
+  }, []);
+  return mode;
+}

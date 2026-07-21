@@ -8,8 +8,7 @@
  * link to the full chat page (`/agents/[slug]`).
  */
 
-import Link from "next/link";
-import { ArrowRight, X } from "lucide-react";
+import { X } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { AGENTS } from "@/lib/agents";
 import type { AgentId } from "../store/stationStore";
@@ -17,9 +16,18 @@ import type { AgentId } from "../store/stationStore";
 interface AgentInspectorProps {
   agentId: AgentId | null;
   onClose: () => void;
+  onChatAction?: (agentId: AgentId) => void;
+  onAssignAction?: (agentId: AgentId) => void;
+  onTerminalAction?: (agentId: AgentId) => void;
 }
 
-export default function AgentInspector({ agentId, onClose }: AgentInspectorProps) {
+export default function AgentInspector({
+  agentId,
+  onClose,
+  onChatAction,
+  onAssignAction,
+  onTerminalAction,
+}: AgentInspectorProps) {
   const { resolvedColors: T } = useTheme();
   if (!agentId) return null;
   const agent = AGENTS[agentId];
@@ -55,7 +63,7 @@ export default function AgentInspector({ agentId, onClose }: AgentInspectorProps
           className="grid h-7 w-7 place-items-center rounded-lg"
           style={{ backgroundColor: `${T.borderColor}22`, color: T.textMuted }}
         >
-          <X size={13} />
+          <X size={13} className="pointer-events-none" aria-hidden="true" />
         </button>
       </header>
 
@@ -93,13 +101,32 @@ export default function AgentInspector({ agentId, onClose }: AgentInspectorProps
         </div>
       </section>
 
-      <Link
-        href={`/agents/${agent.id}`}
-        className="mt-auto flex items-center justify-center gap-2 rounded-xl px-3 py-2 text-[11px] font-black transition-transform hover:-translate-y-0.5"
-        style={{ backgroundColor: `${agent.color}22`, color: agent.color, border: `1px solid ${agent.color}45` }}
-      >
-        Launch {agent.name} terminal <ArrowRight size={12} />
-      </Link>
+      <div className="mt-auto grid grid-cols-3 gap-2">
+        <button
+          type="button"
+          onClick={() => onChatAction?.(agentId)}
+          className="rounded-xl border px-2 py-2 text-[10px] font-black"
+          style={{ backgroundColor: `${agent.color}20`, borderColor: `${agent.color}40`, color: agent.color }}
+        >
+          Chat
+        </button>
+        <button
+          type="button"
+          onClick={() => onAssignAction?.(agentId)}
+          className="rounded-xl border px-2 py-2 text-[10px] font-black"
+          style={{ borderColor: `${T.borderColor}35`, color: T.textColor }}
+        >
+          Assign
+        </button>
+        <button
+          type="button"
+          onClick={() => onTerminalAction?.(agentId)}
+          className="rounded-xl border px-2 py-2 text-[10px] font-black"
+          style={{ borderColor: `${T.borderColor}35`, color: T.textColor }}
+        >
+          Terminal
+        </button>
+      </div>
     </aside>
   );
 }

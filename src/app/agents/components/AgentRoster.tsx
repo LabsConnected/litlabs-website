@@ -9,14 +9,19 @@
  * automatically adds it to the roster (no UI change required).
  */
 
-import Link from "next/link";
 import { Bot, Sparkles as SparkIcon, Circle, ArrowRight } from "lucide-react";
+import type { AgentId } from "../store/stationStore";
 import { useTheme } from "@/context/ThemeContext";
 import { AGENTS } from "@/lib/agents";
 
 const AGENT_ORDER: ReadonlyArray<"litt" | "spark"> = ["litt", "spark"];
 
-export default function AgentRoster() {
+interface AgentRosterProps {
+  selectedAgentId: AgentId | null;
+  onSelectAgentAction: (agentId: AgentId) => void;
+}
+
+export default function AgentRoster({ selectedAgentId, onSelectAgentAction }: AgentRosterProps) {
   const { resolvedColors: T } = useTheme();
   return (
     <section
@@ -43,21 +48,24 @@ export default function AgentRoster() {
           if (!agent) return null;
           const Icon = id === "spark" ? SparkIcon : Bot;
           return (
-            <Link
+            <button
               key={id}
-              href={`/agents/${agent.id}`}
-              className="group flex items-center gap-2 rounded-xl border p-2 transition-all hover:-translate-y-px"
+              type="button"
+              onClick={() => onSelectAgentAction(id)}
+              aria-pressed={selectedAgentId === id}
+              className="group flex w-full items-center gap-2 rounded-xl border p-2 text-left transition-all hover:-translate-y-px"
               style={{
                 borderColor: `${agent.color}30`,
-                backgroundColor: `${agent.color}10`,
+                backgroundColor: selectedAgentId === id ? `${agent.color}20` : `${agent.color}10`,
                 color: T.textColor,
+                boxShadow: selectedAgentId === id ? `0 0 24px ${agent.color}22` : "none",
               }}
             >
               <span
                 className="grid h-8 w-8 shrink-0 place-items-center rounded-lg"
                 style={{ backgroundColor: `${agent.color}22`, color: agent.color }}
               >
-                <Icon size={14} />
+                <Icon size={14} className="pointer-events-none" aria-hidden="true" />
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-1.5">
@@ -65,7 +73,7 @@ export default function AgentRoster() {
                     {agent.name}
                   </span>
                   <span className="flex items-center gap-1">
-                    <Circle size={5} className="fill-current animate-pulse" style={{ color: "#22c55e" }} />
+                    <Circle size={5} className="pointer-events-none fill-current animate-pulse" style={{ color: "#22c55e" }} aria-hidden="true" />
                     <span className="text-[8px] font-bold uppercase" style={{ color: "#22c55e" }}>
                       on
                     </span>
@@ -75,8 +83,8 @@ export default function AgentRoster() {
                   {agent.role}
                 </div>
               </div>
-              <ArrowRight size={12} className="opacity-30 transition-opacity group-hover:opacity-100" style={{ color: T.textMuted }} />
-            </Link>
+              <ArrowRight size={12} className="pointer-events-none opacity-30 transition-opacity group-hover:opacity-100" style={{ color: T.textMuted }} aria-hidden="true" />
+            </button>
           );
         })}
       </div>

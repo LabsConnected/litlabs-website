@@ -522,6 +522,7 @@
 }
 .bubble {
   max-width: min(86%, 620px);
+  width: fit-content;
   border: 1px solid #293441;
   border-radius: 18px;
   padding: 13px 14px 9px;
@@ -530,11 +531,13 @@
 }
 .assistant .bubble {
   border-left: 2px solid var(--cyan);
+  max-width: min(94%, 760px);
 }
 .user .bubble {
   background: linear-gradient(145deg, rgba(48,24,10,0.85), rgba(27,17,11,0.85));
   border-color: #8f4814;
   border-right: 2px solid var(--orange);
+  max-width: min(82%, 620px);
 }
 .copy {
   white-space: pre-wrap;

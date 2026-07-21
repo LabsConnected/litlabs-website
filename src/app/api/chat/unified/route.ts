@@ -45,7 +45,7 @@ interface StudioChatContext {
   currentRoute: string;
 }
 
-interface UnifiedChatRequest {
+export interface UnifiedChatRequest {
   mode?: "agent" | "llm" | "simple";
   from?: string;
   to?: string;
@@ -56,6 +56,7 @@ interface UnifiedChatRequest {
   metadata?: Record<string, unknown>;
   history?: HistoryEntry[];
   provider?: string;
+  model?: string;
   stream?: boolean;
   simulateResponse?: boolean;
   context?: StudioChatContext;
@@ -231,6 +232,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     message,
     history = [],
     provider,
+    model: requestedModel,
     stream = false,
     context,
   } = body;
@@ -248,9 +250,20 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     "openrouter-llama",
     "openrouter-trinity",
   ];
-  const llmProvider: LLMProvider = validProviders.includes(provider as LLMProvider)
-    ? (provider as LLMProvider)
-    : "gemini";
+  const llmProvider: LLMProvider = provider === "google" || provider === "auto"
+    ? "gemini"
+    : validProviders.includes(provider as LLMProvider)
+      ? (provider as LLMProvider)
+      : "gemini";
+  const geminiModels = new Set([
+    "gemini-2.5-flash",
+    "gemini-2.5-pro",
+    process.env.GEMINI_MODEL,
+    process.env.NEXT_PUBLIC_GEMINI_MODEL,
+  ]);
+  const modelOverride = llmProvider === "gemini" && typeof requestedModel === "string" && geminiModels.has(requestedModel)
+    ? { gemini: requestedModel }
+    : undefined;
 
   const agent =
     AGENTS[agentSlug as keyof typeof AGENTS] ??
@@ -286,12 +299,14 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
       provider?: LLMProvider;
       maxTokens: number;
       temperature: number;
+      modelOverride?: Partial<Record<LLMProvider, string>>;
     } = {
       task: "chat",
       maxTokens: 500,
       temperature: 0.4,
     };
     if (provider && llmProvider) llmOptions.provider = llmProvider;
+    if (modelOverride) llmOptions.modelOverride = modelOverride;
     const r = await generateText(prompt, llmOptions, undefined);
     await logConversation(agent, userId, message, r.text);
     await saveMemory(r.text);
@@ -357,11 +372,13 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
         maxTokens: number;
         temperature: number;
         tools?: LLMTool[];
+        modelOverride?: Partial<Record<LLMProvider, string>>;
       } => ({
         task: "chat",
         maxTokens: 500,
         temperature: 0.4,
         ...(provider && llmProvider ? { provider: llmProvider } : {}),
+        ...(modelOverride ? { modelOverride } : {}),
         ...(CHAT_TOOLS.length > 0 ? { tools: CHAT_TOOLS } : {}),
       });
 
@@ -534,14 +551,19 @@ async function handleSimpleChat(body: UnifiedChatRequest, userId: string | null)
   });
 }
 
-async function handler(req: NextRequest) {
-  if (req.method !== "POST") {
+export async function handleUnifiedChat({
+  request,
+  body,
+}: {
+  request: NextRequest;
+  body: UnifiedChatRequest;
+}) {
+  if (request.method !== "POST") {
     return NextResponse.json({ error: "Method not allowed" }, { status: 405 });
   }
 
   try {
     const { userId } = await auth();
-    const body = (await req.json()) as UnifiedChatRequest;
     const { mode = "llm" } = body;
 
     // Auto-detect mode if not specified
@@ -571,4 +593,8 @@ async function handler(req: NextRequest) {
   }
 }
 
-export const POST = withRateLimit(handler, 60, 60);
+export const POST = withRateLimit(async (request: NextRequest) => {
+  const body = (await request.json()) as UnifiedChatRequest;
+  return handleUnifiedChat({ request, body });
+}, 60, 60);
+

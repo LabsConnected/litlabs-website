@@ -16,8 +16,6 @@
 
 import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { useProfile } from "@/context/ProfileContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
 import StationSettings from "./StationSettings";
 import AgentRoster from "./AgentRoster";
 import SparkCustomizer from "./SparkCustomizer";
@@ -32,21 +30,39 @@ const MODE_HINTS: Record<string, string> = {
   explore: "Pan with the pointer. Click an agent to inspect.",
   edit: "Drag agents to reposition. Saved automatically.",
   command: "Queue a mission below. It runs in the background.",
+  saved: "Open a saved layout or preset.",
 };
 
-export default function BaseStationShell() {
+interface BaseStationShellProps {
+  embedded?: boolean;
+  selectedAgentId?: AgentId | null;
+  onSelectAgentAction?: (agentId: AgentId) => void;
+  onOpenAgentChatAction?: (agentId: AgentId) => void;
+  onAssignMissionAction?: (agentId: AgentId) => void;
+  onOpenTerminalAction?: (agentId: AgentId) => void;
+}
+
+export default function BaseStationShell({
+  embedded = false,
+  selectedAgentId,
+  onSelectAgentAction,
+  onOpenAgentChatAction,
+  onAssignMissionAction,
+  onOpenTerminalAction,
+}: BaseStationShellProps) {
   const { resolvedColors: T } = useTheme();
   const { saving } = useStationLayout();
   const layout = useStationStore();
-  const { profile } = useProfile();
-  const { isSignedIn } = useClerkAuth();
-  const [selectedAgent, setSelectedAgent] = useState<AgentId | null>(null);
-
-  const userName = profile?.displayName?.split(" ")[0] || profile?.username || "creator";
+  const [internalSelectedAgent, setInternalSelectedAgent] = useState<AgentId | null>(null);
+  const selectedAgent = selectedAgentId !== undefined ? selectedAgentId : internalSelectedAgent;
+  const selectAgent = (agentId: AgentId | null) => {
+    setInternalSelectedAgent(agentId);
+    if (agentId) onSelectAgentAction?.(agentId);
+  };
 
   return (
     <main
-      className="relative h-full min-h-0 overflow-y-auto"
+      className={embedded ? "relative h-full min-h-0 overflow-hidden" : "relative h-full min-h-0 overflow-y-auto"}
       style={{ backgroundColor: "transparent", color: T.textColor }}
     >
       <div
@@ -55,103 +71,101 @@ export default function BaseStationShell() {
           background: `radial-gradient(circle at 15% 15%, ${T.accentColor}10, transparent 32%), radial-gradient(circle at 85% 40%, ${T.linkColor}0b, transparent 30%)`,
         }}
       />
-      <div className="relative mx-auto max-w-7xl space-y-3 px-3 py-3 sm:space-y-4 sm:px-4 sm:py-4">
+      <div className={embedded ? "relative h-full min-h-0 p-2" : "relative mx-auto max-w-7xl space-y-3 px-3 py-3 sm:space-y-4 sm:px-4 sm:py-4"}>
 
-        {/* Hero header — appears on desktop, hidden on mobile (the mobile
-            layout has its own stack of cards that double as their own
-            headers). */}
-        <header
-          className="relative hidden min-h-32 overflow-hidden rounded-3xl border lg:block"
+        {!embedded && <header
+          className="relative hidden items-center justify-between rounded-2xl border px-4 py-2 lg:flex"
           style={{
-            borderColor: `${T.accentColor}30`,
-            backgroundColor: "#050805",
+            borderColor: "rgba(255,255,255,0.10)",
+            backgroundColor: "rgba(7,8,14,0.88)",
+            backdropFilter: "blur(18px)",
           }}
         >
-          {/* Background hero image — the existing mascot character sheet. */}
-          <div
-            className="absolute inset-0 bg-cover"
-            style={{
-              backgroundImage: "url('/brand/litt-mascot-character-sheet.png')",
-              backgroundPosition: "58% 24%",
-              opacity: 0.45,
-            }}
-            aria-hidden
-          />
-          <div
-            className="absolute inset-0"
-            style={{
-              background: "linear-gradient(90deg,rgba(3,7,5,.98) 0%,rgba(3,7,5,.88) 38%,rgba(3,7,5,.2) 72%,rgba(3,7,5,.55) 100%)",
-            }}
-            aria-hidden
-          />
-          <div className="relative z-10 flex max-w-xl items-center gap-3 p-5 sm:p-6">
-            <div
-              className="grid h-12 w-12 place-items-center rounded-2xl"
-              style={{
-                background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`,
-                boxShadow: `0 0 28px ${T.accentColor}40`,
-              }}
-            >
-              <span className="text-[11px] font-black text-white">LiTT</span>
-            </div>
-            <div>
-              <p className="text-[9px] font-black uppercase tracking-[.22em] text-lime-300">
-                LiTT Base Station
-              </p>
-              <h1 className="text-2xl font-black text-white sm:text-3xl">
-                Welcome back, {userName}.
-              </h1>
-              <p className="mt-1 max-w-md text-xs leading-5 text-white/70">
-                {isSignedIn
-                  ? "Your crew is online. Drag to position, click to inspect, queue a mission when you're ready."
-                  : "Sign in to queue missions, save layouts, and chat with your crew."}
-              </p>
-            </div>
-            <div className="ml-auto flex items-center gap-1.5 self-start rounded-full border bg-emerald-500/15 px-2 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-200" style={{ borderColor: "rgba(52,211,153,.4)" }}>
-              <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />
-              All systems
-            </div>
+          <div>
+            <h1 className="text-sm font-black" style={{ color: T.textColor }}>
+              LiTT Base Station
+            </h1>
+            <p className="text-[9px]" style={{ color: T.textMuted }}>
+              2 agents online · Systems operational
+            </p>
           </div>
-        </header>
-
-        {/* Desktop layout */}
-        <div className="hidden lg:flex lg:h-[calc(100dvh-12rem)] lg:flex-col lg:gap-3">
           <StationSettings saving={saving} />
+          <div
+            className="flex items-center gap-1.5 rounded-full border px-2 py-1 text-[9px] font-black uppercase tracking-wider text-emerald-200"
+            style={{
+              borderColor: "rgba(52,211,153,.4)",
+              backgroundColor: "rgba(16,185,129,.15)",
+            }}
+          >
+            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-300" />
+            Online
+          </div>
+        </header>}
+
+        <div className={embedded ? "flex h-full min-h-0 flex-col gap-3" : "hidden lg:flex lg:h-[calc(100dvh-6rem)] lg:flex-col lg:gap-3"}>
           <p
             className="text-center text-[10px] font-bold italic"
             style={{ color: T.textMuted }}
           >
             {MODE_HINTS[layout.mode] ?? ""}
           </p>
-          <div className="grid min-h-0 flex-1 gap-3 lg:grid-cols-[16rem_minmax(0,1fr)_18rem]">
-            {/* Left rail */}
-            <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
-              <AgentRoster />
+          <div className={embedded ? "grid min-h-0 flex-1 gap-3 md:grid-cols-[14rem_minmax(0,1fr)]" : "grid min-h-0 flex-1 gap-3 lg:grid-cols-[260px_minmax(600px,1fr)_340px]"}>
+            <aside
+              className="flex min-h-0 flex-col gap-3 overflow-y-auto rounded-2xl border p-3"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                backgroundColor: "rgba(7,8,14,0.88)",
+                backdropFilter: "blur(18px)",
+              }}
+            >
+              <AgentRoster selectedAgentId={selectedAgent} onSelectAgentAction={selectAgent} />
               <SparkCustomizer />
             </aside>
 
-            {/* Center canvas */}
-            <section className="min-h-0">
-              <StationViewport
-                mode={layout.mode}
-                selectedAgent={selectedAgent}
-                onSelectAgent={setSelectedAgent}
-              />
+            <section
+              className="relative min-h-0 overflow-hidden rounded-2xl border"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                backgroundColor: "rgba(7,8,14,0.92)",
+                backdropFilter: "blur(18px)",
+              }}
+            >
+              <StationViewport mode={layout.mode} selectedAgent={selectedAgent} onSelectAgent={selectAgent} />
+              {embedded && selectedAgent && (
+                <div className="absolute bottom-3 right-3 top-3 z-20 w-[min(320px,42%)]">
+                  <AgentInspector
+                    agentId={selectedAgent}
+                    onClose={() => selectAgent(null)}
+                    onChatAction={onOpenAgentChatAction}
+                    onAssignAction={onAssignMissionAction}
+                    onTerminalAction={onOpenTerminalAction}
+                  />
+                </div>
+              )}
             </section>
 
-            {/* Right rail */}
-            <aside className="flex min-h-0 flex-col gap-3 overflow-y-auto pr-1">
+            {!embedded && <aside
+              className="flex min-h-0 flex-col gap-3 overflow-y-auto rounded-2xl border p-3"
+              style={{
+                borderColor: "rgba(255,255,255,0.10)",
+                backgroundColor: "rgba(7,8,14,0.88)",
+                backdropFilter: "blur(18px)",
+              }}
+            >
               {selectedAgent ? (
                 <AgentInspector
                   agentId={selectedAgent}
-                  onClose={() => setSelectedAgent(null)}
+                  onClose={() => selectAgent(null)}
+                  onChatAction={onOpenAgentChatAction}
+                  onAssignAction={onAssignMissionAction}
+                  onTerminalAction={onOpenTerminalAction}
                 />
               ) : (
                 <section
                   className="rounded-2xl border p-4"
                   style={{
-                    borderColor: `${T.borderColor}25`,
-                    backgroundColor: `${T.boxBg}99`,
+                    borderColor: "rgba(255,255,255,0.10)",
+                    backgroundColor: "rgba(7,8,14,0.88)",
                   }}
                 >
                   <h3 className="text-[10px] font-black uppercase tracking-[.18em]" style={{ color: T.textMuted }}>
@@ -162,13 +176,22 @@ export default function BaseStationShell() {
                   </p>
                 </section>
               )}
-              <MissionDock />
-            </aside>
+            </aside>}
           </div>
+
+          {!embedded && <section
+            className="rounded-2xl border p-3"
+            style={{
+              borderColor: "rgba(255,255,255,0.10)",
+              backgroundColor: "rgba(7,8,14,0.88)",
+              backdropFilter: "blur(18px)",
+            }}
+          >
+            <MissionDock />
+          </section>}
         </div>
 
-        {/* Mobile layout */}
-        <MobileAgentHome saving={saving} />
+        {!embedded && <MobileAgentHome saving={saving} selectedAgentId={selectedAgent} onSelectAgentAction={selectAgent} onOpenAgentChatAction={onOpenAgentChatAction} onAssignMissionAction={onAssignMissionAction} onOpenTerminalAction={onOpenTerminalAction} />}
       </div>
     </main>
   );

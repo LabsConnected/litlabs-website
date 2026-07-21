@@ -2,6 +2,7 @@
 
 interface Notification {
   id: string;
+  type?: "follow" | "like" | "comment" | "system";
   read_at?: string | null;
   created_at?: string;
   users?: { name?: string } | null;
@@ -32,12 +33,12 @@ import {
   Bell,
   Coins,
   User,
-  Code2,
   Wand2,
-  Bot,
   BrainCircuit,
   Gamepad2,
   MessageCircle,
+  UserPlus,
+  Heart,
 } from "lucide-react";
 
 const NavAuth = dynamic(
@@ -46,16 +47,18 @@ const NavAuth = dynamic(
 );
 
 /* ------------------------------------------------------------------ */
-/*  Primary nav links ΓÇö ALL surfaced, no hidden dropdown               */
+/*  Primary nav links -- ALL surfaced, no hidden dropdown                */
 /* ------------------------------------------------------------------ */
-const leftNavLinks = [
-  { href: "/", label: "Home", icon: Home },
-  { href: "/dashboard", label: "Dashboard", icon: Bot },
+const primaryNavLinks = [
+  { href: "/dashboard", label: "Dashboard", icon: Home },
   { href: "/studio", label: "Studio", icon: Wand2 },
+  { href: "/agents", label: "Agents", icon: BrainCircuit },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
+  { href: "/games", label: "Games", icon: Gamepad2 },
+  { href: "/social", label: "Social", icon: MessageCircle },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
   { href: "/settings", label: "Settings", icon: Settings },
-];
+] as const;
 
 
 /* ------------------------------------------------------------------ */
@@ -64,41 +67,80 @@ const leftNavLinks = [
 const userLinks = [
   { href: "/profile", label: "Profile", icon: User },
   { href: "/settings", label: "Settings", icon: Settings },
-  { href: "/code", label: "Code Scanner", icon: Code2 },
-  { href: "/showcase", label: "Showcase", icon: Sparkles },
 ];
 
 const mobileDrawerGroups = [
-  { label: "Home", links: [{ href: "/dashboard", label: "Command Center", icon: Home }] },
-  { label: "Create", links: [{ href: "/studio", label: "Studio", icon: Wand2 }, { href: "/agents", label: "LiTT Agent", icon: BrainCircuit }, { href: "/gallery", label: "Gallery", icon: Sparkles }] },
-  { label: "Social", links: [{ href: "/social", label: "Community", icon: MessageCircle }] },
-  { label: "Games", links: [{ href: "/games", label: "Games Hub", icon: Gamepad2 }] },
-  { label: "Account", links: [{ href: "/profile", label: "Profile", icon: User }, { href: "/settings", label: "Settings", icon: Settings }] },
+  {
+    label: "Workspace",
+    links: [
+      primaryNavLinks[0],
+      primaryNavLinks[1],
+      primaryNavLinks[2],
+    ],
+  },
+  {
+    label: "Explore",
+    links: [
+      primaryNavLinks[3],
+      primaryNavLinks[4],
+      primaryNavLinks[5],
+      primaryNavLinks[6],
+    ],
+  },
+  {
+    label: "Account",
+    links: [
+      { href: "/profile", label: "Profile", icon: User },
+      primaryNavLinks[7],
+    ],
+  },
 ];
 
-function WalletBadge({ accentColor }: { accentColor: string }) {
+function WalletBadge({
+  accentColor,
+  alwaysVisible = false,
+}: {
+  accentColor: string;
+  alwaysVisible?: boolean;
+}) {
   const { balance, isLoading } = useWallet();
   return (
     <span
-      className="hidden sm:flex items-center gap-1 px-2 py-0.5 rounded text-xs font-bold"
+      className={`
+        items-center gap-1 rounded px-2 py-0.5 text-xs font-bold
+        ${alwaysVisible ? "flex" : "hidden sm:flex"}
+      `}
       style={{
-        backgroundColor: accentColor + "15",
+        backgroundColor: `${accentColor}15`,
         color: accentColor,
         border: `1px solid ${accentColor}30`,
       }}
       title="Your LiTBit Coins balance"
     >
-      <Coins size={10} /> {isLoading ? "ΓÇö" : balance.toLocaleString()}
+      <Coins className="pointer-events-none" size={10} aria-hidden="true" />
+      {isLoading ? "—" : balance.toLocaleString()}
     </span>
   );
 }
 
-export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
+function NotificationTypeIcon({
+  type,
+}: {
+  type?: Notification["type"];
+}) {
+  if (type === "follow") return <UserPlus className="pointer-events-none" size={12} aria-hidden="true" />;
+  if (type === "like") return <Heart className="pointer-events-none" size={12} aria-hidden="true" />;
+  if (type === "comment") return <MessageCircle className="pointer-events-none" size={12} aria-hidden="true" />;
+  return <Bell className="pointer-events-none" size={12} aria-hidden="true" />;
+}
+
+export default function Navbar() {
   const { theme, resolvedColors, setMode } = useTheme();
   const { profile } = useProfile();
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
   const hamburgerRef = useRef<HTMLButtonElement>(null);
+  const drawerRef = useRef<HTMLDivElement>(null);
   const [userOpen, setUserOpen] = useState(false);
   const [notifOpen, setNotifOpen] = useState(false);
   const [notifications, setNotifications] = useState<Notification[]>([]);
@@ -129,43 +171,65 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
 
   useEffect(() => {
     if (!isSignedIn) return;
+    const controller = new AbortController();
+
     const fetchNotifications = async () => {
       try {
-        const [listRes, countRes] = await Promise.all([
-          fetch("/api/notifications?limit=20"),
-          fetch("/api/notifications/count"),
+        const [listResponse, countResponse] = await Promise.all([
+          fetch("/api/notifications?limit=20", { signal: controller.signal }),
+          fetch("/api/notifications/count", { signal: controller.signal }),
         ]);
-        const listData = await listRes.json();
-        const countData = await countRes.json();
-        setNotifications(listData.notifications || []);
-        setUnreadCount(countData.count || 0);
-      } catch {
+
+        if (!listResponse.ok || !countResponse.ok) return;
+
+        const listData = await listResponse.json();
+        const countData = await countResponse.json();
+        setNotifications(listData.notifications ?? []);
+        setUnreadCount(countData.count ?? 0);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         /* ignore */
       }
     };
-    const id = requestAnimationFrame(() => fetchNotifications());
-    const interval = setInterval(() => {
-      if (!document.hidden) fetchNotifications();
-    }, 15000);
+
+    void fetchNotifications();
+
+    const interval = window.setInterval(() => {
+      if (!document.hidden) void fetchNotifications();
+    }, 60_000);
+
     return () => {
-      cancelAnimationFrame(id);
-      clearInterval(interval);
+      controller.abort();
+      window.clearInterval(interval);
     };
   }, [isSignedIn]);
 
-  /* Close dropdowns on outside click + close mobile drawer on desktop resize */
+  /* Close dropdowns on outside click */
   useEffect(() => {
-    const handleClick = (e: MouseEvent) => {
-      if (userRef.current && !userRef.current.contains(e.target as Node))
+    const handlePointerDown = (event: PointerEvent) => {
+      const target = event.target as Node;
+
+      if (userRef.current && !userRef.current.contains(target)) {
         setUserOpen(false);
-      if (notifRef.current && !notifRef.current.contains(e.target as Node))
+      }
+
+      if (notifRef.current && !notifRef.current.contains(target)) {
         setNotifOpen(false);
-      if (mobileOpen && !hamburgerRef.current?.contains(e.target as Node))
+      }
+
+      if (
+        mobileOpen &&
+        !hamburgerRef.current?.contains(target) &&
+        !drawerRef.current?.contains(target)
+      ) {
         setMobileOpen(false);
+      }
     };
-    document.addEventListener("mousedown", handleClick);
+
+    document.addEventListener("pointerdown", handlePointerDown);
+
     return () => {
-      document.removeEventListener("mousedown", handleClick);
+      document.removeEventListener("pointerdown", handlePointerDown);
     };
   }, [mobileOpen]);
 
@@ -173,7 +237,39 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
     if (!mobileOpen) return;
     const previous = document.documentElement.style.overflow;
     document.documentElement.style.overflow = "hidden";
-    return () => { document.documentElement.style.overflow = previous; };
+    return () => {
+      document.documentElement.style.overflow = previous;
+    };
+  }, [mobileOpen]);
+
+  useEffect(() => {
+    if (!mobileOpen) return;
+
+    const previousFocus =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setMobileOpen(false);
+      }
+    };
+
+    document.addEventListener("keydown", handleKeyDown);
+
+    requestAnimationFrame(() => {
+      const firstFocusable =
+        drawerRef.current?.querySelector<HTMLElement>(
+          'a, button, [tabindex]:not([tabindex="-1"])',
+        );
+      firstFocusable?.focus();
+    });
+
+    return () => {
+      document.removeEventListener("keydown", handleKeyDown);
+      previousFocus?.focus();
+    };
   }, [mobileOpen]);
 
   /* Close mobile menu on route change */
@@ -186,8 +282,10 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
     return () => cancelAnimationFrame(id);
   }, [pathname]);
 
-  const isActive = (href: string) =>
-    href === "/" ? pathname === "/" : pathname.startsWith(href);
+  const isActive = (href: string) => {
+    if (href === "/") return pathname === "/";
+    return pathname === href || pathname.startsWith(`${href}/`);
+  };
 
   return (
     <nav
@@ -253,7 +351,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               border: `1px solid ${resolvedColors.borderColor}20`,
             }}
           >
-            {leftNavLinks.map((link) => {
+            {primaryNavLinks.map((link) => {
               const active = isActive(link.href);
               const Icon = link.icon;
               return (
@@ -284,7 +382,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LitCoins wallet ΓÇö only when signed in */}
+            {/* LitCoins wallet -- only when signed in */}
             {authLoaded && isSignedIn && (
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
@@ -294,8 +392,8 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             <div className="relative" ref={notifRef}>
               <button
                 onClick={() => {
-                  setNotifOpen((v) => !v);
-                  if (!notifOpen && unreadCount > 0) markAllRead();
+                  setNotifOpen((open) => !open);
+                  setUserOpen(false);
                 }}
                 className="w-9 h-9 flex items-center justify-center rounded-lg transition-all duration-200 hover:scale-110 relative"
                 style={{
@@ -304,8 +402,10 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   backgroundColor: resolvedColors.accentColor + "08",
                 }}
                 title="Notifications"
+                aria-expanded={notifOpen}
+                aria-controls="notification-panel"
               >
-                <Bell size={16} />
+                <Bell className="pointer-events-none" size={16} aria-hidden="true" />
                 {unreadCount > 0 && (
                   <span
                     className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full flex items-center justify-center text-[8px] font-black px-1"
@@ -320,6 +420,9 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               </button>
               {notifOpen && (
                 <div
+                  id="notification-panel"
+                  role="region"
+                  aria-label="Notifications"
                   className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-[280px] max-h-[400px] overflow-y-auto z-50"
                   style={{
                     backgroundColor: resolvedColors.boxBg + "f0",
@@ -360,19 +463,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                           style={{ opacity: n.read_at ? 0.5 : 1 }}
                         >
                           <div
-                            className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0"
+                            className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full"
                             style={{
                               backgroundColor:
                                 resolvedColors.accentColor + "12",
+                              color: resolvedColors.accentColor,
                             }}
                           >
-                            {n.type === "follow"
-                              ? "≡ƒæñ"
-                              : n.type === "like"
-                                ? "Γ¥ñ"
-                                : n.type === "comment"
-                                  ? "≡ƒÆ¼"
-                                  : "≡ƒöö"}
+                            <NotificationTypeIcon type={n.type} />
                           </div>
                           <div className="flex-1 min-w-0">
                             <div
@@ -417,12 +515,15 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               {theme.mode === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            {/* User dropdown (profile/settings links) ΓÇö desktop, signed-in only */}
+            {/* User dropdown (profile/settings links) -- desktop, signed-in only */}
             {authLoaded && isSignedIn && (
               <div className="hidden md:block relative" ref={userRef}>
                 <button
-                  onClick={() => setUserOpen((v) => !v)}
-                  aria-label="Navigation menu"
+                  onClick={() => {
+                    setUserOpen((open) => !open);
+                    setNotifOpen(false);
+                  }}
+                  aria-label="User menu"
                   aria-expanded={userOpen}
                   className="flex items-center gap-1.5 px-2.5 py-2 rounded-lg transition-all hover:opacity-80"
                   style={{
@@ -484,29 +585,31 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               </div>
             )}
 
-            {/* Auth ΓÇö always visible: avatar+name when signed in, Sign In button when not */}
-            <NavAuth linkColor={resolvedColors.accentColor} />
+            {/* Auth -- sign in only; signed-in users use the profile dropdown */}
+            {authLoaded && !isSignedIn && (
+              <NavAuth linkColor={resolvedColors.accentColor} />
+            )}
 
             {/* Mobile hamburger */}
             <button
               ref={hamburgerRef}
+              aria-controls="mobile-navigation-drawer"
+              aria-expanded={mobileOpen}
+              aria-label={mobileOpen ? "Close menu" : "Open menu"}
               onClick={(e) => {
                 e.stopPropagation();
                 setMobileOpen((open) => !open);
-                onMenuClick?.();
               }}
-              aria-label={mobileOpen ? "Close menu" : "Open menu"}
-              aria-expanded={mobileOpen}
               className="lg:hidden w-9 h-9 flex items-center justify-center rounded-lg"
               style={{ color: resolvedColors.linkColor }}
             >
-              {mobileOpen ? <X size={20} /> : <Menu size={20} />}
+              {mobileOpen ? <X className="pointer-events-none" size={20} aria-hidden="true" /> : <Menu className="pointer-events-none" size={20} aria-hidden="true" />}
             </button>
           </div>
         </div>
       </div>
 
-      {/* Mobile drawer ΓÇö slide down from nav bottom */}
+      {/* Mobile drawer -- slide-in from nav bottom */}
       {mobileOpen && (
         <>
           {/* Tap-outside scrim */}
@@ -517,6 +620,11 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
           />
           {/* Drawer panel */}
           <div
+            ref={drawerRef}
+            id="mobile-navigation-drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Main navigation"
             className="fixed inset-y-0 left-0 z-[10001] flex h-[100dvh] w-[min(88vw,340px)] flex-col overflow-hidden border-r lg:hidden"
             style={{
               backgroundColor: resolvedColors.bgColor,
@@ -527,11 +635,11 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             <header className="flex shrink-0 items-center gap-3 border-b px-4 py-4" style={{ borderColor: resolvedColors.borderColor + "25" }}>
               {profile?.avatarUrl ? <Image src={profile.avatarUrl} alt="" width={44} height={44} className="h-11 w-11 rounded-full object-cover" unoptimized /> : <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>}
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-black" style={{ color: resolvedColors.textColor }}>{profile?.displayName || "Member"}</div><div className="truncate text-[10px]" style={{ color: resolvedColors.textMuted }}>@{profile?.username || "creator"}</div></div>
-              <button onClick={() => setMobileOpen(false)} className="rounded-xl p-2" style={{ color: resolvedColors.textMuted }} aria-label="Close menu"><X size={18} /></button>
+              <button onClick={() => setMobileOpen(false)} className="rounded-xl p-2" style={{ color: resolvedColors.textMuted }} aria-label="Close menu"><X className="pointer-events-none" size={18} aria-hidden="true" /></button>
             </header>
 
             <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-3 py-3 pb-[calc(6.5rem+env(safe-area-inset-bottom))]">
-              {mobileDrawerGroups.map((group) => <section key={group.label} className="mb-4"><div className="px-2 pb-1.5 text-[9px] font-black uppercase tracking-[.18em]" style={{ color: resolvedColors.textMuted }}>{group.label}</div><div className="space-y-1">{group.links.map((link) => { const Icon = link.icon; const active = isActive(link.href); return <Link key={link.href} href={link.href} onClick={() => setMobileOpen(false)} className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold" style={{ color: active ? resolvedColors.accentColor : resolvedColors.textColor, backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent" }}><Icon size={18} />{link.label}</Link>; })}</div></section>)}
+              {mobileDrawerGroups.map((group) => <section key={group.label} className="mb-4"><div className="px-2 pb-1.5 text-[9px] font-black uppercase tracking-[.18em]" style={{ color: resolvedColors.textMuted }}>{group.label}</div><div className="space-y-1">{group.links.map((link) => { const Icon = link.icon; const active = isActive(link.href); return <Link key={link.href} href={link.href} onClick={() => setMobileOpen(false)} className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2 text-sm font-bold" style={{ color: active ? resolvedColors.accentColor : resolvedColors.textColor, backgroundColor: active ? resolvedColors.accentColor + "12" : "transparent" }}><Icon className="pointer-events-none" size={18} aria-hidden="true" />{link.label}</Link>; })}</div></section>)}
             </div>
 
             <div
@@ -540,13 +648,13 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             >
               <div className="flex items-center gap-2">
                 {authLoaded && isSignedIn ? (
-                  <WalletBadge accentColor={resolvedColors.accentColor} />
+                  <WalletBadge
+                    accentColor={resolvedColors.accentColor}
+                    alwaysVisible
+                  />
                 ) : (
                   <>
-                    <Coins
-                      size={12}
-                      style={{ color: resolvedColors.accentColor }}
-                    />
+                    <Coins className="pointer-events-none" size={12} style={{ color: resolvedColors.accentColor }} aria-hidden="true" />
                     <span
                       className="text-xs font-bold"
                       style={{ color: resolvedColors.accentColor }}

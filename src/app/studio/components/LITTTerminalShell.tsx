@@ -50,8 +50,10 @@ import {
   FolderOpen,
 } from "lucide-react";
 import StudioCommandDeck, {
+  type CommandSurface,
   type StudioCommandDeckMode,
 } from "./StudioCommandDeck";
+import type { AgentId } from "@/app/agents/store/stationStore";
 
 import dynamic from "next/dynamic";
 
@@ -60,6 +62,10 @@ const LiveVoiceBar = dynamic(() => import("./LiveVoiceBar").then(m => m.LiveVoic
 import StudioMobileChrome, {
   type StudioMobileView,
 } from "./StudioMobileChrome";
+import GeminiModelPicker, {
+  DEFAULT_GEMINI_MODEL,
+  type ChatModelSelection,
+} from "./GeminiModelPicker";
 import {
   PersonaProvider,
   usePersona,
@@ -293,10 +299,14 @@ function LITTTerminalShellInner({
     setActivity,
   } = useVoiceSession();
   const { persona, switchPersona } = usePersona();
+  const MESSAGE_STORAGE_KEY = "litlab-builder-messages-v3";
   const [messages, setMessages] = useState<Message[]>(() => {
     if (typeof window === "undefined") return [];
     try {
-      const stored = localStorage.getItem("litlab-builder-messages");
+      // One-time cleanup of legacy storage keys.
+      localStorage.removeItem("litlab-builder-messages");
+      localStorage.removeItem("litlab-builder-messages-v2");
+      const stored = localStorage.getItem(MESSAGE_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored);
         if (Array.isArray(parsed)) {
@@ -313,6 +323,7 @@ function LITTTerminalShellInner({
     return [];
   });
   const [busy, setBusy] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<ChatModelSelection>(DEFAULT_GEMINI_MODEL);
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [cameraOpen, setCameraOpen] = useState(false);
@@ -321,6 +332,24 @@ function LITTTerminalShellInner({
   const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+
+  useEffect(() => {
+    try {
+      const saved = window.localStorage.getItem("litt-selected-model");
+      if (!saved) return;
+      const parsed = JSON.parse(saved) as Partial<ChatModelSelection>;
+      if ((parsed.provider === "google" || parsed.provider === "auto") && typeof parsed.model === "string" && typeof parsed.label === "string") {
+        setSelectedModel(parsed as ChatModelSelection);
+      }
+    } catch {
+      window.localStorage.removeItem("litt-selected-model");
+    }
+  }, []);
+
+  const chooseModel = useCallback((model: ChatModelSelection) => {
+    setSelectedModel(model);
+    window.localStorage.setItem("litt-selected-model", JSON.stringify(model));
+  }, []);
 
   // Focus refs for terminal drawer (a11y)
   const terminalDrawerRef = useRef<HTMLDivElement>(null);
@@ -376,7 +405,7 @@ function LITTTerminalShellInner({
     payload?: Record<string, unknown>;
   };
   const [activeCommands, setActiveCommands] = useState<ActiveCommand[]>([]);
-  const [agentId] = useState<keyof typeof AGENTS>("littcode");
+  const agentId: AgentId = searchParams?.get("agent") === "spark" ? "spark" : "litt";
   const [agentChats, setAgentChats] = useState<Record<string, Message[]>>({});
   const [pendingAgentQuery, setPendingAgentQuery] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
@@ -417,12 +446,12 @@ function LITTTerminalShellInner({
   // Persist Builder messages so the stream survives refresh
   useEffect(() => {
     try {
-      localStorage.setItem("litlab-builder-messages", JSON.stringify(messages));
+      localStorage.setItem(MESSAGE_STORAGE_KEY, JSON.stringify(messages));
     } catch {}
   }, [messages]);
 
   const activeAgent = useMemo(
-    () => AGENTS[agentId] || AGENTS.littcode,
+    () => AGENTS[agentId] || AGENTS.litt,
     [agentId],
   );
   const agentMessages = useMemo(
@@ -460,6 +489,28 @@ function LITTTerminalShellInner({
       router.replace(`/studio?${params.toString()}`, { scroll: false });
     },
     [router, searchParams],
+  );
+  const commandSurface: CommandSurface = searchParams?.get("surface") === "agents" ? "agents" : "mission";
+  const setCommandSurface = useCallback(
+    (surface: CommandSurface) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("mode", "command");
+      params.set("surface", surface);
+      router.replace(`/studio?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams],
+  );
+  const selectStudioAgent = useCallback(
+    (nextAgentId: AgentId) => {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("mode", "command");
+      params.set("surface", "agents");
+      params.set("agent", nextAgentId);
+      switchPersona(nextAgentId === "spark" ? "littlebit" : "littcode");
+      setActiveBuilderWindow("agents");
+      router.replace(`/studio?${params.toString()}`, { scroll: false });
+    },
+    [router, searchParams, switchPersona],
   );
 
   const micActive = voiceState !== "idle";
@@ -590,10 +641,13 @@ function LITTTerminalShellInner({
   useEffect(() => {
     const urlAgent = searchParams?.get("agent");
     const urlMission = searchParams?.get("mission");
-    if (urlAgent && (urlAgent === "littcode" || urlAgent === "littlebit")) {
-      if (persona.id !== urlAgent) {
-        switchPersona(urlAgent);
-      }
+    const personaForAgent = urlAgent === "spark" || urlAgent === "littlebit"
+      ? "littlebit"
+      : urlAgent === "litt" || urlAgent === "littcode"
+        ? "littcode"
+        : null;
+    if (personaForAgent && persona.id !== personaForAgent) {
+      switchPersona(personaForAgent);
     }
     if (urlMission) {
       const missionPrompt = decodeURIComponent(urlMission);
@@ -1106,25 +1160,11 @@ function LITTTerminalShellInner({
 
       if (cmd === "build") {
         onToolChangeAction?.("builder");
-        addToolMessage({
-          role: "assistant",
-          content: prompt
-            ? `Switched to the Build tool. Use it to build: ${prompt}`
-            : "Switched to the Build tool.",
-          createdAt: Date.now(),
-        });
         return true;
       }
 
       if (cmd === "code") {
         onToolChangeAction?.("canvas");
-        addToolMessage({
-          role: "assistant",
-          content: prompt
-            ? `Switched to the Code tool. Prompt: ${prompt}`
-            : "Switched to the Code tool.",
-          createdAt: Date.now(),
-        });
         return true;
       }
 
@@ -1146,7 +1186,7 @@ function LITTTerminalShellInner({
         setMessages([]);
         setActiveCommands([]);
         try {
-          localStorage.removeItem("litlab-builder-messages");
+          localStorage.removeItem(MESSAGE_STORAGE_KEY);
         } catch {}
         return true;
       }
@@ -1229,7 +1269,7 @@ function LITTTerminalShellInner({
         setActivity({ type: "idle" });
       }
     },
-    [activeAgent, setActivity, streamAgentChat, setBusy, makeMessage, setAgentChats],
+    [activeAgent, setActivity, streamAgentChat, setBusy, setAgentChats],
   );
 
   // Route a pending /agent query
@@ -1307,10 +1347,12 @@ function LITTTerminalShellInner({
             method: "POST",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              agentSlug: persona.id,
+              agentSlug: agentId,
               message: userMessage,
               history: historyForApi,
               images: attachList,
+              provider: selectedModel.provider,
+              model: selectedModel.model,
               userName: profile.displayName || "Creator",
             }),
           });
@@ -1390,12 +1432,14 @@ function LITTTerminalShellInner({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             mode: "llm",
-            agentSlug: persona.id,
+            agentSlug: agentId,
             message: text || "Describe what you see.",
             history: historyForApi,
             stream: true,
             userName: profile.displayName || "Creator",
             images: attachList,
+            provider: selectedModel.provider,
+            model: selectedModel.model,
             context: studioContext,
           }),
           signal: controller.signal,
@@ -1552,7 +1596,8 @@ function LITTTerminalShellInner({
       messages,
       attachments,
       profile.displayName,
-      persona.id,
+      agentId,
+      selectedModel,
       setActivity,
       runSlashCommand,
       executeTerminalCommand,
@@ -1561,7 +1606,6 @@ function LITTTerminalShellInner({
       activeBuilderWindow,
       activeFilePath,
       selectedAssetPath,
-      streamAgentChat,
       setMessages,
       setBusy,
       setInput,
@@ -1833,13 +1877,8 @@ function LITTTerminalShellInner({
         onChange={handleFiles}
       />
 
-      {/* Mobile Studio chrome — top bar + drawer */}
+      {/* Mobile Studio chrome — bottom workspace tabs only */}
       <StudioMobileChrome
-        projectLabel={
-          activeProjectId
-            ? `Project ${activeProjectId.slice(0, 10)}`
-            : "No project selected"
-        }
         activeView={mobileStudioView}
         onViewChange={(view) => {
           setMobileStudioView(view);
@@ -1852,14 +1891,23 @@ function LITTTerminalShellInner({
           };
           setActiveBuilderWindow(windowMap[view]);
         }}
-        voiceActive={micActive}
-        onVoiceAction={toggleMic}
       />
 
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
         {/* MAIN STAGE */}
-        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden pt-[52px] md:pt-0">
+        <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          <header className="relative z-20 flex items-center gap-2 border-b border-white/10 bg-[#040817]/95 px-3 py-2 backdrop-blur-xl md:hidden">
+            <span className="text-xs font-black text-white">LiTT</span>
+            <GeminiModelPicker value={selectedModel} onChange={chooseModel} />
+            <button
+              type="button"
+              onClick={() => setProjectDrawerOpen(true)}
+              className="ml-auto max-w-28 truncate rounded-lg border border-white/10 px-2 py-1 text-[10px] font-bold text-white/70"
+            >
+              {activeProjectId ? "Project selected" : "No project"}
+            </button>
+          </header>
           {/* Ambient background - simplified on mobile to reduce paint */}
           <div
             className="pointer-events-none absolute inset-0 hidden opacity-50 sm:block"
@@ -1924,6 +1972,23 @@ function LITTTerminalShellInner({
                 onModeChangeAction={setHybridMode}
                 activeProjectId={activeProjectId}
                 onOpenProjectsAction={() => setProjectDrawerOpen(true)}
+                selectedModel={selectedModel}
+                onModelChange={chooseModel}
+                commandSurface={commandSurface}
+                onCommandSurfaceChangeAction={setCommandSurface}
+                selectedAgentId={agentId}
+                onSelectAgentAction={selectStudioAgent}
+                onOpenAgentChatAction={selectStudioAgent}
+                onAssignMissionAction={(selectedAgent) => {
+                  selectStudioAgent(selectedAgent);
+                  setInput(`Assign a mission to ${AGENTS[selectedAgent]?.name ?? selectedAgent}: `);
+                  requestAnimationFrame(() => textInputRef.current?.focus());
+                }}
+                onOpenAgentTerminalAction={(selectedAgent) => {
+                  selectStudioAgent(selectedAgent);
+                  setMobileStudioView("terminal");
+                  setActiveBuilderWindow("terminal");
+                }}
                 mobileView={mobileStudioView}
                 onMobileViewChange={setMobileStudioView}
                 onActiveWindowChange={setActiveBuilderWindow}

@@ -140,3 +140,129 @@
     min-height: 0;
   }
 }
+
+/* Ultra finisher: deterministic desktop layout — rail | workspace | conversation */
+@media (min-width: 701px) {
+  .deck,
+  .deckWithConversation {
+    display: grid;
+    grid-template-columns:
+      56px
+      minmax(0, 1fr)
+      clamp(400px, 27vw, 470px);
+    grid-template-rows:
+      52px
+      minmax(0, 1fr)
+      76px;
+    width: 100%;
+    height: calc(100dvh - 44px);
+    min-width: 0;
+    min-height: 0;
+    overflow: hidden;
+    gap: 10px;
+    padding: 10px 12px 10px 10px;
+  }
+
+  .rail {
+    grid-column: 1;
+    grid-row: 1 / -1;
+  }
+
+  .commandBar {
+    grid-column: 2 / -1;
+    grid-row: 1;
+  }
+
+  .workspace {
+    grid-template-rows: 1fr;
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .conversationPanel {
+    grid-column: 3;
+    grid-row: 2;
+    border-left: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .globalComposer {
+    grid-column: 2 / -1;
+    grid-row: 3;
+  }
+}
+
+/* 1240px breakpoint: collapse conversation into slide-over */
+@media (max-width: 1240px) and (min-width: 701px) {
+  .deck,
+  .deckWithConversation {
+    grid-template-columns: 54px minmax(0, 1fr);
+  }
+
+  .conversationPanel {
+    position: fixed;
+    top: 58px;
+    right: 8px;
+    bottom: 88px;
+    width: min(430px, calc(100vw - 76px));
+    z-index: 70;
+  }
+
+  .globalComposer,
+  .commandBar {
+    grid-column: 2;
+  }
+}
+
+/* Status bar module coloring and divider */
+.statusDivider {
+  width: 1px;
+  height: 20px;
+  background: rgba(255, 255, 255, 0.1);
+  margin: 0 4px;
+}
+
+.module[data-module="project"] strong { color: #ffffff; }
+.module[data-module="branch"] strong { color: var(--deck-cyan); }
+.module[data-module="preview"] strong { color: #43f59b; }
+.module[data-module="services"] strong { color: #ff9f43; }
+.module[data-module="credits"] strong { color: #facc15; }
+
+/* Rail hierarchy: split top and bottom tool groups */
+.rail {
+  padding: 12px 8px;
+}
+
+.railGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.railDivider {
+  flex: 1 0 auto;
+  min-height: 10px;
+}
+
+.agentModeMain {
+  display: grid;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  grid-template-rows: minmax(0, 1fr) clamp(220px, 28vh, 320px);
+  gap: 10px;
+}
+
+.agentWorkspace {
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 14px;
+  background: rgba(5, 11, 28, 0.76);
+}
+
+@media (max-width: 700px) {
+  .agentModeMain {
+    grid-template-rows: minmax(0, 1fr) 42px;
+  }
+}
