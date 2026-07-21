@@ -24,7 +24,8 @@ import {
   Workflow,
   type LucideIcon,
 } from "lucide-react";
-import { useEffect, useLayoutEffect, useState, type CSSProperties, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import styles from "./studio-command-deck.module.css";
 import GeminiModelPicker, { type ChatModelSelection } from "./GeminiModelPicker";
 import AgentPicker from "./AgentPicker";
@@ -33,6 +34,74 @@ import type { AgentId } from "@/app/agents/store/stationStore";
 import { AGENTS } from "@/lib/agents";
 
 const useIsoLayoutEffect = typeof window !== "undefined" ? useLayoutEffect : useEffect;
+
+function RailTooltip({ label, children, active, onClick }: { label: string; children: ReactNode; active?: boolean; onClick?: () => void; }) {
+  const btnRef = useRef<HTMLButtonElement>(null);
+  const [open, setOpen] = useState(false);
+  const [pos, setPos] = useState({ top: 0, left: 0 });
+
+  const updatePos = () => {
+    const rect = btnRef.current?.getBoundingClientRect();
+    if (!rect) return;
+    setPos({ top: rect.top + rect.height / 2, left: rect.right + 10 });
+  };
+
+  useEffect(() => {
+    if (!open) return;
+    updatePos();
+    const onScroll = () => updatePos();
+    window.addEventListener("resize", onScroll);
+    window.addEventListener("scroll", onScroll, true);
+    return () => {
+      window.removeEventListener("resize", onScroll);
+      window.removeEventListener("scroll", onScroll, true);
+    };
+  }, [open]);
+
+  return (
+    <>
+      <button
+        ref={btnRef}
+        type="button"
+        onClick={onClick}
+        data-active={active}
+        aria-label={label}
+        className={styles.railButton}
+        onMouseEnter={() => { updatePos(); setOpen(true); }}
+        onMouseLeave={() => setOpen(false)}
+        onFocus={() => { updatePos(); setOpen(true); }}
+        onBlur={() => setOpen(false)}
+      >
+        {children}
+      </button>
+      {open && typeof document !== "undefined" && createPortal(
+        <span
+          role="tooltip"
+          style={{
+            position: "fixed",
+            top: pos.top,
+            left: pos.left,
+            zIndex: 100000,
+            transform: "translateY(-50%)",
+            pointerEvents: "none",
+            whiteSpace: "nowrap",
+            border: "1px solid rgba(126,151,218,.28)",
+            borderRadius: 7,
+            background: "rgba(3,7,18,.98)",
+            padding: "5px 8px",
+            color: "white",
+            fontSize: 11,
+            fontWeight: 700,
+            boxShadow: "0 10px 30px rgba(0,0,0,.55)",
+          }}
+        >
+          {label}
+        </span>,
+        document.body,
+      )}
+    </>
+  );
+}
 
 // Monaco is isolated in StudioMonacoEditor so Media/Command modes don't pay its bundle cost
 const StudioMonacoEditor = dynamic(() => import("./StudioMonacoEditor"), { ssr: false });
@@ -468,11 +537,19 @@ export default function StudioCommandDeck({
     <section className={deckClass} data-mobile-terminal={mobileTerminalFocus ? "true" : "false"}>
       <aside className={styles.rail} aria-label="Studio tools">
         <div className={styles.railGroup}>
-          {RAIL.slice(0, 3).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}
+          {RAIL.slice(0, 3).map(({ id, label, icon: Icon }) => (
+            <RailTooltip key={id} label={label} active={id === mode} onClick={() => selectRail(id)}>
+              <Icon size={18} />
+            </RailTooltip>
+          ))}
         </div>
         <span className={styles.railDivider} aria-hidden="true" />
         <div className={styles.railGroup}>
-          {RAIL.slice(3).map(({ id, label, icon: Icon }) => <button key={id} onClick={() => selectRail(id)} data-label={label} data-active={id === mode} aria-label={label} title={label}><Icon size={18} /></button>)}
+          {RAIL.slice(3).map(({ id, label, icon: Icon }) => (
+            <RailTooltip key={id} label={label} active={id === mode} onClick={() => selectRail(id)}>
+              <Icon size={18} />
+            </RailTooltip>
+          ))}
         </div>
       </aside>
 
