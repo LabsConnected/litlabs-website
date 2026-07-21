@@ -49,6 +49,7 @@
     "codex-reference",
     "cli",
     "packages",
-    "docs/legacy"
+    "docs/legacy",
+    "src/components/builder"
   ]
 }

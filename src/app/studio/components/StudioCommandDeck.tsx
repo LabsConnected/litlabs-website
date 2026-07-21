@@ -255,7 +255,7 @@ function DockedTerminal({
             </span>
           )}
           {projectName && (
-            <span className="ml-2 text-[9px] text-white/40">
+            <span className="ml-2 text-[9px] text-white/60">
               Project: {projectName}
             </span>
           )}
@@ -273,7 +273,7 @@ function DockedTerminal({
               Workspace: {workspaceLabel}
             </span>
           )}
-          <span className="ml-2 text-[9px] text-white/30">Shell: Local</span>
+          <span className="ml-2 text-[9px] text-white/55">Shell: Local</span>
         </span>
 
         <button
@@ -306,7 +306,7 @@ function Splitter({ panel, size, vertical = false, invert = false, style, onResi
     className={`${styles.splitter} ${vertical ? styles.splitterVertical : ""}`}
     style={style}
     role="separator"
-    aria-orientation={vertical ? "horizontal" : "vertical"}
+    aria-orientation={vertical ? "vertical" : "horizontal"}
     aria-label={`Resize ${panel} panel`}
     aria-controls={controlsId}
     aria-valuemin={0}
@@ -812,7 +812,7 @@ export default function StudioCommandDeck({
             />
             <div className="min-w-0 flex-1">
               <div className="text-xs font-bold text-white truncate">{terminalAgentName ?? "LiTT"}</div>
-              <div className="text-[9px] text-white/40 truncate">
+              <div className="text-[9px] text-white/60 truncate">
                 {activeAgentInfo?.role ?? "AI Assistant"}
                 {projectName ? ` · ${projectName}` : ""}
               </div>

@@ -107,6 +107,7 @@ const nextConfig: NextConfig = {
       "@google/generative-ai",
       "stripe",
       "supermemory",
+      "monaco-editor",
     ],
   },
 
@@ -158,7 +159,7 @@ const nextConfig: NextConfig = {
     ],
   },
 
-  productionBrowserSourceMaps: false,
+  productionBrowserSourceMaps: true,
   compress: true,
   poweredByHeader: false,
 
