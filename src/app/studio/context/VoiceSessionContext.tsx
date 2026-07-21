@@ -149,12 +149,15 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
 const SILENCE_THRESHOLD = 0.02;
 const SPEECH_START_THRESHOLD = 0.035;
-const SILENCE_TIMEOUT_MS = 1200;
+const DESKTOP_SILENCE_TIMEOUT_MS = 550;
+const MOBILE_SILENCE_TIMEOUT_MS = 750;
 const MAX_RECORDING_MS = 30_000;
-const CHUNK_INTERVAL_MS = 250;
+const CHUNK_INTERVAL_MS = 100;
 const MIN_RECORDING_MS = 500;
 const MIN_BLOB_SIZE = 8000;
-const MIN_TRANSCRIBE_INTERVAL_MS = 2000;
+const MIN_TRANSCRIBE_INTERVAL_MS = 900;
+const TTS_CHUNK_LENGTH = 110;
+const VOICE_PLAYBACK_RATE = 1.12;
 
 function isMobileDevice(): boolean {
   if (typeof window === "undefined") return false;
@@ -471,7 +474,7 @@ export function VoiceSessionProvider({
         const res = await fetch("/api/media/transcribe", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ audioBytes: base64, mimeType }),
+          body: JSON.stringify({ audioBytes: base64, mimeType, lowLatency: true }),
         });
 
         if (!res.ok) {
@@ -577,6 +580,7 @@ export function VoiceSessionProvider({
 
     const data = new Uint8Array(analyser.frequencyBinCount);
     const mobile = isMobileDevice();
+    const silenceTimeoutMs = mobile ? MOBILE_SILENCE_TIMEOUT_MS : DESKTOP_SILENCE_TIMEOUT_MS;
     const speechStart = mobile ? SPEECH_START_THRESHOLD * 1.8 : SPEECH_START_THRESHOLD;
     const silence = mobile ? SILENCE_THRESHOLD * 2.5 : SILENCE_THRESHOLD;
     let speechHitCount = 0;
@@ -627,7 +631,7 @@ export function VoiceSessionProvider({
           silenceTimerRef.current = setTimeout(() => {
             silenceTimerRef.current = null;
             finalizeRecording();
-          }, SILENCE_TIMEOUT_MS);
+          }, silenceTimeoutMs);
         }
       }
 
@@ -913,7 +917,7 @@ export function VoiceSessionProvider({
       // Split text into sentence-level chunks for faster first-audio.
       // The first chunk plays immediately while subsequent chunks are
       // fetched in the background and queued for seamless playback.
-      const chunks = splitTextIntoChunks(text, 220);
+      const chunks = splitTextIntoChunks(text, TTS_CHUNK_LENGTH);
       const abortCtrl = new AbortController();
       ttsFetchAbortRef.current = abortCtrl;
       let firstPlayed = false;
@@ -948,7 +952,11 @@ export function VoiceSessionProvider({
           const blob = await res.blob();
           if (ttsCancelledRef.current || abortCtrl.signal.aborted) return null;
           const src = URL.createObjectURL(blob);
-          return new Audio(src);
+          const audio = new Audio(src);
+          audio.playbackRate = VOICE_PLAYBACK_RATE;
+          audio.preservesPitch = true;
+          audio.preload = "auto";
+          return audio;
         } catch {
           return null;
         }

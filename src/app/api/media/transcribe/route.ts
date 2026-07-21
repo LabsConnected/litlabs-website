@@ -16,7 +16,7 @@ async function handler(req: NextRequest) {
     );
 
   try {
-    const { audioBytes, mimeType = "audio/webm" } = await req.json();
+    const { audioBytes, mimeType = "audio/webm", lowLatency = false } = await req.json();
     if (!audioBytes)
       return NextResponse.json(
         { error: "Missing audioBytes" },
@@ -28,7 +28,7 @@ async function handler(req: NextRequest) {
     // Retry with exponential backoff on 429 (RESOURCE_EXHAUSTED).
     // Gemini free tier has tight per-minute limits; retrying after a
     // short delay usually succeeds.
-    const MAX_RETRIES = 2;
+    const MAX_RETRIES = lowLatency ? 0 : 2;
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       try {

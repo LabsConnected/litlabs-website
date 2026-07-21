@@ -2154,11 +2154,46 @@ function LITTTerminalShellInner({
           {process.env.NEXT_PUBLIC_STUDIO_LIVE_VOICE_ENABLED === "true" && (
             <div className="px-2 sm:px-6 sm:pb-1">
               <LiveVoiceBar
-                onTranscript={(text, isFinal) => {
+                context={{
+                  agentId,
+                  agentName: activeAgent.name,
+                  agentRole: activeAgent.role,
+                  projectId: activeProjectId,
+                  projectName,
+                  mode: hybridMode,
+                  activeWindow: activeBuilderWindow,
+                  activeFilePath,
+                }}
+                onInputTranscript={(text, isFinal) => {
                   if (isFinal && text.trim()) {
-                    void send(text);
+                    updateActiveAgentMessages((prev) => [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "user",
+                        content: text.trim(),
+                        createdAt: Date.now(),
+                      },
+                    ]);
                   }
                 }}
+                onOutputTranscript={(text, isFinal) => {
+                  if (isFinal && text.trim()) {
+                    updateActiveAgentMessages((prev) => [
+                      ...prev,
+                      {
+                        id: crypto.randomUUID(),
+                        role: "assistant",
+                        content: text.trim(),
+                        createdAt: Date.now(),
+                      },
+                    ]);
+                  }
+                }}
+                onStarted={() => {
+                  if (micActive) stopVoice();
+                }}
+                onStopped={() => {}}
               />
             </div>
           )}

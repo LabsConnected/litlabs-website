@@ -1,27 +1,51 @@
 "use client";
 
-import { useGeminiLiveVoice } from "../hooks/useGeminiLiveVoice";
+import { useCallback } from "react";
+import { useGeminiLiveVoice, type LiveStudioContext } from "../hooks/useGeminiLiveVoice";
 
 interface LiveVoiceBarProps {
-  onTranscript?: (text: string, isFinal: boolean) => void;
-  onAiText?: (text: string) => void;
+  context: LiveStudioContext;
+  onInputTranscript?: (text: string, isFinal: boolean) => void;
+  onOutputTranscript?: (text: string, isFinal: boolean) => void;
+  onStarted?: () => void;
+  onStopped?: () => void;
 }
 
-export function LiveVoiceBar({ onTranscript, onAiText }: LiveVoiceBarProps) {
+export function LiveVoiceBar({
+  context,
+  onInputTranscript,
+  onOutputTranscript,
+  onStarted,
+  onStopped,
+}: LiveVoiceBarProps) {
   const {
     state,
-    interimTranscript,
-    aiText,
+    inputTranscript,
+    outputTranscript,
+    micLevel,
     error,
+    muted,
     start,
     stop,
+    mute,
+    unmute,
     interrupt,
-  } = useGeminiLiveVoice({ onTranscript, onAiText });
+  } = useGeminiLiveVoice({ onInputTranscript, onOutputTranscript });
+
+  const handleStart = useCallback(async () => {
+    await start(context);
+    onStarted?.();
+  }, [start, context, onStarted]);
+
+  const handleStop = useCallback(() => {
+    stop();
+    onStopped?.();
+  }, [stop, onStopped]);
 
   if (state === "idle" && !error) {
     return (
       <button
-        onClick={start}
+        onClick={handleStart}
         className="flex items-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/5 px-3 py-2 text-[11px] font-bold text-cyan-200 transition hover:bg-cyan-400/10"
       >
         <span className="h-2 w-2 animate-pulse rounded-full bg-cyan-400" />
@@ -37,13 +61,13 @@ export function LiveVoiceBar({ onTranscript, onAiText }: LiveVoiceBarProps) {
           {error ?? "Voice error"}
         </span>
         <button
-          onClick={start}
+          onClick={handleStart}
           className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-gray-300 hover:bg-white/10"
         >
           Retry
         </button>
         <button
-          onClick={stop}
+          onClick={handleStop}
           className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[10px] font-bold text-gray-300 hover:bg-white/10"
         >
           Dismiss
@@ -55,23 +79,29 @@ export function LiveVoiceBar({ onTranscript, onAiText }: LiveVoiceBarProps) {
   const labelMap: Record<string, string> = {
     connecting: "Connecting…",
     listening: "Listening live",
-    speaking: "LiTT is speaking",
+    thinking: "Thinking…",
+    speaking: `${context.agentName} is speaking`,
+    reconnecting: "Reconnecting…",
   };
+
+  const bars = Array.from({ length: 10 });
+  const level = micLevel;
 
   return (
     <div className="flex items-center gap-3 rounded-xl border border-cyan-400/15 bg-cyan-400/5 px-3 py-2">
       {/* Waveform */}
       <div className="flex h-7 items-end gap-[2px]">
-        {Array.from({ length: 10 }).map((_, index) => (
+        {bars.map((_, index) => (
           <span
             key={index}
             className="w-[2px] rounded-full bg-cyan-300 transition-all"
             style={{
-              height: state === "speaking"
-                ? `${4 + Math.abs(Math.sin(Date.now() / 200 + index)) * 22}px`
-                : state === "listening"
-                  ? `${4 + Math.abs(Math.sin(Date.now() / 300 + index * 0.5)) * 18}px`
-                  : "4px",
+              height:
+                state === "speaking"
+                  ? `${4 + Math.abs(Math.sin(Date.now() / 200 + index)) * 22}px`
+                  : state === "listening"
+                    ? `${4 + level * 24 + Math.abs(Math.sin(Date.now() / 300 + index * 0.5)) * 8}px`
+                    : "4px",
             }}
           />
         ))}
@@ -81,11 +111,12 @@ export function LiveVoiceBar({ onTranscript, onAiText }: LiveVoiceBarProps) {
       <div className="min-w-0 flex-1">
         <strong className="block text-[10px] uppercase tracking-wider text-cyan-200">
           {labelMap[state] ?? state}
+          {muted && " · Muted"}
         </strong>
         <p className="truncate text-xs text-white/65">
-          {state === "speaking" && aiText
-            ? aiText
-            : interimTranscript || "Speak naturally. Pause when you finish."}
+          {state === "speaking" && outputTranscript
+            ? outputTranscript
+            : inputTranscript || "Speak naturally. Pause when you finish."}
         </p>
       </div>
 
@@ -98,8 +129,16 @@ export function LiveVoiceBar({ onTranscript, onAiText }: LiveVoiceBarProps) {
           Interrupt
         </button>
       )}
+      {state === "listening" && (
+        <button
+          onClick={muted ? unmute : mute}
+          className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/10"
+        >
+          {muted ? "Unmute" : "Mute"}
+        </button>
+      )}
       <button
-        onClick={stop}
+        onClick={handleStop}
         className="rounded-lg border border-white/10 bg-white/5 px-2.5 py-1.5 text-[10px] font-bold text-gray-300 hover:bg-white/10"
       >
         End

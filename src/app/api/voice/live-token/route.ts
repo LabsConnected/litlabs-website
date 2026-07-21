@@ -15,6 +15,15 @@ export async function POST() {
     );
   }
 
+  if (
+    process.env.NEXT_PUBLIC_STUDIO_LIVE_VOICE_ENABLED !== "true"
+  ) {
+    return NextResponse.json(
+      { error: "Live voice is disabled" },
+      { status: 503 },
+    );
+  }
+
   const apiKey = process.env.GEMINI_API_KEY;
 
   if (!apiKey) {
@@ -61,6 +70,10 @@ export async function POST() {
     return NextResponse.json({
       token: token.name,
       model,
+    }, {
+      headers: {
+        "Cache-Control": "no-store",
+      },
     });
   } catch (err) {
     console.error("[api/voice/live-token] error:", err);
