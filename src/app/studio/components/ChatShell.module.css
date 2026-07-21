@@ -849,6 +849,7 @@
 
 /* Embedded mode: used inside LITTTerminalShell / Command Deck */
 .shell.embedded {
+  position: relative;
   width: 100%;
   height: 100%;
   min-height: 0;
@@ -860,16 +861,36 @@
   margin: 0;
 }
 .shell.embedded .messages {
+  min-width: 0;
   min-height: 0;
-  flex: 1;
-  overflow-y: auto;
+  height: 0;
+  flex: 1 1 0;
   display: flex;
   flex-direction: column;
-  justify-content: flex-end;
-  overscroll-behavior: contain;
-  scroll-behavior: smooth;
-  scroll-padding-bottom: 24px;
-  padding: 10px 10px 20px;
+  justify-content: flex-start;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  scrollbar-gutter: stable;
+  touch-action: pan-y;
+  -webkit-overflow-scrolling: touch;
+  scroll-padding-block: 16px;
+  padding: 10px 10px 24px;
+}
+.jumpToLatest {
+  position: absolute;
+  right: 14px;
+  bottom: 14px;
+  z-index: 5;
+  border: 1px solid rgba(48, 231, 255, 0.25);
+  border-radius: 999px;
+  background: rgba(4, 9, 23, 0.94);
+  padding: 7px 10px;
+  color: #a5f3fc;
+  font-size: 10px;
+  font-weight: 800;
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.4);
+  backdrop-filter: blur(16px);
 }
 .shell.embedded .home {
   width: 100%;
@@ -971,8 +992,10 @@
     min-height: 0;
   }
   .shell.embedded .messages {
-    padding: 8px 8px calc(120px + env(safe-area-inset-bottom));
-    scroll-padding-bottom: calc(120px + env(safe-area-inset-bottom));
+    height: 0;
+    flex: 1 1 0;
+    padding: 10px 8px calc(96px + env(safe-area-inset-bottom));
+    scroll-padding-bottom: calc(96px + env(safe-area-inset-bottom));
   }
   .shell.embedded .creativeHero {
     display: none;

@@ -123,12 +123,17 @@ export function ChatShell({
   const [sessionsOpen, setSessionsOpen] = useState(false);
   const [activityOpen, setActivityOpen] = useState(false);
   const [busySeconds, setBusySeconds] = useState(0);
+  const [showJumpToLatest, setShowJumpToLatest] = useState(false);
+  const messagesRef = useRef<HTMLElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const userScrolledUpRef = useRef(false);
 
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({
+    const element = messagesRef.current;
+    if (!element || userScrolledUpRef.current) return;
+    element.scrollTo({
+      top: element.scrollHeight,
       behavior: sending ? "auto" : "smooth",
-      block: "end",
     });
   }, [messages, sending]);
   const {
@@ -306,7 +311,21 @@ export function ChatShell({
         </section>
       )}
 
-      <section className={styles.messages} aria-live="polite">
+      <section
+        ref={messagesRef}
+        className={styles.messages}
+        aria-live="polite"
+        onScroll={(event) => {
+          const element = event.currentTarget;
+          const awayFromBottom =
+            element.scrollHeight -
+              element.scrollTop -
+              element.clientHeight >
+            80;
+          userScrolledUpRef.current = awayFromBottom;
+          setShowJumpToLatest(awayFromBottom);
+        }}
+      >
         {visibleMessages.length === 0 && !sending && (
           <div className={styles.home}>
             {embedded ? (
@@ -458,6 +477,22 @@ export function ChatShell({
           busySeconds={busySeconds}
         />
         <div ref={bottomRef} />
+        {showJumpToLatest && (
+          <button
+            type="button"
+            className={styles.jumpToLatest}
+            onClick={() => {
+              userScrolledUpRef.current = false;
+              messagesRef.current?.scrollTo({
+                top: messagesRef.current.scrollHeight,
+                behavior: "smooth",
+              });
+              setShowJumpToLatest(false);
+            }}
+          >
+            ↓ Latest
+          </button>
+        )}
       </section>
 
       {!hideDock && (
