@@ -11,6 +11,6 @@
     "resolveJsonModule": true,
     "types": ["node"]
   },
-  "include": ["*.ts"],
+  "include": ["*.ts", "workspace/**/*.ts"],
   "exclude": ["node_modules", "dist"]
 }

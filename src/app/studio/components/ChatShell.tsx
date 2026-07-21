@@ -45,6 +45,18 @@ export type BuilderProposal = {
   action?: string;
 };
 
+export type ChatAgentPresentation = {
+  id: "litt" | "spark";
+  name: string;
+  role: string;
+  tag: string;
+  color: string;
+  avatarUrl: string;
+  modelLabel: string;
+  /** Composer textarea placeholder, falls back to the default if absent. */
+  composerPlaceholder?: string;
+};
+
 type Props = {
   messages: StudioMessage[];
   sending?: boolean;
@@ -81,6 +93,8 @@ type Props = {
   proposalStatuses?: Record<string, "applying" | "complete" | "error">;
   onApproveProposal?: (p: BuilderProposal) => void | Promise<void>;
   onRejectProposal?: (p: BuilderProposal) => void;
+  // Agent presentation
+  activeAgent?: ChatAgentPresentation;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
@@ -117,6 +131,7 @@ export function ChatShell({
   proposalStatuses,
   onApproveProposal,
   onRejectProposal,
+  activeAgent,
 }: Props) {
   const sending = busyProp ?? sendingProp;
   const [draft, setDraft] = useState("");
@@ -190,10 +205,10 @@ export function ChatShell({
       );
     });
     if (sending) {
-      list.push(createThinkingBlock("LiTT is working"));
+      list.push(createThinkingBlock(`${activeAgent?.name ?? "LiTT"} is working`));
     }
     return list;
-  }, [visibleMessages, sending]);
+  }, [visibleMessages, sending, activeAgent]);
 
   const voiceActive =
     voiceState !== "idle";
@@ -471,6 +486,7 @@ export function ChatShell({
 
         <BuilderStream
           blocks={blocks}
+          activeAgent={activeAgent}
           isSpeaking={state === "speaking"}
           onSpeak={speakText}
           stopSpeaking={stopSpeaking}
@@ -529,7 +545,7 @@ export function ChatShell({
                   e.currentTarget.form?.requestSubmit();
                 }
               }}
-              placeholder="Ask LiTT to build, fix, or create…"
+              placeholder={activeAgent?.composerPlaceholder ?? "Ask LiTT to build, fix, or create…"}
               rows={1}
             />
             <button

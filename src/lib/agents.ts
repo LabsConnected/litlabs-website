@@ -17,6 +17,10 @@ export interface Agent {
   tag: string;
   /** Brand hex colour for the terminal UI */
   color: string;
+  /** Avatar image path in /public */
+  avatarUrl: string;
+  /** Composer placeholder text */
+  composerPlaceholder: string;
 }
 
 export interface AgentMessage {
@@ -76,6 +80,8 @@ const LITT_AGENT: Agent = {
   role: "AI Director, Engineer & Creator",
   tag: "LITT",
   color: "#67e8f9",
+  avatarUrl: "/brand/litt-mascot-avatar.png",
+  composerPlaceholder: "Ask LiTT to build, debug, or plan…",
   domains: [
     "code", "architecture", "debugging", "devops", "api", "database", "typescript", "react", "nextjs", "supabase", "vercel",
     "strategy", "orchestration", "planning", "qa", "marketing", "content", "seo", "analytics", "social", "growth",
@@ -129,6 +135,8 @@ const SPARK_AGENT: Agent = {
   role: "Creative Companion & Visual Director",
   tag: "SPARK",
   color: "#f472b6",
+  avatarUrl: "/brand/litt-mascot-avatar.png",
+  composerPlaceholder: "Ask Spark to create, design, or direct…",
   domains: [
     "image-generation", "brand", "design", "ui", "ux", "video", "music", "audio",
     "content", "copy", "storytelling", "social", "marketing", "growth",

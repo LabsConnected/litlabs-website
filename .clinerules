@@ -12,20 +12,25 @@
 [PROJECT_TRUTH]
 - This is a multi-agent AI app: LiTTree Lab Studios.
 - Real subsystems (all verified to exist on disk):
-    src/lib/litt.ts            — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias kept for compatibility)
-    src/lib/litt-context.ts    — LiTT brain / prompt builder / action helpers
-    src/lib/AgentOrchestrator.ts — orchestration matrix
+    src/lib/llm.ts              — LLM provider routing and failover
+    src/lib/llm-completion.ts   — LLM completion helpers
+    src/lib/llm-executor.ts     — LLM execution layer
+    src/lib/agents.ts           — agent orchestration (AGENTS registry, orchestrator singleton)
+    src/lib/litt.ts             — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias kept for compatibility)
+    src/lib/litt-context.ts     — LiTT brain / prompt builder / action helpers
+    src/lib/agent-worker.ts     — task worker logic (used by daemon.ts)
+    src/lib/daemon.ts           — persistent worker entrypoint (autonomic loop)
     src/lib/agent-logger.ts, agent-profiles.ts, agent-tools.ts,
-    agent-validation.ts, agent-worker.ts, agentCommands.ts, agent-user.ts
+    agent-validation.ts, agentCommands.ts, agent-user.ts
     src/lib/director-graph.ts   — director agent graph
     src/lib/supabase.ts, supabase-admin.ts, supabase-client.ts
-    src/lib/llm.ts, llm-completion.ts, llm-executor.ts
     src/lib/auth.ts, jwt.ts
     src/lib/r2.ts               — Cloudflare R2 storage
     src/lib/usage.ts            — usage telemetry
-    src/lib/agentCommands.ts    — task/command persistence
     src/lib/studio-projects.ts  — local studio project storage
+    src/app/studio/components/LITTTerminalShell.tsx — Builder shell (Studio UI)
 - There is NO src/lib/jarvis.ts. Code is branded as LiTT; the `jarvis` export is only a backward-compat alias from `src/lib/litt.ts`.
+- There is NO src/lib/AgentOrchestrator.ts. That file was deleted; the active orchestrator lives in `src/lib/agents.ts`.
 - Repository (git remote): https://github.com/LabsConnected/litlabs-website
 - Branch: main
 - Deployed on Vercel. Self-host via Dockerfile or docker-compose.yml.

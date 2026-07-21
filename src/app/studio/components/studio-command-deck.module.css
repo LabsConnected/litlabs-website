@@ -266,3 +266,32 @@
     grid-template-rows: minmax(0, 1fr) 42px;
   }
 }
+
+.statusChips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.statusChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid;
+  border-radius: 8px;
+  padding: 4px 10px;
+  font-size: 10px;
+  font-weight: 700;
+}
+
+.statusChipLabel {
+  opacity: 0.6;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  font-size: 9px;
+}
+
+.statusChipValue {
+  font-weight: 800;
+}

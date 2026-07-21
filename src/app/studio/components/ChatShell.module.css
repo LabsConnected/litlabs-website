@@ -479,20 +479,28 @@
   gap: 6px;
 }
 .messageLabelAssistant {
-  color: #67e8f9;
+  color: var(--agent-accent, #67e8f9);
+}
+.agentMessageAvatar {
+  flex: 0 0 auto;
+  border: 1px solid;
+  border-radius: 50%;
+  object-fit: cover;
 }
 .messageLabelUser {
   color: #fb923c;
   flex-direction: row-reverse;
 }
 .aiBadge {
-  font-size: 7px;
-  border: 1px solid rgba(103,232,249,0.15);
-  background: rgba(103,232,249,0.05);
-  color: rgba(103,232,249,0.6);
+  display: inline-flex;
+  align-items: center;
+  margin-left: 6px;
+  border: 1px solid;
   border-radius: 999px;
-  padding: 1px 5px;
-  font-weight: 700;
+  padding: 2px 6px;
+  font-size: 8px;
+  font-weight: 900;
+  letter-spacing: 0.06em;
 }
 .messageMeta {
   display: flex;
@@ -530,7 +538,7 @@
   box-shadow: 0 12px 30px #0007;
 }
 .assistant .bubble {
-  border-left: 2px solid var(--cyan);
+  border-left: 2px solid var(--agent-accent, var(--cyan));
   max-width: min(94%, 760px);
 }
 .user .bubble {

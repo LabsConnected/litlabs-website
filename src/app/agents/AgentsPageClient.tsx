@@ -60,13 +60,13 @@ export default function AgentsPageClient() {
         router.replace(`/agents?${params.toString()}`);
       }}
       onOpenAgentChatAction={(agentId) => {
-        router.push(`/studio?mode=command&surface=agents&agent=${agentId}`);
+        router.push(`/studio?mode=command&surface=agents&agent=${agentId}&focus=chat`);
       }}
       onAssignMissionAction={(agentId) => {
-        router.push(`/studio?mode=command&surface=mission&agent=${agentId}`);
+        router.push(`/studio?mode=command&surface=mission&agent=${agentId}&focus=mission`);
       }}
       onOpenTerminalAction={(agentId) => {
-        router.push(`/studio?mode=terminal&agent=${agentId}`);
+        router.push(`/studio?mode=command&surface=agents&agent=${agentId}&focus=terminal`);
       }}
     />
   );

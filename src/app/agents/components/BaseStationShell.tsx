@@ -21,7 +21,7 @@ import AgentRoster from "./AgentRoster";
 import SparkCustomizer from "./SparkCustomizer";
 import StationViewport from "./StationViewport";
 import AgentInspector from "./AgentInspector";
-import MissionDock from "./MissionDock";
+import AgentActivityPanel from "./AgentActivityPanel";
 import MobileAgentHome from "./MobileAgentHome";
 import { useStationStore, type AgentId } from "../store/stationStore";
 import { useStationLayout } from "../hooks/useStationLayout";
@@ -29,7 +29,7 @@ import { useStationLayout } from "../hooks/useStationLayout";
 const MODE_HINTS: Record<string, string> = {
   explore: "Pan with the pointer. Click an agent to inspect.",
   edit: "Drag agents to reposition. Saved automatically.",
-  command: "Queue a mission below. It runs in the background.",
+  command: "Open Studio to assign a mission. Activity is shown below.",
   saved: "Open a saved layout or preset.",
 };
 
@@ -189,7 +189,12 @@ export default function BaseStationShell({
               backdropFilter: "blur(18px)",
             }}
           >
-            <MissionDock />
+            <AgentActivityPanel
+              selectedAgentId={selectedAgent}
+              onOpenStudioAction={(agentId) => {
+                onAssignMissionAction?.(agentId);
+              }}
+            />
           </section>}
         </div>
 

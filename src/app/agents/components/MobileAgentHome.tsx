@@ -8,13 +8,12 @@
  * - Crew roster
  * - Responsive interactive viewport
  * - Spark customization
- * - Persistent mission dock
+ * - Read-only agent activity panel
  * - Full-width agent inspector bottom sheet
  *
  * Phase 4 keeps the same components as the desktop view; Phase 5 will
- * redesign the canvas as a 2.5D room for touch. MissionDock may later
- * be promoted to a sticky bottom command dock outside the scroll
- * container; for now it lives in-flow to avoid covering the viewport.
+ * redesign the canvas as a 2.5D room for touch. The activity panel
+ * is read-only — all mission composition happens in Studio.
  */
 
 import { useCallback, useEffect, useState } from "react";
@@ -26,7 +25,7 @@ import AgentRoster from "./AgentRoster";
 import SparkCustomizer from "./SparkCustomizer";
 import StationViewport from "./StationViewport";
 import AgentInspector from "./AgentInspector";
-import MissionDock from "./MissionDock";
+import AgentActivityPanel from "./AgentActivityPanel";
 
 import {
   useStationMode,
@@ -175,10 +174,15 @@ export default function MobileAgentHome({
         </section>
 
         <section
-          aria-label="Mission controls"
-          className="min-h-[18rem] shrink-0"
+          aria-label="Agent activity"
+          className="min-h-[14rem] shrink-0"
         >
-          <MissionDock />
+          <AgentActivityPanel
+            selectedAgentId={selectedAgent}
+            onOpenStudioAction={(agentId) => {
+              onAssignMissionAction?.(agentId);
+            }}
+          />
         </section>
       </div>
 

@@ -213,7 +213,7 @@ src/
 
 ### Library Files (40+ in src/lib/)
 
-Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logger.ts`, `jarvis.ts`, Stripe helpers, Clerk helpers, and more.
+Key utilities: `supabase.ts`, `llm.ts`, `r2.ts`, `rate-limiter.ts`, `agent-logger.ts`, `litt.ts`, Stripe helpers, Clerk helpers, and more.
 
 ### DB Schema (11 tables in schema.sql)
 

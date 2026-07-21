@@ -42,6 +42,7 @@
     "@xterm/xterm": "^6.0.0",
     "ai": "^7.0.14",
     "bcryptjs": "^3.0.3",
+    "diff": "^9.0.0",
     "jose": "^6.2.3",
     "keytar": "^7.9.0",
     "lucide-react": "^1.24.0",
@@ -56,7 +57,8 @@
     "stripe": "^18.0.0",
     "supermemory": "^4.24.12",
     "svix": "^1.95.1",
-    "xterm-addon-web-links": "0.9.0"
+    "xterm-addon-web-links": "0.9.0",
+    "zod": "^4.4.3"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",

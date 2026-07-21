@@ -13,6 +13,9 @@ import { isBlockedCommand } from "./security";
 import { createDockerSession } from "./docker-manager";
 import { handleLiTTCodeCommand } from "@litt/agent-core";
 import { bearerToken, verifyTerminalToken } from "./auth";
+import { prepareWorkspace, getWorkspace, getWorkspaceRoot } from "./workspace/WorkspaceManager";
+import { listTree, readFile, writeFile, searchFiles } from "./workspace/FileService";
+import { gitStatus } from "./workspace/GitService";
 
 const PORT = Number(process.env.PORT || process.env.TERMINAL_SERVER_PORT || 4001);
 const ALLOWED_ORIGIN = process.env.TERMINAL_ALLOWED_ORIGIN || "http://localhost:3000";
@@ -271,6 +274,102 @@ app.post("/run", (req: AuthenticatedRequest, res) => {
       cwd,
     });
   });
+});
+
+/* ── Workspace Runner endpoints ─────────────────────────────── */
+
+app.use("/v1/workspaces", requireTerminalAuth);
+
+// POST /v1/workspaces/prepare — clone/checkout a repo into a workspace
+app.post("/v1/workspaces/prepare", async (req: AuthenticatedRequest, res) => {
+  const userId = req.terminalUserId!;
+  const { projectId, installationId, owner, repo, branch, commitSha } = req.body ?? {};
+  if (!projectId || !owner || !repo || !branch) {
+    return res.status(400).json({ error: "projectId, owner, repo, branch are required" });
+  }
+  try {
+    const descriptor = await prepareWorkspace({
+      userId,
+      projectId,
+      installationId: Number(installationId) || 0,
+      owner,
+      repo,
+      branch,
+      commitSha: commitSha ?? null,
+      workspaceRoot: WORKSPACE_ROOT,
+    });
+    res.json({ workspace: descriptor });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Workspace preparation failed" });
+  }
+});
+
+// GET /v1/workspaces/:id/tree?path=&depth=
+app.get("/v1/workspaces/:id/tree", (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  try {
+    const dirPath = String(req.query.path || ".");
+    const depth = Number(req.query.depth) || 3;
+    const tree = listTree(root, dirPath, depth);
+    res.json({ tree });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to list tree" });
+  }
+});
+
+// GET /v1/workspaces/:id/file?path=
+app.get("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  try {
+    const filePath = String(req.query.path || "");
+    if (!filePath) return res.status(400).json({ error: "path is required" });
+    const file = readFile(root, filePath);
+    res.json({ file });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to read file" });
+  }
+});
+
+// PUT /v1/workspaces/:id/file
+app.put("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  try {
+    const { path: filePath, content, expectedVersion } = req.body ?? {};
+    if (!filePath) return res.status(400).json({ error: "path is required" });
+    const file = writeFile(root, filePath, String(content ?? ""), expectedVersion);
+    res.json({ file });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Failed to write file" });
+  }
+});
+
+// POST /v1/workspaces/:id/search
+app.post("/v1/workspaces/:id/search", (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  try {
+    const { query } = req.body ?? {};
+    if (!query) return res.status(400).json({ error: "query is required" });
+    const results = searchFiles(root, String(query));
+    res.json({ results });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Search failed" });
+  }
+});
+
+// GET /v1/workspaces/:id/git/status
+app.get("/v1/workspaces/:id/git/status", async (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  try {
+    const status = await gitStatus(root);
+    res.json({ status });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Git status failed" });
+  }
 });
 
 io.use((socket, next) => {

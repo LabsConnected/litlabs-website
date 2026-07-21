@@ -28,8 +28,8 @@ npx tsc --noEmit  # Type-check (no script in package.json yet)
 
 Multi-agent AI app ("LiTTree Lab Studios"). Key subsystems in `src/lib/`:
 
-- `AgentOrchestrator.ts`, `agents.ts`, `agent-profiles.ts` — agent orchestration matrix
-- `litt.ts` — main LiT brain / assistant logic (NOT jarvis.ts — that file does not exist)
+- `agents.ts`, `agent-profiles.ts` — agent orchestration matrix
+- `litt.ts — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias for compat)
 - `director-graph.ts` — director agent graph
 - `llm.ts`, `llm-completion.ts`, `llm-executor.ts` — LLM abstraction layer
 - `supabase.ts`, `supabase-admin.ts`, `supabase-client.ts` — DB access (service role vs anon)

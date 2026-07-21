@@ -13,6 +13,7 @@ import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { parseLiTTActions } from "@/lib/litt-context";
 import { AGENTS } from "@/lib/agents";
+import type { ProjectReadiness } from "@/app/studio/types/project-readiness";
 export type StudioTool =
   | "chat"
   | "image"
@@ -354,6 +355,8 @@ function LITTTerminalShellInner({
   const [workspaceStatus, setWorkspaceStatus] = useState<"unavailable" | "provisioning" | "ready" | "error">("unavailable");
   const [previewStatus, setPreviewStatus] = useState<"unavailable" | "starting" | "ready" | "error">("unavailable");
   const [servicesStatus, setServicesStatus] = useState<"disconnected" | "connecting" | "connected" | "degraded">("disconnected");
+  const [scanStatus, setScanStatus] = useState<"pending" | "scanning" | "ready" | "failed">("pending");
+  const [workspaceId, setWorkspaceId] = useState<string | null>(null);
   const [activityEvents, setActivityEvents] = useState<StudioActivityEvent[]>([]);
   const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
 
@@ -531,7 +534,7 @@ function LITTTerminalShellInner({
       switchPersona(nextAgentId === "spark" ? "littlebit" : "littcode");
       setActiveBuilderWindow("agents");
       const agentName = AGENTS[nextAgentId]?.name ?? nextAgentId;
-      setAgentToast(`Switched to ${agentName}`);
+      setAgentToast(`${agentName} is now active`);
       router.replace(`/studio?${params.toString()}`, { scroll: false });
     },
     [router, searchParams, switchPersona],
@@ -667,7 +670,73 @@ function LITTTerminalShellInner({
     ]);
   }, []);
 
-  // Sync active project from URL ?project=ID and fetch metadata
+  // Sync active project from URL ?project=ID and fetch readiness
+  const applyProjectReadiness = useCallback(
+    (readiness: ProjectReadiness) => {
+      setProjectName(readiness.repository.fullName ?? readiness.projectId);
+      setProjectStatus("connected");
+      setBranchName(readiness.repository.defaultBranch);
+
+      const wsStatus = readiness.workspace.status;
+      setWorkspaceStatus(
+        wsStatus === "not_prepared"
+          ? "unavailable"
+          : wsStatus === "provisioning"
+            ? "provisioning"
+            : wsStatus === "ready"
+              ? "ready"
+              : "error",
+      );
+
+      const rtStatus = readiness.runtime.status;
+      setPreviewStatus(
+        rtStatus === "ready"
+          ? "ready"
+          : rtStatus === "starting"
+            ? "starting"
+            : rtStatus === "failed"
+              ? "error"
+              : "unavailable",
+      );
+
+      setServicesStatus(
+        readiness.terminal.status === "project_ready" ? "connected" : "disconnected",
+      );
+
+      setScanStatus(readiness.scan.status);
+      setWorkspaceId(readiness.workspace.workspaceId);
+
+      pushActivity({ type: "project", status: "success", message: `Project: ${readiness.repository.fullName ?? readiness.projectId}` });
+      if (wsStatus !== "ready") {
+        pushActivity({ type: "workspace", status: "warning", message: "Workspace not prepared" });
+      } else {
+        pushActivity({ type: "workspace", status: "success", message: "Workspace ready" });
+      }
+      pushActivity({ type: "agent", status: "info", message: `${activeAgent.name} available` });
+      pushActivity({
+        type: "terminal",
+        status: "info",
+        message: readiness.terminal.status === "project_ready" ? "Project shell ready" : "Local shell ready",
+      });
+      if (rtStatus !== "ready") {
+        pushActivity({ type: "preview", status: "warning", message: "Preview requires runtime" });
+      }
+    },
+    [pushActivity, activeAgent.name],
+  );
+
+  const refreshProjectReadiness = useCallback(async () => {
+    if (!activeProjectId) return;
+    try {
+      const res = await fetch(`/api/studio/projects/${activeProjectId}/readiness`, { cache: "no-store" });
+      if (!res.ok) return;
+      const data = await res.json();
+      if (data.readiness) applyProjectReadiness(data.readiness);
+    } catch {
+      // silent
+    }
+  }, [activeProjectId, applyProjectReadiness]);
+
   useEffect(() => {
     const urlProject = searchParams?.get("project");
     if (!urlProject) {
@@ -677,48 +746,37 @@ function LITTTerminalShellInner({
       setBranchName(null);
       setWorkspaceStatus("unavailable");
       setPreviewStatus("unavailable");
+      setServicesStatus("disconnected");
+      setScanStatus("pending");
+      setWorkspaceId(null);
       return;
     }
     if (urlProject === activeProjectId && projectStatus !== "none") return;
 
-    let cancelled = false;
+    const controller = new AbortController();
     setActiveProjectId(urlProject);
     setProjectStatus("loading");
     pushActivity({ type: "project", status: "info", message: `Loading project ${urlProject}…` });
 
-    void fetch(`/api/studio/projects`)
-      .then(async (res) => {
-        if (!res.ok) throw new Error("Failed to fetch projects");
-        const data = (await res.json()) as { projects?: Array<{ id: string; name: string; github_branch: string | null; github_default_branch: string | null; scan_status: string }> };
-        const project = data.projects?.find((p) => p.id === urlProject);
-        if (cancelled) return;
-        if (!project) {
-          setProjectStatus("error");
-          setProjectName(urlProject);
-          pushActivity({ type: "project", status: "error", message: `Project ${urlProject} not found` });
-          return;
+    void fetch(`/api/studio/projects/${urlProject}/readiness`, {
+      cache: "no-store",
+      signal: controller.signal,
+    })
+      .then(async (response) => {
+        const data = await response.json();
+        if (!response.ok) {
+          throw new Error(data.error ?? "Project readiness failed");
         }
-        setProjectName(project.name);
-        setProjectStatus("connected");
-        const branch = project.github_branch || project.github_default_branch || null;
-        setBranchName(branch);
-        setWorkspaceStatus("unavailable");
-        setPreviewStatus("unavailable");
-        setServicesStatus("disconnected");
-        pushActivity({ type: "project", status: "success", message: `Project selected: ${project.name}` });
-        pushActivity({ type: "workspace", status: "warning", message: "Workspace not prepared" });
-        pushActivity({ type: "agent", status: "info", message: `${activeAgent.name} available` });
-        pushActivity({ type: "terminal", status: "info", message: "Local shell ready" });
-        pushActivity({ type: "preview", status: "warning", message: "Preview requires runtime" });
+        applyProjectReadiness(data.readiness);
       })
-      .catch(() => {
-        if (cancelled) return;
+      .catch((error) => {
+        if (error instanceof DOMException && error.name === "AbortError") return;
         setProjectStatus("error");
         setProjectName(urlProject);
-        pushActivity({ type: "project", status: "error", message: "Failed to load project metadata" });
+        pushActivity({ type: "project", status: "error", message: "Failed to load project readiness" });
       });
 
-    return () => { cancelled = true; };
+    return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams, pushActivity]);
 
@@ -754,6 +812,54 @@ function LITTTerminalShellInner({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchParams]);
+
+  // Handle ?focus= param from /agents routing (chat/mission/terminal)
+  useEffect(() => {
+    const focus = searchParams?.get("focus");
+    if (!focus) return;
+
+    if (focus === "chat") {
+      setMobileStudioView("chat");
+      setActiveBuilderWindow("conversation");
+    } else if (focus === "mission") {
+      setMobileStudioView("build");
+      setActiveBuilderWindow("mission");
+      setInput(`Assign ${activeAgent.name} a mission: `);
+    } else if (focus === "terminal") {
+      setMobileStudioView("terminal");
+      setActiveBuilderWindow("terminal");
+    }
+
+    // Clean the focus param after consuming it
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("focus");
+    const query = params.toString();
+    router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Prepare workspace action
+  const prepareWorkspace = useCallback(async () => {
+    if (!activeProjectId) return;
+    setWorkspaceStatus("provisioning");
+    pushActivity({ type: "workspace", status: "running", message: "Preparing workspace…" });
+    try {
+      const res = await fetch(`/api/studio/projects/${activeProjectId}/workspace/prepare`, {
+        method: "POST",
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setWorkspaceStatus("error");
+        pushActivity({ type: "workspace", status: "error", message: data.error ?? "Workspace preparation failed" });
+        return;
+      }
+      pushActivity({ type: "workspace", status: "success", message: "Workspace ready" });
+      await refreshProjectReadiness();
+    } catch {
+      setWorkspaceStatus("error");
+      pushActivity({ type: "workspace", status: "error", message: "Workspace preparation failed" });
+    }
+  }, [activeProjectId, pushActivity, refreshProjectReadiness]);
 
   useEffect(() => {
     const el = transcriptRef.current;
@@ -2048,6 +2154,8 @@ function LITTTerminalShellInner({
                 workspaceStatus={workspaceStatus}
                 previewStatus={previewStatus}
                 servicesStatus={servicesStatus}
+                scanStatus={scanStatus}
+                workspaceId={workspaceId}
                 activityEvents={activityEvents}
                 onOpenProjectsAction={() => setProjectDrawerOpen(true)}
                 onInspectProjectAction={() => {
@@ -2067,6 +2175,7 @@ function LITTTerminalShellInner({
                 onCreateMediaAction={() => {
                   setHybridMode("media");
                 }}
+                onPrepareWorkspaceAction={prepareWorkspace}
                 selectedModel={selectedModel}
                 onModelChange={chooseModel}
                 commandSurface={commandSurface}
@@ -2102,6 +2211,15 @@ function LITTTerminalShellInner({
                     hideDock
                     manageVoiceTurns={false}
                     builderMode={true}
+                    activeAgent={{
+                      id: activeAgent.id as "litt" | "spark",
+                      name: activeAgent.name,
+                      role: activeAgent.role,
+                      tag: activeAgent.tag,
+                      color: activeAgent.color,
+                      avatarUrl: activeAgent.avatarUrl,
+                      modelLabel: selectedModel.label,
+                    }}
                     messages={chatMessages}
                     sending={busy}
                     systemLines={[]}
@@ -2133,6 +2251,15 @@ function LITTTerminalShellInner({
                   hideDock
                   manageVoiceTurns={false}
                   builderMode={true}
+                  activeAgent={{
+                    id: activeAgent.id as "litt" | "spark",
+                    name: activeAgent.name,
+                    role: activeAgent.role,
+                    tag: activeAgent.tag,
+                    color: activeAgent.color,
+                    avatarUrl: activeAgent.avatarUrl,
+                    modelLabel: selectedModel.label,
+                  }}
                   messages={chatMessages}
                   sending={busy}
                   systemLines={[]}

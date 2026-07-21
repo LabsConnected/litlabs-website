@@ -29,10 +29,12 @@ import {
   AudioBlock,
 } from "@/app/studio/lib/builder-blocks";
 import { LiTTMessageAvatar, UserMessageAvatar } from "@/components/chat/MessageAvatar";
+import type { ChatAgentPresentation } from "./ChatShell";
 import styles from "./ChatShell.module.css";
 
 interface BuilderStreamProps {
   blocks: BuilderBlock[];
+  activeAgent?: ChatAgentPresentation;
   isSpeaking?: boolean;
   onSpeak?: (text: string) => void;
   stopSpeaking?: () => void;
@@ -51,11 +53,13 @@ function timeLabel(value?: string | number | Date) {
 function TerminalBlockView({
   block,
   onExpand,
+  activeAgent,
 }: {
   block: TerminalBlock;
   onExpand?: () => void;
+  activeAgent?: ChatAgentPresentation;
 }) {
-  const startedBy = block.startedBy === "user" ? "You" : "LiTT";
+  const startedBy = block.startedBy === "user" ? "You" : activeAgent?.name ?? "LiTT";
   const statusColor =
     block.status === "success"
       ? "#22c55e"
@@ -137,8 +141,22 @@ function TerminalBlockView({
   );
 }
 
-function LiTTAvatar({ size = 34 }: { size?: number }) {
-  return <LiTTMessageAvatar size={size} />;
+function AgentAvatar({ agent, size = 34 }: { agent?: ChatAgentPresentation; size?: number }) {
+  if (!agent) return <LiTTMessageAvatar size={size} />;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={agent.avatarUrl}
+      alt=""
+      width={size}
+      height={size}
+      className={styles.agentMessageAvatar}
+      style={{
+        borderColor: `${agent.color}66`,
+        boxShadow: `0 0 18px ${agent.color}35`,
+      }}
+    />
+  );
 }
 
 function UserAvatar({ size = 30 }: { size?: number }) {
@@ -167,23 +185,47 @@ function CopyButton({ text }: { text: string }) {
 
 function ChatMessageBlockView({
   block,
+  activeAgent,
   isSpeaking,
   onSpeak,
   stopSpeaking,
 }: {
   block: ChatMessageBlock;
+  activeAgent?: ChatAgentPresentation;
   isSpeaking?: boolean;
   onSpeak?: (text: string) => void;
   stopSpeaking?: () => void;
 }) {
   const role = block.role === "user" ? "user" : "assistant";
   return (
-    <article className={`${styles.message} ${styles[role]}`}>
-      {role === "assistant" ? <LiTTAvatar /> : <UserAvatar />}
+    <article
+      className={`${styles.message} ${styles[role]}`}
+      style={
+        role === "assistant" && activeAgent
+          ? ({ "--agent-accent": activeAgent.color } as React.CSSProperties)
+          : undefined
+      }
+    >
+      {role === "assistant" ? <AgentAvatar agent={activeAgent} /> : <UserAvatar />}
       <div className={styles.bubble}>
         <div className={`${styles.messageLabel} ${role === "user" ? styles.messageLabelUser : styles.messageLabelAssistant}`}>
-          {role === "user" ? "You" : "LiTT"}
-          {role === "assistant" && <span className={styles.aiBadge}>AI</span>}
+          {role === "user" ? "You" : activeAgent?.name ?? "LiTT"}
+          {role === "assistant" && (
+            <span
+              className={styles.aiBadge}
+              style={
+                activeAgent
+                  ? {
+                      color: activeAgent.color,
+                      borderColor: `${activeAgent.color}45`,
+                      backgroundColor: `${activeAgent.color}12`,
+                    }
+                  : undefined
+              }
+            >
+              {activeAgent ? `${activeAgent.tag} · ${activeAgent.modelLabel}` : "AI"}
+            </span>
+          )}
         </div>
         <div className={styles.copy}>{block.content}</div>
         <div className={styles.messageMeta}>
@@ -211,12 +253,12 @@ function ChatMessageBlockView({
   );
 }
 
-function ImageBlockView({ block }: { block: ImageBlock }) {
+function ImageBlockView({ block, activeAgent }: { block: ImageBlock; activeAgent?: ChatAgentPresentation }) {
   const isLoading = block.status === "generating";
   const isFailed = block.status === "failed";
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         {block.prompt && (
           <div style={{ fontSize: "12px", color: "#9aa6b8", marginBottom: "8px" }}>
@@ -317,10 +359,10 @@ function ImageBlockView({ block }: { block: ImageBlock }) {
   );
 }
 
-function PlanBlockView({ block }: { block: PlanBlock }) {
+function PlanBlockView({ block, activeAgent }: { block: PlanBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9aa6b8", marginBottom: "8px" }}>
           {block.title || "Plan"}
@@ -343,10 +385,10 @@ function PlanBlockView({ block }: { block: PlanBlock }) {
   );
 }
 
-function ProgressBlockView({ block }: { block: ProgressBlock }) {
+function ProgressBlockView({ block, activeAgent }: { block: ProgressBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9aa6b8", marginBottom: "6px" }}>
           {block.title}
@@ -361,10 +403,10 @@ function ProgressBlockView({ block }: { block: ProgressBlock }) {
   );
 }
 
-function ErrorBlockView({ block }: { block: ErrorBlock }) {
+function ErrorBlockView({ block, activeAgent }: { block: ErrorBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%", borderColor: "#ef444433" }}>
         <div style={{ fontSize: "13px", color: "#ef4444" }}>{block.content}</div>
         <time>{timeLabel(block.timestamp)}</time>
@@ -373,10 +415,10 @@ function ErrorBlockView({ block }: { block: ErrorBlock }) {
   );
 }
 
-function CodeBlockView({ block }: { block: CodeBlock }) {
+function CodeBlockView({ block, activeAgent }: { block: CodeBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "6px" }}>
           <span style={{ fontSize: "11px", fontWeight: 800, color: "#9aa6b8", fontFamily: 'ui-monospace, monospace' }}>{block.file}</span>
@@ -400,10 +442,10 @@ function CodeBlockView({ block }: { block: CodeBlock }) {
   );
 }
 
-function DiffBlockView({ block }: { block: DiffBlock }) {
+function DiffBlockView({ block, activeAgent }: { block: DiffBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ fontSize: "11px", fontWeight: 800, color: "#9aa6b8", fontFamily: 'ui-monospace, monospace', marginBottom: "6px" }}>
           {block.file}
@@ -417,10 +459,10 @@ function DiffBlockView({ block }: { block: DiffBlock }) {
   );
 }
 
-function PreviewBlockView({ block }: { block: PreviewBlock }) {
+function PreviewBlockView({ block, activeAgent }: { block: PreviewBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9aa6b8", marginBottom: "6px" }}>
           {block.title || "Live preview"}
@@ -439,11 +481,11 @@ function PreviewBlockView({ block }: { block: PreviewBlock }) {
   );
 }
 
-function AgentRunBlockView({ block }: { block: AgentRunBlock }) {
+function AgentRunBlockView({ block, activeAgent }: { block: AgentRunBlock; activeAgent?: ChatAgentPresentation }) {
   const statusColor = block.status === "complete" ? "#22c55e" : block.status === "error" ? "#ef4444" : "#22d3ee";
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px", fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "#9aa6b8" }}>
           <span style={{ width: 7, height: 7, borderRadius: "50%", backgroundColor: statusColor, boxShadow: `0 0 8px ${statusColor}` }} />
@@ -462,10 +504,10 @@ function AgentRunBlockView({ block }: { block: AgentRunBlock }) {
   );
 }
 
-function FileBlockView({ block }: { block: FileBlock }) {
+function FileBlockView({ block, activeAgent }: { block: FileBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "8px", padding: "10px 12px", borderRadius: "10px", border: "1px solid #1f2937", backgroundColor: "#0a0a0f" }}>
           <span style={{ fontSize: "20px" }}>📄</span>
@@ -481,10 +523,10 @@ function FileBlockView({ block }: { block: FileBlock }) {
   );
 }
 
-function ApprovalBlockView({ block }: { block: ApprovalBlock }) {
+function ApprovalBlockView({ block, activeAgent }: { block: ApprovalBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%", borderColor: "#fbbf2433" }}>
         <div style={{ fontSize: "11px", fontWeight: 800, textTransform: "uppercase", letterSpacing: "0.08em", color: "#fbbf24", marginBottom: "6px" }}>
           Approval needed
@@ -505,10 +547,10 @@ function ApprovalBlockView({ block }: { block: ApprovalBlock }) {
   );
 }
 
-function VideoBlockView({ block }: { block: VideoBlock }) {
+function VideoBlockView({ block, activeAgent }: { block: VideoBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ overflow: "hidden", borderRadius: "12px", border: "1px solid #1f2937", backgroundColor: "#0a0a0f" }}>
           <video src={block.url} controls style={{ width: "100%", maxHeight: "400px", display: "block" }} />
@@ -520,10 +562,10 @@ function VideoBlockView({ block }: { block: VideoBlock }) {
   );
 }
 
-function AudioBlockView({ block }: { block: AudioBlock }) {
+function AudioBlockView({ block, activeAgent }: { block: AudioBlock; activeAgent?: ChatAgentPresentation }) {
   return (
     <article className={`${styles.message} ${styles.assistant}`}>
-      <LiTTAvatar />
+      <AgentAvatar agent={activeAgent} />
       <div className={styles.bubble} style={{ width: "100%", maxWidth: "100%" }}>
         <div style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 12px", borderRadius: "10px", border: "1px solid #1f2937", backgroundColor: "#0a0a0f" }}>
           <span style={{ fontSize: "20px" }}>🎵</span>
@@ -538,7 +580,7 @@ function AudioBlockView({ block }: { block: AudioBlock }) {
   );
 }
 
-function ActivityTraceView({ busySeconds = 0 }: { busySeconds?: number }) {
+function ActivityTraceView({ busySeconds = 0, agentName }: { busySeconds?: number; agentName?: string }) {
   const [open, setOpen] = useState(true);
   const stages = [
     { label: "Understanding your request", detail: "Identifying intent and the best response path", icon: MessageSquareText, at: 0 },
@@ -554,7 +596,7 @@ function ActivityTraceView({ busySeconds = 0 }: { busySeconds?: number }) {
           <span className={styles.activityIconDot} />
         </span>
         <span className={styles.activityBody}>
-          <span className={styles.activityTitle}>LiTT is working</span>
+          <span className={styles.activityTitle}>{agentName ?? "LiTT"} is working</span>
           <span className={styles.activitySub}>Operational trace · {busySeconds}s</span>
         </span>
         <ChevronDown size={14} className={`${styles.activityChevron} ${open ? styles.activityChevronOpen : ""}`} />
@@ -593,6 +635,7 @@ function ActivityTraceView({ busySeconds = 0 }: { busySeconds?: number }) {
 
 export default function BuilderStream({
   blocks,
+  activeAgent,
   isSpeaking,
   onSpeak,
   stopSpeaking,
@@ -608,6 +651,7 @@ export default function BuilderStream({
               <ChatMessageBlockView
                 key={block.id}
                 block={block}
+                activeAgent={activeAgent}
                 isSpeaking={isSpeaking}
                 onSpeak={onSpeak}
                 stopSpeaking={stopSpeaking}
@@ -619,34 +663,35 @@ export default function BuilderStream({
                 key={block.id}
                 block={block}
                 onExpand={onExpandTerminal}
+                activeAgent={activeAgent}
               />
             );
           case "thinking":
-            return <ActivityTraceView key={block.id} busySeconds={busySeconds} />;
+            return <ActivityTraceView key={block.id} busySeconds={busySeconds} agentName={activeAgent?.name} />;
           case "image":
-            return <ImageBlockView key={block.id} block={block} />;
+            return <ImageBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "plan":
-            return <PlanBlockView key={block.id} block={block} />;
+            return <PlanBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "progress":
-            return <ProgressBlockView key={block.id} block={block} />;
+            return <ProgressBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "error":
-            return <ErrorBlockView key={block.id} block={block} />;
+            return <ErrorBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "code":
-            return <CodeBlockView key={block.id} block={block} />;
+            return <CodeBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "diff":
-            return <DiffBlockView key={block.id} block={block} />;
+            return <DiffBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "preview":
-            return <PreviewBlockView key={block.id} block={block} />;
+            return <PreviewBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "agent-run":
-            return <AgentRunBlockView key={block.id} block={block} />;
+            return <AgentRunBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "file":
-            return <FileBlockView key={block.id} block={block} />;
+            return <FileBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "approval":
-            return <ApprovalBlockView key={block.id} block={block} />;
+            return <ApprovalBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "video":
-            return <VideoBlockView key={block.id} block={block} />;
+            return <VideoBlockView key={block.id} block={block} activeAgent={activeAgent} />;
           case "audio":
-            return <AudioBlockView key={block.id} block={block} />;
+            return <AudioBlockView key={block.id} block={block} activeAgent={activeAgent} />;
         }
       })}
     </>

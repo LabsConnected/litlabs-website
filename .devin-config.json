@@ -15,8 +15,8 @@
     "heavyBuilds": "Use Codespaces for /studio page and other heavy builds."
   },
   "paths": {
-    "primary": "/workspaces/litlabs-website",
-    "localWindows": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo",
-    "localAlternative": "C:/Users/litbi/CascadeProjects/litlab"
+    "primary": "C:/Users/litbi/CascadeProjects/litlab",
+    "codespace": "/workspaces/litlabs-website",
+    "archived": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo"
   }
 }

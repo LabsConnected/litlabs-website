@@ -10,9 +10,14 @@
 
 [PROJECT_TRUTH]
 - This is a multi-agent AI app: LiTTree Lab Studios.
-- Core subsystems live in src/lib/ — see `litt.ts`, `AgentOrchestrator.ts`,
-  `director-graph.ts`, `agent-logger.ts`, and the `supabase*.ts` files. Do not invent
-  files that don't exist.
+- Core subsystems live in src/lib/ — see `llm.ts` (provider routing/failover),
+  `agents.ts` (agent orchestration, AGENTS registry), `litt.ts` (notification dispatcher),
+  `litt-context.ts` (prompt builder), `agent-worker.ts` (task worker), `daemon.ts`
+  (persistent worker entrypoint), `director-graph.ts`, `agent-logger.ts`, and the
+  `supabase*.ts` files. Do not invent files that don't exist.
+- There is NO `src/lib/AgentOrchestrator.ts` — it was deleted. The active orchestrator
+  is in `src/lib/agents.ts`.
+- There is NO `src/lib/jarvis.ts` — code is branded as LiTT.
 - Git remote: https://github.com/LabsConnected/litlabs-website
 - Branch: main. Deployed on Vercel.
 

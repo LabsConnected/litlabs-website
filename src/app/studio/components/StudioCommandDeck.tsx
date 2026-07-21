@@ -103,8 +103,12 @@ function RailTooltip({ label, children, active, onClick }: { label: string; chil
   );
 }
 
-// Monaco is isolated in StudioMonacoEditor so Media/Command modes don't pay its bundle cost
-const StudioMonacoEditor = dynamic(() => import("./StudioMonacoEditor"), { ssr: false });
+// Workspace editor components (dynamically loaded to avoid Monaco SSR)
+const WorkspaceEditor = dynamic(() => import("../code/WorkspaceEditor"), { ssr: false });
+const WorkspaceExplorer = dynamic(() => import("../code/WorkspaceExplorer"), { ssr: false });
+const EditorTabs = dynamic(() => import("../code/EditorTabs"), { ssr: false });
+const SaveStatus = dynamic(() => import("../code/SaveStatus"), { ssr: false });
+import { useWorkspaceFiles } from "../code/useWorkspaceFiles";
 
 // Dev-only: detect duplicate deck mounts (must run at module scope for the component root)
 if (typeof window !== "undefined" && process.env.NODE_ENV === "development") {
@@ -133,11 +137,14 @@ type DeckProps = {
   workspaceStatus: "unavailable" | "provisioning" | "ready" | "error";
   previewStatus: "unavailable" | "starting" | "ready" | "error";
   servicesStatus: "disconnected" | "connecting" | "connected" | "degraded";
+  scanStatus?: "pending" | "scanning" | "ready" | "failed";
+  workspaceId?: string | null;
   activityEvents: StudioActivityEvent[];
   onOpenProjectsAction: () => void;
   onInspectProjectAction?: () => void;
   onStartBuildAction?: () => void;
   onCreateMediaAction?: () => void;
+  onPrepareWorkspaceAction?: () => void;
   selectedModel: ChatModelSelection;
   onModelChange: (model: ChatModelSelection) => void;
   commandSurface: CommandSurface;
@@ -327,6 +334,26 @@ function EmptyState({ title, description, actionLabel, onAction, secondaryLabel 
   return <div className={styles.empty}><div className={styles.emptyCard}><CircleAlert size={18} className="mx-auto mb-2 text-cyan-200" /><h3>{title}</h3><p>{description}</p>{actionLabel && onAction && <div className={styles.emptyActions}><button className={styles.button} onClick={onAction}>{actionLabel}</button>{secondaryLabel && <button className={`${styles.button} ${styles.buttonSecondary}`} disabled>{secondaryLabel}</button>}</div>}</div></div>;
 }
 
+function StatusChip({ label, value }: { label: string; value: string }) {
+  const tone = (() => {
+    const v = value.toLowerCase();
+    if (v === "ready" || v === "imported" || v === "project") return "ok";
+    if (v === "not prepared" || v === "pending" || v === "scanning" || v === "requires runtime" || v === "local") return "warn";
+    if (v === "failed" || v === "error" || v === "missing") return "err";
+    return "info";
+  })();
+  const color = tone === "ok" ? "#34d399" : tone === "warn" ? "#fbbf24" : tone === "err" ? "#fb7185" : "#67e8f9";
+  return (
+    <span
+      className={styles.statusChip}
+      style={{ borderColor: `${color}40`, color, backgroundColor: `${color}10` }}
+    >
+      <span className={styles.statusChipLabel}>{label}</span>
+      <span className={styles.statusChipValue}>{value}</span>
+    </span>
+  );
+}
+
 export default function StudioCommandDeck({
   mode,
   onModeChangeAction,
@@ -337,11 +364,14 @@ export default function StudioCommandDeck({
   workspaceStatus,
   previewStatus,
   servicesStatus,
+  scanStatus,
+  workspaceId,
   activityEvents,
   onOpenProjectsAction,
   onInspectProjectAction,
   onStartBuildAction,
   onCreateMediaAction,
+  onPrepareWorkspaceAction,
   selectedModel,
   onModelChange,
   commandSurface,
@@ -362,8 +392,10 @@ export default function StudioCommandDeck({
   onSelectedAssetChange: _onSelectedAssetChange,
 }: DeckProps) {
   const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
-  const [draft, setDraft] = useState("// Demo draft — connect a project to edit real files.\nexport const studioMode = \"code\";\n");
   const [mobilePanel, setMobilePanel] = useState<"editor" | "explorer" | "preview" | "review">("editor");
+
+  // Real workspace file system
+  const ws = useWorkspaceFiles(workspaceId ?? null);
 
   // Agent context for terminal header
   const activeAgentInfo = AGENTS[selectedAgentId ?? "litt"];
@@ -572,12 +604,12 @@ export default function StudioCommandDeck({
       <div className={styles.workspace}>
         {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
           <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
-          <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={onOpenProjectsAction} aria-label="Select project" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><FolderOpen size={13} /></button>}>
-            {activeProjectId ? <div className={styles.fileTree}><div className={styles.fileRow}><FileCode2 size={13} /> File index loading is unavailable</div></div> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
+          <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={() => void ws.refreshTree()} aria-label="Refresh files" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><FolderOpen size={13} /></button>}>
+            {workspaceId ? <WorkspaceExplorer tree={ws.tree} loading={ws.treeLoading} activePath={ws.activePath} onOpenFile={(p) => void ws.openFile(p)} onRefresh={() => void ws.refreshTree()} /> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
           </Panel>
           {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
           <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
-            <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<><button aria-label="Unsaved demo draft" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><span className="text-[9px]">Demo</span></button><button aria-label="Maximize editor" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><Maximize2 size={13} /></button></>}><div className={styles.editor}><StudioMonacoEditor value={draft} onChange={setDraft} /></div></Panel>
+            <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<div className="flex items-center gap-2">{ws.activePath && ws.files[ws.activePath] && <SaveStatus isDirty={ws.files[ws.activePath].dirty} isSaving={ws.savingPaths.has(ws.activePath)} error={ws.error} />}<button aria-label="Maximize editor" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><Maximize2 size={13} /></button></div>}><div className={styles.editor}><EditorTabs openTabs={ws.openTabs} activePath={ws.activePath} files={ws.files} savingPaths={ws.savingPaths} onSelect={(p) => ws.setActivePath(p)} onClose={(p) => ws.closeTab(p)} /><div style={{ height: ws.openTabs.length > 0 ? "calc(100% - 32px)" : "100%", minHeight: 0 }}><WorkspaceEditor path={ws.activePath} file={ws.activePath ? ws.files[ws.activePath] ?? null : null} onChange={(p, c) => ws.updateBuffer(p, c)} onSave={(p) => void ws.saveFile(p)} /></div></div></Panel>
             {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
             <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="Open project" onAction={onOpenProjectsAction} /></div></Panel>
           </div>
@@ -625,11 +657,22 @@ export default function StudioCommandDeck({
                   {projectStatus === "connected" && workspaceStatus !== "ready" && (
                     <>
                       <h2>{projectName} is connected</h2>
-                      <p>Prepare its workspace so {terminalAgentName} can inspect files, run project commands and create verified changes.</p>
+                      <p>Prepare a secure project workspace so {terminalAgentName} can inspect files, run commands and propose edits.</p>
                       <div className={styles.emptyActions}>
-                        <button className={styles.button} disabled>Prepare Workspace</button>
+                        <button
+                          className={styles.button}
+                          onClick={onPrepareWorkspaceAction}
+                          disabled={workspaceStatus === "provisioning" || scanStatus !== "ready"}
+                        >
+                          {workspaceStatus === "provisioning" ? "Preparing…" : "Prepare Workspace"}
+                        </button>
                         <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onInspectProjectAction}>Inspect Metadata</button>
                         <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onCreateMediaAction}>Create Media</button>
+                      </div>
+                      <div className={styles.statusChips}>
+                        <StatusChip label="Repository" value={activeProjectId ? "Imported" : "Missing"} />
+                        <StatusChip label="Scan" value={scanStatus ?? "pending"} />
+                        <StatusChip label="Workspace" value={workspaceStatus === "provisioning" ? "Preparing" : workspaceStatus === "error" ? "Failed" : "Not prepared"} />
                       </div>
                     </>
                   )}
@@ -641,6 +684,13 @@ export default function StudioCommandDeck({
                         <button className={styles.button} onClick={onStartBuildAction}>Start Mission</button>
                         <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onInspectProjectAction}>Inspect Project</button>
                         <button className={`${styles.button} ${styles.buttonSecondary}`} onClick={onCreateMediaAction}>Create Media</button>
+                      </div>
+                      <div className={styles.statusChips}>
+                        <StatusChip label="Repository" value="Imported" />
+                        <StatusChip label="Scan" value={scanStatus ?? "ready"} />
+                        <StatusChip label="Workspace" value="Ready" />
+                        <StatusChip label="Terminal" value={servicesStatus === "connected" ? "Project" : "Local"} />
+                        <StatusChip label="Preview" value={previewStatus === "ready" ? "Ready" : previewStatus === "starting" ? "Starting" : "Requires runtime"} />
                       </div>
                     </>
                   )}

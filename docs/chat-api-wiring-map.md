@@ -159,8 +159,7 @@
 | `litt.ts` | `litt` notification dispatcher (Discord, webhook, push, email). `jarvis` alias kept for back-compat. | system alerts, sales |
 | `litt-context.ts` | Builds LiTT prompts, parses LiTT actions (`add_goal`, `remember`, `run_command`, `create_file`, `edit_file`, `start_agent`, `deploy`) | `/api/litt/think` |
 | `litt-identity.ts` | Static `LITLABS_IDENTITY_SNIPPET` injected into every LLM call | every chat route |
-| `agents.ts` | `AGENTS` registry (one canonical `litt` agent; `littcode`/`littlebit` are non-enum aliases). Exports `orchestrator` singleton — message routing, memory, `simulateAgentResponse`, `startBackgroundConversation`. | chat, agents API |
-| `AgentOrchestrator.ts` | DB-backed orchestrator (orchestration_sessions, agent_tasks tables) | agent-tasks API |
+| `agents.ts` | `AGENTS` registry (one canonical `litt` agent; `littcode`/`littlebit` are non-enum aliases). Exports `orchestrator` singleton — message routing, memory, `simulateAgentResponse`, `startBackgroundConversation`. DB-backed orchestrator (orchestration_sessions, agent_tasks tables). | chat, agents API |
 | `core-agents.ts` | Built-in core agent fallbacks when `agents` table missing | `/api/agents` GET |
 | `director-graph.ts` | `buildDirectorPlan(goal)` pure function → 4-task plan (root/researcher/builder/reviewer). Back-compat `DirectorGraphPlanner` class. | `/api/director/plan` |
 | `agent-profiles.ts`, `agent-tools.ts`, `agent-validation.ts`, `agent-worker.ts`, `agent-user.ts` | Agent subsystem | agent tasks |
