@@ -416,7 +416,7 @@ export default function StudioCommandDeck({
   // Helpers are defined before any effect/use that calls them to avoid TDZ lint errors.
   const setCollapsed = (panel: PanelId) => setLayout((current) => ({ ...current, collapsed: { ...current.collapsed, [panel]: !current.collapsed[panel] } }));
   const setPanelSize = (panel: PanelId, size: number) => { const [min, max] = LIMITS[panel]; const clamped = Math.min(max, Math.max(min, Math.round(size))); setLayout((current) => current.sizes[panel] === clamped ? current : ({ ...current, sizes: { ...current.sizes, [panel]: clamped } })); };
-  const resetLayout = () => setLayout(DEFAULT_LAYOUT);
+  const resetLayout = () => { try { localStorage.removeItem(LAYOUT_KEY); } catch {} setLayout(DEFAULT_LAYOUT); };
 
   // Sync controlled mobileView into internal terminal focus + mode so the UI and CSS react.
   // This makes the parent (mobile chrome + shell) the single source of truth.
@@ -540,13 +540,38 @@ export default function StudioCommandDeck({
   const servicesLabel = servicesStatus === "connected" ? "Connected" : servicesStatus === "connecting" ? "Connecting…" : servicesStatus === "degraded" ? "Degraded" : "Disconnected";
   const workspaceLabel = workspaceStatus === "ready" ? "Ready" : workspaceStatus === "provisioning" ? "Provisioning…" : workspaceStatus === "error" ? "Error" : "Not prepared";
   const explorerW = effectiveCollapsed.explorer ? 42 : layout.sizes.explorer;
-  const reviewW = effectiveCollapsed.review ? 42 : layout.sizes.review;
-  const previewH = effectiveCollapsed.preview ? 42 : layout.sizes.preview;
   const terminalH = effectiveCollapsed.terminal ? 42 : layout.sizes.terminal;
+
+  // Review panel: only show when no dedicated conversation column AND not collapsed
+  const showInternalReview = !hasConversation && !layout.collapsed.review;
+  const reviewWidth = showInternalReview ? layout.sizes.review : 0;
+
+  // Preview panel: only show when workspace is ready AND not collapsed
+  const previewEnabled = Boolean(activeProjectId) && workspaceStatus === "ready";
+  const showPreview = previewEnabled && !layout.collapsed.preview;
+  const previewH = showPreview ? layout.sizes.preview : 0;
+
   // Allocate 24px for splitter columns/rows so the interactive resize handles meet the 24px touch target rule.
   // The visual appearance stays a thin bar; the extra space is hit area.
-  const codeGridStyle: CSSProperties = { gridTemplateColumns: `${explorerW}px ${effectiveCollapsed.explorer ? 0 : 24}px minmax(0,1fr) ${effectiveCollapsed.review ? 0 : 24}px ${reviewW}px`, gridTemplateRows: `minmax(0,1fr) ${effectiveCollapsed.terminal ? 0 : 24}px ${terminalH}px` };
-  const stackGridStyle: CSSProperties = { gridTemplateRows: `minmax(0,1fr) ${effectiveCollapsed.preview ? 0 : 24}px ${previewH}px` };
+  const codeGridStyle: CSSProperties = {
+    gridTemplateColumns: [
+      `${explorerW}px`,
+      effectiveCollapsed.explorer ? '0px' : '24px',
+      'minmax(0,1fr)',
+      showInternalReview ? '24px' : '0px',
+      `${reviewWidth}px`,
+    ].join(' '),
+    gridTemplateRows: [
+      'minmax(0,1fr)',
+      effectiveCollapsed.terminal ? '0px' : '24px',
+      `${terminalH}px`,
+    ].join(' '),
+  };
+  const stackGridStyle: CSSProperties = {
+    gridTemplateRows: showPreview
+      ? `minmax(0,1fr) 24px ${previewH}px`
+      : 'minmax(0,1fr) 0px 0px',
+  };
 
   // Use CSS class for the 3-col layout instead of inline style.
   const deckClass = `${styles.deck} ${hasConversation ? styles.deckWithConversation : ""}`;
@@ -609,12 +634,12 @@ export default function StudioCommandDeck({
           </Panel>
           {!layout.collapsed.explorer && <Splitter panel="explorer" size={layout.sizes.explorer} onResizeAction={setPanelSize} style={{ gridColumn: 2, gridRow: 1 }} />}
           <div className={styles.stack} style={{ gridColumn: 3, gridRow: 1, ...stackGridStyle }}>
-            <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<div className="flex items-center gap-2">{ws.activePath && ws.files[ws.activePath] && <SaveStatus isDirty={ws.files[ws.activePath].dirty} isSaving={ws.savingPaths.has(ws.activePath)} error={ws.error} />}<button aria-label="Maximize editor" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><Maximize2 size={13} /></button></div>}><div className={styles.editor}><EditorTabs openTabs={ws.openTabs} activePath={ws.activePath} files={ws.files} savingPaths={ws.savingPaths} onSelect={(p) => ws.setActivePath(p)} onClose={(p) => ws.closeTab(p)} /><div style={{ height: ws.openTabs.length > 0 ? "calc(100% - 32px)" : "100%", minHeight: 0 }}><WorkspaceEditor path={ws.activePath} file={ws.activePath ? ws.files[ws.activePath] ?? null : null} onChange={(p, c) => ws.updateBuffer(p, c)} onSave={(p) => void ws.saveFile(p)} /></div></div></Panel>
-            {!layout.collapsed.preview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
-            <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="Open project" onAction={onOpenProjectsAction} /></div></Panel>
+            <Panel title="Editor" icon={Braces} dataMobileId="editor" style={{ gridRow: 1 }} action={<div className="flex items-center gap-2">{ws.activePath && ws.files[ws.activePath] && <SaveStatus isDirty={ws.files[ws.activePath].dirty} isSaving={ws.savingPaths.has(ws.activePath)} error={ws.error} />}<button aria-label="Maximize editor" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><Maximize2 size={13} /></button></div>}><div className={styles.editor}>{!workspaceId && activeProjectId && <div className={styles.workspaceBlocker}><strong>Project selected, workspace not prepared</strong><span>Prepare the workspace to load files, run project commands, use Git, start tests, and launch Preview.</span><button className={styles.blockerButton} onClick={onPrepareWorkspaceAction}>Prepare Workspace</button></div>}{!activeProjectId && <div className={styles.workspaceBlocker}><strong>Select a project to unlock Code mode</strong><span>Choose a connected GitHub repository to load files, preview, and Git status.</span><button className={styles.blockerButton} onClick={onOpenProjectsAction}>Select Project</button></div>}{workspaceId && <><EditorTabs openTabs={ws.openTabs} activePath={ws.activePath} files={ws.files} savingPaths={ws.savingPaths} onSelect={(p) => ws.setActivePath(p)} onClose={(p) => ws.closeTab(p)} /><div style={{ height: ws.openTabs.length > 0 ? "calc(100% - 32px)" : "100%", minHeight: 0 }}><WorkspaceEditor path={ws.activePath} file={ws.activePath ? ws.files[ws.activePath] ?? null : null} onChange={(p, c) => ws.updateBuffer(p, c)} onSave={(p) => void ws.saveFile(p)} /></div></>}</div></Panel>
+            {showPreview && <Splitter panel="preview" size={layout.sizes.preview} vertical invert onResizeAction={setPanelSize} style={{ gridRow: 2 }} />}
+            {showPreview && <Panel title="Live preview" icon={Monitor} panelId="preview" dataMobileId="preview" collapsed={layout.collapsed.preview} onCollapseAction={() => setCollapsed("preview")} style={{ gridRow: 3 }} action={<div className={styles.tabs}>{(["desktop", "tablet", "mobile"] as const).map((device) => <button key={device} data-active={layout.previewDevice === device} onClick={() => setLayout((current) => ({ ...current, previewDevice: device }))}>{device}</button>)}</div>}><div className={styles.previewCanvas}><EmptyState title="Preview unavailable" description={`A project runtime has not been provisioned for ${layout.previewDevice} preview.`} actionLabel="Open project" onAction={onOpenProjectsAction} /></div></Panel>}
           </div>
-          {!layout.collapsed.review && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
-          <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." actionLabel="Open agents" onAction={() => selectRail('agents')} />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." actionLabel="Open project" onAction={onOpenProjectsAction} />}</Panel>
+          {showInternalReview && <Splitter panel="review" size={layout.sizes.review} invert onResizeAction={setPanelSize} style={{ gridColumn: 4, gridRow: 1 }} />}
+          {showInternalReview && <Panel title="Review" icon={GitBranch} panelId="review" dataMobileId="review" collapsed={layout.collapsed.review} onCollapseAction={() => setCollapsed("review")} style={{ gridColumn: 5, gridRow: 1 }} className={styles.rightPanel}><div className={styles.rightTabs}>{(["activity", "agents", "git"] as const).map((tab) => <button key={tab} data-active={layout.rightTab === tab} onClick={() => setLayout((current) => ({ ...current, rightTab: tab }))}>{tab}</button>)}</div>{layout.rightTab === "activity" && <div className={styles.activity}><div className={styles.activityItem}><Activity size={13} /> No verified project activity.</div></div>}{layout.rightTab === "agents" && <EmptyState title="No active agents" description="Agent events appear when a verified project task runs." actionLabel="Open agents" onAction={() => selectRail('agents')} />}{layout.rightTab === "git" && <EmptyState title="Git unavailable" description="Changed files, exact diffs, approval, reject, and undo appear after Git workspace provisioning." actionLabel="Open project" onAction={onOpenProjectsAction} />}</Panel>}
           {!layout.collapsed.terminal && <Splitter panel="terminal" size={layout.sizes.terminal} vertical invert onResizeAction={setPanelSize} style={{ gridColumn: "1 / -1", gridRow: 2 }} />}
           <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} projectName={projectName} workspaceLabel={workspaceLabel} />
         </div>}
