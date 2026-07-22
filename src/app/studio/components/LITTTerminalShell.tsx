@@ -670,7 +670,9 @@ function LITTTerminalShellInner({
     ]);
   }, []);
 
-  // Sync active project from URL ?project=ID and fetch readiness
+  // Sync active project from URL ?project=ID and fetch readiness.
+  // Keep the last explicit selection so returning to Studio restores the
+  // user's workspace instead of dropping back to an empty command center.
   const applyProjectReadiness = useCallback(
     (readiness: ProjectReadiness) => {
       setProjectName(readiness.repository.fullName ?? readiness.projectId);
@@ -739,7 +741,15 @@ function LITTTerminalShellInner({
 
   useEffect(() => {
     const urlProject = searchParams?.get("project");
-    if (!urlProject) {
+    const savedProject = window.localStorage.getItem("littree:studio:active-project");
+    const selectedProject = urlProject || savedProject;
+    if (!urlProject && selectedProject) {
+      const params = new URLSearchParams(searchParams?.toString() ?? "");
+      params.set("project", selectedProject);
+      router.replace(`/studio?${params.toString()}`, { scroll: false });
+      return;
+    }
+    if (!selectedProject) {
       setActiveProjectId(null);
       setProjectName(null);
       setProjectStatus("none");
@@ -751,14 +761,15 @@ function LITTTerminalShellInner({
       setWorkspaceId(null);
       return;
     }
-    if (urlProject === activeProjectId && projectStatus !== "none") return;
+    if (selectedProject === activeProjectId && projectStatus !== "none") return;
 
     const controller = new AbortController();
-    setActiveProjectId(urlProject);
+    window.localStorage.setItem("littree:studio:active-project", selectedProject);
+    setActiveProjectId(selectedProject);
     setProjectStatus("loading");
-    pushActivity({ type: "project", status: "info", message: `Loading project ${urlProject}…` });
+    pushActivity({ type: "project", status: "info", message: `Loading project ${selectedProject}…` });
 
-    void fetch(`/api/studio/projects/${urlProject}/readiness`, {
+    void fetch(`/api/studio/projects/${selectedProject}/readiness`, {
       cache: "no-store",
       signal: controller.signal,
     })
@@ -771,8 +782,9 @@ function LITTTerminalShellInner({
       })
       .catch((error) => {
         if (error instanceof DOMException && error.name === "AbortError") return;
+        window.localStorage.removeItem("littree:studio:active-project");
         setProjectStatus("error");
-        setProjectName(urlProject);
+        setProjectName(selectedProject);
         pushActivity({ type: "project", status: "error", message: "Failed to load project readiness" });
       });
 
@@ -2133,6 +2145,7 @@ function LITTTerminalShellInner({
             activeProjectId={activeProjectId}
             onSelect={(projectId) => {
               setProjectDrawerOpen(false);
+              window.localStorage.setItem("littree:studio:active-project", projectId);
               const params = new URLSearchParams(searchParams?.toString() ?? "");
               params.set("project", projectId);
               router.push(`/studio?${params.toString()}`, { scroll: false });
@@ -2238,7 +2251,7 @@ function LITTTerminalShellInner({
                   />
                 }
                 terminal={
-                  <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
+                  <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} />
                 }
               />
             ) : (
@@ -2653,7 +2666,7 @@ function LITTTerminalShellInner({
                         </button>
                       </div>
                       <div className="min-h-0 flex-1">
-                        <TerminalToolDirect ref={terminalRef} onOutput={handleTerminalOutput} />
+                        <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} />
                       </div>
                     </>
                   )}

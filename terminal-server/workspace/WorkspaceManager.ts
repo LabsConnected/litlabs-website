@@ -1,10 +1,12 @@
 import { resolve, join } from "path";
-import { mkdirSync, existsSync, statSync } from "fs";
+import { mkdirSync, existsSync } from "fs";
 import { simpleGit, type SimpleGit } from "simple-git";
 import { randomUUID } from "crypto";
 
 export interface WorkspaceDescriptor {
   workspaceId: string;
+  userId: string;
+  projectId: string;
   root: string;
   branch: string;
   commitSha: string;
@@ -29,8 +31,9 @@ export function getWorkspace(workspaceId: string): WorkspaceDescriptor | undefin
   return workspaces.get(workspaceId);
 }
 
-export function getWorkspaceRoot(workspaceId: string): string | null {
+export function getWorkspaceRoot(workspaceId: string, userId?: string): string | null {
   const ws = workspaces.get(workspaceId);
+  if (userId && ws?.userId !== userId) return null;
   return ws?.root ?? null;
 }
 
@@ -64,6 +67,8 @@ export async function prepareWorkspace(
 
   const descriptor: WorkspaceDescriptor = {
     workspaceId,
+    userId: input.userId,
+    projectId: input.projectId,
     root,
     branch: input.branch,
     commitSha,
@@ -75,5 +80,5 @@ export async function prepareWorkspace(
 }
 
 export function listWorkspaces(userId: string): WorkspaceDescriptor[] {
-  return Array.from(workspaces.values()).filter(() => true);
+  return Array.from(workspaces.values()).filter((workspace) => workspace.userId === userId);
 }

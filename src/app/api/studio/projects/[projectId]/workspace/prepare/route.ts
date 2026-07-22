@@ -58,8 +58,9 @@ export async function POST(
       .eq("user_id", userId);
 
     try {
-      const [owner, repo] = (project.github_repo ?? "").split("/");
-      const branch = project.github_default_branch ?? "main";
+      const owner = project.github_owner ?? null;
+      const repo = project.github_repo ?? null;
+      const branch = project.github_branch ?? project.github_default_branch ?? "main";
       const installationId = project.github_installation_id ?? 0;
 
       if (!owner || !repo) {
@@ -93,7 +94,7 @@ export async function POST(
           owner,
           repo,
           branch,
-          commitSha: project.github_commit_sha ?? null,
+          commitSha: project.latest_commit_sha ?? null,
           githubToken,
         }),
       });

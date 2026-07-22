@@ -307,7 +307,7 @@ app.post("/v1/workspaces/prepare", async (req: AuthenticatedRequest, res) => {
 
 // GET /v1/workspaces/:id/tree?path=&depth=
 app.get("/v1/workspaces/:id/tree", (req: AuthenticatedRequest, res) => {
-  const root = getWorkspaceRoot(req.params.id);
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
   if (!root) return res.status(404).json({ error: "Workspace not found" });
   try {
     const dirPath = String(req.query.path || ".");
@@ -321,7 +321,7 @@ app.get("/v1/workspaces/:id/tree", (req: AuthenticatedRequest, res) => {
 
 // GET /v1/workspaces/:id/file?path=
 app.get("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
-  const root = getWorkspaceRoot(req.params.id);
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
   if (!root) return res.status(404).json({ error: "Workspace not found" });
   try {
     const filePath = String(req.query.path || "");
@@ -335,7 +335,7 @@ app.get("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
 
 // PUT /v1/workspaces/:id/file
 app.put("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
-  const root = getWorkspaceRoot(req.params.id);
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
   if (!root) return res.status(404).json({ error: "Workspace not found" });
   try {
     const { path: filePath, content, expectedVersion } = req.body ?? {};
@@ -349,7 +349,7 @@ app.put("/v1/workspaces/:id/file", (req: AuthenticatedRequest, res) => {
 
 // POST /v1/workspaces/:id/search
 app.post("/v1/workspaces/:id/search", (req: AuthenticatedRequest, res) => {
-  const root = getWorkspaceRoot(req.params.id);
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
   if (!root) return res.status(404).json({ error: "Workspace not found" });
   try {
     const { query } = req.body ?? {};
@@ -363,7 +363,7 @@ app.post("/v1/workspaces/:id/search", (req: AuthenticatedRequest, res) => {
 
 // GET /v1/workspaces/:id/git/status
 app.get("/v1/workspaces/:id/git/status", async (req: AuthenticatedRequest, res) => {
-  const root = getWorkspaceRoot(req.params.id);
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
   if (!root) return res.status(404).json({ error: "Workspace not found" });
   try {
     const status = await gitStatus(root);
@@ -376,6 +376,14 @@ app.get("/v1/workspaces/:id/git/status", async (req: AuthenticatedRequest, res) 
 io.use((socket, next) => {
   try {
     socket.data.userId = verifyTerminalToken(socket.handshake.auth?.token).sub;
+    const requestedWorkspaceId = socket.handshake.auth?.workspaceId;
+    if (requestedWorkspaceId) {
+      const workspace = getWorkspace(String(requestedWorkspaceId));
+      if (!workspace || workspace.userId !== socket.data.userId) {
+        return next(new Error("Workspace unavailable"));
+      }
+      socket.data.workspaceId = workspace.workspaceId;
+    }
     next();
   } catch {
     next(new Error("Unauthorized"));
@@ -388,7 +396,17 @@ io.on("connection", (socket) => {
 
   console.log("[Terminal] Connected:", { userId, sessionId });
 
-  const workspace = resolve(WORKSPACE_ROOT, userId);
+  const requestedWorkspaceId = socket.data.workspaceId
+    ? String(socket.data.workspaceId)
+    : null;
+  const workspace = requestedWorkspaceId
+    ? getWorkspaceRoot(requestedWorkspaceId, userId)
+    : resolve(WORKSPACE_ROOT, userId);
+  if (!workspace) {
+    socket.emit("terminal:error", "Workspace unavailable");
+    socket.disconnect();
+    return;
+  }
   mkdirSync(workspace, { recursive: true });
 
   let ptyProcess: pty.IPty;

@@ -234,18 +234,21 @@ export interface TerminalToolHandle {
 
 type TerminalToolProps = {
   initialMode?: Mode;
+  workspaceId?: string | null;
   onOutput?: (data: string) => void;
   onSessionChange?: (sessionId: string | null) => void;
 };
 
 const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
-  function TerminalTool({ initialMode = "local", onOutput, onSessionChange }, ref) {
+  function TerminalTool({ initialMode = "local", workspaceId = null, onOutput, onSessionChange }, ref) {
     const { resolvedColors: T } = useTheme();
 
     const containerRef = useRef<HTMLDivElement | null>(null);
     const termRef = useRef<Terminal | null>(null);
     const fitRef = useRef<FitAddon | null>(null);
     const socketRef = useRef<Socket | null>(null);
+    const connectedWorkspaceIdRef = useRef<string | null>(null);
+    const previousWorkspaceIdRef = useRef<string | null>(workspaceId);
     const pendingRemoteCommandRef = useRef<string | null>(null);
 
     // Local shell state
@@ -523,7 +526,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       const url = baseUrl || TERMINAL_URL;
 
       const socket = io(url, {
-        auth: { token },
+        auth: { token, workspaceId },
         transports: ["websocket", "polling"],
         reconnection: true,
         reconnectionDelay: 1_000,
@@ -535,6 +538,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       setMode("remote");
 
       socket.on("connect", () => {
+        connectedWorkspaceIdRef.current = workspaceId;
         setStatus("connected");
         termRef.current?.writeln(`\x1b[32m✓ Connected to ${url}\x1b[0m`);
         if (termRef.current) {
@@ -569,6 +573,8 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       });
 
       socket.on("disconnect", (reason) => {
+        if (socketRef.current !== socket) return;
+        connectedWorkspaceIdRef.current = null;
         setStatus("disconnected");
         termRef.current?.writeln(
           `\r\n\x1b[33m⚡ Disconnected: ${reason}\x1b[0m\r\n`,
@@ -577,6 +583,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       });
 
       socket.on("connect_error", (err) => {
+        if (socketRef.current !== socket) return;
         setStatus("error");
         setError(err.message);
         termRef.current?.writeln(
@@ -590,7 +597,43 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       setError(message);
       termRef.current?.writeln(`\r\n\x1b[31m✗ ${message}\x1b[0m\r\n`);
     }
-  }, [status]);
+  }, [status, workspaceId]);
+
+  // A connected PTY is scoped to exactly one workspace. When the selected
+  // project changes, fully retire the previous socket before reconnecting so
+  // commands can never land in the project the user just left.
+  useEffect(() => {
+    if (previousWorkspaceIdRef.current === workspaceId) return;
+    previousWorkspaceIdRef.current = workspaceId;
+
+    const previousSocket = socketRef.current;
+    if (previousSocket) {
+      previousSocket.removeAllListeners();
+      previousSocket.disconnect();
+      socketRef.current = null;
+    }
+    connectedWorkspaceIdRef.current = null;
+    setSessionId(null);
+    onSessionChangeRef.current?.(null);
+    setStatus("idle");
+
+    if (!workspaceId && termRef.current) {
+      startLocal(termRef.current);
+    }
+  }, [startLocal, workspaceId]);
+
+  // A prepared project should open in its real workspace automatically.
+  // Keep the local shell only as the explicit fallback when no project
+  // workspace exists or the gateway cannot be reached.
+  useEffect(() => {
+    if (!workspaceId) return;
+    if (
+      connectedWorkspaceIdRef.current !== workspaceId &&
+      (status === "idle" || status === "disconnected")
+    ) {
+      void connectRemote();
+    }
+  }, [connectRemote, status, workspaceId]);
 
   const runRemoteCommand = useCallback((command: string) => {
     const term = termRef.current;
