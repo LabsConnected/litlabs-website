@@ -11,7 +11,6 @@ import {
   Cloud,
   CreditCard,
   Bot,
-  Workflow,
 } from "lucide-react";
 
 function GitHubIcon({ size = 14 }: { size?: number }) {
@@ -41,7 +40,6 @@ const ICONS: Record<string, React.ReactNode> = {
   vercel: <Cloud size={14} />,
   stripe: <CreditCard size={14} />,
   openrouter: <Bot size={14} />,
-  n8n: <Workflow size={14} />,
 };
 
 export default function StudioHealthPanel() {

@@ -142,21 +142,6 @@ async function checkOpenRouter(): Promise<HealthCheck> {
   }
 }
 
-async function checkN8n(): Promise<HealthCheck> {
-  const start = Date.now();
-  const url = process.env.N8N_WEBHOOK_URL || process.env.N8N_BASE_URL;
-  if (!url) {
-    return { name: "n8n", status: "misconfigured", message: "N8N_WEBHOOK_URL or N8N_BASE_URL missing" };
-  }
-  try {
-    const res = await fetch(url, { method: "HEAD" });
-    if (!res.ok && res.status !== 405) throw new Error(`n8n HTTP ${res.status}`);
-    return { name: "n8n", status: "healthy", message: "n8n reachable", latencyMs: Date.now() - start };
-  } catch (err) {
-    return { name: "n8n", status: "offline", message: err instanceof Error ? err.message : "n8n check failed", latencyMs: Date.now() - start };
-  }
-}
-
 async function checkWorker(): Promise<HealthCheck> {
   if (!supabaseAdmin) {
     return { name: "worker", status: "offline", message: "Supabase admin client not initialized" };
@@ -202,7 +187,6 @@ export async function GET() {
     checkVercel(),
     checkStripe(),
     checkOpenRouter(),
-    checkN8n(),
     checkWorker(),
   ]);
 
