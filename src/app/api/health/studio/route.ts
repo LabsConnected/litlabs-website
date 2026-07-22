@@ -148,25 +148,26 @@ async function checkWorker(): Promise<HealthCheck> {
   }
   try {
     const { data, error } = await supabaseAdmin
-      .from("worker_heartbeats")
-      .select("worker_id, status, last_seen_at")
-      .order("last_seen_at", { ascending: false })
+      .from("worker_instances")
+      .select("id, worker_name, status, last_heartbeat_at")
+      .order("last_heartbeat_at", { ascending: false })
       .limit(1);
     if (error) throw error;
     if (!data || data.length === 0) {
-      return { name: "worker", status: "offline", message: "No worker heartbeats found" };
+      return { name: "worker", status: "offline", message: "No worker instances found" };
     }
     const row = data[0];
-    const lastSeen = new Date(row.last_seen_at).getTime();
+    const lastSeen = new Date(row.last_heartbeat_at).getTime();
     const stale = Date.now() - lastSeen > OFFLINE_THRESHOLD_MS;
     if (stale) {
       return { name: "worker", status: "offline", message: `Last seen ${Math.round((Date.now() - lastSeen) / 1000)}s ago` };
     }
-    const reported = row.status as ServiceStatus;
+    const reported = row.status as string;
+    const mapped: ServiceStatus = reported === "online" ? "healthy" : "offline";
     return {
       name: "worker",
-      status: reported === "healthy" ? "healthy" : reported,
-      message: reported === "healthy" ? "Worker online" : `Worker reports ${reported}`,
+      status: mapped,
+      message: mapped === "healthy" ? "Worker online" : `Worker reports ${reported}`,
     };
   } catch (err) {
     return { name: "worker", status: "offline", message: err instanceof Error ? err.message : "Worker check failed" };
