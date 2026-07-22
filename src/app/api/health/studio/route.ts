@@ -73,6 +73,7 @@ async function checkTerminalServer(): Promise<HealthCheck> {
   try {
     const res = await fetch(`${TERMINAL_SERVER_URL}/health`, {
       signal: AbortSignal.timeout(5_000),
+      headers: { "User-Agent": "LiTTree-HealthCheck/1.0" },
     });
     if (!res.ok) throw new Error(`HTTP ${res.status}`);
     const data = await res.json();

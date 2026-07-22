@@ -81,6 +81,7 @@ export async function runInTerminal(args: {
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${token}`,
+        "User-Agent": "LiTTree-Server/1.0",
       },
       body: JSON.stringify({
         command: args.command,
