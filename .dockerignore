@@ -1,0 +1,16 @@
+node_modules
+dist
+.next
+.env
+.env.local
+*.log
+.git
+.vscode
+chrome/
+litlabs/
+litlabs-website/
+Zoo-Code/
+work/
+meta/
+docs/
+supabase/
