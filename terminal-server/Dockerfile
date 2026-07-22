@@ -5,7 +5,7 @@ FROM node:22-slim
 
 # Install dependencies for node-pty and shell tools
 RUN apt-get update && apt-get install -y \
-    python3 make g++ bash git curl \
+    python3 make g++ bash git curl unzip \
     && rm -rf /var/lib/apt/lists/*
 
 # Enable pnpm via corepack
