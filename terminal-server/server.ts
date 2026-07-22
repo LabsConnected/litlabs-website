@@ -373,6 +373,82 @@ app.get("/v1/workspaces/:id/git/status", async (req: AuthenticatedRequest, res) 
   }
 });
 
+// POST /v1/workspaces/:id/runtime/start — start dev server in workspace
+app.post("/v1/workspaces/:id/runtime/start", async (req: AuthenticatedRequest, res) => {
+  const root = getWorkspaceRoot(req.params.id, req.terminalUserId);
+  if (!root) return res.status(404).json({ error: "Workspace not found" });
+  const { installCommand, devCommand } = req.body ?? {};
+  if (!devCommand) return res.status(400).json({ error: "devCommand is required" });
+
+  try {
+    // Run install first (non-blocking, but wait for completion)
+    if (installCommand) {
+      await new Promise<void>((resolveInstall, rejectInstall) => {
+        const installProc = spawn(installCommand, {
+          cwd: root,
+          shell: true,
+          env: { ...process.env, FORCE_COLOR: "1" },
+        });
+        installProc.on("close", (code) => {
+          if (code === 0) resolveInstall();
+          else rejectInstall(new Error(`Install failed with code ${code}`));
+        });
+        installProc.on("error", rejectInstall);
+      });
+    }
+
+    // Start dev server in background
+    const devProc = spawn(devCommand, {
+      cwd: root,
+      shell: true,
+      env: { ...process.env, FORCE_COLOR: "1", PORT: "0" },
+      detached: false,
+    });
+
+    const workspaceId = req.params.id;
+    const portMap = (globalThis as Record<string, unknown>).__devPorts as Map<string, number> | undefined;
+    if (portMap) portMap.set(workspaceId, 0);
+
+    // Wait for dev server to output a URL or port
+    const previewUrl = await new Promise<string | null>((resolvePreview) => {
+      const timeout = setTimeout(() => {
+        resolvePreview(null);
+      }, 30_000);
+
+      devProc.stdout?.on("data", (data: Buffer) => {
+        const output = data.toString();
+        const portMatch = output.match(/(?:localhost|0\.0\.0\.0|127\.0\.0\.1):(\d{4,5})/);
+        if (portMatch) {
+          clearTimeout(timeout);
+          const port = parseInt(portMatch[1], 10);
+          if (portMap) portMap.set(workspaceId, port);
+          resolvePreview(`http://localhost:${port}`);
+        }
+      });
+
+      devProc.stderr?.on("data", (data: Buffer) => {
+        const output = data.toString();
+        const portMatch = output.match(/(?:localhost|0\.0\.0\.0|127\.0\.0\.1):(\d{4,5})/);
+        if (portMatch) {
+          clearTimeout(timeout);
+          const port = parseInt(portMatch[1], 10);
+          if (portMap) portMap.set(workspaceId, port);
+          resolvePreview(`http://localhost:${port}`);
+        }
+      });
+
+      devProc.on("error", () => {
+        clearTimeout(timeout);
+        resolvePreview(null);
+      });
+    });
+
+    res.json({ previewUrl });
+  } catch (err) {
+    res.status(500).json({ error: err instanceof Error ? err.message : "Runtime start failed" });
+  }
+});
+
 io.use((socket, next) => {
   try {
     socket.data.userId = verifyTerminalToken(socket.handshake.auth?.token).sub;

@@ -19,6 +19,7 @@ export async function GET() {
     const baseUrl =
       process.env.TERMINAL_SERVER_URL ||
       process.env.NEXT_PUBLIC_TERMINAL_URL ||
+      process.env.NEXT_PUBLIC_TERMINAL_WS_URL?.replace(/^wss:/, "https:").replace(/^ws:/, "http:") ||
       "http://localhost:4001";
     return NextResponse.json(
       { token, expiresAt, baseUrl },

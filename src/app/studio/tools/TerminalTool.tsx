@@ -58,14 +58,15 @@ const TERMINAL_URL =
 const LOCAL_WELCOME = [
   "",
   "\x1b[36m╭─────────────────────────────────────────────────────────╮\x1b[0m",
-  "\x1b[36m│\x1b[0m  \x1b[1mLiTT Local Shell\x1b[0m  \x1b[2m— in-browser PTY-free emulator\x1b[0m    \x1b[36m│\x1b[0m",
+  "\x1b[36m│\x1b[0m  \x1b[1mLiTT Local Shell\x1b[0m  \x1b[2m— SIMULATION (no real PTY)\x1b[0m    \x1b[36m│\x1b[0m",
   "\x1b[36m│\x1b[0m  \x1b[2mType \x1b[0m\x1b[33mhelp\x1b[0m\x1b[2m for the list of supported commands.\x1b[0m       \x1b[36m│\x1b[0m",
+  "\x1b[36m│\x1b[0m  \x1b[2mFiles and output are mocked. Connect for a real shell.\x1b[0m  \x1b[36m│\x1b[0m",
   "\x1b[36m╰─────────────────────────────────────────────────────────╯\x1b[0m",
   "",
 ];
 
 const LOCAL_HELP = [
-  "  \x1b[1mSupported commands:\x1b[0m",
+  "  \x1b[1mSupported commands (SIMULATION):\x1b[0m",
   "    \x1b[33mhelp\x1b[0m                Show this list",
   "    \x1b[33mclear\x1b[0m               Clear the screen",
   "    \x1b[33mwhoami\x1b[0m              Print the current user",
@@ -75,12 +76,12 @@ const LOCAL_HELP = [
   "    \x1b[33mecho <text>\x1b[0m         Echo text",
   "    \x1b[33mdate\x1b[0m                Print the current date",
   "    \x1b[33muname -a\x1b[0m            System info",
-  "    \x1b[33mnode -v\x1b[0m              Node.js version",
-  "    \x1b[33mpnpm -v\x1b[0m              pnpm version",
+  "    \x1b[33mnode -v\x1b[0m              Node.js version (mocked)",
+  "    \x1b[33mpnpm -v\x1b[0m              pnpm version (mocked)",
   "    \x1b[33mneofetch\x1b[0m             Tiny system info card",
   "    \x1b[33mcline --acp\x1b[0m          Launch Cline in the real workspace PTY",
   "",
-  "  \x1b[2mFor a real PTY (bash/PS), run \x1b[0m\x1b[33mpnpm terminal:dev\x1b[0m\x1b[2m and click Connect.\x1b[0m",
+  "  \x1b[2m\x1b[33mThis is a simulation.\x1b[0m \x1b[2mFor a real PTY, connect to the terminal server.\x1b[0m",
   "",
 ];
 
@@ -237,10 +238,11 @@ type TerminalToolProps = {
   workspaceId?: string | null;
   onOutput?: (data: string) => void;
   onSessionChange?: (sessionId: string | null) => void;
+  onConnectionChange?: (connected: boolean, mode: Mode) => void;
 };
 
 const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
-  function TerminalTool({ initialMode = "local", workspaceId = null, onOutput, onSessionChange }, ref) {
+  function TerminalTool({ initialMode = "local", workspaceId = null, onOutput, onSessionChange, onConnectionChange }, ref) {
     const { resolvedColors: T } = useTheme();
 
     const containerRef = useRef<HTMLDivElement | null>(null);
@@ -266,6 +268,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     const sessionIdRef = useRef(sessionId);
     const onOutputRef = useRef(onOutput);
     const onSessionChangeRef = useRef(onSessionChange);
+    const onConnectionChangeRef = useRef(onConnectionChange);
 
     useEffect(() => {
       modeRef.current = mode;
@@ -279,6 +282,9 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
     useEffect(() => {
       onSessionChangeRef.current = onSessionChange;
     }, [onSessionChange]);
+    useEffect(() => {
+      onConnectionChangeRef.current = onConnectionChange;
+    }, [onConnectionChange]);
 
     const writePrompt = useCallback(() => {
     if (!termRef.current) return;
@@ -540,6 +546,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
       socket.on("connect", () => {
         connectedWorkspaceIdRef.current = workspaceId;
         setStatus("connected");
+        onConnectionChangeRef.current?.(true, "remote");
         termRef.current?.writeln(`\x1b[32m✓ Connected to ${url}\x1b[0m`);
         if (termRef.current) {
           socket.emit("terminal:resize", {
@@ -580,6 +587,7 @@ const TerminalTool = forwardRef<TerminalToolHandle, TerminalToolProps>(
           `\r\n\x1b[33m⚡ Disconnected: ${reason}\x1b[0m\r\n`,
         );
         onSessionChangeRef.current?.(null);
+        onConnectionChangeRef.current?.(false, "remote");
       });
 
       socket.on("connect_error", (err) => {

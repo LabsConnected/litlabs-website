@@ -5,8 +5,31 @@ import { getAppOctokit } from "@/lib/github-app";
 import type { HealthCheck, ServiceStatus, StudioHealthResponse } from "@/lib/health/types";
 
 export const runtime = "nodejs";
+export const maxDuration = 30;
 
 const OFFLINE_THRESHOLD_MS = 90_000;
+const TERMINAL_SERVER_URL =
+  process.env.TERMINAL_SERVER_URL ||
+  process.env.NEXT_PUBLIC_TERMINAL_URL ||
+  process.env.NEXT_PUBLIC_TERMINAL_WS_URL?.replace(/^wss:/, "https:").replace(/^ws:/, "http:") ||
+  "";
+
+async function checkClerk(): Promise<HealthCheck> {
+  const start = Date.now();
+  if (!process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+    return { name: "clerk", status: "misconfigured", message: "NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY missing" };
+  }
+  if (!process.env.CLERK_SECRET_KEY) {
+    return { name: "clerk", status: "misconfigured", message: "CLERK_SECRET_KEY missing" };
+  }
+  const isDevKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY.startsWith("pk_test_");
+  return {
+    name: "clerk",
+    status: "healthy",
+    message: isDevKey ? "Using development keys (pk_test_)" : "Production keys configured",
+    latencyMs: Date.now() - start,
+  };
+}
 
 async function checkGitHub(): Promise<HealthCheck> {
   const start = Date.now();
@@ -36,6 +59,37 @@ async function checkSupabase(): Promise<HealthCheck> {
     return { name: "supabase", status: "healthy", message: "Database reachable", latencyMs: Date.now() - start };
   } catch (err) {
     return { name: "supabase", status: "offline", message: err instanceof Error ? err.message : "Supabase check failed", latencyMs: Date.now() - start };
+  }
+}
+
+async function checkTerminalServer(): Promise<HealthCheck> {
+  const start = Date.now();
+  if (!TERMINAL_SERVER_URL) {
+    return { name: "terminal-server", status: "misconfigured", message: "TERMINAL_SERVER_URL not configured" };
+  }
+  if (!process.env.TERMINAL_AUTH_SECRET || process.env.TERMINAL_AUTH_SECRET.length < 32) {
+    return { name: "terminal-server", status: "misconfigured", message: "TERMINAL_AUTH_SECRET missing or too short" };
+  }
+  try {
+    const res = await fetch(`${TERMINAL_SERVER_URL}/health`, {
+      signal: AbortSignal.timeout(5_000),
+    });
+    if (!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data = await res.json();
+    const dockerOk = data.docker === true;
+    return {
+      name: "terminal-server",
+      status: dockerOk ? "healthy" : "degraded",
+      message: dockerOk ? "Terminal server online, Docker available" : "Terminal server online, Docker not available",
+      latencyMs: Date.now() - start,
+    };
+  } catch (err) {
+    return {
+      name: "terminal-server",
+      status: "offline",
+      message: err instanceof Error ? err.message : "Terminal server unreachable",
+      latencyMs: Date.now() - start,
+    };
   }
 }
 
@@ -140,8 +194,10 @@ export async function GET() {
   }
 
   const checks = await Promise.all([
+    checkClerk(),
     checkGitHub(),
     checkSupabase(),
+    checkTerminalServer(),
     checkVercel(),
     checkStripe(),
     checkOpenRouter(),

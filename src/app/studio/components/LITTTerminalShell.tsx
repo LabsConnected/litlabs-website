@@ -701,9 +701,7 @@ function LITTTerminalShellInner({
               : "unavailable",
       );
 
-      setServicesStatus(
-        readiness.terminal.status === "project_ready" ? "connected" : "disconnected",
-      );
+      setServicesStatus("disconnected");
 
       setScanStatus(readiness.scan.status);
       setWorkspaceId(readiness.workspace.workspaceId);
@@ -2251,7 +2249,7 @@ function LITTTerminalShellInner({
                   />
                 }
                 terminal={
-                  <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} />
+                  <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} onConnectionChange={(connected, mode) => { setServicesStatus(connected && mode === "remote" ? "connected" : "disconnected"); }} />
                 }
               />
             ) : (
@@ -2666,7 +2664,7 @@ function LITTTerminalShellInner({
                         </button>
                       </div>
                       <div className="min-h-0 flex-1">
-                        <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} />
+                        <TerminalToolDirect ref={terminalRef} workspaceId={workspaceId} onOutput={handleTerminalOutput} onConnectionChange={(connected, mode) => { setServicesStatus(connected && mode === "remote" ? "connected" : "disconnected"); }} />
                       </div>
                     </>
                   )}

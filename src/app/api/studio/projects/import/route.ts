@@ -94,16 +94,41 @@ export async function POST(request: NextRequest) {
       .select()
       .single();
 
-    // Run the scan asynchronously — don't block the response
-    scanRepositoryAsync(sb, project.id, installation_id, owner, repo, workingBranch, scanRecord?.id)
-      .catch(() => {
-        // Non-fatal: scan status will be updated by the async handler
-      });
+    // Run the scan with a timeout. If it completes within the Vercel
+    // function lifetime, return results immediately. If it times out,
+    // the scan continues and the client polls readiness.
+    const SCAN_TIMEOUT_MS = 25_000;
+    let scanCompleted = false;
+    try {
+      await Promise.race([
+        scanRepositoryAsync(sb, project.id, installation_id, owner, repo, workingBranch, scanRecord?.id),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("SCAN_TIMEOUT")), SCAN_TIMEOUT_MS),
+        ),
+      ]);
+      scanCompleted = true;
+    } catch (err) {
+      if (err instanceof Error && err.message === "SCAN_TIMEOUT") {
+        // Scan still running in background — client will poll readiness
+      } else {
+        // Scan failed — error already recorded by scanRepositoryAsync
+      }
+    }
+
+    // Re-fetch the project to get the latest scan status
+    const { data: updatedProject } = await sb
+      .from("studio_projects")
+      .select("*")
+      .eq("id", project.id)
+      .single();
 
     return NextResponse.json({
-      project,
-      scanStarted: true,
-      message: "Repository import started. Scan will complete in the background.",
+      project: updatedProject ?? project,
+      scanStarted: !scanCompleted,
+      scanCompleted,
+      message: scanCompleted
+        ? "Repository imported and scanned successfully."
+        : "Repository import started. Scan will complete in the background.",
     });
   } catch (err) {
     const msg = err instanceof Error ? err.message : "Failed to import project";

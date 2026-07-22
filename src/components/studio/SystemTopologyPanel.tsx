@@ -23,7 +23,9 @@ type Health = {
 };
 
 const terminalUrl = () => {
-  const explicit = process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
+  const explicit =
+    process.env.NEXT_PUBLIC_TERMINAL_URL ||
+    process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL;
   if (explicit) return explicit.replace(/\/$/, "");
   const ws = process.env.NEXT_PUBLIC_TERMINAL_WS_URL;
   return (

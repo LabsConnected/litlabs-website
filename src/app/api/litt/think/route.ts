@@ -516,6 +516,7 @@ function probeSubsystems(): SubsystemProbe[] {
   // tour fast and not fail in environments where the terminal isn't
   // running, like the Vercel build itself)
   const termUrl =
+    process.env.TERMINAL_SERVER_URL ||
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
     process.env.TERMINAL_WS_URL;
   const termPort = process.env.TERMINAL_PORT;

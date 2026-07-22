@@ -91,7 +91,9 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
 
     const wsUrl =
-      process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
+      process.env.NEXT_PUBLIC_TERMINAL_URL ||
+      process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
+      "http://localhost:4001";
     const resize = () => {
       fit.fit();
       socketRef.current?.emit("terminal:resize", {
