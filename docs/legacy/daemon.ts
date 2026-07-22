@@ -1,6 +1,6 @@
 import path from "path";
 import fs from "fs";
-import { AgentWorkerMatrix } from "./lib/agent-worker";
+import { AgentWorkerMatrix } from "../../src/lib/agent-worker";
 
 // Load .env.local if present (for local daemon runs outside Next.js)
 const envPath = path.resolve(process.cwd(), ".env.local");

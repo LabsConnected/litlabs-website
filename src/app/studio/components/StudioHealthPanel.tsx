@@ -8,7 +8,6 @@ import {
   RefreshCw,
   Server,
   Database,
-  Cloud,
   CreditCard,
   Bot,
 } from "lucide-react";
@@ -37,7 +36,6 @@ type HealthResponse = {
 const ICONS: Record<string, React.ReactNode> = {
   github: <GitHubIcon size={14} />,
   supabase: <Database size={14} />,
-  vercel: <Cloud size={14} />,
   stripe: <CreditCard size={14} />,
   openrouter: <Bot size={14} />,
 };

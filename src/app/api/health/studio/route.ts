@@ -94,22 +94,6 @@ async function checkTerminalServer(): Promise<HealthCheck> {
   }
 }
 
-async function checkVercel(): Promise<HealthCheck> {
-  const start = Date.now();
-  if (!process.env.VERCEL_TOKEN) {
-    return { name: "vercel", status: "misconfigured", message: "VERCEL_TOKEN missing" };
-  }
-  try {
-    const res = await fetch("https://api.vercel.com/v9/user", {
-      headers: { Authorization: `Bearer ${process.env.VERCEL_TOKEN}` },
-    });
-    if (!res.ok) throw new Error(`Vercel API ${res.status}`);
-    return { name: "vercel", status: "healthy", message: "Vercel token valid", latencyMs: Date.now() - start };
-  } catch (err) {
-    return { name: "vercel", status: "offline", message: err instanceof Error ? err.message : "Vercel check failed", latencyMs: Date.now() - start };
-  }
-}
-
 async function checkStripe(): Promise<HealthCheck> {
   const start = Date.now();
   if (!process.env.STRIPE_SECRET_KEY) {
@@ -185,7 +169,6 @@ export async function GET() {
     checkGitHub(),
     checkSupabase(),
     checkTerminalServer(),
-    checkVercel(),
     checkStripe(),
     checkOpenRouter(),
     checkWorker(),
