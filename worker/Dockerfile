@@ -23,14 +23,13 @@ COPY packages/litt-agent-core/ packages/litt-agent-core/
 RUN pnpm --filter @litt/agent-core build
 
 # Copy the daemon entry point
-COPY docs/legacy/daemon.ts worker/entry.ts
+COPY worker/entry.ts worker/entry.ts
 
 # Copy full src/ for path alias resolution
 COPY src/ src/
 
-# Fix import path: daemon.ts uses ../../src/lib/agent-worker
-# In Docker we place it at worker/entry.ts, so we need ../src/lib/
-RUN sed -i 's|../../src/lib/agent-worker|../src/lib/agent-worker|' worker/entry.ts
+# Fix import path: entry.ts uses ../src/lib/agent-worker (relative to worker/)
+# which resolves correctly in Docker context
 
 # Install tsx for running TypeScript
 RUN pnpm add -w tsx@latest
