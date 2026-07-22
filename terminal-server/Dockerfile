@@ -21,6 +21,9 @@ COPY terminal-server/package.json terminal-server/tsconfig.json terminal-server/
 # Install dependencies (only the workspace packages we need)
 RUN pnpm install --frozen-lockfile --filter terminal-server --filter "@litt/agent-core"
 
+# Copy full @litt/agent-core source (needed for build)
+COPY packages/litt-agent-core/ packages/litt-agent-core/
+
 # Build @litt/agent-core first
 RUN pnpm --filter @litt/agent-core build
 
