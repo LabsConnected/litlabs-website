@@ -85,11 +85,13 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-CREATE TRIGGER IF NOT EXISTS update_users_updated_at
+DROP TRIGGER IF EXISTS update_users_updated_at ON public.users;
+CREATE TRIGGER update_users_updated_at
   BEFORE UPDATE ON public.users
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 
-CREATE TRIGGER IF NOT EXISTS update_wallets_updated_at
+DROP TRIGGER IF EXISTS update_wallets_updated_at ON public.wallets;
+CREATE TRIGGER update_wallets_updated_at
   BEFORE UPDATE ON public.wallets
   FOR EACH ROW EXECUTE FUNCTION public.update_updated_at_column();
 

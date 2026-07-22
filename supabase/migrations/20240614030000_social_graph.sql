@@ -69,13 +69,13 @@ CREATE POLICY follows_select ON public.follows
 DROP POLICY IF EXISTS follows_insert ON public.follows;
 CREATE POLICY follows_insert ON public.follows
   FOR INSERT WITH CHECK (
-    follower_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid())
+    follower_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid()::text)
   );
 
 DROP POLICY IF EXISTS follows_delete ON public.follows;
 CREATE POLICY follows_delete ON public.follows
   FOR DELETE USING (
-    follower_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid())
+    follower_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid()::text)
   );
 
 -- 7) RLS policies for notifications
@@ -84,7 +84,7 @@ ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
 DROP POLICY IF EXISTS notifications_select ON public.notifications;
 CREATE POLICY notifications_select ON public.notifications
   FOR SELECT USING (
-    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid())
+    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid()::text)
   );
 
 DROP POLICY IF EXISTS notifications_insert ON public.notifications;
@@ -94,13 +94,13 @@ CREATE POLICY notifications_insert ON public.notifications
 DROP POLICY IF EXISTS notifications_update ON public.notifications;
 CREATE POLICY notifications_update ON public.notifications
   FOR UPDATE USING (
-    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid())
+    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid()::text)
   );
 
 DROP POLICY IF EXISTS notifications_delete ON public.notifications;
 CREATE POLICY notifications_delete ON public.notifications
   FOR DELETE USING (
-    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid())
+    recipient_id = (SELECT id FROM public.users WHERE clerk_id = auth.uid()::text)
   );
 
 -- 8) Helper: create notification on follow (trigger)

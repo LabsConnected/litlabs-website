@@ -59,21 +59,24 @@ ALTER TABLE github_webhook_events ENABLE ROW LEVEL SECURITY;
 ALTER TABLE projects ENABLE ROW LEVEL SECURITY;
 
 -- Service-role bypass policies (used by server-side API routes with Clerk auth)
-CREATE POLICY IF NOT EXISTS service_role_all_github_installations
+DROP POLICY IF EXISTS service_role_all_github_installations ON github_installations;
+CREATE POLICY service_role_all_github_installations
     ON github_installations
     FOR ALL
     TO service_role
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS service_role_all_github_webhook_events
+DROP POLICY IF EXISTS service_role_all_github_webhook_events ON github_webhook_events;
+CREATE POLICY service_role_all_github_webhook_events
     ON github_webhook_events
     FOR ALL
     TO service_role
     USING (true)
     WITH CHECK (true);
 
-CREATE POLICY IF NOT EXISTS service_role_all_projects
+DROP POLICY IF EXISTS service_role_all_projects ON projects;
+CREATE POLICY service_role_all_projects
     ON projects
     FOR ALL
     TO service_role

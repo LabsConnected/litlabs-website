@@ -23,6 +23,7 @@ ALTER FUNCTION public.set_updated_at() SET search_path = '';
 DROP POLICY IF EXISTS "Anyone can insert events" ON public.site_events;
 
 -- Create a proper INSERT policy (authenticated users only)
+DROP POLICY IF EXISTS "Authenticated users can insert events" ON public.site_events;
 CREATE POLICY "Authenticated users can insert events"
   ON public.site_events
   FOR INSERT
@@ -38,6 +39,7 @@ CREATE POLICY "Authenticated users can insert events"
 DROP POLICY IF EXISTS "Media is publicly readable" ON storage.objects;
 
 -- Create a policy that only allows reading specific objects, not listing
+DROP POLICY IF EXISTS "Media objects are publicly readable" ON storage.objects;
 CREATE POLICY "Media objects are publicly readable"
   ON storage.objects
   FOR SELECT
