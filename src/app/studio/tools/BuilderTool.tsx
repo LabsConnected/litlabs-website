@@ -161,29 +161,30 @@ export default function BuilderTool({
         <div className="mt-5 grid gap-3 sm:grid-cols-[1.2fr_.8fr]">
           <section className="rounded-2xl border border-white/10 bg-white/[.025] p-4">
             <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
-              <span>Recent project</span>
-              <Link href="/projects" className="normal-case tracking-normal text-cyan-300">View all</Link>
+              <span>Project</span>
+              <Link href="/studio?mode=code" className="normal-case tracking-normal text-cyan-300">Open workspace</Link>
             </div>
-            <Link href="/projects" className="mt-3 grid grid-cols-[40px_1fr_18px] items-center gap-3 rounded-xl p-1 text-white">
-              <span className="grid h-10 w-10 place-items-center rounded-xl bg-cyan-300 text-[10px] font-black text-black">LL</span>
-              <span><b className="block text-sm">LiTTree LabStudios</b><small className="mt-1 block text-[10px]" style={{ color: T.textMuted }}>Updated today</small></span>
-              <ArrowRight size={15} aria-hidden="true" />
-            </Link>
+            <div className="mt-3 rounded-xl border border-dashed border-white/15 p-4 text-center">
+              <p className="text-xs font-bold text-white">Connect a project to start building</p>
+              <p className="mt-1 text-[10px] leading-relaxed" style={{ color: T.textMuted }}>
+                Select a GitHub repository in the Studio. Project, terminal, and preview readiness are separate states.
+              </p>
+            </div>
           </section>
 
           <section className="rounded-2xl border border-white/10 bg-white/[.025] p-4">
             <div className="flex items-center justify-between text-[10px] font-black uppercase tracking-widest" style={{ color: T.textMuted }}>
-              <span>Your AI crew</span><span className="text-emerald-300">Online</span>
+              <span>Your AI crew</span><span className="text-emerald-300">Studio ready</span>
             </div>
             <div className="mt-3 grid grid-cols-[40px_1fr_10px] items-center gap-3 p-1">
               <span className="grid h-10 w-10 place-items-center rounded-xl bg-linear-to-br from-violet-600 to-cyan-400 text-xs font-black text-white">Li</span>
               <span><b className="block text-sm text-white">LiTT Director</b><small className="mt-1 block text-[10px]" style={{ color: T.textMuted }}>Ready to help</small></span>
-              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_#34d399]" aria-label="Online" />
+              <span className="h-2.5 w-2.5 rounded-full bg-emerald-400 shadow-[0_0_12px_#34d399]" aria-label="Studio ready" />
             </div>
           </section>
         </div>
 
-        <Link href="/code" className="mt-4 flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-cyan-400/25 bg-cyan-400/[.06] text-xs font-black text-cyan-200">
+        <Link href="/studio?mode=code" className="mt-4 flex min-h-12 items-center justify-center gap-2 rounded-2xl border border-cyan-400/25 bg-cyan-400/[.06] text-xs font-black text-cyan-200">
           <FolderKanban size={15} aria-hidden="true" /> Open full workspace
         </Link>
 

@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { getInstallationToken } from "@/lib/github-app";
 
 const RUNNER_URL = process.env.TERMINAL_SERVER_URL || "http://localhost:4001";
 
@@ -66,6 +67,20 @@ export async function POST(
       }
 
       const { token } = createTerminalToken(userId);
+
+      // Obtain a short-lived GitHub installation token for private repo access.
+      // The token is passed to the runner which uses it for git clone auth.
+      // Tokens expire after ~1 hour; clone happens immediately so this is sufficient.
+      let githubToken: string | null = null;
+      if (installationId) {
+        try {
+          githubToken = await getInstallationToken(installationId);
+        } catch {
+          // If token generation fails, proceed without it — public repos will still clone.
+          // Private repos will fail at the clone step with a clear error.
+        }
+      }
+
       const runnerRes = await fetch(`${RUNNER_URL}/v1/workspaces/prepare`, {
         method: "POST",
         headers: {
@@ -79,6 +94,7 @@ export async function POST(
           repo,
           branch,
           commitSha: project.github_commit_sha ?? null,
+          githubToken,
         }),
       });
 

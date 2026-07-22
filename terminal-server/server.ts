@@ -283,7 +283,7 @@ app.use("/v1/workspaces", requireTerminalAuth);
 // POST /v1/workspaces/prepare — clone/checkout a repo into a workspace
 app.post("/v1/workspaces/prepare", async (req: AuthenticatedRequest, res) => {
   const userId = req.terminalUserId!;
-  const { projectId, installationId, owner, repo, branch, commitSha } = req.body ?? {};
+  const { projectId, installationId, owner, repo, branch, commitSha, githubToken } = req.body ?? {};
   if (!projectId || !owner || !repo || !branch) {
     return res.status(400).json({ error: "projectId, owner, repo, branch are required" });
   }
@@ -297,6 +297,7 @@ app.post("/v1/workspaces/prepare", async (req: AuthenticatedRequest, res) => {
       branch,
       commitSha: commitSha ?? null,
       workspaceRoot: WORKSPACE_ROOT,
+      githubToken: githubToken ?? null,
     });
     res.json({ workspace: descriptor });
   } catch (err) {

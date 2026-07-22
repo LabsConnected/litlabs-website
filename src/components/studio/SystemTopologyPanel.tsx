@@ -91,7 +91,7 @@ export default function SystemTopologyPanel({
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          repoUrl: "https://github.com/LabsConnected/litlabs-website.git",
+          repoUrl: "",
           branch: "main",
           install: true,
         }),
@@ -132,7 +132,7 @@ export default function SystemTopologyPanel({
       label: "Terminal",
       value:
         gateway === "ready"
-          ? "Online"
+          ? "Studio ready"
           : gateway === "checking"
             ? "Checking"
             : endpoint
@@ -264,13 +264,13 @@ export default function SystemTopologyPanel({
             {initializing ? "Initializing…" : "Initialize project"}
           </button>
           <button
-            onClick={() => router.push("/studio")}
+            onClick={() => router.push("/studio?mode=command")}
             className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold"
           >
             Open terminal
           </button>
           <button
-            onClick={() => router.push("/studio")}
+            onClick={() => router.push("/studio?mode=code")}
             className="rounded-lg border border-white/10 px-2.5 py-1.5 text-[10px] font-bold"
           >
             Open builder

@@ -20,6 +20,7 @@ export interface PrepareInput {
   branch: string;
   commitSha?: string | null;
   workspaceRoot: string;
+  githubToken?: string | null;
 }
 
 const workspaces = new Map<string, WorkspaceDescriptor>();
@@ -43,7 +44,13 @@ export async function prepareWorkspace(
 
   const git: SimpleGit = simpleGit(root);
 
-  const cloneUrl = `https://github.com/${input.owner}/${input.repo}.git`;
+  // Construct clone URL — use installation token for private repos, plain URL for public
+  let cloneUrl: string;
+  if (input.githubToken) {
+    cloneUrl = `https://x-access-token:${input.githubToken}@github.com/${input.owner}/${input.repo}.git`;
+  } else {
+    cloneUrl = `https://github.com/${input.owner}/${input.repo}.git`;
+  }
 
   if (!existsSync(join(root, ".git"))) {
     await git.clone(cloneUrl, root, ["--depth", "1", "--branch", input.branch]);
