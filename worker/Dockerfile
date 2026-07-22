@@ -28,6 +28,9 @@ COPY worker/entry.ts worker/entry.ts
 # Copy full src/ for path alias resolution
 COPY src/ src/
 
+# Copy tsconfig.json for @/* path alias resolution
+COPY worker/tsconfig.json tsconfig.json
+
 # Fix import path: entry.ts uses ../src/lib/agent-worker (relative to worker/)
 # which resolves correctly in Docker context
 
