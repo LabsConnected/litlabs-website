@@ -24,7 +24,7 @@ if (fs.existsSync(envPath)) {
 }
 
 // Required environment for the persistent worker (never run on Vercel serverless)
-const REQUIRED = [
+const _REQUIRED = [
   "SUPABASE_URL",
   "NEXT_PUBLIC_SUPABASE_URL", // fallback if SUPABASE_URL not set
   "SUPABASE_SERVICE_ROLE_KEY",
