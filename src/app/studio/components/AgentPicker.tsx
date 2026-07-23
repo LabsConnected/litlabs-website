@@ -49,7 +49,7 @@ export default function AgentPicker({ value, onChange }: Props) {
         <div
           role="listbox"
           aria-label="Active agent"
-          className="absolute left-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#0b0f1a] p-1 shadow-2xl"
+          className="fixed left-3 right-3 top-14 z-[110] overflow-hidden rounded-2xl border border-white/10 bg-[#0b0f1a]/98 p-2 shadow-2xl backdrop-blur-xl md:absolute md:left-0 md:right-auto md:top-full md:mt-2 md:w-72"
         >
           {AGENT_OPTIONS.map((id) => {
             const agent = AGENTS[id];
@@ -66,11 +66,13 @@ export default function AgentPicker({ value, onChange }: Props) {
                   onChange(id);
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[11px] transition hover:bg-white/10"
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left transition hover:bg-white/10"
               >
                 <ItemIcon size={13} style={{ color: agent.color }} className="pointer-events-none" aria-hidden="true" />
-                <span className="flex-1 font-bold text-white">{agent.name}</span>
-                <span className="text-[9px] text-white/40">{agent.role}</span>
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-xs font-bold text-white">{agent.name}</span>
+                  <span className="mt-0.5 block truncate text-[10px] text-white/45">{agent.role}</span>
+                </span>
                 {active && <Check className="pointer-events-none" size={13} style={{ color: agent.color }} aria-hidden="true" />}
               </button>
             );

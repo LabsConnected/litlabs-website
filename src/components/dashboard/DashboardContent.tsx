@@ -146,8 +146,8 @@ export default function DashboardContent() {
 
   return (
     <div className="space-y-5">
-      <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        <div className="rounded-2xl border p-5 sm:col-span-2" style={{ background: `linear-gradient(135deg, ${T.accentColor}16, ${T.boxBg})`, borderColor: `${T.accentColor}35` }}>
+      <section className="space-y-3">
+        <div className="rounded-2xl border p-5" style={{ background: `linear-gradient(135deg, ${T.accentColor}16, ${T.boxBg})`, borderColor: `${T.accentColor}35` }}>
           <div className="flex items-start justify-between gap-4">
             <div>
               <p className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>Workspace pulse</p>
@@ -163,29 +163,31 @@ export default function DashboardContent() {
             {pulse.updatedAt && <span>Updated {new Date(pulse.updatedAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}</span>}
           </div>
         </div>
-        <Link href="/wallet" className="rounded-2xl border p-5 transition hover:-translate-y-0.5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
-          <Wallet size={18} style={{ color: "#fbbf24" }} />
-          <div className="mt-4 text-2xl font-black" style={{ color: T.headerColor }}>{loading ? "—" : pulse.balance === null ? "Unavailable" : `${pulse.balance.toLocaleString()} LBC`}</div>
-          <div className="mt-1 text-[10px] uppercase tracking-wider" style={{ color: T.textMuted }}>Credit balance · {pulse.plan}</div>
-        </Link>
-        <Link href="/settings" className="rounded-2xl border p-5 transition hover:-translate-y-0.5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
-          <PlugZap size={18} style={{ color: T.accentColor }} />
-          <div className="mt-4 text-2xl font-black" style={{ color: T.headerColor }}>{connections.filter((item) => item.connected).length}/{connections.length}</div>
-          <div className="mt-1 text-[10px] uppercase tracking-wider" style={{ color: T.textMuted }}>Data sources active</div>
-        </Link>
+        <div className="overflow-hidden rounded-2xl border" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}30` }}>
+          <Link href="/wallet" className="flex items-center gap-3 border-b p-4 transition hover:opacity-80" style={{ borderColor: `${T.borderColor}25` }}>
+            <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ backgroundColor: "#fbbf2415" }}><Wallet size={17} style={{ color: "#fbbf24" }} /></span>
+            <span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider" style={{ color: T.textMuted }}>Credit balance · {pulse.plan}</span><strong className="mt-0.5 block text-lg" style={{ color: T.headerColor }}>{loading ? "—" : pulse.balance === null ? "Unavailable" : `${pulse.balance.toLocaleString()} LBC`}</strong></span>
+            <ArrowRight size={14} className="opacity-30" />
+          </Link>
+          <Link href="/settings" className="flex items-center gap-3 p-4 transition hover:opacity-80">
+            <span className="grid h-10 w-10 place-items-center rounded-xl" style={{ backgroundColor: `${T.accentColor}15` }}><PlugZap size={17} style={{ color: T.accentColor }} /></span>
+            <span className="min-w-0 flex-1"><span className="block text-[10px] uppercase tracking-wider" style={{ color: T.textMuted }}>Data sources active</span><strong className="mt-0.5 block text-lg" style={{ color: T.headerColor }}>{connections.filter((item) => item.connected).length}/{connections.length}</strong></span>
+            <ArrowRight size={14} className="opacity-30" />
+          </Link>
+        </div>
       </section>
 
-      <section className="grid grid-cols-2 gap-3 lg:grid-cols-3 xl:grid-cols-6">
+      <section className="overflow-hidden rounded-2xl border" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
         {stats.map((stat) => (
-          <div key={stat.label} className="rounded-xl border p-4" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
-            <stat.icon size={15} style={{ color: stat.color }} />
-            <div className="mt-3 text-xl font-black" style={{ color: T.headerColor }}>{loading ? "—" : stat.ready ? stat.value.toLocaleString() : "—"}</div>
-            <div className="mt-1 text-[9px] uppercase tracking-wider" style={{ color: T.textMuted }}>{stat.label}</div>
+          <div key={stat.label} className="flex items-center gap-3 border-b p-3.5 last:border-b-0" style={{ borderColor: `${T.borderColor}20` }}>
+            <span className="grid h-9 w-9 place-items-center rounded-lg" style={{ backgroundColor: `${stat.color}12` }}><stat.icon size={15} style={{ color: stat.color }} /></span>
+            <div className="min-w-0 flex-1 text-[10px] font-bold uppercase tracking-wider" style={{ color: T.textMuted }}>{stat.label}</div>
+            <div className="text-lg font-black" style={{ color: T.headerColor }}>{loading ? "—" : stat.ready ? stat.value.toLocaleString() : "—"}</div>
           </div>
         ))}
       </section>
 
-      <section className="grid gap-4 xl:grid-cols-[1.5fr_1fr]">
+      <section className="space-y-4">
         <div className="rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
           <div className="flex items-center justify-between gap-3">
             <div><h3 className="text-sm font-black" style={{ color: T.headerColor }}>Seven-day performance</h3><p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>Commands, agent tasks, and generations</p></div>
@@ -217,7 +219,7 @@ export default function DashboardContent() {
         </div>
       </section>
 
-      <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+      <section className="space-y-2">
         {[
           { label: "Open Studio", href: "/studio", icon: Zap, detail: "Create with LiTT" },
           { label: "Connect project", href: "/projects", icon: GitBranch, detail: "Add a GitHub repository" },

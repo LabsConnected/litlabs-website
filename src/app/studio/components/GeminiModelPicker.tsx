@@ -12,14 +12,13 @@ export type ChatModelSelection = {
 export const DEFAULT_GEMINI_MODEL: ChatModelSelection = {
   provider: "google",
   model: process.env.NEXT_PUBLIC_GEMINI_MODEL || "gemini-2.5-flash",
-  label: "Gemini",
+  label: "Gemini Fast",
 };
 
 export const GEMINI_MODELS: readonly ChatModelSelection[] = [
-  DEFAULT_GEMINI_MODEL,
-  { provider: "google", model: "gemini-2.5-flash", label: "Gemini Fast" },
-  { provider: "google", model: "gemini-2.5-pro", label: "Gemini Pro" },
   { provider: "auto", model: "", label: "Auto Best" },
+  DEFAULT_GEMINI_MODEL,
+  { provider: "google", model: "gemini-2.5-pro", label: "Gemini Pro" },
 ];
 
 type Props = {
@@ -56,7 +55,7 @@ export default function GeminiModelPicker({ value, onChange }: Props) {
         <div
           role="listbox"
           aria-label="Chat model"
-          className="absolute left-0 top-full z-50 mt-2 w-48 overflow-hidden rounded-xl border border-white/10 bg-[#0b0f1a] p-1 shadow-2xl"
+          className="fixed left-3 right-3 top-14 z-[110] overflow-hidden rounded-2xl border border-white/10 bg-[#0b0f1a]/98 p-2 shadow-2xl backdrop-blur-xl md:absolute md:left-0 md:right-auto md:top-full md:mt-2 md:w-64"
         >
           {GEMINI_MODELS.map((model) => {
             const active = model.provider === value.provider && model.model === value.model;
@@ -70,7 +69,7 @@ export default function GeminiModelPicker({ value, onChange }: Props) {
                   onChange(model);
                   setOpen(false);
                 }}
-                className="flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left text-[11px] transition hover:bg-white/10"
+                className="flex w-full items-center gap-3 rounded-xl px-3 py-3 text-left text-xs transition hover:bg-white/10"
               >
                 <span className="h-1.5 w-1.5 rounded-full bg-emerald-300" aria-hidden="true" />
                 <span className="flex-1 font-bold text-white">{model.label}</span>
