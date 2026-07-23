@@ -87,7 +87,7 @@ body::before {
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
   background-size: 64px 64px;
   pointer-events: none;
-  z-index: 0;
+  z-index: -1;
   opacity: 0.22;
 }
 

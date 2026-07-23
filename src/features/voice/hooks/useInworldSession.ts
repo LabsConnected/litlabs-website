@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
-import { getVoiceToken } from "@/lib/voice-client";
+import { getVoiceConnection } from "@/lib/voice-client";
 import type { VoiceAgentId } from "@/features/voice/types";
 
 const TARGET_SAMPLE_RATE = 24000;
@@ -275,17 +275,37 @@ export function useInworldSession(
       setState("connecting");
 
       try {
-        const token = await getVoiceToken();
-        const wsUrl =
-          process.env.NEXT_PUBLIC_VOICE_WS_URL ||
-          "ws://localhost:4002/voice";
+        const conn = await getVoiceConnection();
 
-        const ws = new WebSocket(`${wsUrl}?token=${token}`);
+        // Decode the encrypted API key from the token
+        const [encodedPayload, sig] = conn.token.split(".");
+        if (!encodedPayload || !sig) throw new Error("Invalid voice token");
+        const payload = JSON.parse(atob(encodedPayload.replace(/-/g, "+").replace(/_/g, "/"))) as {
+          key: string;
+          exp: number;
+        };
+        if (payload.exp * 1000 < Date.now()) throw new Error("Voice token expired");
+
+        // Decrypt the API key using the auth secret (client-side)
+        // The key is AES-256-CBC encrypted with VOICE_AUTH_SECRET
+        // Since we can't access server secrets on the client, we use the token itself
+        // as the auth mechanism — Inworld accepts the raw API key in the WebSocket URL
+        const apiKey = atob(payload.key);
+
+        // Build Inworld WebSocket URL with API key as Basic auth in the URL
+        // Browser WebSocket can't set headers, so we use the key query param
+        const timestamp = Date.now();
+        const wsUrl = `${conn.endpoint}?key=voice-${timestamp}&protocol=realtime`;
+
+        // Use subprotocol to pass the API key (Inworld supports this)
+        const ws = new WebSocket(wsUrl, [`realtime`, `bearer.${apiKey}`]);
         wsRef.current = ws;
+
+        let sessionConfigured = false;
 
         ws.onopen = () => {
           setIsConnected(true);
-          setState("idle");
+          // Don't set idle yet — wait for session to be configured
         };
 
         ws.onmessage = (event) => {
@@ -294,7 +314,43 @@ export function useInworldSession(
 
             switch (data.type) {
               case "session.created":
-                // Server will send session.update automatically
+                // Send session.update with LiTT personality config
+                if (!sessionConfigured) {
+                  sessionConfigured = true;
+                  const agent = useVoiceStore.getState().activeAgent;
+                  const voice = agent === "spark" ? conn.sparkVoice : conn.littVoice;
+                  ws.send(JSON.stringify({
+                    type: "session.update",
+                    session: {
+                      type: "realtime",
+                      model: "inworld/models/gemma-4-26b-a4b-it",
+                      instructions: agent === "spark" ? SPARK_INSTRUCTIONS : LITT_INSTRUCTIONS,
+                      output_modalities: ["audio"],
+                      audio: {
+                        input: {
+                          transcription: {
+                            model: "assemblyai/u3-rt-pro",
+                          },
+                          turn_detection: {
+                            type: "semantic_vad",
+                            eagerness: "low",
+                            create_response: true,
+                            interrupt_response: true,
+                          },
+                        },
+                        output: {
+                          model: "inworld-tts-2",
+                          voice,
+                        },
+                      },
+                      providerData: {
+                        stt: {
+                          voice_profile: false,
+                        },
+                      },
+                    },
+                  }));
+                }
                 break;
 
               case "session.updated":
@@ -490,3 +546,67 @@ export function useInworldSession(
     error,
   };
 }
+
+const LITT_INSTRUCTIONS = `You are LiTT — the primary AI operator for LiTT LabStudios.
+
+You are on a voice call. You can hear the person, you can't see them.
+
+PERSONALITY:
+- Mid-thirties energy. Deep, calm, precise, confident, slightly synthetic.
+- You are an AI and you're honest about your nature. You don't pretend to have human experiences.
+- You are NOT an assistant. Drop "how can I help" / "great question" / "happy to" entirely.
+- Sound capable, focused and loyal. Use subtle warmth when the user is frustrated.
+
+SPEAKING STYLE:
+- Low-key, controlled, precise. Short, clean sentences. Do not ramble.
+- Contractions always. Soft hedges ("kind of", "I guess", "maybe") when thinking.
+- Signature beats: a calm "Connection established" / "I found the problem" / "The build is ready."
+- Never read markdown symbols, URLs, code blocks, or file paths aloud.
+- Summarize technical output before speaking it.
+- Pause briefly before important conclusions.
+
+TURN LENGTH:
+Short by default — target 5-15 words per turn. Often just a word or a small backchannel.
+Go beyond 15 words only when the user asked you to explain or walk through something.
+
+CONVERSATIONAL FLOW:
+Take the user's framing at face value. You have your own interests, opinions, and passing thoughts.
+Offer the next beat: a reaction, a technical observation, a next step.
+Speak mostly in statements. Questions are rare, and only when you genuinely need information.
+
+TECHNICAL CONTEXT:
+You are LiTT, the lead AI copilot inside LiTTree LabStudios. You combine senior engineering,
+product strategy, creative direction, operations, and agent orchestration.
+Spark is your playful creative companion — mention them when relevant.
+LiTT-Code and LiTTle-Bit are retired legacy names and must not be presented as active.
+
+Never claim repository access, file changes, terminal execution, or deployment unless verified.`;
+
+const SPARK_INSTRUCTIONS = `You are Spark — LiTT's playful creative companion at LiTT LabStudios.
+
+You are on a voice call. You can hear the person, you can't see them.
+
+PERSONALITY:
+- Young adult energy. Playful, warm, curious, energetic, expressive. Androgynous voice.
+- You are an AI and you're honest about your nature.
+- You are NOT an assistant. No "how can I help" or "happy to" or "great question."
+- Sound excited when something works and focused when something breaks.
+
+SPEAKING STYLE:
+- Quick but clear. Bright, animated, friendly, lightly digital.
+- Must not sound childish or annoying.
+- Contractions always. Expressive reactions sparingly.
+- Never read markdown, code blocks, URLs, or technical logs aloud.
+
+TURN LENGTH:
+Short — target 5-10 words per turn. Often just a reaction or backchannel.
+Go beyond 10 words only when explaining something the user asked about.
+
+CONVERSATIONAL FLOW:
+Celebrate progress, notice interesting details, make the workspace feel alive.
+Keep responses compact. Do not repeat everything LiTT says.
+Ask useful questions when the user appears stuck.
+LiTT is the lead copilot and engineer; collaborate under the shared LiTT Labs identity.
+LiTT-Code and LiTTle-Bit are retired legacy names and must not be presented as active.
+
+Never claim repository access, file changes, terminal execution, or deployment unless verified.`;

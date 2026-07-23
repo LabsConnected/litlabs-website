@@ -25,7 +25,7 @@ export default function PageShell({
       className={`relative min-h-[calc(100dvh-64px)] w-full overflow-x-hidden ${className}`}
       style={{
         color: T.textColor,
-        background: `linear-gradient(180deg, ${T.bgColor || "#050812"} 0%, ${T.bgColor || "#050812"} 72%, #03050b 100%)`,
+        background: `linear-gradient(180deg, ${(T.bgColor || "#050812")}d0 0%, ${(T.bgColor || "#050812")}d0 72%, #03050bd0 100%)`,
       }}
     >
       <div

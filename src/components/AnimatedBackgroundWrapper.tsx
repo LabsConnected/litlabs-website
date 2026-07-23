@@ -8,6 +8,7 @@ const SHOW_BACKGROUND_PATHS = [
   "/sign-in",
   "/sign-up",
   "/settings",
+  "/studio",
   "/dashboard",
   "/profile",
   "/marketplace",
@@ -25,7 +26,7 @@ const SHOW_BACKGROUND_PATHS = [
   "/order",
 ];
 
-const HIDE_BACKGROUND_PATHS = ["/studio", "/admin/terminal", "/code", "/games"];
+const HIDE_BACKGROUND_PATHS = ["/admin/terminal", "/code", "/games"];
 
 export default function AnimatedBackgroundWrapper() {
   const pathname = usePathname();

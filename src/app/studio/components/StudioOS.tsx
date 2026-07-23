@@ -229,7 +229,7 @@ export default function StudioOS() {
     <VoiceSessionProvider>
       <div
         className="flex h-[100dvh] w-full flex-col overflow-hidden md:h-full"
-        style={{ backgroundColor: T.bgColor, color: T.textColor }}
+        style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}
       >
         <StudioTopBar
           search={search}
@@ -265,7 +265,7 @@ export default function StudioOS() {
                 <div
                   className="relative flex h-full w-full flex-col overflow-hidden"
                   style={{
-                    backgroundColor: T.bgColor,
+                    backgroundColor: T.bgColor + "ee",
                   }}
                 >
                   <div className="relative flex min-h-16 shrink-0 items-center justify-between overflow-hidden border-b border-white/10 px-4 sm:px-6">
