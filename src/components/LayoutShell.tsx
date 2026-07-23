@@ -22,7 +22,6 @@ const PUBLIC_PATHS = [
   "/marketplace",
   "/gallery",
   "/showcase",
-  "/games",
 ];
 
 // Routes that render their own bottom navigation / floating chrome
