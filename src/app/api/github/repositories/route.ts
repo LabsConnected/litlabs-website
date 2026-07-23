@@ -35,17 +35,38 @@ export async function GET(request: NextRequest) {
 
   try {
     const octokit = await getInstallationOctokit(id);
-    const { data } = await octokit.rest.apps.listReposAccessibleToInstallation();
-    const repositories = (data.repositories || []).map((r) => ({
-      id: r.id,
-      fullName: r.full_name,
-      name: r.name,
-      owner: r.owner?.login,
-      defaultBranch: r.default_branch,
-      private: r.private,
-      htmlUrl: r.html_url,
-    }));
-    return NextResponse.json({ repositories });
+    const repositories: Array<{
+      id: number;
+      fullName: string;
+      name: string;
+      owner: string | undefined;
+      defaultBranch: string;
+      private: boolean;
+      htmlUrl: string;
+    }> = [];
+    let page = 1;
+    const perPage = 100;
+    while (true) {
+      const { data } = await octokit.rest.apps.listReposAccessibleToInstallation({
+        per_page: perPage,
+        page,
+      });
+      for (const r of data.repositories || []) {
+        repositories.push({
+          id: r.id,
+          fullName: r.full_name,
+          name: r.name,
+          owner: r.owner?.login,
+          defaultBranch: r.default_branch,
+          private: r.private,
+          htmlUrl: r.html_url,
+        });
+      }
+      if ((data.repositories || []).length < perPage) break;
+      page++;
+      if (page > 20) break;
+    }
+    return NextResponse.json({ repositories, total: repositories.length });
   } catch (err) {
     const message = err instanceof Error ? err.message : "GitHub error";
     return NextResponse.json({ error: message }, { status: 502 });
