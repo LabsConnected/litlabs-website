@@ -19,6 +19,7 @@ import {
   ChevronUp,
   RefreshCw,
   Camera,
+  ArrowRight,
 } from "lucide-react";
 
 type ChatMessage = {
@@ -815,19 +816,29 @@ export function FloatingChat() {
       {mounted && chatPanel && createPortal(chatPanel, document.body)}
       {mounted && quickActionsOpen &&
         createPortal(
-          <div className="fixed inset-0 z-9998 flex items-end bg-black/55 p-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:hidden" onClick={() => setQuickActionsOpen(false)}>
-            <div className="mx-auto w-full max-w-md rounded-[28px] border border-white/12 bg-[#10111a]/98 p-4 shadow-[0_-20px_70px_rgba(0,0,0,.65)]" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
-              <div className="mb-4 flex items-center justify-between">
-                <div>
-                  <p className="text-sm font-black text-white">LiTT Assistant</p>
-                  <p className="text-xs text-neutral-400">How can I help right now?</p>
+          <div className="fixed inset-0 z-9998 flex items-end bg-black/35 p-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] backdrop-blur-[2px] md:hidden" onClick={() => setQuickActionsOpen(false)}>
+            <div className="mx-auto w-full max-w-md overflow-hidden rounded-[30px] border border-white/12 bg-[#10111a]/98 shadow-[0_-24px_80px_rgba(0,0,0,.7)]" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
+              <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-white/15" aria-hidden="true" />
+              <div className="flex items-center gap-3 px-5 pb-4 pt-3">
+                <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl border border-cyan-300/30 bg-black shadow-[0_0_24px_rgba(34,211,238,.16)]">
+                  <Image src="/brand/litt-mascot-avatar.png" alt="" fill className="object-cover" />
                 </div>
-                <button className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 hover:bg-white/5" onClick={() => setQuickActionsOpen(false)} aria-label="Close assistant actions"><X size={18} /></button>
+                <div className="min-w-0 flex-1">
+                  <p className="text-base font-black text-white">What do you need?</p>
+                  <p className="text-[11px] text-white/45">Ask, speak, or show LiTT what you see.</p>
+                </div>
+                <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/8 text-neutral-400 transition hover:bg-white/5" onClick={() => setQuickActionsOpen(false)} aria-label="Close assistant actions"><X size={17} /></button>
               </div>
-              <div className="grid grid-cols-3 gap-2">
-                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/6 text-cyan-300" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}><MessageCircle size={22} /><span className="text-xs font-bold">Ask</span></button>
-                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/6 text-violet-300" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><Mic size={22} /><span className="text-xs font-bold">Speak</span></button>
-                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/6 text-fuchsia-300" onClick={() => void openCamera()}><Camera size={22} /><span className="text-xs font-bold">Camera</span></button>
+              <div className="space-y-2 px-4 pb-4">
+                <button className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 text-left text-cyan-200 transition active:scale-[.99] active:bg-cyan-300/15" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}>
+                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan-300/12"><MessageCircle size={21} /></span>
+                  <span className="min-w-0 flex-1"><strong className="block text-sm">Ask LiTT</strong><small className="block truncate text-[10px] text-white/45">Plan, build, troubleshoot, or create</small></span>
+                  <ArrowRight size={16} className="opacity-60" />
+                </button>
+                <div className="flex gap-2">
+                  <button className="flex min-h-16 flex-1 items-center gap-3 rounded-2xl border border-violet-400/20 bg-violet-400/6 px-3 text-left text-violet-300 transition active:scale-[.98]" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-400/10"><Mic size={19} /></span><span><strong className="block text-xs">Speak</strong><small className="text-[9px] text-white/40">Hands-free</small></span></button>
+                  <button className="flex min-h-16 flex-1 items-center gap-3 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/6 px-3 text-left text-fuchsia-300 transition active:scale-[.98]" onClick={() => void openCamera()}><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-fuchsia-400/10"><Camera size={19} /></span><span><strong className="block text-xs">Camera</strong><small className="text-[9px] text-white/40">Show LiTT</small></span></button>
+                </div>
               </div>
             </div>
           </div>,
