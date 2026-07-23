@@ -192,6 +192,8 @@ function ActiveCommandTabs({
    */
   onActivate?: (id: string) => void;
 }) {
+  if (tabs.length === 0) return null;
+
   return (
     <div className="flex items-center gap-2 px-4 pb-2">
       {tabs.map((tab) => (
@@ -217,12 +219,6 @@ function ActiveCommandTabs({
           </button>
         </div>
       ))}
-      <button
-        aria-label="Add active command"
-        className="flex h-5 w-5 items-center justify-center rounded-md border border-white/10 text-gray-300 transition hover:bg-white/5"
-      >
-        <Plus size={10} />
-      </button>
     </div>
   );
 }
