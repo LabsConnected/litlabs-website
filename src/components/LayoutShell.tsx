@@ -18,10 +18,6 @@ const PUBLIC_PATHS = [
   "/terms",
   "/cookies",
   "/docs",
-  "/social",
-  "/marketplace",
-  "/gallery",
-  "/showcase",
 ];
 
 // Routes that render their own bottom navigation / floating chrome
