@@ -815,8 +815,8 @@ export function FloatingChat() {
       {mounted && chatPanel && createPortal(chatPanel, document.body)}
       {mounted && quickActionsOpen &&
         createPortal(
-          <div className="fixed inset-0 z-9998 flex items-end bg-black/45 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" onClick={() => setQuickActionsOpen(false)}>
-            <div className="mx-auto w-full max-w-sm rounded-3xl border border-white/10 bg-[#111119]/95 p-4 shadow-2xl" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
+          <div className="fixed inset-0 z-9998 flex items-end bg-black/55 p-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] md:hidden" onClick={() => setQuickActionsOpen(false)}>
+            <div className="mx-auto w-full max-w-md rounded-[28px] border border-white/12 bg-[#10111a]/98 p-4 shadow-[0_-20px_70px_rgba(0,0,0,.65)]" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
               <div className="mb-4 flex items-center justify-between">
                 <div>
                   <p className="text-sm font-black text-white">LiTT Assistant</p>
@@ -825,9 +825,9 @@ export function FloatingChat() {
                 <button className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 hover:bg-white/5" onClick={() => setQuickActionsOpen(false)} aria-label="Close assistant actions"><X size={18} /></button>
               </div>
               <div className="grid grid-cols-3 gap-2">
-                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/5 text-cyan-300" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}><MessageCircle size={22} /><span className="text-xs font-bold">Ask</span></button>
-                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/5 text-violet-300" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><Mic size={22} /><span className="text-xs font-bold">Speak</span></button>
-                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/5 text-fuchsia-300" onClick={() => void openCamera()}><Camera size={22} /><span className="text-xs font-bold">Show Camera</span></button>
+                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/6 text-cyan-300" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}><MessageCircle size={22} /><span className="text-xs font-bold">Ask</span></button>
+                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/6 text-violet-300" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><Mic size={22} /><span className="text-xs font-bold">Speak</span></button>
+                <button className="flex min-h-20 flex-col items-center justify-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/6 text-fuchsia-300" onClick={() => void openCamera()}><Camera size={22} /><span className="text-xs font-bold">Camera</span></button>
               </div>
             </div>
           </div>,

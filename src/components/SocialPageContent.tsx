@@ -212,7 +212,7 @@ export default function SocialPageContent() {
 
   return (
     <div
-      className="min-h-full pb-8"
+      className="social-page min-h-full pb-6"
       style={{ backgroundColor: "transparent", color: C.textColor }}
     >
       {/* Toast */}
@@ -229,10 +229,10 @@ export default function SocialPageContent() {
         </div>
       )}
 
-      <div className="relative z-10 mx-auto w-full max-w-[1500px] px-3 pt-4 sm:px-5 lg:px-6">
+      <div className="relative z-10 mx-auto w-full max-w-[1500px] px-3 pt-3 sm:px-5 sm:pt-4 lg:px-6">
         {/* Header */}
         <div
-          className="mb-4 flex items-center justify-between rounded-xl border p-3"
+          className="mb-3 flex items-center justify-between rounded-2xl border p-3 sm:mb-4"
           style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
         >
           <div className="flex items-center gap-2 sm:gap-3">
@@ -271,7 +271,7 @@ export default function SocialPageContent() {
 
         {isMock && (
           <div
-            className="mb-4 w-full rounded-lg px-4 py-2 text-center text-[10px]"
+            className="mb-3 w-full rounded-xl px-3 py-2 text-center text-[10px] sm:mb-4"
             style={{
               backgroundColor: C.accentColor + "20",
               color: C.accentColor,
@@ -283,7 +283,7 @@ export default function SocialPageContent() {
         )}
 
         {/* Three Column Layout */}
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_320px]">
+        <div className="grid grid-cols-1 gap-3 sm:gap-4 lg:grid-cols-[minmax(0,1fr)_300px] xl:grid-cols-[minmax(0,1fr)_320px]">
           {/* The global product sidebar owns navigation. Keep this legacy rail
               out of the layout so the feed gets the same focus as Dashboard. */}
           <aside className="hidden">
@@ -416,16 +416,16 @@ export default function SocialPageContent() {
           </aside>
 
           {/* CENTER — FEED */}
-          <section className="space-y-4 min-w-0">
+          <section className="min-w-0 space-y-3 sm:space-y-4">
             {/* Compose */}
             {isSignedIn && (
               <div
-                className="border-2 p-3 sm:p-4"
+                className="rounded-2xl border p-3 sm:p-4"
                 style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
               >
                 <div className="flex gap-2 sm:gap-3">
                   <div
-                    className="w-8 h-8 sm:w-10 sm:h-10 border-2 flex items-center justify-center text-sm sm:text-lg shrink-0"
+                    className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-xl border text-sm sm:h-10 sm:w-10 sm:text-lg"
                     style={{ borderColor: C.accentColor }}
                   >
                     {profile?.avatarUrl ? (
@@ -452,11 +452,10 @@ export default function SocialPageContent() {
                           handlePost();
                       }}
                       placeholder="What's on your mind? Share with the community..."
-                      className="w-full p-2 text-xs sm:text-sm bg-transparent border resize-none outline-none"
+                      className="min-h-20 w-full resize-none rounded-xl border bg-black/15 p-3 text-xs outline-none sm:min-h-24 sm:text-sm"
                       style={{
                         borderColor: C.borderColor,
                         color: C.textColor,
-                        minHeight: "50px sm:60px",
                       }}
                     />
                     <div className="flex justify-between items-center mt-2">
@@ -487,7 +486,7 @@ export default function SocialPageContent() {
 
             {/* Tabs */}
             <div
-              className="border-2 p-1 flex gap-1"
+              className="flex gap-1 rounded-2xl border p-1"
               style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
             >
               {[
@@ -526,7 +525,7 @@ export default function SocialPageContent() {
               </div>
             ) : emptyFollowing ? (
               <div
-                className="border-2 p-8 text-center"
+                  className="rounded-2xl border p-8 text-center"
                 style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
               >
                 <Users size={32} className="mx-auto mb-3 opacity-30" />
@@ -554,16 +553,16 @@ export default function SocialPageContent() {
               posts.map((post) => (
                 <div
                   key={post.id}
-                  className="border-2 p-4"
+                  className="rounded-2xl border p-3 sm:p-4"
                   style={{
                     backgroundColor: C.boxBg,
                     borderColor: C.borderColor,
                   }}
                 >
                   {/* Header */}
-                  <div className="flex items-start gap-3 mb-3">
+                  <div className="mb-3 flex items-start gap-2.5 sm:gap-3">
                     <div
-                      className="w-10 h-10 border-2 flex items-center justify-center text-lg shrink-0 overflow-hidden"
+                      className="flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border text-lg"
                       style={{
                         borderColor: post.author?.avatar_url
                           ? C.accentColor
@@ -594,7 +593,7 @@ export default function SocialPageContent() {
                         </span>
                         {post.is_ai_post && (
                           <span
-                            className="text-[9px] px-1.5 py-0.5 border"
+                            className="rounded-md border px-1.5 py-0.5 text-[9px]"
                             style={{
                               borderColor: C.headerColor,
                               color: C.headerColor,
@@ -634,10 +633,9 @@ export default function SocialPageContent() {
                             key={i}
                             src={url}
                             alt=""
-                            className="w-full object-cover border"
+                            className="max-h-[420px] w-full rounded-xl border bg-black/20 object-contain"
                             style={{
                               borderColor: C.borderColor,
-                              maxHeight: "200px sm:300px",
                             }}
                           />
                         </>
@@ -677,7 +675,7 @@ export default function SocialPageContent() {
 
                   {/* Actions */}
                   <div
-                    className="flex items-center gap-6 pt-3 border-t"
+                    className="flex items-center gap-5 border-t pt-3 sm:gap-6"
                     style={{ borderColor: C.borderColor }}
                   >
                     <button

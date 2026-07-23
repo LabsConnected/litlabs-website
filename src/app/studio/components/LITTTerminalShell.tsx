@@ -2072,6 +2072,8 @@ function LITTTerminalShellInner({
         activeView={mobileStudioView}
         onViewChange={(view) => {
           setMobileStudioView(view);
+          if (view === "build") setHybridMode("command");
+          if (view === "files" || view === "preview") setHybridMode("code");
           const windowMap: Record<StudioMobileView, string> = {
             chat: "conversation",
             build: "mission",
@@ -2378,7 +2380,7 @@ function LITTTerminalShellInner({
 
           {/* MOBILE BOTTOM SHELL — composer + nav in one fixed container */}
           <div
-            className="fixed inset-x-0 bottom-0 z-[75] flex flex-col gap-0 border-t border-white/10 bg-[#040817]/95 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:static md:inset-auto md:bottom-0 md:border-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
+            className="fixed inset-x-0 bottom-[calc(60px+env(safe-area-inset-bottom))] z-[75] flex flex-col gap-0 border-t border-white/10 bg-[#040817]/95 backdrop-blur-xl md:static md:inset-auto md:bottom-0 md:border-0 md:bg-transparent md:pb-0 md:backdrop-blur-none"
             style={{
               // Legacy: hide when terminal is the selected mobile view.
               // Hybrid: hide when the docked terminal is focused as the full workspace surface.

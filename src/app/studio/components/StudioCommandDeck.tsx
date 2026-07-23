@@ -10,7 +10,6 @@ import {
   CircleAlert,
   Cloud,
   Code2,
-  FileCode2,
   FolderOpen,
   GitBranch,
   Maximize2,
@@ -394,6 +393,11 @@ export default function StudioCommandDeck({
   const [layout, setLayout] = useState<LayoutState>(DEFAULT_LAYOUT);
   const [mobilePanel, setMobilePanel] = useState<"editor" | "explorer" | "preview" | "review">("editor");
 
+  useEffect(() => {
+    if (mobileView === "files") setMobilePanel("explorer");
+    if (mobileView === "preview") setMobilePanel("preview");
+  }, [mobileView]);
+
   // Real workspace file system
   const ws = useWorkspaceFiles(workspaceId ?? null);
 
@@ -591,7 +595,11 @@ export default function StudioCommandDeck({
   })();
 
   return (
-    <section className={deckClass} data-mobile-terminal={mobileTerminalFocus ? "true" : "false"}>
+    <section
+      className={deckClass}
+      data-mobile-terminal={mobileTerminalFocus ? "true" : "false"}
+      data-mobile-view={mobileView ?? "chat"}
+    >
       <aside className={styles.rail} aria-label="Studio tools">
         <div className={styles.railGroup}>
           {RAIL.slice(0, 3).map(({ id, label, icon: Icon }) => (

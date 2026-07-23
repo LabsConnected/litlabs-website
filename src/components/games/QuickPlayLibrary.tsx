@@ -139,7 +139,7 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
         </header>
       )}
 
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {QUICK_PLAY_LIBRARY.map((game) => {
           const system = getRetroSystem(game.system);
           const itemStatus = status[game.id] ?? { kind: "idle" };
@@ -172,7 +172,7 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
                 )}
               </div>
 
-              <div className="space-y-3 p-4">
+              <div className="space-y-2.5 sm:space-y-3 p-2.5 sm:p-4">
                 <div className="flex items-center justify-between gap-2 text-[10px] text-white/45">
                   <span className="truncate" title={game.author}>
                     by {game.author} · {game.year}

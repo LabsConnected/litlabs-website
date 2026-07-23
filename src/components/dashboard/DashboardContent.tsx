@@ -186,24 +186,24 @@ export default function DashboardContent() {
       </section>
 
       <section className="grid gap-4 xl:grid-cols-[1.5fr_1fr]">
-        <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
+        <div className="rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
           <div className="flex items-center justify-between gap-3">
             <div><h3 className="text-sm font-black" style={{ color: T.headerColor }}>Seven-day performance</h3><p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>Commands, agent tasks, and generations</p></div>
             <Activity size={16} style={{ color: T.accentColor }} />
           </div>
           {pulse.sources.usage ? (
-            <div className="mt-6 flex h-40 items-end gap-2">
+            <div className="mt-5 flex h-28 items-end gap-2 sm:mt-6 sm:h-40">
               {pulse.daily.slice(-7).map((day) => {
                 const total = day.commands + day.agentTasks + day.generations;
                 return <div key={day.date} className="flex h-full flex-1 flex-col justify-end gap-2"><div className="min-h-1 rounded-t-md transition-all" title={`${total} events`} style={{ height: `${Math.max(4, (total / maxDay) * 100)}%`, background: `linear-gradient(180deg, ${T.accentColor}, ${T.linkColor})` }} /><span className="text-center text-[9px]" style={{ color: T.textMuted }}>{new Date(`${day.date}T12:00:00`).toLocaleDateString([], { weekday: "narrow" })}</span></div>;
               })}
             </div>
           ) : (
-            <div className="mt-6 flex h-40 flex-col items-center justify-center rounded-xl border border-dashed" style={{ borderColor: `${T.borderColor}35`, color: T.textMuted }}><Activity size={20} className="mb-2 opacity-50" /><p className="text-xs font-bold">Usage data is not connected</p><Link href="/settings" className="mt-2 text-[10px]" style={{ color: T.accentColor }}>Review connection <ArrowRight size={10} className="inline" /></Link></div>
+            <div className="mt-5 flex h-28 flex-col items-center justify-center rounded-xl border border-dashed sm:mt-6 sm:h-40" style={{ borderColor: `${T.borderColor}35`, color: T.textMuted }}><Activity size={20} className="mb-2 opacity-50" /><p className="text-xs font-bold">Usage data is not connected</p><Link href="/settings" className="mt-2 text-[10px]" style={{ color: T.accentColor }}>Review connection <ArrowRight size={10} className="inline" /></Link></div>
           )}
         </div>
 
-        <div className="rounded-2xl border p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
+        <div className="rounded-2xl border p-4 sm:p-5" style={{ backgroundColor: T.boxBg, borderColor: `${T.borderColor}25` }}>
           <div className="flex items-center justify-between"><div><h3 className="text-sm font-black" style={{ color: T.headerColor }}>Connected software</h3><p className="mt-1 text-[10px]" style={{ color: T.textMuted }}>Live status from your workspace</p></div><Boxes size={16} style={{ color: T.accentColor }} /></div>
           <div className="mt-4 space-y-2">
             {connections.map((connection) => (
