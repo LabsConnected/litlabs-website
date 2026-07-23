@@ -2,8 +2,6 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "@/context/ThemeContext";
-import PageShell from "@/components/PageShell";
 import {
   Search,
   Gamepad2,
@@ -16,11 +14,13 @@ import {
   Sparkles,
   Wand2,
   ShieldCheck,
-  Upload,
   MonitorPlay,
   Code2,
   ArrowUpRight,
   Shuffle,
+  Trophy,
+  Users,
+  Calendar,
 } from "lucide-react";
 import {
   GAME_LIBRARY,
@@ -64,6 +64,8 @@ const EMULATOR_LABS = [
     image: "/showcase/retro-arcade-thumb.svg",
     href: "/games/retro",
     badge: "Chapter 01",
+    accent: "#f97316",
+    icon: "🕹️",
   },
   {
     name: "DOS Lab",
@@ -72,6 +74,8 @@ const EMULATOR_LABS = [
     systems: "DOS · Windows 9x",
     href: "/games/dos",
     badge: "js-dos",
+    accent: "#22d3ee",
+    icon: "💻",
   },
 ];
 
@@ -93,7 +97,6 @@ function randomPrompt() {
 }
 
 export default function GamesPage() {
-  const { resolvedColors: T } = useTheme();
   const router = useRouter();
   const [searchQuery, setSearchQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<GameCategory | "all">(
@@ -115,7 +118,6 @@ export default function GamesPage() {
     setSelectedGame(game);
   }, []);
 
-  // Filter games
   const filteredGames = searchQuery
     ? searchGames(searchQuery)
     : activeCategory === "all"
@@ -134,303 +136,322 @@ export default function GamesPage() {
     );
   }, []);
 
+  const featuredGame = GAME_LIBRARY[3];
+
   return (
-    <PageShell
-      title="Game Cloud"
-      subtitle="Free browser games, open-source classics, and bring-your-own-ROM emulators"
-      icon="🎮"
-    >
-      <div className="px-4 sm:px-6 pt-4">
+    <div className="min-h-dvh w-full text-white">
+      {/* ─── HERO ─── */}
+      <section className="relative overflow-hidden">
+        {/* Animated gradient background */}
+        <div className="absolute inset-0 bg-[#070812]" />
+        <div className="absolute inset-0 opacity-60 bg-[radial-gradient(ellipse_at_20%_0%,rgba(249,115,22,0.25),transparent_50%),radial-gradient(ellipse_at_80%_100%,rgba(124,58,237,0.25),transparent_50%),radial-gradient(ellipse_at_50%_50%,rgba(34,211,238,0.12),transparent_60%)]" />
+        {/* Grid pattern */}
         <div
-          className="rounded-3xl border p-4 sm:p-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4"
+          className="absolute inset-0 opacity-[0.04]"
+          style={{
+            backgroundImage: `linear-gradient(white 1px, transparent 1px), linear-gradient(90deg, white 1px, transparent 1px)`,
+            backgroundSize: "48px 48px",
+          }}
+        />
+        {/* Scanlines */}
+        <div
+          className="absolute inset-0 pointer-events-none opacity-[0.08]"
           style={{
             background:
-              "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(59,130,246,0.08))",
-            borderColor: `${T.borderColor}30`,
+              "repeating-linear-gradient(0deg, rgba(255,255,255,0.3), rgba(255,255,255,0.3) 1px, transparent 1px, transparent 3px)",
           }}
-        >
-          <div>
-            <div
-              className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-1"
-              style={{ color: T.accentColor }}
-            >
-              <Sparkles size={12} /> Best build path
+        />
+
+        <div className="relative z-10 max-w-7xl mx-auto px-4 sm:px-6 pt-10 pb-8">
+          {/* Top branding bar */}
+          <div className="flex items-center justify-between gap-4 mb-8">
+            <div className="flex items-center gap-3">
+              <div className="grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-orange-500 to-purple-600 text-2xl shadow-lg shadow-orange-500/20">
+                🎮
+              </div>
+              <div>
+                <h1 className="text-2xl sm:text-3xl font-black tracking-tight text-white">
+                  Game Cloud
+                </h1>
+                <p className="text-xs sm:text-sm text-white/50 font-medium">
+                  Free browser games, open-source classics, and bring-your-own-ROM emulators
+                </p>
+              </div>
             </div>
-            <p className="text-sm opacity-75 max-w-2xl">
-              Play instantly, discover creator-friendly games, or bring files
-              you already have the right to use. Build original mini-games in
-              Studio when you want something uniquely yours.
-            </p>
-          </div>
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => router.push(studioImageHref)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold"
-              style={{ backgroundColor: T.accentColor, color: T.bgColor }}
-            >
-              <Wand2 size={14} /> Build in Studio
-            </button>
-            <a
-              href="/studio"
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-bold border"
-              style={{ borderColor: `${T.borderColor}40`, color: T.textColor }}
-            >
-              Agent Pipelines
-            </a>
-          </div>
-        </div>
-      </div>
-
-      {/* Games Ticker */}
-      <div
-        className="w-full bg-black py-1 border-b-2 overflow-hidden flex mt-4"
-        style={{ borderColor: T.borderColor, color: T.accentColor }}
-      >
-        <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px]">
-          <span>🎮 GAME CLOUD ONLINE // FREE TO PLAY</span>
-          <span>⚡ OPEN SOURCE • HTML5 • EMULATOR READY</span>
-          <span>🛡️ ONLY USE ROMS YOU OWN OR PUBLIC-DOMAIN HOMEBREW</span>
-          <span>🎯 KEYBOARD • TOUCH • GAMEPAD</span>
-        </div>
-      </div>
-
-      {/* Featured Game Hero */}
-      {!selectedGame && (
-        <div
-          className="relative h-[40vh] min-h-[280px] md:h-[50vh] md:min-h-[360px] overflow-hidden border-b-2"
-          style={{ borderColor: T.borderColor }}
-        >
-          <div
-            className="absolute inset-0"
-            style={{
-              background: `linear-gradient(135deg, ${T.accentColor}20, ${T.linkColor}20)`,
-            }}
-          />
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className="text-center">
-              <div className="text-6xl md:text-8xl mb-4">🎮</div>
-              <h1
-                className="text-2xl md:text-4xl font-black mb-2"
-                style={{ color: T.headerColor }}
+            <div className="hidden sm:flex items-center gap-2">
+              <button
+                onClick={() => router.push(studioImageHref)}
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold bg-gradient-to-r from-orange-500 to-orange-600 text-white shadow-lg shadow-orange-500/20 hover:shadow-orange-500/40 transition-shadow"
               >
-                LiTT Code Game Cloud
-              </h1>
-              <p className="text-sm opacity-60" style={{ color: T.textMuted }}>
-                {GAME_LIBRARY.length} instant games • {EMULATOR_LABS.length}{" "}
-                emulator labs • no install
-              </p>
+                <Wand2 size={14} /> Build in Studio
+              </button>
+              <a
+                href="/studio"
+                className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-bold border border-white/15 bg-white/5 backdrop-blur-sm text-white hover:bg-white/10 transition-colors"
+              >
+                <Sparkles size={14} /> Agent Pipelines
+              </a>
             </div>
           </div>
-          {/* Scanlines */}
-          <div
-            className="absolute inset-0 pointer-events-none opacity-30"
-            style={{
-              background:
-                "repeating-linear-gradient(0deg, rgba(0,0,0,0.2), rgba(0,0,0,0.2) 1px, transparent 1px, transparent 2px)",
-            }}
-          />
-        </div>
-      )}
 
+          {/* Featured game showcase */}
+          <div className="grid lg:grid-cols-[1fr_400px] gap-6 items-center">
+            <div>
+              <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.24em] mb-3 text-orange-400">
+                <Sparkles size={12} /> Featured Today
+              </div>
+              <h2 className="text-4xl sm:text-5xl lg:text-6xl font-black leading-[1.05] text-white mb-4">
+                {featuredGame.title}
+              </h2>
+              <p className="text-base sm:text-lg text-white/60 max-w-xl mb-6 leading-relaxed">
+                {featuredGame.description}
+              </p>
+              <div className="flex flex-wrap items-center gap-4 mb-6">
+                <div className="flex items-center gap-2 text-sm text-white/70">
+                  <Trophy size={15} className="text-yellow-400" />
+                  <span className="font-bold">{featuredGame.rating}</span>
+                  <span className="text-white/40">rating</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-white/70">
+                  <Users size={15} className="text-cyan-400" />
+                  <span className="font-bold">{featuredGame.players}P</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm text-white/70">
+                  <Calendar size={15} className="text-purple-400" />
+                  <span className="font-bold">{featuredGame.year}</span>
+                </div>
+                <div className="flex items-center gap-2 text-sm">
+                  <ShieldCheck size={15} className="text-emerald-400" />
+                  <span className="font-bold text-emerald-400">{featuredGame.licenseLabel}</span>
+                </div>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  onClick={() => launchGame(featuredGame)}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-black bg-white text-black hover:bg-white/90 transition-colors shadow-xl"
+                >
+                  <Play size={18} fill="currentColor" /> Play Now
+                </button>
+                <button
+                  onClick={() => router.push(studioImageHref)}
+                  className="inline-flex items-center gap-2 px-6 py-3 rounded-xl text-base font-bold border border-white/15 bg-white/5 backdrop-blur-sm text-white hover:bg-white/10 transition-colors"
+                >
+                  <Shuffle size={16} /> Surprise Me
+                </button>
+              </div>
+            </div>
+
+            {/* Featured game cover */}
+            <div className="relative hidden lg:block">
+              <div className="absolute -inset-4 bg-gradient-to-br from-orange-500/20 to-purple-600/20 rounded-3xl blur-2xl" />
+              <button
+                onClick={() => launchGame(featuredGame)}
+                className="group relative block w-full aspect-[4/3] rounded-2xl overflow-hidden border border-white/10 shadow-2xl"
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={featuredGame.coverUrl}
+                  alt={featuredGame.title}
+                  className="w-full h-full object-cover transition-transform duration-700 group-hover:scale-105"
+                />
+                <div className="absolute inset-0 bg-gradient-to-t from-black/60 via-transparent to-transparent" />
+                <div className="absolute bottom-4 left-4 right-4 flex items-center justify-between">
+                  <div className="px-3 py-1.5 rounded-lg bg-black/60 backdrop-blur-sm text-[10px] font-black uppercase tracking-wider text-white">
+                    {featuredGame.launchMode === "embedded" ? "▶ Play Here" : "↗ Opens in Tab"}
+                  </div>
+                  <div className="grid h-12 w-12 place-items-center rounded-full bg-white text-black shadow-xl transition group-hover:scale-110">
+                    <Play size={20} fill="currentColor" />
+                  </div>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Stats bar */}
+          <div className="mt-8 flex flex-wrap items-center gap-x-8 gap-y-3 pt-6 border-t border-white/10">
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-black text-white">{GAME_LIBRARY.length}</span>
+              <span className="text-xs text-white/40 font-bold uppercase tracking-wider">Instant Games</span>
+            </div>
+            <div className="h-6 w-px bg-white/10" />
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-black text-white">{EMULATOR_LABS.length}</span>
+              <span className="text-xs text-white/40 font-bold uppercase tracking-wider">Emulator Labs</span>
+            </div>
+            <div className="h-6 w-px bg-white/10" />
+            <div className="flex items-center gap-2">
+              <span className="text-2xl font-black text-white">0</span>
+              <span className="text-xs text-white/40 font-bold uppercase tracking-wider">Install Required</span>
+            </div>
+            <div className="h-6 w-px bg-white/10 hidden sm:block" />
+            <div className="hidden sm:flex items-center gap-2 text-xs font-bold uppercase tracking-wider text-white/40">
+              <span className="text-emerald-400">●</span> All Free · Open Source · No Ads
+            </div>
+          </div>
+        </div>
+
+        {/* Ticker */}
+        <div className="relative z-10 w-full bg-black/60 backdrop-blur-sm py-1.5 border-y border-white/10 overflow-hidden flex">
+          <div className="whitespace-nowrap animate-marquee flex gap-12 font-bold uppercase tracking-wider text-[10px] text-orange-400">
+            <span>🎮 GAME CLOUD ONLINE // FREE TO PLAY</span>
+            <span>⚡ OPEN SOURCE • HTML5 • EMULATOR READY</span>
+            <span>🛡️ ONLY USE ROMS YOU OWN OR PUBLIC-DOMAIN HOMEBREW</span>
+            <span>🎯 KEYBOARD • TOUCH • GAMEPAD</span>
+          </div>
+        </div>
+      </section>
+
+      {/* ─── QUICK PLAY ─── */}
       {!selectedGame && (
-        <section
-          className="py-6 border-b"
-          style={{ borderColor: `${T.borderColor}50` }}
-        >
+        <section className="py-6 border-b border-white/5">
           <QuickPlayLibrary embedded />
         </section>
       )}
 
+      {/* ─── EMULATOR LABS ─── */}
       {!selectedGame && (
-        <section
-          className="py-6 border-b"
-          style={{ borderColor: `${T.borderColor}50` }}
-        >
-          <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 mb-4">
-            <div>
-              <div
-                className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em]"
-                style={{ color: T.accentColor }}
-              >
-                <MonitorPlay size={14} /> Emulator labs
-              </div>
-              <h2
-                className="text-xl sm:text-2xl font-black mt-1"
-                style={{ color: T.headerColor }}
-              >
-                Bring your own games
-              </h2>
-              <p className="text-sm opacity-60 mt-1 max-w-2xl">
-                The emulator is free; commercial game files usually are not.
-                LiTT does not provide copyrighted ROMs.
-              </p>
-            </div>
-            <div
-              className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-2 rounded-full border self-start"
-              style={{
-                borderColor: `${T.accentColor}60`,
-                color: T.accentColor,
-              }}
-            >
-              <ShieldCheck size={14} /> Legal-use guardrails
-            </div>
-          </div>
-          <div className="grid md:grid-cols-2 gap-4">
-            {EMULATOR_LABS.map((lab) => (
-              <a
-                key={lab.name}
-                href={lab.href}
-                target={lab.href.startsWith("http") ? "_blank" : undefined}
-                rel={
-                  lab.href.startsWith("http")
-                    ? "noopener noreferrer"
-                    : undefined
-                }
-                className="group rounded-2xl border p-5 transition-transform hover:-translate-y-0.5"
-                style={{
-                  backgroundColor: `${T.boxBg}b8`,
-                  borderColor: `${T.borderColor}55`,
-                }}
-              >
-                <div className="flex items-start justify-between gap-4">
-                  <div
-                    className="p-2.5 rounded-xl"
-                    style={{
-                      backgroundColor: `${T.accentColor}16`,
-                      color: T.accentColor,
-                    }}
-                  >
-                    <Upload size={20} />
-                  </div>
-                  <ArrowUpRight
-                    size={18}
-                    className="opacity-40 group-hover:opacity-100"
-                  />
+        <section className="py-8 border-b border-white/5">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-3 mb-5">
+              <div>
+                <div className="flex items-center gap-2 text-xs font-black uppercase tracking-[0.22em] text-orange-400">
+                  <MonitorPlay size={14} /> Emulator Labs
                 </div>
-                <div
-                  className="mt-4 text-[10px] font-black uppercase tracking-widest"
-                  style={{ color: T.accentColor }}
-                >
-                  {lab.badge}
-                </div>
-                <h3
-                  className="font-black text-lg mt-1"
-                  style={{ color: T.headerColor }}
-                >
-                  {lab.name}
-                </h3>
-                <p className="text-sm opacity-65 mt-2 leading-relaxed">
-                  {lab.description}
+                <h2 className="text-2xl sm:text-3xl font-black mt-1.5 text-white">
+                  Bring your own games
+                </h2>
+                <p className="text-sm text-white/50 mt-1.5 max-w-2xl">
+                  The emulator is free; commercial game files usually are not. LiTT does not provide copyrighted ROMs.
                 </p>
-                {lab.image ? (
-                  // eslint-disable-next-line @next/next/no-img-element
-                  <img
-                    src={lab.image}
-                    alt={`${lab.name} systems`}
-                    className="mt-4 h-10 w-auto rounded-md object-contain object-left opacity-90"
-                  />
-                ) : (
-                  <p className="text-[10px] font-bold opacity-45 mt-4 uppercase tracking-wider">
-                    {lab.systems}
-                  </p>
-                )}
-              </a>
-            ))}
-          </div>
-        </section>
-      )}
-
-      {!selectedGame && (
-        <section
-          className="py-6 border-b"
-          style={{ borderColor: `${T.borderColor}50` }}
-        >
-          <div className="mb-4 flex items-end justify-between gap-3">
-            <div>
-              <div
-                className="text-[10px] font-black uppercase tracking-[0.22em]"
-                style={{ color: T.accentColor }}
-              >
-                Play next
               </div>
-              <h2
-                className="mt-1 text-xl font-black"
-                style={{ color: T.headerColor }}
-              >
-                Scroll through the arcade
-              </h2>
+              <div className="inline-flex items-center gap-2 text-[11px] font-bold px-3 py-2 rounded-full border border-emerald-400/30 bg-emerald-400/5 text-emerald-400 self-start">
+                <ShieldCheck size={14} /> Legal-use guardrails
+              </div>
             </div>
-            <span className="text-[10px] font-bold opacity-45">
-              Swipe or use your trackpad →
-            </span>
-          </div>
-          <div
-            className="flex snap-x snap-mandatory gap-3 overflow-x-auto pb-3 scrollbar-hide"
-            style={{ scrollbarWidth: "none" }}
-          >
-            {GAME_LIBRARY.map((game) => (
-              <button
-                key={`rail-${game.id}`}
-                type="button"
-                onClick={() => launchGame(game)}
-                className="group relative aspect-4/3 w-[230px] shrink-0 snap-start overflow-hidden rounded-2xl border text-left sm:w-[280px]"
-                style={{
-                  borderColor: `${T.borderColor}55`,
-                  backgroundColor: T.boxBg,
-                }}
-                aria-label={`Play ${game.title}`}
-              >
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={game.coverUrl}
-                  alt=""
-                  className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
-                />
-                <span className="absolute inset-0 bg-linear-to-t from-black/75 via-transparent to-transparent" />
-                <span className="absolute bottom-3 left-3 right-3 flex items-end justify-between gap-3">
-                  <span>
-                    <span className="block text-sm font-black text-white">
-                      {game.title}
-                    </span>
-                    <span className="mt-0.5 block text-[10px] font-bold uppercase tracking-wide text-white/60">
-                      {game.category} · {game.players}P
-                    </span>
-                  </span>
-                  <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-white text-black shadow-lg">
-                    <Play size={15} fill="currentColor" />
-                  </span>
-                </span>
-              </button>
-            ))}
+            <div className="grid md:grid-cols-2 gap-4">
+              {EMULATOR_LABS.map((lab) => (
+                <a
+                  key={lab.name}
+                  href={lab.href}
+                  target={lab.href.startsWith("http") ? "_blank" : undefined}
+                  rel={lab.href.startsWith("http") ? "noopener noreferrer" : undefined}
+                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent p-6 transition-all hover:-translate-y-1 hover:border-white/20"
+                >
+                  <div
+                    className="absolute -top-20 -right-20 h-40 w-40 rounded-full blur-3xl opacity-20 transition-opacity group-hover:opacity-40"
+                    style={{ backgroundColor: lab.accent }}
+                  />
+                  <div className="relative flex items-start justify-between gap-4">
+                    <div
+                      className="grid h-14 w-14 place-items-center rounded-2xl text-2xl"
+                      style={{ backgroundColor: `${lab.accent}15` }}
+                    >
+                      {lab.icon}
+                    </div>
+                    <ArrowUpRight
+                      size={20}
+                      className="text-white/30 group-hover:text-white group-hover:opacity-100 transition-all"
+                    />
+                  </div>
+                  <div className="relative mt-5 text-[10px] font-black uppercase tracking-widest" style={{ color: lab.accent }}>
+                    {lab.badge}
+                  </div>
+                  <h3 className="relative font-black text-xl mt-1 text-white">
+                    {lab.name}
+                  </h3>
+                  <p className="relative text-sm text-white/55 mt-2 leading-relaxed">
+                    {lab.description}
+                  </p>
+                  {lab.image ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={lab.image}
+                      alt={`${lab.name} systems`}
+                      className="relative mt-4 h-10 w-auto rounded-md object-contain object-left opacity-80"
+                    />
+                  ) : (
+                    <p className="relative text-[10px] font-bold text-white/35 mt-4 uppercase tracking-wider">
+                      {lab.systems}
+                    </p>
+                  )}
+                </a>
+              ))}
+            </div>
           </div>
         </section>
       )}
 
-      {/* Game Player Overlay */}
+      {/* ─── ARCADE RAIL ─── */}
+      {!selectedGame && (
+        <section className="py-8 border-b border-white/5">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6">
+            <div className="mb-5 flex items-end justify-between gap-3">
+              <div>
+                <div className="text-[10px] font-black uppercase tracking-[0.22em] text-orange-400">
+                  Play Next
+                </div>
+                <h2 className="mt-1.5 text-2xl font-black text-white">
+                  Scroll through the arcade
+                </h2>
+              </div>
+              <span className="text-[10px] font-bold text-white/30 hidden sm:block">
+                Swipe or use your trackpad →
+              </span>
+            </div>
+            <div className="flex snap-x snap-mandatory gap-4 overflow-x-auto pb-3 scrollbar-hide" style={{ scrollbarWidth: "none" }}>
+              {GAME_LIBRARY.map((game) => (
+                <button
+                  key={`rail-${game.id}`}
+                  type="button"
+                  onClick={() => launchGame(game)}
+                  className="group relative aspect-[4/3] w-[260px] shrink-0 snap-start overflow-hidden rounded-2xl border border-white/10 text-left sm:w-[320px] transition-all hover:border-white/25 hover:shadow-2xl"
+                  aria-label={`Play ${game.title}`}
+                >
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={game.coverUrl}
+                    alt=""
+                    className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  />
+                  <span className="absolute inset-0 bg-gradient-to-t from-black/80 via-black/10 to-transparent" />
+                  <span className="absolute top-3 left-3 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-[9px] font-black uppercase tracking-wider text-white/80">
+                    {game.launchMode === "embedded" ? "▶ Play Here" : "↗ New Tab"}
+                  </span>
+                  <span className="absolute bottom-4 left-4 right-4 flex items-end justify-between gap-3">
+                    <span>
+                      <span className="block text-base font-black text-white drop-shadow-lg">
+                        {game.title}
+                      </span>
+                      <span className="mt-1 block text-[10px] font-bold uppercase tracking-wide text-white/60">
+                        {game.category} · {game.players}P · {game.year}
+                      </span>
+                    </span>
+                    <span className="grid h-10 w-10 shrink-0 place-items-center rounded-full bg-white text-black shadow-xl transition group-hover:scale-110">
+                      <Play size={16} fill="currentColor" />
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {/* ─── GAME PLAYER OVERLAY ─── */}
       {selectedGame && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center"
-          style={{ backgroundColor: T.bgColor + "f0" }}
-        >
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-sm">
           <div className="w-full max-w-6xl mx-4">
-            {/* Player Header */}
-            <div
-              className="flex items-center justify-between p-4 border-2 mb-2"
-              style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
-            >
+            <div className="flex items-center justify-between p-4 rounded-t-2xl border-2 border-b-0 bg-[#0e0e16] border-white/10">
               <div className="flex items-center gap-3">
                 <button
                   onClick={() => setSelectedGame(null)}
-                  className="p-2 border hover:opacity-80"
-                  style={{ borderColor: T.borderColor }}
+                  className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 text-white/60 hover:bg-white/10 hover:text-white transition-colors"
                 >
                   ✕
                 </button>
                 <div>
-                  <div className="font-bold" style={{ color: T.headerColor }}>
-                    {selectedGame.title}
-                  </div>
-                  <div className="text-[10px] opacity-60">
+                  <div className="font-black text-white">{selectedGame.title}</div>
+                  <div className="text-[10px] text-white/40 font-bold uppercase tracking-wider">
                     {selectedGame.platform.toUpperCase()} • {selectedGame.year}
                   </div>
                 </div>
@@ -438,31 +459,14 @@ export default function GamesPage() {
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => handleToggleFav(selectedGame.id)}
-                  className="p-2 border hover:opacity-80"
-                  style={{
-                    borderColor: T.borderColor,
-                    color: favorites.includes(selectedGame.id)
-                      ? T.accentColor
-                      : T.textMuted,
-                  }}
+                  className="grid h-10 w-10 place-items-center rounded-xl border border-white/10 transition-colors hover:bg-white/10"
+                  style={{ color: favorites.includes(selectedGame.id) ? "#f97316" : "rgba(255,255,255,0.4)" }}
                 >
-                  <Heart
-                    size={16}
-                    fill={
-                      favorites.includes(selectedGame.id)
-                        ? T.accentColor
-                        : "none"
-                    }
-                  />
+                  <Heart size={16} fill={favorites.includes(selectedGame.id) ? "#f97316" : "none"} />
                 </button>
               </div>
             </div>
-
-            {/* Game Canvas / Iframe / Emulator */}
-            <div
-              className="aspect-video border-2 relative overflow-hidden"
-              style={{ backgroundColor: "#000", borderColor: T.borderColor }}
-            >
+            <div className="aspect-video border-2 border-x relative overflow-hidden bg-black border-white/10">
               {selectedGame.html5Url ? (
                 <div className="w-full h-full relative">
                   <iframe
@@ -478,58 +482,30 @@ export default function GamesPage() {
                     href={selectedGame.html5Url}
                     target="_blank"
                     rel="noopener noreferrer"
-                    className="absolute top-2 right-2 px-2 py-1 rounded text-[10px] font-bold flex items-center gap-1 opacity-0 hover:opacity-100 transition-opacity"
-                    style={{
-                      backgroundColor: T.bgColor + "cc",
-                      color: T.textColor,
-                      backdropFilter: "blur(4px)",
-                    }}
+                    className="absolute top-2 right-2 px-2 py-1 rounded-lg text-[10px] font-bold flex items-center gap-1 bg-black/60 text-white backdrop-blur-sm opacity-0 hover:opacity-100 transition-opacity"
                   >
-                    <ExternalLink size={10} />
-                    Open in New Tab
+                    <ExternalLink size={10} /> Open in New Tab
                   </a>
                 </div>
               ) : (
                 <div className="absolute inset-0 flex items-center justify-center">
                   <div className="text-center">
                     <div className="text-4xl mb-4">🎮</div>
-                    <p className="text-sm opacity-60 mb-4">
-                      No playable game available.
-                    </p>
-                    <p className="text-[10px] opacity-40 max-w-md">
-                      This game is configured for HTML5. Check back later for
-                      updates.
-                    </p>
+                    <p className="text-sm text-white/60 mb-4">No playable game available.</p>
                   </div>
                 </div>
               )}
             </div>
-
-            {/* Game Info Bar */}
-            <div
-              className="p-3 border-2 border-t-0"
-              style={{ backgroundColor: T.boxBg, borderColor: T.borderColor }}
-            >
+            <div className="p-4 rounded-b-2xl border-2 border-t-0 bg-[#0e0e16] border-white/10">
               <div className="flex items-center justify-between text-[10px]">
-                <div className="flex items-center gap-4">
-                  <span style={{ color: T.textMuted }}>
-                    👤 {selectedGame.players} Player
-                    {selectedGame.players > 1 ? "s" : ""}
-                  </span>
-                  <span style={{ color: T.textMuted }}>
-                    🛡️ {selectedGame.licenseLabel}
-                  </span>
-                  <span style={{ color: T.textMuted }}>
-                    🏢 {selectedGame.developer}
-                  </span>
+                <div className="flex items-center gap-4 text-white/50 font-bold">
+                  <span>👤 {selectedGame.players} Player{selectedGame.players > 1 ? "s" : ""}</span>
+                  <span>🛡️ {selectedGame.licenseLabel}</span>
+                  <span>🏢 {selectedGame.developer}</span>
                 </div>
                 <div className="flex gap-2">
                   {selectedGame.tags.map((tag) => (
-                    <span
-                      key={tag}
-                      className="px-2 py-0.5 border"
-                      style={{ borderColor: T.borderColor, color: T.textMuted }}
-                    >
+                    <span key={tag} className="px-2 py-0.5 rounded-md border border-white/10 text-white/50 font-bold uppercase">
                       {tag}
                     </span>
                   ))}
@@ -540,248 +516,209 @@ export default function GamesPage() {
         </div>
       )}
 
-      {/* Search & Filter Bar */}
-      <div
-        className="sticky top-0 z-20 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between py-4 border-b backdrop-blur-md"
-        style={{ borderColor: T.borderColor }}
-      >
-        {/* Search */}
-        <div className="relative w-full md:w-80">
-          <Search
-            className="absolute left-3 top-1/2 -translate-y-1/2"
-            size={16}
-            style={{ color: T.textMuted }}
-          />
-          <input
-            id="games-search"
-            name="gamesSearch"
-            type="text"
-            placeholder="Search games or describe a scene to create..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-10 pr-4 py-2 border bg-transparent text-sm outline-none focus:border-cyan-500/50"
-            style={{ borderColor: T.borderColor, color: T.textColor }}
-          />
-        </div>
-
-        {/* Prompt randomizer */}
-        <button
-          onClick={() => router.push(studioImageHref)}
-          className="flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide transition hover:opacity-80"
-          style={{ borderColor: `${T.accentColor}60`, color: T.accentColor }}
-          title="Generate a game-themed image"
-        >
-          <Shuffle size={11} /> Surprise me
-        </button>
-
-        {/* Category Filters */}
-        <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1">
-          {CATEGORIES.map((cat) => {
-            const Icon = cat.icon;
-            const isActive = activeCategory === cat.id;
-            return (
-              <button
-                key={cat.id}
-                onClick={() => setActiveCategory(cat.id)}
-                className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase border transition-all whitespace-nowrap ${
-                  isActive ? "opacity-100" : "opacity-60 hover:opacity-80"
-                }`}
-                style={{
-                  borderColor: isActive ? T.accentColor : T.borderColor,
-                  backgroundColor: isActive
-                    ? T.accentColor + "10"
-                    : "transparent",
-                  color: isActive ? T.accentColor : T.textColor,
-                }}
-              >
-                <Icon size={12} />
-                {cat.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* View Toggle */}
-        <div
-          className="flex items-center border"
-          style={{ borderColor: T.borderColor }}
-        >
+      {/* ─── SEARCH & FILTER BAR ─── */}
+      <div className="sticky top-0 z-20 bg-[#070812]/80 backdrop-blur-xl border-b border-white/10">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 flex flex-col md:flex-row gap-4 items-start md:items-center justify-between py-4">
+          <div className="relative w-full md:w-80">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-white/30" size={16} />
+            <input
+              id="games-search"
+              name="gamesSearch"
+              type="text"
+              placeholder="Search games or describe a scene to create..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full pl-10 pr-4 py-2.5 rounded-xl border border-white/10 bg-white/5 text-sm text-white outline-none focus:border-orange-500/50 transition-colors placeholder:text-white/30"
+            />
+          </div>
           <button
-            onClick={() => setViewMode("grid")}
-            className={`p-2 ${viewMode === "grid" ? "opacity-100" : "opacity-40"}`}
-            style={{ color: viewMode === "grid" ? T.accentColor : T.textMuted }}
+            onClick={() => router.push(studioImageHref)}
+            className="flex items-center gap-1.5 rounded-full border border-orange-500/40 px-3 py-1.5 text-[10px] font-bold uppercase tracking-wide text-orange-400 transition hover:bg-orange-500/10"
+            title="Generate a game-themed image"
           >
-            <Grid3X3 size={16} />
+            <Shuffle size={11} /> Surprise Me
           </button>
-          <button
-            onClick={() => setViewMode("list")}
-            className={`p-2 ${viewMode === "list" ? "opacity-100" : "opacity-40"}`}
-            style={{ color: viewMode === "list" ? T.accentColor : T.textMuted }}
-          >
-            <List size={16} />
-          </button>
+          <div className="flex items-center gap-2 overflow-x-auto max-w-full pb-1">
+            {CATEGORIES.map((cat) => {
+              const Icon = cat.icon;
+              const isActive = activeCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setActiveCategory(cat.id)}
+                  className={`flex items-center gap-1.5 px-3 py-1.5 text-[11px] font-bold uppercase border transition-all whitespace-nowrap rounded-lg ${
+                    isActive ? "opacity-100" : "opacity-50 hover:opacity-80"
+                  }`}
+                  style={{
+                    borderColor: isActive ? "#f97316" : "rgba(255,255,255,0.1)",
+                    backgroundColor: isActive ? "rgba(249,115,22,0.1)" : "transparent",
+                    color: isActive ? "#f97316" : "#fff",
+                  }}
+                >
+                  <Icon size={12} />
+                  {cat.label}
+                </button>
+              );
+            })}
+          </div>
+          <div className="flex items-center border border-white/10 rounded-lg overflow-hidden">
+            <button
+              onClick={() => setViewMode("grid")}
+              className={`p-2 transition-colors ${viewMode === "grid" ? "bg-white/10" : ""}`}
+              style={{ color: viewMode === "grid" ? "#f97316" : "rgba(255,255,255,0.3)" }}
+            >
+              <Grid3X3 size={16} />
+            </button>
+            <button
+              onClick={() => setViewMode("list")}
+              className={`p-2 transition-colors ${viewMode === "list" ? "bg-white/10" : ""}`}
+              style={{ color: viewMode === "list" ? "#f97316" : "rgba(255,255,255,0.3)" }}
+            >
+              <List size={16} />
+            </button>
+          </div>
         </div>
       </div>
 
-      {/* Games Grid/List */}
-      <div
-        className={
-          viewMode === "grid"
-            ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 py-6"
-            : "space-y-2 py-6"
-        }
-      >
-        {filteredGames.map((game) => (
-          <div
-            key={game.id}
-            className={`group relative border-2 overflow-hidden transition-all hover:scale-[1.02] ${
-              viewMode === "grid" ? "" : "flex items-center gap-4 p-3"
-            }`}
-            style={{
-              backgroundColor: T.boxBg,
-              borderColor: favorites.includes(game.id)
-                ? T.accentColor
-                : T.borderColor,
-            }}
-          >
-            {/* Cover */}
+      {/* ─── GAMES GRID/LIST ─── */}
+      <div className="max-w-7xl mx-auto px-4 sm:px-6">
+        <div
+          className={
+            viewMode === "grid"
+              ? "grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 py-6"
+              : "space-y-2 py-6"
+          }
+        >
+          {filteredGames.map((game) => (
             <div
-              className={`relative overflow-hidden cursor-pointer ${
-                viewMode === "grid" ? "aspect-square" : "w-20 h-20 shrink-0"
+              key={game.id}
+              className={`group relative overflow-hidden rounded-2xl border transition-all hover:shadow-2xl ${
+                viewMode === "grid" ? "" : "flex items-center gap-4 p-3"
               }`}
-              onClick={() => launchGame(game)}
+              style={{
+                backgroundColor: "rgba(255,255,255,0.02)",
+                borderColor: favorites.includes(game.id) ? "#f97316" : "rgba(255,255,255,0.08)",
+              }}
             >
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={game.coverUrl}
-                alt={game.title}
-                className="w-full h-full object-cover"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src =
-                    'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100" height="100" fill="%23333"/><text x="50" y="50" text-anchor="middle" fill="%23666" font-size="40">🎮</text></svg>';
-                }}
-              />
-              {/* Play overlay */}
-              <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/50">
-                <Play
-                  size={viewMode === "grid" ? 48 : 24}
-                  style={{ color: T.accentColor }}
+              {/* Cover */}
+              <div
+                className={`relative overflow-hidden cursor-pointer ${
+                  viewMode === "grid" ? "aspect-[4/3]" : "w-24 h-24 shrink-0"
+                }`}
+                onClick={() => launchGame(game)}
+              >
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={game.coverUrl}
+                  alt={game.title}
+                  className="w-full h-full object-cover transition-transform duration-500 group-hover:scale-105"
+                  onError={(e) => {
+                    (e.target as HTMLImageElement).src =
+                      'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300"><rect width="400" height="300" fill="%23070812"/><text x="200" y="150" text-anchor="middle" fill="%23333" font-size="60">🎮</text></svg>';
+                  }}
                 />
-              </div>
-              {/* Platform badge */}
-              <div className="absolute top-1 left-1 px-1.5 py-0.5 text-[8px] font-bold uppercase bg-black/70 text-white">
-                {game.launchMode === "embedded" ? "Play here" : "New tab"}
-              </div>
-            </div>
-
-            {/* Info */}
-            <div className={viewMode === "grid" ? "p-3" : "flex-1 min-w-0"}>
-              <div className="flex items-start justify-between gap-2">
-                <div
-                  className="font-bold text-sm truncate"
-                  style={{ color: T.headerColor }}
-                >
-                  {game.title}
+                <div className="absolute inset-0 bg-gradient-to-t from-black/50 via-transparent to-transparent opacity-60" />
+                <div className="absolute inset-0 flex items-center justify-center opacity-0 group-hover:opacity-100 transition-opacity bg-black/40 backdrop-blur-[2px]">
+                  <div className="grid h-14 w-14 place-items-center rounded-full bg-white text-black shadow-2xl transition group-hover:scale-110">
+                    <Play size={24} fill="currentColor" />
+                  </div>
                 </div>
-                <button
-                  onClick={() => handleToggleFav(game.id)}
-                  className="shrink-0 opacity-0 group-hover:opacity-100 transition-opacity"
-                  style={{
-                    color: favorites.includes(game.id)
-                      ? T.accentColor
-                      : T.textMuted,
-                  }}
-                >
-                  <Heart
-                    size={14}
-                    fill={favorites.includes(game.id) ? T.accentColor : "none"}
-                  />
-                </button>
-              </div>
-              <div
-                className="text-[10px] opacity-60 line-clamp-1"
-                style={{ color: T.textMuted }}
-              >
-                {game.description}
-              </div>
-              <div className="flex items-center gap-3 mt-2 text-[9px] opacity-40">
-                <span>👤 {game.players}P</span>
-                <span>{game.year}</span>
-              </div>
-              <div
-                className="flex items-center justify-between gap-2 mt-3 pt-3 border-t"
-                style={{ borderColor: `${T.borderColor}35` }}
-              >
-                <span
-                  className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide"
-                  style={{
-                    color:
-                      game.license === "open-source"
-                        ? "#34d399"
-                        : T.accentColor,
-                  }}
-                >
-                  <ShieldCheck size={11} /> {game.licenseLabel}
-                </span>
-                {game.sourceUrl && (
-                  <a
-                    href={game.sourceUrl}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    onClick={(event) => event.stopPropagation()}
-                    aria-label={`View ${game.title} source`}
-                    className="opacity-45 hover:opacity-100"
-                  >
-                    <Code2 size={13} />
-                  </a>
+                <div className="absolute top-2 left-2 px-2 py-1 rounded-lg bg-black/60 backdrop-blur-sm text-[8px] font-black uppercase tracking-wider text-white/80">
+                  {game.launchMode === "embedded" ? "▶ Play Here" : "↗ New Tab"}
+                </div>
+                {favorites.includes(game.id) && (
+                  <div className="absolute top-2 right-2 grid h-7 w-7 place-items-center rounded-full bg-orange-500/90 shadow-lg">
+                    <Heart size={13} fill="white" className="text-white" />
+                  </div>
                 )}
               </div>
-            </div>
-          </div>
-        ))}
-      </div>
 
-      {/* Empty State */}
-      {filteredGames.length === 0 && (
-        <div className="text-center py-16">
-          <div className="text-4xl mb-4">🔍</div>
-          <p className="opacity-60">No games found matching your search.</p>
-          <button
-            onClick={() => {
-              setSearchQuery("");
-              setActiveCategory("all");
-            }}
-            className="mt-4 px-4 py-2 border text-sm hover:opacity-80"
-            style={{ borderColor: T.borderColor }}
-          >
-            Clear Filters
-          </button>
-        </div>
-      )}
-
-      <section className="grid sm:grid-cols-2 gap-3 pb-8">
-        {FREE_DISCOVERY.map((item) => (
-          <a
-            key={item.label}
-            href={item.href}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="flex items-center justify-between gap-3 rounded-xl border p-4 hover:opacity-80"
-            style={{ borderColor: `${T.borderColor}45` }}
-          >
-            <div>
-              <div
-                className="text-sm font-bold"
-                style={{ color: T.headerColor }}
-              >
-                {item.label}
+              {/* Info */}
+              <div className={viewMode === "grid" ? "p-4" : "flex-1 min-w-0"}>
+                <div className="flex items-start justify-between gap-2">
+                  <div className="font-black text-sm truncate text-white">
+                    {game.title}
+                  </div>
+                  <button
+                    onClick={() => handleToggleFav(game.id)}
+                    className="shrink-0 opacity-30 group-hover:opacity-100 transition-opacity"
+                    style={{ color: favorites.includes(game.id) ? "#f97316" : "rgba(255,255,255,0.4)" }}
+                  >
+                    <Heart size={14} fill={favorites.includes(game.id) ? "#f97316" : "none"} />
+                  </button>
+                </div>
+                <div className="text-[11px] text-white/40 line-clamp-1 mt-0.5">
+                  {game.description}
+                </div>
+                <div className="flex items-center gap-3 mt-2 text-[9px] text-white/30 font-bold">
+                  <span className="flex items-center gap-1">
+                    <Users size={10} /> {game.players}P
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Calendar size={10} /> {game.year}
+                  </span>
+                  <span className="flex items-center gap-1">
+                    <Trophy size={10} /> {game.rating}
+                  </span>
+                </div>
+                <div className="flex items-center justify-between gap-2 mt-3 pt-3 border-t border-white/5">
+                  <span className="inline-flex items-center gap-1 text-[9px] font-bold uppercase tracking-wide text-emerald-400">
+                    <ShieldCheck size={11} /> {game.licenseLabel}
+                  </span>
+                  {game.sourceUrl && (
+                    <a
+                      href={game.sourceUrl}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      onClick={(event) => event.stopPropagation()}
+                      aria-label={`View ${game.title} source`}
+                      className="text-white/30 hover:text-white transition-colors"
+                    >
+                      <Code2 size={13} />
+                    </a>
+                  )}
+                </div>
               </div>
-              <div className="text-xs opacity-50 mt-0.5">{item.detail}</div>
             </div>
-            <ExternalLink size={15} className="opacity-45" />
-          </a>
-        ))}
-      </section>
-    </PageShell>
+          ))}
+        </div>
+
+        {/* Empty State */}
+        {filteredGames.length === 0 && (
+          <div className="text-center py-20">
+            <div className="text-5xl mb-4 opacity-30">🔍</div>
+            <p className="text-white/40 font-bold">No games found matching your search.</p>
+            <button
+              onClick={() => {
+                setSearchQuery("");
+                setActiveCategory("all");
+              }}
+              className="mt-4 px-5 py-2.5 rounded-xl border border-white/10 text-sm font-bold text-white hover:bg-white/5 transition-colors"
+            >
+              Clear Filters
+            </button>
+          </div>
+        )}
+
+        {/* Discovery Links */}
+        <section className="grid sm:grid-cols-2 gap-3 pb-10">
+          {FREE_DISCOVERY.map((item) => (
+            <a
+              key={item.label}
+              href={item.href}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="group flex items-center justify-between gap-3 rounded-2xl border border-white/[0.08] p-5 hover:border-white/15 hover:bg-white/[0.02] transition-all"
+            >
+              <div>
+                <div className="text-sm font-black text-white">{item.label}</div>
+                <div className="text-xs text-white/40 mt-0.5">{item.detail}</div>
+              </div>
+              <ExternalLink size={16} className="text-white/20 group-hover:text-white/60 transition-colors" />
+            </a>
+          ))}
+        </section>
+      </div>
+    </div>
   );
 }
