@@ -2446,20 +2446,20 @@ function LITTTerminalShellInner({
 
               {/* Mic setup panel — sits directly beside the mic button */}
               {micSetupOpen && (
-                <div className="mb-1 rounded-xl border border-violet-300/20 bg-[#0b0c16]/85 p-3 shadow-2xl">
-                  <div className="mb-2 flex items-center justify-between gap-3">
+                <div className="mb-2 rounded-2xl border border-violet-300/25 bg-[#10111d]/95 p-3.5 shadow-2xl backdrop-blur-xl sm:p-4">
+                  <div className="mb-2.5 flex items-start justify-between gap-3">
                     <div>
-                      <strong className="block text-xs text-white">Microphone setup</strong>
-                      <span className="text-[9px] text-white/40">
-                        Click the mic to start. Tap again to stop.
+                      <strong className="block text-sm text-white">Use your microphone</strong>
+                      <span className="mt-0.5 block text-[11px] leading-4 text-white/55">
+                        Tap the mic to start speaking, then tap again to stop.
                       </span>
                     </div>
-                    <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : voiceState === "idle" ? "bg-amber-400/10 text-amber-300" : "bg-emerald-400/10 text-emerald-300"}`}>
+                    <span className={`shrink-0 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : voiceState === "idle" ? "bg-amber-400/10 text-amber-300" : "bg-emerald-400/10 text-emerald-300"}`}>
                       {voiceState === "error" ? "Needs attention" : voiceState === "idle" ? "Ready" : "Active"}
                     </span>
                   </div>
-                  <p className="text-[9px] leading-4 text-white/40">
-                    If the mic doesn&apos;t respond, click it once and choose Allow in the browser prompt. In Firefox, use the microphone icon beside the address bar to reset a blocked permission.
+                  <p className="border-t border-white/5 pt-2.5 text-[11px] leading-5 text-white/45">
+                    Not working? Tap the mic and choose <span className="font-semibold text-white/70">Allow</span> in your browser. If permission was blocked, reset it from the microphone icon beside the address bar.
                   </p>
                 </div>
               )}

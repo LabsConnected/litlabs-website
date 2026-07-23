@@ -317,9 +317,9 @@ export default function ProjectDrawer({
       />
 
       {/* Drawer */}
-      <div className="fixed inset-y-0 left-0 z-100 flex w-full max-w-md flex-col border-r border-white/10 bg-[#0a0a0f] shadow-2xl sm:w-96">
+      <div className="fixed inset-0 z-100 flex w-full max-w-none flex-col bg-[#0a0a0f] shadow-2xl sm:inset-y-0 sm:left-0 sm:right-auto sm:max-w-md sm:border-r sm:border-white/10">
         {/* Header */}
-        <div className="flex items-center justify-between border-b border-white/5 px-4 py-3">
+        <div className="flex min-h-14 items-center justify-between border-b border-white/5 px-4 py-3 pt-[max(.75rem,env(safe-area-inset-top))]">
           <div className="flex items-center gap-2">
             <GitBranch size={16} className="text-cyan-400" />
             <h2 className="text-sm font-black text-white">Projects</h2>

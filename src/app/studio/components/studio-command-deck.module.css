@@ -328,6 +328,37 @@
     padding: 8px;
   }
 
+  .commandModeMain[data-project-status="none"] {
+    justify-content: center;
+    padding: 18px;
+  }
+
+  .commandModeMain[data-project-status="none"] .commandMission {
+    width: 100%;
+    max-width: 440px;
+    margin: 0 auto;
+    border-color: rgba(41, 228, 255, .18);
+    background:
+      radial-gradient(circle at 50% 0, rgba(41, 228, 255, .07), transparent 48%),
+      var(--deck-panel);
+  }
+
+  .commandModeMain[data-project-status="none"] .modeHeroCompact {
+    padding: 22px 18px;
+    text-align: center;
+  }
+
+  .commandModeMain[data-project-status="none"] .modeHeroIntro h2 {
+    font-size: 20px;
+  }
+
+  .commandModeMain[data-project-status="none"] .modeHeroIntro p {
+    max-width: 360px;
+    margin: 8px auto 16px;
+    font-size: 12px;
+    line-height: 1.65;
+  }
+
   .commandMission {
     min-height: auto;
     overflow: visible;
@@ -356,6 +387,33 @@
 
   .emptyActions {
     flex-wrap: wrap;
+  }
+
+  .codeMain[data-active-mobile="explorer"] .empty {
+    flex: 1;
+    min-height: 0;
+    padding: 24px 18px 88px;
+  }
+
+  .codeMain[data-active-mobile="explorer"] .emptyCard {
+    width: 100%;
+    max-width: 380px;
+    border-color: rgba(41, 228, 255, .2);
+    border-radius: 16px;
+    padding: 26px 20px;
+    background:
+      radial-gradient(circle at 50% 0, rgba(41, 228, 255, .08), transparent 56%),
+      rgba(2, 7, 19, .48);
+  }
+
+  .codeMain[data-active-mobile="explorer"] .emptyCard h3 {
+    font-size: 17px;
+  }
+
+  .codeMain[data-active-mobile="explorer"] .emptyCard p {
+    margin: 9px auto 16px;
+    max-width: 300px;
+    font-size: 12px;
   }
 
   .deck[data-mobile-view="terminal"] .commandModeMain,

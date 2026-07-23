@@ -655,7 +655,7 @@ export default function StudioCommandDeck({
         {mode === "media" && <div className={`${styles.main} ${styles.modeMain}`}><Panel title="Media pipeline" icon={Video}><div className={styles.modeHero}><div><h2>Generate, render, and organize.</h2><p>Image, video, audio, and assets share the selected project context.</p></div><div className={styles.timeline}><article><span>Stage 01</span><strong>Prompt & planning</strong><p>Unavailable</p><button className={styles.button} onClick={() => selectRail('command')}>Plan prompt</button></article><article><span>Stage 02</span><strong>Render queue</strong><p>No active jobs</p><button className={styles.button} onClick={() => selectRail('command')}>Queue render</button></article><article><span>Stage 03</span><strong>Artifacts</strong><p>Empty</p><button className={styles.button} onClick={() => selectRail('files')}>Open library</button></article></div></div></Panel><aside className={styles.modeSidebar}><Panel title="Preview" icon={Play}><EmptyState title="Render preview unavailable" description="Start a provider-backed job to view progress and output." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel><Panel title="Usage" icon={Activity}><EmptyState title="Provider usage unavailable" description="Usage and cost appear from a connected provider." actionLabel="Open project" onAction={onOpenProjectsAction} /></Panel></aside><DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} /></div>}
 
         {mode === "command" && commandSurface === "mission" && (
-          <div className={`${styles.main} ${styles.commandModeMain}`}>
+          <div className={`${styles.main} ${styles.commandModeMain}`} data-project-status={projectStatus}>
             <Panel
               title="Mission command center"
               icon={Workflow}
@@ -665,10 +665,10 @@ export default function StudioCommandDeck({
                 <div className={styles.modeHeroIntro}>
                   {projectStatus === "none" && (
                     <>
-                      <h2>Mission control</h2>
-                      <p>No project selected. Connect or create a project before starting a mission.</p>
+                      <h2>Start with a project</h2>
+                      <p>Connect a repository or create a project so LiTT can inspect files, make changes, run code, and preview the result.</p>
                       <div className={styles.emptyActions}>
-                        <button className={styles.button} onClick={onOpenProjectsAction}>Select Project</button>
+                        <button className={styles.button} onClick={onOpenProjectsAction}>Choose or create project</button>
                       </div>
                     </>
                   )}
@@ -741,14 +741,9 @@ export default function StudioCommandDeck({
               </div>
             </Panel>
 
-            <aside className={`${styles.modeSidebar} ${styles.commandSidebar}`}>
+            {activityEvents.length > 0 && <aside className={`${styles.modeSidebar} ${styles.commandSidebar}`}>
               <Panel title="System activity" icon={Activity}>
                 <div className={styles.activityTimeline}>
-                  {activityEvents.length === 0 && (
-                    <div className={styles.activityItem}>
-                      <Activity size={13} /> No activity yet. Select a project to begin.
-                    </div>
-                  )}
                   {activityEvents.map((event) => (
                     <div
                       key={event.id}
@@ -775,7 +770,7 @@ export default function StudioCommandDeck({
                   ))}
                 </div>
               </Panel>
-            </aside>
+            </aside>}
 
             <DockedTerminal terminal={terminal} collapsed={layout.collapsed.terminal} onCollapseAction={() => setCollapsed("terminal")} agentName={terminalAgentName} agentColor={terminalAgentColor} projectName={projectName} workspaceLabel={workspaceLabel} />
           </div>
