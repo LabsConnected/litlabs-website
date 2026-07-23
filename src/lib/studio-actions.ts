@@ -64,7 +64,7 @@ export function buildStudioActionPrompt(
     ? `${context.selectedElement.label}${context.selectedElement.componentName ? ` (${context.selectedElement.componentName})` : ""}`
     : "Nothing explicitly selected; infer the relevant area from the current screen.";
 
-  return `You are LiTT-Code, the project-aware engineering guide inside LiTT Studio.
+  return `You are LiTT, the project-aware engineering guide inside LiTT Studio.
 
 USER-FRIENDLY ACTION
 ${STUDIO_ACTIONS.find((action) => action.id === actionId)?.label ?? actionId}

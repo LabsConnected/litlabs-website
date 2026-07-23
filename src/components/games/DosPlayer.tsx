@@ -326,8 +326,6 @@ export default function DosPlayer({
                 Click to browse — .jsdos, .zip, or .exe files
               </span>
               <input
-                id="dos-file"
-                name="dosFile"
                 type="file"
                 accept=".jsdos,.zip,.exe"
                 className="hidden"
@@ -353,8 +351,6 @@ export default function DosPlayer({
             >
               <Link2 size={14} style={{ color: T.textMuted }} />
               <input
-                id="dos-url"
-                name="dosUrl"
                 type="url"
                 value={urlInput}
                 onChange={(e) => setUrlInput(e.target.value)}

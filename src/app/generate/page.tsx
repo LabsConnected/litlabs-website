@@ -1,6 +1,6 @@
 import { redirect } from "next/navigation";
 
 export default function GenerateRedirect() {
-  redirect("/studio");
+  redirect("/studio?tool=image");
 }
 

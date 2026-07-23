@@ -20,12 +20,14 @@ import {
   WandSparkles,
 } from "lucide-react";
 
-function formatPrice(_cents: number): string {
-  return "FREE";
+function formatPrice(cents: number): string {
+  if (cents === 0) return "FREE";
+  return `${cents.toLocaleString()} LBC`;
 }
 
-function formatUsdPrice(_price: number): string {
-  return "Free";
+function formatUsdPrice(price: number): string {
+  if (price === 0) return "Free";
+  return `$${Number.isInteger(price) ? price.toFixed(0) : price.toFixed(2)}/mo`;
 }
 
 function formatLbc(amount: number): string {
@@ -74,8 +76,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-starter",
     coins: 500,
-    price: 0,
-    priceId: "",
+    price: 5,
+    priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
     label: "Starter",
     tier: "starter",
     popular: true,
@@ -89,8 +91,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-pro",
     coins: 1500,
-    price: 0,
-    priceId: "",
+    price: 19.99,
+    priceId: "price_1TogZdJ53kgx4fp56g6bewkx",
     label: "Pro",
     tier: "pro",
     popular: false,
@@ -105,8 +107,8 @@ const TIER_PACKAGES: {
   {
     id: "tier-elite",
     coins: 5000,
-    price: 0,
-    priceId: "",
+    price: 50,
+    priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
     label: "Elite",
     tier: "elite",
     popular: false,
@@ -288,7 +290,7 @@ function MarketplaceInner() {
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
   const [activeTab, setActiveTab] = useState<"agents" | "coins">(() =>
-    searchParams.get("tab") === "agents" ? "agents" : "coins",
+    searchParams.get("tab") === "coins" ? "coins" : "agents",
   );
   const [currentPlan, setCurrentPlan] = useState<string>("free");
 
@@ -420,29 +422,37 @@ function MarketplaceInner() {
 
   const buyPack = async (pack: (typeof TIER_PACKAGES)[0]) => {
     if (!isSignedIn || !userId) {
-      showToast("Please sign in to get started.", "error");
+      showToast("Please sign in to purchase.", "error");
       return;
     }
     try {
-      const res = await fetch("/api/wallet", {
+      const res = await fetch("/api/stripe/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          type: "credit",
-          amount: pack.coins,
-          reason: `tier:${pack.tier}`,
+          mode: "subscription",
+          priceId: pack.priceId || "",
+          priceData: {
+            amount: pack.price * 100,
+            currency: "usd",
+            name: `${pack.label} Membership`,
+            description: `${pack.features.slice(0, 2).join(", ")}`,
+          },
+          metadata: {
+            clerk_id: userId,
+            tier: pack.tier,
+            coin_amount: String(pack.coins),
+          },
         }),
       });
       const data = await res.json();
-      if (res.ok) {
-        setLiTTCoins(data.balance);
-        setCurrentPlan(pack.tier);
-        showToast(`✅ ${pack.label} tier activated! +${pack.coins} LBC added.`, "success");
+      if (data.url) {
+        window.location.assign(data.url);
       } else {
-        showToast(data.error || "Failed to activate tier. Try again.", "error");
+        showToast(data.error || "Checkout failed. Try again.", "error");
       }
     } catch {
-      showToast("Network error. Try again.", "error");
+      showToast("Network error during checkout.", "error");
     }
   };
 
@@ -539,7 +549,45 @@ function MarketplaceInner() {
       const agent = agents.find((a) => a.id === agentId);
       if (!agent) return;
 
-      // Beta: all agents are free — install via API
+      if (agent.price_cents > 0) {
+        // Paid agents: redirect to Stripe checkout
+        if (!isSignedIn || !userId) {
+          showToast("Please sign in to purchase this agent.", "error");
+          return;
+        }
+        try {
+          const res = await fetch("/api/stripe/checkout", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              mode: "payment",
+              priceData: {
+                amount: agent.price_cents * 100, // 1 LBC = $0.01 → price_cents * 100 = USD cents
+                currency: "usd",
+                name: `${agent.name} — Agent License`,
+                description: `One-time purchase: ${agent.name} (${agent.price_cents} LBC)`,
+              },
+              metadata: {
+                clerk_id: userId,
+                agent_slug: agent.slug,
+                agent_id: agent.id,
+                type: "agent_purchase",
+              },
+            }),
+          });
+          const data = await res.json();
+          if (data.url) {
+            window.location.href = data.url;
+          } else {
+            showToast(data.error || "Checkout failed. Try again.", "error");
+          }
+        } catch {
+          showToast("Network error during checkout.", "error");
+        }
+        return;
+      }
+
+      // Free agent — install via API
       try {
         const res = await fetch("/api/user-agents", {
           method: "POST",
@@ -603,30 +651,13 @@ function MarketplaceInner() {
     setSellPrice("");
   }, []);
 
-  // Auth redirect
-  useEffect(() => {
-    if (isLoaded && !isSignedIn) {
-      router.push("/sign-in?redirect_url=/marketplace");
-    }
-  }, [isLoaded, isSignedIn, router]);
-
-  // Close Sell modal on Escape
-  useEffect(() => {
-    if (!sellModalAgent) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSellModalAgent(null);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [sellModalAgent]);
-
-  // Require authentication (after all hooks to respect Rules of Hooks)
+  // Require authentication for actions (install/purchase), not browsing
   if (!isLoaded) {
     return (
       <div
         style={{
-          backgroundColor: "transparent",
-          minHeight: "100dvh",
+          backgroundColor: T?.bgColor || "#0a0a0f",
+          minHeight: "100vh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -642,23 +673,6 @@ function MarketplaceInner() {
     );
   }
 
-  if (!isSignedIn) {
-    return (
-      <div className="min-h-[60vh] flex flex-col items-center justify-center gap-4">
-        <p className="text-sm opacity-60">
-          Please sign in to view the marketplace.
-        </p>
-        <Link
-          href="/sign-in?redirect_url=/marketplace"
-          className="px-4 py-2 rounded-lg text-sm font-bold"
-          style={{ backgroundColor: "#6366f1", color: "#fff" }}
-        >
-          Sign In
-        </Link>
-      </div>
-    );
-  }
-
   const stats: Record<string, number | string> = {
     total: agents.length,
     free: agents.filter((a) => a.price_cents === 0).length,
@@ -668,9 +682,9 @@ function MarketplaceInner() {
 
   return (
     <div
-      className="marketplace-page flex min-h-dvh flex-col"
+      className="marketplace-page flex min-h-screen flex-col"
       style={{
-        backgroundColor: "transparent",
+        backgroundColor: T.bgColor,
         color: T.textColor,
         position: "relative",
       }}
@@ -680,6 +694,12 @@ function MarketplaceInner() {
           min-height: 100dvh;
           overflow-x: hidden;
         }
+        .marketplace-hero-grid {
+          display: grid;
+          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
+          gap: 20px;
+          align-items: stretch;
+        }
         .marketplace-tab-row {
           overflow-x: auto;
           scrollbar-width: none;
@@ -687,8 +707,28 @@ function MarketplaceInner() {
         .marketplace-tab-row::-webkit-scrollbar {
           display: none;
         }
+        .marketplace-tier-grid {
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          gap: 18px !important;
+          align-items: stretch;
+        }
+        .marketplace-spend-grid {
+          display: grid !important;
+          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
+          gap: 16px !important;
+        }
+        .marketplace-buy-grid {
+          display: grid !important;
+          grid-template-columns: repeat(
+            auto-fit,
+            minmax(170px, 1fr)
+          ) !important;
+          gap: 10px !important;
+        }
         .marketplace-tier-card,
-        .marketplace-spend-card {
+        .marketplace-spend-card,
+        .marketplace-buy-chip {
           min-width: 0;
           overflow-wrap: anywhere;
         }
@@ -696,7 +736,31 @@ function MarketplaceInner() {
           font-variant-numeric: tabular-nums;
           letter-spacing: -0.01em;
         }
+        @media (max-width: 900px) {
+          .marketplace-hero-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .marketplace-tier-grid,
+          .marketplace-spend-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
+          }
+        }
         @media (max-width: 640px) {
+          .marketplace-page [style*="padding: 24px"] {
+            padding-left: 16px !important;
+            padding-right: 16px !important;
+          }
+          .marketplace-tier-grid,
+          .marketplace-spend-grid,
+          .marketplace-buy-grid {
+            grid-template-columns: 1fr !important;
+          }
+          .marketplace-tier-card {
+            padding: 28px 18px 18px !important;
+          }
+          .marketplace-spend-card {
+            padding: 16px !important;
+          }
           .marketplace-tab-row {
             justify-content: flex-start !important;
             padding-inline: 16px;
@@ -742,11 +806,9 @@ function MarketplaceInner() {
       )}
 
       <div
-        className="px-4 sm:px-6"
         style={{
           borderBottom: "1px solid " + T.borderColor,
-          paddingTop: "28px",
-          paddingBottom: "20px",
+          padding: "28px 24px 20px",
           background:
             "linear-gradient(180deg, " +
             T.boxBg +
@@ -756,7 +818,15 @@ function MarketplaceInner() {
         }}
       >
         <div className="mx-auto max-w-6xl">
-          <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_0.85fr] gap-5 items-stretch">
+          <div
+            className="marketplace-hero-grid"
+            style={{
+              display: "grid",
+              gridTemplateColumns: "1.15fr 0.85fr",
+              gap: "20px",
+              alignItems: "stretch",
+            }}
+          >
             <div
               style={{
                 textAlign: "left",
@@ -815,9 +885,9 @@ function MarketplaceInner() {
                   lineHeight: 1.6,
                 }}
               >
-                Choose your membership, unlock LiTBit Coins, and install core AI
-                agents. Director handles planning, Builder ships code — both
-                free for members.
+                Discover, install, and deploy AI agents to your workspace. Free
+                agents install instantly, pro agents unlock with your tier, and
+                premium listings are priced in LiTBit Coins.
               </p>
               <div
                 style={{
@@ -827,7 +897,7 @@ function MarketplaceInner() {
                   marginBottom: "18px",
                 }}
               >
-                <span className="badge badge-pink">Membership</span>
+                <span className="badge badge-pink">Marketplace</span>
                 <span className="badge">Stable rules</span>
                 <span className="badge badge-success">
                   Server-side installs
@@ -947,7 +1017,13 @@ function MarketplaceInner() {
                 </button>
               </div>
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-2.5">
+            <div
+              style={{
+                display: "grid",
+                gridTemplateColumns: "1fr 1fr",
+                gap: "10px",
+              }}
+            >
               {MARKETPLACE_SHOWCASE.map((item, idx) => (
                 <div
                   key={item.title}
@@ -1074,7 +1150,7 @@ function MarketplaceInner() {
                 gap: "8px",
               }}
             >
-              <span>🪙</span> Membership
+              <span>🪙</span> LiTBit Coins
             </button>
           </div>
         </div>
@@ -1083,15 +1159,26 @@ function MarketplaceInner() {
       {activeTab === "agents" && (
         <div className="flex-1 flex flex-col">
           <div
-            className="px-4 sm:px-6 flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between"
             style={{
-              paddingTop: "16px",
-              paddingBottom: "16px",
+              padding: "16px 24px",
               borderBottom: "1px solid " + T.borderColor,
+              display: "flex",
+              gap: "12px",
+              flexWrap: "wrap",
+              alignItems: "center",
+              justifyContent: "space-between",
               backgroundColor: T.boxBg,
             }}
           >
-            <div className="flex flex-wrap gap-1.5 items-center flex-1">
+            <div
+              style={{
+                display: "flex",
+                gap: "6px",
+                flexWrap: "wrap",
+                flex: 1,
+                alignItems: "center",
+              }}
+            >
               <button
                 onClick={() => setSelectedCategory("")}
                 style={{
@@ -1147,15 +1234,12 @@ function MarketplaceInner() {
                 </button>
               ))}
             </div>
-            <div className="flex flex-wrap gap-2 items-center w-full sm:w-auto">
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <input
-                id="marketplace-search"
-                name="marketplaceSearch"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
                 placeholder="Search agents..."
-                className="w-full sm:w-[200px] min-w-0"
                 style={{
                   padding: "8px 14px",
                   backgroundColor: T.bgColor,
@@ -1164,12 +1248,11 @@ function MarketplaceInner() {
                   color: "#e0e0e0",
                   fontSize: "12px",
                   fontFamily: "monospace",
+                  width: "200px",
                   outline: "none",
                 }}
               />
               <select
-                id="marketplace-sort"
-                name="marketplaceSort"
                 value={sortBy}
                 onChange={(e) => setSortBy(e.target.value)}
                 style={{
@@ -1210,10 +1293,9 @@ function MarketplaceInner() {
           </div>
 
           <div
-            className="flex-1 px-4 sm:px-6"
+            className="flex-1"
             style={{
-              paddingTop: "24px",
-              paddingBottom: "24px",
+              padding: "24px",
               maxWidth: "1200px",
               margin: "0 auto",
               width: "100%",
@@ -1232,7 +1314,14 @@ function MarketplaceInner() {
                 >
                   ⭐ FEATURED AGENTS
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(260px, 1fr))",
+                    gap: "16px",
+                  }}
+                >
                   {featuredAgents.map((agent) => (
                     <AgentCard
                       key={agent.id}
@@ -1275,7 +1364,14 @@ function MarketplaceInner() {
                     Just Added
                   </span>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns:
+                      "repeat(auto-fill, minmax(260px, 1fr))",
+                    gap: "16px",
+                  }}
+                >
                   {newArrivals.map((agent) => (
                     <AgentCard
                       key={agent.id}
@@ -1316,7 +1412,13 @@ function MarketplaceInner() {
                   ({filteredAgents.length})
                 </span>
               </div>
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+              <div
+                style={{
+                  display: "grid",
+                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
+                  gap: "16px",
+                }}
+              >
                 {(searchQuery ? filteredAgents : regularAgents).map((agent) => (
                   <AgentCard
                     key={agent.id}
@@ -1357,10 +1459,9 @@ function MarketplaceInner() {
 
       {activeTab === "coins" && (
         <div
-          className="flex-1 px-4 sm:px-6"
+          className="flex-1"
           style={{
-            paddingTop: "24px",
-            paddingBottom: "24px",
+            padding: "24px",
             maxWidth: "1200px",
             margin: "0 auto",
             width: "100%",
@@ -1400,7 +1501,7 @@ function MarketplaceInner() {
                   </strong>
                 </p>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div style={{ display: "flex", gap: "8px" }}>
                 <button
                   onClick={earnCoins}
                   disabled={claimLoading}
@@ -1421,10 +1522,17 @@ function MarketplaceInner() {
               </div>
             </div>
 
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 items-stretch">
+            <div
+              className="marketplace-tier-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "16px",
+              }}
+            >
               {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
                 const isCurrent = currentPlan === tier.tier;
-                const missingPrice = false;
+                const missingPrice = !tier.priceId && tier.price > 0;
                 return (
                   <div
                     key={tier.id}
@@ -1529,17 +1637,30 @@ function MarketplaceInner() {
                     >
                       {tier.features.slice(0, 3).join(" • ")}
                     </div>
+                    {missingPrice && (
+                      <div
+                        style={{
+                          color: "#ff6b6b",
+                          fontSize: "10px",
+                          marginBottom: "8px",
+                        }}
+                      >
+                        ⚠ Stripe price ID missing — update in code/env
+                      </div>
+                    )}
                     <button
                       onClick={() =>
-                        !isCurrent && buyPack(tier)
+                        !isCurrent && !missingPrice && buyPack(tier)
                       }
-                      disabled={isCurrent}
+                      disabled={isCurrent || missingPrice}
                       style={{
                         width: "100%",
                         padding: "12px",
                         backgroundColor: isCurrent
                           ? "#22d3ee"
-                          : tier.popular
+                          : missingPrice
+                            ? "#444"
+                            : tier.popular
                               ? "gold"
                               : T.linkColor,
                         color: isCurrent
@@ -1551,98 +1672,22 @@ function MarketplaceInner() {
                         fontWeight: "bold",
                         fontSize: "13px",
                         cursor:
-                          isCurrent ? "not-allowed" : "pointer",
+                          isCurrent || missingPrice ? "not-allowed" : "pointer",
                         borderRadius: "6px",
-                        opacity: isCurrent ? 0.7 : 1,
+                        opacity: isCurrent || missingPrice ? 0.7 : 1,
                       }}
                     >
                       {isCurrent
                         ? "Current Plan"
-                        : tier.popular
+                        : missingPrice
+                          ? "Not Configured"
+                          : tier.popular
                             ? "⚡ Get Best Value"
                             : "Get " + tier.label}
                     </button>
                   </div>
                 );
               })}
-            </div>
-          </div>
-
-          {/* POWERSHELL 7 CLI */}
-          <div
-            style={{
-              borderTop: "2px solid " + T.borderColor,
-              paddingTop: "32px",
-              marginBottom: "32px",
-            }}
-          >
-            <div
-              style={{
-                color: T.accentColor,
-                fontSize: "14px",
-                letterSpacing: "2px",
-                marginBottom: "12px",
-                fontWeight: "bold",
-              }}
-            >
-              🖥️ INSTALL IN POWERSHELL 7
-            </div>
-            <p
-              style={{
-                color: T.textColor,
-                fontSize: "12px",
-                opacity: 0.7,
-                marginBottom: "16px",
-                maxWidth: "620px",
-              }}
-            >
-              Run Director and Builder from your terminal. Requires PowerShell 7
-              (or later). The module is free and installs in seconds.
-            </p>
-            <div
-              style={{
-                backgroundColor: "#0a0a0f",
-                border: `1px solid ${T.borderColor}40`,
-                borderRadius: "10px",
-                padding: "16px",
-                fontFamily: "monospace",
-                fontSize: "12px",
-                color: "#e2e8f0",
-                marginBottom: "12px",
-                overflowX: "auto",
-              }}
-            >
-              <div style={{ opacity: 0.5 }}># Install</div>
-              <div>
-                irm
-                https://raw.githubusercontent.com/LabsConnected/litlabs-website/main/cli/install.ps1
-                | iex
-              </div>
-              <div style={{ opacity: 0.5, marginTop: "12px" }}># Use</div>
-              <div>Import-Module LiTTree -Force</div>
-              <div>Invoke-Director &quot;Plan a React dashboard&quot;</div>
-              <div>
-                Invoke-Builder &quot;Write a PowerShell function that lists git
-                commits&quot;
-              </div>
-            </div>
-            <div style={{ display: "flex", gap: "10px", flexWrap: "wrap" }}>
-              <a
-                href="https://github.com/LabsConnected/litlabs-website/tree/main/cli"
-                target="_blank"
-                rel="noopener noreferrer"
-                style={{
-                  padding: "8px 14px",
-                  borderRadius: "6px",
-                  border: `1px solid ${T.borderColor}40`,
-                  color: T.textColor,
-                  fontSize: "11px",
-                  fontWeight: "bold",
-                  textDecoration: "none",
-                }}
-              >
-                View CLI source →
-              </a>
             </div>
           </div>
 
@@ -1663,9 +1708,16 @@ function MarketplaceInner() {
                 fontWeight: "bold",
               }}
             >
-              💎 BETA FEATURES (ALL FREE)
+              💎 SPEND YOUR COINS
             </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            <div
+              className="marketplace-spend-grid"
+              style={{
+                display: "grid",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "16px",
+              }}
+            >
               {SPEND_FEATURES.map((feat) => (
                 <div
                   key={feat.id}
@@ -1721,17 +1773,35 @@ function MarketplaceInner() {
                   >
                     <span
                       style={{
-                        color: "#22d3ee",
+                        color: "gold",
                         fontSize: "16px",
                         fontWeight: "bold",
                       }}
                     >
-                      FREE
+                      {formatLbc(feat.cost)}
                     </span>
                     <button
-                      onClick={() => {
+                      onClick={async () => {
+                        if (litBitCoins < feat.cost) {
+                          showToast(
+                            `Need ${formatLbc(feat.cost)}. You have ${formatLbc(litBitCoins)}`,
+                            "error",
+                          );
+                          return;
+                        }
+                        const newBal = await spendWallet(
+                          feat.cost,
+                          `marketplace_feature:${feat.title}`,
+                        );
+                        if (newBal === null) {
+                          showToast(
+                            "Transaction failed. Could not deduct coins.",
+                            "error",
+                          );
+                          return;
+                        }
                         showToast(
-                          `✅ ${feat.action} ${feat.title} — Free during beta!`,
+                          `${feat.action} ${feat.title}. -${formatLbc(feat.cost)}. Balance: ${formatLbc(newBal)}`,
                           "success",
                         );
                       }}
@@ -1749,6 +1819,76 @@ function MarketplaceInner() {
                       {feat.action}
                     </button>
                   </div>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* PRICING EXAMPLES */}
+          <div
+            style={{
+              borderTop: "2px solid " + T.borderColor,
+              paddingTop: "24px",
+            }}
+          >
+            <div
+              style={{
+                color: T.textColor,
+                fontSize: "12px",
+                letterSpacing: "1px",
+                marginBottom: "16px",
+                fontWeight: "bold",
+                opacity: 0.8,
+              }}
+            >
+              📊 WHAT CAN YOU BUY?
+            </div>
+            <div
+              className="marketplace-buy-grid"
+              style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}
+            >
+              {[
+                { name: "Support Agent", cost: 50, color: T.accentColor },
+                { name: "Writing Coach", cost: 75, color: T.headerColor },
+                { name: "Research Guru", cost: 100, color: "#60a5fa" },
+                { name: "Social Dominator", cost: 250, color: "#34d399" },
+                { name: "Data Slayer", cost: 300, color: "#a78bfa" },
+                { name: "Pixel Forge", cost: 200, color: "#ec4899" },
+                { name: "Music Producer", cost: 400, color: "#22d3ee" },
+                { name: "Legal Shield", cost: 1000, color: "#ff6b35" },
+                { name: "Security Guru", cost: 1200, color: "#f87171" },
+                { name: "ML Engineer", cost: 1500, color: "#fbbf24" },
+              ].map((item) => (
+                <div
+                  key={item.name}
+                  className="marketplace-buy-chip"
+                  style={{
+                    padding: "10px 16px",
+                    border: "1px solid " + T.borderColor,
+                    borderRadius: "6px",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                  }}
+                >
+                  <span
+                    style={{
+                      color: item.color,
+                      fontWeight: "bold",
+                      fontSize: "13px",
+                    }}
+                  >
+                    {item.name}
+                  </span>
+                  <span
+                    style={{
+                      color: "gold",
+                      fontSize: "12px",
+                      fontWeight: "bold",
+                    }}
+                  >
+                    {formatLbc(item.cost)}
+                  </span>
                 </div>
               ))}
             </div>
@@ -1894,7 +2034,7 @@ function MarketplaceInner() {
                   {formatPrice(previewAgent.price_cents)}
                 </span>
               </div>
-              <div className="flex flex-wrap gap-2">
+              <div style={{ display: "flex", gap: "8px" }}>
                 {installedAgents.has(previewAgent.id) ? (
                   <>
                     <button
@@ -1951,7 +2091,11 @@ function MarketplaceInner() {
                   <button
                     onClick={() => {
                       installAgent(previewAgent.id);
-                      setPreviewAgent(null);
+                      if (
+                        previewAgent.price_cents === 0 ||
+                        litBitCoins >= previewAgent.price_cents
+                      )
+                        setPreviewAgent(null);
                     }}
                     style={{
                       flex: 1,
@@ -1963,7 +2107,9 @@ function MarketplaceInner() {
                       fontWeight: "bold",
                     }}
                   >
-                    🚀 Install Free
+                    {previewAgent.price_cents === 0
+                      ? "🚀 Install Free"
+                      : "🪙 Buy — " + formatPrice(previewAgent.price_cents)}
                   </button>
                 )}
                 <Link
@@ -2083,7 +2229,7 @@ function MarketplaceInner() {
                 </p>
               )}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div style={{ display: "flex", gap: "8px" }}>
               <button
                 onClick={() => {
                   if (sellPrice && Number(sellPrice) > 0)
@@ -2387,7 +2533,7 @@ function AgentCard({
                 color: "#000",
               }}
             >
-              Install Free
+              {agent.price_cents === 0 ? "Install Free" : "Buy Now"}
             </button>
           )}
         </div>
@@ -2402,8 +2548,8 @@ export default function Marketplace() {
     <Suspense
       fallback={
         <div
-          className="min-h-dvh flex items-center justify-center"
-          style={{ backgroundColor: "transparent" }}
+          className="min-h-screen flex items-center justify-center"
+          style={{ backgroundColor: "#0a0a0f" }}
         >
           <div className="text-center">
             <div className="text-3xl mb-4 animate-pulse">⚡</div>

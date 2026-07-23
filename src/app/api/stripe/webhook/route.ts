@@ -16,17 +16,6 @@ async function creditCoinPack(
   }
   try {
     const sb = getAdminSupabase();
-
-    // Idempotency check — skip if this session was already credited
-    const { data: existingTx } = await sb
-      .from("transactions")
-      .select("id")
-      .eq("metadata->>stripe_session_id", sessionId)
-      .limit(1);
-    if (existingTx && existingTx.length > 0) {
-      return;
-    }
-
     const { data: user } = await sb
       .from("users")
       .select("id")

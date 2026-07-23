@@ -1,5 +1,5 @@
 import { redirect } from "next/navigation";
 
 export default function MemoriesRedirect() {
-  redirect("/studio");
+  redirect("/studio?tool=memory");
 }

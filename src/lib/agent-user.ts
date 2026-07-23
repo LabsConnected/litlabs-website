@@ -47,7 +47,6 @@ export type MemoryRecord = {
   id: string;
   ownerId: string;
   agentId?: string | null;
-  personaId?: string | null;
   content: string;
   scope: MemoryScope;
   source?: string;

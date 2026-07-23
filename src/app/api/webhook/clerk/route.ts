@@ -1,6 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOrCreateUser } from "@/lib/user-db";
-import { getAdminSupabase, isAdminSupabaseConfigured } from "@/lib/supabase-admin";
 import { Webhook } from "svix";
 
 /**
@@ -80,19 +79,8 @@ export async function POST(req: NextRequest) {
     }
 
     if (eventType === "user.deleted") {
-      const data = evt.data;
-      const id = data.id as string;
-      if (id && isAdminSupabaseConfigured()) {
-        const sb = getAdminSupabase();
-        // Clean up user data in order (respect FKs)
-        await sb.from("notifications").delete().eq("user_id", id);
-        await sb.from("push_subscriptions").delete().eq("user_id", id);
-        await sb.from("api_keys").delete().eq("user_id", id);
-        await sb.from("transactions").delete().eq("user_id", id);
-        await sb.from("wallets").delete().eq("user_id", id);
-        await sb.from("subscriptions").delete().eq("user_id", id);
-        await sb.from("users").delete().eq("clerk_id", id);
-      }
+      // User deleted — handle cleanup if needed
+      // Optional: delete from Supabase here
     }
 
     return NextResponse.json({ success: true });

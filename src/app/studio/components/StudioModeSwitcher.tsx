@@ -76,7 +76,7 @@ export default function StudioModeSwitcher({
 }) {
   return (
     <div
-      className="flex items-stretch gap-1 rounded-2xl border p-1"
+      className="flex items-center gap-1 rounded-2xl border p-1"
       style={{
         backgroundColor: T.bgColor + "70",
         borderColor: T.borderColor + "20",
@@ -90,7 +90,7 @@ export default function StudioModeSwitcher({
           <button
             key={m.id}
             onClick={() => onChange(m.id)}
-            className="flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-1.5 rounded-xl px-2 sm:px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.15em] transition-all"
+            className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.15em] transition-all"
             style={{
               backgroundColor: isActive ? m.accent + "18" : "transparent",
               color: isActive ? m.accent : T.textMuted,
@@ -100,7 +100,7 @@ export default function StudioModeSwitcher({
             aria-label={`${m.label} mode`}
           >
             <Icon size={11} />
-            <span>{m.label}</span>
+            <span className="hidden sm:inline">{m.label}</span>
           </button>
         );
       })}

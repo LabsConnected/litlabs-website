@@ -7,30 +7,27 @@
    ============================================================ */
 
 :root {
-  /* Volcanic Cyber theme - burnt orange and ember red.
-     These are the default/fallback values that match the default dark
-     volcanic skin. ThemeContext overrides them on document.documentElement
-     after hydration so dynamic skin changes take effect. */
-  --bg-color: #1a1210;
-  --bg-elevated: #251a15;
-  --bg-card: rgba(37, 26, 21, 0.95);
-  --bg-glass: rgba(255, 255, 255, 0.03);
-  --text-color: #f0d8cc;
-  --text-muted: #a1a1aa;
-  --link-color: #f87171;
-  --header-color: #fca5a5;
-  --border-color: #4a2520;
-  --accent-color: #ef4444;
+  /* Cinematic Studio — deep space, electric cyan, violet and ember */
+  --bg-color: #03050b;
+  --bg-elevated: #080b16;
+  --bg-card: rgba(9, 12, 25, 0.86);
+  --bg-glass: rgba(112, 124, 255, 0.055);
+  --text-color: #eef4ff;
+  --text-muted: #9ba7c7;
+  --link-color: #69e7ff;
+  --header-color: #c7b8ff;
+  --border-color: #25305a;
+  --accent-color: #a970ff;
   --success: #56d364;
   --warning: #e3b341;
   --danger: #f85149;
-  --grid-line: rgba(74, 37, 32, 0.15);
-  --shadow-glow: none;
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.4);
-  --radius-sm: 2px;
-  --radius-md: 4px;
-  --radius-lg: 6px;
-  --transition: 120ms ease-out;
+  --grid-line: rgba(105, 231, 255, 0.07);
+  --shadow-glow: 0 0 40px rgba(169, 112, 255, 0.12);
+  --shadow-card: 0 20px 55px rgba(0, 0, 0, 0.36);
+  --radius-sm: 8px;
+  --radius-md: 14px;
+  --radius-lg: 22px;
+  --transition: 180ms ease-out;
 }
 
 @theme inline {
@@ -64,30 +61,18 @@
 
 /* html scroll-behavior removed - was causing scroll-to-bottom on page refresh */
 
-/* Reduce decorative motion on mobile and for users who prefer reduced motion */
-@media (max-width: 768px), (prefers-reduced-motion: reduce) {
-  .animate-pulse,
-  .animate-ping,
-  .animate-bounce,
-  .ambient-pulse,
-  .ambient-particle,
-  .floating-glow,
-  .animated-grid,
-  .card-shimmer,
-  .pulse-decoration {
-    animation: none !important;
-  }
-}
-
 body {
-  background-color: var(--bg-color);
+  background:
+    radial-gradient(circle at 78% 5%, rgba(169, 112, 255, 0.15), transparent 30rem),
+    radial-gradient(circle at 8% 45%, rgba(0, 214, 255, 0.08), transparent 34rem),
+    var(--bg-color);
   color: var(--text-color);
   font-family: var(--font-sans);
   font-size: 14px;
   line-height: 1.55;
   margin: 0;
   padding: 0;
-  min-height: 100dvh;
+  min-height: 100vh;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -100,10 +85,10 @@ body::before {
   background-image:
     linear-gradient(var(--grid-line) 1px, transparent 1px),
     linear-gradient(90deg, var(--grid-line) 1px, transparent 1px);
-  background-size: 48px 48px;
+  background-size: 64px 64px;
   pointer-events: none;
   z-index: 0;
-  opacity: 0.3;
+  opacity: 0.22;
 }
 
 /* ============================================================
@@ -136,7 +121,10 @@ h6 {
 }
 
 .gradient-text {
-  color: var(--header-color);
+  color: transparent;
+  background: linear-gradient(100deg, #69e7ff 0%, #c7b8ff 48%, #ff9a55 100%);
+  background-clip: text;
+  -webkit-background-clip: text;
   font-weight: 800;
 }
 
@@ -157,8 +145,10 @@ a:hover {
    CARDS / GLASS
    ============================================================ */
 .card {
-  background: rgba(255, 255, 255, 0.02);
-  border: 1px solid rgba(255, 255, 255, 0.05);
+  background:
+    linear-gradient(145deg, rgba(255,255,255,.055), rgba(115,91,255,.025)),
+    rgba(5, 8, 18, 0.82);
+  border: 1px solid rgba(135, 162, 255, 0.14);
   border-radius: var(--radius-md);
   padding: 20px;
   box-shadow: var(--shadow-card);
@@ -167,7 +157,9 @@ a:hover {
 }
 
 .card:hover {
-  border-color: rgba(255, 255, 255, 0.1);
+  border-color: rgba(105, 231, 255, 0.32);
+  box-shadow: 0 24px 70px rgba(0,0,0,.46), 0 0 34px rgba(105,231,255,.07);
+  transform: translateY(-2px);
 }
 
 .card-header {
@@ -1472,9 +1464,6 @@ a:hover {
 /* Fluid base font: 13px mobile → 14px desktop */
 html {
   font-size: clamp(13px, 1.4vw, 14px);
-  width: 100%;
-  min-height: 100%;
-  overflow-x: clip;
 }
 
 /* Safe area insets (notched phones) */
@@ -1552,7 +1541,7 @@ html {
 body,
 #__next,
 main {
-  overflow-x: clip;
+  overflow-x: hidden;
   max-width: 100vw;
 }
 
@@ -1645,37 +1634,37 @@ main {
     font-size: 13px;
   }
 
-  h1 {
-    line-height: 1.15;
+  h1,
+  .font-display {
+    font-size: 1.5rem !important;
+    line-height: 1.2;
   }
 
-  h1,
-  h2,
-  h3,
-  p,
-  a,
-  button,
-  span {
-    overflow-wrap: anywhere;
+  h2 {
+    font-size: 1.25rem !important;
+  }
+
+  h3 {
+    font-size: 1.1rem !important;
   }
 }
 
-/* Safe area insets for notched phones are handled per-element on fixed
-   positioned UI (mobile-bottom-nav, chat-launcher, studio composer) via
-   env(safe-area-inset-*). Adding body-level padding here shifts dvh-based
-   layouts and causes double-counting, so it is intentionally omitted. */
+/* Safe area insets for notched phones */
+@supports (padding-top: env(safe-area-inset-top)) {
+  body {
+    padding-top: env(safe-area-inset-top);
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+}
 
 /* Touch-friendly tap targets (min 44px) */
 @media (pointer: coarse) {
   .btn,
+  a,
   button,
   [role="button"] {
     min-height: 44px;
-  }
-
-  button,
-  [role="button"] {
-    touch-action: manipulation;
+    min-width: 44px;
   }
 
   .card,
@@ -1686,6 +1675,13 @@ main {
 
 /* Mobile layout adjustments */
 @media (max-width: 768px) {
+  /* Reduce horizontal padding on mobile */
+  .px-4,
+  .px-6 {
+    padding-left: 12px !important;
+    padding-right: 12px !important;
+  }
+
   /* Full-width cards on mobile with reduced border radius */
   .glass-card {
     border-radius: 8px;
@@ -2120,9 +2116,9 @@ main {
 /* Mobile chat launcher — sits above bottom nav, below open chat panel */
 .chat-launcher {
   position: fixed;
-  right: 16px;
-  bottom: calc(100px + env(safe-area-inset-bottom));
-  z-index: 120;
+  left: 16px;
+  bottom: calc(88px + env(safe-area-inset-bottom));
+  z-index: 9998;
 }
 
 @media (min-width: 768px) {
@@ -2133,13 +2129,14 @@ main {
   }
 }
 
-/* Mobile bottom navigation — raised floating dock above safe area */
+/* Mobile bottom navigation — fixed above safe area, below chat launcher */
 .mobile-bottom-nav {
   position: fixed;
-  bottom: calc(0.5rem + env(safe-area-inset-bottom));
-  left: 0.5rem;
-  right: 0.5rem;
+  bottom: max(10px, env(safe-area-inset-bottom));
+  left: 10px;
+  right: 10px;
   z-index: 100;
+  padding-bottom: 0;
 }
 
 /* Safe-area padding utility */
@@ -2180,524 +2177,4 @@ main {
 
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 92, 246, 0.85);
-}
-
-/* LiTT Terminal shell keyframes */
-@keyframes spin {
-  from {
-    transform: rotate(0deg);
-  }
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-@keyframes pulse-glow {
-  0%,
-  100% {
-    opacity: 0.6;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-
-/* ============================================================
-   LIGHT MODE OVERRIDES
-   Activated by ThemeContext setting data-theme="light" on <html>.
-   Mirrors the ThemeContext.lightSkins palette for CSS variables
-   so legacy CSS-only components (not using useTheme()) still
-   follow the active theme. Without this, components that rely
-   on --bg-color / --text-color / etc. stayed dark even when the
-   React theme switched — that's why light mode looked horrible.
-   ============================================================ */
-:root[data-theme="light"] {
-  /* Base palette (volcanic light, matches darkSkins[volcanic] default) */
-  --bg-color: #fff5f5;
-  --bg-elevated: #ffffff;
-  --bg-card: rgba(255, 255, 255, 0.95);
-  --bg-glass: rgba(0, 0, 0, 0.02);
-  --text-color: #1a1a2e;
-  --text-muted: #5f5f75;
-  --link-color: #dc2626;
-  --header-color: #b91c1c;
-  --border-color: #fecaca;
-  --accent-color: #ef4444;
-  --success: #16a34a;
-  --warning: #d97706;
-  --danger: #dc2626;
-  --grid-line: rgba(254, 202, 202, 0.4);
-  --shadow-glow: none;
-  --shadow-card: 0 2px 8px rgba(0, 0, 0, 0.06);
-
-  /* IDE tokens for light mode */
-  --color-ide-bg: #ffffff;
-  --color-ide-surface: #f8f8fa;
-  --color-ide-surface-2: #eef0f4;
-  --color-ide-border: #d1d5db;
-}
-
-/* Body background follows the variable (was hard-coded #0d0a05) */
-:root[data-theme="light"] body {
-  background-color: var(--bg-color);
-  color: var(--text-color);
-}
-
-/* Grid backdrop: inverted to subtle dark dots on light bg */
-:root[data-theme="light"] body::before {
-  background-image:
-    linear-gradient(rgba(0, 0, 0, 0.04) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(0, 0, 0, 0.04) 1px, transparent 1px);
-  opacity: 0.35;
-}
-
-/* Selection color flips for contrast on light */
-:root[data-theme="light"] ::selection {
-  background: rgba(220, 38, 38, 0.18);
-  color: #1a1a2e;
-}
-
-/* Scrollbars: dark thumbs on light track */
-:root[data-theme="light"] ::-webkit-scrollbar-thumb {
-  background: rgba(0, 0, 0, 0.18);
-}
-:root[data-theme="light"] ::-webkit-scrollbar-thumb:hover {
-  background: rgba(0, 0, 0, 0.32);
-}
-
-/* Cards / glass panels that hard-coded white-on-dark in dark mode */
-:root[data-theme="light"] .card,
-:root[data-theme="light"] .glass-card,
-:root[data-theme="light"] .studio-card,
-:root[data-theme="light"] .studio-panel,
-:root[data-theme="light"] .lit-box,
-:root[data-theme="light"] .post,
-:root[data-theme="light"] .card-elevated {
-  background: var(--bg-card);
-  border-color: var(--border-color);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-:root[data-theme="light"] .card:hover,
-:root[data-theme="light"] .glass-card:hover,
-:root[data-theme="light"] .lit-box:hover,
-:root[data-theme="light"] .post:hover {
-  border-color: var(--accent-color);
-}
-
-:root[data-theme="light"] .card-header,
-:root[data-theme="light"] .post-actions,
-:root[data-theme="light"] .post-stats,
-:root[data-theme="light"] .post-comments,
-:root[data-theme="light"] .telemetry-row,
-:root[data-theme="light"] .ticker,
-:root[data-theme="light"] .divider {
-  border-color: var(--border-color);
-}
-
-:root[data-theme="light"] .post-comments,
-:root[data-theme="light"] .comment-bubble,
-:root[data-theme="light"] .chat-body,
-:root[data-theme="light"] .chat-input-row {
-  background: var(--bg-glass);
-}
-
-/* Inputs / textarea / select — dark default didn't work on light bg */
-:root[data-theme="light"] .input,
-:root[data-theme="light"] .textarea,
-:root[data-theme="light"] .select,
-:root[data-theme="light"] .chat-input,
-:root[data-theme="light"] .studio-input {
-  background: #ffffff;
-  color: var(--text-color);
-  border-color: var(--border-color);
-}
-:root[data-theme="light"] .input:focus,
-:root[data-theme="light"] .textarea:focus,
-:root[data-theme="light"] .select:focus,
-:root[data-theme="light"] .studio-input:focus,
-:root[data-theme="light"] .chat-input:focus {
-  background: #ffffff;
-  border-color: var(--accent-color);
-  box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.12);
-}
-:root[data-theme="light"] .input::placeholder,
-:root[data-theme="light"] .textarea::placeholder,
-:root[data-theme="light"] .chat-input::placeholder {
-  color: var(--text-muted);
-}
-
-/* Buttons — secondary used white-on-dark; needs dark text on light */
-:root[data-theme="light"] .btn {
-  color: var(--text-color);
-}
-:root[data-theme="light"] .btn-secondary {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-:root[data-theme="light"] .btn-secondary:hover {
-  background: rgba(0, 0, 0, 0.08);
-  border-color: var(--accent-color);
-}
-:root[data-theme="light"] .btn-primary {
-  color: #ffffff;
-}
-:root[data-theme="light"] .btn-ghost {
-  color: var(--text-muted);
-}
-:root[data-theme="light"] .btn-ghost:hover {
-  color: var(--text-color);
-  background: rgba(0, 0, 0, 0.04);
-}
-
-/* Badges — light bg needs light-tinted backgrounds */
-:root[data-theme="light"] .badge {
-  background: rgba(239, 68, 68, 0.08);
-  color: var(--accent-color);
-  border-color: rgba(239, 68, 68, 0.2);
-}
-:root[data-theme="light"] .badge-success {
-  background: rgba(22, 163, 74, 0.1);
-  color: #15803d;
-  border-color: rgba(22, 163, 74, 0.25);
-}
-:root[data-theme="light"] .badge-warning {
-  background: rgba(217, 119, 6, 0.1);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.25);
-}
-:root[data-theme="light"] .badge-pink {
-  background: rgba(236, 72, 153, 0.1);
-  color: #be185d;
-  border-color: rgba(236, 72, 153, 0.25);
-}
-
-/* Chat bubbles — AI bubble used rgba(255,255,255,0.05) which is invisible on white */
-:root[data-theme="light"] .chat-bubble-ai {
-  background: rgba(0, 0, 0, 0.04);
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-:root[data-theme="light"] .chat-bubble-user {
-  color: #ffffff;
-}
-:root[data-theme="light"] .chat-msg.user {
-  background: #ffffff;
-  color: var(--text-color);
-  border-color: var(--border-color);
-}
-:root[data-theme="light"] .chat-msg.agent {
-  background: var(--bg-glass);
-  color: var(--text-color);
-  border-color: var(--border-color);
-}
-:root[data-theme="light"] .chat-send {
-  background: var(--accent-color);
-  color: #ffffff;
-  border-color: var(--accent-color);
-}
-:root[data-theme="light"] .chat-window,
-:root[data-theme="light"] .chat-header {
-  background: #ffffff;
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-
-/* Agent tiles / avatars — borders + bg need to flip */
-:root[data-theme="light"] .agent-tile {
-  background: rgba(0, 0, 0, 0.02);
-  border-color: var(--border-color);
-}
-:root[data-theme="light"] .agent-tile:hover {
-  background: rgba(0, 0, 0, 0.05);
-  border-color: var(--accent-color);
-}
-:root[data-theme="light"] .agent-avatar,
-:root[data-theme="light"] .post-avatar,
-:root[data-theme="light"] .comment-avatar {
-  background: var(--bg-elevated);
-  border-color: var(--border-color);
-  color: var(--text-color);
-}
-:root[data-theme="light"] .agent-online-ring::after {
-  border-color: var(--bg-color);
-}
-
-/* Stat badges — solid colors must stay legible */
-:root[data-theme="light"] .stat-badge-success {
-  background: rgba(22, 163, 74, 0.12);
-  color: #15803d;
-  border-color: rgba(22, 163, 74, 0.25);
-}
-:root[data-theme="light"] .stat-badge-warn {
-  background: rgba(217, 119, 6, 0.12);
-  color: #b45309;
-  border-color: rgba(217, 119, 6, 0.25);
-}
-:root[data-theme="light"] .stat-badge-info {
-  background: rgba(14, 165, 233, 0.12);
-  color: #0369a1;
-  border-color: rgba(14, 165, 233, 0.25);
-}
-:root[data-theme="light"] .stat-badge-accent {
-  background: rgba(168, 85, 247, 0.12);
-  color: #7e22ce;
-  border-color: rgba(168, 85, 247, 0.25);
-}
-
-/* Skeleton / shimmer — light variant for white bg */
-:root[data-theme="light"] .skeleton {
-  background: linear-gradient(
-    90deg,
-    rgba(0, 0, 0, 0.04) 25%,
-    rgba(0, 0, 0, 0.08) 50%,
-    rgba(0, 0, 0, 0.04) 75%
-  );
-}
-:root[data-theme="light"] .shimmer {
-  background: linear-gradient(
-    90deg,
-    transparent 0%,
-    rgba(0, 0, 0, 0.06) 50%,
-    transparent 100%
-  );
-}
-
-/* Lit-box header — gradient with dark text on light bg */
-:root[data-theme="light"] .lit-header {
-  background: linear-gradient(90deg, var(--link-color), var(--header-color));
-  color: #ffffff;
-}
-
-/* Toast — green/red error backgrounds stay but text gets darker */
-:root[data-theme="light"] .lit-toast.success {
-  background: rgba(220, 252, 231, 0.98);
-  color: #15803d;
-  border-color: #16a34a;
-}
-:root[data-theme="light"] .lit-toast.error {
-  background: rgba(254, 226, 226, 0.98);
-  color: #b91c1c;
-  border-color: #ef4444;
-}
-:root[data-theme="light"] .lit-toast.info {
-  background: rgba(219, 234, 254, 0.98);
-  color: #1d4ed8;
-  border-color: #3b82f6;
-}
-
-/* Ticker / marquee */
-:root[data-theme="light"] .ticker {
-  background: #ffffff;
-  border-color: var(--border-color);
-  color: var(--accent-color);
-}
-
-/* Glow effects — too bright on light, dial back */
-:root[data-theme="light"] .glow-box {
-  box-shadow:
-    0 0 20px rgba(220, 38, 38, 0.06),
-    0 0 60px rgba(220, 38, 38, 0.03);
-}
-:root[data-theme="light"] .glow-box:hover {
-  box-shadow:
-    0 0 30px rgba(220, 38, 38, 0.12),
-    0 0 80px rgba(220, 38, 38, 0.05);
-}
-:root[data-theme="light"] .glass-card {
-  box-shadow: 0 8px 32px rgba(0, 0, 0, 0.08);
-}
-:root[data-theme="light"] .glass-card:hover {
-  box-shadow: 0 12px 48px rgba(0, 0, 0, 0.12);
-}
-
-/* Hover-lift shadows */
-:root[data-theme="light"] .hover-lift:hover {
-  box-shadow: 0 12px 40px rgba(0, 0, 0, 0.1);
-}
-
-/* Sidebar scroll thumb (was hard-coded purple gradient) */
-:root[data-theme="light"] .sidebar-scroll {
-  scrollbar-color: rgba(220, 38, 38, 0.4) transparent;
-}
-:root[data-theme="light"] .sidebar-scroll::-webkit-scrollbar-thumb {
-  background: linear-gradient(
-    to bottom,
-    rgba(220, 38, 38, 0.6),
-    rgba(245, 158, 11, 0.4)
-  );
-}
-
-/* CRT overlay — was rgba(0,0,0,0.15) on dark; for light use light scanlines */
-:root[data-theme="light"] .crt-overlay {
-  background: repeating-linear-gradient(
-    0deg,
-    rgba(0, 0, 0, 0.05),
-    rgba(0, 0, 0, 0.05) 1px,
-    transparent 1px,
-    transparent 3px
-  );
-  mix-blend-mode: multiply;
-}
-
-/* LitToast, lit-toast — already covered above */
-
-/* ============================================================
-   SYSTEM PREFERENCE FALLBACK
-   When the user hasn't picked a theme yet (no data-theme attr on
-   <html>) AND the OS reports light, we still want a usable app
-   instead of the default-dark fallback.
-   ============================================================ */
-@media (prefers-color-scheme: light) {
-  :root:not([data-theme]) body {
-    background-color: #fff5f5;
-    color: #1a1a2e;
-  }
-}
-
-/* ============================================================
-   GLOBAL FX TOGGLES
-   Activated by data attributes set in ThemeContext.
-   ============================================================ */
-
-/* Neon Glow — soft accent halos on headings, icons and CTAs */
-:root[data-effect-glow="true"] h1,
-:root[data-effect-glow="true"] h2,
-:root[data-effect-glow="true"] .font-black {
-  text-shadow: 0 0 18px var(--accent-color);
-}
-
-:root[data-effect-glow="true"] button:hover,
-:root[data-effect-glow="true"] a:hover,
-:root[data-effect-glow="true"] [role="button"]:hover {
-  box-shadow: 0 0 16px var(--accent-color);
-  transition: box-shadow 0.2s ease-out;
-}
-
-/* Bloom — drop-shadow accent on icons and images */
-:root[data-effect-bloom="true"] svg:not([class*="no-fx"]),
-:root[data-effect-bloom="true"] img:not([class*="no-fx"]) {
-  filter: drop-shadow(0 0 4px var(--accent-color));
-}
-
-/* Film Grain — subtle animated noise overlay */
-:root[data-effect-noise="true"] body::after {
-  content: "";
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 9999;
-  opacity: 0.07;
-  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 200 200' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-  background-repeat: repeat;
-  background-size: 200px 200px;
-  animation: fx-noise 0.2s steps(4) infinite;
-}
-
-@keyframes fx-noise {
-  0%,
-  100% {
-    transform: translate(0, 0);
-  }
-  25% {
-    transform: translate(2px, -2px);
-  }
-  50% {
-    transform: translate(-1px, 1px);
-  }
-  75% {
-    transform: translate(-2px, -1px);
-  }
-}
-
-/* ============================================================
-   GLOBAL FLOW / MOTION / POLISH
-   Smooth interactive feedback, accessible focus, and consistent
-   entry motion across the app.
-   ============================================================ */
-
-::selection {
-  background: color-mix(in srgb, var(--accent-color) 50%, transparent);
-  color: #fff;
-}
-
-:focus-visible {
-  outline: 2px solid color-mix(in srgb, var(--accent-color) 80%, transparent);
-  outline-offset: 2px;
-  border-radius: var(--radius-md);
-}
-
-button,
-a,
-input,
-textarea,
-select,
-[role="button"] {
-  transition:
-    color var(--transition),
-    background-color var(--transition),
-    border-color var(--transition),
-    transform var(--transition),
-    box-shadow var(--transition);
-}
-
-button:not(:disabled):active,
-a[role="button"]:active {
-  transform: scale(0.98);
-}
-
-/* Page / panel entrance animations */
-@keyframes enter-fade {
-  from {
-    opacity: 0;
-    transform: translateY(8px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes enter-slide-up {
-  from {
-    opacity: 0;
-    transform: translateY(18px);
-  }
-  to {
-    opacity: 1;
-    transform: translateY(0);
-  }
-}
-
-@keyframes pulse-glow {
-  0%,
-  100% {
-    box-shadow: 0 0 0 0 transparent;
-  }
-  50% {
-    box-shadow: 0 0 18px color-mix(in srgb, var(--accent-color) 25%, transparent);
-  }
-}
-
-.animate-enter {
-  animation: enter-fade 0.35s ease-out both;
-}
-
-.animate-slide-up {
-  animation: enter-slide-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
-}
-
-.animate-pulse-glow {
-  animation: pulse-glow 2s ease-in-out infinite;
-}
-
-@media (prefers-reduced-motion: reduce) {
-  .animate-enter,
-  .animate-slide-up,
-  .animate-pulse-glow {
-    animation: none !important;
-    transform: none !important;
-    opacity: 1 !important;
-  }
 }

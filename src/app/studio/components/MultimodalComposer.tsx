@@ -27,7 +27,7 @@ import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
-import type { StudioTool } from "./LITTTerminalShell";
+import type { StudioTool } from "./StudioSidebar";
 
 export type ComposerMode = "text" | "camera";
 
@@ -46,8 +46,8 @@ const COMMANDS: { command: string; description: string; tool: StudioTool }[] = [
   { command: "/image", description: "Generate Image", tool: "image" },
   { command: "/video", description: "Generate Video", tool: "video" },
   { command: "/audio", description: "Generate Audio", tool: "audio" },
-  { command: "/build", description: "Build Anything", tool: "builder" },
-  { command: "/code", description: "Generate Code", tool: "builder" },
+  { command: "/build", description: "Build Anything", tool: "build" },
+  { command: "/code", description: "Generate Code", tool: "code" },
   { command: "/agent", description: "Run Agent", tool: "agents" },
   { command: "/git", description: "Git", tool: "clibridge" },
   { command: "/docker", description: "Docker", tool: "clibridge" },
@@ -61,11 +61,13 @@ const COMMANDS: { command: string; description: string; tool: StudioTool }[] = [
 
 const STATUS_LABELS: Record<VoiceState, string> = {
   idle: "",
+  requesting_permission: "Requesting microphone…",
+  connecting: "Connecting…",
   listening: "Listening",
-  transcribing: "Transcribing…",
-  thinking: "Processing…",
-  speaking: "LiTT speaking",
-  cooldown: "Voice limit reached",
+  user_speaking: "You're speaking…",
+  processing: "Processing…",
+  assistant_speaking: "LiTT speaking",
+  muted: "Muted",
   error: "",
 };
 
@@ -113,6 +115,20 @@ export default function MultimodalComposer({
   const createFileRef = useRef<HTMLInputElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const sheetTouchYRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    if (!showAdd) return;
+    const onKeyDown = (event: KeyboardEvent) => { if (event.key === "Escape") setShowAdd(false); };
+    const mobile = window.matchMedia("(max-width: 767px)").matches;
+    const previousOverflow = document.documentElement.style.overflow;
+    if (mobile) document.documentElement.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      window.removeEventListener("keydown", onKeyDown);
+      if (mobile) document.documentElement.style.overflow = previousOverflow;
+    };
+  }, [showAdd]);
 
   const {
     voiceState,
@@ -124,6 +140,7 @@ export default function MultimodalComposer({
     interrupt,
     setOnTurn,
     errorMessage,
+    voiceMode,
     selectedDeviceId,
     availableDevices,
     selectDevice,
@@ -249,6 +266,20 @@ export default function MultimodalComposer({
           disabled: false,
           onClick: startVoice,
         };
+      case "requesting_permission":
+        return {
+          icon: Loader2,
+          color: "text-white/60",
+          disabled: true,
+          onClick: undefined,
+        };
+      case "connecting":
+        return {
+          icon: Loader2,
+          color: "text-white/60",
+          disabled: true,
+          onClick: undefined,
+        };
       case "listening":
         return {
           icon: Mic,
@@ -256,33 +287,33 @@ export default function MultimodalComposer({
           disabled: false,
           onClick: stopVoice,
         };
-      case "transcribing":
+      case "user_speaking":
+        return {
+          icon: Mic,
+          color: "text-cyan-400",
+          disabled: false,
+          onClick: stopVoice,
+        };
+      case "processing":
         return {
           icon: Loader2,
           color: "text-cyan-400",
           disabled: true,
           onClick: undefined,
         };
-      case "thinking":
-        return {
-          icon: Loader2,
-          color: "text-cyan-400",
-          disabled: true,
-          onClick: undefined,
-        };
-      case "speaking":
+      case "assistant_speaking":
         return {
           icon: Square,
           color: "text-amber-400",
           disabled: false,
           onClick: interrupt,
         };
-      case "cooldown":
+      case "muted":
         return {
           icon: MicOff,
           color: "text-amber-400",
           disabled: false,
-          onClick: startVoice,
+          onClick: toggleMute,
         };
       case "error":
         return {
@@ -306,7 +337,7 @@ export default function MultimodalComposer({
 
   // Mic button styling with pulse effect for listening/speaking states
   const getMicButtonStyle = () => {
-    if (voiceState === "listening") {
+    if (voiceState === "listening" || voiceState === "user_speaking") {
       return {
         boxShadow: `0 0 0 ${2 + micLevel * 8}px rgba(34,211,238,${0.2 + micLevel * 0.4})`,
       };
@@ -315,7 +346,7 @@ export default function MultimodalComposer({
   };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/80 p-2.5 shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl">
+    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 pb-[calc(.625rem+env(safe-area-inset-bottom))] shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl sm:pb-2.5">
       {createMode && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
           <section role="dialog" aria-modal="true" aria-label={`Generate ${createMode}`} className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-[#090a12] shadow-[0_30px_120px_rgba(0,0,0,.8)]">
@@ -365,10 +396,14 @@ export default function MultimodalComposer({
               <>
                 <WaveformBars
                   level={micLevel}
-                  active={voiceState === "listening"}
+                  active={
+                    voiceState === "user_speaking" || voiceState === "listening"
+                  }
                 />
                 <span className="text-[11px] font-bold text-white/80">
-                  {STATUS_LABELS[voiceState]}
+                  {voiceMode === "recording" && voiceState === "listening"
+                    ? "Recording — tap Stop when finished"
+                    : STATUS_LABELS[voiceState]}
                 </span>
               </>
             ) : (
@@ -379,7 +414,7 @@ export default function MultimodalComposer({
           </div>
           {/* Right: controls */}
           <div className="flex items-center gap-1.5">
-            {voiceState === "speaking" && (
+            {voiceState === "assistant_speaking" && (
               <button
                 onClick={interrupt}
                 className="rounded-full border border-amber-400/40 px-2.5 py-1 text-[10px] font-bold text-amber-300 hover:bg-amber-400/10"
@@ -443,7 +478,7 @@ export default function MultimodalComposer({
       )}
 
       {showMicSetup && (
-        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16]/85 p-3 shadow-2xl">
+        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
           <div className="mb-2 flex items-center justify-between gap-3">
             <div>
               <strong className="block text-xs text-white">Microphone setup</strong>
@@ -479,7 +514,18 @@ export default function MultimodalComposer({
 
       {/* Add sheet */}
       {showAdd && (
-        <div className="mb-2 grid grid-cols-3 gap-2 rounded-2xl border border-white/10 bg-[#0a0b12]/85 p-2 shadow-[0_-18px_60px_rgba(0,0,0,.55)] sm:grid-cols-5">
+        <button aria-label="Close create menu" className="fixed inset-0 z-[10010] bg-black/60 md:hidden" onClick={() => setShowAdd(false)} />
+      )}
+      {showAdd && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Create and attach"
+          onTouchStart={(event) => { sheetTouchYRef.current = event.touches[0]?.clientY ?? null; }}
+          onTouchEnd={(event) => { const start = sheetTouchYRef.current; const end = event.changedTouches[0]?.clientY; if (start !== null && end !== undefined && end - start > 70) setShowAdd(false); sheetTouchYRef.current = null; }}
+          className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] left-3 right-3 z-[10020] grid max-h-[min(58dvh,480px)] grid-cols-3 gap-2 overflow-y-auto overscroll-contain rounded-[24px] border border-white/10 bg-[#0a0b12]/98 p-3 shadow-[0_-18px_60px_rgba(0,0,0,.7)] animate-in slide-in-from-bottom-4 sm:static sm:z-auto sm:mb-2 sm:max-h-none sm:grid-cols-5 sm:overflow-visible sm:rounded-2xl sm:p-2"
+        >
+          <div className="col-span-3 mx-auto mb-1 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
           {[
             { label: "Image", tool: "image" as StudioTool, icon: ImageIcon, color: "text-cyan-300" },
             { label: "Video", tool: "video" as StudioTool, icon: Clapperboard, color: "text-violet-300" },
@@ -501,7 +547,7 @@ export default function MultimodalComposer({
                 }
                 setShowAdd(false);
               }}
-              className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5"
+              className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
             >
               <item.icon size={16} className={item.color} /> {item.label}
             </button>
@@ -511,7 +557,7 @@ export default function MultimodalComposer({
               fileInputRef.current?.click();
               setShowAdd(false);
             }}
-            className="flex min-h-14 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5"
+            className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
           >
             <Paperclip size={16} className="text-cyan-300" /> Files
           </button>
@@ -579,8 +625,9 @@ export default function MultimodalComposer({
           <MicIcon
             size={16}
             className={
-              voiceState === "transcribing" ||
-              voiceState === "thinking"
+              voiceState === "requesting_permission" ||
+              voiceState === "connecting" ||
+              voiceState === "processing"
                 ? "animate-spin"
                 : ""
             }

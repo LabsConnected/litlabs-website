@@ -52,7 +52,11 @@ interface TerminalLine {
   timestamp: Date;
 }
 
-export default function CLIBridgeTool() {
+export default function CLIBridgeTool({
+  initialCommand = "",
+}: {
+  initialCommand?: string;
+}) {
   const { resolvedColors: T } = useTheme();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const [selectedTool, setSelectedTool] = useState(CLI_TOOLS[0]);
@@ -66,6 +70,12 @@ export default function CLIBridgeTool() {
   const eventSourceRef = useRef<EventSource | null>(null);
   const terminalRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (!initialCommand) return;
+    setSelectedTool(CLI_TOOLS[CLI_TOOLS.length - 1]);
+    setInput(initialCommand.replace(/^\//, ""));
+  }, [initialCommand]);
 
   // Auto-scroll terminal
   useEffect(() => {
@@ -254,12 +264,14 @@ export default function CLIBridgeTool() {
                 setSelectedTool(tool);
               }}
               className={`px-3 py-1.5 text-xs rounded-md transition-all ${
-                selectedTool.id === tool.id ? "font-bold" : ""
+                selectedTool.id === tool.id
+                  ? "font-bold"
+                  : "opacity-60 hover:opacity-100"
               }`}
               style={{
                 backgroundColor:
                   selectedTool.id === tool.id ? tool.color + "20" : T.boxBg,
-                color: selectedTool.id === tool.id ? tool.color : T.textMuted,
+                color: selectedTool.id === tool.id ? tool.color : T.textColor,
                 border: `1px solid ${selectedTool.id === tool.id ? tool.color : T.borderColor + "30"}`,
               }}
             >
@@ -285,7 +297,7 @@ export default function CLIBridgeTool() {
             <button
               onClick={disconnect}
               className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all"
-              style={{ backgroundColor: T.warning + "20", color: T.warning }}
+              style={{ backgroundColor: "#ff444420", color: "#ff4444" }}
             >
               <Square size={12} /> Disconnect
             </button>
@@ -314,7 +326,7 @@ export default function CLIBridgeTool() {
           )}
           <button
             onClick={clearTerminal}
-            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all"
+            className="flex items-center gap-1.5 px-3 py-1.5 text-xs rounded-md transition-all opacity-60 hover:opacity-100"
             style={{ backgroundColor: T.boxBg, color: T.textMuted }}
           >
             <Trash2 size={12} /> Clear
@@ -326,7 +338,7 @@ export default function CLIBridgeTool() {
       {error && (
         <div
           className="px-4 py-2 text-xs"
-          style={{ backgroundColor: T.warning + "20", color: T.warning }}
+          style={{ backgroundColor: "#ff444420", color: "#ff4444" }}
         >
           <AlertCircle size={12} className="inline mr-1" />
           {error}
@@ -343,10 +355,7 @@ export default function CLIBridgeTool() {
         }}
       >
         {lines.length === 0 ? (
-          <div
-            className="flex flex-col items-center justify-center h-full"
-            style={{ color: T.textMuted }}
-          >
+          <div className="flex flex-col items-center justify-center h-full opacity-40">
             <Terminal size={32} className="mb-2" />
             <p className="text-xs">
               Click Connect to start {selectedTool.name}

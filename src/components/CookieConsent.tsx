@@ -1,16 +1,15 @@
 "use client";
 
-import Link from "next/link";
 import { useState, useEffect } from "react";
+import { useTheme } from "@/context/ThemeContext";
 
 export default function CookieConsent() {
-  const [visible, setVisible] = useState(false);
+  const { resolvedColors: T } = useTheme();
+  const [visible, setVisible] = useState(() => {
+    if (typeof window === "undefined") return false;
+    return !localStorage.getItem("cookie-consent");
+  });
   const [animateIn, setAnimateIn] = useState(false);
-
-  useEffect(() => {
-    const consented = localStorage.getItem("cookie-consent");
-    if (!consented) setVisible(true);
-  }, []);
 
   useEffect(() => {
     if (visible) {
@@ -53,16 +52,16 @@ export default function CookieConsent() {
 
   return (
     <div
-      className="fixed top-4 left-4 right-4 md:top-auto md:bottom-4 md:left-auto md:right-6 md:w-[420px] z-120 border-2 p-4 transition-all duration-300"
+      className="fixed top-4 left-4 right-4 md:top-auto md:bottom-4 md:left-auto md:right-6 md:w-[420px] z-[10000] border-2 p-4 transition-all duration-300"
       style={{
-        borderColor: "#ff00ff",
-        backgroundColor: "#1a0a2e",
-        color: "#00ff41",
+        borderColor: T.accentColor,
+        backgroundColor: T.boxBg,
+        color: T.textColor,
         fontFamily: "monospace",
         fontSize: "11px",
         transform: animateIn ? "translateY(0)" : "translateY(20px)",
         opacity: animateIn ? 1 : 0,
-        boxShadow: "0 0 20px rgba(255, 0, 255, 0.3)",
+        boxShadow: `0 0 24px ${T.accentColor}35`,
       }}
     >
       <div className="flex items-start gap-3">
@@ -70,7 +69,7 @@ export default function CookieConsent() {
         <div className="flex-1">
           <div
             className="font-bold uppercase tracking-wider mb-1"
-            style={{ color: "#00ffff" }}
+            style={{ color: T.headerColor }}
           >
             Neural Cookie Protocol
           </div>
@@ -84,9 +83,9 @@ export default function CookieConsent() {
               onClick={acceptAll}
               className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform"
               style={{
-                borderColor: "#00ff41",
-                color: "#000",
-                backgroundColor: "#00ff41",
+                borderColor: T.accentColor,
+                color: T.bgColor,
+                backgroundColor: T.accentColor,
               }}
             >
               ✓ ACCEPT ALL
@@ -95,25 +94,25 @@ export default function CookieConsent() {
               onClick={acceptEssential}
               className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform"
               style={{
-                borderColor: "#ff0080",
-                color: "#ff0080",
+                borderColor: T.borderColor,
+                color: T.textColor,
                 backgroundColor: "transparent",
               }}
             >
               ESSENTIAL ONLY
             </button>
-            <Link
+            <a
               href="/cookies"
               className="px-3 py-1.5 text-[10px] font-bold border-2 hover:scale-105 transition-transform inline-block"
               style={{
-                borderColor: "#ff00ff",
-                color: "#ff00ff",
+                borderColor: T.borderColor,
+                color: T.linkColor,
                 backgroundColor: "transparent",
                 textDecoration: "none",
               }}
             >
               DETAILS
-            </Link>
+            </a>
           </div>
         </div>
       </div>

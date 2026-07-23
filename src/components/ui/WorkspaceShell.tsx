@@ -20,7 +20,7 @@ export function WorkspaceShell({
 
   return (
     <div
-      className={cn("flex min-h-dvh", className)}
+      className={cn("flex min-h-screen", className)}
       style={{ backgroundColor: tokens.background, color: tokens.text }}
     >
       <main className="min-w-0 flex-1 overflow-y-auto p-3 sm:p-4 lg:p-6">

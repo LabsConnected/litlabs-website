@@ -2,17 +2,15 @@
 
 import { useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { useTheme } from "@/context/ThemeContext";
 
 export default function StudioImagePage() {
-  const { resolvedColors: T } = useTheme();
   const router = useRouter();
   useEffect(() => {
-    router.replace("/studio");
+    router.replace("/studio?tool=image");
   }, [router]);
   return (
-    <div className="min-h-dvh bg-[#050505] flex items-center justify-center">
-      <div className="animate-pulse text-sm" style={{ color: T.accentColor }}>
+    <div className="min-h-screen bg-[#050505] flex items-center justify-center">
+      <div className="text-orange-500 animate-pulse text-sm">
         Redirecting to Studio…
       </div>
     </div>

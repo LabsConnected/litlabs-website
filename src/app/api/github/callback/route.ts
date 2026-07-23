@@ -1,6 +1,9 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
+import { verifyInstallState } from "@/lib/github-install-state";
+
+const REDIRECT_BASE = "/studio/github";
 
 export async function GET(request: NextRequest) {
   const { userId } = await auth();
@@ -13,18 +16,36 @@ export async function GET(request: NextRequest) {
   const setupAction = searchParams.get("setup_action");
   const state = searchParams.get("state");
 
-  // In production, validate the state parameter against the user session to
-  // prevent cross-site installation attacks.
   if (!installationId) {
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/studio/github?error=missing_installation`,
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=missing_installation`,
     );
   }
 
   const id = parseInt(installationId, 10);
   if (Number.isNaN(id)) {
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/studio/github?error=invalid_installation`,
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=invalid_installation`,
+    );
+  }
+
+  // Verify the signed state token to prevent cross-site installation attacks.
+  if (!state) {
+    return NextResponse.redirect(
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=missing_state`,
+    );
+  }
+
+  const stateUserId = verifyInstallState(state);
+  if (!stateUserId) {
+    return NextResponse.redirect(
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=invalid_or_expired_state`,
+    );
+  }
+
+  if (stateUserId !== userId) {
+    return NextResponse.redirect(
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=state_user_mismatch`,
     );
   }
 
@@ -36,7 +57,6 @@ export async function GET(request: NextRequest) {
         user_id: userId,
         installation_id: id,
         setup_action: setupAction || null,
-        state: state || null,
         updated_at: new Date().toISOString(),
       },
       { onConflict: "user_id,installation_id" },
@@ -45,11 +65,11 @@ export async function GET(request: NextRequest) {
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database error";
     return NextResponse.redirect(
-      `${request.nextUrl.origin}/studio/github?error=${encodeURIComponent(message)}`,
+      `${request.nextUrl.origin}${REDIRECT_BASE}?error=${encodeURIComponent(message)}`,
     );
   }
 
   return NextResponse.redirect(
-    `${request.nextUrl.origin}/studio/github?installed=${id}`,
+    `${request.nextUrl.origin}${REDIRECT_BASE}?installed=${id}`,
   );
 }

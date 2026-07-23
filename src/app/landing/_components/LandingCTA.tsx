@@ -3,10 +3,10 @@ import { ArrowRight, Rocket, Sparkles } from "lucide-react";
 
 export function LandingCTA() {
   return (
-    <section className="relative z-10 px-4 py-16 md:py-32">
+    <section className="relative z-10 px-4 py-24 md:py-32">
       <div className="mx-auto max-w-5xl">
         <div
-          className="relative overflow-hidden rounded-3xl border border-purple-500/20 px-4 py-12 text-center sm:px-8 sm:py-16 md:px-16 md:py-20"
+          className="relative overflow-hidden rounded-3xl border border-purple-500/20 px-8 py-16 text-center md:px-16 md:py-20"
           style={{
             background:
               "linear-gradient(145deg, rgba(168,85,247,0.08), rgba(48,231,255,0.04) 50%, transparent), rgba(10,10,20,0.95)",
@@ -47,7 +47,7 @@ export function LandingCTA() {
             <p className="mb-2 text-lg font-semibold text-neutral-400">
               Your project already has the files.
             </p>
-            <h2 className="mb-5 text-3xl font-black leading-[1.06] tracking-tight text-white sm:text-4xl md:text-6xl">
+            <h2 className="mb-5 text-4xl font-black leading-[1.06] tracking-tight text-white md:text-6xl">
               Now give it a{" "}
               <span
                 className="bg-clip-text text-transparent"
@@ -68,7 +68,7 @@ export function LandingCTA() {
             <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
               <Link
                 href="/sign-up"
-                className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl bg-white px-5 py-4 text-sm font-black text-black shadow-[0_0_50px_rgba(255,255,255,0.25)] transition hover:scale-[1.02] hover:shadow-[0_0_70px_rgba(255,255,255,0.4)] sm:w-auto sm:px-8"
+                className="group inline-flex items-center gap-2.5 rounded-2xl bg-white px-8 py-4 text-sm font-black text-black shadow-[0_0_50px_rgba(255,255,255,0.25)] transition hover:scale-[1.02] hover:shadow-[0_0_70px_rgba(255,255,255,0.4)]"
               >
                 <Rocket size={15} />
                 Launch Studio free
@@ -79,7 +79,7 @@ export function LandingCTA() {
               </Link>
               <Link
                 href="/studio"
-                className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-5 py-4 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/25 hover:bg-white/8 sm:w-auto sm:px-8"
+                className="inline-flex items-center gap-2 rounded-2xl border border-white/15 bg-white/5 px-8 py-4 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/25 hover:bg-white/8"
               >
                 Explore the product
               </Link>

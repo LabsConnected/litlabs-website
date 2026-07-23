@@ -53,7 +53,7 @@ async function getHandler() {
             id: clerkId,
             clerk_id: clerkId,
             email: "",
-            name: "Creator",
+            name: "Member",
             username: null,
             avatar_url: null,
             cover_url: null,

@@ -4,33 +4,29 @@
 
 [ENVIRONMENT]
 - PLATFORM: Windows 11 (native, NOT WSL2).
-- WORKSPACE_ROOT: C:\Users\litbi\CascadeProjects\litlab
-- SHELL: cmd.exe (use Windows-style commands; do NOT invent Linux paths or tools).
+- WORKSPACE_ROOT: C:\Users\litbi\CascadeProjects\litlabs\reference-repo
+- SHELL: PowerShell 7 / Windows PowerShell. VS Code's workspace default is PowerShell.
+- START_DIRECTORY: Always verify `Get-Location` is exactly
+  `C:\Users\litbi\CascadeProjects\litlabs\reference-repo` before running project commands.
 - RUNTIME: Next.js 16 (Turbopack Engine) | React 19 | Tailwind v4 | pnpm 9.15+
 - NODE: 22+ (verified: v22.22.3, pnpm 9.15.9)
 
 [PROJECT_TRUTH]
 - This is a multi-agent AI app: LiTTree Lab Studios.
 - Real subsystems (all verified to exist on disk):
-    src/lib/llm.ts              — LLM provider routing and failover
-    src/lib/llm-completion.ts   — LLM completion helpers
-    src/lib/llm-executor.ts     — LLM execution layer
-    src/lib/agents.ts           — agent orchestration (AGENTS registry, orchestrator singleton)
-    src/lib/litt.ts             — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias kept for compatibility)
-    src/lib/litt-context.ts     — LiTT brain / prompt builder / action helpers
-    src/lib/agent-worker.ts     — task worker logic (used by daemon.ts)
-    src/lib/daemon.ts           — persistent worker entrypoint (autonomic loop)
+    src/lib/litt.ts            — LiTT notification dispatcher (exports the legacy `jarvis` singleton for compatibility)
+    src/lib/litt-context.ts    — LiTT brain / prompt builder / action helpers
+    src/lib/AgentOrchestrator.ts — orchestration matrix
     src/lib/agent-logger.ts, agent-profiles.ts, agent-tools.ts,
-    agent-validation.ts, agentCommands.ts, agent-user.ts
+    agent-validation.ts, agent-worker.ts, agentCommands.ts, agent-user.ts
     src/lib/director-graph.ts   — director agent graph
     src/lib/supabase.ts, supabase-admin.ts, supabase-client.ts
+    src/lib/llm.ts, llm-completion.ts, llm-executor.ts
     src/lib/auth.ts, jwt.ts
     src/lib/r2.ts               — Cloudflare R2 storage
     src/lib/usage.ts            — usage telemetry
-    src/lib/studio-projects.ts  — local studio project storage
-    src/app/studio/components/LITTTerminalShell.tsx — Builder shell (Studio UI)
-- There is NO src/lib/jarvis.ts. Code is branded as LiTT; the `jarvis` export is only a backward-compat alias from `src/lib/litt.ts`.
-- There is NO src/lib/AgentOrchestrator.ts. That file was deleted; the active orchestrator lives in `src/lib/agents.ts`.
+    src/lib/TaskRepository.ts   — task persistence
+- There is NO src/lib/jarvis.ts. The `jarvis` export is defined in `src/lib/litt.ts` for compatibility.
 - Repository (git remote): https://github.com/LabsConnected/litlabs-website
 - Branch: main
 - Deployed on Vercel. Self-host via Dockerfile or docker-compose.yml.
@@ -49,6 +45,16 @@
 8. `lucide-react` is pinned to `^1.24.0` (very old, pre-rename). Many modern icons are
    unavailable — prefer inline SVG (see `src/components/dashboard/AutonomicLoopBanner.tsx`) or
    `src/components/dashboard/AutonomicLoopBanner.tsx` for the pattern.
+9. Use PowerShell syntax only. Never use `head`, `tail`, `grep`, `findstr`, `if exist`, `2>nul`,
+   `%ERRORLEVEL%`, `&&`, or Unix shell redirection. Do not mix cmd.exe, bash, and PowerShell.
+10. Do not run `cd C:\Users\litbi\CascadeProjects\litlab`; that is a different sibling checkout.
+    If the current directory is wrong, use
+    `Set-Location -LiteralPath 'C:\Users\litbi\CascadeProjects\litlabs\reference-repo'`.
+11. Before editing, read the exact current file region. Use Cline's native file-edit tool with a
+    complete valid edit block. If an edit fails, re-read the file before retrying; never guess at
+    stale context.
+12. If a follow-up-question tool errors, continue with the safest reasonable interpretation when
+    the user already authorized the task. Do not loop on the broken question tool.
 
 [COMMANDS]
 - Dev server: `pnpm dev` (Turbopack on :3000) or `pnpm dev:webpack` as a fallback.
@@ -58,14 +64,24 @@
 - Type-check: `npx tsc --noEmit`
 - Terminal server: `pnpm terminal:dev` (separate process on its own port).
 
+[POWERSHELL_PATTERNS]
+- Show first lines: `Get-Content -LiteralPath <path> | Select-Object -First 80`
+- Show last lines: `Get-Content -LiteralPath <path> -Tail 80`
+- Search text: `rg -n '<pattern>' <path>`
+- Check a path: `Test-Path -LiteralPath <path>`
+- Remove a temporary file: `Remove-Item -LiteralPath <path> -ErrorAction SilentlyContinue`
+- Capture output and exit code: run the command normally; use `$LASTEXITCODE` only if needed.
+- Run commands sequentially as separate tool calls. Do not chain unrelated commands.
+- Prefer project binaries when launchers are broken: `.\node_modules\.bin\tsc.cmd --noEmit` and
+  `.\node_modules\.bin\eslint.cmd <paths>`.
+
 [QUIRKS]
 - `cleanDistDir: false` in next.config.ts to avoid Windows EPERM errors on `.next/` cleanup.
 - `serverExternalPackages: ["jose"]` to fix the middleware NFT build error.
 - Turbopack `root: __dirname` suppresses a lockfile-detection warning on Windows.
 - `ignore-scripts=true` in `.npmrc` — postinstall scripts are skipped; install native deps manually.
-- Supabase migrations live in `supabase/migrations/`. `supabase/schema.sql` is currently a
-  legacy hand-paste file (not yet regenerated by `supabase db pull`); do not treat it as
-  authoritative schema ground truth.
+- Supabase migrations live in `supabase/migrations/`; never write to `supabase/schema.sql`
+  directly — it is regenerated by `supabase db pull`.
 - Route groups: `(auth)` is a non-URL segment.
 - `tsconfig.json` has `strict: true` — type errors are real. Always run `npx tsc --noEmit`
   before claiming a change is "done".

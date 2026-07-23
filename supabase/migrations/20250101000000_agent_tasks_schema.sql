@@ -70,12 +70,10 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
-DROP TRIGGER IF EXISTS update_agent_tasks_updated_at ON public.agent_tasks;
 CREATE TRIGGER update_agent_tasks_updated_at
   BEFORE UPDATE ON public.agent_tasks
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
-DROP TRIGGER IF EXISTS update_agents_updated_at ON public.agents;
 CREATE TRIGGER update_agents_updated_at
   BEFORE UPDATE ON public.agents
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();

@@ -1,12 +1,7 @@
 import { Supermemory } from "supermemory";
-import { generateText, streamText, type LLMProvider } from "@/lib/llm";
+import { generateText, type LLMProvider } from "@/lib/llm";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
-import { withRateLimit } from "@/lib/rate-limiter";
-import { sanitizeProviderError } from "@/lib/provider-error";
-
-export const runtime = "nodejs";
-export const maxDuration = 60;
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -26,24 +21,12 @@ const MODELS: Record<string, string> = {
   "qwen-coder": "openrouter-qwen",
 };
 
-function sseHeaders() {
-  return {
-    "Content-Type": "text/event-stream",
-    "Cache-Control": "no-cache, no-transform",
-    Connection: "keep-alive",
-  } as const;
-}
-
-function sseEncode(encoder: TextEncoder, data: unknown) {
-  return encoder.encode(`data: ${JSON.stringify(data)}\n\n`);
-}
-
-async function handler(req: NextRequest) {
+export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
     const uid = userId || "anonymous";
 
-    const { messages, model = "gemini-flash", stream = false } = await req.json();
+    const { messages, model = "gemini-flash" } = await req.json();
     if (!messages || !messages.length) {
       return NextResponse.json({ error: "Messages required" }, { status: 400 });
     }
@@ -79,57 +62,13 @@ Be direct, professional, and code-focused.`;
 
     const selectedProvider = (MODELS[model] || "gemini") as LLMProvider;
 
-    // ---- Streaming path (faster perceived time-to-first-token) ----
-    if (stream) {
-      const encoder = new TextEncoder();
-      const sse = new ReadableStream({
-        async start(controller) {
-          let fullText = "";
-          try {
-            const r = await streamText(
-              lastMessage,
-              (chunk) => {
-                fullText += chunk;
-                controller.enqueue(sseEncode(encoder, { text: chunk }));
-              },
-              { task: "code", provider: selectedProvider, maxTokens: 4096 },
-              systemPrompt,
-            );
-            controller.enqueue(
-              sseEncode(encoder, {
-                done: true,
-                provider: r.provider,
-                model: r.model,
-                latencyMs: r.latencyMs,
-              }),
-            );
-            controller.enqueue(encoder.encode("data: [DONE]\n\n"));
-            // Persist to memory in the background
-            if (sm && fullText) {
-              sm.add({
-                content: `User: ${lastMessage}\nAssistant: ${fullText}`,
-                containerTag: uid,
-                metadata: { type: "canvas-build", model },
-              }).catch(() => { });
-            }
-          } catch (err) {
-            const { error: msg } = sanitizeProviderError(err);
-            controller.enqueue(sseEncode(encoder, { error: msg }));
-          } finally {
-            controller.close();
-          }
-        },
-      });
-      return new Response(sse, { headers: sseHeaders() });
-    }
-
-    // ---- Non-streaming path (back-compat) ----
     const result = await generateText(
       lastMessage,
       { task: "code", provider: selectedProvider, maxTokens: 4096 },
       systemPrompt,
     );
 
+    // Async save to memory
     if (sm) {
       sm.add({
         content: `User: ${lastMessage}\nAssistant: ${result.text}`,
@@ -145,13 +84,7 @@ Be direct, professional, and code-focused.`;
     });
   } catch (error: unknown) {
     console.error("[ai-chat] Error:", error);
-    const { status, error: errorMessage, retryAfter } =
-      sanitizeProviderError(error);
-    return NextResponse.json(
-      { error: errorMessage, retryAfter },
-      { status },
-    );
+    const message = error instanceof Error ? error.message : "Chat failed";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-
-export const POST = withRateLimit(handler, 30, 60);

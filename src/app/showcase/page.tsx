@@ -147,7 +147,7 @@ function ShowcasePageInner() {
 
       {/* ── TAB: PROJECT IMAGES ── */}
       {activeTab === "images" && (
-        <div className="w-full px-4 py-8 sm:px-6 sm:py-12">
+        <div className="w-full px-6 py-12">
           <div className="grid md:grid-cols-2 gap-8">
             {showcaseImages.map((img, i) => (
               <div
@@ -287,7 +287,7 @@ function ShowcasePageInner() {
 
       {/* ── TAB: ARCHITECTURE MAP ── */}
       {activeTab === "architecture" && (
-        <div className="w-full px-4 py-8 sm:px-6 sm:py-12">
+        <div className="w-full px-6 py-12">
           <div className="card">
             <div className="card-header">
               <div className="card-title">
@@ -597,7 +597,7 @@ function ShowcasePageInner() {
 
       {/* ── TAB: CASE STUDY ── */}
       {activeTab === "case-study" && (
-        <div className="w-full px-4 py-8 sm:px-6 sm:py-12">
+        <div className="w-full px-6 py-12">
           <div className="card">
             <div className="card-header">
               <div className="card-title">
@@ -870,7 +870,7 @@ function ShowcasePageInner() {
       )}
 
       {/* Back nav */}
-      <div className="w-full px-4 pb-8 sm:px-6 sm:pb-12">
+      <div className="w-full px-6 pb-12">
         <Link href="/" className="btn btn-ghost text-xs">
           ← Back to Studio
         </Link>

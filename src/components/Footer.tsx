@@ -45,8 +45,9 @@ export default function Footer() {
           className="mb-8 rounded-3xl border p-5 sm:p-6 flex flex-col sm:flex-row sm:items-center sm:justify-between gap-4"
           style={{
             background:
-              "linear-gradient(135deg, rgba(99,102,241,0.10), rgba(56,189,248,0.06))",
+              "radial-gradient(circle at 88% 20%, rgba(255,126,62,.12), transparent 34%), linear-gradient(135deg, rgba(28,190,255,.10), rgba(169,112,255,.13))",
             borderColor: `${C.borderColor}25`,
+            boxShadow: "0 24px 70px rgba(0,0,0,.26), inset 0 1px rgba(255,255,255,.045)",
           }}
         >
           <div>
@@ -166,7 +167,7 @@ export default function Footer() {
               className="text-sm font-black"
               style={{ color: C.headerColor }}
             >
-              LiTTree LabStudios
+              LiTTree-LabStudios
             </span>
             <span className="text-xs opacity-60">© 2026</span>
           </div>

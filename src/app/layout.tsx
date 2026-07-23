@@ -28,12 +28,10 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  viewportFit: "cover",
-  interactiveWidget: "resizes-content",
-  themeColor: "#0d0a05",
+  themeColor: "#03050b",
 };
 
-const META_TITLE = "LiTTree LabStudios — AI Agents for Creators";
+const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
 const META_DESC =
   "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
 
@@ -41,7 +39,7 @@ export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
   title: {
     default: META_TITLE,
-    template: "%s | LiTTree LabStudios",
+    template: "%s | LiTTree-LabStudios",
   },
   description: META_DESC,
   keywords: [
@@ -54,14 +52,14 @@ export const metadata: Metadata = {
     "automation",
     "artificial intelligence",
     "NoCode",
-    "LiTTree LabStudios",
+    "LiTTree-LabStudios",
     "LiTLabs",
     "litlabs.net",
     "AI platform",
   ],
-  authors: [{ name: "LiTTree LabStudios", url: SITE_URL }],
-  creator: "LiTTree LabStudios",
-  publisher: "LiTTree LabStudios",
+  authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
+  creator: "LiTTree-LabStudios",
+  publisher: "LiTTree-LabStudios",
   robots: {
     index: true,
     follow: true,
@@ -71,7 +69,7 @@ export const metadata: Metadata = {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree LabStudios",
+    siteName: "LiTTree-LabStudios",
     title: META_TITLE,
     description: META_DESC,
     images: [
@@ -144,7 +142,7 @@ export default function RootLayout({
       <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
-        style={{ backgroundColor: "#0d0a05" }}
+        style={{ backgroundColor: "#03050b" }}
       >
         {hasClerk ? (
           <ClerkProvider
@@ -159,31 +157,31 @@ export default function RootLayout({
             }
             appearance={{
               variables: {
-                colorPrimary: "#fbbf24",
-                colorBackground: "#0a0a0f",
-                colorText: "#f5e6c8",
-                colorTextSecondary: "#a8916b",
+                colorPrimary: "#a970ff",
+                colorBackground: "#060914",
+                colorText: "#eef4ff",
+                colorTextSecondary: "#9ba7c7",
                 colorDanger: "#ef4444",
                 colorSuccess: "#22c55e",
                 borderRadius: "8px",
               },
               elements: {
                 card: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
-                  boxShadow: "0 4px 20px rgba(251,191,36,0.1)",
+                  backgroundColor: "#090d1b",
+                  border: "1px solid #29345e",
+                  boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(169,112,255,.12)",
                 },
                 userButtonPopoverCard: {
-                  backgroundColor: "#1a1510",
-                  border: "1px solid #3d3220",
+                  backgroundColor: "#090d1b",
+                  border: "1px solid #29345e",
                 },
                 userButtonPopoverActionButton: {
                   "&:hover": {
-                    backgroundColor: "rgba(251,191,36,0.1)",
+                    backgroundColor: "rgba(169,112,255,0.12)",
                   },
                 },
                 badge: {
-                  backgroundColor: "#f59e0b",
+                  backgroundColor: "#a970ff",
                 },
               },
             }}

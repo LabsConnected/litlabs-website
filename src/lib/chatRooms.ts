@@ -12,7 +12,7 @@ export const CHAT_ROOMS: ChatRoom[] = [
     label: "Studio HQ",
     modelId: "adaptive",
     description: "The default command room for planning, execution, and orchestration.",
-    members: ["LiTT", "Director", "Studio"],
+    members: ["LiTT", "Studio"],
   },
   {
     id: "terminal-ops",

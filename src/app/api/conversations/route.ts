@@ -77,28 +77,13 @@ async function postHandler(req: NextRequest) {
       return NextResponse.json({ error: "Missing agentId" }, { status: 400 });
     }
 
-    // Verify user owns and has this agent installed (user_agents has is_active column)
-    const { data: ownership, error: ownershipError } = await supabaseAdmin
+    // Verify user owns this agent
+    await supabaseAdmin
       .from("user_agents")
       .select("id")
       .eq("user_id", dbUserId)
       .eq("agent_id", agentId)
-      .eq("is_active", true)
-      .maybeSingle();
-
-    if (ownershipError) {
-      return NextResponse.json(
-        { error: "Failed to verify agent ownership" },
-        { status: 500 },
-      );
-    }
-
-    if (!ownership) {
-      return NextResponse.json(
-        { error: "Agent not installed. Install it before starting a conversation." },
-        { status: 403 },
-      );
-    }
+      .single();
 
     // Get agent info for title
     const { data: agent } = await supabaseAdmin

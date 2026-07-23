@@ -133,7 +133,7 @@ export default function DashboardWidgets({
               {displayName}
             </div>
             <div className="text-[10px] uppercase tracking-wider" style={{ color: T.textMuted }}>
-              Member
+              Creator
             </div>
           </div>
           <div className="flex items-center gap-1 text-xs font-bold shrink-0" style={{ color: T.accentColor }}>

@@ -19,12 +19,12 @@ interface PromptComposerProps {
   placeholder?: string;
 }
 
-export default function PromptComposer({ 
-  value, 
-  onChange, 
-  onGenerate, 
+export default function PromptComposer({
+  value,
+  onChange,
+  onGenerate,
   onSave,
-  placeholder = "Describe what you want to create..."
+  placeholder = "Describe what you want to create...",
 }: PromptComposerProps) {
   const { resolvedColors: T } = useTheme();
   const [history, setHistory] = useState<PromptHistory[]>(() => {
@@ -74,7 +74,7 @@ export default function PromptComposer({
   };
 
   const deleteFromHistory = (id: string) => {
-    setHistory(history.filter(h => h.id !== id));
+    setHistory(history.filter((h) => h.id !== id));
   };
 
   const copyToClipboard = (text: string) => {
@@ -102,16 +102,20 @@ export default function PromptComposer({
             }
           }}
         />
-        
+
         <div className="flex items-center justify-between mt-2">
           <div className="flex items-center gap-2">
             <button
               onClick={() => setShowHistory(!showHistory)}
               className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-bold transition-all hover:scale-105"
               style={{
-                backgroundColor: showHistory ? T.accentColor + "15" : T.boxBg + "40",
+                backgroundColor: showHistory
+                  ? T.accentColor + "15"
+                  : T.boxBg + "40",
                 color: showHistory ? T.accentColor : T.textMuted,
-                border: showHistory ? "1px solid " + T.accentColor + "30" : "1px solid " + T.borderColor + "30",
+                border: showHistory
+                  ? "1px solid " + T.accentColor + "30"
+                  : "1px solid " + T.borderColor + "30",
               }}
             >
               <History size={12} />
@@ -131,7 +135,7 @@ export default function PromptComposer({
               {isEnhancing ? "Enhancing..." : "Enhance"}
             </button>
           </div>
-          
+
           <div className="flex items-center gap-2">
             <button
               onClick={() => copyToClipboard(value)}
@@ -168,15 +172,27 @@ export default function PromptComposer({
       {showHistory && (
         <div
           className="rounded-xl border p-3"
-          style={{ backgroundColor: T.boxBg + "60", borderColor: T.borderColor + "30" }}
+          style={{
+            backgroundColor: T.boxBg + "60",
+            borderColor: T.borderColor + "30",
+          }}
         >
-          <div className="text-[10px] font-bold uppercase tracking-widest mb-2" style={{ color: T.textMuted }}>
+          <div
+            className="text-[10px] font-bold uppercase tracking-widest mb-2"
+            style={{ color: T.textMuted }}
+          >
             Recent Prompts
           </div>
           {history.length === 0 ? (
             <div className="text-center py-4">
-              <History size={20} className="mx-auto mb-2" style={{ color: T.textMuted }} />
-              <p className="text-xs" style={{ color: T.textMuted }}>No history yet</p>
+              <History
+                size={20}
+                className="mx-auto mb-2"
+                style={{ color: T.textMuted }}
+              />
+              <p className="text-xs" style={{ color: T.textMuted }}>
+                No history yet
+              </p>
             </div>
           ) : (
             <div className="space-y-2 max-h-48 overflow-y-auto">

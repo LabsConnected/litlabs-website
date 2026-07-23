@@ -16,12 +16,16 @@ const SHOW_BACKGROUND_PATHS = [
   "/agents",
   "/gallery",
   "/library",
-  "/studio",
-  "/games",
+  "/projects",
+  "/creator",
   "/social",
+  "/deployments",
+  "/wallet",
+  "/showcase",
+  "/order",
 ];
 
-const HIDE_BACKGROUND_PATHS = ["/admin/terminal", "/code"];
+const HIDE_BACKGROUND_PATHS = ["/studio", "/admin/terminal", "/code", "/games"];
 
 export default function AnimatedBackgroundWrapper() {
   const pathname = usePathname();

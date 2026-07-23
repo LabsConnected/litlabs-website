@@ -17,8 +17,13 @@ const HIDE_PATHS = [
   "/settings",
   "/profile",
   "/wallet",
+  "/creator",
   "/memories",
   "/library",
+  "/litt-terminal",
+  "/litt",
+  "/builder",
+  "/code",
   "/social",
 ];
 

@@ -3,7 +3,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { getCoreAgents } from "@/lib/core-agents";
 
 async function getHandler(req: NextRequest) {
   try {
@@ -41,25 +40,14 @@ async function getHandler(req: NextRequest) {
     const { data: rows, error } = await query;
 
     if (error) {
-      // The agents table may not exist in fresh environments. Fall back to
-      // built-in core agents so the banner and marketplace never appear down.
-      console.warn("[api/agents] Supabase query failed, using core fallback:", error.message);
-      return NextResponse.json({
-        agents: getCoreAgents(),
-        total: getCoreAgents().length,
-        categories: [...new Set(getCoreAgents().map((a) => a.role ?? "general"))],
-        timestamp: new Date().toISOString(),
-        warning: "Agents table not initialized; core fallback used",
-      });
+      // Supabase error:
+      return NextResponse.json(
+        { error: "Failed to fetch agents" },
+        { status: 500 },
+      );
     }
 
-    const dbRows = rows || [];
-    // If no core agents exist in the database yet, serve the built-in core
-    // agents so the marketplace is never empty.
-    const fallbackRows = dbRows.length === 0 ? getCoreAgents() : [];
-    const combinedRows = [...dbRows, ...fallbackRows];
-
-    const agents = combinedRows.map((a) => ({
+    const agents = (rows || []).map((a) => ({
       id: a.id,
       slug: a.slug,
       name: a.display_name,
@@ -84,18 +72,12 @@ async function getHandler(req: NextRequest) {
       categories: [...new Set(agents.map((a) => a.category))],
       timestamp: new Date().toISOString(),
     });
-  } catch (err: unknown) {
-    // Supabase not configured / table missing / proxy stub throws before the query completes.
-    // Return built-in core agents so the banner and marketplace never appear down.
-    console.warn("[api/agents] Unhandled error, using core fallback:", err);
-    const fallback = getCoreAgents();
-    return NextResponse.json({
-      agents: fallback,
-      total: fallback.length,
-      categories: [...new Set(fallback.map((a) => a.role ?? "general"))],
-      timestamp: new Date().toISOString(),
-      warning: "Agents table not initialized or Supabase unavailable; core fallback used",
-    });
+  } catch {
+    // Error fetching agents:
+    return NextResponse.json(
+      { error: "Failed to fetch agents" },
+      { status: 500 },
+    );
   }
 }
 

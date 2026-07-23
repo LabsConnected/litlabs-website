@@ -8,6 +8,18 @@ export interface AgentAvatarMeta {
 }
 
 export const AGENT_AVATAR_META: Record<string, AgentAvatarMeta> = {
+  litt: {
+    emoji: "✨",
+    initials: "LT",
+    color: "#67e8f9",
+    bg: "rgba(103,232,249,0.12)",
+  },
+  spark: {
+    emoji: "⚡",
+    initials: "SP",
+    color: "#a970ff",
+    bg: "rgba(169,112,255,0.12)",
+  },
   director: {
     emoji: "🎯",
     initials: "D",

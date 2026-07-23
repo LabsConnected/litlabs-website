@@ -1,25 +1,23 @@
-"use client";
-
 import { SignUp } from "@clerk/nextjs";
 import Link from "next/link";
 
 export default function SignUpPage() {
   return (
     <div
-      className="min-h-dvh flex items-center justify-center px-4"
+      className="min-h-screen flex items-center justify-center px-4"
       style={{ backgroundColor: "#0f0f14" }}
     >
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <div className="text-3xl mb-3">🚀</div>
+          <div className="text-3xl mb-3">🌳</div>
           <h1
             className="text-xl font-black tracking-tight mb-1"
             style={{ color: "#e2e8f0" }}
           >
-            LiTTree-LabStudios
+            Create your free LiTTree
           </h1>
           <p className="text-xs opacity-50" style={{ color: "#94a3b8" }}>
-            Create your account to start building with AI agents
+            Start with 500 credits. No credit card required.
           </p>
         </div>
 
@@ -28,7 +26,7 @@ export default function SignUpPage() {
           style={{ backgroundColor: "#1a1a24", border: "1px solid #2a2a3a" }}
         >
           <SignUp
-            fallbackRedirectUrl="/studio"
+            fallbackRedirectUrl="/"
             signInUrl="/sign-in"
             appearance={{
               elements: {

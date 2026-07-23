@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { sanitizeProviderError } from "@/lib/provider-error";
 import {
   MEDIA_PROVIDERS,
   MediaFormat,
@@ -216,13 +215,13 @@ async function handleHuggingFaceVideo(
 
   const body: Record<string, unknown> = referenceUrl
     ? {
-      inputs: referenceUrl,
-      options: { wait_for_model: true, use_cache: false },
-    }
+        inputs: referenceUrl,
+        options: { wait_for_model: true, use_cache: false },
+      }
     : {
-      inputs: prompt.trim(),
-      options: { wait_for_model: true, use_cache: false },
-    };
+        inputs: prompt.trim(),
+        options: { wait_for_model: true, use_cache: false },
+      };
 
   const res = await fetch(modelUrl, {
     method: "POST",
@@ -546,11 +545,9 @@ async function handler(req: NextRequest) {
       );
     }
   } catch (err) {
-    console.error("[api/media/generate] provider error:", err);
-    const { status, error: message, retryAfter } = sanitizeProviderError(err);
     return NextResponse.json(
-      { error: message, retryAfter },
-      { status },
+      { error: err instanceof Error ? err.message : "Provider error" },
+      { status: 502 },
     );
   }
 
@@ -578,7 +575,7 @@ async function handler(req: NextRequest) {
   });
 }
 
-export const POST = withRateLimit(handler, 10, 60);
+export const POST = withRateLimit(handler, 60, 60); // generous for free + paid
 
 // GET = list providers (handy for /flow UI and agents)
 export async function GET() {

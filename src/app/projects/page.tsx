@@ -74,37 +74,17 @@ export default function ProjectsPage() {
               >
                 <GitBranch size={12} /> Canonical project
               </div>
-              <h2
-                className="text-2xl font-black sm:text-3xl"
-                style={{ color: T.headerColor }}
-              >
-                LiTTree LabStudios
+              <h2 className="text-2xl font-black sm:text-3xl" style={{ color: T.headerColor }}>
+                LiTTree-LabStudios
               </h2>
-              <p
-                className="mt-2 max-w-2xl text-sm leading-relaxed"
-                style={{ color: T.textMuted }}
-              >
-                Build LiTTree from inside LiTTree with project context kept
-                visible. Work should happen on a task branch, then move through
-                diff, checks, preview, and review before deployment.
+              <p className="mt-2 max-w-2xl text-sm leading-relaxed" style={{ color: T.textMuted }}>
+                Build LiTTree from inside LiTTree with project context kept visible. Work should happen on a task branch, then move through diff, checks, preview, and review before deployment.
               </p>
               <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-bold">
-                <span
-                  className="rounded-lg border px-2.5 py-1.5"
-                  style={{
-                    borderColor: `${T.borderColor}45`,
-                    color: T.textMuted,
-                  }}
-                >
+                <span className="rounded-lg border px-2.5 py-1.5" style={{ borderColor: `${T.borderColor}45`, color: T.textMuted }}>
                   LabsConnected/litlabs-website
                 </span>
-                <span
-                  className="rounded-lg border px-2.5 py-1.5"
-                  style={{
-                    borderColor: `${T.borderColor}45`,
-                    color: T.textMuted,
-                  }}
-                >
+                <span className="rounded-lg border px-2.5 py-1.5" style={{ borderColor: `${T.borderColor}45`, color: T.textMuted }}>
                   Base branch: main
                 </span>
                 <a
@@ -112,10 +92,7 @@ export default function ProjectsPage() {
                   target="_blank"
                   rel="noopener noreferrer"
                   className="inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 hover:opacity-80"
-                  style={{
-                    borderColor: `${T.borderColor}45`,
-                    color: T.textMuted,
-                  }}
+                  style={{ borderColor: `${T.borderColor}45`, color: T.textMuted }}
                 >
                   Repository <ExternalLink size={11} />
                 </a>
@@ -132,10 +109,7 @@ export default function ProjectsPage() {
               <Link
                 href="/settings?tab=workspace"
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl border px-5 py-3 text-sm font-bold"
-                style={{
-                  borderColor: `${T.borderColor}55`,
-                  color: T.textColor,
-                }}
+                style={{ borderColor: `${T.borderColor}55`, color: T.textColor }}
               >
                 <Settings size={16} /> Project setup
               </Link>
@@ -146,28 +120,18 @@ export default function ProjectsPage() {
         <section className="mt-8">
           <div className="mb-4 flex items-end justify-between gap-4">
             <div>
-              <p
-                className="text-[10px] font-black uppercase tracking-[0.2em]"
-                style={{ color: T.accentColor }}
-              >
+              <p className="text-[10px] font-black uppercase tracking-[0.2em]" style={{ color: T.accentColor }}>
                 Continue working
               </p>
-              <h2
-                className="mt-1 text-xl font-black"
-                style={{ color: T.headerColor }}
-              >
+              <h2 className="mt-1 text-xl font-black" style={{ color: T.headerColor }}>
                 Pick up without hunting through menus
               </h2>
             </div>
-            <Link
-              href="/studio"
-              className="hidden items-center gap-1 text-xs font-bold sm:inline-flex"
-              style={{ color: T.accentColor }}
-            >
+            <Link href="/studio" className="hidden items-center gap-1 text-xs font-bold sm:inline-flex" style={{ color: T.accentColor }}>
               New Run <Plus size={14} />
             </Link>
           </div>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid gap-3 sm:grid-cols-2">
             {QUICK_ACTIONS.map((action) => {
               const Icon = action.icon;
               return (
@@ -175,86 +139,34 @@ export default function ProjectsPage() {
                   key={action.href}
                   href={action.href}
                   className="group flex min-h-28 items-start gap-4 rounded-2xl border p-4 transition-transform hover:-translate-y-0.5"
-                  style={{
-                    backgroundColor: `${T.boxBg}b8`,
-                    borderColor: `${T.borderColor}45`,
-                  }}
+                  style={{ backgroundColor: `${T.boxBg}b8`, borderColor: `${T.borderColor}45` }}
                 >
-                  <span
-                    className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
-                    style={{
-                      backgroundColor: `${T.accentColor}14`,
-                      color: T.accentColor,
-                    }}
-                  >
+                  <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl" style={{ backgroundColor: `${T.accentColor}14`, color: T.accentColor }}>
                     <Icon size={20} />
                   </span>
                   <span className="min-w-0 flex-1">
-                    <span
-                      className="block text-sm font-black"
-                      style={{ color: T.headerColor }}
-                    >
-                      {action.label}
-                    </span>
-                    <span
-                      className="mt-1 block text-xs leading-relaxed"
-                      style={{ color: T.textMuted }}
-                    >
-                      {action.description}
-                    </span>
+                    <span className="block text-sm font-black" style={{ color: T.headerColor }}>{action.label}</span>
+                    <span className="mt-1 block text-xs leading-relaxed" style={{ color: T.textMuted }}>{action.description}</span>
                   </span>
-                  <ArrowRight
-                    size={16}
-                    className="mt-1 shrink-0 opacity-35 transition-transform group-hover:translate-x-1 group-hover:opacity-100"
-                  />
+                  <ArrowRight size={16} className="mt-1 shrink-0 opacity-35 transition-transform group-hover:translate-x-1 group-hover:opacity-100" />
                 </Link>
               );
             })}
           </div>
         </section>
 
-        <section className="mt-8 grid grid-cols-2 gap-3 md:grid-cols-3">
+        <section className="mt-8 grid gap-3 md:grid-cols-3">
           {[
-            {
-              label: "Files",
-              detail: "Browse project and uploaded files",
-              href: "/library/files",
-              icon: FileText,
-            },
-            {
-              label: "Runs",
-              detail: "Start a traceable Studio mission",
-              href: "/studio",
-              icon: Play,
-            },
-            {
-              label: "New project",
-              detail: "Project import is the next connection step",
-              href: "/settings?tab=workspace",
-              icon: Plus,
-            },
+            { label: "Files", detail: "Browse project and uploaded files", href: "/library/files", icon: FileText },
+            { label: "Runs", detail: "Start a traceable Studio mission", href: "/studio", icon: Play },
+            { label: "New project", detail: "Project import is the next connection step", href: "/settings?tab=workspace", icon: Plus },
           ].map((item) => {
             const Icon = item.icon;
             return (
-              <Link
-                key={item.label}
-                href={item.href}
-                className="rounded-2xl border p-4 hover:opacity-85"
-                style={{
-                  borderColor: `${T.borderColor}40`,
-                  backgroundColor: `${T.boxBg}75`,
-                }}
-              >
+              <Link key={item.label} href={item.href} className="rounded-2xl border p-4 hover:opacity-85" style={{ borderColor: `${T.borderColor}40`, backgroundColor: `${T.boxBg}75` }}>
                 <Icon size={18} style={{ color: T.accentColor }} />
-                <div
-                  className="mt-3 text-sm font-black"
-                  style={{ color: T.headerColor }}
-                >
-                  {item.label}
-                </div>
-                <div className="mt-1 text-xs" style={{ color: T.textMuted }}>
-                  {item.detail}
-                </div>
+                <div className="mt-3 text-sm font-black" style={{ color: T.headerColor }}>{item.label}</div>
+                <div className="mt-1 text-xs" style={{ color: T.textMuted }}>{item.detail}</div>
               </Link>
             );
           })}

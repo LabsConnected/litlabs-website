@@ -1,4 +1,4 @@
-export async function askLiTT(message: string, model = "llama3.2:3b") {
+export async function askJarvis(message: string, model = "llama3.2:3b") {
   const res = await fetch("/api/ai/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },

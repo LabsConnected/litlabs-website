@@ -6,8 +6,6 @@ import { useState } from "react";
 import { LandingHeaderAuth } from "./LandingHeaderAuth";
 
 const NAV_LINKS = [
-  { label: "Generate", href: "/generate" },
-  { label: "Flow", href: "/flow" },
   { label: "Studio", href: "/studio" },
   { label: "Agents", href: "/agents" },
   { label: "Marketplace", href: "/marketplace" },

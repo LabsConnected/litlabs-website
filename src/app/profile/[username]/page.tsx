@@ -277,7 +277,7 @@ export default function UserProfilePage() {
   if (!usernameParam) {
     return (
       <div
-        className="min-h-dvh flex items-center justify-center"
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: C.bgColor, color: C.textColor }}
       >
         <div className="text-center">
@@ -301,7 +301,7 @@ export default function UserProfilePage() {
   if (!isLoaded || !userProfile) {
     return (
       <div
-        className="min-h-dvh flex items-center justify-center"
+        className="min-h-screen flex items-center justify-center"
         style={{ backgroundColor: C.bgColor, color: C.textColor }}
       >
         <div className="text-center">
@@ -320,7 +320,7 @@ export default function UserProfilePage() {
 
   return (
     <div
-      className="min-h-dvh"
+      className="min-h-screen"
       style={{ backgroundColor: C.bgColor, color: C.textColor }}
     >
       <div className="w-full px-4 py-6">

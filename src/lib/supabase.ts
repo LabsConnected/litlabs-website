@@ -21,26 +21,16 @@ export function getSupabase(): SupabaseClient | null {
   return _supabase;
 }
 
-// Build-Safe Proxy Engine — returns a no-op chainable stub when Supabase is not configured
-const STUB_METHODS = new Set(["from", "auth", "channel", "storage", "rpc"]);
-const CHAIN_STUB: Record<string, () => unknown> = {};
-const chainable = () => new Proxy(CHAIN_STUB, {
-  get(_, p) {
-    if (p === "then") return undefined; // not a thenable
-    if (typeof p === "string") return chainable;
-    return undefined;
-  },
-});
-for (const m of ["select", "insert", "update", "delete", "upsert", "eq", "neq", "gt", "gte", "lt", "lte", "like", "ilike", "in", "is", "not", "or", "and", "order", "limit", "offset", "range", "single", "maybeSingle", "throwOnError", "then", "catch", "finally", "contains", "containedBy", "overlaps", "match", "filter", "textSearch", "rpc"]) {
-  CHAIN_STUB[m] = chainable;
-}
-
+// 🔱 Build-Safe Proxy Engine
 export const supabase = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     const client = getSupabase();
     if (!client) {
-      if (typeof prop === "string" && STUB_METHODS.has(prop)) return chainable;
-      return undefined;
+      // During static prerendering (no env keys), return safe stubs instead of crashing
+      return typeof prop === "string" &&
+        ["from", "auth", "channel"].includes(prop)
+        ? () => ({ select: () => ({}), insert: () => ({}) })
+        : undefined;
     }
     return (client as unknown as Record<string | symbol, unknown>)[prop];
   },
@@ -66,10 +56,9 @@ export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     const client = getSupabaseAdmin();
     if (!client) {
-      if (typeof prop === "string" && ["from", "auth", "channel", "storage", "rpc"].includes(prop)) {
-        return chainable;
-      }
-      return undefined;
+      return typeof prop === "string" && ["from"].includes(prop)
+        ? () => ({ select: () => ({}), insert: () => ({}), update: () => ({}) })
+        : undefined;
     }
     return (client as unknown as Record<string | symbol, unknown>)[prop];
   },

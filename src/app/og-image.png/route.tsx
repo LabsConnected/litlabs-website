@@ -89,7 +89,7 @@ export function GET() {
             textTransform: "uppercase",
           }}
         >
-          LiTTree LabStudios
+          LiTTree-LabStudios
         </span>
       </div>
 

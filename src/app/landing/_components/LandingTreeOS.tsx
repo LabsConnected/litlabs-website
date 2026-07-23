@@ -40,7 +40,7 @@ const STATS = [
 
 export function LandingTreeOS() {
   return (
-    <section className="relative z-10 overflow-hidden border-y border-white/5 px-4 py-16 md:py-32">
+    <section className="relative z-10 overflow-hidden border-y border-white/5 px-4 py-24 md:py-32">
       {/* Background tree silhouette glow */}
       <div
         aria-hidden
@@ -120,7 +120,7 @@ export function LandingTreeOS() {
 
         {/* Example creator stats strip */}
         <div
-          className="overflow-hidden rounded-2xl border border-white/8 px-4 py-5 sm:px-8 sm:py-6"
+          className="overflow-hidden rounded-2xl border border-white/8 px-8 py-6"
           style={{
             background:
               "linear-gradient(145deg, rgba(168,85,247,0.05), rgba(48,231,255,0.03)), rgba(255,255,255,0.01)",

@@ -47,7 +47,7 @@ export default function DocsPageClient() {
 
   return (
     <main
-      className="min-h-dvh px-4 py-16"
+      className="min-h-screen px-4 py-16"
       style={{ backgroundColor: T.bgColor, color: T.textColor }}
     >
       <div className="mx-auto max-w-5xl">
@@ -68,7 +68,7 @@ export default function DocsPageClient() {
             className="max-w-2xl text-base leading-relaxed opacity-65 md:text-lg"
             style={{ color: T.textColor }}
           >
-            LiTTree LabStudios is organized around one loop: choose an agent,
+            LiTTree-LabStudios is organized around one loop: choose an agent,
             create in Studio, automate the repeatable parts, and ship the
             result to your audience or marketplace.
           </p>

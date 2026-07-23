@@ -6,43 +6,28 @@ import {
   checkPromptSafety,
 } from "@/lib/agent-validation";
 import { logAgentEvent } from "@/lib/agent-logger";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-  // Authenticated only. Per Autonomic Worker Reliability spec:
-  // - Do not weaken task APIs for banner polling.
-  // - Public health data will be served from /api/system/autonomic-health.
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  try {
-    const { data: tasks, error } = await supabaseAdmin
-      .from("agent_tasks")
-      .select("*")
-      .eq("user_id", userId)
-      .order("created_at", { ascending: false })
-      .limit(50);
+  const { data, error } = await supabaseAdmin
+    .from("agent_tasks")
+    .select("id, session_id, assigned_to, dispatcher, task_input, task_output, status, created_at, updated_at")
+    .eq("user_id", userId)
+    .order("created_at", { ascending: false })
+    .limit(50);
 
-    if (error) {
-      console.error("[api/agent-tasks] Supabase query failed:", error.message);
-      return NextResponse.json(
-        { error: "Failed to load missions" },
-        { status: 500 },
-      );
-    }
-
-    return NextResponse.json({ tasks: tasks || [] });
-  } catch (err) {
-    console.error("[api/agent-tasks] Unhandled error in GET:", err);
-    return NextResponse.json(
-      { error: "Failed to load missions" },
-      { status: 500 },
-    );
+  if (error) {
+    console.error("agent_tasks list failed", error);
+    return NextResponse.json({ error: "Failed to load missions" }, { status: 500 });
   }
+
+  return NextResponse.json({ tasks: data || [] });
 }
 
 export async function POST(request: Request) {
@@ -61,7 +46,7 @@ export async function POST(request: Request) {
       taskInput,
       meta = {},
     } = body as {
-      sessionId?: string;
+      sessionId: string;
       workflowId?: string;
       assignedTo: string;
       dispatcher: string;
@@ -89,11 +74,10 @@ export async function POST(request: Request) {
     }
 
     // 3. Resolve sequence order mapping
-    const effectiveSessionId = sessionId || crypto.randomUUID();
     const { count, error: countError } = await supabaseAdmin
       .from("agent_tasks")
       .select("*", { count: "exact", head: true })
-      .eq("session_id", effectiveSessionId);
+      .eq("session_id", sessionId);
 
     if (countError) {
       console.error("Failed to compute sequence order", countError);
@@ -107,7 +91,8 @@ export async function POST(request: Request) {
 
     // 4. Commit the validated record to the live cluster
     const taskPayload = {
-      session_id: effectiveSessionId,
+      user_id: userId,
+      session_id: sessionId,
       workflow_id: workflowId || null,
       assigned_to: assignedTo,
       dispatcher,
@@ -115,7 +100,6 @@ export async function POST(request: Request) {
       task_output: {},
       status: "queued",
       sequence_order: nextOrder,
-      user_id: userId,
     };
 
     const { data: task, error: txError } = await supabaseAdmin
@@ -143,7 +127,7 @@ export async function POST(request: Request) {
         assignedTo,
         meta,
       },
-    ).catch(() => { });
+    ).catch(() => {});
 
     return NextResponse.json(
       {
@@ -154,11 +138,14 @@ export async function POST(request: Request) {
     );
   } catch (error: unknown) {
     console.error("Critical Gateway Router Exception:", error);
-    const { status, error: message, retryAfter } =
-      sanitizeProviderError(error);
     return NextResponse.json(
-      { error: message, retryAfter },
-      { status },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Internal Execution Interruption",
+      },
+      { status: 500 },
     );
   }
 }

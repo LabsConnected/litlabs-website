@@ -1,42 +1,23 @@
-import { LITLABS_IDENTITY_SNIPPET, mergeLittIdentityWithProject } from "@/lib/litt-identity";
-
-export type LiTTActionType =
+export type JarvisActionType =
   | "run_command"
   | "insert_command"
   | "create_file"
   | "edit_file"
   | "start_agent"
-  | "deploy"
-  | "add_goal"
-  | "remember";
+  | "deploy";
 
-export type LiTTMemoryScope =
-  | "profile"
-  | "preference"
-  | "agent"
-  | "project"
-  | "conversation"
-  | "temporary";
-
-export type LiTTAction = {
-  type: LiTTActionType;
+export type JarvisAction = {
+  type: JarvisActionType;
   label: string;
   command?: string;
   filePath?: string;
   content?: string;
   agentName?: string;
-  // add_goal
-  goalTitle?: string;
-  goalNotes?: string;
-  priority?: "low" | "medium" | "high";
-  // remember
-  memoryContent?: string;
-  memoryScope?: LiTTMemoryScope;
 };
 
-export type LiTTAgentStatus = "online" | "idle" | "running" | "error";
+export type JarvisAgentStatus = "online" | "idle" | "running" | "error";
 
-export type LiTTContext = {
+export type JarvisContext = {
   route: string;
   terminalOutput: string;
   commandHistory: string[];
@@ -48,45 +29,22 @@ export type LiTTContext = {
   fileTree: string[];
   agents: {
     name: string;
-    status: LiTTAgentStatus;
+    status: JarvisAgentStatus;
   }[];
   websocketStatus: "connected" | "offline" | "connecting";
 };
 
-export type LiTTThinkResponse = {
+export type JarvisThinkResponse = {
   answer: string;
-  actions?: LiTTAction[];
+  actions?: JarvisAction[];
 };
 
-export type LiTTProjectContext = {
-  name?: string;
-  description?: string;
-  stack?: string;
-  goals?: string;
-  repoUrl?: string;
-  customInstructions?: string;
-};
-
-/**
- * Build the user prompt for the LiTT think route.
- *
- * The static litlabs.net project identity is auto-injected by the LLM
- * layer (see `withLittIdentity` in src/lib/llm.ts), so we do NOT include
- * it here again. We only include the live runtime context (route,
- * terminal, files, logs, agents).
- *
- * If you need to force the identity into a prompt-only caller (no system
- * message slot), use `mergeLittIdentityWithProject()` to prepend it.
- */
-export function buildLiTTPrompt(message: string, context: LiTTContext): string {
+export function buildJarvisPrompt(message: string, context: JarvisContext): string {
   return `
-You are LiTT inside LiTTree LabStudios (litlabs.net).
+You are LiTT inside LiTTree-LabStudios.
 
 You are not a normal chatbot.
 You are an AI developer command center.
-
-Project brain (in case the system prompt didn't carry it through):
-${LITLABS_IDENTITY_SNIPPET}
 
 User request:
 ${message}
@@ -120,31 +78,15 @@ Rules:
 - Be direct.
 - Diagnose the issue.
 - Give prioritized fixes.
-- Return useful commands (pnpm …, not npm …).
+- Return useful commands.
 - Do not ask vague questions unless truly required.
 - For dangerous commands, require approval.
 - Prefer markdown formatting with code blocks.
-- This is the litlabs.net codebase — use real paths (src/lib/…, src/app/api/…),
-  not invented ones.
-- When generating images, do NOT ask the user for a prompt. Infer the image
-  description from the PROJECT_CONTEXT (README, src/ file tree, docs, schema),
-  the File tree, and the Selected file above.
-  If nothing is clear, generate a sensible default for the project and state
-  the prompt you are using.
 `;
 }
 
-/**
- * Build a *system* prompt that includes the project identity. Use this
- * when the caller can't pass a separate system-prompt slot and only has
- * a single user-prompt string to send to the LLM.
- */
-export function buildLiTTSystemPrompt(project?: LiTTProjectContext): string {
-  return mergeLittIdentityWithProject(project);
-}
-
-export function parseLiTTActions(answer: string): LiTTAction[] {
-  const actions: LiTTAction[] = [];
+export function parseJarvisActions(answer: string): JarvisAction[] {
+  const actions: JarvisAction[] = [];
 
   // Extract bash commands from the first code block and offer to insert/run
   const codeBlockMatch = answer.match(/```(?:bash|sh|shell)?\n([\s\S]*?)```/);
@@ -156,68 +98,12 @@ export function parseLiTTActions(answer: string): LiTTAction[] {
     }
   }
 
-  // Extract JSON action blocks. The model is instructed to emit these when
-  // the user says "add this to my list" / "make a goal" / "todo: X" / etc.
-  // We accept both fenced ```json … ``` and bare inline objects.
-  const jsonBlocks: string[] = [];
-  const fenceMatches = answer.matchAll(/```(?:json)?\s*(\{[\s\S]*?\})\s*```/g);
-  for (const m of fenceMatches) jsonBlocks.push(m[1]);
-  const inlineMatches = answer.matchAll(
-    /(?<![`{])\{\s*"type"\s*:\s*"(add_goal|remember)"[\s\S]*?\}/g,
-  );
-  for (const m of inlineMatches) jsonBlocks.push(m[0]);
-
-  const validPriorities = ["low", "medium", "high"] as const;
-  const validScopes: LiTTMemoryScope[] = [
-    "profile",
-    "preference",
-    "agent",
-    "project",
-    "conversation",
-    "temporary",
-  ];
-
-  for (const raw of jsonBlocks) {
-    try {
-      const obj = JSON.parse(raw) as Record<string, unknown>;
-      if (obj.type === "add_goal" && typeof obj.title === "string" && obj.title.trim()) {
-        const priority = validPriorities.includes(obj.priority as never)
-          ? (obj.priority as "low" | "medium" | "high")
-          : "medium";
-        actions.push({
-          type: "add_goal",
-          label: `Add goal: ${obj.title}`,
-          goalTitle: obj.title.trim(),
-          goalNotes: typeof obj.notes === "string" ? obj.notes : undefined,
-          priority,
-        });
-      } else if (
-        obj.type === "remember" &&
-        typeof obj.content === "string" &&
-        obj.content.trim()
-      ) {
-        const scope = validScopes.includes(obj.scope as LiTTMemoryScope)
-          ? (obj.scope as LiTTMemoryScope)
-          : "conversation";
-        const preview = obj.content.length > 60 ? `${obj.content.slice(0, 60)}…` : obj.content;
-        actions.push({
-          type: "remember",
-          label: `Remember: ${preview}`,
-          memoryContent: obj.content.trim(),
-          memoryScope: scope,
-        });
-      }
-    } catch {
-      // Malformed JSON — skip this block, the rest of the answer is still useful.
-    }
-  }
-
   return actions;
 }
 
-export function collectLiTTContext(
-  partial: Partial<LiTTContext> & { route: string },
-): LiTTContext {
+export function collectJarvisContext(
+  partial: Partial<JarvisContext> & { route: string },
+): JarvisContext {
   return {
     route: partial.route,
     terminalOutput: partial.terminalOutput || "",

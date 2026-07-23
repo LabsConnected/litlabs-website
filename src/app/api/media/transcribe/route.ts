@@ -16,7 +16,7 @@ async function handler(req: NextRequest) {
     );
 
   try {
-    const { audioBytes, mimeType = "audio/webm", lowLatency = false } = await req.json();
+    const { audioBytes, mimeType = "audio/webm" } = await req.json();
     if (!audioBytes)
       return NextResponse.json(
         { error: "Missing audioBytes" },
@@ -25,87 +25,25 @@ async function handler(req: NextRequest) {
 
     const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
 
-    // Retry with exponential backoff on 429 (RESOURCE_EXHAUSTED).
-    // Gemini free tier has tight per-minute limits; retrying after a
-    // short delay usually succeeds.
-    const MAX_RETRIES = lowLatency ? 0 : 2;
-    let lastError: unknown;
-    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
-      try {
-        const response = await ai.models.generateContent({
-          model: "gemini-2.0-flash",
-          contents: [
-            { inlineData: { data: audioBytes, mimeType } },
-            {
-              text: "Transcribe only the clear, intelligible spoken words in this audio clip. If the audio is mostly silence, background noise, static, music, or unintelligible mumbling, return an empty string. Do NOT guess, invent, or hallucinate words that are not clearly spoken. Do NOT add commentary, timestamps, speaker tags, or introductory text. Output ONLY the transcript text or an empty string.",
-            },
-          ],
-        });
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: [
+        { inlineData: { data: audioBytes, mimeType } },
+        {
+          text: "Provide a complete, highly accurate, and clean transcription of the spoken words in this audio. Do not include introductory notes, timestamps, speaker tags, or external commentary. Output only the transcript text.",
+        },
+      ],
+    });
 
-        return NextResponse.json({
-          // An empty transcript is a normal no-speech result. Returning a human
-          // sentence here caused clients to submit it to LiTT as if the user spoke.
-          text: response.text?.trim() || "",
-        });
-      } catch (err: unknown) {
-        lastError = err;
-        const raw = err instanceof Error ? err.message : String(err);
-        const is429 = /429|quota|resource_exhausted/i.test(raw);
-        if (!is429 || attempt === MAX_RETRIES) break;
-        // Exponential backoff: 1s, 2s
-        const delayMs = 1000 * Math.pow(2, attempt);
-        await new Promise((r) => setTimeout(r, delayMs));
-      }
-    }
-
-    // All retries exhausted — return the formatted error
-    const raw = lastError instanceof Error ? lastError.message : String(lastError);
-    const clean = formatProviderError(raw);
-    return NextResponse.json(
-      { error: clean.message, retryAfter: clean.retryAfter },
-      { status: clean.status },
-    );
+    return NextResponse.json({
+      text: response.text || "No transcription detected.",
+    });
   } catch (err: unknown) {
-    const raw = err instanceof Error ? err.message : String(err);
-    const clean = formatProviderError(raw);
     return NextResponse.json(
-      { error: clean.message, retryAfter: clean.retryAfter },
-      { status: clean.status },
+      { error: err instanceof Error ? err.message : "Transcription failed" },
+      { status: 500 },
     );
   }
-}
-
-function formatProviderError(raw: string): {
-  message: string;
-  retryAfter?: number;
-  status: number;
-} {
-  const lower = raw.toLowerCase();
-  if (lower.includes("429") || lower.includes("quota") || lower.includes("resource_exhausted")) {
-    const seconds = extractRetrySeconds(raw);
-    return {
-      message: seconds
-        ? `Voice service rate limit reached. Retry in ${seconds}s.`
-        : "Voice service rate limit reached. Please try again shortly.",
-      retryAfter: seconds,
-      status: 429,
-    };
-  }
-  if (lower.includes("api key not valid") || lower.includes("unauthorized")) {
-    return {
-      message: "Voice service API key is invalid or missing.",
-      status: 500,
-    };
-  }
-  return { message: "Transcription failed. Please try again.", status: 500 };
-}
-
-function extractRetrySeconds(raw: string): number | undefined {
-  const match = raw.match(/(?:retry\s*in|retry\s*delay|retryafter)[\s:]*([\d.]+)\s*s/i);
-  if (match) return Math.round(parseFloat(match[1]));
-  const seconds = raw.match(/(\d+(?:\.\d+)?)\s*seconds/i);
-  if (seconds) return Math.round(parseFloat(seconds[1]));
-  return undefined;
 }
 
 export const POST = withRateLimit(handler, 60, 60);

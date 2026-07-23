@@ -1,10 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { sanitizeProviderError } from "@/lib/provider-error";
 import { streamText, generateText } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
-import { PROJECT_CONTEXT } from "@/lib/project-context-server";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 
@@ -13,7 +11,7 @@ export const maxDuration = 60;
 
 type HistoryEntry = { role: "user" | "assistant"; content: string };
 
-const DEFAULT_AGENT_SLUG = "littcode";
+const DEFAULT_AGENT_SLUG = "litt";
 const HISTORY_LIMIT = 12;
 
 async function fetchMemories(query: string, userId: string): Promise<string> {
@@ -66,7 +64,7 @@ async function generateWithImages(
 ): Promise<{ text: string; provider: string; model: string; latencyMs: number }> {
   const { GoogleGenerativeAI } = await import("@google/generative-ai");
   const key = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || "";
-  if (!key) throw new Error("Service unavailable");
+  if (!key) throw new Error("Gemini API key not configured");
   const genAI = new GoogleGenerativeAI(key);
   const model = genAI.getGenerativeModel({
     model: modelName,
@@ -100,7 +98,7 @@ function buildPrompt(
   history: HistoryEntry[],
   memoryContext: string,
   userName?: string,
-  projectContext = PROJECT_CONTEXT,
+  capabilities?: Record<string, unknown>,
 ): string {
   const recentHistory = history.slice(-HISTORY_LIMIT);
 
@@ -112,14 +110,12 @@ function buildPrompt(
     )
     .join("\n");
 
-  const resolvedName = userName?.trim() || "Creator";
+  const resolvedName = userName?.trim() || "Member";
   const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
 
   return [
-    "=== PROJECT CONTEXT (repo files, docs, schema) ===",
-    projectContext,
-    "",
     systemPrompt,
+    `Verified capability state: ${JSON.stringify(capabilities ?? { repository: "none", terminalExecution: "unavailable", writeAccess: false })}\nTruth rules: Never claim the repository was scanned, indexed, read, modified, or that a command executed unless the verified capability state and supplied tool result explicitly confirm it. State uncertainty plainly.`,
     memoryContext,
     "",
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
@@ -177,6 +173,7 @@ async function handler(req: NextRequest) {
       stream = false,
       userName,
       images = [],
+      capabilities = {},
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -189,20 +186,14 @@ async function handler(req: NextRequest) {
 
     const uid = userId || "anonymous-dev";
     const memoryContext = userId ? await fetchMemories(message, uid) : "";
-    const systemPrompt = buildPrompt(agent, message, history, memoryContext, userName)
+    const systemPrompt = buildPrompt(agent, message, history, memoryContext, userName, capabilities)
       .split("User: ")[0]
       .trim();
 
-    const geminiModels = new Set([
-      "gemini-2.5-flash",
-      "gemini-2.5-pro",
-      process.env.GEMINI_MODEL,
-      process.env.NEXT_PUBLIC_GEMINI_MODEL,
-    ]);
-    const geminiModel = typeof requestedModel === "string" && geminiModels.has(requestedModel)
-      ? requestedModel
-      : "gemini-2.5-flash";
-    const llmProvider = provider === "google" || provider === "auto" ? "gemini" : provider;
+    const geminiModel =
+      typeof requestedModel === "string" && requestedModel.startsWith("gemini")
+        ? requestedModel
+        : "gemini-2.5-flash";
 
     // Multimodal path: send image snapshots directly to Gemini
     const imageArray = Array.isArray(images) ? images : [];
@@ -220,16 +211,16 @@ async function handler(req: NextRequest) {
       });
     }
 
-    const prompt = buildPrompt(agent, message, history, memoryContext, userName);
+    const prompt = buildPrompt(agent, message, history, memoryContext, userName, capabilities);
 
     if (!stream) {
       const r = await generateText(
         prompt,
         {
           task: "chat",
-          provider: llmProvider,
+          provider,
           maxTokens: 2048,
-          modelOverride: llmProvider === "gemini" ? { gemini: geminiModel } : undefined,
+          modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
         },
         undefined,
       );
@@ -262,9 +253,9 @@ async function handler(req: NextRequest) {
             },
             {
               task: "chat",
-              provider: llmProvider,
+              provider,
               maxTokens: 2048,
-              modelOverride: llmProvider === "gemini" ? { gemini: geminiModel } : undefined,
+              modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
             },
           );
           controller.enqueue(
@@ -274,7 +265,7 @@ async function handler(req: NextRequest) {
           );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
         } catch (err) {
-          const { error: msg } = sanitizeProviderError(err);
+          const msg = err instanceof Error ? err.message : "stream error";
           controller.enqueue(
             encoder.encode(`data: ${JSON.stringify({ error: msg })}\n\n`),
           );
@@ -300,10 +291,9 @@ async function handler(req: NextRequest) {
   } catch (err) {
     // LLM chat route error:
     console.error("[api/gemini/chat] error:", err);
-    const { status, error: message, retryAfter } = sanitizeProviderError(err);
     return NextResponse.json(
-      { error: message, retryAfter },
-      { status },
+      { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
+      { status: 500 },
     );
   }
 }

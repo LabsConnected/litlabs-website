@@ -48,16 +48,6 @@ CREATE TABLE IF NOT EXISTS public.agents (
   created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
   updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
-
--- Add columns if agents table already existed with different schema
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS display_name TEXT;
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT 'general';
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS system_prompt TEXT;
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS personality TEXT;
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS model TEXT DEFAULT 'gpt-4o-mini';
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS is_core BOOLEAN DEFAULT false;
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS is_public BOOLEAN DEFAULT true;
-ALTER TABLE public.agents ADD COLUMN IF NOT EXISTS owner_id UUID REFERENCES public.users(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_agents_slug ON public.agents(slug);
 CREATE INDEX IF NOT EXISTS idx_agents_owner ON public.agents(owner_id);
 CREATE INDEX IF NOT EXISTS idx_agents_core ON public.agents(is_core);

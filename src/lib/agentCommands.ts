@@ -35,7 +35,7 @@ const CORE_COMMANDS: AgentCommand[] = [
   },
 ];
 
-// Director-specific commands
+// Copilot-specific commands
 const DIRECTOR_COMMANDS: AgentCommand[] = [
   {
     name: "orchestrate",

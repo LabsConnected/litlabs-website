@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
+import { MUSIC_MODELS } from "@/lib/studio-models";
 import {
   Music,
   Wand2,
@@ -25,69 +26,8 @@ const VOICES = [
   { id: "Zeph", label: "Zeph", desc: "Authoritative" },
 ];
 
-const MUSIC_MODELS = [
-  {
-    id: "lyria-3-clip-preview",
-    label: "Lyria",
-    desc: "Full music generation",
-    cost: 3,
-  },
-];
-
-const GENRES = [
-  { id: "auto", label: "Auto" },
-  { id: "electronic", label: "Electronic" },
-  { id: "orchestral", label: "Orchestral" },
-  { id: "lo-fi", label: "Lo-fi" },
-  { id: "rock", label: "Rock" },
-  { id: "hip-hop", label: "Hip-hop" },
-  { id: "ambient", label: "Ambient" },
-  { id: "jazz", label: "Jazz" },
-  { id: "cinematic", label: "Cinematic" },
-  { id: "edm", label: "EDM" },
-];
-
-const MOODS = [
-  { id: "auto", label: "Auto" },
-  { id: "happy", label: "Happy" },
-  { id: "sad", label: "Sad" },
-  { id: "energetic", label: "Energetic" },
-  { id: "calm", label: "Calm" },
-  { id: "dark", label: "Dark" },
-  { id: "epic", label: "Epic" },
-];
-
-const INSTRUMENTS = [
-  { id: "guitar", label: "Guitar" },
-  { id: "piano", label: "Piano" },
-  { id: "synth", label: "Synth" },
-  { id: "drums", label: "Drums" },
-  { id: "strings", label: "Strings" },
-  { id: "bass", label: "Bass" },
-  { id: "vocals", label: "Vocals" },
-  { id: "brass", label: "Brass" },
-];
-
 const STORAGE_KEY = "litlabs-studio-audio-history";
 const MAX_HISTORY = 12;
-
-function buildMusicPrompt(
-  prompt: string,
-  genre: string,
-  mood: string,
-  tempo: number,
-  instruments: string[],
-  duration: number,
-) {
-  const parts = [prompt];
-  if (genre && genre !== "auto") parts.push(`Genre: ${genre}.`);
-  if (mood && mood !== "auto") parts.push(`Mood: ${mood}.`);
-  parts.push(`Tempo: ${tempo} BPM.`);
-  if (instruments.length > 0)
-    parts.push(`Instruments: ${instruments.join(", ")}.`);
-  parts.push(`Duration: ${duration} seconds.`);
-  return parts.join(" ");
-}
 
 interface AudioGen {
   id: string;
@@ -100,16 +40,6 @@ interface AudioGen {
   error?: string;
   createdAt: number;
   cost: number;
-  // Music options
-  duration?: number;
-  genre?: string;
-  mood?: string;
-  tempo?: number;
-  instruments?: string[];
-  seed?: number;
-  // TTS options
-  speed?: number;
-  pitch?: number;
 }
 
 export default function AudioTool() {
@@ -118,14 +48,6 @@ export default function AudioTool() {
   const [text, setText] = useState("");
   const [voice, setVoice] = useState("Kore");
   const [musicModel, setMusicModel] = useState("lyria-3-clip-preview");
-  const [musicDuration, setMusicDuration] = useState(30);
-  const [musicGenre, setMusicGenre] = useState("auto");
-  const [musicMood, setMusicMood] = useState("energetic");
-  const [musicTempo, setMusicTempo] = useState(120);
-  const [musicInstruments, setMusicInstruments] = useState<string[]>([]);
-  const [musicSeed, setMusicSeed] = useState("");
-  const [ttsSpeed, setTtsSpeed] = useState(1.0);
-  const [ttsPitch, setTtsPitch] = useState(1.0);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<AudioGen | null>(null);
@@ -182,18 +104,6 @@ export default function AudioTool() {
       status: "generating",
       createdAt: Date.now(),
       cost,
-      ...(mode === "music" && {
-        duration: musicDuration,
-        genre: musicGenre,
-        mood: musicMood,
-        tempo: musicTempo,
-        instruments: musicInstruments,
-        seed: musicSeed ? Number(musicSeed) : undefined,
-      }),
-      ...(mode === "tts" && {
-        speed: ttsSpeed,
-        pitch: ttsPitch,
-      }),
     };
     setCurrent(gen);
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
@@ -203,34 +113,10 @@ export default function AudioTool() {
         mode === "tts"
           ? "/api/media/generate-audio"
           : "/api/media/generate-music";
-      let body: Record<string, unknown>;
-      if (mode === "tts") {
-        body = {
-          prompt: text.trim(),
-          voice,
-          speed: ttsSpeed,
-          pitch: ttsPitch,
-        };
-      } else {
-        const musicPrompt = buildMusicPrompt(
-          text.trim(),
-          musicGenre,
-          musicMood,
-          musicTempo,
-          musicInstruments,
-          musicDuration,
-        );
-        body = {
-          prompt: musicPrompt,
-          model: musicModel,
-          duration: musicDuration,
-          genre: musicGenre,
-          mood: musicMood,
-          tempo: musicTempo,
-          instruments: musicInstruments,
-        };
-        if (musicSeed) body.seed = Number(musicSeed);
-      }
+      const body: Record<string, unknown> =
+        mode === "tts"
+          ? { prompt: text.trim(), voice }
+          : { prompt: text.trim(), model: musicModel };
 
       const res = await fetch(endpoint, {
         method: "POST",
@@ -282,23 +168,7 @@ export default function AudioTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [
-    text,
-    voice,
-    musicModel,
-    mode,
-    cost,
-    canAfford,
-    refreshWallet,
-    musicDuration,
-    musicGenre,
-    musicMood,
-    musicTempo,
-    musicInstruments,
-    musicSeed,
-    ttsSpeed,
-    ttsPitch,
-  ]);
+  }, [text, voice, musicModel, mode, cost, canAfford, refreshWallet]);
 
   const togglePlay = (id: string, url: string) => {
     if (playingId === id) {
@@ -395,8 +265,6 @@ export default function AudioTool() {
               {mode === "tts" ? "Text to Speak" : "Music Prompt"}
             </label>
             <textarea
-              id="audio-tool-prompt"
-              name="audioToolPrompt"
               value={text}
               onChange={(e) => {
                 setText(e.target.value);
@@ -451,7 +319,7 @@ export default function AudioTool() {
                     }}
                   >
                     <span className="font-bold">{v.label}</span>
-                    <span style={{ color: T.textMuted }}>{v.desc}</span>
+                    <span className="opacity-60">{v.desc}</span>
                   </button>
                 ))}
               </div>
@@ -486,7 +354,7 @@ export default function AudioTool() {
                   >
                     <div className="flex items-center gap-2">
                       <span className="font-bold">{m.label}</span>
-                      <span style={{ color: T.textMuted }}>{m.desc}</span>
+                      <span className="opacity-60">{m.desc}</span>
                     </div>
                     <span
                       className="px-1.5 py-0.5 rounded border text-[9px]"
@@ -500,234 +368,13 @@ export default function AudioTool() {
             </div>
           )}
 
-          {mode === "tts" && (
-            <div
-              className="border rounded-lg p-3 space-y-3"
-              style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-            >
-              <label
-                className="block text-[10px] uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Speech Settings
-              </label>
-
-              <div>
-                <div
-                  className="flex items-center justify-between text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  <span>Speed</span>
-                  <span>{ttsSpeed.toFixed(1)}x</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={2.0}
-                  step={0.1}
-                  value={ttsSpeed}
-                  onChange={(e) => setTtsSpeed(Number(e.target.value))}
-                  disabled={isGenerating}
-                  className="w-full"
-                />
-              </div>
-
-              <div>
-                <div
-                  className="flex items-center justify-between text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  <span>Pitch</span>
-                  <span>{ttsPitch.toFixed(1)}</span>
-                </div>
-                <input
-                  type="range"
-                  min={0.5}
-                  max={2.0}
-                  step={0.1}
-                  value={ttsPitch}
-                  onChange={(e) => setTtsPitch(Number(e.target.value))}
-                  disabled={isGenerating}
-                  className="w-full"
-                />
-              </div>
-            </div>
-          )}
-
-          {mode === "music" && (
-            <div
-              className="border rounded-lg p-3 space-y-3"
-              style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
-            >
-              <label
-                className="block text-[10px] uppercase tracking-widest"
-                style={{ color: T.textMuted }}
-              >
-                Music Options
-              </label>
-
-              <div>
-                <div
-                  className="flex items-center justify-between text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  <span>Duration</span>
-                  <span>{musicDuration}s</span>
-                </div>
-                <input
-                  type="range"
-                  min={5}
-                  max={180}
-                  step={1}
-                  value={musicDuration}
-                  onChange={(e) => setMusicDuration(Number(e.target.value))}
-                  disabled={isGenerating}
-                  className="w-full"
-                />
-              </div>
-
-              <div>
-                <div
-                  className="text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Genre
-                </div>
-                <select
-                  value={musicGenre}
-                  onChange={(e) => setMusicGenre(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full text-[10px] rounded px-2 py-1.5 outline-none"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    border: `1px solid ${T.borderColor}`,
-                    color: T.textColor,
-                  }}
-                >
-                  {GENRES.map((g) => (
-                    <option key={g.id} value={g.id}>
-                      {g.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div
-                  className="text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Mood
-                </div>
-                <select
-                  value={musicMood}
-                  onChange={(e) => setMusicMood(e.target.value)}
-                  disabled={isGenerating}
-                  className="w-full text-[10px] rounded px-2 py-1.5 outline-none"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    border: `1px solid ${T.borderColor}`,
-                    color: T.textColor,
-                  }}
-                >
-                  {MOODS.map((m) => (
-                    <option key={m.id} value={m.id}>
-                      {m.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div>
-                <div
-                  className="flex items-center justify-between text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  <span>Tempo</span>
-                  <span>{musicTempo} BPM</span>
-                </div>
-                <input
-                  type="range"
-                  min={60}
-                  max={180}
-                  step={1}
-                  value={musicTempo}
-                  onChange={(e) => setMusicTempo(Number(e.target.value))}
-                  disabled={isGenerating}
-                  className="w-full"
-                />
-              </div>
-
-              <div>
-                <div
-                  className="text-[10px] mb-1.5"
-                  style={{ color: T.textMuted }}
-                >
-                  Instruments
-                </div>
-                <div className="flex flex-wrap gap-1">
-                  {INSTRUMENTS.map((inst) => {
-                    const selected = musicInstruments.includes(inst.id);
-                    return (
-                      <button
-                        key={inst.id}
-                        onClick={() => {
-                          setMusicInstruments((prev) =>
-                            selected
-                              ? prev.filter((i) => i !== inst.id)
-                              : [...prev, inst.id],
-                          );
-                        }}
-                        disabled={isGenerating}
-                        className="px-2 py-1 rounded border text-[9px] transition-all"
-                        style={{
-                          borderColor: selected ? T.accentColor : T.borderColor,
-                          backgroundColor: selected
-                            ? T.accentColor + "15"
-                            : "transparent",
-                          color: T.textColor,
-                        }}
-                      >
-                        {inst.label}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div>
-                <div
-                  className="text-[10px] mb-1"
-                  style={{ color: T.textMuted }}
-                >
-                  Seed
-                </div>
-                <input
-                  type="number"
-                  min={0}
-                  step={1}
-                  value={musicSeed}
-                  onChange={(e) => setMusicSeed(e.target.value)}
-                  placeholder="Random"
-                  disabled={isGenerating}
-                  className="w-full text-[10px] rounded px-2 py-1.5 outline-none"
-                  style={{
-                    backgroundColor: T.bgColor,
-                    border: `1px solid ${T.borderColor}`,
-                    color: T.textColor,
-                  }}
-                />
-              </div>
-            </div>
-          )}
-
           {error && (
             <div
               className="flex items-center gap-2 p-2 rounded border text-[11px]"
               style={{
-                borderColor: T.warning,
-                color: T.warning,
-                backgroundColor: T.warning + "10",
+                borderColor: "#ef4444",
+                color: "#ef4444",
+                backgroundColor: "rgba(239,68,68,0.1)",
               }}
             >
               <AlertTriangle size={12} /> {error}
@@ -787,7 +434,7 @@ export default function AudioTool() {
                       ? "Ready"
                       : "Failed"}
                 </span>
-                <span className="text-[10px]" style={{ color: T.textMuted }}>
+                <span className="text-[10px] opacity-60">
                   {current.mode === "tts" ? "TTS" : "Music"}
                 </span>
               </div>
@@ -808,7 +455,7 @@ export default function AudioTool() {
                   <div className="flex items-center gap-3">
                     <button
                       onClick={() => togglePlay(current.id, current.audioUrl!)}
-                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-bold hover:bg-white/10"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs font-bold hover:opacity-80"
                       style={{
                         borderColor: T.accentColor,
                         color: T.accentColor,
@@ -828,7 +475,7 @@ export default function AudioTool() {
                       onClick={() =>
                         handleDownload(current.audioUrl!, current.mode)
                       }
-                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs hover:bg-white/10"
+                      className="flex items-center gap-2 px-3 py-1.5 rounded border text-xs hover:opacity-80"
                       style={{ borderColor: T.borderColor, color: T.textMuted }}
                     >
                       <Download size={12} /> Download
@@ -842,7 +489,7 @@ export default function AudioTool() {
                   )}
                 </div>
               ) : current.status === "failed" ? (
-                <div className="text-sm" style={{ color: T.warning }}>
+                <div className="text-sm" style={{ color: "#ef4444" }}>
                   {current.error || "Failed"}
                 </div>
               ) : null}
@@ -864,7 +511,7 @@ export default function AudioTool() {
                 </span>
                 <button
                   onClick={handleClear}
-                  className="text-[10px] hover:underline"
+                  className="text-[10px] hover:opacity-70"
                   style={{ color: T.textMuted }}
                 >
                   Clear
@@ -879,15 +526,12 @@ export default function AudioTool() {
                   >
                     <div className="min-w-0 flex-1">
                       <div className="text-xs truncate">{g.text}</div>
-                      <div
-                        className="text-[10px] flex items-center gap-2"
-                        style={{ color: T.textMuted }}
-                      >
+                      <div className="text-[10px] opacity-50 flex items-center gap-2">
                         <span>{g.mode === "tts" ? "TTS" : "Music"}</span>
                         <span>•</span>
                         <span>{g.cost} 🪙</span>
                         {g.status === "failed" && (
-                          <span style={{ color: T.warning }}>Failed</span>
+                          <span style={{ color: "#ef4444" }}>Failed</span>
                         )}
                       </div>
                     </div>
@@ -895,7 +539,7 @@ export default function AudioTool() {
                       <div className="flex items-center gap-1 ml-2">
                         <button
                           onClick={() => togglePlay(g.id, g.audioUrl!)}
-                          className="p-1.5 rounded hover:bg-white/10"
+                          className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.accentColor }}
                           aria-label={
                             playingId === g.id ? "Pause audio" : "Play audio"
@@ -909,7 +553,7 @@ export default function AudioTool() {
                         </button>
                         <button
                           onClick={() => handleDownload(g.audioUrl!, g.mode)}
-                          className="p-1.5 rounded hover:bg-white/10"
+                          className="p-1.5 rounded hover:opacity-80"
                           style={{ color: T.textMuted }}
                           aria-label="Download audio"
                         >
@@ -928,11 +572,7 @@ export default function AudioTool() {
               className="border rounded-lg p-6 text-center"
               style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
             >
-              <Music
-                size={24}
-                className="mx-auto mb-2"
-                style={{ color: T.textMuted }}
-              />
+              <Music size={24} className="mx-auto mb-2 opacity-30" />
               <p className="text-sm" style={{ color: T.textMuted }}>
                 Your generated audio will appear here
               </p>

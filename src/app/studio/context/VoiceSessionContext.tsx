@@ -9,8 +9,6 @@ import {
   useRef,
   useState,
 } from "react";
-import { cleanTextForSpeech } from "@/lib/tts-clean";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -18,83 +16,24 @@ import { sanitizeProviderError } from "@/lib/provider-error";
 
 export type VoiceState =
   | "idle"
+  | "requesting_permission"
+  | "connecting"
   | "listening"
-  | "transcribing"
-  | "thinking"
-  | "speaking"
-  | "cooldown"
+  | "user_speaking"
+  | "processing"
+  | "assistant_speaking"
+  | "muted"
   | "error";
-
-export type VoiceActivity =
-  | { type: "idle" }
-  | { type: "requesting_permission" }
-  | { type: "connecting" }
-  | { type: "listening" }
-  | { type: "speech_detected"; durationMs: number }
-  | { type: "transcribing" }
-  | { type: "sending" }
-  | { type: "thinking" }
-  | { type: "using_tool"; tool: string }
-  | { type: "reading_files"; files: [number, number] }
-  | { type: "writing_files"; files: [number, number] }
-  | { type: "running_command"; command: string }
-  | { type: "testing"; tests: [number, number] }
-  | { type: "generating_response" }
-  | { type: "speaking" }
-  | { type: "paused" }
-  | { type: "complete" }
-  | { type: "cooldown"; retryAfter?: number }
-  | { type: "error"; message: string };
-
-export type VoiceTimingStage =
-  | "speech_end"
-  | "transcription_complete"
-  | "AI_first_token"
-  | "AI_complete"
-  | "TTS_request"
-  | "TTS_first_audio"
-  | "playback_started";
-export type VoiceTimings = Partial<Record<VoiceTimingStage, number>>;
-
-const ACTIVITY_TO_VOICE_STATE: Record<
-  VoiceActivity["type"],
-  VoiceState | undefined
-> = {
-  idle: "idle",
-  requesting_permission: "listening",
-  connecting: "listening",
-  listening: "listening",
-  speech_detected: "listening",
-  transcribing: "transcribing",
-  sending: "thinking",
-  thinking: "thinking",
-  using_tool: "thinking",
-  reading_files: "thinking",
-  writing_files: "thinking",
-  running_command: "thinking",
-  testing: "thinking",
-  generating_response: "thinking",
-  speaking: "speaking",
-  paused: "idle",
-  complete: "idle",
-  cooldown: "cooldown",
-  error: "error",
-};
 
 export interface VoiceSessionCtx {
   voiceState: VoiceState;
-  state: "idle" | "loading" | "speaking" | "error";
   transcript: string;
-  interimTranscript: string;
   micLevel: number;
   errorMessage: string | null;
-  cooldownRemaining: number;
   isMuted: boolean;
   selectedDeviceId: string | null;
   availableDevices: MediaDeviceInfo[];
-  listeningDurationMs: number;
-  activity: VoiceActivity;
-  timings: VoiceTimings;
+  voiceMode: "live" | "recording" | null;
   // Actions
   startVoice: () => void;
   stopVoice: () => void;
@@ -104,8 +43,45 @@ export interface VoiceSessionCtx {
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void) => void;
-  setActivity: (activity: VoiceActivity) => void;
-  markTiming: (stage: VoiceTimingStage) => void;
+}
+
+// ---------------------------------------------------------------------------
+// Singleton stream guard — survives provider remounts
+// ---------------------------------------------------------------------------
+
+let activeStream: MediaStream | null = null;
+
+// ---------------------------------------------------------------------------
+// SpeechRecognition type shim (not in lib.dom.d.ts by default)
+// ---------------------------------------------------------------------------
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+}
+
+interface SpeechRecognitionInstance extends EventTarget {
+  continuous: boolean;
+  interimResults: boolean;
+  lang: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onstart: ((ev: Event) => void) | null;
+  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
+  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
+  onend: ((ev: Event) => void) | null;
+}
+
+declare global {
+  interface Window {
+    SpeechRecognition?: new () => SpeechRecognitionInstance;
+    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -116,18 +92,13 @@ const noop = () => {};
 
 const defaultCtx: VoiceSessionCtx = {
   voiceState: "idle",
-  state: "idle",
   transcript: "",
-  interimTranscript: "",
   micLevel: 0,
   errorMessage: null,
-  cooldownRemaining: 0,
   isMuted: false,
   selectedDeviceId: null,
   availableDevices: [],
-  listeningDurationMs: 0,
-  activity: { type: "idle" },
-  timings: {},
+  voiceMode: null,
   startVoice: noop,
   stopVoice: noop,
   toggleMute: noop,
@@ -136,8 +107,6 @@ const defaultCtx: VoiceSessionCtx = {
   stopSpeaking: noop,
   selectDevice: noop,
   setOnTurn: noop,
-  setActivity: noop,
-  markTiming: noop,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -147,58 +116,7 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 // ---------------------------------------------------------------------------
 
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
-const SILENCE_THRESHOLD = 0.02;
-const SPEECH_START_THRESHOLD = 0.035;
-const DESKTOP_SILENCE_TIMEOUT_MS = 550;
-const MOBILE_SILENCE_TIMEOUT_MS = 750;
-const MAX_RECORDING_MS = 30_000;
-const CHUNK_INTERVAL_MS = 100;
-const MIN_RECORDING_MS = 500;
-const MIN_BLOB_SIZE = 8000;
-const MIN_TRANSCRIBE_INTERVAL_MS = 900;
-const TTS_CHUNK_LENGTH = 110;
-const VOICE_PLAYBACK_RATE = 1.12;
-
-function isMobileDevice(): boolean {
-  if (typeof window === "undefined") return false;
-  return (
-    /Android|iPhone|iPad|iPod|Mobile|CriOS/i.test(navigator.userAgent) ||
-    (navigator.maxTouchPoints > 1 && window.innerWidth < 1024)
-  );
-}
-
-function getSupportedMimeType(): string | undefined {
-  const types = [
-    "audio/webm;codecs=opus",
-    "audio/webm",
-    "audio/mp4;codecs=mp4a.40.2",
-    "audio/mp4",
-    "audio/ogg;codecs=opus",
-    "audio/ogg",
-  ];
-  if (typeof window === "undefined" || !window.MediaRecorder) return undefined;
-  return types.find((t) => MediaRecorder.isTypeSupported(t));
-}
-
-function getUserMediaErrorMessage(err: DOMException): string {
-  switch (err.name) {
-    case "NotAllowedError":
-    case "PermissionDeniedError":
-      return "Microphone permission denied. Allow microphone access in your browser/site settings.";
-    case "NotFoundError":
-    case "DevicesNotFoundError":
-      return "No microphone found. Connect a microphone and try again.";
-    case "NotReadableError":
-    case "TrackStartError":
-      return "Microphone is in use by another application.";
-    case "AbortError":
-      return "Microphone request was cancelled.";
-    case "SecurityError":
-      return "Microphone access blocked by security policy.";
-    default:
-      return err.message || "Microphone error.";
-  }
-}
+const SILENCE_TIMEOUT_MS = 900;
 
 export function VoiceSessionProvider({
   children,
@@ -206,12 +124,10 @@ export function VoiceSessionProvider({
   children: React.ReactNode;
 }) {
   // --- State ---
-  const [voiceState, setVoiceStateRaw] = useState<VoiceState>("idle");
+  const [voiceState, setVoiceState] = useState<VoiceState>("idle");
   const [transcript, setTranscript] = useState("");
-  const [interimTranscript, setInterimTranscript] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
-  const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [isMuted, setIsMuted] = useState(false);
   const [selectedDeviceId, setSelectedDeviceId] = useState<string | null>(
     () => {
@@ -222,173 +138,85 @@ export function VoiceSessionProvider({
   const [availableDevices, setAvailableDevices] = useState<MediaDeviceInfo[]>(
     [],
   );
-  const [listeningDurationMs, setListeningDurationMs] = useState(0);
-  const [activity, setActivityState] = useState<VoiceActivity>({
-    type: "idle",
-  });
-  const [timings, setTimings] = useState<VoiceTimings>({});
-  const markTiming = useCallback((stage: VoiceTimingStage) => {
-    setTimings((current) => ({ ...current, [stage]: performance.now() }));
-  }, []);
-
-  const state: "idle" | "loading" | "speaking" | "error" = useMemo(() => {
-    if (voiceState === "speaking") return "speaking";
-    if (voiceState === "error" || voiceState === "cooldown") return "error";
-    if (voiceState === "idle") return "idle";
-    return "loading";
-  }, [voiceState]);
+  const [voiceMode, setVoiceMode] = useState<"live" | "recording" | null>(null);
 
   // --- Refs ---
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
+  const recorderRef = useRef<MediaRecorder | null>(null);
+  const recorderChunksRef = useRef<Blob[]>([]);
   const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const ttsCancelledRef = useRef(false);
-  const ttsQueueRef = useRef<HTMLAudioElement[]>([]);
-  const ttsFetchAbortRef = useRef<AbortController | null>(null);
   const rafRef = useRef<number | null>(null);
   const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const maxRecordingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const listeningStartMsRef = useRef<number | null>(null);
-  const activeRef = useRef(false);
-  const voiceStateRef = useRef<VoiceState>("idle");
+  const activeRef = useRef(false); // true while a session is live
+  const voiceStateRef = useRef<VoiceState>("idle"); // mirror for RAF/async callbacks
   const onTurnRef = useRef<(text: string) => void>(noop);
   const prevMicLevelRef = useRef(0);
-  const speechDetectedRef = useRef(false);
-  const activityRef = useRef<VoiceActivity>({ type: "idle" });
-  const recorderMimeTypeRef = useRef<string>("audio/webm");
-  const lastTranscribeMsRef = useRef<number>(0);
-  const pendingListenRestartRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const cooldownTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const startVoiceRef = useRef<() => Promise<void>>(async () => {});
+  const submittedTranscriptRef = useRef("");
 
-  // Keep mirrors in sync
+  // Keep voiceStateRef in sync
   useEffect(() => {
     voiceStateRef.current = voiceState;
   }, [voiceState]);
-  useEffect(() => {
-    activityRef.current = activity;
-  }, [activity]);
-
-  const setVoiceState = useCallback(
-    (next: VoiceState) => {
-      voiceStateRef.current = next;
-      setVoiceStateRaw(next);
-    },
-    [setVoiceStateRaw],
-  );
-
-  const setActivity = useCallback(
-    (next: VoiceActivity) => {
-      activityRef.current = next;
-      setActivityState(next);
-      const mapped = ACTIVITY_TO_VOICE_STATE[next.type];
-      if (mapped) setVoiceState(mapped);
-    },
-    [setActivityState, setVoiceState],
-  );
 
   // ---------------------------------------------------------------------------
-  // cleanup
+  // cleanup — fully idempotent
   // ---------------------------------------------------------------------------
 
   const cleanup = useCallback(() => {
-    console.debug("[LiTT Voice] cleanup");
+    console.debug("[Voice] cleanup called");
 
-    if (pendingListenRestartRef.current) {
-      clearTimeout(pendingListenRestartRef.current);
-      pendingListenRestartRef.current = null;
-    }
-
+    // 1. Stop mic tracks
+    activeStream?.getTracks().forEach((t) => t.stop());
+    activeStream = null;
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((t) => t.stop());
       streamRef.current = null;
     }
 
+    // 2. Close AudioContext
     if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
       audioCtxRef.current.close().catch(() => {});
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
 
-    if (mediaRecorderRef.current) {
-      try {
-        if (mediaRecorderRef.current.state !== "inactive") {
-          mediaRecorderRef.current.stop();
-        }
-      } catch {
-        // ignore
-      }
-      mediaRecorderRef.current = null;
+    // 3. Abort SpeechRecognition
+    if (recognitionRef.current) {
+      recognitionRef.current.abort();
+      recognitionRef.current = null;
     }
-    recordedChunksRef.current = [];
+    if (recorderRef.current) {
+      recorderRef.current.onstop = null;
+      if (recorderRef.current.state === "recording") recorderRef.current.stop();
+      recorderRef.current = null;
+      recorderChunksRef.current = [];
+    }
 
-    ttsCancelledRef.current = true;
+    // 4. Stop TTS
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
     }
     if (currentAudioRef.current) {
-      currentAudioRef.current.onended = null;
-      currentAudioRef.current.onerror = null;
       currentAudioRef.current.pause();
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
 
+    // 5. Cancel RAF
     if (rafRef.current !== null) {
       cancelAnimationFrame(rafRef.current);
       rafRef.current = null;
     }
 
+    // 6. Clear silence timer
     if (silenceTimerRef.current !== null) {
       clearTimeout(silenceTimerRef.current);
       silenceTimerRef.current = null;
     }
-    if (maxRecordingTimerRef.current !== null) {
-      clearTimeout(maxRecordingTimerRef.current);
-      maxRecordingTimerRef.current = null;
-    }
-
-    speechDetectedRef.current = false;
-    listeningStartMsRef.current = null;
-    setListeningDurationMs(0);
-    setMicLevel(0);
-    prevMicLevelRef.current = 0;
   }, []);
-
-  // ---------------------------------------------------------------------------
-  // Cooldown
-  // ---------------------------------------------------------------------------
-
-  const enterCooldown = useCallback(
-    (seconds: number) => {
-      console.debug("[LiTT Voice] cooldown entered:", seconds);
-      cleanup();
-      setTranscript("");
-      setInterimTranscript("");
-      setErrorMessage("Voice limit reached");
-      setCooldownRemaining(seconds);
-      setActivity({ type: "cooldown", retryAfter: seconds });
-      activeRef.current = false;
-    },
-    [cleanup, setActivity],
-  );
-
-  const finishCooldown = useCallback(() => {
-    if (cooldownTimerRef.current) {
-      clearInterval(cooldownTimerRef.current);
-      cooldownTimerRef.current = null;
-    }
-    setActivity({ type: "idle" });
-    setCooldownRemaining(0);
-    setErrorMessage(null);
-  }, [setActivity]);
 
   // ---------------------------------------------------------------------------
   // Device enumeration
@@ -404,174 +232,23 @@ export function VoiceSessionProvider({
     }
   }, []);
 
+  // On mount: enumerate devices, subscribe to devicechange
   useEffect(() => {
-    const run = () => void enumerateDevices();
+    if (!navigator.mediaDevices) return;
+    // Run async — state update happens inside the promise callback, not synchronously
+    const run = () => {
+      void enumerateDevices();
+    };
     run();
+
     navigator.mediaDevices.addEventListener("devicechange", run);
-    return () =>
+    return () => {
       navigator.mediaDevices.removeEventListener("devicechange", run);
+    };
   }, [enumerateDevices]);
 
   // ---------------------------------------------------------------------------
-  // Transcription helpers
-  // ---------------------------------------------------------------------------
-
-  const finalizeRecording = useCallback(() => {
-    markTiming("speech_end");
-    if (mediaRecorderRef.current?.state === "recording") {
-      try {
-        mediaRecorderRef.current.stop();
-      } catch {
-        // ignore
-      }
-    }
-  }, [markTiming]);
-
-  const sendForTranscription = useCallback(
-    async (chunks: Blob[]) => {
-      const mimeType = recorderMimeTypeRef.current || "audio/webm";
-      const blob = new Blob(chunks, { type: mimeType });
-
-      const recordingDuration = listeningStartMsRef.current
-        ? Date.now() - listeningStartMsRef.current
-        : 0;
-
-      if (blob.size < MIN_BLOB_SIZE || recordingDuration < MIN_RECORDING_MS) {
-        setActivity({ type: "listening" });
-        setInterimTranscript("");
-        speechDetectedRef.current = false;
-        recordedChunksRef.current = [];
-        // Re-arm with a fresh stream/recorder; a stopped MediaRecorder cannot be restarted.
-        voiceStateRef.current = "idle";
-        void startVoiceRef.current();
-        return;
-      }
-
-      setActivity({ type: "transcribing" });
-
-      try {
-        const arrayBuffer = await blob.arrayBuffer();
-        const bytes = new Uint8Array(arrayBuffer);
-        let base64 = "";
-        const chunkSize = 0x8000;
-        for (let i = 0; i < bytes.length; i += chunkSize) {
-          base64 += String.fromCharCode.apply(
-            null,
-            Array.from(bytes.subarray(i, i + chunkSize)) as unknown as number[],
-          );
-        }
-        base64 = btoa(base64);
-
-        // Throttle to avoid Gemini per-minute rate limits.
-        const now = Date.now();
-        const elapsed = now - lastTranscribeMsRef.current;
-        if (elapsed < MIN_TRANSCRIBE_INTERVAL_MS) {
-          const wait = MIN_TRANSCRIBE_INTERVAL_MS - elapsed;
-          await new Promise((r) => setTimeout(r, wait));
-        }
-        lastTranscribeMsRef.current = Date.now();
-
-        const res = await fetch("/api/media/transcribe", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ audioBytes: base64, mimeType, lowLatency: true }),
-        });
-
-        if (!res.ok) {
-          const err = await res.json().catch(() => ({}));
-          const raw =
-            typeof err.error === "string"
-              ? err.error
-              : `Transcription API error ${res.status}`;
-
-          if (
-            res.status === 429 ||
-            /rate limit|too many requests|429|resource_exhausted/i.test(raw)
-          ) {
-            const { retryAfter } = sanitizeProviderError(new Error(raw));
-            const seconds =
-              typeof err.retryAfter === "number" ? err.retryAfter : retryAfter || 15;
-            enterCooldown(seconds);
-            return;
-          }
-
-          throw new Error(raw);
-        }
-
-        const data = (await res.json()) as { text?: string };
-        const text = data.text?.trim();
-        markTiming("transcription_complete");
-
-        if (!text) {
-          setActivity({ type: "listening" });
-          setInterimTranscript("");
-          setErrorMessage(
-            "No speech detected. Try speaking closer to the mic.",
-          );
-          speechDetectedRef.current = false;
-          return;
-        }
-
-        // Hallucination guard
-        const durationSec = recordingDuration / 1000;
-        const wordCount = text.split(/\s+/).length;
-        const maxExpectedWords = Math.max(5, durationSec * 5);
-        if (wordCount > maxExpectedWords) {
-          console.warn(
-            "[LiTT Voice] transcript length suspicious for duration — likely hallucination, discarding",
-            { wordCount, durationSec, text: text.slice(0, 100) },
-          );
-          setActivity({ type: "listening" });
-          setInterimTranscript("");
-          speechDetectedRef.current = false;
-          recordedChunksRef.current = [];
-          // Re-arm with a fresh stream/recorder.
-          voiceStateRef.current = "idle";
-          void startVoiceRef.current();
-          return;
-        }
-
-        setTranscript(text);
-        setInterimTranscript("");
-        setActivity({ type: "sending" });
-
-        // Hand off to chat
-        onTurnRef.current(text);
-
-        // If no TTS/speakText is triggered within 2s, restart listening.
-        if (activeRef.current) {
-          if (pendingListenRestartRef.current) {
-            clearTimeout(pendingListenRestartRef.current);
-          }
-          pendingListenRestartRef.current = setTimeout(() => {
-            pendingListenRestartRef.current = null;
-            if (
-              activeRef.current &&
-              voiceStateRef.current === "thinking"
-            ) {
-              setActivity({ type: "listening" });
-              speechDetectedRef.current = false;
-              recordedChunksRef.current = [];
-              try {
-                mediaRecorderRef.current?.start(CHUNK_INTERVAL_MS);
-              } catch {
-                // ignore
-              }
-            }
-          }, 2000);
-        }
-      } catch (err: unknown) {
-        const msg = err instanceof Error ? err.message : "Transcription failed";
-        console.error("[LiTT Voice] transcription error:", msg);
-        setActivity({ type: "error", message: msg });
-        setErrorMessage(msg);
-      }
-    },
-    [enterCooldown, markTiming, setActivity],
-  );
-
-  // ---------------------------------------------------------------------------
-  // Mic level + duration + speech detection loop
+  // Mic level RAF loop
   // ---------------------------------------------------------------------------
 
   const startMicLevelLoop = useCallback(() => {
@@ -579,15 +256,10 @@ export function VoiceSessionProvider({
     if (!analyser) return;
 
     const data = new Uint8Array(analyser.frequencyBinCount);
-    const mobile = isMobileDevice();
-    const silenceTimeoutMs = mobile ? MOBILE_SILENCE_TIMEOUT_MS : DESKTOP_SILENCE_TIMEOUT_MS;
-    const speechStart = mobile ? SPEECH_START_THRESHOLD * 1.8 : SPEECH_START_THRESHOLD;
-    const silence = mobile ? SILENCE_THRESHOLD * 2.5 : SILENCE_THRESHOLD;
-    let speechHitCount = 0;
-    const SPEECH_HITS_REQUIRED = mobile ? 4 : 2;
 
     const tick = () => {
-      if (!activeRef.current || voiceStateRef.current !== "listening") {
+      const state = voiceStateRef.current;
+      if (state !== "listening" && state !== "user_speaking") {
         rafRef.current = null;
         return;
       }
@@ -599,40 +271,11 @@ export function VoiceSessionProvider({
         sum += v * v;
       }
       const rms = Math.sqrt(sum / data.length);
-      const level = Math.min(1, rms * 3);
+      const level = Math.min(1, rms * 2.5);
 
       if (Math.abs(level - prevMicLevelRef.current) > 0.02) {
         prevMicLevelRef.current = level;
         setMicLevel(level);
-      }
-
-      if (listeningStartMsRef.current) {
-        setListeningDurationMs(Date.now() - listeningStartMsRef.current);
-      }
-
-      // Speech detection — require sustained signal to avoid false triggers
-      if (!speechDetectedRef.current && level > speechStart) {
-        speechHitCount++;
-        if (speechHitCount >= SPEECH_HITS_REQUIRED) {
-          speechDetectedRef.current = true;
-          setActivity({ type: "speech_detected", durationMs: 0 });
-        }
-      } else if (!speechDetectedRef.current) {
-        speechHitCount = 0;
-      }
-
-      if (speechDetectedRef.current) {
-        if (level > silence) {
-          if (silenceTimerRef.current !== null) {
-            clearTimeout(silenceTimerRef.current);
-            silenceTimerRef.current = null;
-          }
-        } else if (silenceTimerRef.current === null) {
-          silenceTimerRef.current = setTimeout(() => {
-            silenceTimerRef.current = null;
-            finalizeRecording();
-          }, silenceTimeoutMs);
-        }
       }
 
       rafRef.current = requestAnimationFrame(tick);
@@ -640,7 +283,7 @@ export function VoiceSessionProvider({
 
     if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
     rafRef.current = requestAnimationFrame(tick);
-  }, [setActivity, finalizeRecording]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // startVoice
@@ -649,81 +292,105 @@ export function VoiceSessionProvider({
   const startVoice = useCallback(async () => {
     const current = voiceStateRef.current;
     if (current !== "idle" && current !== "error") {
-      console.debug("[LiTT Voice] startVoice ignored — state:", current);
+      console.debug(
+        "[Voice] startVoice ignored — already active, state:",
+        current,
+      );
       return;
     }
 
-    console.debug("[LiTT Voice] session start");
-    setActivity({ type: "requesting_permission" });
+    console.debug("[Voice] session start");
+    setVoiceState("requesting_permission");
+    voiceStateRef.current = "requesting_permission";
     setErrorMessage(null);
     setTranscript("");
-    setInterimTranscript("");
+    setIsMuted(false);
+    submittedTranscriptRef.current = "";
 
+    // Always clean up before starting
+    activeRef.current = false;
     cleanup();
 
-    if (typeof window === "undefined" || !window.MediaRecorder) {
-      setActivity({ type: "error", message: "MediaRecorder not supported" });
-      setErrorMessage("MediaRecorder not supported in this browser.");
-      return;
-    }
-
-    const mimeType = getSupportedMimeType();
-    if (!mimeType) {
-      setActivity({ type: "error", message: "No supported audio MIME type" });
-      setErrorMessage("No supported audio format found in this browser.");
-      return;
-    }
-
-    const baseAudio: MediaTrackConstraints = {
-      echoCancellation: { ideal: true },
-      noiseSuppression: { ideal: true },
-      autoGainControl: { ideal: true },
-      channelCount: { ideal: 1 },
-    };
-    let constraints: MediaStreamConstraints = { audio: baseAudio };
-    if (selectedDeviceId) {
-      constraints = {
-        audio: { ...baseAudio, deviceId: { ideal: selectedDeviceId } },
-      };
-    }
-
+    // --- getUserMedia ---
     let stream: MediaStream;
     try {
-      stream = await navigator.mediaDevices.getUserMedia(constraints);
-    } catch (err: unknown) {
-      const domErr = err as DOMException;
-      // If the stored device is gone or over-constrained, fall back to default mic.
-      if (
-        selectedDeviceId &&
-        (domErr.name === "NotFoundError" ||
-          domErr.name === "OverconstrainedError" ||
-          domErr.name === "DevicesNotFoundError")
-      ) {
-        try {
-          stream = await navigator.mediaDevices.getUserMedia({ audio: baseAudio });
-        } catch (fallbackErr: unknown) {
-          const e = fallbackErr as DOMException;
-          const msg = getUserMediaErrorMessage(e);
-          console.error("[LiTT Voice] getUserMedia fallback error:", e.name, msg);
-          setActivity({ type: "error", message: msg });
-          setErrorMessage(msg);
-          return;
-        }
-      } else {
-        const e = err as DOMException;
-        const msg = getUserMediaErrorMessage(e);
-        console.error("[LiTT Voice] getUserMedia error:", e.name, msg);
-        setActivity({ type: "error", message: msg });
-        setErrorMessage(msg);
-        return;
+      if (!navigator.mediaDevices?.getUserMedia) {
+        throw new DOMException(
+          "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.",
+          "NotSupportedError",
+        );
       }
+
+      const audio: MediaTrackConstraints = {
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+        channelCount: 1,
+        ...(selectedDeviceId
+          ? { deviceId: { exact: selectedDeviceId } }
+          : {}),
+      };
+
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio });
+      } catch (deviceError) {
+        const deviceException = deviceError as DOMException;
+        const savedDeviceIsStale =
+          Boolean(selectedDeviceId) &&
+          (deviceException.name === "NotFoundError" ||
+            deviceException.name === "OverconstrainedError" ||
+            deviceException.name === "DevicesNotFoundError");
+
+        if (!savedDeviceIsStale) throw deviceError;
+
+        localStorage.removeItem(DEVICE_STORAGE_KEY);
+        setSelectedDeviceId(null);
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+          },
+        });
+      }
+    } catch (err: unknown) {
+      const e = err as DOMException;
+      let msg = "Microphone error.";
+      if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
+        msg =
+          "Microphone permission denied. Please allow access in browser settings and check for hardware privacy switches.";
+      } else if (
+        e.name === "NotFoundError" ||
+        e.name === "DevicesNotFoundError"
+      ) {
+        msg = "No microphone found.";
+      } else if (
+        e.name === "NotReadableError" ||
+        e.name === "TrackStartError"
+      ) {
+        msg = "Microphone is in use by another application.";
+      } else if (e.name === "NotSupportedError") {
+        msg = e.message;
+      } else if (e.message) {
+        msg = e.message;
+      }
+      console.error("[Voice] getUserMedia error:", e.name, msg);
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setErrorMessage(msg);
+      return;
     }
 
-    console.debug("[LiTT Voice] stream id:", stream.id);
+    console.debug("[Voice] stream id:", stream.id);
+    activeStream = stream;
     streamRef.current = stream;
     activeRef.current = true;
+    await enumerateDevices();
 
-    setActivity({ type: "connecting" });
+    // --- AudioContext + Analyser ---
+    setVoiceState("connecting");
+    voiceStateRef.current = "connecting";
 
     try {
       const ctx = new AudioContext();
@@ -737,84 +404,213 @@ export function VoiceSessionProvider({
       const source = ctx.createMediaStreamSource(stream);
       source.connect(analyser);
     } catch (err) {
-      console.warn("[LiTT Voice] AudioContext setup failed:", err);
+      console.warn("[Voice] AudioContext setup failed:", err);
+      // non-fatal — mic level won't work but recognition can continue
     }
 
+    // --- SpeechRecognition ---
+    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
+    if (!SR) {
+      try {
+        const preferredType = [
+          "audio/webm;codecs=opus",
+          "audio/webm",
+          "audio/ogg;codecs=opus",
+        ].find((type) => MediaRecorder.isTypeSupported(type));
+        const recorder = new MediaRecorder(
+          stream,
+          preferredType ? { mimeType: preferredType } : undefined,
+        );
+        recorderRef.current = recorder;
+        recorderChunksRef.current = [];
+        setVoiceMode("recording");
+        recorder.ondataavailable = (event) => {
+          if (event.data.size) recorderChunksRef.current.push(event.data);
+        };
+        recorder.onerror = () => {
+          setVoiceState("error");
+          voiceStateRef.current = "error";
+          setErrorMessage("This browser could not record the selected microphone.");
+        };
+        recorder.onstop = async () => {
+          const chunks = recorderChunksRef.current;
+          recorderChunksRef.current = [];
+          if (!chunks.length) {
+            setVoiceState("error");
+            voiceStateRef.current = "error";
+            setErrorMessage("No audio was captured. Check your microphone and try again.");
+            cleanup();
+            return;
+          }
+          setVoiceState("processing");
+          voiceStateRef.current = "processing";
+          try {
+            const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
+            const dataUrl = await blobToDataUrl(blob);
+            const response = await fetch("/api/media/transcribe", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                audioBytes: dataUrl.split(",")[1],
+                mimeType: blob.type,
+              }),
+            });
+            const data = (await response.json()) as { text?: string; error?: string };
+            if (!response.ok || !data.text?.trim()) {
+              throw new Error(data.error || "No speech was detected.");
+            }
+            const spokenText = data.text.trim();
+            setTranscript(spokenText);
+            onTurnRef.current(spokenText);
+            setVoiceState("idle");
+            voiceStateRef.current = "idle";
+            setVoiceMode(null);
+            cleanup();
+          } catch (error) {
+            setVoiceState("error");
+            voiceStateRef.current = "error";
+            setErrorMessage(
+              error instanceof Error ? error.message : "Voice transcription failed.",
+            );
+            cleanup();
+          }
+        };
+        recorder.start(250);
+        setVoiceState("listening");
+        voiceStateRef.current = "listening";
+        startMicLevelLoop();
+      } catch (error) {
+        setVoiceState("error");
+        voiceStateRef.current = "error";
+        setErrorMessage(
+          error instanceof Error
+            ? error.message
+            : "Voice recording is not supported in this browser.",
+        );
+        cleanup();
+      }
+      return;
+    }
+
+    setVoiceMode("live");
+
+    const buildRecognition = () => {
+      const rec = new SR();
+      rec.continuous = true;
+      rec.interimResults = true;
+      rec.lang = "en-US";
+
+      rec.onstart = () => {
+        console.debug("[Voice] recognition started");
+        setVoiceState("listening");
+        voiceStateRef.current = "listening";
+        startMicLevelLoop();
+      };
+
+      rec.onresult = (ev: SpeechRecognitionEvent) => {
+        let finalText = "";
+        let interimText = "";
+        for (let i = ev.resultIndex; i < ev.results.length; i++) {
+          const r = ev.results[i];
+          if (r.isFinal) {
+            finalText += r[0].transcript;
+          } else {
+            interimText += r[0].transcript;
+          }
+        }
+        const combined = (finalText + interimText).trim();
+        setTranscript(combined);
+
+        if (combined) {
+          setVoiceState("user_speaking");
+          voiceStateRef.current = "user_speaking";
+
+          // Reset silence timer
+          if (silenceTimerRef.current !== null) {
+            clearTimeout(silenceTimerRef.current);
+          }
+          silenceTimerRef.current = setTimeout(() => {
+            silenceTimerRef.current = null;
+            const t = combined.trim();
+            if (t && t !== submittedTranscriptRef.current) {
+              submittedTranscriptRef.current = t;
+              console.debug("[Voice] silence detected, turn:", t);
+              activeRef.current = false;
+              setVoiceState("processing");
+              voiceStateRef.current = "processing";
+              cleanup();
+              onTurnRef.current(t);
+              setVoiceState("idle");
+              voiceStateRef.current = "idle";
+              setVoiceMode(null);
+            }
+          }, SILENCE_TIMEOUT_MS);
+        }
+      };
+
+      rec.onerror = (ev: SpeechRecognitionErrorEvent) => {
+        if (ev.error === "aborted" || ev.error === "no-speech") return;
+        console.error("[Voice] recognition error:", ev.error);
+        setVoiceState("error");
+        voiceStateRef.current = "error";
+        setErrorMessage(`Speech recognition error: ${ev.error}`);
+      };
+
+      rec.onend = () => {
+        console.debug("[Voice] recognition ended, active:", activeRef.current);
+        const shouldRestart =
+          activeRef.current &&
+          voiceStateRef.current !== "assistant_speaking" &&
+          voiceStateRef.current !== "muted" &&
+          voiceStateRef.current !== "error";
+
+        if (shouldRestart) {
+          setTimeout(() => {
+            if (activeRef.current && recognitionRef.current === rec) {
+              try {
+                rec.start();
+              } catch {
+                // recognition may already be restarted or closed
+              }
+            }
+          }, 500);
+        }
+      };
+
+      return rec;
+    };
+
+    const rec = buildRecognition();
+    recognitionRef.current = rec;
     try {
-      const recorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = recorder;
-      recorderMimeTypeRef.current = recorder.mimeType || mimeType;
-      recordedChunksRef.current = [];
-
-      recorder.ondataavailable = (ev) => {
-        if (ev.data && ev.data.size > 0) {
-          recordedChunksRef.current.push(ev.data);
-        }
-      };
-
-      recorder.onstop = () => {
-        const chunks = recordedChunksRef.current;
-        recordedChunksRef.current = [];
-        if (chunks.length > 0) {
-          void sendForTranscription(chunks);
-        }
-      };
-
-      recorder.onerror = (ev) => {
-        console.error("[LiTT Voice] MediaRecorder error:", ev);
-        setActivity({ type: "error", message: "Recording error" });
-        setErrorMessage("Recording error. Please try again.");
-      };
-
-      recorder.start(CHUNK_INTERVAL_MS);
-      listeningStartMsRef.current = Date.now();
-      setListeningDurationMs(0);
-      setActivity({ type: "listening" });
-      startMicLevelLoop();
-
-      // Max recording safety net
-      maxRecordingTimerRef.current = setTimeout(() => {
-        if (voiceStateRef.current === "listening") {
-          finalizeRecording();
-        }
-      }, MAX_RECORDING_MS);
+      rec.start();
     } catch (err) {
-      console.error("[LiTT Voice] MediaRecorder start failed:", err);
-      setActivity({ type: "error", message: "Could not start recorder" });
-      setErrorMessage("Could not start audio recorder.");
-      cleanup();
+      console.error("[Voice] recognition.start() failed:", err);
     }
-  }, [
-    cleanup,
-    selectedDeviceId,
-    startMicLevelLoop,
-    sendForTranscription,
-    setActivity,
-    finalizeRecording,
-  ]);
-
-  useEffect(() => {
-    startVoiceRef.current = startVoice;
-  }, [startVoice]);
+  }, [cleanup, enumerateDevices, selectedDeviceId, startMicLevelLoop]);
 
   // ---------------------------------------------------------------------------
   // stopVoice
   // ---------------------------------------------------------------------------
 
   const stopVoice = useCallback(() => {
-    console.debug("[LiTT Voice] stopVoice");
-    activeRef.current = false;
-    if (cooldownTimerRef.current) {
-      clearInterval(cooldownTimerRef.current);
-      cooldownTimerRef.current = null;
+    console.debug("[Voice] stopVoice");
+    if (recorderRef.current?.state === "recording") {
+      setVoiceState("processing");
+      voiceStateRef.current = "processing";
+      recorderRef.current.stop();
+      return;
     }
-    setCooldownRemaining(0);
-    setActivity({ type: "idle" });
+    activeRef.current = false;
+    setVoiceState("idle");
+    voiceStateRef.current = "idle";
     cleanup();
     setTranscript("");
-    setInterimTranscript("");
-    setErrorMessage(null);
-  }, [cleanup, setActivity]);
+    setMicLevel(0);
+    setVoiceMode(null);
+    submittedTranscriptRef.current = "";
+    prevMicLevelRef.current = 0;
+  }, [cleanup]);
 
   // ---------------------------------------------------------------------------
   // toggleMute
@@ -827,38 +623,32 @@ export function VoiceSessionProvider({
       tracks.forEach((t) => {
         t.enabled = !next;
       });
-      console.debug("[LiTT Voice] mute toggled:", next);
+      if (next) {
+        setVoiceState("muted");
+        voiceStateRef.current = "muted";
+      } else {
+        setVoiceState("listening");
+        voiceStateRef.current = "listening";
+        startMicLevelLoop();
+      }
+      console.debug("[Voice] mute toggled:", next);
       return next;
     });
-  }, []);
+  }, [startMicLevelLoop]);
 
   // ---------------------------------------------------------------------------
   // stopSpeaking
   // ---------------------------------------------------------------------------
 
   const stopSpeaking = useCallback(() => {
-    ttsCancelledRef.current = true;
-    if (ttsFetchAbortRef.current) {
-      ttsFetchAbortRef.current.abort();
-      ttsFetchAbortRef.current = null;
-    }
     if (typeof window !== "undefined") {
       window.speechSynthesis?.cancel();
     }
     if (currentAudioRef.current) {
-      currentAudioRef.current.onended = null;
-      currentAudioRef.current.onerror = null;
       currentAudioRef.current.pause();
       currentAudioRef.current.src = "";
       currentAudioRef.current = null;
     }
-    ttsQueueRef.current.forEach((a) => {
-      a.onended = null;
-      a.onerror = null;
-      a.pause();
-      if (a.src.startsWith("blob:")) URL.revokeObjectURL(a.src);
-    });
-    ttsQueueRef.current = [];
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -866,169 +656,102 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const speakText = useCallback(
-    (rawText: string) => {
-      const text = cleanTextForSpeech(rawText);
+    (text: string) => {
       if (!text.trim()) return;
 
+      // Stop any current TTS first
       stopSpeaking();
-      ttsCancelledRef.current = false;
-      ttsQueueRef.current = [];
 
-      if (pendingListenRestartRef.current) {
-        clearTimeout(pendingListenRestartRef.current);
-        pendingListenRestartRef.current = null;
-      }
-
-      if (mediaRecorderRef.current?.state === "recording") {
+      // Pause recognition while speaking to avoid echo loops
+      if (recognitionRef.current) {
         try {
-          mediaRecorderRef.current.pause();
+          recognitionRef.current.stop();
         } catch {
           // ignore
         }
       }
 
-      setActivity({ type: "speaking" });
-      markTiming("TTS_request");
+      setVoiceState("assistant_speaking");
+      voiceStateRef.current = "assistant_speaking";
 
       const onSpeechEnd = () => {
-        if (ttsCancelledRef.current) return;
-        const recorder = mediaRecorderRef.current;
-        if (recorder?.state === "paused") {
+        if (activeRef.current) {
+          setVoiceState("listening");
+          voiceStateRef.current = "listening";
+          startMicLevelLoop();
+          // Resume recognition after assistant finished speaking
           try {
-            recorder.resume();
+            recognitionRef.current?.start();
           } catch {
             // ignore
           }
-        } else if (recorder?.state === "inactive" && activeRef.current) {
-          recordedChunksRef.current = [];
-          voiceStateRef.current = "idle";
-          void startVoiceRef.current();
-          return;
-        }
-        if (activeRef.current) {
-          setActivity({ type: "listening" });
-          speechDetectedRef.current = false;
-          startMicLevelLoop();
         } else {
-          setActivity({ type: "idle" });
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
         }
       };
 
-      // Split text into sentence-level chunks for faster first-audio.
-      // The first chunk plays immediately while subsequent chunks are
-      // fetched in the background and queued for seamless playback.
-      const chunks = splitTextIntoChunks(text, TTS_CHUNK_LENGTH);
-      const abortCtrl = new AbortController();
-      ttsFetchAbortRef.current = abortCtrl;
-      let firstPlayed = false;
-      let allFailed = true;
+      // Try API audio first
+      fetch("/api/media/generate-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text, voice: "Kore" }),
+      })
+        .then(async (res) => {
+          if (!res.ok) throw new Error(`API ${res.status}`);
+          const data = (await res.json()) as {
+            audioBase64?: string;
+            audioUrl?: string;
+          };
 
-      const fetchChunk = async (chunk: string): Promise<HTMLAudioElement | null> => {
-        if (ttsCancelledRef.current || abortCtrl.signal.aborted) return null;
-        try {
-          const res = await fetch("/api/tts", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ text: chunk, voice: "aoede" }),
-            signal: abortCtrl.signal,
-          });
-          if (!res.ok) {
-            const data = await res.json().catch(() => ({}));
-            const raw =
-              typeof data.error === "string" ? data.error : `TTS ${res.status}`;
-            if (
-              res.status === 429 ||
-              /rate limit|too many requests|429|resource_exhausted/i.test(raw)
-            ) {
-              const { retryAfter } = sanitizeProviderError(new Error(raw));
-              const seconds =
-                typeof data.retryAfter === "number"
-                  ? data.retryAfter
-                  : retryAfter || 15;
-              enterCooldown(seconds);
-            }
-            return null;
-          }
-          const blob = await res.blob();
-          if (ttsCancelledRef.current || abortCtrl.signal.aborted) return null;
-          const src = URL.createObjectURL(blob);
-          const audio = new Audio(src);
-          audio.playbackRate = VOICE_PLAYBACK_RATE;
-          audio.preservesPitch = true;
-          audio.preload = "auto";
-          return audio;
-        } catch {
-          return null;
-        }
-      };
-
-      const playFromQueue = () => {
-        if (ttsCancelledRef.current) return;
-        const audio = ttsQueueRef.current.shift();
-        if (!audio) {
-          // Queue empty — if we already played something, we're done.
-          // If not, fall back to browser TTS for the whole text.
-          if (allFailed) {
-            fallbackSynth(text, onSpeechEnd);
+          let src = "";
+          if (data.audioBase64) {
+            src = data.audioBase64.startsWith("data:")
+              ? data.audioBase64
+              : `data:audio/mpeg;base64,${data.audioBase64}`;
+          } else if (data.audioUrl) {
+            src = data.audioUrl;
           } else {
+            throw new Error("No audio data in response");
+          }
+
+          const audio = new Audio(src);
+          currentAudioRef.current = audio;
+
+          audio.onended = () => {
+            if (currentAudioRef.current === audio) {
+              currentAudioRef.current = null;
+            }
             onSpeechEnd();
+          };
+
+          audio.onerror = () => {
+            console.warn(
+              "[Voice] HTMLAudio error — falling back to speechSynthesis",
+            );
+            if (currentAudioRef.current === audio) {
+              currentAudioRef.current = null;
+            }
+            fallbackSynth(text, onSpeechEnd);
+          };
+
+          try {
+            await audio.play();
+          } catch (err) {
+            console.warn("[Voice] audio.play() blocked:", err);
+            fallbackSynth(text, onSpeechEnd);
           }
-          return;
-        }
-        allFailed = false;
-        currentAudioRef.current = audio;
-
-        audio.onended = () => {
-          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-          if (currentAudioRef.current === audio) {
-            currentAudioRef.current = null;
-          }
-          playFromQueue();
-        };
-
-        audio.onerror = () => {
-          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-          if (currentAudioRef.current === audio) {
-            currentAudioRef.current = null;
-          }
-          playFromQueue();
-        };
-
-        audio.play().catch(() => {
-          if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-          if (currentAudioRef.current === audio) {
-            currentAudioRef.current = null;
-          }
-          playFromQueue();
-        });
-      };
-
-      // Process chunks: fetch first, play immediately, then fetch rest
-      // sequentially while earlier chunks play.
-      (async () => {
-        for (let i = 0; i < chunks.length; i++) {
-          if (ttsCancelledRef.current || abortCtrl.signal.aborted) return;
-
-          const audio = await fetchChunk(chunks[i]);
-          if (!audio) continue;
-
-          ttsQueueRef.current.push(audio);
-
-          if (!firstPlayed) {
-            firstPlayed = true;
-            markTiming("TTS_first_audio");
-            markTiming("playback_started");
-            playFromQueue();
-          }
-        }
-      })().catch(() => {
-        // If the entire fetch chain fails, fall back to browser TTS
-        if (!ttsCancelledRef.current && !firstPlayed) {
+        })
+        .catch((err) => {
+          console.warn(
+            "[Voice] generate-audio API failed:",
+            err,
+            "— falling back to speechSynthesis",
+          );
           fallbackSynth(text, onSpeechEnd);
-        }
-      });
+        });
     },
-    [stopSpeaking, startMicLevelLoop, setActivity, enterCooldown, markTiming],
+    [stopSpeaking, startMicLevelLoop],
   );
 
   // ---------------------------------------------------------------------------
@@ -1036,20 +759,19 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const interrupt = useCallback(() => {
-    console.debug("[LiTT Voice] interrupt");
+    console.debug("[Voice] interrupt");
     stopSpeaking();
-    if (mediaRecorderRef.current?.state === "paused") {
+    if (activeRef.current) {
+      setVoiceState("listening");
+      voiceStateRef.current = "listening";
+      startMicLevelLoop();
       try {
-        mediaRecorderRef.current.resume();
+        recognitionRef.current?.start();
       } catch {
         // ignore
       }
     }
-    if (activeRef.current) {
-      setActivity({ type: "listening" });
-      startMicLevelLoop();
-    }
-  }, [stopSpeaking, startMicLevelLoop, setActivity]);
+  }, [stopSpeaking, startMicLevelLoop]);
 
   // ---------------------------------------------------------------------------
   // selectDevice
@@ -1059,8 +781,10 @@ export function VoiceSessionProvider({
     (deviceId: string) => {
       localStorage.setItem(DEVICE_STORAGE_KEY, deviceId);
       setSelectedDeviceId(deviceId);
+      // If currently active, restart with new device
       if (activeRef.current) {
         stopVoice();
+        // Small delay to let cleanup finish before restarting
         setTimeout(() => startVoice(), 300);
       }
     },
@@ -1072,73 +796,12 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
-  // Cooldown countdown
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    if (voiceState !== "cooldown" || cooldownRemaining <= 0) {
-      if (cooldownTimerRef.current) {
-        clearInterval(cooldownTimerRef.current);
-        cooldownTimerRef.current = null;
-      }
-      return;
-    }
-
-    cooldownTimerRef.current = setInterval(() => {
-      setCooldownRemaining((prev) => {
-        if (prev <= 1) {
-          if (cooldownTimerRef.current) {
-            clearInterval(cooldownTimerRef.current);
-            cooldownTimerRef.current = null;
-          }
-          finishCooldown();
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
-
-    return () => {
-      if (cooldownTimerRef.current) {
-        clearInterval(cooldownTimerRef.current);
-        cooldownTimerRef.current = null;
-      }
-    };
-  }, [voiceState, cooldownRemaining, finishCooldown]);
-
-  // ---------------------------------------------------------------------------
-  // Page lifecycle recovery
-  // ---------------------------------------------------------------------------
-
-  useEffect(() => {
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") {
-        if (audioCtxRef.current?.state === "suspended") {
-          audioCtxRef.current.resume().catch(() => {});
-        }
-      }
-    };
-    const onPageShow = () => {
-      if (activeRef.current && voiceStateRef.current === "listening") {
-        startMicLevelLoop();
-      }
-    };
-    document.addEventListener("visibilitychange", onVisibility);
-    window.addEventListener("pageshow", onPageShow);
-    return () => {
-      document.removeEventListener("visibilitychange", onVisibility);
-      window.removeEventListener("pageshow", onPageShow);
-    };
-  }, [startMicLevelLoop]);
-
   // Cleanup on unmount
+  // ---------------------------------------------------------------------------
+
   useEffect(() => {
     return () => {
       activeRef.current = false;
-      if (cooldownTimerRef.current) {
-        clearInterval(cooldownTimerRef.current);
-        cooldownTimerRef.current = null;
-      }
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1151,18 +814,13 @@ export function VoiceSessionProvider({
   const ctx = useMemo<VoiceSessionCtx>(
     () => ({
       voiceState,
-      state,
       transcript,
-      interimTranscript,
       micLevel,
       errorMessage,
-      cooldownRemaining,
       isMuted,
       selectedDeviceId,
       availableDevices,
-      listeningDurationMs,
-      activity,
-      timings,
+      voiceMode,
       startVoice,
       stopVoice,
       toggleMute,
@@ -1171,23 +829,16 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
-      setActivity,
-      markTiming,
     }),
     [
       voiceState,
-      state,
       transcript,
-      interimTranscript,
       micLevel,
       errorMessage,
-      cooldownRemaining,
       isMuted,
       selectedDeviceId,
       availableDevices,
-      listeningDurationMs,
-      activity,
-      timings,
+      voiceMode,
       startVoice,
       stopVoice,
       toggleMute,
@@ -1196,8 +847,6 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
-      setActivity,
-      markTiming,
     ],
   );
 
@@ -1217,7 +866,7 @@ export function useVoiceSession(): VoiceSessionCtx {
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers (module-level, not closures, so they don't capture stale refs)
 // ---------------------------------------------------------------------------
 
 function fallbackSynth(text: string, onEnd: () => void) {
@@ -1231,29 +880,12 @@ function fallbackSynth(text: string, onEnd: () => void) {
   window.speechSynthesis.speak(utt);
 }
 
-function splitTextIntoChunks(text: string, maxLen: number): string[] {
-  if (text.length <= maxLen) return [text];
-
-  const sentences: string[] = [];
-  let current = "";
-
-  const pushCurrent = () => {
-    if (current.trim()) sentences.push(current.trim());
-    current = "";
-  };
-
-  for (let i = 0; i < text.length; i++) {
-    current += text[i];
-    if (/[.!?]/.test(text[i]) && (i + 1 >= text.length || /\s/.test(text[i + 1]))) {
-      if (current.length >= maxLen) {
-        pushCurrent();
-      }
-    }
-    if (current.length >= maxLen) {
-      pushCurrent();
-    }
-  }
-  pushCurrent();
-
-  return sentences.length > 0 ? sentences : [text];
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result));
+    reader.onerror = () =>
+      reject(reader.error || new Error("Could not read microphone audio."));
+    reader.readAsDataURL(blob);
+  });
 }

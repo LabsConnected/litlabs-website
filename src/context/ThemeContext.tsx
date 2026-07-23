@@ -5,16 +5,10 @@ import {
   useContext,
   useState,
   useEffect,
-  useLayoutEffect,
   useCallback,
   ReactNode,
 } from "react";
 import type { BackgroundMode } from "@/components/AnimatedBackground";
-
-// Use layout effect on the client so CSS variables are applied before the
-// first paint, avoiding a flash of the default volcanic palette.
-const useIsomorphicLayoutEffect =
-  typeof window !== "undefined" ? useLayoutEffect : useEffect;
 
 // Skin presets
 export type SkinPreset =
@@ -51,8 +45,6 @@ export type AccentColor =
   | "purple-haze";
 
 // Theme structure
-export type EffectKey = "glow" | "noise" | "bloom";
-
 export interface Theme {
   mode: ThemeMode;
   skin: SkinPreset;
@@ -66,11 +58,6 @@ export interface Theme {
     borderColor?: string;
     accentColor?: string;
     boxBg?: string;
-  };
-  effects?: {
-    glow?: boolean;
-    noise?: boolean;
-    bloom?: boolean;
   };
 }
 
@@ -151,13 +138,13 @@ const darkSkins: Record<
     boxBg: "#1e122e",
   },
   volcanic: {
-    bgColor: "#1a1210",
-    textColor: "#f0d8cc",
-    linkColor: "#f87171",
-    headerColor: "#fca5a5",
-    borderColor: "#4a2520",
-    accentColor: "#ef4444",
-    boxBg: "#251a15",
+    bgColor: "#03050b",
+    textColor: "#eef4ff",
+    linkColor: "#69e7ff",
+    headerColor: "#c7b8ff",
+    borderColor: "#25305a",
+    accentColor: "#a970ff",
+    boxBg: "#0a0d18",
   },
   gold: {
     bgColor: "#131210",
@@ -461,13 +448,8 @@ const accentOverrides: Record<
 const defaultTheme: Theme = {
   mode: "dark",
   skin: "volcanic",
-  accent: "sunset-orange",
-  backgroundMode: "constellation",
-  effects: {
-    glow: false,
-    noise: false,
-    bloom: false,
-  },
+  accent: "purple-haze",
+  backgroundMode: "nebula",
 };
 
 // Context
@@ -513,73 +495,50 @@ interface ThemeContextType {
     accentColor?: string;
     boxBg?: string;
   }) => void;
-  setEffect: (key: EffectKey, value: boolean) => void;
   resetTheme: () => void;
 }
 
-// Helpers for safe muted color
-const hexToRgb = (hex: string) => {
-  const c = hex.replace("#", "");
-  if (c.length !== 6) return { r: 0, g: 0, b: 0 };
-  return {
-    r: parseInt(c.slice(0, 2), 16),
-    g: parseInt(c.slice(2, 4), 16),
-    b: parseInt(c.slice(4, 6), 16),
-  };
-};
-const to2 = (v: number) =>
-  Math.max(0, Math.min(255, Math.round(v)))
-    .toString(16)
-    .padStart(2, "0");
-const luminance = (r: number, g: number, b: number) => {
-  const a = [r, g, b].map((v) => {
-    v /= 255;
-    return v <= 0.03928 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-  });
-  return a[0] * 0.2126 + a[1] * 0.7152 + a[2] * 0.0722;
-};
-const contrastRatio = (lum1: number, lum2: number) => {
-  const l1 = lum1 + 0.05;
-  const l2 = lum2 + 0.05;
-  return Math.max(l1, l2) / Math.min(l1, l2);
-};
-
 // Helper: produce a muted variant with safe contrast for small text.
-// Mixes the text color toward the background color until contrast is just
-// above 4.5:1 so it stays readable in both dark and light modes.
-function mixMuted(textHex: string, bgHex: string): string {
-  const text = hexToRgb(textHex);
-  const bg = hexToRgb(bgHex);
-  const bgLum = luminance(bg.r, bg.g, bg.b);
-  let lo = 0;
-  let hi = 0.35;
-  let ratio = 0.15;
-  for (let i = 0; i < 8; i++) {
-    const r = text.r + (bg.r - text.r) * ratio;
-    const g = text.g + (bg.g - text.g) * ratio;
-    const b = text.b + (bg.b - text.b) * ratio;
-    const lum = luminance(r, g, b);
-    const cr = contrastRatio(lum, bgLum);
-    if (cr < 4.5) {
-      hi = ratio;
-      ratio = (lo + ratio) / 2;
-    } else if (cr > 6) {
-      lo = ratio;
-      ratio = (ratio + hi) / 2;
-    } else {
-      return `#${to2(r)}${to2(g)}${to2(b)}`;
-    }
-  }
-  const r = text.r + (bg.r - text.r) * ratio;
-  const g = text.g + (bg.g - text.g) * ratio;
-  const b = text.b + (bg.b - text.b) * ratio;
-  return `#${to2(r)}${to2(g)}${to2(b)}`;
+// We lighten the base text color toward white so it never drops below ~4.5:1
+// on the matching dark background.
+function mixMuted(hex: string): string {
+  const c = hex.replace("#", "");
+  if (c.length !== 6) return "#c4c4d4";
+  const r = parseInt(c.slice(0, 2), 16);
+  const g = parseInt(c.slice(2, 4), 16);
+  const b = parseInt(c.slice(4, 6), 16);
+  const mix = (v: number) => Math.round(v + (235 - v) * 0.45);
+  const to2 = (v: number) => v.toString(16).padStart(2, "0");
+  return `#${to2(mix(r))}${to2(mix(g))}${to2(mix(b))}`;
 }
 
 const ThemeContext = createContext<ThemeContextType | undefined>(undefined);
 
 export function ThemeProvider({ children }: { children: ReactNode }) {
-  const [theme, setTheme] = useState<Theme>(defaultTheme);
+  const [theme, setTheme] = useState<Theme>(() => {
+    if (typeof window === "undefined") return defaultTheme;
+    const stored = localStorage.getItem("litlabs-theme");
+    if (stored) {
+      try {
+        const saved = JSON.parse(stored) as Theme;
+        // Move the former factory-default look to the cinematic studio system
+        // without changing themes that a member intentionally customized.
+        if (
+          saved.mode === "dark" &&
+          saved.skin === "volcanic" &&
+          saved.accent === "sunset-orange" &&
+          saved.backgroundMode === "constellation" &&
+          !saved.customColors
+        ) {
+          return defaultTheme;
+        }
+        return saved;
+      } catch {
+        /* ignore */
+      }
+    }
+    return defaultTheme;
+  });
   const getResolvedColors = (t: Theme) => {
     // Get base skin based on mode
     const baseSkins = t.mode === "light" ? lightSkins : darkSkins;
@@ -591,12 +550,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     // Apply accent override if not custom
     const accent = custom.accentColor ? null : accentOverrides[t.accent];
 
-    const bgColor = custom.bgColor || skinColors.bgColor;
-    const textColor = custom.textColor || skinColors.textColor;
     return {
-      bgColor,
-      textColor,
-      textMuted: mixMuted(textColor, bgColor),
+      bgColor: custom.bgColor || skinColors.bgColor,
+      textColor: custom.textColor || skinColors.textColor,
+      textMuted: mixMuted(custom.textColor || skinColors.textColor),
       linkColor: accent?.linkColor || custom.linkColor || skinColors.linkColor,
       headerColor:
         accent?.headerColor || custom.headerColor || skinColors.headerColor,
@@ -634,68 +591,20 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     return () => cancelAnimationFrame(id);
   }, []);
 
-  // Load stored theme after hydration to avoid server/client mismatch
-  useEffect(() => {
-    const stored = localStorage.getItem("litlabs-theme");
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored) as Theme;
-      if (parsed && typeof parsed === "object") {
-        setTheme((prev) => ({ ...prev, ...parsed }));
-      }
-    } catch {
-      // ignore corrupted stored theme
-    }
-  }, []);
-
-  // Apply CSS variables synchronously before the browser paints so the
-  // ThemeContext palette takes effect immediately (and before any stored theme
-  // is loaded). This is intentionally not gated by `mounted`.
-  useIsomorphicLayoutEffect(() => {
-    if (typeof document === "undefined") return;
-    const root = document.documentElement;
-    const colors = getResolvedColors(theme);
-    root.style.setProperty("--bg-color", colors.bgColor);
-    root.style.setProperty("--text-color", colors.textColor);
-    root.style.setProperty("--text-muted", colors.textMuted);
-    root.style.setProperty("--link-color", colors.linkColor);
-    root.style.setProperty("--header-color", colors.headerColor);
-    root.style.setProperty("--border-color", colors.borderColor);
-    root.style.setProperty("--accent-color", colors.accentColor);
-    root.style.setProperty("--success", colors.success);
-    root.style.setProperty("--warning", colors.warning);
-    root.style.setProperty("--box-bg", colors.boxBg);
-    // Sync data-theme attribute so the :root[data-theme="light"]
-    // overrides in globals.css activate for legacy CSS-only components.
-    // Also handle the "system" mode by reading prefers-color-scheme.
-    const isLight =
-      theme.mode === "light" ||
-      (theme.mode === "system" &&
-        typeof window !== "undefined" &&
-        !!window.matchMedia &&
-        window.matchMedia("(prefers-color-scheme: light)").matches);
-    if (isLight) {
-      root.setAttribute("data-theme", "light");
-    } else {
-      root.removeAttribute("data-theme");
-    }
-    // Keep the browser chrome (mobile address bar, splash) in sync.
-    const meta = document.querySelector('meta[name="theme-color"]');
-    if (meta) {
-      meta.setAttribute("content", colors.bgColor);
-    }
-
-    // Toggle optional global visual effects.
-    const fx = theme.effects || { glow: false, noise: false, bloom: false };
-    root.setAttribute("data-effect-glow", String(fx.glow ?? false));
-    root.setAttribute("data-effect-noise", String(fx.noise ?? false));
-    root.setAttribute("data-effect-bloom", String(fx.bloom ?? false));
-  }, [theme]);
-
   // Save to localStorage on change
   useEffect(() => {
     if (mounted) {
       localStorage.setItem("litlabs-theme", JSON.stringify(theme));
+      // Apply CSS variables
+      const root = document.documentElement;
+      const colors = getResolvedColors(theme);
+      root.style.setProperty("--bg-color", colors.bgColor);
+      root.style.setProperty("--text-color", colors.textColor);
+      root.style.setProperty("--link-color", colors.linkColor);
+      root.style.setProperty("--header-color", colors.headerColor);
+      root.style.setProperty("--border-color", colors.borderColor);
+      root.style.setProperty("--accent-color", colors.accentColor);
+      root.style.setProperty("--box-bg", colors.boxBg);
     }
   }, [theme, mounted]);
 
@@ -730,13 +639,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     }));
   };
 
-  const setEffect = (key: EffectKey, value: boolean) => {
-    setTheme((prev) => ({
-      ...prev,
-      effects: { ...prev.effects, [key]: value },
-    }));
-  };
-
   const resetTheme = () => {
     setTheme(defaultTheme);
   };
@@ -752,7 +654,6 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setAccent,
         setBackgroundMode,
         setCustomColors,
-        setEffect,
         resetTheme,
       }}
     >

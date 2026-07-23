@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { callService } from "@/lib/ha-api";
 import { executeHATool } from "@/lib/ha-tools";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export async function POST(req: NextRequest) {
   const { userId } = await auth();
@@ -27,8 +26,7 @@ export async function POST(req: NextRequest) {
 
     return NextResponse.json({ error: "Missing 'domain+service' or 'tool' parameter" }, { status: 400 });
   } catch (err) {
-    console.error("[api/ha/service] error:", err);
-    const { status, error: msg } = sanitizeProviderError(err);
-    return NextResponse.json({ error: msg }, { status });
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

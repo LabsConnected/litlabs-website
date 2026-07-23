@@ -120,15 +120,6 @@ CREATE TABLE IF NOT EXISTS cli_sessions (
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
--- Add columns to notifications if it was created by earlier migration with different schema
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS user_id UUID REFERENCES users(id) ON DELETE CASCADE;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS priority TEXT DEFAULT 'medium';
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS title TEXT;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS body TEXT;
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS data JSONB DEFAULT '{}';
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS channels TEXT[] DEFAULT '{}';
-ALTER TABLE notifications ADD COLUMN IF NOT EXISTS sent_at TIMESTAMPTZ DEFAULT NOW();
-
 -- Indexes for performance
 CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
 CREATE INDEX IF NOT EXISTS idx_conversations_agent_id ON conversations(agent_id);
@@ -154,40 +145,32 @@ ALTER TABLE agent_reviews ENABLE ROW LEVEL SECURITY;
 ALTER TABLE cli_sessions ENABLE ROW LEVEL SECURITY;
 
 -- Users can only see their own data
-DROP POLICY IF EXISTS conversations_user_isolation ON conversations;
 CREATE POLICY conversations_user_isolation ON conversations
-  FOR ALL USING (user_id::text = auth.uid()::text);
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
-DROP POLICY IF EXISTS conversation_messages_user_isolation ON conversation_messages;
 CREATE POLICY conversation_messages_user_isolation ON conversation_messages
   FOR ALL USING (
     conversation_id IN (
-      SELECT id FROM conversations WHERE user_id::text = auth.uid()::text
+      SELECT id FROM conversations WHERE user_id = auth.uid()::UUID
     )
   );
 
-DROP POLICY IF EXISTS notifications_user_isolation ON notifications;
 CREATE POLICY notifications_user_isolation ON notifications
-  FOR ALL USING (user_id::text = auth.uid()::text);
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
-DROP POLICY IF EXISTS agent_sales_buyer_isolation ON agent_sales;
 CREATE POLICY agent_sales_buyer_isolation ON agent_sales
-  FOR SELECT USING (buyer_id::text = auth.uid()::text OR seller_id::text = auth.uid()::text);
+  FOR SELECT USING (buyer_id = auth.uid()::UUID OR seller_id = auth.uid()::UUID);
 
-DROP POLICY IF EXISTS creator_earnings_user_isolation ON creator_earnings;
 CREATE POLICY creator_earnings_user_isolation ON creator_earnings
-  FOR ALL USING (user_id::text = auth.uid()::text);
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
-DROP POLICY IF EXISTS agent_reviews_user_isolation ON agent_reviews;
 CREATE POLICY agent_reviews_user_isolation ON agent_reviews
-  FOR ALL USING (user_id::text = auth.uid()::text);
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
-DROP POLICY IF EXISTS cli_sessions_user_isolation ON cli_sessions;
 CREATE POLICY cli_sessions_user_isolation ON cli_sessions
-  FOR ALL USING (user_id::text = auth.uid()::text);
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
 -- Public reads for analytics (aggregated only)
-DROP POLICY IF EXISTS agent_analytics_public ON agent_analytics;
 CREATE POLICY agent_analytics_public ON agent_analytics
   FOR SELECT USING (true);
 
@@ -200,7 +183,6 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-DROP TRIGGER IF EXISTS update_conversations_updated_at ON conversations;
 CREATE TRIGGER update_conversations_updated_at
   BEFORE UPDATE ON conversations
   FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
@@ -221,7 +203,6 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
-DROP TRIGGER IF EXISTS trigger_update_creator_earnings ON agent_sales;
 CREATE TRIGGER trigger_update_creator_earnings
   AFTER INSERT ON agent_sales
   FOR EACH ROW

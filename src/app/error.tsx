@@ -17,7 +17,7 @@ export default function Error({
 
   return (
     <div
-      className="min-h-dvh flex items-center justify-center px-4"
+      className="min-h-screen flex items-center justify-center px-4"
       style={{ backgroundColor: "#0f0f14", color: "#e2e8f0" }}
     >
       <div

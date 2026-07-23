@@ -1,7 +1,6 @@
 // List deployment records
 import { NextRequest, NextResponse } from "next/server";
 import { getDeployments } from "@/lib/deployments";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -37,11 +36,10 @@ export async function GET(req: NextRequest) {
 
     return NextResponse.json({ deployments, count: deployments.length });
   } catch (error) {
-    console.error("[api/deployments] error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
+    const message = error instanceof Error ? error.message : "Unknown error";
     return NextResponse.json(
       { error: "Failed to fetch deployments", message },
-      { status },
+      { status: 500 },
     );
   }
 }

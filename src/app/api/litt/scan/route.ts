@@ -174,7 +174,7 @@ export async function GET() {
 
   return NextResponse.json(
     {
-      projectName: "LiTTree LabStudios",
+      projectName: "LiTTree-LabStudios",
       totalFiles: files.length,
       totalLines: files.reduce((sum, file) => sum + file.lineCount, 0),
       techStack: [...techStack],

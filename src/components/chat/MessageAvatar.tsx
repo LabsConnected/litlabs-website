@@ -77,10 +77,10 @@ export function LiTTMessageAvatar({ size = 32 }: { size?: number }) {
       {!imageFailed ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img
-          src="/brand/litt-mascot-avatar.png"
+          src="/brand/litt-mascot-hero.png"
           alt=""
           className="h-full w-full object-cover drop-shadow-[0_0_6px_rgba(103,232,249,.6)]"
-          style={{ objectPosition: "50% 40%" }}
+          style={{ objectPosition: "50% 13%" }}
           onError={() => setImageFailed(true)}
         />
       ) : (

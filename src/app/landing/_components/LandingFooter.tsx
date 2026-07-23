@@ -101,7 +101,7 @@ const SOCIALS: Array<{
 
 export function LandingFooter() {
   return (
-    <footer className="relative z-10 border-t border-white/5 bg-[#06060e] px-4 py-12 sm:px-6 sm:py-16">
+    <footer className="relative z-10 border-t border-white/5 bg-[#06060e] px-6 py-16">
       <div className="mx-auto max-w-6xl">
         <div className="grid gap-10 md:grid-cols-[1.4fr_3fr]">
           {/* Brand */}
@@ -110,7 +110,7 @@ export function LandingFooter() {
               href="/"
               className="inline-flex items-center gap-2.5 text-sm font-black tracking-tight text-white"
             >
-              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-gradient-to-br from-cyan-400 via-fuchsia-500 to-amber-400 shadow-lg shadow-fuchsia-500/30">
                 <Sparkles size={15} className="text-black" />
               </div>
               LiTT <span className="text-neutral-500">/</span> Labs
@@ -158,7 +158,7 @@ export function LandingFooter() {
         </div>
 
         <div className="mt-12 flex flex-col items-center justify-between gap-3 border-t border-white/5 pt-6 text-xs text-neutral-500 sm:flex-row">
-          <div>© {new Date().getFullYear()} LiTTree Labs. Built with LiTT.</div>
+          <div>© {new Date().getFullYear()} LiTTree-LabStudios. Built with LiTT.</div>
           <div className="flex items-center gap-2 font-mono text-neutral-600">
             <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-emerald-400" />
             All systems normal · v1.0.0

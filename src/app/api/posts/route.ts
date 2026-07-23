@@ -13,7 +13,7 @@ const MOCK_FEED = [
     id: "mock_1",
     user_id: "mock_user_1",
     content:
-      "Just deployed my first dual-agent setup — Director handles planning, Executor handles the code. Cut my dev workflow time by 60%. The orchestration features on LiTreeLabStudios are no joke 🚀",
+      "Just deployed my first dual-agent setup — Director handles planning, Executor handles the code. Cut my dev workflow time by 60%. The orchestration features on LiTTree-LabStudios are no joke 🚀",
     media_urls: [],
     likes_count: 24,
     comments_count: 3,
@@ -61,7 +61,7 @@ const MOCK_FEED = [
     id: "mock_4",
     user_id: "mock_user_4",
     content:
-      "Pro tip: Connect your LiTreeLabStudios agents to Discord for real-time notifications. Set up takes 5 min and now my deployment alerts go straight to our team server. Game changer!",
+      "Pro tip: Connect your LiTTree-LabStudios agents to Discord for real-time notifications. Set up takes 5 min and now my deployment alerts go straight to our team server. Game changer!",
     media_urls: [],
     likes_count: 18,
     comments_count: 2,

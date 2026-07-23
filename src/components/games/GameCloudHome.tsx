@@ -1,7 +1,14 @@
 "use client";
 
-import { useState, useMemo } from "react";
-import { GAME_LIBRARY, searchGames, type Game } from "@/lib/games";
+import { useState, useMemo, useEffect } from "react";
+import {
+  GAME_LIBRARY,
+  searchGames,
+  type Game,
+  type GamePlatform,
+} from "@/lib/games";
+
+const EXTERNAL_PLATFORMS: GamePlatform[] = ["browser", "emulator", "dos"];
 import GameHero from "./GameHero";
 import GameCard from "./GameCard";
 import CategoryChips from "./CategoryChips";
@@ -9,7 +16,7 @@ import DailyMissions from "./DailyMissions";
 import FriendsPlaying from "./FriendsPlaying";
 import MultiplayerRooms from "./MultiplayerRooms";
 import MobileGameNav from "./MobileGameNav";
-import { X, ExternalLink } from "lucide-react";
+import { X, ExternalLink, AlertTriangle } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 
 const QUICK_FILTERS = [
@@ -20,10 +27,26 @@ const QUICK_FILTERS = [
   "Leaders",
 ];
 
+function openGameExternally(game: Game) {
+  const url = game.externalUrl || game.html5Url;
+  if (!url) return;
+  window.open(url, "_blank", "noopener,noreferrer");
+}
+
 export default function GameCloudHome() {
   const { resolvedColors: T } = useTheme();
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
+  const [iframeError, setIframeError] = useState(false);
+
+  const handlePlay = (game: Game) => {
+    if (EXTERNAL_PLATFORMS.includes(game.platform)) {
+      openGameExternally(game);
+      return;
+    }
+    setIframeError(false);
+    setSelectedGame(game);
+  };
 
   const filteredGames = useMemo(
     () => (searchQuery ? searchGames(searchQuery) : GAME_LIBRARY),
@@ -33,8 +56,31 @@ export default function GameCloudHome() {
   const continueGames = GAME_LIBRARY.slice(0, 4);
   const featuredGames = GAME_LIBRARY.slice(0, 4);
 
+  // Scan which games cannot be safely embedded
+  const scan = useMemo(() => {
+    const externalOnly = GAME_LIBRARY.filter((g) =>
+      EXTERNAL_PLATFORMS.includes(g.platform),
+    );
+    const iframeReady = GAME_LIBRARY.filter(
+      (g) => !EXTERNAL_PLATFORMS.includes(g.platform) && g.html5Url,
+    );
+    const broken = GAME_LIBRARY.filter((g) => !g.html5Url && !g.externalUrl);
+    return { externalOnly, iframeReady, broken };
+  }, []);
+
+  useEffect(() => {
+    console.table(
+      GAME_LIBRARY.map((g) => ({
+        title: g.title,
+        platform: g.platform,
+        embedsInline: !EXTERNAL_PLATFORMS.includes(g.platform),
+        url: g.html5Url || g.externalUrl || "missing",
+      })),
+    );
+  }, []);
+
   return (
-    <main className="min-h-screen bg-[#070812] text-white pb-28">
+    <main className="min-h-screen bg-[#070812] text-white pb-[calc(112px+env(safe-area-inset-bottom))]">
       <section className="px-4 pt-5 space-y-5 max-w-7xl mx-auto">
         <div>
           <p className="text-sm text-orange-400 font-bold">
@@ -75,7 +121,7 @@ export default function GameCloudHome() {
                 key={game.id}
                 game={game}
                 showProgress={!searchQuery}
-                onClick={() => setSelectedGame(game)}
+                onClick={() => handlePlay(game)}
               />
             ))}
           </div>
@@ -88,11 +134,23 @@ export default function GameCloudHome() {
                 <GameCard
                   key={game.id}
                   game={game}
-                  onClick={() => setSelectedGame(game)}
+                  onClick={() => handlePlay(game)}
                 />
               ))}
             </div>
           </Section>
+        )}
+
+        {scan.externalOnly.length > 0 && (
+          <div className="rounded-2xl border border-orange-500/20 bg-orange-500/10 p-3 text-xs text-orange-200">
+            <span className="font-black uppercase tracking-wider">
+              Compatibility scan:
+            </span>{" "}
+            {scan.iframeReady.length} game(s) embed inline.{" "}
+            {scan.externalOnly.length} game(s)/hub(s) open in a new tab
+            (emulators, external hubs, and publishers that block iframes).{" "}
+            {scan.broken.length > 0 && `${scan.broken.length} have no URL.`}
+          </div>
         )}
 
         <CategoryChips />
@@ -109,7 +167,7 @@ export default function GameCloudHome() {
       {/* Game Player Overlay */}
       {selectedGame && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
         >
           <div
@@ -135,7 +193,7 @@ export default function GameCloudHome() {
               </div>
               <div className="flex items-center gap-2">
                 <a
-                  href={selectedGame.html5Url}
+                  href={selectedGame.externalUrl || selectedGame.html5Url}
                   target="_blank"
                   rel="noopener noreferrer"
                   className="p-2 rounded-lg border hover:opacity-80"
@@ -145,7 +203,10 @@ export default function GameCloudHome() {
                   <ExternalLink size={16} />
                 </a>
                 <button
-                  onClick={() => setSelectedGame(null)}
+                  onClick={() => {
+                    setIframeError(false);
+                    setSelectedGame(null);
+                  }}
                   className="p-2 rounded-lg border hover:opacity-80"
                   style={{ borderColor: T.borderColor, color: T.textMuted }}
                 >
@@ -156,24 +217,45 @@ export default function GameCloudHome() {
 
             {/* Game iframe */}
             <div className="aspect-video bg-black">
-              {selectedGame.html5Url ? (
+              {iframeError || !selectedGame.html5Url ? (
+                <div className="w-full h-full flex flex-col items-center justify-center gap-4 p-6 text-center">
+                  <AlertTriangle size={40} className="text-orange-400" />
+                  <div>
+                    <p className="text-sm font-bold text-white">
+                      This game can&apos;t be embedded here.
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      The publisher blocks iframe loading. Open it in a new tab
+                      to play.
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => openGameExternally(selectedGame)}
+                    className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-black text-black hover:bg-orange-400 transition-colors"
+                  >
+                    <ExternalLink size={14} /> Open Game
+                  </button>
+                </div>
+              ) : (
                 <iframe
                   src={selectedGame.html5Url}
                   className="w-full h-full"
                   allow="fullscreen; gamepad"
                   sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
                   referrerPolicy="no-referrer"
+                  onError={() => setIframeError(true)}
+                  onLoad={(e) => {
+                    // Some publishers still render a blank/blocked page inside
+                    // the iframe. Give them a moment, then check accessibility.
+                    try {
+                      // eslint-disable-next-line @typescript-eslint/no-unused-expressions
+                      (e.target as HTMLIFrameElement).contentWindow?.document;
+                    } catch {
+                      setIframeError(true);
+                    }
+                  }}
                   style={{ border: "none" }}
                 />
-              ) : (
-                <div className="w-full h-full flex items-center justify-center">
-                  <div className="text-center">
-                    <div className="text-4xl mb-4">🎮</div>
-                    <p className="text-sm opacity-60">
-                      No playable link available.
-                    </p>
-                  </div>
-                </div>
               )}
             </div>
 

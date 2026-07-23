@@ -64,16 +64,54 @@ export default function HomePage() {
   const { profile, displayName } = useProfile();
   
   return (
-    <div className="min-h-dvh" style={{ backgroundColor: C.bgColor }}>
+    <div className="min-h-screen" style={{ backgroundColor: C.bgColor }}>
       {/* Content */}
     </div>
   );
 }`,
-  "/src/lib/agents.ts": `// Canonical source lives in src/lib/agents.ts
-// (export class AgentOrchestrator + export const orchestrator)
-// This demo stub avoids duplicating the live implementation.
-export { AgentOrchestrator, orchestrator } from '@/lib/agents';
-`, 
+  "/src/lib/agents.ts": `export interface Agent {
+  id: string;
+  name: string;
+  role: string;
+  systemPrompt: string;
+  model?: string;
+  temperature?: number;
+}
+
+export interface AgentMessage {
+  role: 'user' | 'assistant' | 'system';
+  content: string;
+  timestamp: number;
+}
+
+export interface AgentConversation {
+  id: string;
+  agentId: string;
+  messages: AgentMessage[];
+  createdAt: number;
+  updatedAt: number;
+}
+
+export class AgentOrchestrator {
+  private agents: Map<string, Agent> = new Map();
+  private conversations: Map<string, AgentConversation> = new Map();
+
+  registerAgent(agent: Agent): void {
+    this.agents.set(agent.id, agent);
+  }
+
+  async sendMessage(agentId: string, content: string): Promise<AgentMessage> {
+    const agent = this.agents.get(agentId);
+    if (!agent) throw new Error(\`Agent \${agentId} not found\`);
+    
+    // Process message through Gemini API
+    return {
+      role: 'assistant',
+      content: 'Processing...',
+      timestamp: Date.now(),
+    };
+  }
+}`,
   "/package.json": `{
   "name": "litlabs",
   "version": "2.0.0",
@@ -421,7 +459,7 @@ export default function CodeScannerPage() {
   if (!isLoaded) {
     return (
       <PageShell title="Loading...">
-        <div className="min-h-dvh flex items-center justify-center">
+        <div className="min-h-screen flex items-center justify-center">
           <div className="text-center">
             <Cpu
               className="animate-spin mx-auto mb-4"
@@ -591,8 +629,6 @@ export default function CodeScannerPage() {
                     style={{ color: T.textMuted }}
                   />
                   <input
-                    id="code-search"
-                    name="codeSearch"
                     type="text"
                     placeholder="Search files..."
                     value={searchQuery}

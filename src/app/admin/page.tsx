@@ -105,7 +105,7 @@ export default function AdminDashboard() {
 
   if (!isLoaded) {
     return (
-      <div className="min-h-dvh grid place-items-center" style={{ backgroundColor: T.bgColor, color: T.textMuted }}>
+      <div className="min-h-screen grid place-items-center" style={{ backgroundColor: T.bgColor, color: T.textMuted }}>
         Loading Admin Dashboard...
       </div>
     );
@@ -113,7 +113,7 @@ export default function AdminDashboard() {
 
   if (!isSignedIn || userId !== ADMIN_USER_ID) {
     return (
-      <div className="min-h-dvh grid place-items-center" style={{ backgroundColor: T.bgColor }}>
+      <div className="min-h-screen grid place-items-center" style={{ backgroundColor: T.bgColor }}>
         <div className="text-center">
           <AlertCircle size={48} className="mx-auto mb-4" style={{ color: T.warning }} />
           <p style={{ color: T.textMuted }}>Access Denied - Admin Only</p>
@@ -124,13 +124,13 @@ export default function AdminDashboard() {
 
   return (
     <div
-      className="min-h-dvh p-4 sm:p-6"
+      className="min-h-screen p-4 sm:p-6"
       style={{
         background: `radial-gradient(circle at 10% 0%, ${T.accentColor}14, transparent 30%), radial-gradient(circle at 90% 10%, ${T.headerColor}12, transparent 28%), linear-gradient(180deg, ${T.bgColor}, ${T.boxBg})`,
         color: T.textColor,
       }}
     >
-      <div className="mx-auto flex min-h-dvh max-w-[1800px] flex-col gap-4">
+      <div className="mx-auto flex min-h-screen max-w-[1800px] flex-col gap-4">
         <header
           className="rounded-3xl border px-5 py-4 sm:px-6"
           style={{ backgroundColor: T.boxBg + "78", borderColor: T.borderColor + "24" }}

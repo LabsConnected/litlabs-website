@@ -2,29 +2,22 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { Bell, Search, Zap, Coins, Gamepad2, Users, Settings, Store, LogIn } from "lucide-react";
-import { UserButton } from "@clerk/nextjs";
+import { Bell, Search, Sparkles } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
-import { useWallet } from "@/context/WalletContext";
-import { useClerkAuth } from "@/hooks/useClerkAuth";
+import { usePathname } from "next/navigation";
 
 const desktopLinks = [
   ["Dashboard", "/dashboard"],
   ["Studio", "/studio"],
   ["Agents", "/agents"],
   ["Gallery", "/gallery"],
-  ["Games", "/games"],
-  ["Social", "/social"],
   ["Marketplace", "/marketplace"],
-  ["Settings", "/settings"],
+  ["Games", "/games"],
 ] as const;
 
 export default function NavbarWrapper() {
   const { resolvedColors: T } = useTheme();
   const pathname = usePathname();
-  const { balance, isLoading } = useWallet();
-  const { isLoaded, isSignedIn } = useClerkAuth();
   const [scrolled, setScrolled] = useState(false);
 
   useEffect(() => {
@@ -42,24 +35,42 @@ export default function NavbarWrapper() {
         backdropFilter: "blur(14px)",
       }}
     >
-      <div className="flex items-center gap-3">
-        <Link href="/dashboard" className="flex items-center gap-2 font-black text-sm" style={{ color: T.headerColor }}><Zap size={18} style={{ color: T.accentColor }} />LiTT</Link>
-        <nav className="ml-5 flex items-center gap-1">
+      <div className="flex min-w-0 items-center gap-3">
+        <Link
+          href="/dashboard"
+          className="flex shrink-0 items-center gap-2 font-black"
+          style={{ color: T.headerColor }}
+          aria-label="LiTTree-LabStudios home"
+        >
+          <span
+            className="grid h-8 w-8 place-items-center rounded-xl border"
+            style={{
+              color: T.accentColor,
+              borderColor: `${T.accentColor}45`,
+              backgroundColor: `${T.accentColor}12`,
+              boxShadow: `0 0 20px ${T.accentColor}18`,
+            }}
+          >
+            <Sparkles size={16} />
+          </span>
+          <span className="hidden text-sm tracking-[-.025em] lg:inline">LiTTree-LabStudios</span>
+          <span className="text-sm tracking-[-.025em] lg:hidden">LiTTree</span>
+        </Link>
+        <nav className="ml-2 flex items-center gap-0.5 lg:ml-4 lg:gap-1">
           {desktopLinks.map(([label, href]) => {
-            const active = pathname?.startsWith(href);
+            const active = pathname === href || pathname?.startsWith(`${href}/`);
             return (
               <Link
                 key={href}
                 href={href}
-                className="flex items-center gap-1.5 rounded-lg px-3 py-2 text-xs font-bold transition-colors hover:bg-white/5"
+                className={`rounded-lg px-2 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 lg:px-3 lg:text-xs ${
+                  label === "Marketplace" ? "hidden xl:block" : ""
+                }`}
                 style={{
                   color: active ? T.accentColor : T.textMuted,
+                  backgroundColor: active ? `${T.accentColor}12` : "transparent",
                 }}
               >
-                {label === "Games" && <Gamepad2 size={12} />}
-                {label === "Social" && <Users size={12} />}
-                {label === "Marketplace" && <Store size={12} />}
-                {label === "Settings" && <Settings size={12} />}
                 {label}
               </Link>
             );
@@ -68,22 +79,6 @@ export default function NavbarWrapper() {
       </div>
 
       <div className="flex items-center gap-2">
-        {/* LitCoins wallet badge */}
-        {isLoaded && isSignedIn && (
-          <Link
-            href="/wallet"
-            className="flex items-center gap-1 px-2 py-1 rounded-lg text-xs font-bold transition-colors hover:bg-white/5"
-            style={{
-              backgroundColor: T.accentColor + "15",
-              color: T.accentColor,
-              border: `1px solid ${T.accentColor}30`,
-            }}
-            title="Your LiTBit Coins balance"
-          >
-            <Coins size={12} />
-            {isLoading ? "ΓÇö" : balance.toLocaleString()}
-          </Link>
-        )}
         <button
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
@@ -91,14 +86,6 @@ export default function NavbarWrapper() {
         >
           <Search size={18} />
         </button>
-        <Link
-          href="/wallet"
-          className="p-2 rounded-lg hover:bg-white/5 transition-colors"
-          style={{ color: T.textMuted }}
-          aria-label="Wallet"
-        >
-          <Coins size={18} />
-        </Link>
         <button
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}
@@ -106,29 +93,6 @@ export default function NavbarWrapper() {
         >
           <Bell size={18} />
         </button>
-        {isLoaded && isSignedIn ? (
-          <UserButton
-            afterSignOutUrl="/sign-in"
-            appearance={{
-              elements: {
-                userButtonAvatarBox:
-                  "h-8 w-8 rounded-full border border-white/10",
-              },
-            }}
-          />
-        ) : isLoaded && !isSignedIn ? (
-          <Link
-            href="/sign-in"
-            className="flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-colors hover:bg-white/5"
-            style={{
-              color: T.accentColor,
-              border: `1px solid ${T.accentColor}40`,
-            }}
-          >
-            <LogIn size={14} />
-            Sign In
-          </Link>
-        ) : null}
       </div>
     </header>
   );

@@ -19,19 +19,11 @@ export interface RetroGameRecord {
   lastPlayedAt?: number;
   launches: number;
   favorite: boolean;
-  /** Optional custom artwork stored as a data URL or blob URL. */
-  customArtworkUrl?: string;
-  /** Optional accent color override for generated artwork. */
-  artworkAccent?: string;
-  /** Optional subtitle / tagline shown on artwork. */
-  subtitle?: string;
-  /** Optional Quick Play source id, used to prevent duplicate installs. */
-  quickPlayId?: string;
 }
 
 export const RETRO_SYSTEMS: RetroSystem[] = [
   { id: "nes", name: "Nintendo Entertainment System", shortName: "NES", extensions: ["nes"], color: "#ff4d67" },
-  { id: "snes", name: "Super Nintendo", shortName: "SNES", extensions: ["sfc", "smc", "swc", "bs", "fig"], color: "#a78bfa" },
+  { id: "snes", name: "Super Nintendo", shortName: "SNES", extensions: ["sfc", "smc"], color: "#a78bfa" },
   { id: "gb", name: "Game Boy", shortName: "GB", extensions: ["gb"], color: "#a3e635" },
   { id: "gbc", name: "Game Boy Color", shortName: "GBC", extensions: ["gbc"], color: "#fbbf24" },
   { id: "gba", name: "Game Boy Advance", shortName: "GBA", extensions: ["gba"], color: "#38bdf8" },
@@ -40,7 +32,7 @@ export const RETRO_SYSTEMS: RetroSystem[] = [
 
 const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
-const DB_VERSION = 2;
+const DB_VERSION = 1;
 
 function openRetroDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -55,12 +47,6 @@ function openRetroDatabase(): Promise<IDBDatabase> {
         const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
         store.createIndex("lastPlayedAt", "lastPlayedAt");
         store.createIndex("system", "system");
-        store.createIndex("quickPlayId", "quickPlayId");
-      } else if (request.result.version < 2) {
-        const store = request.transaction!.objectStore(STORE_NAME);
-        if (!store.indexNames.contains("quickPlayId")) {
-          store.createIndex("quickPlayId", "quickPlayId");
-        }
       }
     };
     request.onsuccess = () => resolve(request.result);
@@ -93,12 +79,7 @@ export function getRetroSystem(id: RetroSystemId): RetroSystem {
   return RETRO_SYSTEMS.find((system) => system.id === id) ?? RETRO_SYSTEMS[0];
 }
 
-export async function addRetroGame(
-  file: File,
-  title: string,
-  system: RetroSystemId,
-  options?: { quickPlayId?: string; subtitle?: string; customArtworkUrl?: string },
-): Promise<RetroGameRecord> {
+export async function addRetroGame(file: File, title: string, system: RetroSystemId): Promise<RetroGameRecord> {
   const record: RetroGameRecord = {
     id: crypto.randomUUID(),
     title: title.trim() || titleFromFileName(file.name),
@@ -109,9 +90,6 @@ export async function addRetroGame(
     addedAt: Date.now(),
     launches: 0,
     favorite: false,
-    quickPlayId: options?.quickPlayId,
-    subtitle: options?.subtitle,
-    customArtworkUrl: options?.customArtworkUrl,
   };
   const db = await openRetroDatabase();
   try {
@@ -155,20 +133,6 @@ export async function updateRetroGame(id: string, patch: Partial<Omit<RetroGameR
   }
 }
 
-/** Check whether a Quick Play game has already been imported. */
-export async function findQuickPlayInstall(quickPlayId: string): Promise<RetroGameRecord | undefined> {
-  const db = await openRetroDatabase();
-  try {
-    const index = db.transaction(STORE_NAME).objectStore(STORE_NAME).index("quickPlayId");
-    return await requestResult(index.get(quickPlayId)) as RetroGameRecord | undefined;
-  } catch {
-    const all = await requestResult(db.transaction(STORE_NAME).objectStore(STORE_NAME).getAll()) as RetroGameRecord[];
-    return all.find((g) => g.quickPlayId === quickPlayId);
-  } finally {
-    db.close();
-  }
-}
-
 export async function deleteRetroGame(id: string): Promise<void> {
   const db = await openRetroDatabase();
   try {
@@ -181,25 +145,4 @@ export async function deleteRetroGame(id: string): Promise<void> {
 export function formatRomSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
-}
-
-/**
- * Encode a ROM Blob into a base64 data URL. Used by the player page so the
- * file can be loaded inside a `srcDoc` iframe (which gets an opaque origin
- * and cannot read parent-created `blob:` URLs).
- */
-export async function readRomAsBase64(rom: Blob): Promise<string> {
-  const buffer = await rom.arrayBuffer();
-  let binary = "";
-  const bytes = new Uint8Array(buffer);
-  const chunk = 0x8000;
-  for (let i = 0; i < bytes.length; i += chunk) {
-    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
-  }
-  return btoa(binary);
-}
-
-export function detectSatellaview(fileName: string): boolean {
-  const lower = fileName.toLowerCase();
-  return lower.endsWith(".bs") || lower.endsWith(".bsa") || lower.endsWith(".fig") || lower.includes("satellaview") || lower.includes("bs-x") || lower.includes("bsx");
 }

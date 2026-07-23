@@ -1,13 +1,13 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Cookie Policy | LiTreeLabStudios",
-  description: "Cookie Policy for LiTreeLabStudios AI Agent Platform.",
+  title: "Cookie Policy | LiTTree-LabStudios",
+  description: "Cookie Policy for LiTTree-LabStudios AI Agent Platform.",
 };
 
 export default function CookiesPage() {
   return (
-    <div className="min-h-dvh pb-20 font-mono text-xs" style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}>
+    <div className="min-h-screen pb-20 font-mono text-xs" style={{ backgroundColor: "var(--bg-color)", color: "var(--text-color)" }}>
       <div className="max-w-3xl mx-auto px-4 py-12">
         <div className="lit-box p-6 mb-8" style={{ borderColor: "var(--border-color)", backgroundColor: "var(--bg-card)" }}>
           <div className="lit-header -mx-6 -mt-6 mb-4" style={{ color: "white" }}>🍪 Cookie Policy</div>

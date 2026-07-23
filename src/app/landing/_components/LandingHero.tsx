@@ -44,7 +44,7 @@ export function LandingHero() {
         <p className="mb-3 text-lg font-bold text-neutral-400 md:text-xl">
           Stop chatting.
         </p>
-        <h1 className="mb-6 text-4xl font-black leading-[1.03] tracking-tight text-white min-[390px]:text-5xl md:text-7xl lg:text-[5.5rem]">
+        <h1 className="mb-6 text-5xl font-black leading-[1.03] tracking-tight text-white md:text-7xl lg:text-[5.5rem]">
           Start{" "}
           <span
             className="bg-clip-text text-transparent"
@@ -68,14 +68,14 @@ export function LandingHero() {
         <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
           <Link
             href="/sign-up"
-            className="group inline-flex w-full items-center justify-center gap-2.5 rounded-2xl bg-white px-5 py-3.5 text-sm font-black text-black shadow-[0_0_40px_rgba(255,255,255,0.18)] transition hover:shadow-[0_0_60px_rgba(255,255,255,0.32)] sm:w-auto sm:px-8"
+            className="group inline-flex items-center gap-2.5 rounded-2xl bg-white px-8 py-3.5 text-sm font-black text-black shadow-[0_0_40px_rgba(255,255,255,0.18)] transition hover:shadow-[0_0_60px_rgba(255,255,255,0.32)]"
           >
             Launch Studio free
             <ArrowRight size={14} className="transition-transform group-hover:translate-x-0.5" />
           </Link>
           <Link
             href="/studio"
-            className="inline-flex w-full items-center justify-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-5 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/20 hover:bg-white/8 sm:w-auto sm:px-7"
+            className="inline-flex items-center gap-2 rounded-2xl border border-white/10 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-md transition hover:border-white/20 hover:bg-white/8"
           >
             <Play size={13} className="text-orange-300" />
             Watch LiTT build
@@ -208,7 +208,7 @@ export function LandingHero() {
 
               {/* Composer */}
               <div className="mt-auto flex items-center gap-2 rounded-xl border border-white/10 bg-white/[0.025] px-3 py-2.5">
-                <div className="h-5 w-5 rounded-full bg-linear-to-br from-orange-400 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shrink-0">L</div>
+                <div className="h-5 w-5 rounded-full bg-gradient-to-br from-orange-400 to-purple-500 flex items-center justify-center text-[9px] font-black text-white shrink-0">L</div>
                 <span className="flex-1 text-[11.5px] text-neutral-500">
                   Ask LiTT to build, fix, design, research, or deploy…
                 </span>

@@ -2,8 +2,8 @@
 
 import Link from "next/link";
 import { Component, type ReactNode, useState, useEffect } from "react";
-import { UserButton, SignInButton } from "@clerk/nextjs";
-import { useClerkAuth, useAppUser } from "@/hooks/useClerkAuth";
+import { useUser, UserButton, SignInButton } from "@clerk/nextjs";
+import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { LogIn } from "lucide-react";
 
 type NavAuthProps = {
@@ -108,7 +108,7 @@ function CustomAuthFallback({ linkColor }: NavAuthProps) {
 
 function AuthInner({ linkColor }: NavAuthProps) {
   const { isSignedIn, isLoaded } = useClerkAuth();
-  const { user } = useAppUser();
+  const { user } = useUser();
 
   if (!isLoaded) {
     return (

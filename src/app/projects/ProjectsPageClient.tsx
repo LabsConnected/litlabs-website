@@ -76,7 +76,7 @@ export default function ProjectsPageClient() {
   if (!isLoaded) {
     return (
       <div
-        className="relative flex min-h-dvh items-center justify-center overflow-hidden"
+        className="relative flex min-h-screen items-center justify-center overflow-hidden"
         style={{ backgroundColor: tokens.background }}
       >
         <div className="pointer-events-none absolute inset-0">
@@ -105,7 +105,7 @@ export default function ProjectsPageClient() {
   if (!isSignedIn) {
     return (
       <div
-        className="relative flex min-h-dvh items-center justify-center overflow-hidden p-6"
+        className="relative flex min-h-screen items-center justify-center overflow-hidden p-6"
         style={{ backgroundColor: tokens.background }}
       >
         <div
@@ -182,7 +182,7 @@ export default function ProjectsPageClient() {
             </p>
           </div>
           <Link
-            href="/settings?tab=integrations"
+            href="/studio/github"
             className="inline-flex shrink-0 items-center gap-2 rounded-xl px-4 py-2 text-sm font-black transition-all hover:opacity-90"
             style={{
               backgroundColor: tokens.primary,
@@ -245,7 +245,7 @@ export default function ProjectsPageClient() {
                   isolated workspace.
                 </p>
                 <Link
-                  href="/settings?tab=integrations"
+                  href="/studio/github"
                   className="inline-flex items-center gap-2 rounded-xl px-4 py-2 text-sm font-black"
                   style={{
                     backgroundColor: tokens.primary,

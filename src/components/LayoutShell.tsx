@@ -4,7 +4,6 @@ import { usePathname } from "next/navigation";
 import NavbarWrapper from "@/components/NavbarWrapper";
 import FooterWrapper from "@/components/FooterWrapper";
 import MobileBottomNav from "@/components/MobileBottomNav";
-import { FloatingChat } from "@/components/FloatingChat";
 import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
@@ -19,10 +18,15 @@ const PUBLIC_PATHS = [
   "/terms",
   "/cookies",
   "/docs",
+  "/social",
+  "/marketplace",
+  "/gallery",
+  "/showcase",
+  "/games",
 ];
 
 // Routes that render their own bottom navigation / floating chrome
-const SELF_CONTAINED_CHROME = ["/games/cloud", "/agents"];
+const SELF_CONTAINED_CHROME = ["/games/cloud"];
 
 function isPublicPath(path: string) {
   return PUBLIC_PATHS.some((p) => path === p || path.startsWith(`${p}/`));
@@ -90,7 +94,6 @@ export default function LayoutShell({
             {children}
           </main>
           {!ownChrome && <MobileBottomNav />}
-          <FloatingChat />
           <FooterWrapper />
           <CookieConsent />
           <ServiceWorkerRegistration />

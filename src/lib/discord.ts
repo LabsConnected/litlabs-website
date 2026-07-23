@@ -43,16 +43,15 @@ export const DISCORD_COLORS = {
   neutral: 0x8888aa, // Gray
 };
 
-// Discord webhooks have been removed from the public bundle. Use a server-only
-// notification service instead of exposing webhook URLs to the browser.
+// Channel-specific webhook URLs (loaded from env)
 const WEBHOOK_URLS: Record<NotificationChannel, string | undefined> = {
-  general: undefined,
-  admin: undefined,
-  security: undefined,
-  sales: undefined,
-  errors: undefined,
-  agents: undefined,
-  system: undefined,
+  general: process.env.NEXT_PUBLIC_DISCORD_GENERAL_WEBHOOK,
+  admin: process.env.NEXT_PUBLIC_DISCORD_ADMIN_WEBHOOK,
+  security: process.env.NEXT_PUBLIC_DISCORD_SECURITY_WEBHOOK,
+  sales: process.env.NEXT_PUBLIC_DISCORD_SALES_WEBHOOK,
+  errors: process.env.NEXT_PUBLIC_DISCORD_ERRORS_WEBHOOK,
+  agents: process.env.NEXT_PUBLIC_DISCORD_AGENTS_WEBHOOK,
+  system: process.env.NEXT_PUBLIC_DISCORD_SYSTEM_WEBHOOK,
 };
 
 /**

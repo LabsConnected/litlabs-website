@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { X, Save, Loader2 } from "lucide-react";
 import type { UserProfile } from "@/context/ProfileContext";
 
@@ -27,14 +27,6 @@ export function EditProfileDialog({
     website: profile.website,
   }));
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [onClose]);
-
   if (!open) return null;
 
   const field = (
@@ -58,8 +50,6 @@ export function EditProfileDialog({
       </label>
       {multiline ? (
         <textarea
-          id="edit-profile-bio"
-          name="editProfileBio"
           value={form[key]}
           maxLength={maxLen}
           onChange={(e) => setForm((p) => ({ ...p, [key]: e.target.value }))}
@@ -81,8 +71,6 @@ export function EditProfileDialog({
         />
       ) : (
         <input
-          id="edit-profile-name"
-          name="editProfileName"
           type="text"
           value={form[key]}
           maxLength={maxLen}

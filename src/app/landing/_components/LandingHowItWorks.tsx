@@ -18,7 +18,7 @@ const STEPS = [
     title: "Plan",
     color: "#f472b6",
     tag: "Orchestrate",
-    desc: "LiTT Director breaks the mission into clear steps and assigns the right agents. Nothing important happens silently.",
+    desc: "LiTT breaks the mission into clear steps and assigns the right agents. Nothing important happens silently.",
   },
   {
     n: "04",
@@ -47,7 +47,7 @@ export function LandingHowItWorks() {
   return (
     <section
       id="how"
-      className="relative z-10 border-y border-white/5 px-4 py-16 md:py-32"
+      className="relative z-10 border-y border-white/5 px-4 py-24 md:py-32"
       style={{ background: "rgba(255,255,255,0.01)" }}
     >
       <div className="mx-auto max-w-6xl">

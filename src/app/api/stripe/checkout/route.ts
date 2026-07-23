@@ -28,8 +28,6 @@ export async function POST(req: NextRequest) {
 
     const params = new URLSearchParams({
       mode,
-      // Dedicated post-purchase "Thank you" page — see src/app/order/success/page.tsx.
-      // The {CHECKOUT_SESSION_ID} placeholder is replaced by Stripe at redirect time.
       success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
       cancel_url: `${origin}/marketplace?canceled=true`,
       allow_promotion_codes: "true",

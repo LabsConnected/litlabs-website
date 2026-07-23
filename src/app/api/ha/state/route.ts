@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getStates, getState } from "@/lib/ha-api";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export async function GET(req: NextRequest) {
   const { userId } = await auth();
@@ -27,8 +26,7 @@ export async function GET(req: NextRequest) {
     const states = await getStates();
     return NextResponse.json({ entities: states, count: states.length });
   } catch (err) {
-    console.error("[api/ha/state] error:", err);
-    const { status, error: msg } = sanitizeProviderError(err);
-    return NextResponse.json({ error: msg }, { status });
+    const msg = err instanceof Error ? err.message : String(err);
+    return NextResponse.json({ error: msg }, { status: 500 });
   }
 }

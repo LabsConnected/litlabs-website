@@ -1,6 +1,6 @@
 export const metadata = {
   title: "Terms",
-  description: "Terms of service for LiTTree LabStudios.",
+  description: "Terms of service for LiTTree-LabStudios.",
 };
 
 const UPDATED = "July 2, 2026";
@@ -8,7 +8,7 @@ const UPDATED = "July 2, 2026";
 export default function TermsPage() {
   return (
     <main
-      className="min-h-dvh px-4 py-16"
+      className="min-h-screen px-4 py-16"
       style={{ backgroundColor: "#08080c", color: "#e2e2e9" }}
     >
       <article className="mx-auto max-w-3xl">
@@ -26,7 +26,7 @@ export default function TermsPage() {
               Use of the Platform
             </h2>
             <p>
-              LiTTree LabStudios provides creative AI tools, agent workflows,
+              LiTTree-LabStudios provides creative AI tools, agent workflows,
               gallery features, marketplace experiences, and related services.
               Use the platform lawfully and do not attempt to disrupt, abuse, or
               bypass security controls.

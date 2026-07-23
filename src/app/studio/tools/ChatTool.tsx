@@ -4,7 +4,7 @@ import { useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
 import ChatShell from "../components/ChatShell";
-import type { StudioTool } from "../components/LITTTerminalShell";
+import type { StudioTool } from "../components/StudioSidebar";
 import { getChatModel } from "@/lib/studio-models";
 import { useBuilderSessions } from "../hooks/useBuilderSessions";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
@@ -27,9 +27,7 @@ export default function ChatTool({
   const setMessages = sessionManager.setMessages;
   const { profile } = useProfile();
   const searchParams = useSearchParams();
-  const requestedAgent = searchParams.get("agent")?.toLowerCase() === "littlebit" || searchParams.get("agent")?.toLowerCase() === "little-bit"
-    ? "littlebit"
-    : "littcode";
+  const requestedAgent = "litt";
   const initialPrompt = searchParams.get("mission") || "";
 
   const send = async (
@@ -159,7 +157,7 @@ export default function ChatTool({
       onNewSession={() => sessionManager.create()}
       onRenameSession={sessionManager.rename}
       onPinSession={sessionManager.togglePin}
-      onDuplicateSession={(session: typeof sessionManager.sessions[number]) => sessionManager.create(session)}
+      onDuplicateSession={(session) => sessionManager.create(session)}
       onDeleteSession={sessionManager.remove}
       onDeleteAllSessions={sessionManager.removeAll}
       shellAction={shellAction}

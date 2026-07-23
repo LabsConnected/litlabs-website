@@ -18,7 +18,7 @@ export default function GlobalError({
   return (
     <html lang="en">
       <head>
-        <title>Error — LiTTree LabStudios</title>
+        <title>Error — LiTTree-LabStudios</title>
         <meta name="description" content="An unexpected error occurred." />
       </head>
       <body
@@ -31,7 +31,7 @@ export default function GlobalError({
       >
         <main
           style={{
-            minHeight: "100dvh",
+            minHeight: "100vh",
             display: "flex",
             alignItems: "center",
             justifyContent: "center",

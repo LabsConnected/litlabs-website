@@ -2,18 +2,18 @@
 
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
-import { 
-  X, 
-  ZoomIn, 
-  ZoomOut, 
-  Download, 
-  Maximize2, 
-  Minimize2, 
-  RotateCw, 
+import {
+  X,
+  ZoomIn,
+  ZoomOut,
+  Download,
+  Maximize2,
+  Minimize2,
+  RotateCw,
   FlipHorizontal,
   ArrowLeft,
   ArrowRight,
-  Edit3
+  Edit3,
 } from "lucide-react";
 
 interface ImageLightboxProps {
@@ -23,11 +23,11 @@ interface ImageLightboxProps {
   allowEdit?: boolean;
 }
 
-export default function ImageLightbox({ 
-  images, 
-  initialIndex = 0, 
+export default function ImageLightbox({
+  images,
+  initialIndex = 0,
   onClose,
-  allowEdit = true 
+  allowEdit = true,
 }: ImageLightboxProps) {
   const { resolvedColors: T } = useTheme();
   const [currentIndex, setCurrentIndex] = useState(initialIndex);
@@ -38,7 +38,7 @@ export default function ImageLightbox({
   const [isDragging, setIsDragging] = useState(false);
   const [position, setPosition] = useState({ x: 0, y: 0 });
   const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
-  
+
   const imageRef = useRef<HTMLImageElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
 
@@ -92,7 +92,7 @@ export default function ImageLightbox({
 
   // Reset zoom/position when image changes
   useEffect(() => {
-    setZoom(1);
+    setZoom(1);  
     setPosition({ x: 0, y: 0 });
     setRotation(0);
     setFlip(false);
@@ -161,7 +161,7 @@ export default function ImageLightbox({
   return (
     <div
       ref={containerRef}
-      className="fixed inset-0 z-50 flex items-center justify-center"
+      className="fixed inset-0 z-[10000] flex items-center justify-center"
       style={{ backgroundColor: "rgba(0, 0, 0, 0.95)" }}
       onClick={handleBackdropClick}
       onMouseMove={handleMouseMove}
@@ -181,14 +181,20 @@ export default function ImageLightbox({
       {images.length > 1 && (
         <>
           <button
-            onClick={(e) => { e.stopPropagation(); goToPrevious(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              goToPrevious();
+            }}
             className="absolute left-4 top-1/2 -translate-y-1/2 p-3 rounded-full transition-all hover:scale-110 z-10"
             style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
           >
             <ArrowLeft size={24} />
           </button>
           <button
-            onClick={(e) => { e.stopPropagation(); goToNext(); }}
+            onClick={(e) => {
+              e.stopPropagation();
+              goToNext();
+            }}
             className="absolute right-4 top-1/2 -translate-y-1/2 p-3 rounded-full transition-all hover:scale-110 z-10"
             style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
           >
@@ -199,14 +205,16 @@ export default function ImageLightbox({
 
       {/* Image counter */}
       {images.length > 1 && (
-        <div className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-bold z-10"
-          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}>
+        <div
+          className="absolute top-4 left-1/2 -translate-x-1/2 px-4 py-2 rounded-full text-sm font-bold z-10"
+          style={{ backgroundColor: T.boxBg + "80", color: T.textColor }}
+        >
           {currentIndex + 1} / {images.length}
         </div>
       )}
 
       {/* Main image */}
-      <div 
+      <div
         className="relative max-w-[90vw] max-h-[90vh] overflow-hidden"
         onClick={(e) => e.stopPropagation()}
       >
@@ -226,9 +234,12 @@ export default function ImageLightbox({
       </div>
 
       {/* Toolbar */}
-      <div 
+      <div
         className="absolute bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-2 px-4 py-3 rounded-2xl z-10"
-        style={{ backgroundColor: T.boxBg + "90", border: `1px solid ${T.borderColor}30` }}
+        style={{
+          backgroundColor: T.boxBg + "90",
+          border: `1px solid ${T.borderColor}30`,
+        }}
         onClick={(e) => e.stopPropagation()}
       >
         {/* Zoom controls */}
@@ -240,7 +251,10 @@ export default function ImageLightbox({
         >
           <ZoomOut size={20} />
         </button>
-        <div className="text-sm font-bold w-12 text-center" style={{ color: T.textColor }}>
+        <div
+          className="text-sm font-bold w-12 text-center"
+          style={{ color: T.textColor }}
+        >
           {Math.round(zoom * 100)}%
         </div>
         <button
@@ -252,7 +266,10 @@ export default function ImageLightbox({
           <ZoomIn size={20} />
         </button>
 
-        <div className="w-px h-6 mx-2" style={{ backgroundColor: T.borderColor + "40" }} />
+        <div
+          className="w-px h-6 mx-2"
+          style={{ backgroundColor: T.borderColor + "40" }}
+        />
 
         {/* Edit controls */}
         {allowEdit && (
@@ -273,7 +290,10 @@ export default function ImageLightbox({
             >
               <FlipHorizontal size={20} />
             </button>
-            <div className="w-px h-6 mx-2" style={{ backgroundColor: T.borderColor + "40" }} />
+            <div
+              className="w-px h-6 mx-2"
+              style={{ backgroundColor: T.borderColor + "40" }}
+            />
           </>
         )}
 
@@ -305,7 +325,8 @@ export default function ImageLightbox({
       </div>
 
       {/* Keyboard shortcuts hint */}
-      <div className="absolute bottom-20 left-1/2 -translate-x-1/2 text-xs text-center opacity-50"
+      <div
+        className="absolute bottom-20 left-1/2 -translate-x-1/2 text-xs text-center opacity-50"
         style={{ color: T.textColor }}
         onClick={(e) => e.stopPropagation()}
       >

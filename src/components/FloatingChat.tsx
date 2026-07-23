@@ -19,7 +19,6 @@ import {
   ChevronUp,
   RefreshCw,
   Camera,
-  ArrowRight,
 } from "lucide-react";
 
 type ChatMessage = {
@@ -51,6 +50,12 @@ const VOICES = [
   { value: "Orus", label: "Orus", desc: "Steady · Male" },
 ];
 
+function audioSrcFromBase64(input: string): string {
+  if (!input) return "";
+  if (input.startsWith("data:")) return input;
+  return `data:audio/wav;base64,${input}`;
+}
+
 export function FloatingChat() {
   const { profile } = useProfile();
   const { tokens } = useTheme();
@@ -64,7 +69,7 @@ export function FloatingChat() {
   const [messages, setMessages] = useState<ChatMessage[]>([
     {
       role: "agent",
-      content: `Hey ${userName}, I'm LiTT Director — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
+      content: `Hey ${userName}, I'm LiTT — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
     },
   ]);
   const [loading, setLoading] = useState(false);
@@ -106,7 +111,7 @@ export function FloatingChat() {
           return [
             {
               role: "agent" as const,
-              content: `Hey ${userName}, I'm LiTT Director — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
+              content: `Hey ${userName}, I'm LiTT — your AI crew chief. Ask me to build, generate, research, or recall memories. What's the mission?`,
             },
           ];
         }
@@ -422,66 +427,35 @@ export function FloatingChat() {
       return true;
     };
 
-    // Split into sentence chunks for faster first-audio
-    const sentences = text.split(/(?<=[.!?])\s+/).filter((s) => s.trim());
-    const chunks = sentences.length > 0 ? sentences : [text];
-    const queue: HTMLAudioElement[] = [];
-    const cancelled = false;
-    let firstPlayed = false;
+    try {
+      const res = await fetch("/api/media/generate-audio", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt: text, voice }),
+      });
+      const data = await res.json();
+      if (!res.ok || data.error) throw new Error(data.error || "TTS failed");
 
-    const playNext = () => {
-      if (cancelled) return;
-      const audio = queue.shift();
-      if (!audio) {
-        setSpeaking(null);
-        audioRef.current = null;
-        return;
-      }
+      const audioSrc = audioSrcFromBase64(data.audioBase64);
+      if (!audioSrc) throw new Error("No audio source returned");
+
+      const audio = new Audio(audioSrc);
       audioRef.current = audio;
       audio.onended = () => {
-        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-        playNext();
+        setSpeaking(null);
+        audioRef.current = null;
       };
       audio.onerror = () => {
-        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-        playNext();
+        setSpeaking(null);
+        audioRef.current = null;
       };
-      audio.play().catch(() => {
-        if (audio.src.startsWith("blob:")) URL.revokeObjectURL(audio.src);
-        playNext();
-      });
-    };
-
-    try {
-      for (let i = 0; i < chunks.length; i++) {
-        if (cancelled) return;
-        const chunk = chunks[i].trim();
-        if (!chunk) continue;
-
-        const res = await fetch("/api/tts", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ text: chunk, voice }),
-        });
-        if (!res.ok) throw new Error(`TTS ${res.status}`);
-        const blob = await res.blob();
-        if (cancelled) return;
-        const src = URL.createObjectURL(blob);
-        const audio = new Audio(src);
-        queue.push(audio);
-
-        if (!firstPlayed) {
-          firstPlayed = true;
-          playNext();
-        }
-      }
+      await audio.play();
     } catch (err) {
-      if (cancelled) return;
       const msg = err instanceof Error ? err.message : "TTS failed";
-      if (!firstPlayed && !fallbackToBrowserTTS()) {
+      if (!fallbackToBrowserTTS()) {
         showToast(`Voice error: ${msg}`, { type: "speak", text, idx });
       }
-      if (!firstPlayed) setSpeaking(null);
+      setSpeaking(null);
     }
   };
 
@@ -502,7 +476,7 @@ export function FloatingChat() {
       style={{ backdropFilter: "blur(12px)" }}
       role="dialog"
       aria-modal="true"
-      aria-label="LiTT Director chat"
+      aria-label="LiTT chat"
     >
       {/* Header */}
       <div className="flex shrink-0 items-center justify-between border-b border-neutral-800 px-4 py-3">
@@ -510,7 +484,7 @@ export function FloatingChat() {
           <LiTTMessageAvatar size={28} />
           <div>
             <div className="text-xs font-black text-neutral-100">
-              LiTT Director · {userName}
+              LiTT · {userName}
             </div>
             <div
               className="flex items-center gap-1 text-[9px]"
@@ -794,7 +768,7 @@ export function FloatingChat() {
           value={input}
           onChange={(e) => setInput(e.target.value)}
           onKeyDown={handleKeyDown}
-          placeholder={recording ? "Listening…" : "Ask LiTT Director…"}
+          placeholder={recording ? "Listening…" : "Ask LiTT…"}
           disabled={loading || recording || transcribing}
           className="flex-1 rounded-xl border border-neutral-700/50 bg-neutral-900/60 px-3 py-2 text-sm text-neutral-100 outline-none placeholder:text-neutral-600 focus:border-white/30"
         />
@@ -816,29 +790,19 @@ export function FloatingChat() {
       {mounted && chatPanel && createPortal(chatPanel, document.body)}
       {mounted && quickActionsOpen &&
         createPortal(
-          <div className="fixed inset-0 z-9998 flex items-end bg-black/35 p-3 pb-[calc(5.25rem+env(safe-area-inset-bottom))] backdrop-blur-[2px] md:hidden" onClick={() => setQuickActionsOpen(false)}>
-            <div className="mx-auto w-full max-w-md overflow-hidden rounded-[30px] border border-white/12 bg-[#10111a]/98 shadow-[0_-24px_80px_rgba(0,0,0,.7)]" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
-              <div className="mx-auto mt-2.5 h-1 w-10 rounded-full bg-white/15" aria-hidden="true" />
-              <div className="flex items-center gap-3 px-5 pb-4 pt-3">
-                <div className="relative h-11 w-11 shrink-0 overflow-hidden rounded-2xl border border-cyan-300/30 bg-black shadow-[0_0_24px_rgba(34,211,238,.16)]">
-                  <Image src="/brand/litt-mascot-avatar.png" alt="" fill className="object-cover" />
+          <div className="fixed inset-0 z-9998 flex items-end bg-black/45 p-4 pb-[calc(5.5rem+env(safe-area-inset-bottom))] backdrop-blur-sm md:hidden" onClick={() => setQuickActionsOpen(false)}>
+            <div className="mx-auto w-full max-w-sm rounded-3xl border border-white/10 bg-[#111119]/95 p-4 shadow-2xl" role="dialog" aria-modal="true" aria-label="LiTT assistant quick actions" onClick={(event) => event.stopPropagation()}>
+              <div className="mb-4 flex items-center justify-between">
+                <div>
+                  <p className="text-sm font-black text-white">LiTT Assistant</p>
+                  <p className="text-xs text-neutral-400">How can I help right now?</p>
                 </div>
-                <div className="min-w-0 flex-1">
-                  <p className="text-base font-black text-white">What do you need?</p>
-                  <p className="text-[11px] text-white/45">Ask, speak, or show LiTT what you see.</p>
-                </div>
-                <button className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/8 text-neutral-400 transition hover:bg-white/5" onClick={() => setQuickActionsOpen(false)} aria-label="Close assistant actions"><X size={17} /></button>
+                <button className="flex h-10 w-10 items-center justify-center rounded-full text-neutral-400 hover:bg-white/5" onClick={() => setQuickActionsOpen(false)} aria-label="Close assistant actions"><X size={18} /></button>
               </div>
-              <div className="space-y-2 px-4 pb-4">
-                <button className="flex min-h-16 w-full items-center gap-3 rounded-2xl border border-cyan-300/25 bg-cyan-300/10 px-4 text-left text-cyan-200 transition active:scale-[.99] active:bg-cyan-300/15" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}>
-                  <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-cyan-300/12"><MessageCircle size={21} /></span>
-                  <span className="min-w-0 flex-1"><strong className="block text-sm">Ask LiTT</strong><small className="block truncate text-[10px] text-white/45">Plan, build, troubleshoot, or create</small></span>
-                  <ArrowRight size={16} className="opacity-60" />
-                </button>
-                <div className="flex gap-2">
-                  <button className="flex min-h-16 flex-1 items-center gap-3 rounded-2xl border border-violet-400/20 bg-violet-400/6 px-3 text-left text-violet-300 transition active:scale-[.98]" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-violet-400/10"><Mic size={19} /></span><span><strong className="block text-xs">Speak</strong><small className="text-[9px] text-white/40">Hands-free</small></span></button>
-                  <button className="flex min-h-16 flex-1 items-center gap-3 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/6 px-3 text-left text-fuchsia-300 transition active:scale-[.98]" onClick={() => void openCamera()}><span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-fuchsia-400/10"><Camera size={19} /></span><span><strong className="block text-xs">Camera</strong><small className="text-[9px] text-white/40">Show LiTT</small></span></button>
-                </div>
+              <div className="grid grid-cols-3 gap-2">
+                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-cyan-400/20 bg-cyan-400/5 text-cyan-300" onClick={() => { setQuickActionsOpen(false); setChatOpen(true); }}><MessageCircle size={22} /><span className="text-xs font-bold">Ask</span></button>
+                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-violet-400/20 bg-violet-400/5 text-violet-300" onClick={() => { setQuickActionsOpen(false); setVoiceMode(true); void toggleRecording(); }}><Mic size={22} /><span className="text-xs font-bold">Speak</span></button>
+                <button className="flex min-h-24 flex-col items-center justify-center gap-2 rounded-2xl border border-fuchsia-400/20 bg-fuchsia-400/5 text-fuchsia-300" onClick={() => void openCamera()}><Camera size={22} /><span className="text-xs font-bold">Show Camera</span></button>
               </div>
             </div>
           </div>,
@@ -878,7 +842,7 @@ export function FloatingChat() {
         }}
         aria-label="Open LiTT Assistant"
       >
-        <Image src="/brand/litt-mascot-avatar.png" alt="Open LiTT Assistant" fill className="object-cover" style={{ objectPosition: "50% 40%" }} />
+        <Image src="/brand/litt-mascot-hero.png" alt="Open LiTT Assistant" fill className="object-cover" style={{ objectPosition: "50% 13%" }} />
         {!chatOpen && (
           <span className="absolute -top-1 -right-1 flex h-3 w-3">
             <span className="absolute inline-flex h-full w-full animate-ping rounded-full bg-green-400 opacity-75" />

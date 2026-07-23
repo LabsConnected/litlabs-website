@@ -2,12 +2,11 @@ import { Supermemory } from "supermemory";
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
   if (!key) {
-    throw new Error("Service unavailable");
+    throw new Error("SUPERMEMORY_API_KEY is not configured");
   }
   return new Supermemory({ apiKey: key });
 }
@@ -125,20 +124,15 @@ export async function POST(req: NextRequest) {
       supermemory: supermemoryResult,
     });
   } catch (error: unknown) {
-    console.error("[api/memory] POST error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
-    return NextResponse.json({ error: message }, { status });
+    const message = error instanceof Error ? error.message : "Failed to add memory";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
 export async function GET(req: NextRequest) {
-  let userId: string | null = null;
-  try {
-    const authResult = await auth();
-    userId = authResult.userId ?? null;
-  } catch (authError) {
-    console.warn("[api/memory] auth failed:", authError);
-    userId = null;
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
   try {
@@ -147,21 +141,6 @@ export async function GET(req: NextRequest) {
     const scope = searchParams.get("scope") || undefined;
     const limit = Math.min(Number(searchParams.get("limit")) || 20, 100);
     const normalizedScope = scope ? normalizeScope(scope) : undefined;
-
-    // Banner health check does not require auth; semantic queries do.
-    if (!query.trim()) {
-      if (!userId) {
-        return NextResponse.json({
-          memories: [],
-          count: 0,
-          source: "auth",
-          status: "ok",
-          warning: "Sign in to load memories",
-        });
-      }
-    } else if (!userId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-    }
 
     // Health check / recent list: return Supabase memories when no semantic query is provided.
     if (!query.trim()) {
@@ -213,7 +192,7 @@ export async function GET(req: NextRequest) {
           limit,
         })) as { memories?: unknown[]; results?: unknown[] };
       } catch (err) {
-        supermemoryError = "Service unavailable";
+        supermemoryError = err instanceof Error ? err.message : "Supermemory search failed";
         console.error("Supermemory search failed:", err);
         source = "supabase";
       }
@@ -278,9 +257,8 @@ export async function GET(req: NextRequest) {
       source,
     });
   } catch (error: unknown) {
-    console.error("[api/memory] GET error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
-    return NextResponse.json({ error: message }, { status });
+    const message = error instanceof Error ? error.message : "Failed to search memories";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -331,9 +309,8 @@ export async function DELETE(req: NextRequest) {
 
     return NextResponse.json({ deleted: id });
   } catch (error: unknown) {
-    console.error("[api/memory] DELETE error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
-    return NextResponse.json({ error: message }, { status });
+    const message = error instanceof Error ? error.message : "Failed to forget memory";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }
 
@@ -390,8 +367,7 @@ export async function PATCH(req: NextRequest) {
 
     return NextResponse.json({ memory: data });
   } catch (error: unknown) {
-    console.error("[api/memory] PATCH error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
-    return NextResponse.json({ error: message }, { status });
+    const message = error instanceof Error ? error.message : "Failed to update memory";
+    return NextResponse.json({ error: message }, { status: 500 });
   }
 }

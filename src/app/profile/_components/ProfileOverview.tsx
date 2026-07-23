@@ -520,7 +520,7 @@ export function ProfileOverview({
                   letterSpacing: "-0.02em",
                 }}
               >
-                LiTTree LabStudios
+                LiTTree-LabStudios
               </h3>
               <p
                 style={{

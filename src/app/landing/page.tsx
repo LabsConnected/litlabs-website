@@ -19,7 +19,7 @@ export const metadata: Metadata = {
 
 export default function ModernLandingPage() {
   return (
-    <div className="relative min-h-dvh overflow-x-hidden bg-[#06060e] text-neutral-100">
+    <div className="relative min-h-screen overflow-x-hidden bg-[#06060e] text-neutral-100">
       <LandingBackground />
       <LandingHeader />
       <main className="relative z-10">

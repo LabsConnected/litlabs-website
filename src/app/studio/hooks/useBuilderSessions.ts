@@ -22,7 +22,7 @@ export type BuilderSession = {
 
 const STORAGE_KEY = "littree:builder:sessions:v1";
 const ACTIVE_KEY = "littree:builder:active-session:v1";
-const defaultContext = (): BuilderSessionContext => ({ projectId: null, repositoryState: "none", selectedAgent: "littcode", terminalSessionIds: [], activeTerminalSessionId: null });
+const defaultContext = (): BuilderSessionContext => ({ projectId: null, repositoryState: "none", selectedAgent: "litt", terminalSessionIds: [], activeTerminalSessionId: null });
 const makeSession = (title = "New chat"): BuilderSession => { const now = new Date().toISOString(); return { id: crypto.randomUUID(), title, pinned: false, messages: [], context: defaultContext(), createdAt: now, updatedAt: now }; };
 
 function loadLocal(): BuilderSession[] {

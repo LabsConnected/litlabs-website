@@ -1,4 +1,4 @@
-import { getAdminSupabase } from "./supabase-admin";
+import { supabase } from "./supabase";
 
 export type NotificationType =
   | "sale"
@@ -31,7 +31,7 @@ export interface NotificationConfig {
   resendApiKey?: string;
 }
 
-class Jarvis {
+class LiTT {
   private config: NotificationConfig;
   private initialized = false;
 
@@ -46,14 +46,14 @@ class Jarvis {
 
   async notify(payload: NotificationPayload): Promise<boolean> {
     if (!this.initialized) {
-      // Jarvis not initialized — using default config
+      // LiTT not initialized — using default config
     }
 
     const channels = payload.channels || ["discord"];
     const results: boolean[] = [];
 
     try {
-      await getAdminSupabase().from("notifications").insert({
+      await supabase.from("notifications").insert({
         user_id: payload.userId || null,
         type: payload.type,
         priority: payload.priority,
@@ -62,8 +62,9 @@ class Jarvis {
         data: payload.data || {},
         channels: channels,
       });
-    } catch {
       // DB error saving notification — continuing
+    } catch {
+      // Error saving notification — continuing
     }
 
     for (const channel of channels) {
@@ -118,12 +119,12 @@ class Jarvis {
       timestamp: new Date().toISOString(),
       fields: payload.data
         ? Object.entries(payload.data).map(([key, value]) => ({
-            name: key,
-            value: String(value).substring(0, 1000),
-            inline: true,
-          }))
+          name: key,
+          value: String(value).substring(0, 1000),
+          inline: true,
+        }))
         : [],
-      footer: { text: `LiTTree LabStudios \u2022 ${payload.priority.toUpperCase()}` },
+      footer: { text: `LiTT \u2022 ${payload.priority.toUpperCase()}` },
     };
 
     try {
@@ -167,7 +168,7 @@ class Jarvis {
     }
 
     try {
-      const subscriptions = await getAdminSupabase()
+      const subscriptions = await supabase
         .from("push_subscriptions")
         .select("subscription")
         .eq("user_id", payload.userId || "");
@@ -221,7 +222,7 @@ class Jarvis {
             <p>${payload.body}</p>
             ${payload.data ? `<pre>${JSON.stringify(payload.data, null, 2)}</pre>` : ""}
             <hr />
-            <p style="color: #888; font-size: 12px;">LiTTree LabStudios Notification System</p>
+            <p style="color: #888; font-size: 12px;">LiTT Notification System</p>
           `,
         }),
       });
@@ -327,14 +328,13 @@ class Jarvis {
   }
 }
 
-export const jarvis = new Jarvis();
-export const litt = jarvis;
+export const jarvis = new LiTT();
 
 if (typeof window === "undefined") {
   jarvis.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
-    webhookEndpoint: process.env.JARVIS_WEBHOOK_URL,
+    webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
     pushVapidPublicKey: process.env.NEXT_PUBLIC_VAPID_PUBLIC_KEY,
     pushVapidPrivateKey: process.env.VAPID_PRIVATE_KEY,
     pushVapidSubject: process.env.VAPID_SUBJECT || "mailto:admin@litlabs.net",

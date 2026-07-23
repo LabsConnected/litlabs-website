@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { logAgentEvent } from "@/lib/agent-logger";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export const dynamic = "force-dynamic";
 
@@ -10,12 +10,15 @@ export async function GET(
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
 
     const { data: task, error } = await supabaseAdmin
       .from("agent_tasks")
       .select("*")
       .eq("id", taskId)
+      .eq("user_id", userId)
       .single();
 
     if (error || !task) {
@@ -28,10 +31,9 @@ export async function GET(
     return NextResponse.json({ task });
   } catch (error) {
     console.error("Task fetch failed:", error);
-    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
-      { error: message },
-      { status },
+      { error: "Internal error" },
+      { status: 500 },
     );
   }
 }
@@ -41,6 +43,8 @@ export async function PATCH(
   { params }: { params: Promise<{ taskId: string }> },
 ) {
   try {
+    const { userId } = await auth();
+    if (!userId) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     const { taskId } = await params;
     const body = await request.json();
 
@@ -73,6 +77,7 @@ export async function PATCH(
       .from("agent_tasks")
       .update(updates)
       .eq("id", taskId)
+      .eq("user_id", userId)
       .select("*")
       .single();
 
@@ -96,15 +101,19 @@ export async function PATCH(
         sessionId: task.session_id,
         previousStatus: body.previousStatus,
       },
-    ).catch(() => { });
+    ).catch(() => {});
 
     return NextResponse.json({ ok: true, task });
   } catch (error) {
     console.error("Critical Task Update Exception:", error);
-    const { status, error: message } = sanitizeProviderError(error);
     return NextResponse.json(
-      { error: message },
-      { status },
+      {
+        error:
+          error instanceof Error
+            ? error.message
+            : "Internal Execution Interruption",
+      },
+      { status: 500 },
     );
   }
 }

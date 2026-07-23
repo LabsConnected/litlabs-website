@@ -199,7 +199,7 @@ function defaultConfig(
 
 function toYAML(nodes: PipelineNode[]): string {
   const lines: string[] = [
-    "# LiTTree LabStudios Pipeline Protocol",
+    "# LiTTree-LabStudios Pipeline Protocol",
     `# Generated: ${new Date().toISOString()}`,
     `# ${process.env.NEXT_PUBLIC_SITE_URL || "https://litlabs.net"}`,
     "",
@@ -265,15 +265,6 @@ export default function FlowPage() {
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
   }, [terminalLogs]);
-
-  useEffect(() => {
-    if (!showYaml) return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setShowYaml(false);
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [showYaml]);
 
   const log = useCallback((msg: string) => {
     const ts = new Date().toISOString().split("T")[1].slice(0, 8);
@@ -489,7 +480,7 @@ export default function FlowPage() {
 
   if (!isLoaded) {
     return (
-      <div className="min-h-dvh flex items-center justify-center font-mono bg-[#050108] text-fuchsia-400">
+      <div className="min-h-screen flex items-center justify-center font-mono bg-[#050108] text-fuchsia-400">
         <div className="text-center">
           <div className="text-3xl mb-4 animate-pulse">⚡</div>
           <div>Loading Pipeline...</div>
@@ -535,8 +526,6 @@ export default function FlowPage() {
           <div className="flex items-center gap-1.5 bg-[#130720] border border-white/10 rounded-lg px-2 py-1.5">
             <Search className="w-3 h-3 text-slate-500 shrink-0" />
             <input
-              id="flow-filter"
-              name="flowFilter"
               value={libraryFilter}
               onChange={(e) => setLibraryFilter(e.target.value)}
               placeholder="Filter nodes..."
@@ -751,8 +740,6 @@ export default function FlowPage() {
             <form onSubmit={handleAiBuild} className="flex items-center w-full">
               <div className="w-2 h-2 bg-fuchsia-500 rounded-full animate-pulse ml-3 mr-3 shadow-[0_0_10px_rgba(217,70,239,0.8)] shrink-0" />
               <input
-                id="flow-ai-prompt"
-                name="flowAiPrompt"
                 value={aiPrompt}
                 onChange={(e) => setAiPrompt(e.target.value)}
                 disabled={isGenerating}
@@ -798,8 +785,6 @@ export default function FlowPage() {
                   Node Name
                 </label>
                 <input
-                  id="flow-node-name"
-                  name="flowNodeName"
                   value={selectedNode.title}
                   onChange={(e) =>
                     setNodes((prev) =>
@@ -822,8 +807,6 @@ export default function FlowPage() {
                       Endpoint Path
                     </label>
                     <input
-                      id="flow-endpoint"
-                      name="flowEndpoint"
                       value={String(selectedNode.config.endpoint || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -902,8 +885,6 @@ export default function FlowPage() {
                       Cron Expression
                     </label>
                     <input
-                      id="flow-cron"
-                      name="flowCron"
                       value={String(selectedNode.config.cron || "")}
                       onChange={(e) => {
                         updateConfig(selectedNode.id, "cron", e.target.value);
@@ -924,8 +905,6 @@ export default function FlowPage() {
                       AI Model
                     </label>
                     <select
-                      id="flow-model"
-                      name="flowModel"
                       value={String(selectedNode.config.model)}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "model", e.target.value)
@@ -951,8 +930,6 @@ export default function FlowPage() {
                       </span>
                     </div>
                     <input
-                      id="flow-temperature"
-                      name="flowTemperature"
                       type="range"
                       min="0"
                       max="1"
@@ -987,8 +964,6 @@ export default function FlowPage() {
                       </button>
                     </div>
                     <textarea
-                      id="flow-system-prompt"
-                      name="flowSystemPrompt"
                       value={String(selectedNode.config.prompt)}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "prompt", e.target.value)
@@ -1009,8 +984,6 @@ export default function FlowPage() {
                       Target Table
                     </label>
                     <input
-                      id="flow-table"
-                      name="flowTable"
                       value={String(selectedNode.config.table || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "table", e.target.value)
@@ -1024,8 +997,6 @@ export default function FlowPage() {
                       Ledger Cluster
                     </label>
                     <select
-                      id="flow-cluster"
-                      name="flowCluster"
                       value={String(selectedNode.config.cluster || "primary")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "cluster", e.target.value)
@@ -1048,8 +1019,6 @@ export default function FlowPage() {
                       Webhook URL
                     </label>
                     <input
-                      id="flow-webhook-url"
-                      name="flowWebhookUrl"
                       value={String(selectedNode.config.webhook_url || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -1067,8 +1036,6 @@ export default function FlowPage() {
                       Message Template
                     </label>
                     <textarea
-                      id="flow-message-template"
-                      name="flowMessageTemplate"
                       value={String(selectedNode.config.message_template || "")}
                       onChange={(e) =>
                         updateConfig(
@@ -1093,8 +1060,6 @@ export default function FlowPage() {
                       To
                     </label>
                     <input
-                      id="flow-to"
-                      name="flowTo"
                       value={String(selectedNode.config.to || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "to", e.target.value)
@@ -1108,8 +1073,6 @@ export default function FlowPage() {
                       Subject
                     </label>
                     <input
-                      id="flow-subject"
-                      name="flowSubject"
                       value={String(selectedNode.config.subject || "")}
                       onChange={(e) =>
                         updateConfig(selectedNode.id, "subject", e.target.value)
@@ -1203,7 +1166,7 @@ export default function FlowPage() {
       {/* ── YAML Export Modal ── */}
       {showYaml && (
         <div
-          className="fixed inset-0 z-120 flex items-center justify-center p-4"
+          className="fixed inset-0 z-[10000] flex items-center justify-center p-4"
           style={{ backgroundColor: "rgba(0,0,0,0.85)" }}
           onClick={() => setShowYaml(false)}
         >

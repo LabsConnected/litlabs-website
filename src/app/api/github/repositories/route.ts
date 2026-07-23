@@ -2,7 +2,6 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getInstallationOctokit } from "@/lib/github-app";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export async function GET(request: NextRequest) {
   const { userId } = await auth();
@@ -48,8 +47,7 @@ export async function GET(request: NextRequest) {
     }));
     return NextResponse.json({ repositories });
   } catch (err) {
-    console.error("[api/github/repositories] error:", err);
-    const { status, error: message } = sanitizeProviderError(err);
-    return NextResponse.json({ error: message }, { status: status === 429 ? 429 : 502 });
+    const message = err instanceof Error ? err.message : "GitHub error";
+    return NextResponse.json({ error: message }, { status: 502 });
   }
 }

@@ -11,11 +11,11 @@
 - Clerk auth, Supabase DB, Stripe payments
 - AI: OpenRouter, Gemini, Together, Fal, MiniMax
 - Deployed on Vercel; Docker available for self-hosting
-- Local host: Windows 11 (cmd.exe) — NOT WSL2
+- Local host: Windows 11 with PowerShell as the workspace shell — NOT WSL2
 
 ## Commands
 
-```bash
+```powershell
 pnpm dev          # Start dev server with Turbopack on :3000
 pnpm dev:webpack  # Dev server with Webpack (rarely needed)
 pnpm build        # Production build
@@ -28,8 +28,8 @@ npx tsc --noEmit  # Type-check (no script in package.json yet)
 
 Multi-agent AI app ("LiTTree Lab Studios"). Key subsystems in `src/lib/`:
 
-- `agents.ts`, `agent-profiles.ts` — agent orchestration matrix
-- `litt.ts — LiTT notification dispatcher (exports `litt` singleton; `jarvis` alias for compat)
+- `AgentOrchestrator.ts`, `agents.ts`, `agent-profiles.ts` — agent orchestration matrix
+- `litt.ts` — main LiT brain / assistant logic (NOT jarvis.ts — that file does not exist)
 - `director-graph.ts` — director agent graph
 - `llm.ts`, `llm-completion.ts`, `llm-executor.ts` — LLM abstraction layer
 - `supabase.ts`, `supabase-admin.ts`, `supabase-client.ts` — DB access (service role vs anon)
@@ -54,7 +54,8 @@ Copy `.env.example` to `.env.local` and fill in secrets. Key groups:
 - AI: `OPENROUTER_API_KEY`, `GEMINI_API_KEY`, etc.
 - Auth: `AUTH_SECRET` (generate: `openssl rand -hex 32`)
 
-Run `bash scripts/setup-env.sh` to configure Vercel environment variables interactively.
+The legacy `scripts/setup-env.sh` requires Git Bash; do not run it from PowerShell. Prefer the
+Vercel CLI or the provider dashboard when configuring environment variables on Windows.
 
 ## Quirks
 

@@ -12,10 +12,12 @@ type CheckResult = {
   detail?: string;
 };
 
-// Single source of truth for autonomic system health.
-// Old per-endpoint probes are intentionally removed — they only proved "URL answered",
-// not that the worker/leases/execution are alive.
-const HEALTH_ENDPOINT = "/api/system/autonomic-health";
+const CHECK_ENDPOINTS: Array<{ id: string; label: string; url: string }> = [
+  { id: "director", label: "Director planner", url: "/api/director/plan" },
+  { id: "agents", label: "Agent roster", url: "/api/agents" },
+  { id: "memory", label: "Memory store", url: "/api/memory" },
+  { id: "agent-tasks", label: "Task intake", url: "/api/agent-tasks" },
+];
 
 const POLL_INTERVAL_MS = 60_000;
 
@@ -132,23 +134,8 @@ export default function AutonomicLoopBanner() {
   // without triggering re-renders. Cancelled on unmount.
   const abortRef = useRef<AbortController | null>(null);
 
-  // Real health snapshot from the worker surface
-  type HealthSnapshot = {
-    status: "online" | "degraded" | "offline";
-    api?: string;
-    database?: string;
-    queue?: string;
-    worker?: string;
-    memory?: string;
-    queuedTasks?: number;
-    runningTasks?: number;
-    failedTasks?: number;
-    lastWorkerHeartbeat?: string | null;
-    lastSuccessfulTask?: string | null;
-    version?: string;
-  };
-
   const runChecks = useCallback(async () => {
+    // Cancel any prior probe so we never setState on a stale cycle.
     abortRef.current?.abort();
     const controller = new AbortController();
     abortRef.current = controller;
@@ -156,46 +143,55 @@ export default function AutonomicLoopBanner() {
     setState("checking");
     const signal = controller.signal;
 
-    try {
-      const res = await fetch(HEALTH_ENDPOINT, {
-        method: "GET",
-        signal,
-        cache: "no-store",
-      });
+    const results: CheckResult[] = await Promise.all(
+      CHECK_ENDPOINTS.map(async (endpoint) => {
+        try {
+          const res = await fetch(endpoint.url, {
+            method: "GET",
+            signal,
+            cache: "no-store",
+          });
+          if (signal.aborted) {
+            return {
+              id: endpoint.id,
+              label: endpoint.label,
+              ok: false,
+              detail: "aborted",
+            };
+          }
+          return {
+            id: endpoint.id,
+            label: endpoint.label,
+            ok: res.ok,
+            detail: `${res.status}`,
+          };
+        } catch (err) {
+          if ((err as { name?: string })?.name === "AbortError") {
+            return {
+              id: endpoint.id,
+              label: endpoint.label,
+              ok: false,
+              detail: "aborted",
+            };
+          }
+          return {
+            id: endpoint.id,
+            label: endpoint.label,
+            ok: false,
+            detail: err instanceof Error ? err.message : "unreachable",
+          };
+        }
+      }),
+    );
 
-      if (signal.aborted) return;
+    if (signal.aborted) return;
 
-      if (!res.ok) {
-        // Treat non-2xx as degraded signal (endpoint itself is reachable but system unhappy)
-        setChecks([{ id: "health", label: "Autonomic health", ok: false, detail: `${res.status}` }]);
-        setState("degraded");
-        setLastChecked(new Date());
-        return;
-      }
-
-      const h = (await res.json()) as HealthSnapshot;
-
-      // Map canonical status to banner state
-      const mapped: LoopState =
-        h.status === "online" ? "ok" : h.status === "degraded" ? "degraded" : "down";
-
-      // Build a compact set of indicators for the expanded row
-      const items: CheckResult[] = [
-        { id: "worker", label: "Worker", ok: h.worker === "online", detail: h.worker || "unknown" },
-        { id: "database", label: "Database", ok: h.database === "online", detail: h.database || "unknown" },
-        { id: "queue", label: "Queue", ok: h.queue === "online", detail: h.queue || "unknown" },
-        { id: "memory", label: "Memory", ok: h.memory === "online", detail: h.memory || "unconfigured" },
-      ];
-
-      setChecks(items);
-      setState(mapped);
-      setLastChecked(new Date());
-    } catch (err) {
-      if ((err as { name?: string })?.name === "AbortError") return;
-      setChecks([{ id: "health", label: "Autonomic health", ok: false, detail: "unreachable" }]);
-      setState("down");
-      setLastChecked(new Date());
-    }
+    setChecks(results);
+    const okCount = results.filter((r) => r.ok).length;
+    if (okCount === results.length) setState("ok");
+    else if (okCount === 0) setState("down");
+    else setState("degraded");
+    setLastChecked(new Date());
   }, []);
 
   useEffect(() => {
@@ -233,10 +229,10 @@ export default function AutonomicLoopBanner() {
   if (dismissed) return null;
 
   const palette = {
-    ok: { color: "#22c55e", label: "Systems Online" },
-    degraded: { color: "#f59e0b", label: "Partial" },
-    down: { color: "#ef4444", label: "Offline" },
-    checking: { color: tokens.primary, label: "Checking" },
+    ok: { color: "#22c55e", label: "Autonomic Loop · Online" },
+    degraded: { color: "#f59e0b", label: "Autonomic Loop · Degraded" },
+    down: { color: "#ef4444", label: "Autonomic Loop · Offline" },
+    checking: { color: tokens.primary, label: "Autonomic Loop · Probing" },
   }[state];
 
   const StatusIcon =
@@ -247,24 +243,23 @@ export default function AutonomicLoopBanner() {
       className="sticky top-0 z-40 w-full border-b backdrop-blur-md"
       style={{
         backgroundColor: `${tokens.surface}cc`,
-        borderColor: `${palette.color}20`,
+        borderColor: `${palette.color}30`,
       }}
     >
-      <div className="w-full flex items-center gap-2 px-4 py-1.5 text-xs font-bold">
+      <div className="w-full flex items-center gap-3 px-4 py-2 text-xs font-bold">
         <button
           onClick={() => setExpanded((v) => !v)}
-          className="flex items-center gap-2 flex-1 min-w-0 text-left transition-all hover:opacity-90"
+          className="flex items-center gap-3 flex-1 min-w-0 text-left transition-all hover:opacity-90"
           aria-expanded={expanded}
-          aria-label={`Autonomic Loop status: ${palette.label}. ${expanded ? "Hide" : "Show"} details`}
+          aria-label="Toggle Autonomic Loop status"
         >
           <StatusIcon
-            size={12}
+            size={14}
             className={state === "checking" ? "animate-spin" : ""}
             style={{ color: palette.color }}
-            aria-hidden="true"
           />
           <span
-            className="uppercase tracking-[0.15em] text-[10px]"
+            className="uppercase tracking-[0.18em]"
             style={{ color: palette.color }}
           >
             {palette.label}
@@ -305,12 +300,7 @@ export default function AutonomicLoopBanner() {
           style={{ borderTop: `1px solid ${tokens.border}30` }}
         >
           {checks.length === 0
-            ? [
-                { id: "worker", label: "Worker" },
-                { id: "database", label: "Database" },
-                { id: "queue", label: "Queue" },
-                { id: "memory", label: "Memory" },
-              ].map((e) => (
+            ? CHECK_ENDPOINTS.map((e) => (
                 <div
                   key={e.id}
                   className="flex items-center gap-2 text-[10px] font-mono"

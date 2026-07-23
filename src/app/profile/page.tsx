@@ -113,7 +113,7 @@ function ProfilePageInner() {
     return (
       <div
         style={{
-          minHeight: "100dvh",
+          minHeight: "100vh",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
@@ -131,7 +131,7 @@ function ProfilePageInner() {
     return (
       <div
         style={{
-          minHeight: "100dvh",
+          minHeight: "100vh",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -195,10 +195,7 @@ function ProfilePageInner() {
         </div>
 
         {(activeTab === "overview" || activeTab === "about") && (
-          <div
-            className="grid grid-cols-1 items-start gap-5 lg:grid-cols-[1fr_340px]"
-            style={{ marginTop: "24px" }}
-          >
+          <div className="profile-content-grid" style={{ marginTop: "24px" }}>
             <ProfileOverview hasProjects hasAgents />
             <ProfileRightRail profile={profile} />
           </div>
@@ -239,7 +236,7 @@ function ProfilePageInner() {
 
       <style>{`
         .profile-page {
-          min-height: 100dvh;
+          min-height: 100vh;
           background:
             radial-gradient(circle at 15% 5%, rgba(168,85,247,0.08), transparent 28%),
             radial-gradient(circle at 90% 15%, rgba(48,231,255,0.05), transparent 24%),
@@ -251,7 +248,14 @@ function ProfilePageInner() {
           margin: 0 auto;
           padding: 24px 28px 100px;
         }
+        .profile-content-grid {
+          display: grid;
+          grid-template-columns: 1fr 340px;
+          gap: 20px;
+          align-items: start;
+        }
         @media (max-width: 1099px) {
+          .profile-content-grid { grid-template-columns: 1fr; }
           .profile-container { padding-inline: 20px; }
         }
         @media (max-width: 767px) {

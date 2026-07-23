@@ -106,14 +106,14 @@ Rules:
 }
 
 /**
- * Director AI — plans tasks from backlog. Returns JSON.
+ * Copilot AI — plans tasks from backlog. Returns JSON.
  */
 export async function directorPlan(
   backlog: string,
   completed: string,
   projectContext: string,
 ): Promise<string> {
-  const prompt = `You are the LiTTree LabStudios Hive Mind Director. Analyze the project state and plan the next task.
+  const prompt = `You are the LiTTree-LabStudios Hive Mind Copilot. Analyze the project state and plan the next task.
 
 PROJECT CONTEXT:
 ${projectContext}
@@ -128,7 +128,7 @@ Output ONLY a JSON object (no markdown, no explanations) with this exact structu
 {
   "milestone": "Short task name",
   "status": "pending",
-  "director_instructions": "Detailed, step-by-step technical instructions for the Executor. Be specific about which files to create/modify, what components to use, styling details, and functionality requirements.",
+  "copilot_instructions": "Detailed, step-by-step technical instructions for the Executor. Be specific about which files to create/modify, what components to use, styling details, and functionality requirements.",
   "target_files": ["path/to/file.tsx"],
   "estimated_complexity": "low|medium|high",
   "dependencies": []
@@ -146,7 +146,7 @@ Rules:
 }
 
 /**
- * Executor AI — writes code from Director instructions.
+ * Executor AI — writes code from Copilot instructions.
  */
 export async function executorCode(
   instructions: string,
@@ -154,9 +154,9 @@ export async function executorCode(
   existingCode?: string,
   errorLogs?: string,
 ): Promise<string> {
-  let prompt = `You are the LiTTree LabStudios Hive Mind Executor. Implement the code for: ${targetFile}
+  let prompt = `You are the LiTTree-LabStudios Hive Mind Executor. Implement the code for: ${targetFile}
 
-DIRECTOR INSTRUCTIONS:
+COPILOT INSTRUCTIONS:
 ${instructions}
 `;
 

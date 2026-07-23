@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { CODE_MODELS as MODELS } from "@/lib/studio-models";
 import {
   Bot,
   Copy,
@@ -19,7 +20,6 @@ import {
   Minimize2,
   Play,
   Brain,
-  MessageSquare,
 } from "lucide-react";
 
 type Message = {
@@ -36,18 +36,6 @@ type GeneratedFile = {
   content: string;
   language: string;
 };
-
-const MODEL_MODES = [
-  { id: "auto", label: "Auto", model: "gemini-flash" },
-  { id: "fast", label: "Fast", model: "gemini-flash" },
-  { id: "deep-think", label: "Deep Think", model: "claude-sonnet" },
-  { id: "code", label: "Code", model: "qwen-coder" },
-  { id: "local", label: "Local", model: "llama-nemotron" },
-];
-
-function modeToModel(mode: string) {
-  return MODEL_MODES.find((m) => m.id === mode)?.model ?? "gemini-flash";
-}
 
 const STARTER_TEMPLATES = [
   {
@@ -74,14 +62,10 @@ export default function CanvasTool() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
-  const [mode, setMode] = useState("auto");
-  const model = modeToModel(mode);
+  const [model, setModel] = useState("gemini-flash");
   const [generatedFiles, setGeneratedFiles] = useState<GeneratedFile[]>([]);
   const [activeFile, setActiveFile] = useState<string>("");
   const [previewMode, setPreviewMode] = useState<"code" | "preview">("code");
-  const [mobilePanel, setMobilePanel] = useState<"chat" | "code" | "preview">(
-    "chat",
-  );
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [memories, setMemories] = useState<string[]>([]);
@@ -265,7 +249,7 @@ export default function CanvasTool() {
 
   return (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-120" : "h-full"}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[10000]" : "h-full"}`}
       style={{ backgroundColor: T.bgColor }}
     >
       {/* Header with Model Switcher */}
@@ -288,45 +272,28 @@ export default function CanvasTool() {
           )}
         </div>
         <div className="flex items-center gap-2">
-          {/* LiTT Mode Selector */}
+          {/* Model Switcher */}
           <div
-            className="relative flex items-center rounded-lg px-2 py-1"
+            className="flex items-center gap-1 rounded-xl p-1"
             style={{
               backgroundColor: T.bgColor + "60",
               border: `1px solid ${T.borderColor}30`,
             }}
           >
-            <span
-              className="mr-1 text-[10px] font-black"
-              style={{ color: T.accentColor }}
-            >
-              LiTT
-            </span>
-            <select
-              value={mode}
-              onChange={(e) => setMode(e.target.value)}
-              className="appearance-none bg-transparent pr-4 text-[10px] font-bold outline-none"
-              style={{ color: T.headerColor }}
-              aria-label="Canvas mode"
-            >
-              {MODEL_MODES.map((m) => (
-                <option key={m.id} value={m.id} className="bg-[#0a0a0f]">
-                  {m.label}
-                </option>
-              ))}
-            </select>
-            <svg
-              className="pointer-events-none absolute right-1.5 h-3 w-3"
-              style={{ color: T.textMuted }}
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <polyline points="6 9 12 15 18 9" />
-            </svg>
+            {MODELS.map((m) => (
+              <button
+                key={m.id}
+                onClick={() => setModel(m.id)}
+                className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all"
+                style={{
+                  backgroundColor:
+                    model === m.id ? T.accentColor + "20" : "transparent",
+                  color: model === m.id ? T.accentColor : T.textMuted,
+                }}
+              >
+                {m.short}
+              </button>
+            ))}
           </div>
           <button
             onClick={() => setIsFullscreen(!isFullscreen)}
@@ -338,62 +305,10 @@ export default function CanvasTool() {
         </div>
       </div>
 
-      {/* Mobile panel tabs */}
-      <div
-        className="md:hidden flex items-center gap-1 px-3 py-2 border-b shrink-0"
-        style={{
-          borderColor: T.borderColor + "20",
-          backgroundColor: T.boxBg,
-        }}
-      >
-        <button
-          onClick={() => setMobilePanel("chat")}
-          className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition-all"
-          style={{
-            backgroundColor:
-              mobilePanel === "chat" ? T.accentColor + "15" : "transparent",
-            color: mobilePanel === "chat" ? T.accentColor : T.textMuted,
-            border: `1px solid ${mobilePanel === "chat" ? T.accentColor + "30" : "transparent"}`,
-          }}
-        >
-          <MessageSquare size={12} /> Chat
-        </button>
-        <button
-          onClick={() => {
-            setPreviewMode("code");
-            setMobilePanel("code");
-          }}
-          className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition-all"
-          style={{
-            backgroundColor:
-              mobilePanel === "code" ? T.accentColor + "15" : "transparent",
-            color: mobilePanel === "code" ? T.accentColor : T.textMuted,
-            border: `1px solid ${mobilePanel === "code" ? T.accentColor + "30" : "transparent"}`,
-          }}
-        >
-          <Code className="pointer-events-none" size={12} /> Code
-        </button>
-        <button
-          onClick={() => {
-            setPreviewMode("preview");
-            setMobilePanel("preview");
-          }}
-          className="flex-1 h-8 flex items-center justify-center gap-1.5 rounded-lg text-[11px] font-bold transition-all"
-          style={{
-            backgroundColor:
-              mobilePanel === "preview" ? T.accentColor + "15" : "transparent",
-            color: mobilePanel === "preview" ? T.accentColor : T.textMuted,
-            border: `1px solid ${mobilePanel === "preview" ? T.accentColor + "30" : "transparent"}`,
-          }}
-        >
-          <Eye className="pointer-events-none" size={12} /> Preview
-        </button>
-      </div>
-
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat Panel */}
         <div
-          className={`flex-col border-r w-full md:w-1/2 lg:w-[42%] shrink-0 ${mobilePanel === "chat" ? "flex" : "hidden md:flex"}`}
+          className="flex flex-col border-r w-full md:w-1/2 lg:w-[42%] shrink-0"
           style={{ borderColor: T.borderColor + "20" }}
         >
           {/* Messages */}
@@ -407,7 +322,7 @@ export default function CanvasTool() {
                     border: `1px solid ${T.accentColor}30`,
                   }}
                 >
-                  <Code className="pointer-events-none" size={24} style={{ color: T.accentColor }} />
+                  <Code size={24} style={{ color: T.accentColor }} />
                 </div>
                 <h3
                   className="text-base font-black mb-2"
@@ -471,7 +386,7 @@ export default function CanvasTool() {
                         ? "You"
                         : msg.role === "system"
                           ? "System"
-                          : "LiTT"}
+                          : MODELS.find((m) => m.id === model)?.short || "AI"}
                     </span>
                     <span className="text-[9px]" style={{ color: T.textMuted }}>
                       {msg.ts}
@@ -497,7 +412,6 @@ export default function CanvasTool() {
                         if (file) {
                           setActiveFile(file.name);
                           setPreviewMode("code");
-                          setMobilePanel("code");
                         }
                       }}
                       className="mt-1.5 flex items-center gap-1.5 text-[10px] font-bold px-2.5 py-1 rounded-lg transition-all hover:scale-105"
@@ -507,7 +421,7 @@ export default function CanvasTool() {
                         border: `1px solid ${T.accentColor}30`,
                       }}
                     >
-                      <FileCode className="pointer-events-none" size={10} /> View code
+                      <FileCode size={10} /> View code
                     </button>
                   )}
                 </div>
@@ -558,8 +472,6 @@ export default function CanvasTool() {
                 />
                 <textarea
                   ref={inputRef}
-                  id="canvas-tool-prompt"
-                  name="canvasToolPrompt"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={handleKey}
@@ -593,9 +505,7 @@ export default function CanvasTool() {
         </div>
 
         {/* Code/Preview Panel */}
-        <div
-          className={`flex-col flex-1 min-w-0 ${mobilePanel === "code" || mobilePanel === "preview" ? "flex" : "hidden md:flex"}`}
-        >
+        <div className="hidden md:flex flex-col flex-1 min-w-0">
           {/* Panel Header */}
           <div
             className="flex items-center justify-between px-3 py-2 border-b shrink-0"
@@ -620,7 +530,7 @@ export default function CanvasTool() {
                     border: `1px solid ${activeFile === file.name ? T.accentColor + "30" : "transparent"}`,
                   }}
                 >
-                  <FileCode className="pointer-events-none" size={10} /> {file.name}
+                  <FileCode size={10} /> {file.name}
                 </button>
               ))}
               {generatedFiles.length === 0 && (
@@ -632,7 +542,7 @@ export default function CanvasTool() {
             <div className="flex items-center gap-1 shrink-0">
               <button
                 onClick={() => setPreviewMode("code")}
-                className="p-1.5 rounded-lg hidden md:block"
+                className="p-1.5 rounded-lg"
                 style={{
                   backgroundColor:
                     previewMode === "code"
@@ -641,11 +551,11 @@ export default function CanvasTool() {
                   color: previewMode === "code" ? T.accentColor : T.textMuted,
                 }}
               >
-                <Code className="pointer-events-none" size={13} />
+                <Code size={13} />
               </button>
               <button
                 onClick={() => setPreviewMode("preview")}
-                className="p-1.5 rounded-lg hidden md:block"
+                className="p-1.5 rounded-lg"
                 style={{
                   backgroundColor:
                     previewMode === "preview"
@@ -655,7 +565,7 @@ export default function CanvasTool() {
                     previewMode === "preview" ? T.accentColor : T.textMuted,
                 }}
               >
-                <Eye className="pointer-events-none" size={13} />
+                <Eye size={13} />
               </button>
               {generatedFiles.length > 0 && (
                 <>
@@ -664,29 +574,27 @@ export default function CanvasTool() {
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    {copied ? <Check className="pointer-events-none" size={13} aria-hidden="true" /> : <Copy className="pointer-events-none" size={13} aria-hidden="true" />}
+                    {copied ? <Check size={13} /> : <Copy size={13} />}
                   </button>
                   <button
                     onClick={downloadFile}
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    <Download className="pointer-events-none" size={13} aria-hidden="true" />
+                    <Download size={13} />
                   </button>
                   <button
                     onClick={() => {
                       const win = window.open("", "_blank");
                       if (win) {
-                        requestAnimationFrame(() => {
-                          win.document.write(getPreviewHtml());
-                          win.document.close();
-                        });
+                        win.document.write(getPreviewHtml());
+                        win.document.close();
                       }
                     }}
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
-                    <Play className="pointer-events-none" size={13} aria-hidden="true" />
+                    <Play size={13} />
                   </button>
                 </>
               )}
@@ -704,7 +612,7 @@ export default function CanvasTool() {
                     border: `1px solid ${T.borderColor}30`,
                   }}
                 >
-                  <Terminal className="pointer-events-none" size={24} style={{ color: T.textMuted }} aria-hidden="true" />
+                  <Terminal size={24} style={{ color: T.textMuted }} />
                 </div>
                 <p className="text-xs" style={{ color: T.textMuted }}>
                   Generated code appears here

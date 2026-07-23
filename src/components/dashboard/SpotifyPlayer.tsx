@@ -193,7 +193,7 @@ export default function SpotifyPlayer() {
     if (!sdkReady || !isPremium) return;
 
     const player = new window.Spotify.Player({
-      name: "LiTTree LabStudios",
+      name: "LiTTree-LabStudios",
       getOAuthToken: async (cb) => {
         const res = await fetch("/api/spotify/token");
         const data = await res.json();
@@ -355,7 +355,7 @@ export default function SpotifyPlayer() {
             Connect Spotify
           </div>
           <div className="text-xs" style={{ color: T.textMuted }}>
-            Stream your music directly in LiTTree LabStudios
+            Stream your music directly in LiTTree-LabStudios
           </div>
         </div>
         {error && (
@@ -431,8 +431,6 @@ export default function SpotifyPlayer() {
           {/* Search */}
           <div className="flex gap-2">
             <input
-              id="spotify-search-1"
-              name="spotifySearch1"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doSearch()}
@@ -740,8 +738,6 @@ export default function SpotifyPlayer() {
         <div className="p-4 space-y-3">
           <div className="flex gap-2">
             <input
-              id="spotify-search-2"
-              name="spotifySearch2"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               onKeyDown={(e) => e.key === "Enter" && doSearch()}

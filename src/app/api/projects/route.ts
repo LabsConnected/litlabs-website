@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
-import { sanitizeProviderError } from "@/lib/provider-error";
 
 export async function GET() {
   const { userId } = await auth();
@@ -21,10 +20,8 @@ export async function GET() {
     }
 
     return NextResponse.json({ projects: data || [] });
-  } catch (error) {
-    console.error("[api/projects] GET error:", error);
-    const { status, error: message } = sanitizeProviderError(error);
-    return NextResponse.json({ error: message }, { status });
+  } catch {
+    return NextResponse.json({ projects: [] }, { status: 200 });
   }
 }
 
@@ -42,6 +39,9 @@ export async function POST(request: NextRequest) {
     repository,
     default_branch = "main",
     working_branch,
+    repository_full_name,
+    repository_html_url,
+    repository_private = false,
   } = body;
 
   if (!github_installation_id || !repository_id || !owner || !repository || !working_branch) {
@@ -59,6 +59,21 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: "Installation not found" }, { status: 404 });
   }
 
+  // Verify the repository is accessible through this installation.
+  try {
+    const { getInstallationOctokit } = await import("@/lib/github-app");
+    const octokit = await getInstallationOctokit(github_installation_id);
+    const { data: repoData } = await octokit.rest.repos.get({ owner, repo: repository });
+    if (repoData.id !== repository_id) {
+      return NextResponse.json({ error: "Repository ID mismatch" }, { status: 400 });
+    }
+  } catch {
+    return NextResponse.json(
+      { error: "Repository not accessible through this installation" },
+      { status: 403 },
+    );
+  }
+
   const { data, error } = await supabaseAdmin
     .from("projects")
     .insert({
@@ -69,7 +84,12 @@ export async function POST(request: NextRequest) {
       repository,
       default_branch,
       working_branch,
+      selected_branch: working_branch,
+      repository_full_name: repository_full_name || `${owner}/${repository}`,
+      repository_html_url: repository_html_url || null,
+      repository_private: repository_private,
       status: "offline",
+      connection_status: "disconnected",
     })
     .select()
     .single();

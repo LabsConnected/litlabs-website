@@ -55,8 +55,6 @@ export function ProfileCover({
 
       <input
         ref={inputRef}
-        id="profile-cover-file"
-        name="profileCoverFile"
         type="file"
         accept="image/*"
         className="hidden"

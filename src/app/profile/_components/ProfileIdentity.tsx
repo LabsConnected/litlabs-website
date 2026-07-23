@@ -104,8 +104,6 @@ export function ProfileIdentity({
 
         <input
           ref={avatarRef}
-          id="profile-avatar-file"
-          name="profileAvatarFile"
           type="file"
           accept="image/*"
           className="hidden"

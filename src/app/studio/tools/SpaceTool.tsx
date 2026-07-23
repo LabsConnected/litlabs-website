@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
+import { SPACE_MODEL } from "@/lib/studio-models";
 import { Rocket, Loader2, Sparkles } from "lucide-react";
 
 export default function SpaceTool() {
@@ -51,7 +52,7 @@ export default function SpaceTool() {
             border: "1px solid #ff6b3540",
           }}
         >
-          MiniMax
+          {SPACE_MODEL.label}
         </span>
       </div>
 
@@ -115,7 +116,7 @@ export default function SpaceTool() {
           style={{ border: `1px solid ${T.borderColor}20` }}
         >
           {result.startsWith("http") ? (
-            /* eslint-disable-next-line @next/next/no-img-element */
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={result}
               alt="Generated space"

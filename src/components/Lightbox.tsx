@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useCallback } from "react";
-import Image from "next/image";
 import { X, ChevronLeft, ChevronRight, Download, Share2 } from "lucide-react";
 
 interface LightboxProps {
@@ -48,7 +47,7 @@ export default function Lightbox({
 
   return (
     <div
-      className="fixed inset-0 z-120 flex items-center justify-center"
+      className="fixed inset-0 z-[10000] flex items-center justify-center"
       style={{ backgroundColor: "rgba(0,0,0,0.92)" }}
       onClick={onClose}
     >
@@ -94,14 +93,11 @@ export default function Lightbox({
         className="relative max-w-[90vw] max-h-[80vh] flex flex-col items-center"
         onClick={(e) => e.stopPropagation()}
       >
-        <Image
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img
           src={current.src}
           alt={current.alt || "Gallery image"}
-          width={2048}
-          height={2048}
           className="max-w-full max-h-[70vh] object-contain rounded-lg"
-          unoptimized
-          priority
         />
         {current.caption && (
           <p className="mt-3 text-sm text-white/80 text-center max-w-xl">

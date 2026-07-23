@@ -106,9 +106,6 @@ export default function SettingsPage() {
   const [profileLoading, setProfileLoading] = useState(false);
   const [profileSaved, setProfileSaved] = useState(false);
   const [profileError, setProfileError] = useState<string | null>(null);
-  const [deleteLoading, setDeleteLoading] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
-  const [deleteConfirm, setDeleteConfirm] = useState(false);
 
   useEffect(() => {
     if (!accountUserId) return;
@@ -366,20 +363,6 @@ export default function SettingsPage() {
     }
   }, [autoSaveDrafts, compactMode, livePreview, showTelemetry, defaultWorkspace, savePreferences]);
 
-  const deleteAccount = useCallback(async () => {
-    setDeleteLoading(true);
-    setDeleteError(null);
-    try {
-      const res = await fetch("/api/account", { method: "DELETE" });
-      const data = await res.json().catch(() => ({}));
-      if (!res.ok) throw new Error(data.error || "Failed to delete account");
-      window.location.href = "/sign-in";
-    } catch (e) {
-      setDeleteError(e instanceof Error ? e.message : "Failed to delete account");
-      setDeleteLoading(false);
-    }
-  }, []);
-
   const inputStyle = {
     backgroundColor: `${T.boxBg}80`,
     borderColor: `${T.borderColor}40`,
@@ -609,98 +592,6 @@ export default function SettingsPage() {
                   </span>
                 )}
               </div>
-            </div>
-
-            {/* Danger Zone */}
-            <div
-              className="rounded-2xl border p-4 sm:p-6"
-              style={{
-                backgroundColor: "rgba(239,68,68,0.05)",
-                borderColor: "rgba(239,68,68,0.25)",
-              }}
-            >
-              <h2
-                className="text-lg font-black mb-1"
-                style={{ color: "#fca5a5" }}
-              >
-                Danger Zone
-              </h2>
-              <p className="text-xs mb-5 opacity-80" style={{ color: T.textMuted }}>
-                Permanently delete your account, wallet, agents, and all associated data.
-                This action cannot be undone.
-              </p>
-              {deleteError && (
-                <div
-                  className="mb-4 rounded-lg border px-3 py-2 text-sm"
-                  style={{ color: "#fca5a5", borderColor: "rgba(239,68,68,0.4)", backgroundColor: "rgba(239,68,68,0.1)" }}
-                >
-                  {deleteError}
-                </div>
-              )}
-              {!deleteConfirm ? (
-                <button
-                  onClick={() => setDeleteConfirm(true)}
-                  className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                  style={{
-                    backgroundColor: "rgba(239,68,68,0.1)",
-                    color: "#fca5a5",
-                    border: "1px solid rgba(239,68,68,0.3)",
-                  }}
-                >
-                  <Trash2 size={14} />
-                  Delete Account
-                </button>
-              ) : (
-                <div className="space-y-3">
-                  <div
-                    className="rounded-lg border p-3 text-sm"
-                    style={{
-                      borderColor: "rgba(239,68,68,0.3)",
-                      backgroundColor: "rgba(239,68,68,0.08)",
-                      color: T.textColor,
-                    }}
-                  >
-                    <strong style={{ color: "#fca5a5" }}>Are you absolutely sure?</strong>
-                    <p className="mt-1 text-xs opacity-80">
-                      This will permanently erase your profile, wallet balance, installed agents, and all preferences. You will be signed out immediately.
-                    </p>
-                  </div>
-                  <div className="flex gap-3">
-                    <button
-                      onClick={deleteAccount}
-                      disabled={deleteLoading}
-                      className="flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                      style={{
-                        backgroundColor: "#ef4444",
-                        color: "white",
-                        border: "none",
-                        opacity: deleteLoading ? 0.6 : 1,
-                      }}
-                    >
-                      {deleteLoading ? (
-                        <Loader2 size={14} className="animate-spin" />
-                      ) : (
-                        <Trash2 size={14} />
-                      )}
-                      Yes, delete my account
-                    </button>
-                    <button
-                      onClick={() => {
-                        setDeleteConfirm(false);
-                        setDeleteError(null);
-                      }}
-                      className="px-4 py-2 rounded-lg text-sm font-bold transition-all"
-                      style={{
-                        backgroundColor: `${T.boxBg}55`,
-                        color: T.textColor,
-                        border: `1px solid ${T.borderColor}30`,
-                      }}
-                    >
-                      Cancel
-                    </button>
-                  </div>
-                </div>
-              )}
             </div>
           </div>
         )}
