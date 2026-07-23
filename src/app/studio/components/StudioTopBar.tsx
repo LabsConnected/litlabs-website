@@ -213,7 +213,7 @@ function NotifPanel({
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const items = [
-    { icon: Sparkles, label: "Director finished planning", time: "now" },
+    { icon: Sparkles, label: "Copilot finished planning", time: "now" },
     { icon: Activity, label: "Code Champion deployed v1.2", time: "2m" },
     { icon: ShieldCheck, label: "Wallet claimed 250 LBC", time: "12m" },
   ];

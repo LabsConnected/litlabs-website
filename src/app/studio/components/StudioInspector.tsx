@@ -296,7 +296,7 @@ function ChatInspector({
         <Row label="Context window" value="1M" />
       </Section>
       <Section title="Agents active">
-        {["Director", "Forge", "Research Beast"].map((a) => (
+        {["Copilot", "Forge", "Research Beast"].map((a) => (
           <div
             key={a}
             className="flex items-center gap-2 py-1.5 border-b border-white/5 last:border-0"

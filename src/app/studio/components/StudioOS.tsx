@@ -81,6 +81,20 @@ const DRAWER_TOOLS: StudioTool[] = [
   "color",
 ];
 const MODEL_PREF_KEY = "littree:studio:model";
+const TOOL_META: Partial<Record<StudioTool, { title: string; eyebrow: string }>> = {
+  image: { title: "Image Forge", eyebrow: "Create, remix, and save original visuals" },
+  video: { title: "Motion Studio", eyebrow: "Turn prompts and images into cinematic scenes" },
+  audio: { title: "Sound Lab", eyebrow: "Give LiTT a voice or create music and sound" },
+  build: { title: "Build Command", eyebrow: "Plan locally now, connect a repository when ready" },
+  code: { title: "Code Canvas", eyebrow: "Describe it, generate it, refine it, and ship it" },
+  agents: { title: "Crew Room", eyebrow: "Direct LiTT, Spark, and specialist agents" },
+  assets: { title: "Asset Vault", eyebrow: "Keep every image, video, file, and creation together" },
+  plugins: { title: "Connection Bay", eyebrow: "Add capabilities when your services are ready" },
+  pipeline: { title: "Mission Pipeline", eyebrow: "Connect repeatable steps into a reusable flow" },
+  space: { title: "World Builder", eyebrow: "Build immersive spaces and 360° experiences" },
+  clibridge: { title: "CLI Bridge", eyebrow: "Connect local tools without leaving the Studio" },
+  color: { title: "Color Lab", eyebrow: "Create, play, and explore color" },
+};
 
 export default function StudioOS() {
   const { resolvedColors: T } = useTheme();
@@ -209,6 +223,7 @@ export default function StudioOS() {
 
   const drawerTool = DRAWER_TOOLS.includes(activeTool) ? activeTool : null;
   const DrawerComponent = drawerTool ? TOOL_COMPONENTS[drawerTool] : null;
+  const drawerMeta = drawerTool ? TOOL_META[drawerTool] : null;
 
   return (
     <VoiceSessionProvider>
@@ -246,24 +261,21 @@ export default function StudioOS() {
             </div>
 
             {DrawerComponent && drawerTool && (
-              <section className="absolute inset-0 z-50 flex justify-end bg-black/55 backdrop-blur-[2px]">
-                <button
-                  className="absolute inset-0 cursor-default"
-                  onClick={() => setActiveTool("home")}
-                  aria-label={`Close ${drawerTool} creator`}
-                />
+              <section className="absolute inset-0 z-50 flex justify-end">
                 <div
-                  className="relative flex h-full w-full flex-col overflow-hidden border-l shadow-[-30px_0_90px_rgba(0,0,0,.65)] sm:w-[min(860px,92vw)]"
+                  className="relative flex h-full w-full flex-col overflow-hidden"
                   style={{
                     backgroundColor: T.bgColor,
-                    borderColor: T.borderColor + "50",
                   }}
                 >
-                  <div className="flex h-12 shrink-0 items-center justify-between border-b border-white/10 px-4">
+                  <div className="relative flex min-h-16 shrink-0 items-center justify-between overflow-hidden border-b border-white/10 px-4 sm:px-6">
+                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,rgba(103,232,249,.11),transparent_38%),radial-gradient(circle_at_90%_0%,rgba(168,85,247,.12),transparent_38%)]" />
                     <div className="flex items-center gap-2">
                       <span className={`h-2 w-2 rounded-full ${drawerTool === "image" ? "bg-cyan-300 shadow-[0_0_12px_#67e8f9]" : "bg-violet-300 shadow-[0_0_12px_#c4b5fd]"}`} />
-                      <strong className="text-xs capitalize">{drawerTool} creator</strong>
-                      <span className="text-[9px] text-white/35">Your conversation stays open</span>
+                      <div>
+                        <strong className="block text-sm font-black tracking-tight">{drawerMeta?.title || `${drawerTool} creator`}</strong>
+                        <span className="hidden text-[9px] font-medium text-white/40 sm:block">{drawerMeta?.eyebrow || "Your conversation stays open"}</span>
+                      </div>
                     </div>
                     <button
                       onClick={() => setActiveTool("home")}
@@ -273,15 +285,17 @@ export default function StudioOS() {
                       ✕
                     </button>
                   </div>
-                  <div className="min-h-0 flex-1 overflow-auto p-2 sm:p-3">
-                    <DrawerComponent />
+                  <div className="studio-tool-surface min-h-0 flex-1 overflow-auto px-2 py-3 sm:px-5 sm:py-5">
+                    <div className="mx-auto w-full max-w-[1380px]">
+                      <DrawerComponent />
+                    </div>
                   </div>
                 </div>
               </section>
             )}
           </main>
 
-          <StudioInspector variant="aside" T={T} activeTool={activeTool} />
+          {!drawerTool && <StudioInspector variant="aside" T={T} activeTool={activeTool} />}
         </div>
 
         {inspectorOpen && (

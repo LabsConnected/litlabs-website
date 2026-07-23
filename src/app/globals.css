@@ -2178,3 +2178,53 @@ main {
 .sidebar-scroll::-webkit-scrollbar-thumb:hover {
   background: rgba(139, 92, 246, 0.85);
 }
+
+/* Studio creator surfaces — one visual language across every tool. */
+.studio-tool-surface {
+  background:
+    radial-gradient(circle at 8% 0%, rgba(34, 211, 238, 0.055), transparent 28rem),
+    radial-gradient(circle at 92% 8%, rgba(139, 92, 246, 0.075), transparent 30rem),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.012), transparent 16rem);
+  scrollbar-width: thin;
+  scrollbar-color: rgba(139, 92, 246, 0.42) transparent;
+}
+
+.studio-tool-surface::-webkit-scrollbar {
+  width: 7px;
+}
+
+.studio-tool-surface::-webkit-scrollbar-thumb {
+  border-radius: 999px;
+  background: linear-gradient(rgba(103, 232, 249, 0.35), rgba(139, 92, 246, 0.45));
+}
+
+.studio-tool-surface :is(input, textarea, select) {
+  transition:
+    border-color 160ms ease,
+    box-shadow 160ms ease,
+    background-color 160ms ease;
+}
+
+.studio-tool-surface :is(input, textarea, select):focus {
+  border-color: rgba(103, 232, 249, 0.55) !important;
+  box-shadow: 0 0 0 3px rgba(103, 232, 249, 0.08);
+}
+
+.studio-tool-surface button {
+  transition:
+    transform 150ms ease,
+    border-color 150ms ease,
+    background-color 150ms ease,
+    color 150ms ease,
+    opacity 150ms ease;
+}
+
+.studio-tool-surface button:not(:disabled):active {
+  transform: translateY(1px) scale(0.995);
+}
+
+@media (max-width: 640px) {
+  .studio-tool-surface {
+    padding-bottom: calc(5rem + env(safe-area-inset-bottom));
+  }
+}
