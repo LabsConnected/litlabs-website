@@ -106,9 +106,6 @@ export default function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  // FloatingChat is mounted inside LayoutShell which already has access to
-  // the provider tree via context. LayoutShell suppresses it on /studio so
-  // the Studio route manages its own voice/chat UI exclusively.
   const shell = (
     <ThemeProvider>
       <ProfileProvider>

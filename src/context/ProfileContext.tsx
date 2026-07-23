@@ -61,7 +61,7 @@ const defaultProfile: UserProfile = {
   videoLinks: {},
   socialLinks: {},
   badges: ["🔥 Early Adopter", "🤖 Agent Creator", "💬 Community"],
-  wallpaper: "mesh",
+  wallpaper: "afterglow",
   customWallpaperUrl: null,
   sidebarStyle: "comfortable",
   accentColor: "#fbbf24",

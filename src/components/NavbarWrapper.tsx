@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react";
 import Link from "next/link";
-import { Bell, Search, Sparkles } from "lucide-react";
+import { Bell, Search, Settings, Sparkles } from "lucide-react";
 import { useTheme } from "@/context/ThemeContext";
 import { usePathname } from "next/navigation";
 
@@ -79,6 +79,18 @@ export default function NavbarWrapper() {
       </div>
 
       <div className="flex items-center gap-2">
+        <Link
+          href="/settings"
+          className="rounded-lg p-2 transition-colors hover:bg-white/5"
+          style={{
+            color: pathname?.startsWith("/settings") ? T.accentColor : T.textMuted,
+            backgroundColor: pathname?.startsWith("/settings") ? `${T.accentColor}12` : "transparent",
+          }}
+          aria-label="Settings"
+          title="Settings"
+        >
+          <Settings size={18} />
+        </Link>
         <button
           className="p-2 rounded-lg hover:bg-white/5 transition-colors"
           style={{ color: T.textMuted }}

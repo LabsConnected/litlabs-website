@@ -90,7 +90,7 @@ const TOOL_META: Partial<Record<StudioTool, { title: string; eyebrow: string }>>
   agents: { title: "Crew Room", eyebrow: "Direct LiTT, Spark, and specialist agents" },
   assets: { title: "Asset Vault", eyebrow: "Keep every image, video, file, and creation together" },
   plugins: { title: "Connection Bay", eyebrow: "Add capabilities when your services are ready" },
-  pipeline: { title: "Mission Pipeline", eyebrow: "Connect repeatable steps into a reusable flow" },
+  pipeline: { title: "Workflow Forge", eyebrow: "Connect repeatable steps into a reusable flow" },
   space: { title: "World Builder", eyebrow: "Build immersive spaces and 360° experiences" },
   clibridge: { title: "CLI Bridge", eyebrow: "Connect local tools without leaving the Studio" },
   color: { title: "Color Lab", eyebrow: "Create, play, and explore color" },

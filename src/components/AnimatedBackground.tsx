@@ -61,7 +61,6 @@ const cssBackgrounds: Record<BackgroundMode, string> = {
 
 export default function AnimatedBackground() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scanlineRef = useRef<HTMLDivElement>(null);
   const { theme, resolvedColors } = useTheme();
   const { profile } = useProfile();
   const colorsRef = useRef(resolvedColors);
@@ -475,17 +474,6 @@ export default function AnimatedBackground() {
           }}
         />
       )}
-      {/* Static scanlines — lightweight, no animation */}
-      <div
-        ref={scanlineRef}
-        className="fixed inset-0 pointer-events-none z-1"
-        style={{
-          background:
-            "repeating-linear-gradient(0deg, rgba(0,0,0,0.08) 0px, rgba(0,0,0,0.08) 1px, transparent 1px, transparent 3px)",
-          backgroundSize: "100% 4px",
-          opacity: 0.25,
-        }}
-      />
     </>
   );
 }

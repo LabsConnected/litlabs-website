@@ -34,19 +34,14 @@ function getVideoThumbnailUrl(rawUrl: string): string | null {
   return null;
 }
 
-function pollinationsUrl(prompt: string, width = 1600, height = 1200): string {
-  const encoded = encodeURIComponent(prompt);
-  return `https://image.pollinations.ai/prompt/${encoded}?width=${width}&height=${height}&nologo=true&seed=${Math.floor(Math.random() * 10000)}`;
-}
-
 // Demo gallery items when DB is not configured
 const DEMO_GALLERY = [
   {
     id: "demo_1",
     title: "Neon Cyber City",
-    artist: "Pixel Forge",
+    artist: "LiTTree Studios",
     category: "360-worlds",
-    imageUrl: pollinationsUrl("Neon cyberpunk city street at night with neon signs and rain reflections, cinematic"),
+    imageUrl: "/gallery/museum/neon-cyber-city.png",
     likes: 234,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -54,9 +49,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_2",
     title: "Ethereal Dreamscape",
-    artist: "DreamWeaver",
+    artist: "LiTTree Studios",
     category: "abstract",
-    imageUrl: pollinationsUrl("Ethereal dreamscape with floating islands and soft pastel clouds, surreal art"),
+    imageUrl: "/gallery/museum/ethereal-dreamscape.png",
     likes: 189,
     createdAt: "2026-06-02",
     mediaType: "image" as const,
@@ -64,9 +59,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_3",
     title: "Lost Temple Ruins",
-    artist: "Explorer-X",
+    artist: "LiTTree Studios",
     category: "landscape",
-    imageUrl: pollinationsUrl("Ancient lost temple ruins in a misty jungle with dramatic sunlight beams"),
+    imageUrl: "/gallery/museum/lost-temple-ruins.png",
     likes: 312,
     createdAt: "2026-05-28",
     mediaType: "image" as const,
@@ -74,9 +69,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_4",
     title: "Quantum Warrior",
-    artist: "Pixel Forge",
+    artist: "LiTTree Studios",
     category: "character",
-    imageUrl: pollinationsUrl("Quantum warrior futuristic samurai in glowing armor, digital art"),
+    imageUrl: "/gallery/museum/quantum-warrior.png",
     likes: 156,
     createdAt: "2026-06-03",
     mediaType: "image" as const,
@@ -84,9 +79,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_5",
     title: "Crystal Cavern",
-    artist: "GeoMancer",
+    artist: "LiTTree Studios",
     category: "360-worlds",
-    imageUrl: pollinationsUrl("Crystal cavern interior with glowing crystals and an underground lake"),
+    imageUrl: "/gallery/museum/crystal-cavern.png",
     likes: 278,
     createdAt: "2026-05-30",
     mediaType: "image" as const,
@@ -94,9 +89,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_6",
     title: "Void Entity",
-    artist: "ShadowNet",
+    artist: "LiTTree Studios",
     category: "character",
-    imageUrl: pollinationsUrl("Void entity abstract dark cosmic creature with glowing eyes, horror sci-fi"),
+    imageUrl: "/gallery/museum/void-entity.png",
     likes: 421,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -104,9 +99,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_7",
     title: "Sunset Megacity",
-    artist: "Pixel Forge",
+    artist: "LiTTree Studios",
     category: "landscape",
-    imageUrl: pollinationsUrl("Sunset megacity skyline with towering skyscrapers and orange sky"),
+    imageUrl: "/gallery/museum/sunset-megacity.png",
     likes: 198,
     createdAt: "2026-05-25",
     mediaType: "image" as const,
@@ -114,9 +109,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_8",
     title: "Fractal Mind",
-    artist: "DreamWeaver",
+    artist: "LiTTree Studios",
     category: "abstract",
-    imageUrl: pollinationsUrl("Fractal mind abstract colorful geometric patterns swirling, psychedelic art"),
+    imageUrl: "/gallery/museum/fractal-mind.png",
     likes: 267,
     createdAt: "2026-05-29",
     mediaType: "image" as const,
@@ -124,9 +119,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_9",
     title: "Underwater Utopia",
-    artist: "AquaBot",
+    artist: "LiTTree Studios",
     category: "360-worlds",
-    imageUrl: pollinationsUrl("Underwater utopia with coral reefs and bioluminescent sea creatures"),
+    imageUrl: "/gallery/museum/underwater-utopia.png",
     likes: 345,
     createdAt: "2026-06-01",
     mediaType: "image" as const,
@@ -134,9 +129,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_10",
     title: "Cyber Samurai",
-    artist: "Pixel Forge",
+    artist: "LiTTree Studios",
     category: "character",
-    imageUrl: pollinationsUrl("Cyber samurai with katana and neon armor in a futuristic dojo"),
+    imageUrl: "/gallery/museum/cyber-samurai.png",
     likes: 189,
     createdAt: "2026-05-27",
     mediaType: "image" as const,
@@ -144,9 +139,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_11",
     title: "Starfield Station",
-    artist: "StarWalker",
+    artist: "LiTTree Studios",
     category: "landscape",
-    imageUrl: pollinationsUrl("Starfield station space station orbiting a purple nebula, sci-fi"),
+    imageUrl: "/gallery/museum/starfield-station.png",
     likes: 567,
     createdAt: "2026-06-04",
     mediaType: "image" as const,
@@ -154,9 +149,9 @@ const DEMO_GALLERY = [
   {
     id: "demo_12",
     title: "Neural Network",
-    artist: "DataMancer",
+    artist: "LiTTree Studios",
     category: "abstract",
-    imageUrl: pollinationsUrl("Neural network visualization glowing nodes and synapses, dark background"),
+    imageUrl: "/gallery/museum/neural-network.png",
     likes: 234,
     createdAt: "2026-05-26",
     mediaType: "image" as const,
@@ -182,7 +177,10 @@ async function getHandler(req: NextRequest) {
     const view = searchParams.get("view") || "community"; // "community" | "my-uploads"
 
     if (!isSupabaseConfigured()) {
-      return NextResponse.json({ items: DEMO_GALLERY, mock: true });
+      return NextResponse.json(
+        { items: DEMO_GALLERY, mock: true },
+        { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
+      );
     }
 
     // Get current user (if authenticated)
@@ -229,7 +227,10 @@ async function getHandler(req: NextRequest) {
     const { data, error } = await query;
 
     if (error) {
-      return NextResponse.json({ items: DEMO_GALLERY, mock: true });
+      return NextResponse.json(
+        { items: DEMO_GALLERY, mock: true },
+        { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
+      );
     }
 
     const items = (data || []).map(
@@ -270,9 +271,29 @@ async function getHandler(req: NextRequest) {
       },
     );
 
-    return NextResponse.json({ items });
+    // An empty community database should still feel alive. Keep the founding
+    // collection visible until the first real community uploads arrive.
+    if (view === "community" && items.length === 0) {
+      return NextResponse.json(
+        { items: DEMO_GALLERY, mock: true },
+        { headers: { "Cache-Control": "public, s-maxage=300, stale-while-revalidate=3600" } },
+      );
+    }
+
+    return NextResponse.json(
+      { items },
+      {
+        headers:
+          view === "community"
+            ? { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" }
+            : { "Cache-Control": "private, no-store" },
+      },
+    );
   } catch {
-    return NextResponse.json({ items: DEMO_GALLERY, mock: true });
+    return NextResponse.json(
+      { items: DEMO_GALLERY, mock: true },
+      { headers: { "Cache-Control": "public, s-maxage=60, stale-while-revalidate=300" } },
+    );
   }
 }
 

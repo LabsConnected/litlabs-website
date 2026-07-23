@@ -465,16 +465,6 @@ export default function PipelineTool() {
   const selectedNode = nodes.find((n) => n.id === selectedNodeId);
   return (
     <div className="flex h-full bg-[#050108] text-slate-300 font-sans overflow-hidden relative">
-      {/* Grid */}
-      <div
-        className="absolute inset-0 z-0 pointer-events-none opacity-[0.12]"
-        style={{
-          backgroundImage:
-            "linear-gradient(rgba(217,70,239,0.15) 1px,transparent 1px),linear-gradient(90deg,rgba(217,70,239,0.15) 1px,transparent 1px)",
-          backgroundSize: "40px 40px",
-        }}
-      />
-
       {/* ── LEFT: Library ── */}
       <aside className="w-56 shrink-0 border-r border-fuchsia-900/30 bg-[#0a0310]/80 backdrop-blur-xl flex flex-col z-10">
         <div className="p-3 border-b border-white/5">

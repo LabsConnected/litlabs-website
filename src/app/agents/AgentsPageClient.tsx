@@ -374,21 +374,20 @@ export default function AgentsPageClient() {
   return (
     <main className="relative h-full overflow-y-auto bg-[#03050a] pb-24 text-white">
       <div className="pointer-events-none fixed inset-0 bg-[radial-gradient(circle_at_12%_12%,rgba(168,255,47,.08),transparent_24%),radial-gradient(circle_at_88%_20%,rgba(169,112,255,.12),transparent_28%),radial-gradient(circle_at_50%_90%,rgba(34,211,238,.08),transparent_30%)]" />
-      <div className="relative mx-auto max-w-[1600px] space-y-4 px-3 py-4 sm:px-5 lg:px-7">
-        <header className="relative overflow-hidden rounded-3xl border border-white/10 bg-[#070a12] px-5 py-5 shadow-[0_25px_80px_rgba(0,0,0,.35)] sm:px-7">
-          <div className="absolute inset-0 opacity-30 [background-image:linear-gradient(rgba(101,244,255,.05)_1px,transparent_1px),linear-gradient(90deg,rgba(101,244,255,.05)_1px,transparent_1px)] [background-size:42px_42px]" />
+      <div className="relative mx-auto max-w-[1680px] space-y-3 px-2.5 py-3 sm:px-4 lg:px-5">
+        <header className="relative overflow-hidden rounded-2xl border border-white/10 bg-[#070a12] px-4 py-3 shadow-[0_18px_60px_rgba(0,0,0,.3)]">
           <div className="absolute -right-20 -top-28 h-72 w-72 rounded-full bg-violet-500/15 blur-3xl" />
-          <div className="relative flex flex-col justify-between gap-5 xl:flex-row xl:items-center">
-            <div className="flex items-center gap-4">
-              <div className="grid h-12 w-12 place-items-center rounded-2xl border border-lime-300/30 bg-lime-300/10 text-lime-300 shadow-[0_0_30px_rgba(168,255,47,.15)]"><Workflow size={23} /></div>
+          <div className="relative flex flex-col justify-between gap-3 lg:flex-row lg:items-center">
+            <div className="flex items-center gap-3">
+              <div className="grid h-10 w-10 place-items-center rounded-xl border border-lime-300/30 bg-lime-300/10 text-lime-300 shadow-[0_0_24px_rgba(168,255,47,.12)]"><Workflow size={19} /></div>
               <div>
                 <div className="flex flex-wrap items-center gap-2">
-                  <h1 className="text-2xl font-black tracking-tight sm:text-3xl">Agent Workflow Forge</h1>
+                  <h1 className="text-lg font-black tracking-tight sm:text-xl">Workflow Forge</h1>
                   <span className={`rounded-full border px-2.5 py-1 text-[8px] font-black uppercase tracking-widest ${executionMode === "connected" ? "border-emerald-300/25 bg-emerald-300/10 text-emerald-300" : "border-amber-300/25 bg-amber-300/10 text-amber-300"}`}>
                     {executionMode === "connected" ? "Connected runtime" : "Local draft mode"}
                   </span>
                 </div>
-                <p className="mt-1 text-xs text-white/45">Drag agents and capabilities onto the canvas. Connect them. Run the mission.</p>
+                <p className="mt-0.5 text-[10px] text-white/40">LiTTree-LabStudios™ · Build the crew, connect the work, run the mission.</p>
               </div>
             </div>
             <div className="flex flex-wrap items-center gap-2">
@@ -402,14 +401,13 @@ export default function AgentsPageClient() {
           </div>
         </header>
 
-        <section className="grid min-h-[720px] gap-3 xl:grid-cols-[250px_minmax(600px,1fr)_300px]">
-          <aside className="rounded-3xl border border-white/10 bg-[#070a12]/95 p-4">
+        <section className="grid min-h-[600px] gap-2.5 lg:grid-cols-[190px_minmax(420px,1fr)_240px] 2xl:grid-cols-[210px_minmax(620px,1fr)_260px]">
+          <aside className="h-fit rounded-2xl border border-white/10 bg-[#070a12]/95 p-3 lg:sticky lg:top-3">
             <div className="flex items-center justify-between">
-              <div><p className="text-[9px] font-black uppercase tracking-[.18em] text-cyan-300">Block library</p><h2 className="mt-1 text-sm font-black">Drag to build</h2></div>
+              <div><p className="text-[8px] font-black uppercase tracking-[.18em] text-cyan-300">Add to mission</p><h2 className="mt-0.5 text-xs font-black">Crew & capabilities</h2></div>
               <Plus size={16} className="text-white/35" />
             </div>
-            <p className="mt-2 text-[10px] leading-4 text-white/35">Drop blocks on the forge, then drag them into place.</p>
-            <div className="mt-4 space-y-2">
+            <div className="mt-3 grid grid-cols-2 gap-1.5">
               {PALETTE.map((item, index) => {
                 const Icon = item.icon;
                 return (
@@ -429,26 +427,28 @@ export default function AgentsPageClient() {
                       event.dataTransfer.setData("application/x-litlabs-palette", String(index));
                       event.dataTransfer.effectAllowed = "copy";
                     }}
-                    className="group flex cursor-grab items-center gap-3 rounded-2xl border border-white/10 bg-white/[.025] p-3 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[.055] active:cursor-grabbing"
+                    className="group flex min-h-[70px] cursor-grab flex-col items-start justify-between rounded-xl border border-white/10 bg-white/[.025] p-2 transition hover:-translate-y-0.5 hover:border-white/20 hover:bg-white/[.055] active:cursor-grabbing"
                     title={`Click or drag to add ${item.title}`}
                   >
-                    <span className="grid h-9 w-9 shrink-0 place-items-center rounded-xl border" style={{ borderColor: `${item.color}35`, backgroundColor: `${item.color}12`, color: item.color }}><Icon size={15} /></span>
-                    <span className="min-w-0"><span className="block text-[11px] font-black">{item.title}</span><span className="block truncate text-[9px] text-white/35">{item.subtitle}</span></span>
-                    <span className="ml-auto text-white/15 group-hover:text-white/45">⋮⋮</span>
+                    <span className="flex w-full items-start justify-between">
+                      <span className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border" style={{ borderColor: `${item.color}35`, backgroundColor: `${item.color}12`, color: item.color }}><Icon size={13} /></span>
+                      <span className="text-white/15 group-hover:text-white/45">+</span>
+                    </span>
+                    <span className="line-clamp-2 text-[9px] font-black leading-3">{item.title}</span>
                   </div>
                 );
               })}
             </div>
-            <Link href="/studio?intent=agent" className="mt-4 flex items-center justify-center gap-2 rounded-xl border border-violet-400/25 bg-violet-400/[.08] px-3 py-2.5 text-[10px] font-black text-violet-300 hover:border-violet-400/50">
-              <Plus size={13} /> Create specialist agent
+            <Link href="/studio?intent=agent" className="mt-2.5 flex items-center justify-center gap-1.5 rounded-xl border border-violet-400/25 bg-violet-400/[.08] px-2 py-2 text-[8px] font-black text-violet-300 hover:border-violet-400/50">
+              <Plus size={11} /> New specialist
             </Link>
           </aside>
 
           <div className="overflow-hidden rounded-3xl border border-cyan-300/15 bg-[#050812] shadow-[inset_0_0_80px_rgba(0,0,0,.45),0_25px_80px_rgba(0,0,0,.3)]">
-            <div className="flex flex-col gap-3 border-b border-white/10 bg-black/20 p-4 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-2 border-b border-white/10 bg-black/20 px-3 py-2.5 sm:flex-row sm:items-center sm:justify-between">
               <div className="min-w-0 flex-1">
                 <label className="text-[8px] font-black uppercase tracking-[.18em] text-white/30">Mission name</label>
-                <input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-1 w-full bg-transparent text-sm font-black text-white outline-none placeholder:text-white/20" placeholder="Name the outcome you want…" />
+                <input value={missionName} onChange={(event) => setMissionName(event.target.value)} className="mt-0.5 w-full bg-transparent text-xs font-black text-white outline-none placeholder:text-white/20" placeholder="Name the outcome you want…" />
               </div>
               <div className="flex items-center gap-2">
                 {connectingFrom ? <span className="rounded-lg border border-cyan-300/25 bg-cyan-300/10 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200">Choose a target block</span> : <span className="hidden text-[9px] text-white/30 sm:block">Drag blocks · click to inspect</span>}
@@ -462,9 +462,13 @@ export default function AgentsPageClient() {
                 event.dataTransfer.dropEffect = event.dataTransfer.types.includes("application/x-litlabs-node") ? "move" : "copy";
               }}
               onDrop={handleDrop}
-              className="relative min-h-[650px] overflow-auto bg-[radial-gradient(circle_at_50%_20%,rgba(169,112,255,.09),transparent_35%)]"
+              className="relative min-h-[550px] overflow-auto bg-cover bg-center"
+              style={{
+                backgroundImage:
+                  "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
+              }}
             >
-              <div className="pointer-events-none absolute inset-0 opacity-35 [background-image:linear-gradient(rgba(101,244,255,.07)_1px,transparent_1px),linear-gradient(90deg,rgba(101,244,255,.07)_1px,transparent_1px)] [background-size:32px_32px]" />
+              <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(101,244,255,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(169,112,255,.09),transparent_30%)]" />
               <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
                 <defs>
                   <linearGradient id="flow-line" x1="0" y1="0" x2="1" y2="0">
@@ -528,11 +532,11 @@ export default function AgentsPageClient() {
             </div>
           </div>
 
-          <aside className="space-y-3">
-            <section className="rounded-3xl border border-white/10 bg-[#070a12]/95 p-4">
+          <aside className="h-fit lg:sticky lg:top-3">
+            <section className="rounded-2xl border border-white/10 bg-[#070a12]/95 p-3.5">
               <div className="flex items-center justify-between"><div><p className="text-[9px] font-black uppercase tracking-[.18em] text-violet-300">Inspector</p><h2 className="mt-1 text-sm font-black">{selected ? selected.title : "Select a block"}</h2></div><Settings2 size={15} className="text-white/30" /></div>
               {selected ? (
-                <div className="mt-4 space-y-4">
+                <div className="mt-3 space-y-3">
                   <div>
                     <label className="text-[8px] font-black uppercase tracking-wider text-white/30">Block name</label>
                     <input value={selected.title} onChange={(event) => updateSelected({ title: event.target.value })} className="mt-1.5 w-full rounded-xl border border-white/10 bg-black/25 px-3 py-2 text-xs font-bold outline-none focus:border-violet-400/50" />
@@ -578,26 +582,17 @@ export default function AgentsPageClient() {
                 </div>
               ) : <p className="mt-4 text-[10px] leading-5 text-white/35">Click any block on the canvas to rename it, explain its job, connect it, or remove it.</p>}
             </section>
-
-            <section className="overflow-hidden rounded-3xl border border-violet-400/20 bg-[#090712]">
-              <div className="relative aspect-[16/10]">
-                <Image src="/brand/spark-agent-hero-v2.png" alt="Spark in the workflow forge" fill className="object-cover opacity-70" />
-                <div className="absolute inset-0 bg-gradient-to-t from-[#090712] via-transparent to-transparent" />
-              </div>
-              <div className="-mt-8 relative p-4">
-                <div className="text-[9px] font-black uppercase tracking-[.18em] text-violet-300">Spark suggestion</div>
-                <p className="mt-2 text-xs font-black">Add an approval gate before anything ships.</p>
-                <p className="mt-1 text-[9px] leading-4 text-white/35">It keeps you in control and makes the workflow safe to reuse.</p>
-              </div>
-            </section>
           </aside>
         </section>
 
-        <section className="rounded-3xl border border-white/10 bg-[#070a12] p-4 sm:p-5">
+        <details className="group rounded-2xl border border-white/10 bg-[#070a12]">
+          <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 px-4 py-3">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div><p className="text-[9px] font-black uppercase tracking-[.18em] text-lime-300">{executionMode === "connected" ? "Real mission activity" : "Local mission drafts"}</p><h2 className="mt-1 text-sm font-black">{activeMissions.length ? `${activeMissions.length} mission${activeMissions.length === 1 ? "" : "s"} running` : executionMode === "connected" ? "Forge activity" : "Build now · connect later"}</h2></div>
-            <button onClick={() => void loadMissions()} className="rounded-xl border border-white/10 p-2 text-white/40 hover:text-white" aria-label="Refresh missions"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
           </div>
+            <span className="text-[9px] font-black text-white/35 group-open:text-cyan-300">View activity +</span>
+          </summary>
+          <div className="border-t border-white/8 px-4 pb-4">
           {error && <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2 text-[10px] text-rose-300">{error}</div>}
           <div className="mt-4 grid gap-2 lg:grid-cols-3">
             {loading && missions.length === 0 ? (
@@ -619,8 +614,17 @@ export default function AgentsPageClient() {
               );
             })}
           </div>
-          <div className="mt-4 flex justify-end"><Link href="/studio" className="flex items-center gap-2 text-[10px] font-black text-cyan-300">Open execution workspace <ArrowRight size={11} /></Link></div>
-        </section>
+          <div className="mt-4 flex items-center justify-between">
+            <button onClick={() => void loadMissions()} className="rounded-xl border border-white/10 p-2 text-white/40 hover:text-white" aria-label="Refresh missions"><RefreshCw size={13} className={loading ? "animate-spin" : ""} /></button>
+            <Link href="/studio" className="flex items-center gap-2 text-[10px] font-black text-cyan-300">Open execution workspace <ArrowRight size={11} /></Link>
+          </div>
+          </div>
+        </details>
+
+        <footer className="flex flex-col gap-2 border-t border-white/8 px-1 py-4 text-[9px] text-white/30 sm:flex-row sm:items-center sm:justify-between">
+          <span>© {new Date().getFullYear()} LiTTree-LabStudios™. All rights reserved.</span>
+          <span>LiTTree-LabStudios™, LiTT™, Spark™, and the LiTTree mark are trademarks of LiTTree-LabStudios.</span>
+        </footer>
       </div>
     </main>
   );

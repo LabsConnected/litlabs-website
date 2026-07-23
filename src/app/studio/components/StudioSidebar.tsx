@@ -64,7 +64,7 @@ const CREATE_TOOLS: ToolItem[] = [
 const AI_TOOLS: ToolItem[] = [
   { id: "agents", label: "Agents", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
-  { id: "pipeline", label: "Pipeline", icon: Network, shortcut: "7" },
+  { id: "pipeline", label: "Workflow Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
 ];
 

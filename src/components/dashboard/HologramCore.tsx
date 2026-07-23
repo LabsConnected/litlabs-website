@@ -54,7 +54,7 @@ export default function HologramCore({
   const timeRef = useRef(0);
   const [voiceActive, setVoiceActive] = useState(active);
 
-  /* Listen for voice events from FloatingChat */
+  /* Listen for voice events from chat UI */
   useEffect(() => {
     const onVoice = (e: Event) => {
       const detail = (e as CustomEvent).detail;

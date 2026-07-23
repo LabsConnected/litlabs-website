@@ -81,7 +81,7 @@ export const NAV_GROUPS: NavGroup[] = [
       { label: "Image", href: "/studio?tool=image", icon: Image },
       { label: "Video", href: "/studio?tool=video", icon: Video },
       { label: "Music", href: "/dashboard?app=music", icon: Music },
-      { label: "Workflows", href: "/studio?tool=pipeline", icon: Workflow },
+      { label: "Workflow Forge", href: "/studio?tool=pipeline", icon: Workflow },
     ],
   },
   {
