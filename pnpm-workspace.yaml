@@ -1,5 +1,6 @@
 packages:
   - "."
   - "terminal-server"
+  - "voice-server"
   - "cli"
   - "packages/litt-agent-core"

@@ -1,10 +1,11 @@
-import "dotenv/config";
+import { config } from "dotenv";
+config({ path: "../.env.local" });
 import express from "express";
 import http from "http";
 import cors from "cors";
 import { WebSocketServer, WebSocket } from "ws";
-import { verifyVoiceToken } from "./auth.js";
-import { buildSessionUpdate } from "./inworld-config.js";
+import { verifyVoiceToken } from "./auth";
+import { buildSessionUpdate } from "./inworld-config";
 
 const PORT = Number(process.env.VOICE_SERVER_PORT || 4002);
 const ALLOWED_ORIGIN = process.env.VOICE_ALLOWED_ORIGIN || "http://localhost:3000";
