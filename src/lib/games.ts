@@ -67,8 +67,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Classic Atari Pong in your browser.",
     category: "retro",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/pong",
+    coverUrl: "/games/artwork/pong.png",
     html5Url: "https://sethclydesdale.github.io/browser-pong/",
     sourceUrl: "https://github.com/SethClydesdale/browser-pong",
     license: "open-source",
@@ -87,8 +86,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Slide tiles to reach the legendary 2048 tile.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/2048",
+    coverUrl: "/games/artwork/2048.png",
     html5Url: "https://gabrielecirulli.github.io/2048/",
     sourceUrl: "https://github.com/gabrielecirulli/2048",
     license: "open-source",
@@ -107,8 +105,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fast-paced hexagon stacking puzzle.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/hextris",
+    coverUrl: "/games/artwork/hextris.png",
     html5Url: "https://hextris.github.io/hextris/",
     sourceUrl: "https://github.com/Hextris/hextris",
     license: "open-source",
@@ -127,8 +124,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Classic block-stacking puzzle game.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/tetris",
+    coverUrl: "/games/artwork/tetris.png",
     html5Url: "https://chvin.github.io/react-tetris/",
     sourceUrl: "https://github.com/chvin/react-tetris",
     license: "open-source",
@@ -147,8 +143,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "The classic arcade maze chase.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/pacman",
+    coverUrl: "/games/artwork/pacman.png",
     html5Url: "https://pacman.platzh1rsch.ch/",
     license: "free-to-play",
     licenseLabel: "Community web edition",
@@ -166,8 +161,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Eat, grow, and don't crash into yourself.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/snake",
+    coverUrl: "/games/artwork/snake.png",
     html5Url: "https://alfredang.github.io/snake-game/",
     sourceUrl: "https://github.com/alfredang/snake-game",
     license: "open-source",
@@ -186,8 +180,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Fill the grid with numbers 1–9.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/sudoku",
+    coverUrl: "/games/artwork/sudoku.png",
     html5Url: "https://aduh95.github.io/web-sudoku/",
     sourceUrl: "https://github.com/aduh95/web-sudoku",
     license: "open-source",
@@ -206,8 +199,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Tap to fly between the pipes.",
     category: "arcade",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/flappy",
+    coverUrl: "/games/artwork/flappy.png",
     html5Url: "https://chaping.github.io/game/flappy-bird/",
     sourceUrl: "https://github.com/chaping/game",
     license: "open-source",
@@ -226,8 +218,7 @@ export const GAME_LIBRARY: Game[] = [
     description: "Clear the board without detonating a mine.",
     category: "puzzle",
     platform: "html5",
-    coverUrl:
-      "/api/artwork/minesweeper",
+    coverUrl: "/games/artwork/minesweeper.png",
     html5Url: "https://minesweeper.github.io/",
     sourceUrl: "https://github.com/minesweeper/minesweeper",
     license: "open-source",
