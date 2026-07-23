@@ -234,6 +234,7 @@ function DockedTerminal({
   return (
     <section
       className={`${styles.dockedTerminal} ${collapsed ? styles.dockedTerminalCollapsed : ""}`}
+      data-deck-panel="terminal"
     >
       <header className={styles.dockedTerminalHeader}>
         <span className={styles.terminalLabel}>
@@ -450,7 +451,7 @@ export default function StudioCommandDeck({
       setMobileTerminalFocus(false);
       onMobileTerminalFocusChange?.(false);
     } else if (effectiveMobileView === "preview") {
-      onModeChangeAction("media");
+      onModeChangeAction("code");
       setMobileTerminalFocus(false);
       onMobileTerminalFocusChange?.(false);
     } else if (effectiveMobileView === "files") {
@@ -552,7 +553,7 @@ export default function StudioCommandDeck({
 
   // Preview panel: only show when workspace is ready AND not collapsed
   const previewEnabled = Boolean(activeProjectId) && workspaceStatus === "ready";
-  const showPreview = previewEnabled && !layout.collapsed.preview;
+  const showPreview = (previewEnabled || effectiveMobileView === "preview") && !layout.collapsed.preview;
   const previewH = showPreview ? layout.sizes.preview : 0;
 
   // Allocate 24px for splitter columns/rows so the interactive resize handles meet the 24px touch target rule.
@@ -636,7 +637,6 @@ export default function StudioCommandDeck({
       {/* Workspace area (mode-specific content) */}
       <div className={styles.workspace}>
         {mode === "code" && <div className={`${styles.main} ${styles.codeMain}`} style={codeGridStyle} data-active-mobile={mobilePanel}>
-          <div className={styles.mobileTabBar}>{(["editor", "explorer", "preview", "review"] as const).map((p) => <button key={p} data-active={mobilePanel === p} onClick={() => setMobilePanel(p)}>{p === "explorer" ? "files" : p}</button>)}</div>
           <Panel title="Explorer" icon={FolderOpen} panelId="explorer" dataMobileId="explorer" collapsed={layout.collapsed.explorer} onCollapseAction={() => setCollapsed("explorer")} style={{ gridColumn: 1, gridRow: 1 }} className={styles.explorerPanel} action={<button onClick={() => void ws.refreshTree()} aria-label="Refresh files" style={{ minWidth: 24, minHeight: 24, padding: 4 }}><FolderOpen size={13} /></button>}>
             {workspaceId ? <WorkspaceExplorer tree={ws.tree} loading={ws.treeLoading} activePath={ws.activePath} onOpenFile={(p) => void ws.openFile(p)} onRefresh={() => void ws.refreshTree()} /> : <EmptyState title="No project selected" description="Choose a connected project to load files, preview, and Git status." actionLabel="Select project" onAction={onOpenProjectsAction} secondaryLabel="Connect GitHub" />}
           </Panel>

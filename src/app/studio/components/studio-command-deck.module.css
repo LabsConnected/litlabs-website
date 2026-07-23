@@ -449,3 +449,19 @@
 .blockerButton:hover {
   background: rgba(145, 71, 255, 0.2);
 }
+
+@media (max-width: 700px) {
+  /* The persistent bottom navigation is the only mobile view switcher. */
+  .mobileTabBar {
+    display: none !important;
+  }
+
+  /* Files and Preview must never inherit the desktop docked terminal. */
+  .codeMain > [data-deck-panel="terminal"] {
+    display: none !important;
+  }
+
+  .deck[data-mobile-view="terminal"] .codeMain > [data-deck-panel="terminal"] {
+    display: grid !important;
+  }
+}

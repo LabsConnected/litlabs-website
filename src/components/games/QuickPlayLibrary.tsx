@@ -139,7 +139,7 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
         </header>
       )}
 
-      <div className="grid grid-cols-2 gap-2.5 sm:gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+      <div className="space-y-3">
         {QUICK_PLAY_LIBRARY.map((game) => {
           const system = getRetroSystem(game.system);
           const itemStatus = status[game.id] ?? { kind: "idle" };
@@ -148,9 +148,9 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
           return (
             <article
               key={game.id}
-              className="group relative overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e16] transition hover:-translate-y-0.5 hover:border-white/20"
+              className="group relative flex overflow-hidden rounded-2xl border border-white/10 bg-[#0e0e16] transition hover:border-white/20"
             >
-              <div className="relative aspect-[3/4] overflow-hidden">
+              <div className="relative w-[42%] max-w-52 shrink-0 overflow-hidden border-r border-white/10">
                 <RetroArtwork
                   system={game.system}
                   title={game.title}
@@ -172,7 +172,7 @@ export default function QuickPlayLibrary({ onAdded, embedded = false }: Props) {
                 )}
               </div>
 
-              <div className="space-y-2.5 sm:space-y-3 p-2.5 sm:p-4">
+              <div className="min-w-0 flex-1 space-y-2.5 p-3 sm:space-y-3 sm:p-4">
                 <div className="flex items-center justify-between gap-2 text-[10px] text-white/45">
                   <span className="truncate" title={game.author}>
                     by {game.author} · {game.year}

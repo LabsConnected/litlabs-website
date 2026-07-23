@@ -8,7 +8,6 @@ import {
   Heart,
   Play,
   Grid3X3,
-  List,
   Zap,
   ExternalLink,
   Sparkles,
@@ -102,7 +101,6 @@ export default function GamesPage() {
   const [activeCategory, setActiveCategory] = useState<GameCategory | "all">(
     "all",
   );
-  const [viewMode, setViewMode] = useState<"grid" | "list">("grid");
   const [favorites, setFavorites] = useState<string[]>(() => {
     if (typeof window === "undefined") return [];
     return getFavorites();
@@ -126,7 +124,7 @@ export default function GamesPage() {
 
   const studioImageHref = useMemo(() => {
     const prompt = searchQuery.trim() || randomPrompt();
-    return `/studio?prompt=${encodeURIComponent(prompt)}`;
+    return `/studio?openImage=1&prompt=${encodeURIComponent(prompt)}`;
   }, [searchQuery]);
 
   const handleToggleFav = useCallback((gameId: string) => {
@@ -427,22 +425,6 @@ export default function GamesPage() {
               >
                 <Shuffle size={11} /> <span className="hidden sm:inline">Surprise Me</span>
               </button>
-              <div className="flex items-center border border-white/10 rounded-lg overflow-hidden">
-                <button
-                  onClick={() => setViewMode("grid")}
-                  className={`p-2 transition-colors ${viewMode === "grid" ? "bg-white/10" : ""}`}
-                  style={{ color: viewMode === "grid" ? "#f97316" : "rgba(255,255,255,0.3)" }}
-                >
-                  <Grid3X3 size={16} />
-                </button>
-                <button
-                  onClick={() => setViewMode("list")}
-                  className={`p-2 transition-colors ${viewMode === "list" ? "bg-white/10" : ""}`}
-                  style={{ color: viewMode === "list" ? "#f97316" : "rgba(255,255,255,0.3)" }}
-                >
-                  <List size={16} />
-                </button>
-              </div>
             </div>
           </div>
           {/* Row 2: Category chips (horizontal scroll on mobile) */}
@@ -472,21 +454,13 @@ export default function GamesPage() {
         </div>
       </div>
 
-      {/* ─── GAMES GRID/LIST ─── */}
+      {/* ─── GAME LIBRARY ─── */}
       <div className="max-w-7xl mx-auto px-4 sm:px-6">
-        <div
-          className={
-            viewMode === "grid"
-              ? "grid grid-cols-2 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2.5 sm:gap-4 py-4 sm:py-6"
-              : "space-y-2 py-4 sm:py-6"
-          }
-        >
+        <div className="space-y-3 py-4 sm:py-6">
           {filteredGames.map((game) => (
             <div
               key={game.id}
-              className={`group relative overflow-hidden rounded-2xl border transition-all hover:shadow-2xl ${
-                viewMode === "grid" ? "" : "flex items-center gap-4 p-3"
-              }`}
+              className="group relative flex items-center gap-3 overflow-hidden rounded-2xl border p-2.5 transition-all hover:border-white/20 hover:bg-white/[.035] hover:shadow-2xl sm:gap-4 sm:p-3"
               style={{
                 backgroundColor: "rgba(255,255,255,0.02)",
                 borderColor: favorites.includes(game.id) ? "#f97316" : "rgba(255,255,255,0.08)",
@@ -494,9 +468,7 @@ export default function GamesPage() {
             >
               {/* Cover */}
               <div
-                className={`relative overflow-hidden cursor-pointer ${
-                  viewMode === "grid" ? "aspect-[4/3]" : "w-20 h-20 sm:w-24 sm:h-24 shrink-0"
-                }`}
+                className="relative h-24 w-28 shrink-0 cursor-pointer overflow-hidden rounded-xl sm:h-32 sm:w-48"
                 onClick={() => launchGame(game)}
               >
                 {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -526,7 +498,7 @@ export default function GamesPage() {
               </div>
 
               {/* Info */}
-              <div className={viewMode === "grid" ? "p-2.5 sm:p-4" : "flex-1 min-w-0"}>
+              <div className="min-w-0 flex-1 py-1 pr-1">
                 <div className="flex items-start justify-between gap-1.5 sm:gap-2">
                   <div className="font-black text-xs sm:text-sm truncate text-white">
                     {game.title}
@@ -542,7 +514,7 @@ export default function GamesPage() {
                 <div className="text-[10px] sm:text-[11px] text-white/40 line-clamp-1 mt-0.5">
                   {game.description}
                 </div>
-                <div className="hidden sm:flex items-center gap-3 mt-2 text-[9px] text-white/30 font-bold">
+                <div className="mt-2 flex items-center gap-3 text-[9px] font-bold text-white/30">
                   <span className="flex items-center gap-1">
                     <Users size={10} /> {game.players}P
                   </span>
@@ -617,52 +589,36 @@ export default function GamesPage() {
             </div>
 
             {/* Emulator Lab cards */}
-            <div className="grid md:grid-cols-2 gap-3 sm:gap-4 mb-6 sm:mb-8">
+            <div className="mb-6 space-y-3 sm:mb-8">
               {EMULATOR_LABS.map((lab) => (
                 <a
                   key={lab.name}
                   href={lab.href}
                   target={lab.href.startsWith("http") ? "_blank" : undefined}
                   rel={lab.href.startsWith("http") ? "noopener noreferrer" : undefined}
-                  className="group relative overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-br from-white/[0.03] to-transparent p-4 sm:p-6 transition-all hover:-translate-y-1 hover:border-white/20"
+                  className="group relative flex items-center gap-4 overflow-hidden rounded-2xl border border-white/10 bg-gradient-to-r from-white/[0.04] to-transparent p-4 transition-all hover:border-white/20 sm:p-5"
                 >
                   <div
                     className="absolute -top-20 -right-20 h-40 w-40 rounded-full blur-3xl opacity-20 transition-opacity group-hover:opacity-40"
                     style={{ backgroundColor: lab.accent }}
                   />
-                  <div className="relative flex items-start justify-between gap-4">
+                  <div className="relative shrink-0">
                     <div
                       className="grid h-14 w-14 place-items-center rounded-2xl text-2xl"
                       style={{ backgroundColor: `${lab.accent}15` }}
                     >
                       {lab.icon}
                     </div>
-                    <ArrowUpRight
-                      size={20}
-                      className="text-white/30 group-hover:text-white group-hover:opacity-100 transition-all"
-                    />
                   </div>
-                  <div className="relative mt-5 text-[10px] font-black uppercase tracking-widest" style={{ color: lab.accent }}>
-                    {lab.badge}
+                  <div className="relative min-w-0 flex-1">
+                    <div className="text-[10px] font-black uppercase tracking-widest" style={{ color: lab.accent }}>
+                      {lab.badge}
+                    </div>
+                    <h3 className="mt-1 font-black text-white sm:text-lg">{lab.name}</h3>
+                    <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-white/55 sm:text-sm">{lab.description}</p>
+                    <p className="mt-2 text-[9px] font-bold uppercase tracking-wider text-white/35">{lab.systems}</p>
                   </div>
-                  <h3 className="relative font-black text-xl mt-1 text-white">
-                    {lab.name}
-                  </h3>
-                  <p className="relative text-sm text-white/55 mt-2 leading-relaxed">
-                    {lab.description}
-                  </p>
-                  {lab.image ? (
-                    // eslint-disable-next-line @next/next/no-img-element
-                    <img
-                      src={lab.image}
-                      alt={`${lab.name} systems`}
-                      className="relative mt-4 h-10 w-auto rounded-md object-contain object-left opacity-80"
-                    />
-                  ) : (
-                    <p className="relative text-[10px] font-bold text-white/35 mt-4 uppercase tracking-wider">
-                      {lab.systems}
-                    </p>
-                  )}
+                  <ArrowUpRight size={18} className="relative shrink-0 text-white/30 transition-colors group-hover:text-white" />
                 </a>
               ))}
             </div>
@@ -685,7 +641,7 @@ export default function GamesPage() {
       {!selectedGame && (
         <section className="py-4 sm:py-6 border-t border-white/5">
           <div className="max-w-7xl mx-auto px-4 sm:px-6">
-            <div className="grid sm:grid-cols-2 gap-2.5 sm:gap-3 pb-6 sm:pb-10">
+            <div className="space-y-2.5 pb-6 sm:pb-10">
               {FREE_DISCOVERY.map((item) => (
                 <a
                   key={item.label}

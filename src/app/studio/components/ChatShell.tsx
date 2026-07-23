@@ -64,6 +64,8 @@ type Props = {
   onSend: (text: string) => string | Promise<string | void>;
   onToolSelect?: (tool: StudioTool) => void;
   onOpenImageGen?: () => void;
+  hasProject?: boolean;
+  onOpenProjects?: () => void;
   onPromptSelectAction?: (prompt: string) => void;
   embedded?: boolean;
   hideDock?: boolean;
@@ -107,6 +109,8 @@ export function ChatShell({
   onSend,
   onToolSelect,
   onOpenImageGen,
+  hasProject = true,
+  onOpenProjects,
   onPromptSelectAction,
   embedded = false,
   hideDock = false,
@@ -357,12 +361,20 @@ export function ChatShell({
                   </p>
                 </div>
                 <div className={styles.compactActions}>
-                  <button onClick={() => onPromptSelectAction?.("Inspect this project and tell me what needs attention.")}>
-                    Inspect project
-                  </button>
-                  <button onClick={() => onPromptSelectAction?.("Help me build a new feature.")}>
-                    Start a build
-                  </button>
+                  {hasProject ? (
+                    <>
+                      <button onClick={() => onPromptSelectAction?.("Inspect this project and tell me what needs attention.")}>
+                        Inspect project
+                      </button>
+                      <button onClick={() => onPromptSelectAction?.("Help me build a new feature.")}>
+                        Start building
+                      </button>
+                    </>
+                  ) : (
+                    <button onClick={onOpenProjects}>
+                      Choose a project
+                    </button>
+                  )}
                   <button onClick={() => onOpenImageGen?.()}>
                     Create media
                   </button>

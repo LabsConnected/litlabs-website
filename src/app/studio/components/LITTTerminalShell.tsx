@@ -647,11 +647,18 @@ function LITTTerminalShellInner({
 
   // Auto-open the image generation popover when navigated with ?openImage=1
   useEffect(() => {
-    if (searchParams?.get("openImage") === "1") {
+    if (
+      searchParams?.get("openImage") === "1" ||
+      searchParams?.get("intent") === "image"
+    ) {
+      const prompt = searchParams.get("prompt");
+      if (prompt) setInput(prompt);
       setImageGenOpen(true);
       // Clean the param so it doesn't re-open on every render
       const params = new URLSearchParams(searchParams.toString());
       params.delete("openImage");
+      params.delete("intent");
+      params.delete("prompt");
       const query = params.toString();
       router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
     }
@@ -2235,6 +2242,8 @@ function LITTTerminalShellInner({
                     onSend={handleChatSend}
                     onToolSelect={onToolChangeAction}
                     onOpenImageGen={() => setImageGenOpen(true)}
+                    hasProject={Boolean(activeProjectId)}
+                    onOpenProjects={() => setProjectDrawerOpen(true)}
                     onPromptSelectAction={(prompt) => {
                       setInput(prompt);
                       requestAnimationFrame(() => textInputRef.current?.focus());
@@ -2275,6 +2284,8 @@ function LITTTerminalShellInner({
                   onSend={handleChatSend}
                   onToolSelect={onToolChangeAction}
                   onOpenImageGen={() => setImageGenOpen(true)}
+                  hasProject={Boolean(activeProjectId)}
+                  onOpenProjects={() => setProjectDrawerOpen(true)}
                   onPromptSelectAction={(prompt) => {
                     setInput(prompt);
                     requestAnimationFrame(() => textInputRef.current?.focus());
