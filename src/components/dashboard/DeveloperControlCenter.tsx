@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
+import { FloatingVoiceButton } from "@/features/voice/components/FloatingVoiceButton";
 
 /* ---------- Inline SVG icons (lucide-react pinned to old version) ---------- */
 function Icon({ name, size = 16, className = "", style }: { name: string; size?: number; className?: string; style?: CSSProperties }) {
@@ -983,6 +984,7 @@ export function DeveloperControlCenter() {
           <span>Settings</span>
         </Link>
       </div>
+      <FloatingVoiceButton />
     </div>
   );
 }
