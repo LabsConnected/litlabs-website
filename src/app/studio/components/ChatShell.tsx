@@ -3,7 +3,7 @@
 import { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import { LiTTMessageAvatar, UserMessageAvatar } from "@/components/chat/MessageAvatar";
+import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import {
   Sparkles,
   Zap,
@@ -33,6 +33,11 @@ import type { TerminalBuilderBlock } from "../types/builder-blocks";
 import SessionSidebar from "./SessionSidebar";
 import type { BuilderSession } from "../hooks/useBuilderSessions";
 import { parseJarvisActions } from "@/lib/litt-context";
+import {
+  useStudioAgentStore,
+  AGENT_META,
+  type AgentId,
+} from "../stores/useStudioAgentStore";
 
 type Message = {
   role: "user" | "assistant";
@@ -51,6 +56,7 @@ interface ChatShellProps {
   requestedTool?: StudioTool;
   pendingCommand?: string;
   initialPrompt?: string;
+  activeAgentId: AgentId;
   sessions: BuilderSession[];
   activeSessionId: string;
   onSelectSession: (id: string) => void;
@@ -61,6 +67,7 @@ interface ChatShellProps {
   onDeleteSession: (id: string) => void;
   onDeleteAllSessions: () => void;
   shellAction?: { id: number; type: "terminal" | "sessions" } | null;
+  fallbackNotice?: string | null;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -97,6 +104,7 @@ export default function ChatShell({
   requestedTool = "chat",
   pendingCommand = "",
   initialPrompt = "",
+  activeAgentId,
   sessions,
   activeSessionId,
   onSelectSession,
@@ -107,10 +115,14 @@ export default function ChatShell({
   onDeleteSession,
   onDeleteAllSessions,
   shellAction,
+  fallbackNotice,
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
   const { speakText } = useVoiceSession();
+  const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
+  const agentMeta = AGENT_META[activeAgentId];
+  const agentColor = agentMeta.color;
   const [input, setInput] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
   const terminalRef = useRef<TerminalPanelHandle>(null);
@@ -173,8 +185,6 @@ export default function ChatShell({
     [profile],
   );
 
-  const projectName = "LiTTree-LabStudios";
-  const stateLabel = `${displayName} · Live mission`;
 
   // Auto-scroll to bottom on new messages
   useEffect(() => {
@@ -216,8 +226,8 @@ export default function ChatShell({
         }}
       />
 
-      {/* Header */}
-      <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b border-white/10 bg-[#0a0a0f]/90 px-3 backdrop-blur-md">
+      {/* Header — Agent Console */}
+      <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b bg-[#0a0a0f]/90 px-3 backdrop-blur-md" style={{ borderColor: `${agentColor}20` }}>
         <div className="flex items-center gap-3">
           <button
             className="rounded-lg p-2 hover:bg-white/5 md:hidden"
@@ -225,32 +235,69 @@ export default function ChatShell({
           >
             <Menu size={18} style={{ color: T.textMuted }} />
           </button>
-          <div className="flex items-center gap-2.5">
-            <LiTTMessageAvatar size={34} />
-            <div className="hidden flex-col sm:flex">
-              <span
-                className="text-[11px] font-black leading-tight"
-                style={{ color: T.textColor }}
-              >
-                LiTT
-              </span>
-              <span
-                className="text-[9px] font-medium leading-tight"
-                style={{ color: T.textMuted }}
-              >
-                {projectName} · {stateLabel}
-              </span>
-            </div>
+
+          {/* Agent switcher */}
+          <div className="flex items-center gap-1 rounded-xl border border-white/8 bg-black/40 p-1">
+            {(Object.keys(AGENT_META) as AgentId[]).map((id) => {
+              const meta = AGENT_META[id];
+              const active = activeAgentId === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setActiveAgent(id)}
+                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-black transition-all"
+                  style={{
+                    backgroundColor: active ? `${meta.color}18` : "transparent",
+                    color: active ? meta.color : "rgba(255,255,255,0.4)",
+                  }}
+                  aria-label={`Switch to ${meta.displayName}`}
+                >
+                  <span
+                    className="h-1.5 w-1.5 rounded-full"
+                    style={{
+                      backgroundColor: meta.color,
+                      boxShadow: active ? `0 0 6px ${meta.color}` : "none",
+                    }}
+                  />
+                  {meta.displayName}
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="hidden flex-col sm:flex">
+            <span
+              className="text-[11px] font-black leading-tight"
+              style={{ color: agentColor }}
+            >
+              {agentMeta.displayName}
+            </span>
+            <span
+              className="text-[9px] font-medium leading-tight"
+              style={{ color: T.textMuted }}
+            >
+              {agentMeta.role}
+            </span>
           </div>
         </div>
 
         <div className="flex items-center gap-2">
+          <span
+            className="hidden items-center gap-1.5 text-[9px] font-bold sm:flex"
+            style={{ color: "rgba(255,255,255,0.4)" }}
+          >
+            <span
+              className="h-1.5 w-1.5 rounded-full"
+              style={{ backgroundColor: agentColor, boxShadow: `0 0 4px ${agentColor}` }}
+            />
+            Online
+          </span>
           <button
             onClick={() => onNewChat?.()}
             className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold hover:bg-white/5"
-            aria-label="New chat"
+            aria-label="Clear conversation"
           >
-            <Zap size={12} style={{ color: T.accentColor }} /> New
+            <Zap size={12} style={{ color: agentColor }} /> Clear
           </button>
           <button
             className="rounded-full border border-white/10 p-2 hover:bg-white/5"
@@ -336,6 +383,14 @@ export default function ChatShell({
           </div>
         ) : (
           <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4">
+            {fallbackNotice && (
+              <div
+                className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/8 px-3 py-2 text-[10px] font-bold text-amber-300"
+              >
+                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+                {fallbackNotice}
+              </div>
+            )}
             {messages.map((message, index) => {
               const isUser = message.role === "user";
               const isLastAssistant =
@@ -346,18 +401,32 @@ export default function ChatShell({
                   key={index}
                   className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
                 >
-                  {isUser ? <UserMessageAvatar size={30} /> : <LiTTMessageAvatar size={32} />}
+                  {isUser ? <UserMessageAvatar size={30} /> : (
+                    <div
+                      className="grid place-items-center rounded-full border"
+                      style={{
+                        width: 32,
+                        height: 32,
+                        borderColor: `${agentColor}30`,
+                        backgroundColor: `${agentColor}10`,
+                      }}
+                    >
+                      <span className="text-[13px] font-black" style={{ color: agentColor }}>
+                        {agentMeta.displayName[0]}
+                      </span>
+                    </div>
+                  )}
                   <div
                     className={`flex max-w-[88%] flex-col sm:max-w-[78%] ${isUser ? "items-end" : "items-start"}`}
                   >
-                    <div className={`mb-1 flex items-center gap-2 px-1 text-[9px] font-black uppercase tracking-[.14em] ${isUser ? "flex-row-reverse" : ""}`} style={{ color: isUser ? "#fb923c" : "#67e8f9" }}>
-                      <span>{isUser ? displayName : "LiTT"}</span>
-                      {!isUser && <span className="rounded-full border border-cyan-300/15 bg-cyan-300/5 px-1.5 py-0.5 text-[7px] text-cyan-200/60">AI</span>}
+                    <div className={`mb-1 flex items-center gap-2 px-1 text-[9px] font-black uppercase tracking-[.14em] ${isUser ? "flex-row-reverse" : ""}`} style={{ color: isUser ? "#fb923c" : agentColor }}>
+                      <span>{isUser ? displayName : agentMeta.displayName}</span>
+                      {!isUser && <span className="rounded-full border px-1.5 py-0.5 text-[7px]" style={{ borderColor: `${agentColor}20`, backgroundColor: `${agentColor}08`, color: `${agentColor}99` }}>AI</span>}
                     </div>
                     {!isUser && command && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
-                        <button onClick={() => { setTerminalOpen(true); if (terminalConnectedRef.current) terminalRef.current?.insertCommand(command); else pendingInsertCommandRef.current = command; }} className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200 hover:bg-cyan-300/10">Insert into terminal</button>
-                        <button disabled={!ptyConnected} onClick={() => { if (window.confirm(`Run in the connected PTY?\n\n${command}`)) terminalRef.current?.runCommand(command); }} className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-35">Run in terminal</button>
+                        <button type="button" onClick={() => { setTerminalOpen(true); if (terminalConnectedRef.current) terminalRef.current?.insertCommand(command); else pendingInsertCommandRef.current = command; }} className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200 hover:bg-cyan-300/10">Insert into terminal</button>
+                        <button type="button" disabled={!ptyConnected} onClick={() => { if (window.confirm(`Run in the connected PTY?\n\n${command}`)) terminalRef.current?.runCommand(command); }} className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-35">Run in terminal</button>
                         {!ptyConnected && <span className="text-[8px] text-amber-300/65">Connect the real PTY to run</span>}
                       </div>
                     )}
@@ -366,10 +435,10 @@ export default function ChatShell({
                       style={{
                         borderColor: isUser
                           ? "rgba(249,115,22,0.25)"
-                          : "rgba(34,211,238,0.15)",
+                          : `${agentColor}26`,
                         background: isUser
                           ? "linear-gradient(135deg, rgba(249,115,22,0.12), rgba(249,115,22,0.05))"
-                          : "linear-gradient(135deg, rgba(34,211,238,0.06), rgba(255,255,255,0.02))",
+                          : `linear-gradient(135deg, ${agentColor}0f, rgba(255,255,255,0.02))`,
                         color: isUser ? "#fff" : T.textColor,
                       }}
                     >
@@ -397,20 +466,22 @@ export default function ChatShell({
                         <>
                           <CopyButton text={message.content} />
                           <button
+                            type="button"
                             onClick={() => speakText(message.content)}
                             className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
                             title="Read aloud"
                           >
-                            <Zap size={10} /> Speak
+                            <Zap size={10} className="pointer-events-none" /> Speak
                           </button>
                           {isLastAssistant && (
                             <button
+                              type="button"
                               onClick={() => onRegenerate?.()}
                               disabled={busy}
                               className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300 disabled:opacity-40"
                               title="Regenerate"
                             >
-                              <RefreshCw size={10} /> Regen
+                              <RefreshCw size={10} className="pointer-events-none" /> Regen
                             </button>
                           )}
                         </>
@@ -423,8 +494,8 @@ export default function ChatShell({
             {terminalBlocks.map((block) => (
               <section key={block.id} className="rounded-2xl border border-emerald-400/20 bg-black/60 p-3 font-mono text-[11px]">
                 <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 font-bold text-emerald-300"><TerminalIcon size={13} /> Terminal · You</span>
-                  <button onClick={() => setTerminalOpen(true)} className="flex items-center gap-1 text-white/60 hover:text-white"><ChevronUp size={12} /> Expand</button>
+                  <span className="flex items-center gap-2 font-bold text-emerald-300"><TerminalIcon size={13} className="pointer-events-none" /> Terminal · You</span>
+                  <button type="button" onClick={() => setTerminalOpen(true)} className="flex items-center gap-1 text-white/60 hover:text-white"><ChevronUp size={12} className="pointer-events-none" /> Expand</button>
                 </div>
                 <div className="text-white/90">$ {block.command}</div>
                 <div className="mt-2 max-h-20 overflow-hidden whitespace-pre-wrap text-white/45">{block.output}</div>
@@ -442,14 +513,14 @@ export default function ChatShell({
                 <section className="ml-11 overflow-hidden rounded-2xl border border-cyan-300/15 bg-[linear-gradient(135deg,rgba(34,211,238,.07),rgba(139,92,246,.045),rgba(255,255,255,.015))] shadow-[0_18px_55px_rgba(0,0,0,.28)]">
                   <button type="button" onClick={() => setActivityOpen((open) => !open)} className="flex w-full items-center gap-3 px-4 py-3 text-left">
                     <span className="relative grid h-9 w-9 place-items-center rounded-xl border border-cyan-300/20 bg-cyan-300/8 text-cyan-200">
-                      <BrainCircuit size={17} />
+                      <BrainCircuit size={17} className="pointer-events-none" />
                       <span className="absolute -right-0.5 -top-0.5 h-2 w-2 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_10px_#67e8f9]" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block text-xs font-black text-white">LiTT is working</span>
+                      <span className="block text-xs font-black text-white">{agentMeta.displayName} is working</span>
                       <span className="block truncate text-[9px] text-white/42">Operational trace · {busySeconds}s</span>
                     </span>
-                    <ChevronDown size={14} className={`text-white/35 transition ${activityOpen ? "rotate-180" : ""}`} />
+                    <ChevronDown size={14} className={`pointer-events-none text-white/35 transition ${activityOpen ? "rotate-180" : ""}`} />
                   </button>
                   {activityOpen && (
                     <div className="border-t border-white/7 px-4 py-3">
@@ -491,6 +562,7 @@ export default function ChatShell({
           busy={busy}
           modelName={selectedModel}
           onRouteTool={onRouteTool}
+          activeAgentId={activeAgentId}
         />
       </div>
 

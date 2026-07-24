@@ -14,23 +14,16 @@ export default function MobileBottomNav() {
 
   const isActive = (href: string) => {
     if (href === "#menu") return false;
-    if (href === "/") return pathname === "/";
-    return pathname?.startsWith(href);
+    if (href === "/dashboard") return pathname === "/dashboard";
+    return pathname === href || pathname?.startsWith(href + "/");
   };
 
   return (
     <>
       <nav
-        className="mobile-bottom-nav md:hidden fixed z-[100] overflow-hidden rounded-2xl border backdrop-blur-xl"
-        style={{
-          borderColor: `${T.borderColor}35`,
-          boxShadow: "0 14px 45px rgba(0,0,0,.48)",
-        }}
+        className="fixed inset-x-0 bottom-0 z-50 border-t border-white/10 bg-[#080910]/95 px-2 pb-[env(safe-area-inset-bottom)] backdrop-blur-xl md:hidden"
       >
-        <div
-          className="flex items-center justify-around px-1 py-1.5"
-          style={{ backgroundColor: `${T.bgColor}f2` }}
-        >
+        <div className="grid h-16 grid-cols-5">
           {MOBILE_BOTTOM_ITEMS.map((item) => {
             const Icon = item.icon;
             const active = isActive(item.href);
@@ -47,16 +40,22 @@ export default function MobileBottomNav() {
                       }
                     : undefined
                 }
-                className="relative flex min-w-0 flex-1 flex-col items-center gap-0.5 rounded-xl px-2 py-2 transition-all"
+                className="relative flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all"
                 style={{ color: active ? T.accentColor : T.textMuted }}
               >
                 {active && (
                   <span
-                    className="absolute inset-0 rounded-xl opacity-15"
-                    style={{ backgroundColor: T.accentColor }}
+                    className="absolute inset-x-2 top-0 h-[3px] rounded-full"
+                    style={{
+                      backgroundColor: T.accentColor,
+                      boxShadow: `0 0 8px ${T.accentColor}80`,
+                    }}
                   />
                 )}
-                <Icon size={20} />
+                <Icon
+                  size={20}
+                  style={active ? { filter: `drop-shadow(0 0 4px ${T.accentColor}60)` } : undefined}
+                />
                 <span className="text-[9px] font-black">{item.label}</span>
               </Link>
             );

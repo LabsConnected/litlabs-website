@@ -55,6 +55,67 @@ export interface VoiceSessionConfig {
   allowInterruptions: boolean;
 }
 
+export interface VoiceTimingMetrics {
+  recordingStartedAt: number | null;
+  recordingEndedAt: number | null;
+  transcriptionStartedAt: number | null;
+  transcriptionCompletedAt: number | null;
+  aiResponseStartedAt: number | null;
+  aiResponseCompletedAt: number | null;
+  ttsStartedAt: number | null;
+  ttsFirstByteAt: number | null;
+  playbackStartedAt: number | null;
+  playbackEndedAt: number | null;
+}
+
+export function createInitialTimingMetrics(): VoiceTimingMetrics {
+  return {
+    recordingStartedAt: null,
+    recordingEndedAt: null,
+    transcriptionStartedAt: null,
+    transcriptionCompletedAt: null,
+    aiResponseStartedAt: null,
+    aiResponseCompletedAt: null,
+    ttsStartedAt: null,
+    ttsFirstByteAt: null,
+    playbackStartedAt: null,
+    playbackEndedAt: null,
+  };
+}
+
+export interface VoiceDiagnostics {
+  timing: VoiceTimingMetrics;
+  queueLength: number;
+  currentText: string;
+  spokenCharCount: number;
+  totalCharCount: number;
+}
+
+export function computeLatencies(timing: VoiceTimingMetrics): {
+  transcriptionMs: number | null;
+  aiResponseMs: number | null;
+  ttsMs: number | null;
+  totalMs: number | null;
+  ttsTimeToFirstByteMs: number | null;
+} {
+  const transcriptionMs = timing.transcriptionStartedAt && timing.transcriptionCompletedAt
+    ? timing.transcriptionCompletedAt - timing.transcriptionStartedAt
+    : null;
+  const aiResponseMs = timing.aiResponseStartedAt && timing.aiResponseCompletedAt
+    ? timing.aiResponseCompletedAt - timing.aiResponseStartedAt
+    : null;
+  const ttsMs = timing.ttsStartedAt && timing.playbackStartedAt
+    ? timing.playbackStartedAt - timing.ttsStartedAt
+    : null;
+  const ttsTimeToFirstByteMs = timing.ttsStartedAt && timing.ttsFirstByteAt
+    ? timing.ttsFirstByteAt - timing.ttsStartedAt
+    : null;
+  const totalMs = timing.recordingStartedAt && timing.playbackStartedAt
+    ? timing.playbackStartedAt - timing.recordingStartedAt
+    : null;
+  return { transcriptionMs, aiResponseMs, ttsMs, totalMs, ttsTimeToFirstByteMs };
+}
+
 export const DEFAULT_LITT_PROFILE: AgentVoiceProfile = {
   agentId: "litt",
   provider: "elevenlabs",

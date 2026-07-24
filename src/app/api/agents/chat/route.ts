@@ -5,6 +5,7 @@ import { generateText } from "@/lib/llm";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getUserByClerkId } from "@/lib/user-db";
 import { Supermemory } from "supermemory";
+import { getStudioContext, buildCapabilityContextForChat } from "@/lib/capabilities/studio-context";
 
 function getSupermemory() {
   const key = process.env.SUPERMEMORY_API_KEY;
@@ -138,11 +139,15 @@ You operate inside the LiTTree-LabStudios platform (also called LiTT for the age
 - Current repository: LabsConnected/litlabs-website on GitHub, deployed on Vercel
 - You already have access to project files via scan, memory, and agent tools. When the user asks what you're building or what you know, reference this context.`;
 
-function buildDirectorPrompt(userName: string): string {
+function buildDirectorPrompt(userName: string, capabilityContext: string): string {
   const name = userName || "the user";
   return `You are LiTT Director — ${name}'s personal AI crew chief inside LiTTree-LabStudios.
 
 ${PROJECT_CONTEXT}
+
+${capabilityContext}
+
+IMPORTANT: Before answering questions about project state, coding readiness, or what's connected, review the STUDIO CAPABILITY STATE above. Never claim something is ready, connected, or running if the capability state says otherwise. If there is a NEXT BLOCKER, mention it and suggest the repair action.
 
 Personality: sharp, confident, concise, occasionally sardonic. You address ${name} by their name (${name}). You do not over-explain.
 
@@ -174,7 +179,17 @@ export async function POST(req: NextRequest) {
     // Fetch the user's profile name so the agent can address them personally
     const userProfile = await getUserByClerkId(userId);
     const userName = userProfile?.name || "";
-    const directorPrompt = buildDirectorPrompt(userName);
+
+    // Fetch real capability state for the studio context
+    let capabilityContext = "";
+    try {
+      const ctx = await getStudioContext();
+      capabilityContext = buildCapabilityContextForChat(ctx);
+    } catch {
+      // non-fatal — continue without capability context
+    }
+
+    const directorPrompt = buildDirectorPrompt(userName, capabilityContext);
 
     const agent = orchestrator.getAgent(resolvedId);
     const recalled = await recallMemories(userId, message, 5);

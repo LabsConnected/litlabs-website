@@ -7,12 +7,12 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StudioSidebar, { type StudioTool } from "./StudioSidebar";
 import StudioTopBar from "./StudioTopBar";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
+import { useStudioAgentStore } from "../stores/useStudioAgentStore";
+import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import { MobileStudio } from "./MobileStudio";
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
-const StudioInspector = dynamic(() => import("./StudioInspector"), {
-  ssr: false,
-});
 const ChatTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
@@ -66,35 +66,17 @@ const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
 };
 
 const VALID_TOOLS = Object.keys(TOOL_COMPONENTS) as StudioTool[];
-const DRAWER_TOOLS: StudioTool[] = [
-  "image",
-  "video",
-  "audio",
-  "build",
-  "code",
-  "agents",
-  "assets",
-  "plugins",
-  "pipeline",
-  "space",
-  "clibridge",
-  "color",
-];
-const MODEL_PREF_KEY = "littree:studio:model";
-const TOOL_META: Partial<Record<StudioTool, { title: string; eyebrow: string }>> = {
-  image: { title: "Image Forge", eyebrow: "Create, remix, and save original visuals" },
-  video: { title: "Motion Studio", eyebrow: "Turn prompts and images into cinematic scenes" },
-  audio: { title: "Sound Lab", eyebrow: "Give LiTT a voice or create music and sound" },
-  build: { title: "Build Command", eyebrow: "Plan locally now, connect a repository when ready" },
-  code: { title: "Code Canvas", eyebrow: "Describe it, generate it, refine it, and ship it" },
-  agents: { title: "Crew Room", eyebrow: "Direct LiTT, Spark, and specialist agents" },
-  assets: { title: "Asset Vault", eyebrow: "Keep every image, video, file, and creation together" },
-  plugins: { title: "Connection Bay", eyebrow: "Add capabilities when your services are ready" },
-  pipeline: { title: "Workflow Forge", eyebrow: "Connect repeatable steps into a reusable flow" },
-  space: { title: "World Builder", eyebrow: "Build immersive spaces and 360° experiences" },
-  clibridge: { title: "CLI Bridge", eyebrow: "Connect local tools without leaving the Studio" },
-  color: { title: "Color Lab", eyebrow: "Create, play, and explore color" },
-};
+
+function AgentVoiceSync() {
+  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const setVoiceAgent = useVoiceStore((s) => s.setActiveAgent);
+
+  useEffect(() => {
+    setVoiceAgent(activeAgentId);
+  }, [activeAgentId, setVoiceAgent]);
+
+  return null;
+}
 
 export default function StudioOS() {
   const { resolvedColors: T } = useTheme();
@@ -117,22 +99,9 @@ export default function StudioOS() {
     return "home";
   })();
 
-  const initialModel = (() => {
-    const fromUrl = searchParams.get("model");
-    if (fromUrl) return fromUrl;
-    const fromStore =
-      typeof window === "undefined"
-        ? null
-        : localStorage.getItem(MODEL_PREF_KEY);
-    return fromStore || "adaptive";
-  })();
-
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
   const [search, setSearch] = useState("");
-  const [model, setModel] = useState(initialModel);
-  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [pendingCommand, setPendingCommand] = useState("");
-  const scrollRef = useRef<HTMLDivElement>(null);
   const isInitialMount = useRef(true);
   const [cameraDock, setCameraDock] = useState<{
     open: boolean;
@@ -143,31 +112,11 @@ export default function StudioOS() {
     pos: DockPosition;
   }>({ open: false, pos: "bottom-left" });
 
-  // Restore and persist scroll position per tool.
-  useEffect(() => {
-    const el = scrollRef.current;
-    if (!el) return;
-    const saved = sessionStorage.getItem(`littree:studio:scroll:${activeTool}`);
-    if (saved) {
-      el.scrollTop = Number(saved);
-    }
-    const onScroll = () => {
-      sessionStorage.setItem(
-        `littree:studio:scroll:${activeTool}`,
-        String(el.scrollTop),
-      );
-    };
-    el.addEventListener("scroll", onScroll, { passive: true });
-    return () => el.removeEventListener("scroll", onScroll);
-  }, [activeTool]);
-
-  // Sync tool/model to localStorage immediately, and to URL only after the
-  // user changes them (not on initial mount). This avoids Chrome marking the
-  // history entry as skippable on page load.
+  // Sync tool to localStorage immediately, and to URL only after the
+  // user changes them (not on initial mount).
   useEffect(() => {
     try {
       localStorage.setItem("littree:studio:tool", activeTool);
-      localStorage.setItem(MODEL_PREF_KEY, model);
     } catch {
       // ignore storage errors
     }
@@ -178,14 +127,11 @@ export default function StudioOS() {
     const params = new URLSearchParams(searchParams.toString());
     if (activeTool !== "home" && activeTool !== "chat") params.set("tool", activeTool);
     else params.delete("tool");
-    if (model !== "adaptive") params.set("model", model);
-    else params.delete("model");
     const query = params.toString();
     router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
-  }, [activeTool, model, pathname, router, searchParams]);
+  }, [activeTool, pathname, router, searchParams]);
 
-  // Handle tool switches emitted from inside workspaces, e.g. BuilderTool ->
-  // Code.
+  // Handle tool switches emitted from inside workspaces.
   useEffect(() => {
     const handler = (e: Event) => {
       const custom = e as CustomEvent<string>;
@@ -221,25 +167,35 @@ export default function StudioOS() {
     [],
   );
 
-  const drawerTool = DRAWER_TOOLS.includes(activeTool) ? activeTool : null;
-  const DrawerComponent = drawerTool ? TOOL_COMPONENTS[drawerTool] : null;
-  const drawerMeta = drawerTool ? TOOL_META[drawerTool] : null;
+  // Determine which component to render in the center workspace
+  const isChatOrHome = activeTool === "chat" || activeTool === "home";
+  const WorkspaceComponent = isChatOrHome ? null : TOOL_COMPONENTS[activeTool];
 
   return (
     <VoiceSessionProvider>
+      <AgentVoiceSync />
+
+      {/* Mobile: unified MobileStudio */}
+      <div className="md:hidden">
+        <MobileStudio
+          onRouteTool={handleCommandRoute}
+        />
+      </div>
+
+      {/* Desktop: 3-column layout */}
       <div
-        className="flex h-[100dvh] w-full flex-col overflow-hidden md:h-full"
-        style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}
+        className="hidden md:flex h-[100dvh] w-full flex-col overflow-hidden"
+        style={{ backgroundColor: "#06070b", color: T.textColor }}
       >
         <StudioTopBar
           search={search}
           onSearchChange={setSearch}
-          selectedModel={model}
-          onModelChange={setModel}
-          onInspectorToggle={() => setInspectorOpen((v) => !v)}
+          selectedModel=""
+          onModelChange={() => {}}
           T={T}
         />
 
+        {/* 3-column grid: ToolRail | Workspace | ChatPanel */}
         <div className="flex flex-1 min-h-0">
           <StudioSidebar
             activeTool={activeTool}
@@ -247,74 +203,51 @@ export default function StudioOS() {
             search={search}
           />
 
+          {/* Center workspace — renders active tool directly, no overlay */}
           <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+            {isChatOrHome ? (
+              <WelcomeWorkspace T={T} onToolChange={handleToolChange} />
+            ) : WorkspaceComponent ? (
+              <div className="studio-tool-surface min-h-0 flex-1 overflow-auto">
+                <WorkspaceComponent />
+              </div>
+            ) : null}
+          </main>
+
+          {/* Persistent right chat panel — desktop only */}
+          <aside
+            className="hidden md:flex shrink-0 flex-col border-l overflow-hidden"
+            style={{
+              width: "clamp(360px, 25vw, 440px)",
+              backgroundColor: "rgba(8,9,13,0.96)",
+              borderColor: "rgba(255,255,255,0.06)",
+            }}
+          >
             <div
-              ref={scrollRef}
-              className="min-h-0 flex-1 overflow-hidden p-2 pb-[calc(3.5rem+env(safe-area-inset-bottom))] sm:p-3 md:pb-2"
+              className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
+              style={{ borderColor: "rgba(255,255,255,0.06)" }}
             >
+              <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
+                Conversation
+              </span>
+              <span
+                className="w-1.5 h-1.5 rounded-full"
+                style={{
+                  backgroundColor: T.success,
+                  boxShadow: `0 0 4px ${T.success}`,
+                }}
+                aria-hidden
+              />
+            </div>
+            <div className="min-h-0 flex-1 overflow-hidden">
               <ChatTool
-                selectedModel={model}
                 onRouteTool={handleCommandRoute}
                 requestedTool={activeTool}
                 pendingCommand={pendingCommand}
               />
             </div>
-
-            {DrawerComponent && drawerTool && (
-              <section className="absolute inset-0 z-50 flex justify-end">
-                <div
-                  className="relative flex h-full w-full flex-col overflow-hidden"
-                  style={{
-                    backgroundColor: T.bgColor + "ee",
-                  }}
-                >
-                  <div className="relative flex min-h-16 shrink-0 items-center justify-between overflow-hidden border-b border-white/10 px-4 sm:px-6">
-                    <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_0%,rgba(103,232,249,.11),transparent_38%),radial-gradient(circle_at_90%_0%,rgba(168,85,247,.12),transparent_38%)]" />
-                    <div className="flex items-center gap-2">
-                      <span className={`h-2 w-2 rounded-full ${drawerTool === "image" ? "bg-cyan-300 shadow-[0_0_12px_#67e8f9]" : "bg-violet-300 shadow-[0_0_12px_#c4b5fd]"}`} />
-                      <div>
-                        <strong className="block text-sm font-black tracking-tight">{drawerMeta?.title || `${drawerTool} creator`}</strong>
-                        <span className="hidden text-[9px] font-medium text-white/40 sm:block">{drawerMeta?.eyebrow || "Your conversation stays open"}</span>
-                      </div>
-                    </div>
-                    <button
-                      onClick={() => setActiveTool("home")}
-                      className="grid h-8 w-8 place-items-center rounded-xl border border-white/10 text-sm text-white/55 transition hover:bg-white/10 hover:text-white"
-                      aria-label={`Close ${drawerTool} creator`}
-                    >
-                      ✕
-                    </button>
-                  </div>
-                  <div className="studio-tool-surface min-h-0 flex-1 overflow-auto px-2 py-3 sm:px-5 sm:py-5">
-                    <div className="mx-auto w-full max-w-[1380px]">
-                      <DrawerComponent />
-                    </div>
-                  </div>
-                </div>
-              </section>
-            )}
-          </main>
-
-          {!drawerTool && <StudioInspector variant="aside" T={T} activeTool={activeTool} />}
+          </aside>
         </div>
-
-        {inspectorOpen && (
-          <div className="fixed inset-0 z-10000 md:hidden">
-            <button
-              className="absolute inset-0 w-full h-full bg-black/60 cursor-default"
-              onClick={() => setInspectorOpen(false)}
-              aria-label="Close inspector"
-            />
-            <div className="absolute right-0 top-0 h-full w-[280px]">
-              <StudioInspector
-                variant="sheet"
-                onClose={() => setInspectorOpen(false)}
-                T={T}
-                activeTool={activeTool}
-              />
-            </div>
-          </div>
-        )}
       </div>
 
       {/* Persistent media overlays */}
@@ -327,6 +260,110 @@ export default function StudioOS() {
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
     </VoiceSessionProvider>
+  );
+}
+
+/* ── Welcome / Empty workspace state ─────────────────────────────── */
+function WelcomeWorkspace({
+  T,
+  onToolChange,
+}: {
+  T: ReturnType<typeof useTheme>["resolvedColors"];
+  onToolChange: (tool: StudioTool) => void;
+}) {
+  const actions = [
+    {
+      tool: "code" as StudioTool,
+      label: "Start Blank",
+      desc: "Open the code editor",
+      icon: "📝",
+      accent: T.accentColor,
+    },
+    {
+      tool: "code" as StudioTool,
+      label: "Connect Project",
+      desc: "Link a Git repository",
+      icon: "🔗",
+      accent: "#67e8f9",
+    },
+    {
+      tool: "code" as StudioTool,
+      label: "Upload Files",
+      desc: "Import existing code",
+      icon: "📤",
+      accent: "#a855f7",
+    },
+    {
+      tool: "code" as StudioTool,
+      label: "Generate",
+      desc: "AI-generate from prompt",
+      icon: "✨",
+      accent: "#22c55e",
+    },
+  ];
+
+  return (
+    <div className="flex h-full w-full items-center justify-center overflow-auto p-6">
+      <div className="flex max-w-2xl flex-col items-center text-center">
+        <div
+          className="mb-6 grid h-16 w-16 place-items-center rounded-2xl border"
+          style={{
+            borderColor: `${T.accentColor}30`,
+            backgroundColor: `${T.accentColor}08`,
+          }}
+        >
+          <span className="text-3xl">🚀</span>
+        </div>
+        <h1
+          className="mb-2 text-2xl font-black tracking-tight"
+          style={{ color: "rgba(255,255,255,0.9)" }}
+        >
+          Welcome to your workspace
+        </h1>
+        <p
+          className="mb-8 text-sm"
+          style={{ color: "rgba(255,255,255,0.45)" }}
+        >
+          Choose how you want to start building, or ask LiTT in the conversation panel.
+        </p>
+        <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
+          {actions.map((action) => (
+            <button
+              key={action.label}
+              type="button"
+              onClick={() => onToolChange(action.tool)}
+              className="group flex flex-col items-center gap-2 rounded-2xl border p-4 transition-all hover:scale-[1.03]"
+              style={{
+                borderColor: "rgba(255,255,255,0.06)",
+                backgroundColor: "rgba(255,255,255,0.02)",
+              }}
+            >
+              <span
+                className="grid h-10 w-10 place-items-center rounded-xl text-xl transition-transform group-hover:scale-110"
+                style={{
+                  backgroundColor: `${action.accent}12`,
+                  border: `1px solid ${action.accent}30`,
+                }}
+              >
+                {action.icon}
+              </span>
+              <span
+                className="text-[11px] font-bold"
+                style={{ color: "rgba(255,255,255,0.8)" }}
+              >
+                {action.label}
+              </span>
+              <span
+                className="text-[9px]"
+                style={{ color: "rgba(255,255,255,0.4)" }}
+              >
+                {action.desc}
+              </span>
+            </button>
+          ))}
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -345,8 +382,9 @@ function DockBadge({ label, onClose, onMove }: { label: string; onClose: () => v
       <span className="h-1.5 w-1.5 rounded-full bg-red-500 animate-pulse" />
       <span className="mr-1">{label}</span>
       <button
+        type="button"
         onClick={onMove}
-        className="rounded-md hover:bg-white/10"
+        className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/10"
         style={{ color: T.textMuted }}
         aria-label="Move dock"
         title="Move dock"
@@ -354,8 +392,9 @@ function DockBadge({ label, onClose, onMove }: { label: string; onClose: () => v
         ⇮
       </button>
       <button
+        type="button"
         onClick={onClose}
-        className="rounded-md hover:bg-white/10"
+        className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/10"
         style={{ color: T.textMuted }}
         aria-label="Close dock"
         title="Close dock"

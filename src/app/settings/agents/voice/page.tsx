@@ -19,7 +19,7 @@ export default function VoiceSettingsPage() {
   const T = useTheme().resolvedColors;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
+    <div className="min-h-screen" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
       <div className="mx-auto max-w-3xl p-4 lg:p-6">
         <Link
           href="/settings"

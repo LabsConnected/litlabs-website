@@ -1,4 +1,4 @@
-{
+﻿{
   "project": "LiTTree LabStudios",
   "repository": "https://github.com/LabsConnected/litlabs-website",
   "codespace": "https://turbo-space-spork-wv5jqrjgg59h6q.github.dev/",
@@ -12,11 +12,29 @@
     "setup": "Use GitHub Codespaces environment. Do not use local WSL for heavy builds.",
     "workflow": "Work from main branch. Create PRs for changes.",
     "localRole": "Use local PC only for small edits, testing /litt, reviewing changes, and emergency fixes.",
-    "heavyBuilds": "Use Codespaces for /studio page and other heavy builds."
+    "heavyBuilds": "Use Codespaces for /studio page and other heavy builds.",
+    "performance": "Use pnpm filters for targeted builds. Enable incremental type checking. Run typecheck in background."
   },
   "paths": {
     "primary": "C:/Users/litbi/CascadeProjects/litlab",
     "codespace": "/workspaces/litlabs-website",
     "archived": "C:/Users/litbi/CascadeProjects/litlabs/reference-repo"
+  },
+  "productivity": {
+    "godModeShortcuts": {
+      "agentChat": "Ctrl+; a",
+      "terminalSend": "Ctrl+Enter",
+      "quickFix": "Ctrl+.",
+      "renameSymbol": "F2",
+      "jumpToDefinition": "F12",
+      "peekDefinition": "Alt+F12",
+      "multiCursor": "Alt+Click",
+      "lineDuplicate": "Shift+Alt+Down"
+    },
+    "buildOptimizations": {
+      "incremental": true,
+      "turboPackCache": true,
+      "typeCheckOnlyChanged": true
+    }
   }
 }

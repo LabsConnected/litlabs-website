@@ -113,9 +113,19 @@ function buildPrompt(
   const resolvedName = userName?.trim() || "Member";
   const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
 
+  const connSummary = capabilities?.connectionSummary as string | undefined;
+  const availableTools = capabilities?.availableTools as string[] | undefined;
+  const toolList = Array.isArray(availableTools) && availableTools.length > 0
+    ? availableTools.join(", ")
+    : "none";
+
   return [
     systemPrompt,
-    `Verified capability state: ${JSON.stringify(capabilities ?? { repository: "none", terminalExecution: "unavailable", writeAccess: false })}\nTruth rules: Never claim the repository was scanned, indexed, read, modified, or that a command executed unless the verified capability state and supplied tool result explicitly confirm it. State uncertainty plainly.`,
+    `Verified capability state: ${JSON.stringify(capabilities ?? { repository: "none", terminalExecution: "unavailable", writeAccess: false })}`,
+    `Connection summary: ${connSummary || "No services connected."}`,
+    `Available tools: ${toolList}`,
+    `Truth rules: Never claim the repository was scanned, indexed, read, modified, or that a command executed unless the verified capability state and supplied tool result explicitly confirm it. Never claim a service is connected unless it appears in the connection summary. State uncertainty plainly. If no services are connected, say so and suggest visiting the Connection Bay.`,
+    `Terminal truthfulness: The terminalExecution capability is "${capabilities?.terminalExecution ?? "unavailable"}". If it is "unavailable", you MUST NOT claim you can run commands, execute code, or access a terminal. Tell the user the terminal is not connected and they need to start the PTY server and connect. If it is "available", you may suggest commands but must clarify that execution requires user approval. Never fabricate terminal output or claim a command ran when you have no tool result confirming it.`,
     memoryContext,
     "",
     transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",

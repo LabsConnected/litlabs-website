@@ -1,0 +1,209 @@
+{
+  "Typescript Component": {
+    "prefix": "litcomp",
+    "body": [
+      "interface ${TM_FILENAME_BASE}Props {",
+      "  $1",
+      "}",
+      "",
+      "export function ${TM_FILENAME_BASE}({}: ${TM_FILENAME_BASE}Props) {",
+      "  return (",
+      "    <div className=\"$2\">",
+      "      $0",
+      "    </div>",
+      "  )",
+      "}"
+    ],
+    "description": "LiTT TypeScript Component"
+  },
+  "Next.js Page": {
+    "prefix": "litpage",
+    "body": [
+      "export default function Page() {",
+      "  return (",
+      "    <div className=\"$1\">",
+      "      $0",
+      "    </div>",
+      "  )",
+      "}",
+      "",
+      "export const runtime = 'edge'",
+      "export const dynamic = 'force-dynamic'"
+    ],
+    "description": "LiTT Next.js Edge Page"
+  },
+  "API Route": {
+    "prefix": "litapi",
+    "body": [
+      "import { NextRequest, NextResponse } from 'next/server'",
+      "",
+      "export async function ${1:GET(request: NextRequest) {",
+      "  $0",
+      "  return NextResponse.json({})",
+      "}"
+    ],
+    "description": "LiTT API Route"
+  },
+  "Tailwind Styled Div": {
+    "prefix": "litdiv",
+    "body": [
+      "<div className=\"flex flex-col items-center justify-center $1\">",
+      "  $0",
+      "</div>"
+    ],
+    "description": "LiTT Flex Div"
+  },
+  "Zod Schema": {
+    "prefix": "litzod",
+    "body": [
+      "const ${1:schema} = z.object({",
+      "  $0",
+      "})"
+    ],
+    "description": "LiTT Zod Schema"
+  },
+  "React Hook": {
+    "prefix": "lithook",
+    "body": [
+      "import { useState, useEffect } from 'react'",
+      "",
+      "export function use${1:CustomHook}() {",
+      "  const [$2, set$2] = useState<$3>($0)",
+      "",
+      "  useEffect(() => {",
+      "    ",
+      "  }, [])",
+      "",
+      "  return [$2, set$2] as const",
+      "}"
+    ],
+    "description": "LiTT React Hook"
+  },
+  "Agent Command": {
+    "prefix": "litagent",
+    "body": [
+      "const ${1:command} = {",
+      "  id: \"${2:command-id}\",",
+      "  label: \"${3:Command Label}\",",
+      "  icon: ${4:Icon},",
+      "  description: \"${5:What this command does}\",",
+      "  execute: async (args: string[]) => {",
+      "    $0",
+      "  },",
+      "} as const;"
+    ],
+    "description": "LiTT Agent Command definition"
+  },
+  "Terminal Interaction": {
+    "prefix": "litterm",
+    "body": [
+      "const handleTerminal = useCallback((command: string) => {",
+      "  window.dispatchEvent(",
+      "    new CustomEvent(\"studio:open-terminal\", {",
+      "      detail: { command },",
+      "    }),",
+      "  );",
+      "}, []);",
+      "$0"
+    ],
+    "description": "LiTT Terminal dispatch pattern"
+  },
+  "Zustand Store": {
+    "prefix": "litstore",
+    "body": [
+      "\"use client\";",
+      "",
+      "import { create } from \"zustand\";",
+      "import { persist } from \"zustand/middleware\";",
+      "",
+      "interface ${1:Store}State {",
+      "  $2",
+      "}",
+      "",
+      "export const use${1:Store} = create<${1:Store}State>()(",
+      "  persist(",
+      "    (set, get) => ({",
+      "      $0",
+      "    }),",
+      "    {",
+      "      name: \"litt-${2:store}-v1\",",
+      "    },",
+      "  ),",
+      ");"
+    ],
+    "description": "LiTT Zustand Store with persistence"
+  },
+  "Accessible Button": {
+    "prefix": "litbtn",
+    "body": [
+      "<button",
+      "  type=\"button\"",
+      "  onClick={$1}",
+      "  className=\"grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10\"",
+      "  aria-label=\"$2\"",
+      ">",
+      "  <$3 size={16} className=\"pointer-events-none\" />",
+      "</button>$0"
+    ],
+    "description": "LiTT Accessible Icon Button (type=button, pointer-events-none, aria-label, 36px)"
+  },
+  "Accessible Toggle": {
+    "prefix": "littoggle",
+    "body": [
+      "<button",
+      "  type=\"button\"",
+      "  onClick={() => on$1(!$2)}",
+      "  className=\"relative h-6 w-11 rounded-full border transition-all\"",
+      "  style={{",
+      "    backgroundColor: $2 ? T.accentColor : \"rgba(255,255,255,0.08)\",",
+      "    borderColor: $2 ? T.accentColor : \"rgba(255,255,255,0.12)\",",
+      "  }}",
+      "  role=\"switch\"",
+      "  aria-checked={$2}",
+      "  aria-label=\"$3\"",
+      ">",
+      "  <span",
+      "    className=\"pointer-events-none absolute top-0.5 rounded-full bg-white transition-transform\"",
+      "    style={{",
+      "      height: 18,",
+      "      width: 18,",
+      "      transform: $2 ? \"translateX(20px)\" : \"translateX(2px)\",",
+      "    }}",
+      "  />",
+      "</button>$0"
+    ],
+    "description": "LiTT Accessible Toggle Switch"
+  },
+  "Safe Area Padding": {
+    "prefix": "litsafe",
+    "body": [
+      "paddingTop: \"max(8px, env(safe-area-inset-top))\",",
+      "paddingBottom: \"max(8px, env(safe-area-inset-bottom))\",$0"
+    ],
+    "description": "LiTT Safe-area inset padding for mobile"
+  },
+  "Studio Tool Route": {
+    "prefix": "litroute",
+    "body": [
+      "const handleRouteTool = useCallback(",
+      "  (tool: StudioTool, command?: string) => {",
+      "    if (tool === \"terminal\") {",
+      "      setTerminalOpen(true);",
+      "      if (command) setTerminalCommand(command);",
+      "      return;",
+      "    }",
+      "    onRouteTool(tool, command);",
+      "  },",
+      "  [onRouteTool],",
+      ");$0"
+    ],
+    "description": "LiTT Studio Tool routing pattern"
+  },
+  "Dynamic Import": {
+    "prefix": "litdynamic",
+    "body": [
+      "const ${1:Component} = dynamic(() => import(\"${2:./Component}\"), { ssr: false });$0"
+    ],
+    "description": "LiTT Dynamic import with SSR disabled"
+  }
+}

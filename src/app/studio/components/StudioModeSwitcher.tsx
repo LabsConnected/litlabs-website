@@ -89,6 +89,7 @@ export default function StudioModeSwitcher({
         return (
           <button
             key={m.id}
+            type="button"
             onClick={() => onChange(m.id)}
             className="flex items-center gap-1.5 rounded-xl px-2.5 py-1.5 text-[10px] font-black uppercase tracking-[0.15em] transition-all"
             style={{
@@ -99,7 +100,7 @@ export default function StudioModeSwitcher({
             title={m.desc}
             aria-label={`${m.label} mode`}
           >
-            <Icon size={11} />
+            <Icon size={11} className="pointer-events-none" />
             <span className="hidden sm:inline">{m.label}</span>
           </button>
         );

@@ -9,6 +9,9 @@ import {
   useRef,
   useState,
 } from "react";
+import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
+import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -34,6 +37,8 @@ export interface VoiceSessionCtx {
   selectedDeviceId: string | null;
   availableDevices: MediaDeviceInfo[];
   voiceMode: "live" | "recording" | null;
+  timing: VoiceTimingMetrics;
+  latencies: ReturnType<typeof computeLatencies>;
   // Actions
   startVoice: () => void;
   stopVoice: () => void;
@@ -99,6 +104,8 @@ const defaultCtx: VoiceSessionCtx = {
   selectedDeviceId: null,
   availableDevices: [],
   voiceMode: null,
+  timing: createInitialTimingMetrics(),
+  latencies: computeLatencies(createInitialTimingMetrics()),
   startVoice: noop,
   stopVoice: noop,
   toggleMute: noop,
@@ -139,6 +146,8 @@ export function VoiceSessionProvider({
     [],
   );
   const [voiceMode, setVoiceMode] = useState<"live" | "recording" | null>(null);
+  const voiceStore = useVoiceStore();
+  const setTiming = voiceStore.setTiming;
 
   // --- Refs ---
   const streamRef = useRef<MediaStream | null>(null);
@@ -306,6 +315,7 @@ export function VoiceSessionProvider({
     setTranscript("");
     setIsMuted(false);
     submittedTranscriptRef.current = "";
+    setTiming({ recordingStartedAt: Date.now() });
 
     // Always clean up before starting
     activeRef.current = false;
@@ -444,6 +454,7 @@ export function VoiceSessionProvider({
           }
           setVoiceState("processing");
           voiceStateRef.current = "processing";
+          setTiming({ recordingEndedAt: Date.now(), transcriptionStartedAt: Date.now() });
           try {
             const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
             const dataUrl = await blobToDataUrl(blob);
@@ -461,7 +472,9 @@ export function VoiceSessionProvider({
             }
             const spokenText = data.text.trim();
             setTranscript(spokenText);
+            setTiming({ transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
             onTurnRef.current(spokenText);
+            setTiming({ aiResponseCompletedAt: Date.now() });
             setVoiceState("idle");
             voiceStateRef.current = "idle";
             setVoiceMode(null);
@@ -538,8 +551,10 @@ export function VoiceSessionProvider({
               activeRef.current = false;
               setVoiceState("processing");
               voiceStateRef.current = "processing";
+              setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
               cleanup();
               onTurnRef.current(t);
+              setTiming({ aiResponseCompletedAt: Date.now() });
               setVoiceState("idle");
               voiceStateRef.current = "idle";
               setVoiceMode(null);
@@ -659,7 +674,10 @@ export function VoiceSessionProvider({
     (text: string) => {
       if (!text.trim()) return;
 
-      // Stop any current TTS first
+      const sanitized = sanitizeSpeech(text);
+      if (!sanitized) return;
+
+      // Stop any current TTS first (barge-in)
       stopSpeaking();
 
       // Pause recognition while speaking to avoid echo loops
@@ -673,8 +691,10 @@ export function VoiceSessionProvider({
 
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
+      setTiming({ ttsStartedAt: Date.now() });
 
       const onSpeechEnd = () => {
+        setTiming({ playbackEndedAt: Date.now() });
         if (activeRef.current) {
           setVoiceState("listening");
           voiceStateRef.current = "listening";
@@ -691,34 +711,23 @@ export function VoiceSessionProvider({
         }
       };
 
-      // Try API audio first
-      fetch("/api/media/generate-audio", {
+      // Try streaming TTS via /api/voice/speak (ElevenLabs)
+      fetch("/api/voice/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ prompt: text, voice: "Kore" }),
+        body: JSON.stringify({ text: sanitized, agentId: "litt" }),
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(`API ${res.status}`);
-          const data = (await res.json()) as {
-            audioBase64?: string;
-            audioUrl?: string;
-          };
+          setTiming({ ttsFirstByteAt: Date.now() });
 
-          let src = "";
-          if (data.audioBase64) {
-            src = data.audioBase64.startsWith("data:")
-              ? data.audioBase64
-              : `data:audio/mpeg;base64,${data.audioBase64}`;
-          } else if (data.audioUrl) {
-            src = data.audioUrl;
-          } else {
-            throw new Error("No audio data in response");
-          }
-
-          const audio = new Audio(src);
+          const audioBlob = await res.blob();
+          const audioUrl = URL.createObjectURL(audioBlob);
+          const audio = new Audio(audioUrl);
           currentAudioRef.current = audio;
 
           audio.onended = () => {
+            URL.revokeObjectURL(audioUrl);
             if (currentAudioRef.current === audio) {
               currentAudioRef.current = null;
             }
@@ -726,32 +735,84 @@ export function VoiceSessionProvider({
           };
 
           audio.onerror = () => {
+            URL.revokeObjectURL(audioUrl);
             console.warn(
               "[Voice] HTMLAudio error — falling back to speechSynthesis",
             );
             if (currentAudioRef.current === audio) {
               currentAudioRef.current = null;
             }
-            fallbackSynth(text, onSpeechEnd);
+            fallbackSynth(sanitized, onSpeechEnd);
           };
 
+          setTiming({ playbackStartedAt: Date.now() });
           try {
             await audio.play();
           } catch (err) {
             console.warn("[Voice] audio.play() blocked:", err);
-            fallbackSynth(text, onSpeechEnd);
+            fallbackSynth(sanitized, onSpeechEnd);
           }
         })
         .catch((err) => {
           console.warn(
-            "[Voice] generate-audio API failed:",
+            "[Voice] /api/voice/speak failed:",
             err,
-            "— falling back to speechSynthesis",
+            "— falling back to /api/media/generate-audio",
           );
-          fallbackSynth(text, onSpeechEnd);
+          // Fallback to old generate-audio endpoint
+          fetch("/api/media/generate-audio", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ prompt: sanitized, voice: "Kore" }),
+          })
+            .then(async (res2) => {
+              if (!res2.ok) throw new Error(`API ${res2.status}`);
+              const data = (await res2.json()) as {
+                audioBase64?: string;
+                audioUrl?: string;
+              };
+
+              let src = "";
+              if (data.audioBase64) {
+                src = data.audioBase64.startsWith("data:")
+                  ? data.audioBase64
+                  : `data:audio/mpeg;base64,${data.audioBase64}`;
+              } else if (data.audioUrl) {
+                src = data.audioUrl;
+              } else {
+                throw new Error("No audio data in response");
+              }
+
+              const audio = new Audio(src);
+              currentAudioRef.current = audio;
+              setTiming({ playbackStartedAt: Date.now() });
+
+              audio.onended = () => {
+                if (currentAudioRef.current === audio) {
+                  currentAudioRef.current = null;
+                }
+                onSpeechEnd();
+              };
+
+              audio.onerror = () => {
+                if (currentAudioRef.current === audio) {
+                  currentAudioRef.current = null;
+                }
+                fallbackSynth(sanitized, onSpeechEnd);
+              };
+
+              try {
+                await audio.play();
+              } catch {
+                fallbackSynth(sanitized, onSpeechEnd);
+              }
+            })
+            .catch(() => {
+              fallbackSynth(sanitized, onSpeechEnd);
+            });
         });
     },
-    [stopSpeaking, startMicLevelLoop],
+    [stopSpeaking, startMicLevelLoop, setTiming],
   );
 
   // ---------------------------------------------------------------------------
@@ -811,6 +872,11 @@ export function VoiceSessionProvider({
   // Context value
   // ---------------------------------------------------------------------------
 
+  const latencies = useMemo(
+    () => computeLatencies(voiceStore.timing),
+    [voiceStore.timing],
+  );
+
   const ctx = useMemo<VoiceSessionCtx>(
     () => ({
       voiceState,
@@ -821,6 +887,8 @@ export function VoiceSessionProvider({
       selectedDeviceId,
       availableDevices,
       voiceMode,
+      timing: voiceStore.timing,
+      latencies,
       startVoice,
       stopVoice,
       toggleMute,
@@ -839,6 +907,8 @@ export function VoiceSessionProvider({
       selectedDeviceId,
       availableDevices,
       voiceMode,
+      voiceStore.timing,
+      latencies,
       startVoice,
       stopVoice,
       toggleMute,

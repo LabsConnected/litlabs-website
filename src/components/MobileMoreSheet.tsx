@@ -3,60 +3,29 @@
 import { useEffect } from "react";
 import Link from "next/link";
 import {
-  Bot,
-  Coins,
-  FolderGit2,
-  FolderKanban,
-  Gamepad2,
-  Images,
-  Settings,
-  ShoppingBag,
-  User,
+  Image as Images,
   Users,
-  WandSparkles,
+  ShoppingBag,
+  Settings,
+  User,
   X,
+  Plug,
 } from "lucide-react";
+import { MOBILE_MORE_ITEMS } from "@/lib/navigation";
 
 type MobileMoreSheetProps = {
   open: boolean;
   onClose: () => void;
 };
 
-const GROUPS = [
-  {
-    label: "Create",
-    items: [
-      { label: "New project", href: "/projects?new=1", icon: FolderKanban },
-      { label: "Create agent", href: "/agents?create=1", icon: Bot },
-      { label: "Generate media", href: "/studio?intent=image", icon: WandSparkles },
-    ],
-  },
-  {
-    label: "Manage",
-    items: [
-      { label: "Projects", href: "/projects", icon: FolderKanban },
-      { label: "Agents", href: "/agents", icon: Bot },
-      { label: "Assets", href: "/gallery", icon: Images },
-      { label: "GitHub connections", href: "/settings?tab=workspace", icon: FolderGit2 },
-    ],
-  },
-  {
-    label: "Explore",
-    items: [
-      { label: "Social", href: "/social", icon: Users },
-      { label: "Games", href: "/games", icon: Gamepad2 },
-      { label: "Marketplace", href: "/marketplace", icon: ShoppingBag },
-    ],
-  },
-  {
-    label: "Account",
-    items: [
-      { label: "Profile", href: "/profile", icon: User },
-      { label: "Credits", href: "/wallet", icon: Coins },
-      { label: "Settings", href: "/settings", icon: Settings },
-    ],
-  },
-] as const;
+const ICON_MAP: Record<string, typeof Images> = {
+  Gallery: Images,
+  Social: Users,
+  Marketplace: ShoppingBag,
+  Settings: Settings,
+  Connections: Plug,
+  Account: User,
+};
 
 export default function MobileMoreSheet({ open, onClose }: MobileMoreSheetProps) {
   useEffect(() => {
@@ -88,27 +57,30 @@ export default function MobileMoreSheet({ open, onClose }: MobileMoreSheetProps)
         <div className="mb-5 flex items-center justify-between">
           <div>
             <h2 className="text-lg font-black text-white">More</h2>
-            <p className="text-[10px] text-white/40">Everything beyond your core workspace</p>
+            <p className="text-[10px] text-white/40">Gallery, social, settings and more</p>
           </div>
           <button onClick={onClose} className="grid h-9 w-9 place-items-center rounded-xl border border-white/10 text-white/55" aria-label="Close more menu">
             <X size={16} />
           </button>
         </div>
 
-        <div className="space-y-5">
-          {GROUPS.map((group) => (
-            <section key={group.label}>
-              <h3 className="mb-2 px-1 text-[9px] font-black uppercase tracking-[.2em] text-white/35">{group.label}</h3>
-              <div className="grid grid-cols-2 gap-2">
-                {group.items.map((item) => (
-                  <Link key={item.label} href={item.href} onClick={onClose} className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/8 bg-white/[.035] px-3 py-2.5 text-white/75 transition active:scale-[.98] active:bg-white/10">
-                    <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-400/10 text-violet-200"><item.icon size={15} /></span>
-                    <span className="text-[11px] font-bold leading-tight">{item.label}</span>
-                  </Link>
-                ))}
-              </div>
-            </section>
-          ))}
+        <div className="grid grid-cols-2 gap-2">
+          {MOBILE_MORE_ITEMS.map((item) => {
+            const Icon = ICON_MAP[item.label] || item.icon;
+            return (
+              <Link
+                key={item.label}
+                href={item.href}
+                onClick={onClose}
+                className="flex min-h-14 items-center gap-3 rounded-2xl border border-white/8 bg-white/[.035] px-3 py-2.5 text-white/75 transition active:scale-[.98] active:bg-white/10"
+              >
+                <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-violet-400/10 text-violet-200">
+                  <Icon size={15} />
+                </span>
+                <span className="text-[11px] font-bold leading-tight">{item.label}</span>
+              </Link>
+            );
+          })}
         </div>
       </section>
     </div>

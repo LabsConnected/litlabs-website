@@ -21,7 +21,7 @@ import {
 } from "lucide-react";
 
 function formatPrice(cents: number): string {
-  if (cents === 0) return "FREE";
+  if (cents === 0 || ALL_AGENTS_FREE_DURING_BETA) return "FREE";
   return `${cents.toLocaleString()} LBC`;
 }
 
@@ -51,127 +51,77 @@ function getCategoryColor(category: string): string {
   return colors[category] || "#fbbf24";
 }
 
-// TIER PACKAGES — Stripe price_id required for each (create in Stripe Dashboard)
-// All prices created in test mode: Starter($5), Pro($19.99), Elite($50)
-const TIER_PACKAGES: {
-  id: string;
-  coins: number;
-  price: number;
-  priceId: string;
-  label: string;
-  tier: string;
-  popular: boolean;
-  features: string[];
-}[] = [
-  {
-    id: "tier-free",
-    coins: 100,
-    price: 0,
-    priceId: "",
-    label: "Free",
-    tier: "free",
-    popular: false,
-    features: ["1 agent slot", "Basic tools", "Community support"],
-  },
-  {
-    id: "tier-starter",
-    coins: 500,
-    price: 5,
-    priceId: "price_1TogVaJ53kgx4fp5pclmzUZv",
-    label: "Starter",
-    tier: "starter",
-    popular: true,
-    features: [
-      "5 agent slots",
-      "All basic tools",
-      "Priority support",
-      "Daily bonus +50",
-    ],
-  },
-  {
-    id: "tier-pro",
-    coins: 1500,
-    price: 19.99,
-    priceId: "price_1TogZdJ53kgx4fp56g6bewkx",
-    label: "Pro",
-    tier: "pro",
-    popular: false,
-    features: [
-      "Unlimited agent slots",
-      "All premium tools",
-      "24/7 support",
-      "Daily bonus +200",
-      "Priority processing",
-    ],
-  },
-  {
-    id: "tier-elite",
-    coins: 5000,
-    price: 50,
-    priceId: "price_1TogWpJ53kgx4fp5D5qi1ld8",
-    label: "Elite",
-    tier: "elite",
-    popular: false,
-    features: [
-      "Unlimited agent slots",
-      "All tools + beta",
-      "Dedicated support",
-      "Daily bonus +1000",
-      "Highest priority",
-      "Early access",
-    ],
-  },
+const BETA_MODE = true;
+const BILLING_ENABLED = false;
+const MARKETPLACE_PURCHASES_ENABLED = false;
+const ALL_AGENTS_FREE_DURING_BETA = true;
+
+const BETA_BETA_FEATURES = [
+  "Full Studio access",
+  "LiTT and Spark",
+  "All beta specialists",
+  "Image, audio, code, and workflows",
+  "Beta LiTBits for testing",
+  "Feedback rewards",
 ];
 
-// SPEND COINS — interactive features with real coin deduction
-const SPEND_FEATURES: {
+const BETA_SPEND_FEATURES: {
   id: string;
   title: string;
   desc: string;
   cost: number;
   action: string;
+  free?: boolean;
 }[] = [
   {
     id: "generate",
-    title: "AI Generate",
-    desc: "Generate an image, music track, or video with AI",
-    cost: 50,
+    title: "Image Generation",
+    desc: "Generate an image with AI",
+    cost: 10,
     action: "Generate",
+  },
+  {
+    id: "audio",
+    title: "Audio Generation",
+    desc: "Generate a music track or voice clip",
+    cost: 15,
+    action: "Generate",
+  },
+  {
+    id: "video",
+    title: "Video Generation",
+    desc: "Generate a short video clip",
+    cost: 30,
+    action: "Generate",
+  },
+  {
+    id: "workflow",
+    title: "Workflow Run",
+    desc: "Execute a multi-agent orchestrated workflow",
+    cost: 20,
+    action: "Run",
   },
   {
     id: "slot",
     title: "Extra Agent Slot",
     desc: "Expand your dock to run +1 agent simultaneously",
-    cost: 200,
+    cost: 0,
+    action: "Unlock",
+    free: true,
+  },
+  {
+    id: "theme",
+    title: "Premium Theme",
+    desc: "Unlock an exclusive UI skin",
+    cost: 25,
     action: "Unlock",
   },
   {
     id: "boost",
     title: "Social Boost",
     desc: "Feature your post at the top of the social feed for 24h",
-    cost: 100,
+    cost: 20,
     action: "Boost",
-  },
-  {
-    id: "priority",
-    title: "Priority Mode",
-    desc: "Get faster agent responses and higher rate limits",
-    cost: 150,
-    action: "Activate",
-  },
-  {
-    id: "theme",
-    title: "Rare Theme",
-    desc: "Unlock an exclusive limited-edition UI skin",
-    cost: 300,
-    action: "Unlock",
-  },
-  {
-    id: "workflow",
-    title: "Workflow Run",
-    desc: "Execute a multi-agent orchestrated workflow",
-    cost: 75,
-    action: "Run",
   },
 ];
 
@@ -289,8 +239,8 @@ function MarketplaceInner() {
   const [sellModalAgent, setSellModalAgent] = useState<Agent | null>(null);
   const [sellPrice, setSellPrice] = useState("");
   const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<"agents" | "coins">(() =>
-    searchParams.get("tab") === "coins" ? "coins" : "agents",
+  const [activeTab, setActiveTab] = useState<"agents" | "beta">(() =>
+    searchParams.get("tab") === "beta" ? "beta" : "agents",
   );
   const [currentPlan, setCurrentPlan] = useState<string>("free");
 
@@ -420,40 +370,16 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
-  const buyPack = async (pack: (typeof TIER_PACKAGES)[0]) => {
+  const buyPack = async () => {
+    if (BETA_MODE || !MARKETPLACE_PURCHASES_ENABLED) {
+      showToast("Purchases are disabled during beta. All features are free!", "info");
+      return;
+    }
     if (!isSignedIn || !userId) {
       showToast("Please sign in to purchase.", "error");
       return;
     }
-    try {
-      const res = await fetch("/api/stripe/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          mode: "subscription",
-          priceId: pack.priceId || "",
-          priceData: {
-            amount: pack.price * 100,
-            currency: "usd",
-            name: `${pack.label} Membership`,
-            description: `${pack.features.slice(0, 2).join(", ")}`,
-          },
-          metadata: {
-            clerk_id: userId,
-            tier: pack.tier,
-            coin_amount: String(pack.coins),
-          },
-        }),
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.assign(data.url);
-      } else {
-        showToast(data.error || "Checkout failed. Try again.", "error");
-      }
-    } catch {
-      showToast("Network error during checkout.", "error");
-    }
+    showToast("Billing is not available during beta.", "info");
   };
 
   const [claimLoading, setClaimLoading] = useState(false);
@@ -549,10 +475,14 @@ function MarketplaceInner() {
       const agent = agents.find((a) => a.id === agentId);
       if (!agent) return;
 
-      if (agent.price_cents > 0) {
-        // Paid agents: redirect to Stripe checkout
+      if (agent.price_cents > 0 && !ALL_AGENTS_FREE_DURING_BETA) {
+        // Paid agents: redirect to Stripe checkout (disabled during beta)
         if (!isSignedIn || !userId) {
-          showToast("Please sign in to purchase this agent.", "error");
+          showToast("Please sign in to install this agent.", "error");
+          return;
+        }
+        if (!MARKETPLACE_PURCHASES_ENABLED) {
+          showToast("All agents are free during beta!", "info");
           return;
         }
         try {
@@ -562,7 +492,7 @@ function MarketplaceInner() {
             body: JSON.stringify({
               mode: "payment",
               priceData: {
-                amount: agent.price_cents * 100, // 1 LBC = $0.01 → price_cents * 100 = USD cents
+                amount: agent.price_cents * 100,
                 currency: "usd",
                 name: `${agent.name} — Agent License`,
                 description: `One-time purchase: ${agent.name} (${agent.price_cents} LBC)`,
@@ -684,7 +614,7 @@ function MarketplaceInner() {
     <div
       className="marketplace-page flex min-h-screen flex-col"
       style={{
-        backgroundColor: T.bgColor,
+        backgroundColor: T.bgColor + "d0",
         color: T.textColor,
         position: "relative",
       }}
@@ -885,9 +815,8 @@ function MarketplaceInner() {
                   lineHeight: 1.6,
                 }}
               >
-                Discover, install, and deploy AI agents to your workspace. Free
-                agents install instantly, pro agents unlock with your tier, and
-                premium listings are priced in LiTBit Coins.
+                All agents are free during beta. Install any specialist instantly —
+                no purchases, no credits required. Your feedback shapes what we build next.
               </p>
               <div
                 style={{
@@ -1001,7 +930,7 @@ function MarketplaceInner() {
                   Open in Studio <ArrowRight size={15} />
                 </Link>
                 <button
-                  onClick={() => setActiveTab("coins")}
+                  onClick={() => setActiveTab("beta")}
                   style={{
                     padding: "12px 18px",
                     backgroundColor: "rgba(255,215,0,0.08)",
@@ -1013,7 +942,7 @@ function MarketplaceInner() {
                     borderRadius: "10px",
                   }}
                 >
-                  View Coin Packs
+                  Beta Access
                 </button>
               </div>
             </div>
@@ -1130,19 +1059,19 @@ function MarketplaceInner() {
               </span>
             </button>
             <button
-              onClick={() => setActiveTab("coins")}
+              onClick={() => setActiveTab("beta")}
               style={{
                 padding: "12px 32px",
                 fontSize: "14px",
                 fontWeight: "bold",
                 border:
                   "2px solid " +
-                  (activeTab === "coins" ? "gold" : T.borderColor),
+                  (activeTab === "beta" ? "gold" : T.borderColor),
                 backgroundColor:
-                  activeTab === "coins"
+                  activeTab === "beta"
                     ? "rgba(255,215,0,0.15)"
                     : "transparent",
-                color: activeTab === "coins" ? "gold" : T.textColor,
+                color: activeTab === "beta" ? "gold" : T.textColor,
                 borderRadius: "8px 8px 0 0",
                 cursor: "pointer",
                 display: "flex",
@@ -1150,7 +1079,7 @@ function MarketplaceInner() {
                 gap: "8px",
               }}
             >
-              <span>🪙</span> LiTBit Coins
+              <span>�</span> Beta Access
             </button>
           </div>
         </div>
@@ -1457,440 +1386,241 @@ function MarketplaceInner() {
         </div>
       )}
 
-      {activeTab === "coins" && (
+      {activeTab === "beta" && (
         <div
           className="flex-1"
           style={{
             padding: "24px",
-            maxWidth: "1200px",
+            maxWidth: "900px",
             margin: "0 auto",
             width: "100%",
           }}
         >
-          {/* MEMBERSHIP TIERS */}
-          <div style={{ marginBottom: "32px" }}>
-            <div
-              style={{
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "center",
-                marginBottom: "20px",
-                flexWrap: "wrap",
-                gap: "16px",
-              }}
-            >
+          {/* BETA STATUS BANNER */}
+          <div
+            style={{
+              borderRadius: "16px",
+              border: "1px solid rgba(255,215,0,0.3)",
+              background: "linear-gradient(135deg, rgba(255,215,0,0.08), rgba(168,85,247,0.06))",
+              padding: "24px",
+              marginBottom: "24px",
+            }}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
+              <span style={{ fontSize: "28px" }}>🧪</span>
               <div>
-                <div
-                  style={{
-                    color: "gold",
-                    fontSize: "14px",
-                    letterSpacing: "2px",
-                    marginBottom: "4px",
-                    fontWeight: "bold",
-                  }}
-                >
-                  ⭐ CHOOSE YOUR TIER
+                <div style={{ color: "gold", fontSize: "18px", fontWeight: "bold" }}>
+                  Public Beta
                 </div>
-                <p
-                  style={{ color: T.textColor, fontSize: "12px", opacity: 0.7 }}
-                >
-                  Unlock features and capabilities based on your membership
-                  level.
-                  <strong style={{ color: T.accentColor }}>
-                    Free forever, upgrade anytime.
-                  </strong>
-                </p>
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  onClick={earnCoins}
-                  disabled={claimLoading}
-                  style={{
-                    padding: "10px 18px",
-                    backgroundColor: `${T.accentColor}20`,
-                    border: `2px solid ${T.accentColor}`,
-                    color: T.accentColor,
-                    fontSize: "12px",
-                    cursor: claimLoading ? "not-allowed" : "pointer",
-                    fontWeight: "bold",
-                    borderRadius: "6px",
-                    opacity: claimLoading ? 0.6 : 1,
-                  }}
-                >
-                  {claimLoading ? "⏳ Claiming..." : "⚡ Claim Daily Bonus"}
-                </button>
+                <div style={{ color: T.textColor, fontSize: "12px", opacity: 0.7 }}>
+                  All agents and features are free during beta. No real purchases.
+                </div>
               </div>
             </div>
+            <p style={{ color: T.textColor, fontSize: "13px", lineHeight: 1.6, opacity: 0.8 }}>
+              Welcome to LiTTree Lab Studios Beta. Every specialist agent is available for free
+              while we test and improve the platform. Your feedback shapes what we build next.
+            </p>
+          </div>
 
+          {/* BETA PLAN CARD */}
+          <div
+            style={{
+              borderRadius: "16px",
+              border: `2px solid ${T.accentColor}`,
+              background: T.boxBg,
+              padding: "28px",
+              marginBottom: "24px",
+              textAlign: "center",
+            }}
+          >
+            <div style={{ color: T.accentColor, fontSize: "12px", fontWeight: "bold", letterSpacing: "2px", marginBottom: "8px" }}>
+              BETA PLAN
+            </div>
+            <div style={{ color: T.headerColor, fontSize: "32px", fontWeight: "bold", marginBottom: "4px" }}>
+              Free
+            </div>
+            <div style={{ color: T.textMuted, fontSize: "12px", marginBottom: "20px" }}>
+              Everything unlocked · No credit card needed
+            </div>
             <div
-              className="marketplace-tier-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "16px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
+                gap: "8px",
+                textAlign: "left",
+                maxWidth: "500px",
+                margin: "0 auto",
               }}
             >
-              {TIER_PACKAGES.filter((t) => t.tier !== "free").map((tier) => {
-                const isCurrent = currentPlan === tier.tier;
-                const missingPrice = !tier.priceId && tier.price > 0;
-                return (
-                  <div
-                    key={tier.id}
-                    className="marketplace-tier-card"
-                    style={{
-                      position: "relative",
-                      padding: "24px 20px",
-                      border: `2px solid ${isCurrent ? "#22d3ee" : tier.popular ? "gold" : T.borderColor}`,
-                      backgroundColor: isCurrent
-                        ? "rgba(34,211,238,0.10)"
-                        : tier.popular
-                          ? "rgba(255,215,0,0.12)"
-                          : T.boxBg,
-                      textAlign: "center",
-                      borderRadius: "12px",
-                      transition: "all 0.2s",
-                      boxShadow: isCurrent
-                        ? "0 8px 32px rgba(34,211,238,0.15)"
-                        : tier.popular
-                          ? "0 8px 32px rgba(255,215,0,0.15)"
-                          : "none",
-                    }}
-                  >
-                    {isCurrent && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "-12px",
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          backgroundColor: "#22d3ee",
-                          color: "black",
-                          padding: "4px 16px",
-                          fontSize: "11px",
-                          fontWeight: "bold",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        ✓ CURRENT PLAN
-                      </div>
-                    )}
-                    {tier.popular && (
-                      <div
-                        style={{
-                          position: "absolute",
-                          top: "-12px",
-                          left: "50%",
-                          transform: "translateX(-50%)",
-                          backgroundColor: "gold",
-                          color: "black",
-                          padding: "4px 16px",
-                          fontSize: "11px",
-                          fontWeight: "bold",
-                          borderRadius: "4px",
-                        }}
-                      >
-                        ⭐ BEST VALUE
-                      </div>
-                    )}
-                    <div
-                      style={{
-                        fontSize: "12px",
-                        color: T.textColor,
-                        opacity: 0.6,
-                        marginBottom: "8px",
-                        textTransform: "uppercase",
-                        letterSpacing: "1px",
-                      }}
-                    >
-                      {tier.label}
-                    </div>
-                    <div
-                      className="marketplace-price"
-                      style={{
-                        color: tier.popular ? "gold" : T.headerColor,
-                        fontSize: "34px",
-                        fontWeight: "bold",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      {formatUsdPrice(tier.price)}
-                    </div>
-                    <div
-                      style={{
-                        color: T.textColor,
-                        fontSize: "12px",
-                        marginBottom: "12px",
-                        opacity: 0.8,
-                      }}
-                    >
-                      {formatLbc(tier.coins)} included
-                    </div>
-                    <div
-                      style={{
-                        color: T.textColor,
-                        fontSize: "11px",
-                        opacity: 0.6,
-                        marginBottom: "16px",
-                        lineHeight: 1.5,
-                        minHeight: "50px",
-                      }}
-                    >
-                      {tier.features.slice(0, 3).join(" • ")}
-                    </div>
-                    {missingPrice && (
-                      <div
-                        style={{
-                          color: "#ff6b6b",
-                          fontSize: "10px",
-                          marginBottom: "8px",
-                        }}
-                      >
-                        ⚠ Stripe price ID missing — update in code/env
-                      </div>
-                    )}
-                    <button
-                      onClick={() =>
-                        !isCurrent && !missingPrice && buyPack(tier)
-                      }
-                      disabled={isCurrent || missingPrice}
-                      style={{
-                        width: "100%",
-                        padding: "12px",
-                        backgroundColor: isCurrent
-                          ? "#22d3ee"
-                          : missingPrice
-                            ? "#444"
-                            : tier.popular
-                              ? "gold"
-                              : T.linkColor,
-                        color: isCurrent
-                          ? "black"
-                          : tier.popular
-                            ? "black"
-                            : "white",
-                        border: "none",
-                        fontWeight: "bold",
-                        fontSize: "13px",
-                        cursor:
-                          isCurrent || missingPrice ? "not-allowed" : "pointer",
-                        borderRadius: "6px",
-                        opacity: isCurrent || missingPrice ? 0.7 : 1,
-                      }}
-                    >
-                      {isCurrent
-                        ? "Current Plan"
-                        : missingPrice
-                          ? "Not Configured"
-                          : tier.popular
-                            ? "⚡ Get Best Value"
-                            : "Get " + tier.label}
-                    </button>
-                  </div>
-                );
-              })}
+              {BETA_BETA_FEATURES.map((feat) => (
+                <div
+                  key={feat}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: "8px",
+                    color: T.textColor,
+                    fontSize: "12px",
+                  }}
+                >
+                  <Check size={14} style={{ color: T.accentColor, flexShrink: 0 }} />
+                  {feat}
+                </div>
+              ))}
             </div>
           </div>
 
-          {/* SPEND COINS */}
+          {/* BETA LiTBits BALANCE & REFILL */}
           <div
             style={{
-              borderTop: "2px solid " + T.borderColor,
-              paddingTop: "32px",
-              marginBottom: "32px",
+              borderRadius: "16px",
+              border: `1px solid ${T.borderColor}`,
+              background: T.boxBg,
+              padding: "20px",
+              marginBottom: "24px",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "space-between",
+              flexWrap: "wrap",
+              gap: "16px",
             }}
           >
-            <div
+            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+              <Coins size={28} style={{ color: T.accentColor }} />
+              <div>
+                <div style={{ color: T.headerColor, fontSize: "16px", fontWeight: "bold" }}>
+                  {litBitCoins.toLocaleString()} Beta LiTBits
+                </div>
+                <div style={{ color: T.textMuted, fontSize: "11px" }}>
+                  Testing credits — not real currency. Refill daily for free.
+                </div>
+              </div>
+            </div>
+            <button
+              onClick={earnCoins}
+              disabled={claimLoading}
               style={{
+                padding: "10px 20px",
+                backgroundColor: `${T.accentColor}20`,
+                border: `2px solid ${T.accentColor}`,
                 color: T.accentColor,
-                fontSize: "14px",
-                letterSpacing: "2px",
-                marginBottom: "20px",
+                fontSize: "13px",
+                cursor: claimLoading ? "not-allowed" : "pointer",
                 fontWeight: "bold",
+                borderRadius: "8px",
+                opacity: claimLoading ? 0.6 : 1,
               }}
             >
-              💎 SPEND YOUR COINS
+              {claimLoading ? "⏳ Refilling..." : "⚡ Daily Beta Refill"}
+            </button>
+          </div>
+
+          {/* BETA SPEND FEATURES */}
+          <div style={{ marginBottom: "24px" }}>
+            <div
+              style={{
+                color: T.textColor,
+                fontSize: "13px",
+                fontWeight: "bold",
+                marginBottom: "16px",
+                opacity: 0.8,
+              }}
+            >
+              🎮 WHAT YOU CAN DO WITH BETA LiTBits
             </div>
             <div
               className="marketplace-spend-grid"
               style={{
                 display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "16px",
+                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                gap: "12px",
               }}
             >
-              {SPEND_FEATURES.map((feat) => (
+              {BETA_SPEND_FEATURES.map((feat) => (
                 <div
                   key={feat.id}
                   className="marketplace-spend-card"
                   style={{
-                    padding: "20px",
-                    border: "1px solid " + T.borderColor,
+                    padding: "16px",
+                    border: `1px solid ${T.borderColor}`,
+                    borderRadius: "12px",
                     backgroundColor: T.boxBg,
-                    borderRadius: "10px",
                   }}
                 >
-                  <div
-                    style={{
-                      fontSize: "11px",
-                      fontWeight: "bold",
-                      color: T.accentColor,
-                      marginBottom: "8px",
-                      letterSpacing: "1px",
-                    }}
-                  >
-                    {feat.title.toUpperCase()}
-                  </div>
-                  <div
-                    style={{
-                      color: T.headerColor,
-                      fontSize: "14px",
-                      fontWeight: "bold",
-                      marginBottom: "4px",
-                    }}
-                  >
-                    {feat.title}
-                  </div>
-                  <div
-                    style={{
-                      color: T.textColor,
-                      fontSize: "11px",
-                      opacity: 0.7,
-                      lineHeight: 1.5,
-                      marginBottom: "12px",
-                      minHeight: "50px",
-                    }}
-                  >
-                    {feat.desc}
-                  </div>
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      paddingTop: "12px",
-                      borderTop: "1px solid " + T.borderColor,
-                    }}
-                  >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ color: T.headerColor, fontSize: "14px", fontWeight: "bold" }}>
+                      {feat.title}
+                    </span>
                     <span
                       style={{
-                        color: "gold",
-                        fontSize: "16px",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      {formatLbc(feat.cost)}
-                    </span>
-                    <button
-                      onClick={async () => {
-                        if (litBitCoins < feat.cost) {
-                          showToast(
-                            `Need ${formatLbc(feat.cost)}. You have ${formatLbc(litBitCoins)}`,
-                            "error",
-                          );
-                          return;
-                        }
-                        const newBal = await spendWallet(
-                          feat.cost,
-                          `marketplace_feature:${feat.title}`,
-                        );
-                        if (newBal === null) {
-                          showToast(
-                            "Transaction failed. Could not deduct coins.",
-                            "error",
-                          );
-                          return;
-                        }
-                        showToast(
-                          `${feat.action} ${feat.title}. -${formatLbc(feat.cost)}. Balance: ${formatLbc(newBal)}`,
-                          "success",
-                        );
-                      }}
-                      style={{
-                        padding: "8px 16px",
-                        backgroundColor: T.linkColor,
-                        color: "white",
-                        border: "none",
+                        color: feat.free ? T.accentColor : "gold",
                         fontSize: "12px",
                         fontWeight: "bold",
-                        cursor: "pointer",
-                        borderRadius: "6px",
+                        padding: "2px 8px",
+                        borderRadius: "4px",
+                        backgroundColor: feat.free ? `${T.accentColor}20` : "rgba(255,215,0,0.1)",
                       }}
                     >
-                      {feat.action}
-                    </button>
+                      {feat.free ? "FREE" : `${feat.cost} LBC`}
+                    </span>
                   </div>
+                  <p style={{ color: T.textColor, fontSize: "11px", opacity: 0.7, lineHeight: 1.5 }}>
+                    {feat.desc}
+                  </p>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* PRICING EXAMPLES */}
+          {/* FEEDBACK SECTION */}
           <div
             style={{
-              borderTop: "2px solid " + T.borderColor,
-              paddingTop: "24px",
+              borderRadius: "16px",
+              border: `1px solid ${T.borderColor}`,
+              background: T.boxBg,
+              padding: "20px",
+              textAlign: "center",
             }}
           >
-            <div
-              style={{
-                color: T.textColor,
-                fontSize: "12px",
-                letterSpacing: "1px",
-                marginBottom: "16px",
-                fontWeight: "bold",
-                opacity: 0.8,
-              }}
-            >
-              📊 WHAT CAN YOU BUY?
+            <div style={{ color: T.headerColor, fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>
+              💬 Beta Feedback
             </div>
-            <div
-              className="marketplace-buy-grid"
-              style={{ display: "flex", flexWrap: "wrap", gap: "12px" }}
-            >
-              {[
-                { name: "Support Agent", cost: 50, color: T.accentColor },
-                { name: "Writing Coach", cost: 75, color: T.headerColor },
-                { name: "Research Guru", cost: 100, color: "#60a5fa" },
-                { name: "Social Dominator", cost: 250, color: "#34d399" },
-                { name: "Data Slayer", cost: 300, color: "#a78bfa" },
-                { name: "Pixel Forge", cost: 200, color: "#ec4899" },
-                { name: "Music Producer", cost: 400, color: "#22d3ee" },
-                { name: "Legal Shield", cost: 1000, color: "#ff6b35" },
-                { name: "Security Guru", cost: 1200, color: "#f87171" },
-                { name: "ML Engineer", cost: 1500, color: "#fbbf24" },
-              ].map((item) => (
-                <div
-                  key={item.name}
-                  className="marketplace-buy-chip"
-                  style={{
-                    padding: "10px 16px",
-                    border: "1px solid " + T.borderColor,
-                    borderRadius: "6px",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span
-                    style={{
-                      color: item.color,
-                      fontWeight: "bold",
-                      fontSize: "13px",
-                    }}
-                  >
-                    {item.name}
-                  </span>
-                  <span
-                    style={{
-                      color: "gold",
-                      fontSize: "12px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {formatLbc(item.cost)}
-                  </span>
-                </div>
-              ))}
+            <p style={{ color: T.textMuted, fontSize: "12px", marginBottom: "16px" }}>
+              Found a bug? Have a feature request? Let us know — beta feedback earns bonus LiTBits.
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
+              <Link
+                href="/studio?tool=chat"
+                style={{
+                  padding: "10px 20px",
+                  backgroundColor: T.accentColor,
+                  color: "#000",
+                  textDecoration: "none",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                  borderRadius: "8px",
+                  display: "inline-flex",
+                  alignItems: "center",
+                  gap: "8px",
+                }}
+              >
+                <Sparkles size={14} /> Report via LiTT
+              </Link>
+              <a
+                href="mailto:beta@litlabs.net"
+                style={{
+                  padding: "10px 20px",
+                  border: `1px solid ${T.borderColor}`,
+                  color: T.textColor,
+                  textDecoration: "none",
+                  fontSize: "13px",
+                  fontWeight: "bold",
+                  borderRadius: "8px",
+                }}
+              >
+                Email Feedback
+              </a>
             </div>
           </div>
         </div>
@@ -2107,7 +1837,7 @@ function MarketplaceInner() {
                       fontWeight: "bold",
                     }}
                   >
-                    {previewAgent.price_cents === 0
+                    {previewAgent.price_cents === 0 || ALL_AGENTS_FREE_DURING_BETA
                       ? "🚀 Install Free"
                       : "🪙 Buy — " + formatPrice(previewAgent.price_cents)}
                   </button>

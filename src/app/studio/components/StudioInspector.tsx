@@ -167,6 +167,7 @@ function ImageInspector({
             (a) => (
               <button
                 key={a}
+                type="button"
                 className="py-1.5 px-2 rounded-lg text-[10px] font-bold transition-all hover:bg-white/8 text-left"
                 style={{
                   background: "rgba(255,255,255,0.04)",
@@ -438,6 +439,7 @@ function SystemPanel({
         ].map(({ icon: Icon, label }) => (
           <button
             key={label}
+            type="button"
             className="w-full flex items-center gap-2 py-1.5 px-2 rounded-lg hover:bg-white/5 transition-colors border-b border-white/5 last:border-0"
             style={{ color: "rgba(255,255,255,0.6)" }}
           >
@@ -641,8 +643,9 @@ export default function StudioInspector({
         </div>
         {onClose && (
           <button
+            type="button"
             onClick={onClose}
-            className="rounded-md p-1.5 hover:bg-white/10"
+            className="grid h-7 w-7 place-items-center rounded-md hover:bg-white/10"
             style={{ color: "rgba(255,255,255,0.4)" }}
             aria-label="Close inspector"
           >
@@ -662,6 +665,7 @@ export default function StudioInspector({
           return (
             <button
               key={t.id}
+              type="button"
               onClick={() => setTab(t.id)}
               className="flex-1 flex items-center justify-center gap-1 py-2.5 text-[10px] font-bold uppercase tracking-wider transition-all"
               style={{
@@ -722,6 +726,7 @@ export default function StudioInspector({
                   </span>
                 </div>
                 <button
+                  type="button"
                   className="text-[9px] font-bold hover:underline"
                   style={{ color: T.accentColor }}
                 >

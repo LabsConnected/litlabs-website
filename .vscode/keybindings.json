@@ -1,0 +1,134 @@
+/* God Mode Productivity Keybindings — Lightning Fast Editing */
+[
+  /* === NAVIGATION SPEED BOOSTS === */
+  {
+    "key": "ctrl+space",
+    "command": "editor.action.triggerSuggest",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "ctrl+shift+space",
+    "command": "editor.action.parameterHints",
+    "when": "editorTextFocus"
+  },
+
+  /* === QUICK FIX SUPREME === */
+  {
+    "key": "ctrl+.",
+    "command": "editor.action.quickFix",
+    "when": "editorHasCodeActionsProvider && editorTextFocus && !editorReadonly"
+  },
+  {
+    "key": "ctrl+shift+.",
+    "command": "editor.action.codeAction",
+    "when": "editorHasCodeActionsProvider && editorTextFocus"
+  },
+
+  /* === BOOM LANDMARK NAVIGATION === */
+  {
+    "key": "ctrl+alt+up",
+    "command": "editor.action.smartSelect.grow",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "ctrl+alt+down",
+    "command": "editor.action.smartSelect.shrink",
+    "when": "editorTextFocus"
+  },
+
+  /* === ONE-CLICK CODE MODIFICATIONS === */
+  {
+    "key": "alt+enter",
+    "command": "editor.action.insertLineAfter",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "alt+shift+enter",
+    "command": "editor.action.insertLineBefore",
+    "when": "editorTextFocus"
+  },
+
+  /* === DUPLICATE LIKE A DEMON === */
+  {
+    "key": "alt+d",
+    "command": "editor.action.copyLinesDownAction",
+    "when": "editorTextFocus && !editorReadonly"
+  },
+  {
+    "key": "alt+shift+d",
+    "command": "editor.action.copyLinesUpAction",
+    "when": "editorTextFocus && !editorReadonly"
+  },
+
+  /* === MULTI-CURSOR CHAOS === */
+  {
+    "key": "ctrl+alt+down",
+    "command": "editor.action.insertCursorBelow",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "ctrl+alt+up",
+    "command": "editor.action.insertCursorAbove",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "ctrl+shift+l",
+    "command": "editor.action.selectLine",
+    "when": "editorTextFocus"
+  },
+
+  /* === CHAOS CONTROL === */
+  {
+    "key": "ctrl+k ctrl+0",
+    "command": "editor.foldAllMarkerRegions",
+    "when": "editorTextFocus"
+  },
+  {
+    "key": "ctrl+k ctrl+j",
+    "command": "editor.unfoldAllMarkerRegions",
+    "when": "editorTextFocus"
+  },
+
+  /* === TERMINAL SLASH COMMANDS FAST-ACCESS === */
+  {
+    "key": "ctrl+; f",
+    "command": "workbench.action.terminal.focus",
+    "when": "terminalFocus"
+  },
+  {
+    "key": "ctrl+; k",
+    "command": "workbench.action.terminal.kill",
+    "when": "terminalFocus"
+  },
+  {
+    "key": "ctrl+; c",
+    "command": "workbench.action.terminal.clear",
+    "when": "terminalFocus"
+  },
+
+  /* === FILE NAVIGATION GOD MODE === */
+  {
+    "key": "ctrl+p",
+    "command": "workbench.action.quickOpen"
+  },
+  {
+    "key": "ctrl+shift+p",
+    "command": "workbench.action.quickOpenPreviousEditor"
+  },
+  {
+    "key": "ctrl+tab",
+    "command": "workbench.action.quickOpenPreviousEditorInGroup"
+  },
+
+  /* === REFACTORING SPEED DIALS === */
+  {
+    "key": "f2",
+    "command": "editor.action.rename",
+    "when": "editorTextFocus && !isComposing"
+  },
+  {
+    "key": "ctrl+shift+r",
+    "command": "editor.action.refactor",
+    "when": "editorHasCodeActionsProvider && editorTextFocus"
+  }
+]

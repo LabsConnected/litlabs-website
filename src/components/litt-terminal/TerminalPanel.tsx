@@ -12,8 +12,11 @@ import { FitAddon } from "@xterm/addon-fit";
 import { io, Socket } from "socket.io-client";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { getTerminalToken } from "@/lib/terminal-client";
-import { Maximize2, Minimize2, Plug, RotateCcw, Trash2 } from "lucide-react";
+import { useTerminalStore } from "@/stores/useTerminalStore";
+import { Maximize2, Minimize2, Plug, RotateCcw, Trash2, AlertCircle } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
+
+const HEARTBEAT_INTERVAL_MS = 10_000;
 
 interface TerminalPanelProps {
   onLog?: (entry: string) => void;
@@ -44,6 +47,8 @@ export const TerminalPanel = forwardRef<
   const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string } | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
   const { isLoaded, isSignedIn } = useClerkAuth();
+  const terminalStore = useTerminalStore();
+  const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
@@ -113,22 +118,45 @@ export const TerminalPanel = forwardRef<
 
         connectedSocket.on("connect", () => {
           setConnected(true);
+          terminalStore.setStatus("connecting");
           onConnectionChange?.(true);
           term.writeln("\x1b[32m✅ Connected to terminal server\x1b[0m");
           onLog?.("[WS] Connected to terminal server");
+
+          // Start heartbeat
+          if (heartbeatRef.current) clearInterval(heartbeatRef.current);
+          heartbeatRef.current = setInterval(() => {
+            if (connectedSocket.connected) {
+              terminalStore.setHeartbeat(new Date().toISOString());
+            }
+          }, HEARTBEAT_INTERVAL_MS);
         });
 
         connectedSocket.on("disconnect", (reason) => {
           setConnected(false);
+          terminalStore.setStatus("disconnected");
+          terminalStore.setSession(null);
           onConnectionChange?.(false);
           term.writeln(`\x1b[31m❌ Disconnected: ${reason}\x1b[0m`);
           onLog?.(`[WS] Disconnected: ${reason}`);
+          if (heartbeatRef.current) {
+            clearInterval(heartbeatRef.current);
+            heartbeatRef.current = null;
+          }
         });
 
         connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell" }) => {
           setSessionInfo({ sessionId: sid, cwd, shell });
+          terminalStore.setSession(sid, cwd);
+          terminalStore.setStatus("connected");
+          terminalStore.setHeartbeat(new Date().toISOString());
           term.writeln(`\x1b[36mℹ Session ready: ${sid.slice(0, 8)}...\x1b[0m`);
           onLog?.(`[SESSION] Ready ${sid.slice(0, 8)}...`);
+        });
+
+        connectedSocket.on("connect_error", (err: Error) => {
+          terminalStore.setError(err.message);
+          onLog?.(`[WS] Connect error: ${err.message}`);
         });
 
         connectedSocket.on("terminal:output", (data: string) => {
@@ -183,9 +211,16 @@ export const TerminalPanel = forwardRef<
     return () => {
       disposed = true;
       window.removeEventListener("resize", resize);
+      if (heartbeatRef.current) {
+        clearInterval(heartbeatRef.current);
+        heartbeatRef.current = null;
+      }
       socketRef.current?.disconnect();
       term.dispose();
+      terminalStore.setStatus("disconnected");
+      terminalStore.setSession(null);
     };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     isLoaded,
     isSignedIn,
@@ -226,11 +261,24 @@ export const TerminalPanel = forwardRef<
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="min-w-0 text-sm">
-          <span
-            className={`inline-flex items-center gap-1.5 rounded px-2 py-1 text-[10px] font-bold ${connected ? "bg-green-500/20 text-green-400" : "bg-amber-500/15 text-amber-300"}`}
-          >
-            <Plug size={10} /> {connected ? "Real PTY connected" : "Real PTY disconnected"}
-          </span>
+          {terminalStore.status === "error" ? (
+            <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+              <AlertCircle size={10} /> PTY connection failed
+              {terminalStore.error && <span className="ml-1 truncate text-[9px] text-red-300/70">{terminalStore.error}</span>}
+            </span>
+          ) : terminalStore.status === "connecting" ? (
+            <span className="inline-flex items-center gap-1.5 rounded bg-blue-500/20 px-2 py-1 text-[10px] font-bold text-blue-400">
+              <Plug size={10} className="animate-pulse" /> Connecting to PTY…
+            </span>
+          ) : connected ? (
+            <span className="inline-flex items-center gap-1.5 rounded bg-green-500/20 px-2 py-1 text-[10px] font-bold text-green-400">
+              <Plug size={10} /> Real PTY connected
+            </span>
+          ) : (
+            <span className="inline-flex items-center gap-1.5 rounded bg-amber-500/15 px-2 py-1 text-[10px] font-bold text-amber-300">
+              <Plug size={10} /> Real PTY disconnected
+            </span>
+          )}
           {connected && sessionInfo && <div className="mt-1 truncate text-[9px] text-neutral-500">Workspace: {sessionInfo.cwd} · Shell: {sessionInfo.shell}</div>}
         </div>
 

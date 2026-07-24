@@ -28,6 +28,7 @@ import {
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
 import type { StudioTool } from "./StudioSidebar";
+import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
 
 export type ComposerMode = "text" | "camera";
 
@@ -38,6 +39,7 @@ interface MultimodalComposerProps {
   busy?: boolean;
   modelName?: string;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
+  activeAgentId?: AgentId;
 }
 
 const COMMANDS: { command: string; description: string; tool: StudioTool }[] = [
@@ -66,7 +68,7 @@ const STATUS_LABELS: Record<VoiceState, string> = {
   listening: "Listening",
   user_speaking: "You're speaking…",
   processing: "Processing…",
-  assistant_speaking: "LiTT speaking",
+  assistant_speaking: "Agent speaking",
   muted: "Muted",
   error: "",
 };
@@ -100,7 +102,9 @@ export default function MultimodalComposer({
   busy,
   modelName = "Gemini 2.5 Flash",
   onRouteTool,
+  activeAgentId = "litt",
 }: MultimodalComposerProps) {
+  const agentMeta = AGENT_META[activeAgentId];
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
@@ -530,11 +534,13 @@ export default function MultimodalComposer({
             { label: "Image", tool: "image" as StudioTool, icon: ImageIcon, color: "text-cyan-300" },
             { label: "Video", tool: "video" as StudioTool, icon: Clapperboard, color: "text-violet-300" },
             { label: "Audio", tool: "audio" as StudioTool, icon: Music2, color: "text-fuchsia-300" },
+            { label: "Code", tool: "code" as StudioTool, icon: Hammer, color: "text-orange-300" },
             { label: "Build", tool: "build" as StudioTool, icon: Hammer, color: "text-orange-300" },
-            { label: "Agent", tool: "agents" as StudioTool, icon: Bot, color: "text-emerald-300" },
+            { label: "Agents", tool: "agents" as StudioTool, icon: Bot, color: "text-emerald-300" },
             { label: "Terminal", tool: "terminal" as StudioTool, icon: TerminalIcon, color: "text-emerald-300" },
             { label: "Camera", tool: "camera" as StudioTool, icon: Camera, color: "text-cyan-300" },
             { label: "Screen", tool: "screen" as StudioTool, icon: MonitorUp, color: "text-blue-300" },
+            { label: "Plugins", tool: "plugins" as StudioTool, icon: Sparkles, color: "text-violet-300" },
           ].map((item) => (
             <button
               key={item.label}
@@ -580,12 +586,13 @@ export default function MultimodalComposer({
       {/* Input row */}
       <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/4 px-2.5 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
         <button
+          type="button"
           onClick={() => setShowAdd((value) => !value)}
           className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
           aria-label={showAdd ? "Close tools" : "Add tool or attachment"}
           title="Tools and attachments"
         >
-          <Plus size={16} />
+          <Plus size={16} className="pointer-events-none" />
         </button>
         <textarea
           ref={textareaRef}
@@ -597,23 +604,25 @@ export default function MultimodalComposer({
               void submit(e);
             }
           }}
-          placeholder="Message LiTT..."
+          placeholder={agentMeta.placeholder}
           className="flex-1 resize-none bg-transparent text-sm text-white placeholder-white/40 outline-none"
           style={{ minHeight: "44px", maxHeight: "160px" }}
           rows={1}
         />
 
         <button
+          type="button"
           onClick={() => setShowMicSetup((value) => !value)}
           className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${showMicSetup ? "bg-violet-400/12 text-violet-200" : "text-white/35 hover:bg-white/8 hover:text-white"}`}
           aria-label="Microphone setup"
           title="Microphone setup"
         >
-          <Settings2 size={15} />
+          <Settings2 size={15} className="pointer-events-none" />
         </button>
 
         {/* Mic button */}
         <button
+          type="button"
           onClick={micButtonState.onClick}
           disabled={micButtonState.disabled}
           className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${micButtonState.color} ${
@@ -624,30 +633,35 @@ export default function MultimodalComposer({
         >
           <MicIcon
             size={16}
-            className={
+            className={`pointer-events-none ${
               voiceState === "requesting_permission" ||
               voiceState === "connecting" ||
               voiceState === "processing"
                 ? "animate-spin"
                 : ""
-            }
+            }`}
           />
         </button>
 
         {/* Send button */}
         <button
+          type="button"
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
           className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send message"
         >
-          <Send size={16} />
+          <Send size={16} className="pointer-events-none" />
         </button>
       </div>
 
       <div className="flex items-center justify-between px-1 text-[8px] text-white/25">
         <span>Press / for exact commands</span>
-        <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
+        <span className="flex items-center gap-1.5">
+          <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
+          <span className="text-white/40">·</span>
+          <span className="font-bold text-white/45">{modelName}</span>
+        </span>
       </div>
     </div>
   );

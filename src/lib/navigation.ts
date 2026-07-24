@@ -7,7 +7,6 @@ import {
   Gamepad2,
   BarChart3,
   Settings,
-  Home,
   MessagesSquare,
   User,
   Store,
@@ -23,7 +22,6 @@ import {
   Star,
   Receipt,
   Menu,
-  Paintbrush,
   Brain,
   Database,
   Code2,
@@ -161,25 +159,20 @@ type MobileNavItem = {
 };
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
-  { label: "Home", href: "/dashboard", icon: Home },
+  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio", icon: Sparkles },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
   { label: "Agents", href: "/agents", icon: Bot },
+  { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "More", href: "#menu", icon: Menu },
 ];
 
 export const MOBILE_MORE_ITEMS: MobileNavItem[] = [
-  { label: "Profile", href: "/profile", icon: User },
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Studio", href: "/studio", icon: Paintbrush },
-  { label: "Projects", href: "/projects", icon: FolderKanban },
-  { label: "Agents", href: "/agents", icon: Bot },
   { label: "Gallery", href: "/gallery", icon: Image },
-  { label: "Marketplace", href: "/marketplace", icon: Store },
-  { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "Social", href: "/social", icon: Users },
-  { label: "Wallet", href: "/wallet", icon: Wallet },
+  { label: "Marketplace", href: "/marketplace", icon: Store },
   { label: "Settings", href: "/settings", icon: Settings },
+  { label: "Connections", href: "/settings/connections", icon: Settings },
+  { label: "Account", href: "/profile", icon: User },
 ];
 
 export const AI_SUGGESTIONS = [

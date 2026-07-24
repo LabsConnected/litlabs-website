@@ -3,6 +3,9 @@ import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { getAppAuth, getInstallationOctokit, getAppOctokit } from "@/lib/github-app";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 type DiagStep = {
   step: string;
   status: "pass" | "fail" | "warn";

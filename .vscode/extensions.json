@@ -1,11 +1,15 @@
 {
-  // VS Code will prompt the user to install these when the workspace is opened.
-  // See: https://code.visualstudio.com/docs/editor/extension-marketplace#_workspace-recommended-extensions
   "recommendations": [
     "WallabyJs.console-ninja",
     "usernamehw.errorlens",
     "ms-playwright.playwright",
     "humao.rest-client",
-    "eamodio.gitlens"
+    "eamodio.gitlens",
+    "GitHub.copilot",
+    "bradlc.vscode-tailwindcss",
+    "ms-vscode.vscode-typescript-next",
+    "formulahendry.auto-rename-tag",
+    "formulahendry.auto-close-tag",
+    "streetsidesoftware.code spell checker"
   ]
 }

@@ -1,16 +1,22 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
 import ChatShell from "../components/ChatShell";
 import type { StudioTool } from "../components/StudioSidebar";
-import { getChatModel } from "@/lib/studio-models";
 import { useBuilderSessions } from "../hooks/useBuilderSessions";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
+import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import {
+  useStudioAgentStore,
+  AGENT_META,
+  type ChatMessage,
+} from "../stores/useStudioAgentStore";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
 
 export default function ChatTool({
-  selectedModel = "adaptive",
+  selectedModel: _selectedModel = "adaptive",
   onRouteTool,
   requestedTool = "chat",
   pendingCommand = "",
@@ -23,11 +29,29 @@ export default function ChatTool({
   const [busy, setBusy] = useState(false);
   const [shellAction, setShellAction] = useState<{ id: number; type: "terminal" | "sessions" } | null>(null);
   const sessionManager = useBuilderSessions();
-  const messages = sessionManager.activeSession?.messages ?? [];
-  const setMessages = sessionManager.setMessages;
+  const { capabilities } = useConnectionSummary();
+
+  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const threads = useStudioAgentStore((s) => s.threads);
+  const storeSetMessages = useStudioAgentStore((s) => s.setMessages);
+  const clearThread = useStudioAgentStore((s) => s.clearThread);
+
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
+  const setFallbackNotice = useStudioModelStore((s) => s.setFallbackNotice);
+
+  const messages = useMemo(
+    () => threads[activeAgentId] ?? [],
+    [threads, activeAgentId],
+  );
+  const setMessages = useCallback(
+    (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) =>
+      storeSetMessages(activeAgentId, updater),
+    [storeSetMessages, activeAgentId],
+  );
+
   const { profile } = useProfile();
   const searchParams = useSearchParams();
-  const requestedAgent = "litt";
   const initialPrompt = searchParams.get("mission") || "";
 
   const send = async (
@@ -80,31 +104,34 @@ export default function ChatTool({
     ]);
     if (sessionManager.activeSession?.title === "New chat") sessionManager.rename(sessionManager.activeSession.id, text.slice(0, 56) || "Image request");
     setBusy(true);
-    const modelConfig = getChatModel(selectedModel);
     try {
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          agentSlug: requestedAgent,
-          provider: modelConfig.apiProvider ?? modelConfig.provider,
-          model: modelConfig.apiModel,
+          agentSlug: activeAgentId,
+          systemPrompt: AGENT_META[activeAgentId].systemPrompt,
+          provider: selectedModel.provider,
+          model: selectedModel.model,
           message: text || "Describe what you see.",
           history: historyForApi,
           stream: false,
           userName: profile.displayName || "Member",
           images: attachments,
           capabilities: {
-            repository: sessionManager.activeSession?.context.repositoryState ?? "none",
-            repositoryIndexed: false,
-            terminalExecution: "unavailable",
-            writeAccess: false,
+            repository: capabilities.repository,
+            repositoryIndexed: capabilities.repositoryIndexed,
+            terminalExecution: capabilities.terminalExecution,
+            writeAccess: capabilities.writeAccess,
+            connectedProviders: capabilities.connectedProviders,
+            availableTools: capabilities.availableTools,
+            connectionSummary: capabilities.connectionSummary,
           },
         }),
       });
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.detail || err.error || "LiTT is reconnecting");
+        throw new Error(err.detail || err.error || `${AGENT_META[activeAgentId].displayName} is reconnecting`);
       }
       const data = await response.json();
       const reply =
@@ -113,6 +140,9 @@ export default function ChatTool({
         data.message ||
         data.content ||
         "I’m ready. Tell me what we’re building.";
+      if (data.usedFallbackModel) {
+        setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
+      }
       setMessages((current) => [
         ...current,
         { role: "assistant", content: reply, createdAt: Date.now() },
@@ -120,7 +150,7 @@ export default function ChatTool({
       return reply;
     } catch (error) {
       const reply =
-        error instanceof Error ? error.message : "LiTT is reconnecting";
+        error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
       setMessages((current) => [
         ...current,
         { role: "assistant", content: reply, createdAt: Date.now() },
@@ -141,16 +171,18 @@ export default function ChatTool({
 
   return (
     <ChatShell
-      selectedModel={selectedModel}
+      selectedModel={selectedModel.label}
       messages={messages}
       busy={busy}
       onSend={send}
-      onNewChat={() => setMessages([])}
+      onNewChat={() => clearThread(activeAgentId)}
+      activeAgentId={activeAgentId}
       onRegenerate={handleRegenerate}
       onRouteTool={onRouteTool}
       requestedTool={requestedTool}
       pendingCommand={pendingCommand}
       initialPrompt={initialPrompt}
+      fallbackNotice={fallbackNotice}
       sessions={sessionManager.sessions}
       activeSessionId={sessionManager.activeId}
       onSelectSession={sessionManager.setActiveId}

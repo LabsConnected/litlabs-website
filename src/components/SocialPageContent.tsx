@@ -199,7 +199,7 @@ export default function SocialPageContent() {
     return (
       <div
         className="min-h-screen flex items-center justify-center"
-        style={{ backgroundColor: C.bgColor }}
+        style={{ backgroundColor: C.bgColor + "d0" }}
       >
         <Loader2
           className="animate-spin"
@@ -211,7 +211,7 @@ export default function SocialPageContent() {
   }
 
   return (
-    <div className="min-h-full pb-8" style={{ backgroundColor: C.bgColor, color: C.textColor }}>
+    <div className="min-h-full pb-8" style={{ backgroundColor: C.bgColor + "d0", color: C.textColor }}>
       {/* Toast */}
       {toast && (
         <div

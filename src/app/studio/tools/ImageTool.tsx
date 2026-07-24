@@ -33,6 +33,8 @@ import {
   Menu,
 } from "lucide-react";
 import { MediaProviderId } from "@/lib/media";
+import { GENERATION_PRESETS } from "@/lib/visual-packs/generation-presets";
+import { DEFAULT_MASCOT_DESCRIPTION } from "@/lib/visual-packs/types";
 
 /* ─── Types ───────────────────────────────────────────────────────────── */
 
@@ -351,6 +353,9 @@ export default function ImageTool() {
     "masterpiece best quality",
   );
   const [autoEnhance, setAutoEnhance] = useState<boolean>(true);
+
+  /* ── Brand lock ── */
+  const [brandLockEnabled, setBrandLockEnabled] = useState<boolean>(false);
 
   const currentAspect = ASPECT_OPTIONS.find((a) => a.value === aspectRatio)!;
   const currentProvider =
@@ -1408,6 +1413,88 @@ export default function ImageTool() {
                     </button>
                   ))}
                 </div>
+              </div>
+
+              {/* Visual Pack Presets */}
+              <div
+                className="rounded-lg border overflow-hidden"
+                style={sectionBox}
+              >
+                <div className="px-3 py-2">
+                  <span
+                    className="text-[10px] font-bold"
+                    style={{ color: T.textMuted }}
+                  >
+                    Visual Pack Presets
+                  </span>
+                </div>
+                <div className="px-3 pb-3 flex gap-2 overflow-x-auto snap-x snap-mandatory md:block md:space-y-1 md:max-h-40 md:overflow-y-auto">
+                  {GENERATION_PRESETS.map((p) => (
+                    <button
+                      key={p.id}
+                      onClick={() => {
+                        setPrompt(p.promptSuffix ?? p.prompt);
+                        if (p.negativePrompt) setNegativePrompt(p.negativePrompt);
+                        addLog("info", `Preset loaded: ${p.name}`);
+                      }}
+                      disabled={isWorking}
+                      className="w-[82%] shrink-0 snap-start text-left text-[11px] px-3 py-2.5 rounded-lg border hover:opacity-80 disabled:opacity-40 transition-all md:w-full"
+                      style={{
+                        backgroundColor: T.bgColor,
+                        borderColor: T.borderColor + "40",
+                        color: T.textColor + "cc",
+                      }}
+                    >
+                      <div className="font-bold text-[10px] uppercase tracking-wide" style={{ color: T.accentColor }}>
+                        {p.name}
+                      </div>
+                      <div className="text-[9px] mt-0.5 line-clamp-2" style={{ color: T.textMuted }}>
+                        {p.description}
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              {/* Brand Lock */}
+              <div
+                className="rounded-lg border overflow-hidden"
+                style={sectionBox}
+              >
+                <button
+                  onClick={() => setBrandLockEnabled((v) => !v)}
+                  className="w-full flex items-center justify-between px-3 py-2 text-[10px] font-bold"
+                  style={{ color: T.textMuted }}
+                >
+                  <span className="flex items-center gap-1.5">
+                    <Sparkles size={10} style={{ color: T.accentColor }} />
+                    Brand Lock
+                  </span>
+                  <span
+                    className="text-[9px] rounded-full px-2 py-0.5"
+                    style={{
+                      background: brandLockEnabled ? T.accentColor + "20" : T.borderColor + "20",
+                      color: brandLockEnabled ? T.accentColor : T.textMuted,
+                    }}
+                  >
+                    {brandLockEnabled ? "ON" : "OFF"}
+                  </span>
+                </button>
+                {brandLockEnabled && (
+                  <div className="px-3 pb-3 space-y-2">
+                    <p className="text-[9px]" style={{ color: T.textMuted }}>
+                      Enforces LiTT mascot identity, approved colors, and logo placement in every generation.
+                    </p>
+                    <div className="flex gap-1.5 flex-wrap">
+                      {["#9a4dff", "#26e6ff", "#54ff83", "#ff7a1a"].map((c) => (
+                        <div key={c} className="h-4 w-4 rounded-full border" style={{ background: c, borderColor: T.borderColor + "40" }} />
+                      ))}
+                    </div>
+                    <p className="text-[9px] italic" style={{ color: T.textMuted + "80" }}>
+                      Mascot: {DEFAULT_MASCOT_DESCRIPTION.slice(0, 60)}…
+                    </p>
+                  </div>
+                )}
               </div>
             </div>
           )}

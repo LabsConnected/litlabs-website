@@ -129,6 +129,18 @@ type DashboardData = {
   installations: Array<{ installation_id: number; user_id: string; created_at: string }>;
 };
 
+type ConnectionOverview = {
+  provider: string;
+  label: string;
+  category: string;
+  status: string;
+  externalAccountName: string | null;
+  lastSyncedAt: string | null;
+  lastErrorMessage: string | null;
+  isConnected: boolean;
+  connectUrl?: string;
+};
+
 /* ---------- Helpers ---------- */
 function timeAgo(dateStr: string | null): string {
   if (!dateStr) return "Never";
@@ -540,20 +552,29 @@ export function DeveloperControlCenter() {
   const { user } = useAppUser();
   const { profile } = useProfile();
   const [data, setData] = useState<DashboardData | null>(null);
+  const [connections, setConnections] = useState<ConnectionOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Array<{ step: string; status: string; detail: string }> | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
+  const [disconnectingProvider, setDisconnectingProvider] = useState<string | null>(null);
   const eventsRef = useRef<HTMLDivElement>(null);
 
   const fetchDashboard = useCallback(async () => {
     try {
-      const res = await fetch("/api/dashboard");
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const json = await res.json();
+      const [dashRes, connRes] = await Promise.all([
+        fetch("/api/dashboard"),
+        fetch("/api/connections"),
+      ]);
+      if (!dashRes.ok) throw new Error(`HTTP ${dashRes.status}`);
+      const json = await dashRes.json();
       setData(json);
+      if (connRes.ok) {
+        const connJson = await connRes.json();
+        setConnections(connJson.overview ?? []);
+      }
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to load dashboard");
@@ -594,12 +615,15 @@ export function DeveloperControlCenter() {
         setError("No GitHub installation found");
         return;
       }
-      const res = await fetch("/api/github/sync", {
+      const res = await fetch("/api/connections/github/sync", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ installation_id: instId, full: true }),
       });
-      if (!res.ok) throw new Error(`Sync failed: HTTP ${res.status}`);
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Sync failed: HTTP ${res.status}`);
+      }
       await fetchDashboard();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sync failed");
@@ -608,12 +632,31 @@ export function DeveloperControlCenter() {
     }
   };
 
+  const handleDisconnect = async (provider: string) => {
+    setDisconnectingProvider(provider);
+    try {
+      const res = await fetch(`/api/connections/${provider}/disconnect`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      if (!res.ok) {
+        const errBody = await res.json().catch(() => ({}));
+        throw new Error(errBody.error || `Disconnect failed: HTTP ${res.status}`);
+      }
+      await fetchDashboard();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Disconnect failed");
+    } finally {
+      setDisconnectingProvider(null);
+    }
+  };
+
   const handleRunDiagnostics = async () => {
     setDiagnosticsLoading(true);
     setShowDiagnostics(true);
     try {
       const instId = data?.installations?.[0]?.installation_id;
-      const url = instId ? `/api/github/diagnostics?installation_id=${instId}` : "/api/github/diagnostics";
+      const url = instId ? `/api/connections/github/diagnostics?installation_id=${instId}` : "/api/connections/github/diagnostics";
       const res = await fetch(url);
       const json = await res.json();
       setDiagnostics(json.steps || []);
@@ -692,7 +735,7 @@ export function DeveloperControlCenter() {
           >
             <div className="flex items-center justify-between mb-3">
               <h3 className="text-sm font-bold" style={{ color: T.headerColor }}>
-                GitHub Sync Diagnostics
+                Connection Diagnostics
               </h3>
               <button onClick={() => setShowDiagnostics(false)} className="opacity-50 hover:opacity-80">
                 <Icon name="x" size={16} />
@@ -745,9 +788,7 @@ export function DeveloperControlCenter() {
                   key={acc.id}
                   account={acc}
                   onReconnect={() => handleSync()}
-                  onDisconnect={async () => {
-                    // Disconnect handler — could be provider-specific
-                  }}
+                  onDisconnect={() => handleDisconnect(acc.provider)}
                 />
               ))}
               {/* Show placeholder for missing providers */}
@@ -776,6 +817,16 @@ export function DeveloperControlCenter() {
                         Connect →
                       </Link>
                     )}
+                    {p === "vercel" && (
+                      <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
+                        Connect →
+                      </Link>
+                    )}
+                    {p === "supabase" && (
+                      <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
+                        Connect →
+                      </Link>
+                    )}
                   </div>
                 ))}
             </div>
@@ -796,6 +847,11 @@ export function DeveloperControlCenter() {
                   <div className="text-xs opacity-60">Not connected</div>
                   {p === "github" && (
                     <Link href="/studio/github" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
+                      Connect →
+                    </Link>
+                  )}
+                  {p !== "github" && (
+                    <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
                       Connect →
                     </Link>
                   )}

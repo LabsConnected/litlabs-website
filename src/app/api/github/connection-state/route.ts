@@ -2,6 +2,9 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 
+export const dynamic = "force-dynamic";
+export const revalidate = 0;
+
 /**
  * GET /api/github/connection-state
  * Returns the user's GitHub connection state: installations, repositories,
@@ -63,6 +66,8 @@ export async function GET(request: NextRequest) {
         repositoryFullName: p.repository_full_name,
         repositoryPrivate: p.repository_private,
       })),
+    }, {
+      headers: { "Cache-Control": "no-store, max-age=0" },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database error";

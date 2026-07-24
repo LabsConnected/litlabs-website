@@ -1,5 +1,6 @@
 import { create } from "zustand";
-import type { VoiceAgentId, VoiceSessionState } from "@/features/voice/types";
+import type { VoiceAgentId, VoiceSessionState, VoiceTimingMetrics } from "@/features/voice/types";
+import { createInitialTimingMetrics } from "@/features/voice/types";
 
 interface VoiceStore {
   state: VoiceSessionState;
@@ -9,6 +10,7 @@ interface VoiceStore {
   error: string | null;
   isMuted: boolean;
   audioLevel: number;
+  timing: VoiceTimingMetrics;
 
   setState: (state: VoiceSessionState) => void;
   setActiveAgent: (agent: VoiceAgentId) => void;
@@ -17,6 +19,7 @@ interface VoiceStore {
   setError: (error: string | null) => void;
   setMuted: (muted: boolean) => void;
   setAudioLevel: (level: number) => void;
+  setTiming: (timing: Partial<VoiceTimingMetrics>) => void;
   reset: () => void;
 }
 
@@ -28,6 +31,7 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
   error: null,
   isMuted: false,
   audioLevel: 0,
+  timing: createInitialTimingMetrics(),
 
   setState: (state) => set({ state }),
   setActiveAgent: (activeAgent) => set({ activeAgent }),
@@ -36,6 +40,7 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
   setError: (error) => set({ error, state: error ? "error" : "idle" }),
   setMuted: (isMuted) => set({ isMuted }),
   setAudioLevel: (audioLevel) => set({ audioLevel }),
+  setTiming: (partial) => set((prev) => ({ timing: { ...prev.timing, ...partial } })),
 
   reset: () =>
     set({
@@ -44,5 +49,6 @@ export const useVoiceStore = create<VoiceStore>((set) => ({
       interimTranscript: "",
       error: null,
       audioLevel: 0,
+      timing: createInitialTimingMetrics(),
     }),
 }));

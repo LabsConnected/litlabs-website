@@ -2,6 +2,11 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { supabaseAdmin } from "@/lib/supabase";
 import { verifyInstallState } from "@/lib/github-install-state";
+import { upsertConnection } from "@/lib/connections/state";
+import { logAudit } from "@/lib/connections/audit";
+import { getInstallationOctokit } from "@/lib/github-app";
+
+export const dynamic = "force-dynamic";
 
 const REDIRECT_BASE = "/studio/github";
 
@@ -62,6 +67,33 @@ export async function GET(request: NextRequest) {
       { onConflict: "user_id,installation_id" },
     );
     if (error) throw error;
+
+    // Also upsert into the unified provider_connections table
+    let accountName: string | undefined;
+    try {
+      const octokit = await getInstallationOctokit(id);
+      const { data: installation } = await octokit.rest.apps.getInstallation({
+        installation_id: id,
+      });
+      accountName = (installation.account as { login?: string; slug?: string; name?: string })?.login
+        || (installation.account as { slug?: string })?.slug
+        || (installation.account as { name?: string })?.name;
+    } catch {
+      // Non-fatal — we still have the installation ID
+    }
+
+    await upsertConnection(userId, "github", {
+      connectionMethod: "app_installation",
+      status: "connected",
+      externalAccountId: String(id),
+      externalAccountName: accountName,
+      grantedScopes: ["repo", "metadata", "contents"],
+    });
+
+    await logAudit(userId, "github", "connected", undefined, {
+      installationId: id,
+      accountName,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : "Database error";
     return NextResponse.redirect(
@@ -70,6 +102,6 @@ export async function GET(request: NextRequest) {
   }
 
   return NextResponse.redirect(
-    `${request.nextUrl.origin}${REDIRECT_BASE}?installed=${id}`,
+    `${request.nextUrl.origin}${REDIRECT_BASE}?installed=${id}&connected=1`,
   );
 }

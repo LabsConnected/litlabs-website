@@ -1,10 +1,11 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono } from "next/font/google";
+import { Inter, JetBrains_Mono, Space_Grotesk, Sora, Pixelify_Sans, Orbitron, Press_Start_2P, Chakra_Petch, Rajdhani } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
 import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
+import { VisualProvider } from "@/context/VisualContext";
 import LayoutShell from "@/components/LayoutShell";
 import { SITE_URL } from "@/lib/siteConfig";
 import { GoogleAnalytics } from "@next/third-parties/google";
@@ -22,6 +23,51 @@ const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
   variable: "--font-jetbrains",
   display: "swap",
+});
+
+const spaceGrotesk = Space_Grotesk({
+  subsets: ["latin"],
+  variable: "--font-space-grotesk",
+  display: "swap",
+});
+
+const sora = Sora({
+  subsets: ["latin"],
+  variable: "--font-sora",
+  display: "swap",
+});
+
+const pixelifySans = Pixelify_Sans({
+  subsets: ["latin"],
+  variable: "--font-pixelify-sans",
+  display: "swap",
+});
+
+const orbitron = Orbitron({
+  subsets: ["latin"],
+  variable: "--font-orbitron",
+  display: "swap",
+});
+
+const pressStart2P = Press_Start_2P({
+  subsets: ["latin"],
+  variable: "--font-press-start-2p",
+  display: "swap",
+  weight: ["400"],
+});
+
+const chakraPetch = Chakra_Petch({
+  subsets: ["latin"],
+  variable: "--font-chakra-petch",
+  display: "swap",
+  weight: ["400", "500", "600", "700"],
+});
+
+const rajdhani = Rajdhani({
+  subsets: ["latin"],
+  variable: "--font-rajdhani",
+  display: "swap",
+  weight: ["300", "400", "500", "600", "700"],
 });
 
 export const viewport: Viewport = {
@@ -110,14 +156,16 @@ export default function RootLayout({
     <ThemeProvider>
       <ProfileProvider>
         <WalletProvider>
-          <LayoutShell>{children}</LayoutShell>
+          <VisualProvider>
+            <LayoutShell>{children}</LayoutShell>
+          </VisualProvider>
         </WalletProvider>
       </ProfileProvider>
     </ThemeProvider>
   );
 
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable}`}>
+    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${sora.variable} ${pixelifySans.variable} ${orbitron.variable} ${pressStart2P.variable} ${chakraPetch.variable} ${rajdhani.variable}`}>
       <link
         rel="preconnect"
         href="https://accounts.dev"
