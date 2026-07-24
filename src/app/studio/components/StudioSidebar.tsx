@@ -94,7 +94,7 @@ function RailButton({
     <button
       type="button"
       onClick={onClick}
-      className="group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all duration-200 hover:bg-white/8"
+      className="group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all duration-200 hover:bg-white/8"
       style={{
         color: active ? T.accentColor : "rgba(255,255,255,0.5)",
         backgroundColor: active ? `${T.accentColor}15` : "transparent",
@@ -112,7 +112,7 @@ function RailButton({
         />
       )}
       <Icon
-        size={20}
+        size={16}
         strokeWidth={active ? 2.2 : 1.7}
         style={active ? { filter: `drop-shadow(0 0 4px ${T.accentColor}60)` } : undefined}
         className="pointer-events-none transition-transform duration-200 group-hover:scale-110"
@@ -150,23 +150,23 @@ export default function StudioSidebar({
           DESKTOP Tool Rail — 72px icon-only, hidden on mobile
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden md:flex h-full w-[72px] shrink-0 flex-col items-center border-r py-2"
+        className="hidden md:flex h-full w-12 shrink-0 flex-col items-center border-r py-2"
         style={{
           backgroundColor: "rgba(8,9,13,0.96)",
           borderRight: "1px solid rgba(255,255,255,0.06)",
         }}
       >
         {/* Logo */}
-        <div className="mb-2 flex h-10 w-10 items-center justify-center">
+        <div className="mb-2 flex h-8 w-8 items-center justify-center">
           <span
-            className="grid h-8 w-8 place-items-center rounded-xl border"
+            className="grid h-7 w-7 place-items-center rounded-lg border"
             style={{
               color: T.accentColor,
               borderColor: `${T.accentColor}40`,
               backgroundColor: `${T.accentColor}10`,
             }}
           >
-            <Sparkles size={16} className="pointer-events-none" />
+            <Sparkles size={14} className="pointer-events-none" />
           </span>
         </div>
 
@@ -192,7 +192,7 @@ export default function StudioSidebar({
           <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
-            className="group relative flex h-11 w-11 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+            className="group relative flex h-9 w-9 items-center justify-center rounded-lg transition-all hover:bg-white/8"
             style={{
               color: moreOpen ? T.accentColor : "rgba(255,255,255,0.5)",
               backgroundColor: moreOpen ? `${T.accentColor}15` : "transparent",
@@ -200,7 +200,7 @@ export default function StudioSidebar({
             title="More Tools"
             aria-label="More Tools"
           >
-            <MoreHorizontal size={20} strokeWidth={1.7} className="pointer-events-none" />
+            <MoreHorizontal size={16} strokeWidth={1.7} className="pointer-events-none" />
             <span
               className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
               style={{
@@ -232,7 +232,7 @@ export default function StudioSidebar({
       ═══════════════════════════════════════════════════════════ */}
       {moreOpen && (
         <div
-          className="fixed left-[72px] top-0 z-50 hidden h-full w-[220px] flex-col border-r md:flex"
+          className="fixed left-12 top-0 z-50 hidden h-full w-[220px] flex-col border-r md:flex"
           style={{
             backgroundColor: "rgba(10,12,18,0.98)",
             borderRight: "1px solid rgba(255,255,255,0.08)",

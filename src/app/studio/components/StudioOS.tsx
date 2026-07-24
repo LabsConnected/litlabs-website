@@ -182,10 +182,14 @@ export default function StudioOS() {
         />
       </div>
 
-      {/* Desktop: 3-column layout */}
+      {/* Desktop: 3-column grid layout */}
       <div
-        className="hidden md:flex h-[100dvh] w-full flex-col overflow-hidden"
-        style={{ backgroundColor: "#06070b", color: T.textColor }}
+        className="hidden md:grid h-[100dvh] w-full overflow-hidden"
+        style={{
+          gridTemplateRows: "auto minmax(0, 1fr)",
+          backgroundColor: "#06070b",
+          color: T.textColor,
+        }}
       >
         <StudioTopBar
           search={search}
@@ -196,7 +200,12 @@ export default function StudioOS() {
         />
 
         {/* 3-column grid: ToolRail | Workspace | ChatPanel */}
-        <div className="flex flex-1 min-h-0">
+        <div
+          className="grid min-h-0 overflow-hidden"
+          style={{
+            gridTemplateColumns: "48px minmax(520px, 1fr) clamp(320px, 26vw, 420px)",
+          }}
+        >
           <StudioSidebar
             activeTool={activeTool}
             onToolChange={handleToolChange}
@@ -204,11 +213,11 @@ export default function StudioOS() {
           />
 
           {/* Center workspace — renders active tool directly, no overlay */}
-          <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
+          <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden">
             {isChatOrHome ? (
               <WelcomeWorkspace T={T} onToolChange={handleToolChange} />
             ) : WorkspaceComponent ? (
-              <div className="studio-tool-surface min-h-0 flex-1 overflow-auto">
+              <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
                 <WorkspaceComponent />
               </div>
             ) : null}
@@ -216,9 +225,8 @@ export default function StudioOS() {
 
           {/* Persistent right chat panel — desktop only */}
           <aside
-            className="hidden md:flex shrink-0 flex-col border-l overflow-hidden"
+            className="hidden md:flex shrink-0 min-w-0 min-h-0 flex-col border-l overflow-hidden"
             style={{
-              width: "clamp(360px, 25vw, 440px)",
               backgroundColor: "rgba(8,9,13,0.96)",
               borderColor: "rgba(255,255,255,0.06)",
             }}
@@ -239,7 +247,7 @@ export default function StudioOS() {
                 aria-hidden
               />
             </div>
-            <div className="min-h-0 flex-1 overflow-hidden">
+            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
               <ChatTool
                 onRouteTool={handleCommandRoute}
                 requestedTool={activeTool}

@@ -9,6 +9,7 @@ import {
   Bell,
   GitBranch,
   HeartPulse,
+  Home,
   Menu,
   Play,
   Rocket,
@@ -107,6 +108,21 @@ export default function StudioTopBar({
           LiTT Studio
         </span>
       </div>
+
+      {/* Dashboard exit button */}
+      <a
+        href="/dashboard"
+        className="hidden md:flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 shrink-0"
+        style={{
+          borderColor: "rgba(255,255,255,0.08)",
+          color: "rgba(255,255,255,0.5)",
+        }}
+        title="Back to Dashboard"
+        aria-label="Back to Dashboard"
+      >
+        <Home size={11} className="pointer-events-none" />
+        <span className="pointer-events-none">Dashboard</span>
+      </a>
 
       {/* Divider */}
       <div className="hidden md:block h-5 w-px" style={{ backgroundColor: "rgba(255,255,255,0.08)" }} />

@@ -28,7 +28,7 @@ import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import ReactMarkdown from "react-markdown";
 import MultimodalComposer from "./MultimodalComposer";
 import type { StudioTool } from "./StudioSidebar";
-import { TerminalPanel, type TerminalPanelHandle } from "@/components/litt-terminal/TerminalPanel";
+import { type TerminalPanelHandle } from "@/components/litt-terminal/TerminalPanel";
 import type { TerminalBuilderBlock } from "../types/builder-blocks";
 import SessionSidebar from "./SessionSidebar";
 import type { BuilderSession } from "../hooks/useBuilderSessions";
@@ -38,6 +38,7 @@ import {
   AGENT_META,
   type AgentId,
 } from "../stores/useStudioAgentStore";
+import { useTerminalStore } from "@/stores/useTerminalStore";
 
 type Message = {
   role: "user" | "assistant";
@@ -135,7 +136,7 @@ export default function ChatShell({
   const [activityOpen, setActivityOpen] = useState(true);
   const [busySeconds, setBusySeconds] = useState(0);
   const [sessionsOpen, setSessionsOpen] = useState(false);
-  const [ptyConnected, setPtyConnected] = useState(false);
+  const ptyUsable = useTerminalStore((s) => s.isUsable());
 
   useEffect(() => {
     if (!shellAction) return;
@@ -227,7 +228,7 @@ export default function ChatShell({
       />
 
       {/* Header — Agent Console */}
-      <header className="relative z-10 flex h-16 shrink-0 items-center justify-between border-b bg-[#0a0a0f]/90 px-3 backdrop-blur-md" style={{ borderColor: `${agentColor}20` }}>
+      <header className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b bg-[#0a0a0f]/90 px-3 backdrop-blur-md" style={{ borderColor: `${agentColor}20` }}>
         <div className="flex items-center gap-3">
           <button
             className="rounded-lg p-2 hover:bg-white/5 md:hidden"
@@ -310,7 +311,7 @@ export default function ChatShell({
 
       <div className="relative z-10 flex shrink-0 items-center gap-2 overflow-x-auto border-b border-white/7 bg-black/20 px-3 py-1.5 text-[8px] font-bold text-white/38 scrollbar-hide">
         <span className={currentSession?.context.repositoryState === "connected" ? "text-emerald-300" : "text-amber-300"}>{currentSession?.context.repositoryState === "connected" ? "● Repository connected" : currentSession?.context.repositoryState === "partial" ? "◐ Repository partially indexed" : currentSession?.context.repositoryState === "read-only" ? "◐ Read-only repository" : "○ No repository connected"}</span>
-        <span>·</span><span className={ptyConnected ? "text-emerald-300" : "text-white/35"}>{ptyConnected ? "● Terminal execution enabled" : "○ Terminal execution unavailable"}</span>
+        <span>·</span><span className={ptyUsable ? "text-emerald-300" : "text-white/35"}>{ptyUsable ? "● Terminal execution enabled" : "○ Terminal execution unavailable"}</span>
         <span>·</span><span className="text-white/35">Write access requires approval</span>
       </div>
 
@@ -417,7 +418,7 @@ export default function ChatShell({
                     </div>
                   )}
                   <div
-                    className={`flex max-w-[88%] flex-col sm:max-w-[78%] ${isUser ? "items-end" : "items-start"}`}
+                    className={`flex max-w-[88%] min-w-0 flex-col sm:max-w-[78%] ${isUser ? "items-end" : "items-start"}`}
                   >
                     <div className={`mb-1 flex items-center gap-2 px-1 text-[9px] font-black uppercase tracking-[.14em] ${isUser ? "flex-row-reverse" : ""}`} style={{ color: isUser ? "#fb923c" : agentColor }}>
                       <span>{isUser ? displayName : agentMeta.displayName}</span>
@@ -426,13 +427,14 @@ export default function ChatShell({
                     {!isUser && command && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
                         <button type="button" onClick={() => { setTerminalOpen(true); if (terminalConnectedRef.current) terminalRef.current?.insertCommand(command); else pendingInsertCommandRef.current = command; }} className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200 hover:bg-cyan-300/10">Insert into terminal</button>
-                        <button type="button" disabled={!ptyConnected} onClick={() => { if (window.confirm(`Run in the connected PTY?\n\n${command}`)) terminalRef.current?.runCommand(command); }} className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-35">Run in terminal</button>
-                        {!ptyConnected && <span className="text-[8px] text-amber-300/65">Connect the real PTY to run</span>}
+                        <button type="button" disabled={!ptyUsable} onClick={() => { if (window.confirm(`Run in the connected PTY?\n\n${command}`)) terminalRef.current?.runCommand(command); }} className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-35">Run in terminal</button>
+                        {!ptyUsable && <span className="text-[8px] text-amber-300/65">Connect the real PTY to run</span>}
                       </div>
                     )}
                     <div
-                      className="relative overflow-hidden rounded-2xl border px-4 py-3 text-[13px] leading-6 shadow-[0_12px_35px_rgba(0,0,0,.18)]"
+                      className="relative min-w-0 overflow-hidden overflow-wrap-anywhere rounded-2xl border px-4 py-3 text-[13px] leading-6 shadow-[0_12px_35px_rgba(0,0,0,.18)]"
                       style={{
+                        overflowWrap: "anywhere",
                         borderColor: isUser
                           ? "rgba(249,115,22,0.25)"
                           : `${agentColor}26`,
@@ -565,32 +567,6 @@ export default function ChatShell({
           activeAgentId={activeAgentId}
         />
       </div>
-
-      <section className={`${terminalOpen ? "flex" : "hidden"} absolute inset-x-0 bottom-0 z-40 h-[min(56vh,520px)] flex-col border-t border-emerald-400/20 bg-black shadow-[0_-20px_60px_rgba(0,0,0,.65)] md:bottom-[76px]`}>
-        <div className="flex items-center justify-between border-b border-white/10 px-3 py-2">
-          <div><strong className="flex items-center gap-2 text-xs text-emerald-300"><TerminalIcon size={14} /> Terminal</strong><div className="mt-0.5 text-[9px] text-white/35">Browser shell: unavailable · <span className={ptyConnected ? "text-emerald-300" : "text-amber-300"}>{ptyConnected ? "● Real PTY connected" : "○ Real PTY disconnected"}</span></div></div>
-          <button onClick={() => setTerminalOpen(false)} className="rounded-lg p-1.5 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close terminal"><X size={15} /></button>
-        </div>
-        <div className="min-h-0 flex-1">
-          <TerminalPanel
-            ref={terminalRef}
-            onTerminalOutput={(output) => setTerminalBlocks((current) => current.map((block, index) => index === current.length - 1 ? { ...block, output: output.slice(-1200) } : block))}
-            onConnectionChange={(connected) => {
-              terminalConnectedRef.current = connected;
-              setPtyConnected(connected);
-              if (connected && pendingTerminalCommandRef.current) {
-                terminalRef.current?.runCommand(pendingTerminalCommandRef.current);
-                pendingTerminalCommandRef.current = "";
-              } else if (connected && pendingInsertCommandRef.current) {
-                terminalRef.current?.insertCommand(pendingInsertCommandRef.current);
-                pendingInsertCommandRef.current = "";
-              } else if (!connected) {
-                setTerminalBlocks((current) => current.map((block, index) => index === current.length - 1 && block.status === "running" ? { ...block, status: "disconnected" } : block));
-              }
-            }}
-          />
-        </div>
-      </section>
 
       <style jsx>{`
         @keyframes spin {
