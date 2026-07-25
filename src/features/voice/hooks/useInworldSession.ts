@@ -485,6 +485,7 @@ export function useInworldSession(
         setErrorState(message);
         setError(message);
         setState("error");
+        throw err;
       }
     },
     [enqueueAudioChunk, isListening, onError, onAgentText, onTranscript, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
@@ -510,6 +511,10 @@ export function useInworldSession(
     if (!isConnected) {
       await connect();
     }
+    // Verify the WebSocket is actually open — connect() may have failed
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      throw new Error("Voice connection is not active.");
+    }
 
     // Initialize playback context on user gesture
     if (!playbackContextRef.current) {
@@ -526,7 +531,7 @@ export function useInworldSession(
       wsRef.current.send(JSON.stringify({ type: "input_audio_buffer.commit" }));
     }
     setState("thinking");
-  }, [isListening, setState, stopMicCapture]);
+  }, [setState, stopMicCapture]);
 
   const interruptRef = useRef<() => void>(() => {});
 
