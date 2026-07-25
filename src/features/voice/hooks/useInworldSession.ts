@@ -276,30 +276,22 @@ export function useInworldSession(
       setState("connecting");
 
       try {
+        // Get voice config (voices, etc.) but connect through our proxy
         const conn = await getVoiceConnection();
 
-        // Decode the encrypted API key from the token
-        const [encodedPayload, sig] = conn.token.split(".");
-        if (!encodedPayload || !sig) throw new Error("Invalid voice token");
-        const payload = JSON.parse(atob(encodedPayload.replace(/-/g, "+").replace(/_/g, "/"))) as {
-          key: string;
-          exp: number;
-        };
-        if (payload.exp * 1000 < Date.now()) throw new Error("Voice token expired");
+        // Use our WebSocket proxy — the browser can't set Authorization headers
+        // so we connect to our proxy which adds the Inworld API key header
+        const proxyUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL;
+        if (!proxyUrl) {
+          throw new Error("Voice proxy is not configured. Set NEXT_PUBLIC_VOICE_WS_URL.");
+        }
 
-        // Decrypt the API key using the auth secret (client-side)
-        // The key is AES-256-CBC encrypted with VOICE_AUTH_SECRET
-        // Since we can't access server secrets on the client, we use the token itself
-        // as the auth mechanism — Inworld accepts the raw API key in the WebSocket URL
-        const apiKey = atob(payload.key);
+        // Convert ws:// to wss:// for production if needed
+        const wsUrl = proxyUrl.startsWith("ws://") && typeof window !== "undefined" && window.location.protocol === "https:"
+          ? proxyUrl.replace("ws://", "wss://")
+          : proxyUrl;
 
-        // Build Inworld WebSocket URL with API key as Basic auth in the URL
-        // Browser WebSocket can't set headers, so we use the key query param
-        const timestamp = Date.now();
-        const wsUrl = `${conn.endpoint}?key=voice-${timestamp}&protocol=realtime`;
-
-        // Use subprotocol to pass the API key (Inworld supports this)
-        const ws = new WebSocket(wsUrl, [`realtime`, `bearer.${apiKey}`]);
+        const ws = new WebSocket(wsUrl);
         wsRef.current = ws;
 
         let sessionConfigured = false;

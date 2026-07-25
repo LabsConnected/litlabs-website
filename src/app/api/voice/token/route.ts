@@ -50,7 +50,7 @@ export async function GET() {
       {
         token: `${encoded}.${sig}`,
         expiresAt: payload.exp * 1000,
-        endpoint: "wss://api.inworld.ai/api/v1/realtime/session",
+        endpoint: process.env.NEXT_PUBLIC_VOICE_WS_URL || "ws://localhost:4002/voice",
         littVoice,
         sparkVoice,
       },
