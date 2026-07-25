@@ -195,10 +195,10 @@ export default function RootLayout({
             signInUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_IN_URL ?? "/sign-in"}
             signUpUrl={process.env.NEXT_PUBLIC_CLERK_SIGN_UP_URL ?? "/sign-up"}
             signInFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio"
+              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_IN_URL ?? "/studio?tool=chat"
             }
             signUpFallbackRedirectUrl={
-              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio"
+              process.env.NEXT_PUBLIC_CLERK_AFTER_SIGN_UP_URL ?? "/studio?tool=chat"
             }
             appearance={{
               variables: {

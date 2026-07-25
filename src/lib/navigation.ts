@@ -71,11 +71,11 @@ export const NAV_GROUPS: NavGroup[] = [
   },
   {
     label: "Studio",
-    href: "/studio",
+    href: "/studio?tool=chat",
     icon: Sparkles,
     accent: GROUP_ACCENTS.Studio,
     items: [
-      { label: "Create", href: "/studio", icon: Sparkles },
+      { label: "Create", href: "/studio?tool=chat", icon: Sparkles },
       { label: "Image", href: "/studio?tool=image", icon: Image },
       { label: "Video", href: "/studio?tool=video", icon: Video },
       { label: "Music", href: "/dashboard?app=music", icon: Music },
@@ -160,7 +160,7 @@ type MobileNavItem = {
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
-  { label: "Studio", href: "/studio", icon: Sparkles },
+  { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
   { label: "Agents", href: "/agents", icon: Bot },
   { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "More", href: "#menu", icon: Menu },

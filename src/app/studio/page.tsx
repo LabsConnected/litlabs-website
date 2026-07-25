@@ -111,7 +111,7 @@ function StudioHub() {
             Sign in to access your AI crew, projects, and creative workspace.
           </div>
           <Link
-            href="/sign-in?redirect_url=/studio"
+            href="/sign-in?redirect_url=/studio?tool=chat"
             className="mb-3 flex items-center justify-center gap-2 rounded-xl px-5 py-2.5 text-sm font-black text-black transition-all hover:opacity-90 hover:scale-[1.02]"
             style={{
               backgroundColor: tokens.primary,

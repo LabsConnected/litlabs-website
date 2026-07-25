@@ -281,17 +281,12 @@ export default function StudioSidebar({
           </div>
         </div>
       )}
-
-      {/* ═══════════════════════════════════════════════════════════
-          MOBILE bottom tab bar — visible only below md
-      ═══════════════════════════════════════════════════════════ */}
-      <MobileTabBar activeTool={activeTool} onToolChange={onToolChange} T={T} />
     </>
   );
 }
 
 /* ── Mobile bottom tab bar ───────────────────────────────────────── */
-function MobileTabBar({
+export function MobileTabBar({
   activeTool,
   onToolChange,
   T,

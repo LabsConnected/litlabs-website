@@ -2540,9 +2540,21 @@ main {
 }
 
 /* ── Studio responsive layout ──────────────────────────────────── */
-/* Panel width is JS-controlled via gridTemplateColumns inline style */
+/* Desktop: 3-col grid with JS-controlled panel width */
+.studio-grid-responsive {
+  grid-template-columns: 48px minmax(0, 1fr) 340px;
+}
+
+@media (min-width: 1051px) {
+  .studio-grid-responsive {
+    grid-template-columns: 48px minmax(0, 1fr) var(--litt-panel-width, 340px);
+  }
+}
 
 @media (max-width: 1050px) {
+  .studio-grid-responsive {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
   .studio-shell {
     grid-template-columns: 48px minmax(0, 1fr) !important;
   }

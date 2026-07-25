@@ -4,12 +4,11 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import dynamic from "next/dynamic";
 import { useTheme } from "@/context/ThemeContext";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
-import StudioSidebar, { type StudioTool } from "./StudioSidebar";
+import StudioSidebar, { type StudioTool, MobileTabBar } from "./StudioSidebar";
 import StudioTopBar from "./StudioTopBar";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
-import { MobileStudio } from "./MobileStudio";
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
@@ -44,7 +43,6 @@ const PluginsTool = dynamic(() => import("../tools/PluginsTool"), {
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 const HomeTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
-const OnboardingCanvas = dynamic(() => import("./OnboardingCanvas"), { ssr: false });
 
 const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   home: HomeTool,
@@ -85,6 +83,7 @@ export default function StudioOS() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
 
+  const DEFAULT_STUDIO_TOOL: StudioTool = "chat";
   const initialTool = (() => {
     const fromUrl = searchParams.get("tool");
     if (fromUrl && VALID_TOOLS.includes(fromUrl as StudioTool)) {
@@ -97,7 +96,7 @@ export default function StudioOS() {
     if (fromStore && VALID_TOOLS.includes(fromStore as StudioTool)) {
       return fromStore as StudioTool;
     }
-    return "home";
+    return DEFAULT_STUDIO_TOOL;
   })();
 
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
@@ -153,11 +152,15 @@ export default function StudioOS() {
     }
     if (isInitialMount.current) {
       isInitialMount.current = false;
+      // On initial mount, ensure URL has the correct tool param
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("tool", activeTool);
+      const query = params.toString();
+      router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
       return;
     }
     const params = new URLSearchParams(searchParams.toString());
-    if (activeTool !== "home" && activeTool !== "chat") params.set("tool", activeTool);
-    else params.delete("tool");
+    params.set("tool", activeTool);
     const query = params.toString();
     router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
   }, [activeTool, pathname, router, searchParams]);
@@ -199,25 +202,17 @@ export default function StudioOS() {
   );
 
   // Determine which component to render in the center workspace
-  const isChatOrHome = activeTool === "chat" || activeTool === "home";
-  const WorkspaceComponent = isChatOrHome ? null : TOOL_COMPONENTS[activeTool];
+  const isChat = activeTool === "chat";
+  const WorkspaceComponent = isChat ? null : TOOL_COMPONENTS[activeTool];
 
   return (
     <VoiceSessionProvider>
       <AgentVoiceSync />
 
-      {/* Mobile: unified MobileStudio */}
-      <div className="md:hidden">
-        <MobileStudio
-          onRouteTool={handleCommandRoute}
-        />
-      </div>
-
-      {/* Desktop: 3-column grid layout */}
+      {/* Unified Studio shell — responsive, one layout for mobile + desktop */}
       <div
-        className="hidden md:grid h-dvh w-full overflow-hidden"
+        className="flex h-dvh w-full flex-col overflow-hidden"
         style={{
-          gridTemplateRows: "auto minmax(0, 1fr)",
           backgroundColor: "#06070b",
           color: T.textColor,
         }}
@@ -230,23 +225,28 @@ export default function StudioOS() {
           T={T}
         />
 
-        {/* 3-column grid: ToolRail | Workspace | LiTT panel */}
+        {/* Main content area: 1-col on mobile, 3-col on desktop */}
         <div
-          className="grid min-h-0 min-w-0 overflow-hidden studio-shell"
-          style={{
-            gridTemplateColumns: `48px minmax(0, 1fr) ${littPanelWidth}px`,
-          }}
+          className="grid min-h-0 min-w-0 flex-1 overflow-hidden studio-shell studio-grid-responsive"
+          style={{ ["--litt-panel-width" as string]: `${littPanelWidth}px` }}
         >
-          <StudioSidebar
-            activeTool={activeTool}
-            onToolChange={handleToolChange}
-            search={search}
-          />
+          {/* Tool rail — hidden on mobile, MobileTabBar at bottom handles tool switching */}
+          <div className="hidden md:block">
+            <StudioSidebar
+              activeTool={activeTool}
+              onToolChange={handleToolChange}
+              search={search}
+            />
+          </div>
 
-          {/* Center workspace — renders active tool directly, no overlay */}
+          {/* Center workspace — renders active tool */}
           <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden">
-            {isChatOrHome ? (
-              <OnboardingCanvas onToolChange={handleToolChange} />
+            {isChat ? (
+              <ChatTool
+                onRouteTool={handleCommandRoute}
+                requestedTool={activeTool}
+                pendingCommand={pendingCommand}
+              />
             ) : WorkspaceComponent ? (
               <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
                 <WorkspaceComponent />
@@ -254,7 +254,7 @@ export default function StudioOS() {
             ) : null}
           </main>
 
-          {/* Draggable resizer between workspace and LiTT panel */}
+          {/* Draggable resizer between workspace and LiTT panel — desktop only */}
           <div
             className={`hidden md:flex w-1 shrink-0 cursor-col-resize items-center justify-center transition-colors ${isResizing ? "bg-cyan-300/30" : "bg-white/4 hover:bg-white/10"}`}
             onMouseDown={startResize}
@@ -298,6 +298,11 @@ export default function StudioOS() {
               />
             </div>
           </aside>
+        </div>
+
+        {/* Mobile bottom tab bar — tool switching */}
+        <div className="md:hidden">
+          <MobileTabBar activeTool={activeTool} onToolChange={handleToolChange} T={T} />
         </div>
       </div>
 

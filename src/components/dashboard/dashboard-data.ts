@@ -34,7 +34,7 @@ export const APPS = [
     label: "Studio",
     icon: Zap,
     color: "#00f0ff",
-    href: "/studio",
+    href: "/studio?tool=chat",
   },
   {
     id: "gallery",
