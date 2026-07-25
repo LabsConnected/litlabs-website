@@ -689,7 +689,7 @@ export function DeveloperControlCenter() {
 
   return (
     <div className="min-h-screen backdrop-blur-sm" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
-      <div className="mx-auto max-w-[1400px] p-4 lg:p-8">
+      <div className="mx-auto max-w-350 p-4 lg:p-8">
         {/* Header */}
         <div
           className="mb-8 flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between"

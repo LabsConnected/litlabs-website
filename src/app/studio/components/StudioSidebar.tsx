@@ -104,7 +104,7 @@ function RailButton({
     >
       {active && (
         <span
-          className="absolute -left-1 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full"
+          className="absolute -left-1 top-1/2 h-5 w-0.75 -translate-y-1/2 rounded-r-full"
           style={{
             backgroundColor: T.accentColor,
             boxShadow: `0 0 8px ${T.accentColor}`,
@@ -232,7 +232,7 @@ export default function StudioSidebar({
       ═══════════════════════════════════════════════════════════ */}
       {moreOpen && (
         <div
-          className="fixed left-12 top-0 z-50 hidden h-full w-[220px] flex-col border-r md:flex"
+          className="fixed left-12 top-0 z-50 hidden h-full w-55 flex-col border-r md:flex"
           style={{
             backgroundColor: "rgba(10,12,18,0.98)",
             borderRight: "1px solid rgba(255,255,255,0.08)",

@@ -406,7 +406,7 @@ function MediaOverlayHost({
     <>
       {cameraDock.open && (
         <div
-          className={`fixed z-[1100] flex flex-col gap-2 ${posClass(cameraDock.pos)}`}
+          className={`fixed z-1100 flex flex-col gap-2 ${posClass(cameraDock.pos)}`}
           style={{ width: 320, maxWidth: "calc(100% - 1.5rem)" }}
         >
           <CameraTool />
@@ -420,7 +420,7 @@ function MediaOverlayHost({
 
       {screenDock.open && (
         <div
-          className={`fixed z-[1100] flex flex-col gap-2 ${posClass(screenDock.pos)}`}
+          className={`fixed z-1100 flex flex-col gap-2 ${posClass(screenDock.pos)}`}
           style={{ width: 360, maxWidth: "calc(100% - 1.5rem)" }}
         >
           <ScreenTool />

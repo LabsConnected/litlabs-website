@@ -701,7 +701,7 @@ export default function AgentTool() {
     <div className="flex h-full overflow-hidden select-none">
       {/* ── LEFT SIDEBAR ── */}
       <div
-        className="hidden md:flex w-[210px] shrink-0 flex-col border-r"
+        className="hidden md:flex w-52.5 shrink-0 flex-col border-r"
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: T.boxBg + "90",
@@ -1137,7 +1137,7 @@ export default function AgentTool() {
 
       {/* ── RIGHT: AGENT INFO PANEL ── */}
       <div
-        className="hidden xl:flex w-[190px] shrink-0 border-l flex-col"
+        className="hidden xl:flex w-47.5 shrink-0 border-l flex-col"
         style={{
           borderColor: T.borderColor + "15",
           backgroundColor: T.boxBg + "50",

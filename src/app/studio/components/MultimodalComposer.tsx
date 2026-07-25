@@ -75,11 +75,11 @@ const STATUS_LABELS: Record<VoiceState, string> = {
 function WaveformBars({ level, active }: { level: number; active: boolean }) {
   const bars = [0.4, 0.7, 1.0, 0.7, 0.4];
   return (
-    <div className="flex items-center gap-[2px] h-4">
+    <div className="flex items-center gap-0.5 h-4">
       {bars.map((h, i) => (
         <div
           key={i}
-          className="w-[3px] rounded-full transition-all duration-75"
+          className="w-0.75 rounded-full transition-all duration-75"
           style={{
             height: active
               ? `${Math.max(20, (h * level + 0.1) * 100)}%`
@@ -356,7 +356,7 @@ export default function MultimodalComposer({
   return (
     <div className="relative flex w-full min-w-0 flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5 pb-[calc(.625rem+env(safe-area-inset-bottom))] shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl sm:pb-2.5">
       {createMode && (
-        <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
+        <div className="fixed inset-0 z-100 grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
           <section role="dialog" aria-modal="true" aria-label={`Generate ${createMode}`} className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-[#090a12] shadow-[0_30px_120px_rgba(0,0,0,.8)]">
             <header className="flex items-center justify-between border-b border-white/10 px-4 py-3">
               <div className="flex items-center gap-2 text-sm font-black text-white">{createMode === "image" ? <ImageIcon size={17} className="text-cyan-300" /> : <Clapperboard size={17} className="text-violet-300" />} Generate {createMode === "image" ? "Image" : "Video"}</div>
@@ -367,9 +367,9 @@ export default function MultimodalComposer({
               <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Aspect ratio</span><div className="mt-1.5 flex flex-wrap gap-2">{["1:1", "16:9", "9:16", "4:3", "3:4"].map((ratio) => <button type="button" key={ratio} onClick={() => setCreateAspect(ratio)} className={`rounded-lg border px-3 py-2 text-[10px] font-bold ${createAspect === ratio ? "border-cyan-300/60 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{ratio}</button>)}</div></div>
               <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Style</span><div className="mt-1.5 flex flex-wrap gap-2">{(createMode === "image" ? ["None", "LiTLabs brand", "Photorealistic", "Anime", "3D render", "Cinematic"] : ["Cinematic", "Product", "Anime motion", "Slow motion", "Music visualizer"]).map((style) => <button type="button" key={style} onClick={() => setCreateStyle(style)} className={`rounded-full border px-3 py-1.5 text-[9px] font-bold ${createStyle === style ? "border-violet-300/55 bg-violet-300/10 text-violet-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{style}</button>)}</div></div>
               {createMode === "video" && <div className="grid grid-cols-2 gap-3"><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Duration<select value={createDuration} onChange={(e) => setCreateDuration(Number(e.target.value))} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option value={4}>4 seconds</option><option value={6}>6 seconds</option><option value={8}>8 seconds</option></select></label><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Resolution<select value={createResolution} onChange={(e) => setCreateResolution(e.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option>720p</option><option>1080p</option></select></label></div>}
-              <button type="button" onClick={() => createFileRef.current?.click()} className="flex w-full items-center gap-3 rounded-xl border border-dashed border-white/15 bg-white/[.025] p-3 text-left text-[10px] text-white/55 hover:border-cyan-300/35"><Upload size={15} className="text-cyan-300" /><span><b className="block text-white/80">{createReference ? "Reference image added" : createMode === "video" ? "Add a starting image" : "Add a reference image"}</b>{createReference ? "Click to replace it" : "Optional · keeps character, composition, or brand direction"}</span></button>
+              <button type="button" onClick={() => createFileRef.current?.click()} className="flex w-full items-center gap-3 rounded-xl border border-dashed border-white/15 bg-white/2.5 p-3 text-left text-[10px] text-white/55 hover:border-cyan-300/35"><Upload size={15} className="text-cyan-300" /><span><b className="block text-white/80">{createReference ? "Reference image added" : createMode === "video" ? "Add a starting image" : "Add a reference image"}</b>{createReference ? "Click to replace it" : "Optional · keeps character, composition, or brand direction"}</span></button>
               <input ref={createFileRef} type="file" accept="image/*" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; if (!file) return; const reader = new FileReader(); reader.onload = () => setCreateReference(String(reader.result)); reader.readAsDataURL(file); }} />
-              <button type="button" disabled={createPrompt.trim().length < 3} onClick={() => { sessionStorage.setItem(`litlabs:${createMode}:draft`, JSON.stringify({ prompt: createPrompt.trim(), aspectRatio: createAspect, style: createStyle, duration: createDuration, resolution: createResolution, referenceImage: createReference })); onRouteTool?.(createMode, createPrompt.trim()); setCreateMode(null); }} className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-cyan-400 to-violet-400 py-3 text-xs font-black text-black disabled:opacity-35"><Sparkles size={14} /> Continue to {createMode === "image" ? "Image" : "Video"} Studio</button>
+              <button type="button" disabled={createPrompt.trim().length < 3} onClick={() => { sessionStorage.setItem(`litlabs:${createMode}:draft`, JSON.stringify({ prompt: createPrompt.trim(), aspectRatio: createAspect, style: createStyle, duration: createDuration, resolution: createResolution, referenceImage: createReference })); onRouteTool?.(createMode, createPrompt.trim()); setCreateMode(null); }} className="flex w-full items-center justify-center gap-2 rounded-xl bg-linear-to-r from-cyan-400 to-violet-400 py-3 text-xs font-black text-black disabled:opacity-35"><Sparkles size={14} /> Continue to {createMode === "image" ? "Image" : "Video"} Studio</button>
             </div>
           </section>
         </div>
@@ -487,7 +487,7 @@ export default function MultimodalComposer({
 
         {/* Add sheet */}
       {showAdd && (
-        <button aria-label="Close create menu" className="fixed inset-0 z-[10010] bg-black/60 md:hidden" onClick={() => setShowAdd(false)} />
+        <button aria-label="Close create menu" className="fixed inset-0 z-10010 bg-black/60 md:hidden" onClick={() => setShowAdd(false)} />
       )}
       {showAdd && (
         <div
@@ -496,7 +496,7 @@ export default function MultimodalComposer({
           aria-label="Create and attach"
           onTouchStart={(event) => { sheetTouchYRef.current = event.touches[0]?.clientY ?? null; }}
           onTouchEnd={(event) => { const start = sheetTouchYRef.current; const end = event.changedTouches[0]?.clientY; if (start !== null && end !== undefined && end - start > 70) setShowAdd(false); sheetTouchYRef.current = null; }}
-          className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] left-3 right-3 z-[10020] grid max-h-[min(58dvh,480px)] grid-cols-3 gap-2 overflow-y-auto overscroll-contain rounded-[24px] border border-white/10 bg-[#0a0b12]/98 p-3 shadow-[0_-18px_60px_rgba(0,0,0,.7)] animate-in slide-in-from-bottom-4 sm:static sm:z-auto sm:mb-2 sm:max-h-none sm:grid-cols-5 sm:overflow-visible sm:rounded-2xl sm:p-2"
+          className="fixed bottom-[calc(8.25rem+env(safe-area-inset-bottom))] left-3 right-3 z-10020 grid max-h-[min(58dvh,480px)] grid-cols-3 gap-2 overflow-y-auto overscroll-contain rounded-3xl border border-white/10 bg-[#0a0b12]/98 p-3 shadow-[0_-18px_60px_rgba(0,0,0,.7)] animate-in slide-in-from-bottom-4 sm:static sm:z-auto sm:mb-2 sm:max-h-none sm:grid-cols-5 sm:overflow-visible sm:rounded-2xl sm:p-2"
         >
           <div className="col-span-3 mx-auto mb-1 h-1 w-10 rounded-full bg-white/20 sm:hidden" />
           {[
@@ -523,7 +523,7 @@ export default function MultimodalComposer({
                 }
                 setShowAdd(false);
               }}
-              className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
+              className="flex min-h-18 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
             >
               <item.icon size={16} className={item.color} /> {item.label}
             </button>
@@ -533,7 +533,7 @@ export default function MultimodalComposer({
               fileInputRef.current?.click();
               setShowAdd(false);
             }}
-            className="flex min-h-[72px] flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
+            className="flex min-h-18 flex-col items-center justify-center gap-1 rounded-xl border border-transparent p-2 text-[9px] font-bold text-slate-300 transition hover:border-white/10 hover:bg-white/5 sm:min-h-14"
           >
             <Paperclip size={16} className="text-cyan-300" /> Files
           </button>

@@ -1,3 +1,5 @@
+import { translateCapabilities, type RawCapabilities } from "./translate";
+
 export interface StudioContext {
   terminalConnected: boolean;
   terminalSessionId: string | null;
@@ -17,11 +19,14 @@ export async function getStudioContext(): Promise<StudioContext> {
 }
 
 export function buildCapabilityContextForChat(ctx: StudioContext): string {
-  const parts: string[] = [];
-  parts.push(`Terminal: ${ctx.terminalConnected ? "connected" : "disconnected"}`);
-  if (ctx.terminalSessionId) parts.push(`Session: ${ctx.terminalSessionId.slice(0, 8)}`);
-  parts.push(`Repository: ${ctx.repositoryConnected ? "connected" : "not connected"}`);
-  parts.push(`Tools: ${ctx.availableTools.length > 0 ? ctx.availableTools.join(", ") : "none"}`);
-  parts.push(`Summary: ${ctx.connectionSummary}`);
-  return parts.join("\n");
+  const raw: RawCapabilities = {
+    repository: ctx.repositoryConnected ? "connected" : "none",
+    repositoryIndexed: ctx.repositoryConnected,
+    terminalExecution: ctx.terminalConnected ? "available" : "unavailable",
+    terminalSessionId: ctx.terminalSessionId,
+    connectedProviders: ctx.availableTools,
+    availableTools: ctx.availableTools,
+    connectionSummary: ctx.connectionSummary,
+  };
+  return translateCapabilities(raw).contextBlock;
 }

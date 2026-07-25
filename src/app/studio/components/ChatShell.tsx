@@ -207,7 +207,7 @@ export default function ChatShell({
             aria-label="Close sessions"
           />
           <div
-            className="fixed left-12 top-0 z-50 flex h-full w-[300px] flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
+            className="fixed left-12 top-0 z-50 flex h-full w-75 flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
             role="dialog"
             aria-modal="true"
             aria-label="Chat sessions"
@@ -658,7 +658,7 @@ export default function ChatShell({
       </main>
 
       {/* Composer */}
-      <div className="relative z-20 shrink-0 bg-gradient-to-t from-[#05060b] via-[#05060b]/95 to-transparent px-2 pt-2 sm:px-4">
+      <div className="relative z-20 shrink-0 bg-linear-to-t from-[#05060b] via-[#05060b]/95 to-transparent px-2 pt-2 sm:px-4">
         <MultimodalComposer
           value={input}
           onChange={setInput}

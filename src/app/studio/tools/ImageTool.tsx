@@ -30,7 +30,6 @@ import {
   ChevronDown,
   ChevronUp,
   ImageIcon,
-  Menu,
 } from "lucide-react";
 import { MediaProviderId } from "@/lib/media";
 import { GENERATION_PRESETS } from "@/lib/visual-packs/generation-presets";
@@ -387,7 +386,6 @@ export default function ImageTool() {
     "prompt",
   );
   const [historyOpen, setHistoryOpen] = useState(true);
-  const [mobileLeftOpen, setMobileLeftOpen] = useState(false);
   const [mobileRightOpen, setMobileRightOpen] = useState(false);
 
   /* ── Resizable panel widths ── */
@@ -552,7 +550,6 @@ export default function ImageTool() {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
-        setMobileLeftOpen(false);
         setMobileRightOpen(false);
       }
     };
@@ -1099,7 +1096,7 @@ export default function ImageTool() {
           </div>
         </div>
 
-        {/* Mobile panel toggles */}
+        {/* Mobile history toggle (only) — prompt form is always visible on mobile */}
         <div className="flex items-center gap-1.5 shrink-0 md:hidden">
           <button
             onClick={() => setMobileRightOpen((v) => !v)}
@@ -1116,22 +1113,6 @@ export default function ImageTool() {
             aria-label="Toggle history"
           >
             <History size={14} />
-          </button>
-          <button
-            onClick={() => setMobileLeftOpen((v) => !v)}
-            className="h-8 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all"
-            style={{
-              borderColor: mobileLeftOpen
-                ? T.accentColor + "60"
-                : T.borderColor + "40",
-              color: mobileLeftOpen ? T.accentColor : T.textMuted,
-              backgroundColor: mobileLeftOpen
-                ? T.accentColor + "10"
-                : "transparent",
-            }}
-            aria-label="Toggle controls"
-          >
-            <Menu size={14} />
           </button>
         </div>
 
@@ -1179,46 +1160,318 @@ export default function ImageTool() {
 
       {/* ── Body ────────────────────────────────────────────────────────── */}
       <div className="flex-1 flex min-h-0 relative">
-        {/* Mobile backdrop */}
-        {(mobileLeftOpen || mobileRightOpen) && (
+        {/* Mobile backdrop — only for history panel */}
+        {mobileRightOpen && (
           <div
-            className="fixed inset-0 bg-black/40 z-[10000] md:hidden"
-            onClick={() => {
-              setMobileLeftOpen(false);
-              setMobileRightOpen(false);
-            }}
+            className="fixed inset-0 bg-black/40 z-10000 md:hidden"
+            onClick={() => setMobileRightOpen(false)}
           />
         )}
 
-        {/* ── LEFT PANEL: Controls ──────────────────────────────────── */}
+        {/* ── MOBILE: Single-column workspace ──────────────────────── */}
         <div
-          className={`shrink-0 flex flex-col overflow-hidden transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 left-0 z-[10002] w-full max-w-[460px] md:w-[var(--left-panel-width)] md:max-w-none shadow-2xl md:shadow-none ${mobileLeftOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"}`}
+          className="md:hidden flex-1 flex flex-col min-h-0 overflow-y-auto overscroll-contain"
+          style={{ backgroundColor: T.bgColor }}
+        >
+          <div
+            className="flex-1 px-4 pt-4 pb-[calc(96px+env(safe-area-inset-bottom))] space-y-4"
+          >
+            {/* Prompt textarea — first interactive element */}
+            <div className="space-y-1.5">
+              <label
+                className="text-[10px] font-bold uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
+                Prompt
+              </label>
+              <textarea
+                value={prompt}
+                onChange={(e) => { setPrompt(e.target.value); setError(null); }}
+                placeholder="Describe what you want to create..."
+                rows={4}
+                disabled={isWorking}
+                className="w-full min-h-28 px-3 py-3 text-sm rounded-xl outline-none resize-none disabled:opacity-50 transition-all focus:ring-1"
+                style={{
+                  backgroundColor: T.bgColor,
+                  border: `1px solid ${T.borderColor}40`,
+                  color: T.textColor,
+                  lineHeight: "1.6",
+                }}
+              />
+              <div className="flex items-center justify-between">
+                <button
+                  onClick={enhancePrompt}
+                  disabled={!prompt.trim() || isWorking}
+                  className="flex items-center gap-1 h-6 px-2 rounded border text-[9px] font-bold transition-all hover:opacity-80 disabled:opacity-30"
+                  style={{ borderColor: T.accentColor + "40", color: T.accentColor }}
+                >
+                  <Zap size={9} /> Enhance
+                </button>
+                <span className="text-[9px]" style={{ color: T.textMuted + "60" }}>
+                  {prompt.length}
+                </span>
+              </div>
+            </div>
+
+            {/* Quick controls — compact chips */}
+            <div className="space-y-2">
+              <span
+                className="text-[10px] font-bold uppercase tracking-widest"
+                style={{ color: T.textMuted }}
+              >
+                Quick settings
+              </span>
+              <div className="flex flex-wrap gap-1.5">
+                {/* Style chip */}
+                <button
+                  onClick={() => setActiveTab("style")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(!!selectedStyle)}
+                >
+                  <Palette size={11} />
+                  {selectedStyle ? selectedStyle.split(" ").slice(0, 2).join(" ") : "Style"}
+                </button>
+                {/* Aspect ratio chip */}
+                <button
+                  onClick={() => setActiveTab("settings")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(false)}
+                >
+                  <Layout size={11} />
+                  {aspectRatio}
+                </button>
+                {/* Model chip */}
+                <button
+                  onClick={() => setActiveTab("settings")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(false)}
+                >
+                  <Sparkles size={11} />
+                  {currentProvider.label}
+                </button>
+                {/* Quality chip */}
+                <button
+                  onClick={() => setActiveTab("settings")}
+                  className="h-8 px-3 flex items-center gap-1.5 rounded-lg border text-[10px] font-bold transition-all"
+                  style={pill(false)}
+                >
+                  <Flame size={11} />
+                  {qualityPreset}
+                </button>
+              </div>
+            </div>
+
+            {/* Reference image */}
+            <div
+              className="rounded-lg border overflow-hidden"
+              style={sectionBox}
+            >
+              <div className="px-3 py-2 flex items-center justify-between">
+                <span className="text-[10px] font-bold" style={{ color: T.textMuted }}>
+                  Reference image
+                </span>
+                {referenceImage && (
+                  <button
+                    onClick={() => { setReferenceImage(null); addLog("info", "Reference cleared"); }}
+                    className="flex items-center gap-1 text-[9px]"
+                    style={{ color: T.textMuted }}
+                  >
+                    <X size={9} /> Clear
+                  </button>
+                )}
+              </div>
+              <input
+                type="file"
+                accept="image/*"
+                ref={fileInputRef}
+                onChange={handleFileUpload}
+                aria-label="Upload reference image"
+                title="Upload reference image"
+                className="hidden"
+              />
+              {referenceImage ? (
+                <div className="mx-3 mb-3 rounded-md overflow-hidden border" style={{ borderColor: T.borderColor + "40" }}>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={referenceImage} alt="Reference" className="w-full h-24 object-cover" />
+                </div>
+              ) : (
+                <button
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isWorking}
+                  className="mx-3 mb-3 w-[calc(100%-24px)] py-3 rounded-md border border-dashed flex flex-col items-center gap-1 text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+                  style={{ borderColor: T.borderColor + "60", color: T.textMuted }}
+                >
+                  <Upload size={14} /> Upload
+                </button>
+              )}
+            </div>
+
+            {/* Generate button — sticky above bottom nav */}
+            <div className="sticky bottom-0 z-10 -mx-4 px-4 pt-3 pb-[calc(12px+env(safe-area-inset-bottom))] border-t" style={{ borderColor: T.borderColor + "24", backgroundColor: T.boxBg }}>
+              <button
+                onClick={handleGenerate}
+                disabled={!promptValid || !canAfford || isWorking}
+                className="w-full h-13 rounded-2xl font-black text-sm uppercase tracking-widest flex items-center justify-center gap-2 transition-all hover:scale-[1.01] disabled:opacity-40 disabled:cursor-not-allowed"
+                style={{
+                  background: isWorking
+                    ? T.accentColor + "60"
+                    : `linear-gradient(135deg, ${T.accentColor} 0%, ${T.headerColor} 100%)`,
+                  color: T.bgColor,
+                  boxShadow: isWorking ? "none" : `0 0 24px ${T.accentColor}40`,
+                }}
+              >
+                {isWorking ? (
+                  <><Loader2 size={15} className="animate-spin" /> Forging...</>
+                ) : (
+                  <><Wand2 size={15} /> Forge{batchSize > 1 ? ` ${batchSize}×` : ""}</>
+                )}
+              </button>
+              {error && (
+                <div
+                  className="mt-2 text-[10px] px-3 py-2.5 rounded-lg flex items-start gap-1.5"
+                  style={{
+                    backgroundColor: error.includes("✓") ? T.success + "15" : "#f8514915",
+                    borderLeft: `3px solid ${error.includes("✓") ? T.success : "#f85149"}`,
+                    color: error.includes("✓") ? T.success : "#f85149",
+                  }}
+                >
+                  {error.includes("✓") ? <CheckCircle2 size={11} className="mt-px shrink-0" /> : <AlertTriangle size={11} className="mt-px shrink-0" />}
+                  <span>{error}</span>
+                </div>
+              )}
+            </div>
+
+            {/* Prompt starters — below generate */}
+            <div className="space-y-2">
+              <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                Try a prompt
+              </span>
+              <div className="flex gap-2 overflow-x-auto snap-x snap-mandatory pb-1 -mx-1 px-1">
+                {PROMPT_PRESETS.map((p, i) => (
+                  <button
+                    key={i}
+                    onClick={() => handleUsePrompt(p)}
+                    disabled={isWorking}
+                    className="w-[78%] shrink-0 snap-start text-left text-[11px] px-3 py-2.5 rounded-lg border hover:opacity-80 disabled:opacity-40 line-clamp-2 transition-all"
+                    style={{
+                      backgroundColor: T.bgColor,
+                      borderColor: T.borderColor + "40",
+                      color: T.textColor + "cc",
+                    }}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Style presets — compact horizontal scroll */}
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                  Style
+                </span>
+                {selectedStyle && (
+                  <button onClick={() => setSelectedStyle(null)} className="text-[9px] opacity-60 hover:opacity-100" style={{ color: T.accentColor }}>
+                    Clear
+                  </button>
+                )}
+              </div>
+              <div className="flex gap-1.5 overflow-x-auto pb-1 -mx-1 px-1">
+                {STYLE_PRESETS.map((style) => (
+                  <button
+                    key={style}
+                    onClick={() => { setSelectedStyle(style); addLog("info", `Style: ${style}`); }}
+                    disabled={isWorking}
+                    className="shrink-0 px-2.5 py-1.5 text-[10px] font-bold rounded-full border transition-all hover:scale-105 disabled:opacity-40"
+                    style={{
+                      borderColor: selectedStyle === style ? T.accentColor : T.borderColor + "60",
+                      color: selectedStyle === style ? T.accentColor : T.textMuted,
+                      backgroundColor: selectedStyle === style ? T.accentColor + "15" : T.bgColor,
+                    }}
+                  >
+                    {style}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Generated result / canvas */}
+            {currentResult?.fileUrl ? (
+              <div className="rounded-xl border overflow-hidden" style={{ borderColor: T.borderColor + "40" }}>
+                <div className="flex items-center justify-between px-3 h-9" style={{ borderBottom: `1px solid ${T.borderColor}15` }}>
+                  <div className="flex items-center gap-2 text-[10px]" style={{ color: T.textMuted }}>
+                    <ImageIcon size={10} />
+                    <span className="font-bold uppercase tracking-widest">Result</span>
+                    {currentResult.status === "succeeded" && (
+                      <span className="flex items-center gap-1 text-[9px]" style={{ color: T.success }}>
+                        <CheckCircle2 size={9} /> Ready
+                      </span>
+                    )}
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => currentResult?.fileUrl && handleDownload(currentResult.fileUrl, currentResult.prompt)} className="h-6 px-2 flex items-center gap-1 rounded border text-[9px] font-bold" style={{ borderColor: T.borderColor + "50", color: T.textMuted }}>
+                      <Download size={9} /> Save
+                    </button>
+                    <button onClick={handleGenerate} className="h-6 px-2 flex items-center gap-1 rounded border text-[9px] font-bold" style={{ borderColor: T.borderColor + "50", color: T.textMuted }}>
+                      <RefreshCw size={9} /> Regen
+                    </button>
+                  </div>
+                </div>
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={currentResult.fileUrl} alt={currentResult.prompt} className="w-full" onError={() => setImgError("Failed to load image")} />
+                <div className="px-3 py-2 text-[10px] opacity-50" style={{ color: T.textMuted }}>
+                  {currentResult.prompt}
+                </div>
+              </div>
+            ) : isWorking ? (
+              <div className="rounded-xl border flex flex-col items-center justify-center py-16" style={{ borderColor: T.borderColor + "40", backgroundColor: T.boxBg }}>
+                <Loader2 size={32} className="animate-spin mb-3" style={{ color: T.accentColor }} />
+                <span className="text-xs font-bold" style={{ color: T.textMuted }}>Generating...</span>
+              </div>
+            ) : null}
+
+            {/* Recent generations — horizontal scroll */}
+            {history.length > 0 && (
+              <div className="space-y-2">
+                <span className="text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                  Recent generations
+                </span>
+                <div className="flex gap-2 overflow-x-auto pb-1 -mx-1 px-1">
+                  {history.slice(0, 10).map((g) => (
+                    <button
+                      key={g.id}
+                      onClick={() => setCurrentResult(g)}
+                      className="relative w-20 h-20 shrink-0 rounded-lg border overflow-hidden group transition-all hover:scale-[1.03]"
+                      style={{ borderColor: currentResult?.id === g.id ? T.accentColor : T.borderColor + "40" }}
+                    >
+                      {g.fileUrl ? (
+                        /* eslint-disable-next-line @next/next/no-img-element */
+                        <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
+                          <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />
+                        </div>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* ── LEFT PANEL: Controls (desktop only) ─────────────────── */}
+        <div
+          className="hidden md:flex shrink-0 flex-col overflow-hidden"
           style={{
             "--left-panel-width": `${leftWidth}px`,
             borderRight: `1px solid ${T.borderColor}18`,
             backgroundColor: T.boxBg,
             backdropFilter: "blur(20px)",
+            width: `${leftWidth}px`,
           } as CSSProperties}
         >
-          {/* Mobile close */}
-          <div className="md:hidden flex items-center justify-between px-4 pt-[max(1rem,env(safe-area-inset-top))] pb-2">
-            <div>
-              <span className="block text-sm font-black tracking-tight" style={{ color: T.headerColor }}>
-                Create an image
-              </span>
-              <span className="block text-[10px] mt-0.5" style={{ color: T.textMuted }}>
-                Describe it, tune it, then forge it.
-              </span>
-            </div>
-            <button
-              onClick={() => setMobileLeftOpen(false)}
-              className="grid h-10 w-10 place-items-center rounded-xl border transition-all hover:bg-white/10"
-              style={{ color: T.textMuted }}
-              aria-label="Close controls"
-            >
-              <X size={16} />
-            </button>
-          </div>
 
           {/* Tab nav */}
           <div className="flex shrink-0 gap-1.5 px-4 md:px-3 pt-2 md:pt-3 pb-3 md:pb-2">
@@ -2419,8 +2672,8 @@ export default function ImageTool() {
           />
         </div>
 
-        {/* ── CENTER + RIGHT: Canvas + History ──────────────────────── */}
-        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {/* ── CENTER + RIGHT: Canvas + History (desktop only) ──────── */}
+        <div className="hidden md:flex flex-1 flex-col min-w-0 overflow-hidden">
           {/* Canvas area */}
           <div className="flex-1 flex items-stretch min-h-0 overflow-hidden">
             {/* Preview */}
@@ -2541,7 +2794,7 @@ export default function ImageTool() {
                     </div>
 
                     <button
-                      onClick={() => { setPrompt(currentResult.prompt); setMobileLeftOpen(true); }}
+                      onClick={() => { setPrompt(currentResult.prompt); }}
                       className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
                       style={{
                         borderColor: T.borderColor + "50",
@@ -2819,7 +3072,7 @@ export default function ImageTool() {
 
             {/* History sidebar (right) */}
             <div
-              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-[10000] ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
+              className={`shrink-0 flex flex-col transition-transform duration-300 ease-out md:relative md:translate-x-0 fixed inset-y-0 right-0 z-10000 ${mobileRightOpen ? "translate-x-0" : "translate-x-full md:translate-x-0"}`}
               style={{
                 width: rightWidth,
                 borderLeft: `1px solid ${T.borderColor}15`,

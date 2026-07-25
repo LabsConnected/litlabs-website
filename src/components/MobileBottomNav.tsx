@@ -32,7 +32,7 @@ export default function MobileBottomNav() {
             >
               {active && (
                 <span
-                  className="absolute inset-x-2 top-0 h-[3px] rounded-full"
+                  className="absolute inset-x-2 top-0 h-0.75 rounded-full"
                   style={{
                     backgroundColor: T.accentColor,
                     boxShadow: `0 0 8px ${T.accentColor}80`,
