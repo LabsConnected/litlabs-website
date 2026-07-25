@@ -111,20 +111,23 @@ CREATE TABLE IF NOT EXISTS public.creator_earnings (
 );
 ALTER TABLE public.creator_earnings ENABLE ROW LEVEL SECURITY;
 
--- Seed core agents (idempotent)
-INSERT INTO public.agents (slug, display_name, description, role, is_core, is_public)
+-- Seed marketplace items (idempotent). Slugs remain stable for backward
+-- compatibility with existing user_agents records, but display names and
+-- descriptions reflect the new skills/specialists model.
+INSERT INTO public.agents (slug, display_name, description, role, is_core, is_public, is_featured)
 VALUES
-  ('director', 'Director', 'Orchestrates multi-agent workflows and platform strategy', 'Orchestrator', true, true),
-  ('champion', 'Champion', 'General assistant for user queries and tasks', 'General Assistant', true, true),
-  ('code-champion', 'Code Champion', 'Software engineering and code review', 'Software Engineer', true, true),
-  ('social-dominator', 'Social Dominator', 'Growth, content, and social scheduling', 'Growth & Content', true, true),
-  ('data-slayer', 'Data Slayer', 'Data science and telemetry analysis', 'Data Scientist', true, true),
-  ('writing-coach', 'Writing Coach', 'Content writing and editing', 'Content Writer', true, true),
-  ('music-producer', 'Music Producer', 'Audio and music generation', 'Music Generation', true, true)
+  ('director', 'Mission Orchestration', 'Multi-agent workflow orchestration, strategy planning, and task automation.', 'automation', true, true, true),
+  ('champion', 'General Productivity', 'General assistance, task handling, and FAQ documentation.', 'automation', true, true, false),
+  ('code-champion', 'Software Engineering', 'Code review, debugging, implementation, and test support.', 'development', true, true, true),
+  ('social-dominator', 'Social Growth', 'Growth, content, and social scheduling for creators.', 'creative', true, true, true),
+  ('data-slayer', 'Analytics', 'Data science, telemetry analysis, and reporting.', 'data', true, true, false),
+  ('writing-coach', 'Writing and Editing', 'Content writing, editing, and proofreading.', 'creative', true, true, false),
+  ('music-producer', 'Music Creation', 'Audio and music generation tools.', 'media', true, true, false)
 ON CONFLICT (slug) DO UPDATE SET
   display_name = EXCLUDED.display_name,
   description = EXCLUDED.description,
   role = EXCLUDED.role,
   is_core = EXCLUDED.is_core,
   is_public = EXCLUDED.is_public,
+  is_featured = EXCLUDED.is_featured,
   updated_at = now();

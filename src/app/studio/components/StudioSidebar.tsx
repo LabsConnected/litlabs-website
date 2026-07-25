@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import {
   Image as ImageIcon,
@@ -22,6 +23,14 @@ import {
   MonitorUp,
   MoreHorizontal,
   X,
+  Settings as SettingsIcon,
+  User,
+  Plug,
+  Bell,
+  Mic,
+  Cpu,
+  Shield,
+  Coins,
 } from "lucide-react";
 
 export type StudioTool =
@@ -286,6 +295,30 @@ export default function StudioSidebar({
   );
 }
 
+/* ── More sheet entry types ─────────────────────────────────────── */
+type SheetEntry = {
+  label: string;
+  description?: string;
+  icon: typeof ImageIcon;
+  href?: string;
+  tool?: StudioTool;
+};
+
+const PRIMARY_ENTRIES: SheetEntry[] = [
+  { label: "Settings", description: "Manage Studio, models, voice, camera, appearance, and connections", icon: SettingsIcon, href: "/settings" },
+  { label: "Account", description: "Profile, plan, usage, and security", icon: User, href: "/profile" },
+  { label: "Connections", description: "GitHub, Vercel, Supabase, and model providers", icon: Plug, href: "/settings/connections" },
+];
+
+const SYSTEM_ENTRIES: SheetEntry[] = [
+  { label: "Notifications", icon: Bell, href: "/settings" },
+  { label: "Appearance", icon: Palette, href: "/settings" },
+  { label: "Voice & Camera", icon: Mic, href: "/settings/agents/voice" },
+  { label: "AI & Models", icon: Cpu, href: "/settings" },
+  { label: "Privacy & Security", icon: Shield, href: "/settings" },
+  { label: "Billing & LiTBits", icon: Coins, href: "/settings" },
+];
+
 /* ── Mobile bottom tab bar ───────────────────────────────────────── */
 export function MobileTabBar({
   activeTool,
@@ -297,12 +330,73 @@ export function MobileTabBar({
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const [drawerOpen, setDrawerOpen] = useState(false);
+  const sheetRef = useRef<HTMLDivElement>(null);
 
   const primaryTools = ALL_TOOLS.filter((t) => MOBILE_PRIMARY.includes(t.id));
   const secondaryTools = ALL_TOOLS.filter(
     (t) => !MOBILE_PRIMARY.includes(t.id),
   );
   const activeIsSecondary = secondaryTools.some((t) => t.id === activeTool);
+
+  // Close on Escape + focus trap
+  useEffect(() => {
+    if (!drawerOpen) return;
+    const sheet = sheetRef.current;
+    if (!sheet) return;
+
+    // Focus first focusable element on open
+    const focusables = sheet.querySelectorAll<HTMLElement>(
+      'a[href], button:not([disabled]), [tabindex]:not([tabindex="-1"])',
+    );
+    focusables[0]?.focus();
+
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setDrawerOpen(false);
+        return;
+      }
+      if (e.key === "Tab" && focusables.length > 0) {
+        const first = focusables[0];
+        const last = focusables[focusables.length - 1];
+        if (e.shiftKey && document.activeElement === first) {
+          e.preventDefault();
+          last.focus();
+        } else if (!e.shiftKey && document.activeElement === last) {
+          e.preventDefault();
+          first.focus();
+        }
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [drawerOpen]);
+
+  const returnTo = typeof window !== "undefined" ? encodeURIComponent(window.location.pathname + window.location.search) : "/studio";
+
+  const renderEntry = (entry: SheetEntry, key: string) => {
+    const Icon = entry.icon;
+    const href = entry.href ? `${entry.href}${entry.href.includes("?") ? "&" : "?"}returnTo=${returnTo}` : undefined;
+    if (href) {
+      return (
+        <Link
+          key={key}
+          href={href}
+          onClick={() => setDrawerOpen(false)}
+          className="flex min-h-11 items-center gap-3 rounded-xl px-3 py-2.5 transition-all hover:bg-white/5"
+          aria-label={entry.label}
+        >
+          <Icon size={18} className="pointer-events-none shrink-0" style={{ color: T.accentColor }} />
+          <div className="min-w-0 flex-1">
+            <div className="text-xs font-bold" style={{ color: "rgba(255,255,255,0.85)" }}>{entry.label}</div>
+            {entry.description && (
+              <div className="text-[10px] leading-tight" style={{ color: "rgba(255,255,255,0.4)" }}>{entry.description}</div>
+            )}
+          </div>
+        </Link>
+      );
+    }
+    return null;
+  };
 
   return (
     <>
@@ -316,17 +410,26 @@ export function MobileTabBar({
 
       {drawerOpen && (
         <div
-          className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-10000 max-h-[min(58dvh,480px)] overflow-y-auto rounded-t-2xl border-t px-3 pt-3 pb-2 md:hidden"
+          ref={sheetRef}
+          className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-10000 max-h-[min(70dvh,560px)] overflow-y-auto rounded-t-2xl border-t px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden"
           style={{
             backgroundColor: "#08090d",
             borderColor: "rgba(255,255,255,0.08)",
             boxShadow: `0 -8px 32px rgba(0,0,0,0.5)`,
           }}
         >
-          <div className="mb-2 text-[9px] font-bold uppercase tracking-widest text-white/70">
-            More Tools
+          {/* Drag handle */}
+          <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.15)" }} />
+
+          {/* PRIMARY section */}
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">Primary</div>
+          <div className="mb-3 space-y-1">
+            {PRIMARY_ENTRIES.map((entry) => renderEntry(entry, `primary-${entry.label}`))}
           </div>
-          <div className="grid grid-cols-4 gap-2">
+
+          {/* TOOLS section */}
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">Tools</div>
+          <div className="mb-3 grid grid-cols-4 gap-2">
             {secondaryTools.map((tool) => {
               const Icon = tool.icon;
               const active = activeTool === tool.id;
@@ -357,6 +460,12 @@ export function MobileTabBar({
                 </button>
               );
             })}
+          </div>
+
+          {/* SYSTEM section */}
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">System</div>
+          <div className="space-y-1">
+            {SYSTEM_ENTRIES.map((entry) => renderEntry(entry, `system-${entry.label}`))}
           </div>
         </div>
       )}
@@ -402,8 +511,8 @@ export function MobileTabBar({
           onClick={() => setDrawerOpen((v) => !v)}
           className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
           style={{ color: activeIsSecondary ? T.accentColor : "rgba(255,255,255,0.4)" }}
-          aria-label="More tools"
-          title="More tools"
+          aria-label="More"
+          title="More"
         >
           {activeIsSecondary && (
             <span

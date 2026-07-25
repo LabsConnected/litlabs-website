@@ -1,12 +1,14 @@
 "use client";
 
 import { useState, useMemo, useCallback, useEffect } from "react";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import {
   LayoutGrid, User, Palette, Sparkles, Layers, Compass, Briefcase,
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
   Server, Search, ChevronRight, Check, Loader2, AlertCircle,
-  RotateCcw, Lock, X,
+  RotateCcw, Lock, X, ArrowLeft,
 } from "lucide-react";
 import {
   useSettingsStore,
@@ -62,6 +64,8 @@ export default function SettingsPage() {
 
   const [saveStatus, setSaveStatus] = useState<SaveStatus>("idle");
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const searchParams = useSearchParams();
+  const returnTo = searchParams.get("returnTo") || "/studio";
 
   const sections = visibleSections();
 
@@ -133,9 +137,20 @@ export default function SettingsPage() {
             backdropFilter: "blur(14px)",
           }}
         >
-          <span className="text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
-            Settings
-          </span>
+          <div className="flex items-center gap-3">
+            <Link
+              href={returnTo}
+              className="grid h-9 w-9 place-items-center rounded-lg border"
+              style={{ borderColor: "rgba(255,255,255,0.08)", color: "rgba(255,255,255,0.6)" }}
+              aria-label="Back to Studio"
+              title="Back to Studio"
+            >
+              <ArrowLeft size={16} className="pointer-events-none" />
+            </Link>
+            <span className="text-sm font-black" style={{ color: "rgba(255,255,255,0.9)" }}>
+              Settings
+            </span>
+          </div>
           <button
             type="button"
             onClick={() => setMobileNavOpen(true)}

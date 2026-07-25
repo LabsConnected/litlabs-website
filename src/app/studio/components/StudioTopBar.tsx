@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
@@ -321,16 +322,27 @@ export default function StudioTopBar({
           )}
       </div>
 
-      {/* Settings */}
-      <button
-        type="button"
-        className="hidden md:block grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10"
+      {/* Settings — mobile (visible, links to /settings with return context) */}
+      <Link
+        href={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+        className="grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10 md:hidden"
         style={{ color: "rgba(255,255,255,0.5)" }}
-        aria-label="Settings"
+        aria-label="Open settings"
+        title="Settings"
+      >
+        <Settings size={16} className="pointer-events-none" />
+      </Link>
+
+      {/* Settings — desktop */}
+      <Link
+        href={`/settings?returnTo=${encodeURIComponent(typeof window !== "undefined" ? window.location.pathname + window.location.search : "/studio")}`}
+        className="hidden md:grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10"
+        style={{ color: "rgba(255,255,255,0.5)" }}
+        aria-label="Open settings"
         title="Settings"
       >
         <Settings size={14} className="pointer-events-none" />
-      </button>
+      </Link>
 
       {/* User avatar — Clerk UserButton with styled profile card for dark theme */}
       <div className="shrink-0">

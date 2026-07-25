@@ -2,2290 +2,718 @@
 
 import { useState, useCallback, useEffect, Suspense } from "react";
 import Link from "next/link";
-import Image from "next/image";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { useSearchParams, useRouter } from "next/navigation";
-import {
-  AGENT_AVATARS,
-  AGENT_AVATAR_META,
-  type AgentAvatarMeta,
-} from "@/lib/avatars";
+import { useSearchParams } from "next/navigation";
 import {
   Check,
   ArrowRight,
   Sparkles,
   ShieldCheck,
   Coins,
-  WandSparkles,
+  Gamepad2,
+  Code2,
+  PenTool,
+  BarChart3,
+  Music,
+  Search as SearchIcon,
+  Wrench,
+  Zap,
+  FileText,
+  Bot,
 } from "lucide-react";
 
-function formatPrice(cents: number): string {
-  if (cents === 0 || ALL_AGENTS_FREE_DURING_BETA) return "FREE";
-  return `${cents.toLocaleString()} LBC`;
-}
+// --- Types ---
 
-function formatUsdPrice(price: number): string {
-  if (price === 0) return "Free";
-  return `$${Number.isInteger(price) ? price.toFixed(0) : price.toFixed(2)}/mo`;
-}
+type MarketplaceItemType = "skill" | "specialist" | "workflow" | "tool" | "template";
 
-function formatLbc(amount: number): string {
-  return `${amount.toLocaleString()} LBC`;
-}
-
-// Category color mapping for consistent theming
-function getCategoryColor(category: string): string {
-  const colors: Record<string, string> = {
-    developer: "#818cf8", // Indigo
-    marketing: "#34d399", // Emerald
-    analytics: "#a78bfa", // Purple
-    content: "#f472b6", // Pink
-    general: "#fbbf24", // Amber
-    orchestrator: "#fb923c", // Orange
-    music: "#22d3ee", // Cyan
-    design: "#ec4899", // Rose
-    research: "#60a5fa", // Blue
-    legal: "#94a3b8", // Slate
-  };
-  return colors[category] || "#fbbf24";
-}
-
-const BETA_MODE = true;
-const BILLING_ENABLED = false;
-const MARKETPLACE_PURCHASES_ENABLED = false;
-const ALL_AGENTS_FREE_DURING_BETA = true;
-
-const BETA_BETA_FEATURES = [
-  "Full Studio access",
-  "LiTT and Spark",
-  "All beta specialists",
-  "Image, audio, code, and workflows",
-  "Beta LiTBits for testing",
-  "Feedback rewards",
-];
-
-const BETA_SPEND_FEATURES: {
-  id: string;
-  title: string;
-  desc: string;
-  cost: number;
-  action: string;
-  free?: boolean;
-}[] = [
-  {
-    id: "generate",
-    title: "Image Generation",
-    desc: "Generate an image with AI",
-    cost: 10,
-    action: "Generate",
-  },
-  {
-    id: "audio",
-    title: "Audio Generation",
-    desc: "Generate a music track or voice clip",
-    cost: 15,
-    action: "Generate",
-  },
-  {
-    id: "video",
-    title: "Video Generation",
-    desc: "Generate a short video clip",
-    cost: 30,
-    action: "Generate",
-  },
-  {
-    id: "workflow",
-    title: "Workflow Run",
-    desc: "Execute a multi-agent orchestrated workflow",
-    cost: 20,
-    action: "Run",
-  },
-  {
-    id: "slot",
-    title: "Extra Agent Slot",
-    desc: "Expand your dock to run +1 agent simultaneously",
-    cost: 0,
-    action: "Unlock",
-    free: true,
-  },
-  {
-    id: "theme",
-    title: "Premium Theme",
-    desc: "Unlock an exclusive UI skin",
-    cost: 25,
-    action: "Unlock",
-  },
-  {
-    id: "boost",
-    title: "Social Boost",
-    desc: "Feature your post at the top of the social feed for 24h",
-    cost: 20,
-    action: "Boost",
-  },
-];
-
-type Agent = {
+type MarketplaceItem = {
   id: string;
   slug: string;
   name: string;
   description: string;
+  type: MarketplaceItemType;
   category: string;
-  avatar_url: string;
-  price_cents: number;
+  compatibleWith: ("litt" | "spark")[];
   features: string[];
   is_featured: boolean;
-  personality: string;
-  rating?: number;
-  installs?: number;
+  price_cents: number;
   created_at?: string;
 };
 
-const CATEGORY_LABELS: Record<string, string> = {
-  developer: "Developer",
-  marketing: "Marketing",
-  analytics: "Analytics",
-  content: "Content",
-  general: "General",
-  orchestrator: "Orchestrator",
-  music: "Music",
-  design: "Design",
-  research: "Research",
-  legal: "Legal",
-  "smart-home": "Smart Home",
+type MarketplaceStats = {
+  totalItems: number;
+  freeItems: number;
+  installedItems: number;
+  availableItems: number;
 };
 
-// AGENT PRICING TIERS (in LiTBit Coins 🪙)
-// Fallback metadata for real core agents. The marketplace now reads from
-// /api/agents (Supabase) as the source of truth. This map is only used as a
-// safety net when a real agent row is missing marketplace metadata.
-const CORE_AGENT_META: Record<string, Partial<Agent>> = {
+// --- Beta flags ---
+
+const BETA_MODE = true;
+const BILLING_ENABLED = false;
+const MARKETPLACE_PURCHASES_ENABLED = false;
+const ALL_ITEMS_FREE_DURING_BETA = true;
+
+// --- Category config ---
+
+const CATEGORIES = [
+  { id: "all", label: "All" },
+  { id: "development", label: "Development" },
+  { id: "creative", label: "Creative" },
+  { id: "research", label: "Research" },
+  { id: "automation", label: "Automation" },
+  { id: "data", label: "Data" },
+  { id: "media", label: "Media" },
+] as const;
+
+const CATEGORY_COLORS: Record<string, string> = {
+  development: "#818cf8",
+  creative: "#ec4899",
+  research: "#60a5fa",
+  automation: "#fbbf24",
+  data: "#a78bfa",
+  media: "#22d3ee",
+};
+
+const TYPE_LABELS: Record<MarketplaceItemType, string> = {
+  skill: "Skill",
+  specialist: "Specialist",
+  workflow: "Workflow",
+  tool: "Tool",
+  template: "Template",
+};
+
+const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
+  skill: Zap,
+  specialist: Bot,
+  workflow: Wrench,
+  tool: Code2,
+  template: FileText,
+};
+
+// --- Migration map (old agent slug → new marketplace item) ---
+
+const OLD_TO_NEW: Record<string, { name: string; type: MarketplaceItemType; category: string; description: string; compatibleWith: ("litt" | "spark")[]; features: string[] }> = {
   director: {
-    avatar_url: AGENT_AVATARS.director,
-    features: [
-      "Multi-agent orchestration",
-      "Strategy planning",
-      "Workflow automation",
-    ],
-    is_featured: true,
-    personality: "Strategic, decisive, concise",
-    rating: 4.9,
-    installs: 1240,
+    name: "Mission Orchestration",
+    type: "skill",
+    category: "automation",
+    description: "Multi-agent workflow orchestration, strategy planning, and task automation.",
+    compatibleWith: ["litt"],
+    features: ["Workflow orchestration", "Strategy planning", "Task automation"],
   },
   champion: {
-    avatar_url: AGENT_AVATARS["support-agent"],
-    features: ["General assistance", "Task handling", "FAQ documentation"],
-    is_featured: false,
-    personality: "Patient, helpful, clear",
-    rating: 4.6,
-    installs: 543,
+    name: "General Productivity",
+    type: "skill",
+    category: "automation",
+    description: "General assistance, task handling, and FAQ documentation.",
+    compatibleWith: ["litt", "spark"],
+    features: ["Task handling", "FAQ documentation", "General assistance"],
+  },
+  "code-champion": {
+    name: "Software Engineering",
+    type: "specialist",
+    category: "development",
+    description: "Code review, debugging, implementation, and test support.",
+    compatibleWith: ["litt"],
+    features: ["Code review", "Debugging", "Implementation", "Test support"],
+  },
+  "social-dominator": {
+    name: "Social Growth",
+    type: "specialist",
+    category: "creative",
+    description: "Growth, content, and social scheduling for creators.",
+    compatibleWith: ["spark"],
+    features: ["Social scheduling", "Growth strategy", "Content planning"],
+  },
+  "data-slayer": {
+    name: "Analytics",
+    type: "specialist",
+    category: "data",
+    description: "Data science, telemetry analysis, and reporting.",
+    compatibleWith: ["litt"],
+    features: ["Data analysis", "Telemetry", "Reporting"],
+  },
+  "writing-coach": {
+    name: "Writing and Editing",
+    type: "skill",
+    category: "creative",
+    description: "Content writing, editing, and proofreading.",
+    compatibleWith: ["spark"],
+    features: ["Content writing", "Editing", "Proofreading"],
+  },
+  "music-producer": {
+    name: "Music Creation",
+    type: "skill",
+    category: "media",
+    description: "Audio and music generation tools.",
+    compatibleWith: ["spark"],
+    features: ["Audio generation", "Music composition", "Sound design"],
   },
 };
 
-const CORE_BY_SLUG = CORE_AGENT_META;
+// --- Convert API agent rows to marketplace items ---
 
-const MARKETPLACE_SHOWCASE = [
-  {
-    src: "/showcase/cover-architecture.png",
-    title: "Architecture",
-    subtitle: "Multi-agent systems and orchestration",
-  },
-  {
-    src: "/showcase/control-center.png",
-    title: "Control Center",
-    subtitle: "Live agent management and installs",
-  },
-  {
-    src: "/showcase/engine-routing.png",
-    title: "Engine Routing",
-    subtitle: "Dispatch work to the right specialist",
-  },
-];
+function apiAgentToItem(a: Record<string, unknown>): MarketplaceItem {
+  const slug = String(a.slug || "");
+  const mapped = OLD_TO_NEW[slug];
 
-const CATEGORY_ART: Record<string, string> = {
-  developer: "/showcase/engine-routing.png",
-  orchestrator: "/showcase/cover-architecture.png",
-  analytics: "/showcase/control-center.png",
-  marketing: "/showcase/control-center.png",
-  content: "/showcase/cover-architecture.png",
-  design: "/showcase/engine-routing.png",
-  research: "/showcase/control-center.png",
-  music: "/showcase/cover-architecture.png",
-  legal: "/showcase/control-center.png",
-  general: "/showcase/engine-routing.png",
-};
+  return {
+    id: String(a.id || slug),
+    slug,
+    name: mapped?.name || String(a.display_name || a.name || slug),
+    description: mapped?.description || String(a.description || ""),
+    type: mapped?.type || "skill",
+    category: mapped?.category || String(a.category || a.role || "general"),
+    compatibleWith: mapped?.compatibleWith || ["litt"],
+    features: mapped?.features || (Array.isArray(a.features) ? (a.features as string[]) : []),
+    is_featured: Boolean(a.is_featured ?? false),
+    price_cents: typeof a.price_cents === "number" ? a.price_cents : 0,
+    created_at: a.created_at ? String(a.created_at) : undefined,
+  };
+}
+
+// --- Component ---
 
 function MarketplaceInner() {
-  const { isLoaded, isSignedIn, userId } = useClerkAuth();
+  const { isLoaded, isSignedIn } = useClerkAuth();
   const { resolvedColors: T } = useTheme();
   const searchParams = useSearchParams();
-  const router = useRouter();
-  const [agents, setAgents] = useState<Agent[]>([]);
-  const [installedAgents, setInstalledAgents] = useState<Set<string>>(
-    new Set(),
-  );
-  const [installedAgentDbIds, setInstalledAgentDbIds] = useState<
-    Map<string, string>
-  >(new Map());
-  const [selectedCategory, setSelectedCategory] = useState<string>("");
+  const [items, setItems] = useState<MarketplaceItem[]>([]);
+  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [sortBy, setSortBy] = useState("featured");
-  const [previewAgent, setPreviewAgent] = useState<Agent | null>(null);
   const [litBitCoins, setLiTTCoins] = useState(500);
-  const [toast, setToast] = useState<{
-    msg: string;
-    type: "success" | "error" | "info";
-  } | null>(null);
-  const [sellModalAgent, setSellModalAgent] = useState<Agent | null>(null);
-  const [sellPrice, setSellPrice] = useState("");
-  const [listedAgents, setListedAgents] = useState<Set<string>>(new Set());
-  const [activeTab, setActiveTab] = useState<"agents" | "beta">(() =>
-    searchParams.get("tab") === "beta" ? "beta" : "agents",
+  const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">(() =>
+    searchParams.get("tab") === "beta" ? "beta" : "marketplace",
   );
-  const [currentPlan, setCurrentPlan] = useState<string>("free");
 
-  const showToast = (
-    msg: string,
-    type: "success" | "error" | "info" = "success",
-  ) => {
+  const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Load agents from /api/agents, enrich with local metadata
-  const loadAgents = useCallback(async () => {
+  // Load items from /api/agents, migrate to marketplace items
+  const loadItems = useCallback(async () => {
     try {
       const res = await fetch("/api/agents");
       const data = await res.json();
       if (Array.isArray(data.agents)) {
-        const merged: Agent[] = data.agents.map(
-          (a: Record<string, unknown>) => {
-            const fallback = CORE_BY_SLUG[(a.slug as string) || ""];
-            return {
-              id: String(a.id || fallback?.id || a.slug || ""),
-              slug: String(a.slug || ""),
-              name: String(a.name || a.display_name || fallback?.name || ""),
-              description: String(a.description || fallback?.description || ""),
-              category: String(a.category || fallback?.category || "general"),
-              avatar_url: String(a.avatar_url || fallback?.avatar_url || ""),
-              price_cents:
-                typeof a.price_cents === "number"
-                  ? a.price_cents
-                  : (fallback?.price_cents ?? 0),
-              features: Array.isArray(a.features)
-                ? (a.features as string[])
-                : (fallback?.features ?? []),
-              is_featured: Boolean(
-                a.is_featured ?? fallback?.is_featured ?? false,
-              ),
-              personality: String(a.personality ?? fallback?.personality ?? ""),
-              rating:
-                typeof a.rating === "number" ? a.rating : fallback?.rating,
-              installs:
-                typeof a.installs === "number"
-                  ? a.installs
-                  : fallback?.installs,
-            };
-          },
-        );
-        setAgents(merged);
+        const mapped = data.agents.map(apiAgentToItem);
+        setItems(mapped);
       }
     } catch {
-      // Keep empty list on error; no fake demo fallback
+      // Keep empty list on error
     }
   }, []);
 
-  // Fetch wallet from API (source of truth)
+  // Fetch wallet
   const fetchWallet = useCallback(async () => {
     try {
       const res = await fetch("/api/wallet");
       const data = await res.json();
-      if (typeof data.balance === "number") {
-        setLiTTCoins(data.balance);
-      }
+      if (typeof data.balance === "number") setLiTTCoins(data.balance);
     } catch {
-      // silent fail
+      // silent
     }
   }, []);
 
-  // Load which agents the signed-in user has installed
-  const loadInstalledAgents = async () => {
+  // Load installed items
+  const loadInstalled = async () => {
     try {
       const res = await fetch("/api/user-agents");
       const data = await res.json();
       if (Array.isArray(data.agents)) {
         const ids = new Set<string>();
-        const dbIdMap = new Map<string, string>();
         for (const ua of data.agents) {
-          const agentId: string = ua.agent?.id || ua.agent_id || "";
-          const agentSlug: string = ua.agent?.slug || "";
-          if (agentId) {
-            ids.add(agentId);
-            dbIdMap.set(agentId, ua.agent_id || agentId);
-          }
-          if (agentSlug) {
-            ids.add(agentSlug);
-          }
+          const agentId = ua.agent?.id || ua.agent_id || "";
+          const agentSlug = ua.agent?.slug || "";
+          if (agentId) ids.add(agentId);
+          if (agentSlug) ids.add(agentSlug);
         }
-        setInstalledAgents(ids);
-        setInstalledAgentDbIds(dbIdMap);
+        setInstalledIds(ids);
       }
     } catch {
-      // silent fail
+      // silent
     }
   };
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
-      loadAgents();
+      loadItems();
       fetchWallet();
-      if (isSignedIn && userId) {
-        fetch(`/api/users/${userId}/plan`)
-          .then((r) => (r.ok ? r.json() : { plan: "free" }))
-          .then((data) => {
-            if (data.plan) setCurrentPlan(data.plan);
-          })
-          .catch(() => {});
-      }
-
-      // Stripe return detection
-      const success = searchParams.get("success");
-      const canceled = searchParams.get("canceled");
-      if (success === "true") {
-        showToast(
-          "Payment successful! Your LiTBit Coins will be credited shortly.",
-          "success",
-        );
-      } else if (canceled === "true") {
-        showToast("Payment canceled. No coins were charged.", "info");
-      }
+      if (isSignedIn) loadInstalled();
     });
     return () => cancelAnimationFrame(id);
-  }, [loadAgents, fetchWallet, searchParams, isSignedIn, userId]);
+  }, [loadItems, fetchWallet, isSignedIn]);
 
-  useEffect(() => {
-    if (isSignedIn) {
-      const id = requestAnimationFrame(() => loadInstalledAgents());
-      return () => cancelAnimationFrame(id);
+  const installItem = useCallback(async (item: MarketplaceItem) => {
+    if (!isSignedIn) {
+      showToast("Please sign in to install.", "error");
+      return;
+    }
+    try {
+      const res = await fetch("/api/user-agents", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ agentId: item.id }),
+      });
+      if (res.ok || res.status === 200) {
+        setInstalledIds((prev) => new Set([...prev, item.id, item.slug]));
+        showToast(`${item.name} installed`, "success");
+      } else {
+        const data = await res.json();
+        showToast(data.error || "Install failed.", "error");
+      }
+    } catch {
+      showToast("Network error during install.", "error");
     }
   }, [isSignedIn]);
 
-  const buyPack = async () => {
-    if (BETA_MODE || !MARKETPLACE_PURCHASES_ENABLED) {
-      showToast("Purchases are disabled during beta. All features are free!", "info");
-      return;
-    }
-    if (!isSignedIn || !userId) {
-      showToast("Please sign in to purchase.", "error");
-      return;
-    }
-    showToast("Billing is not available during beta.", "info");
-  };
-
-  const [claimLoading, setClaimLoading] = useState(false);
-
-  const earnCoins = async () => {
-    if (claimLoading) return;
-    setClaimLoading(true);
+  const uninstallItem = useCallback(async (item: MarketplaceItem) => {
     try {
-      const res = await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ type: "daily" }),
-      });
-      const data = await res.json();
-      if (res.ok) {
-        setLiTTCoins(data.balance);
-        showToast(
-          `+50 LBC Daily bonus claimed. Balance: ${data.balance}`,
-          "success",
-        );
-      } else {
-        showToast(data.error || "Failed to claim daily bonus.", "error");
-      }
+      await fetch(`/api/user-agents?agentId=${item.id}`, { method: "DELETE" });
     } catch {
-      showToast("Network error. Try again.", "error");
-    } finally {
-      setClaimLoading(false);
+      // silent
     }
-  };
-
-  const categories = Array.from(new Set(agents.map((a) => a.category)));
-
-  const filteredAgents = agents
-    .filter((a) => !selectedCategory || a.category === selectedCategory)
-    .filter(
-      (a) =>
-        !searchQuery ||
-        a.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        a.description.toLowerCase().includes(searchQuery.toLowerCase()),
-    )
-    .sort((a, b) => {
-      if (sortBy === "featured")
-        return (
-          (b.is_featured ? 1 : 0) - (a.is_featured ? 1 : 0) ||
-          (b.installs || 0) - (a.installs || 0)
-        );
-      if (sortBy === "popular") return (b.installs || 0) - (a.installs || 0);
-      if (sortBy === "rating") return (b.rating || 0) - (a.rating || 0);
-      if (sortBy === "price") return a.price_cents - b.price_cents;
-      if (sortBy === "name") return a.name.localeCompare(b.name);
-      return 0;
+    setInstalledIds((prev) => {
+      const n = new Set(prev);
+      n.delete(item.id);
+      n.delete(item.slug);
+      return n;
     });
-
-  const featuredAgents = filteredAgents.filter((a) => a.is_featured);
-  const newArrivals = filteredAgents
-    .filter((a) => a.created_at)
-    .sort(
-      (a, b) =>
-        new Date(b.created_at as string).getTime() -
-        new Date(a.created_at as string).getTime(),
-    )
-    .slice(0, 4);
-  const regularAgents = filteredAgents.filter(
-    (a) => !newArrivals.find((n) => n.id === a.id),
-  );
-
-  const spendWallet = async (amount: number, reason: string) => {
-    if (amount <= 0) return null;
-    try {
-      const res = await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "spend",
-          amount,
-          reason,
-          idempotencyKey: `marketplace:${crypto.randomUUID()}`,
-        }),
-      });
-      const data = await res.json();
-      if (res.ok && typeof data.balance === "number") {
-        setLiTTCoins(data.balance);
-        return data.balance;
-      }
-    } catch {
-      // silent fail
-    }
-    return null;
-  };
-
-  const installAgent = useCallback(
-    async (agentId: string) => {
-      const agent = agents.find((a) => a.id === agentId);
-      if (!agent) return;
-
-      if (agent.price_cents > 0 && !ALL_AGENTS_FREE_DURING_BETA) {
-        // Paid agents: redirect to Stripe checkout (disabled during beta)
-        if (!isSignedIn || !userId) {
-          showToast("Please sign in to install this agent.", "error");
-          return;
-        }
-        if (!MARKETPLACE_PURCHASES_ENABLED) {
-          showToast("All agents are free during beta!", "info");
-          return;
-        }
-        try {
-          const res = await fetch("/api/stripe/checkout", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              mode: "payment",
-              priceData: {
-                amount: agent.price_cents * 100,
-                currency: "usd",
-                name: `${agent.name} — Agent License`,
-                description: `One-time purchase: ${agent.name} (${agent.price_cents} LBC)`,
-              },
-              metadata: {
-                clerk_id: userId,
-                agent_slug: agent.slug,
-                agent_id: agent.id,
-                type: "agent_purchase",
-              },
-            }),
-          });
-          const data = await res.json();
-          if (data.url) {
-            window.location.href = data.url;
-          } else {
-            showToast(data.error || "Checkout failed. Try again.", "error");
-          }
-        } catch {
-          showToast("Network error during checkout.", "error");
-        }
-        return;
-      }
-
-      // Free agent — install via API
-      try {
-        const res = await fetch("/api/user-agents", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ agentId: agent.id }),
-        });
-        const data = await res.json();
-        if (res.ok || res.status === 200) {
-          setInstalledAgents((prev) => {
-            const n = new Set(prev);
-            n.add(agent.id);
-            n.add(agent.slug);
-            return n;
-          });
-          showToast(`✅ ${agent.name} installed!`, "success");
-        } else {
-          showToast(data.error || "Install failed.", "error");
-        }
-      } catch {
-        // Optimistic fallback
-        setInstalledAgents((prev) => {
-          const n = new Set(prev);
-          n.add(agent.id);
-          n.add(agent.slug);
-          return n;
-        });
-        showToast(`✅ ${agent.name} installed for free!`, "success");
-      }
-    },
-    [agents, isSignedIn, userId],
-  );
-
-  const uninstallAgent = useCallback(
-    async (agentId: string) => {
-      const agent = agents.find((a) => a.id === agentId);
-      if (!agent) return;
-      const dbId = installedAgentDbIds.get(agentId) || agentId;
-      try {
-        await fetch(`/api/user-agents?agentId=${dbId}`, { method: "DELETE" });
-      } catch {
-        // silent — still remove from local state
-      }
-      setInstalledAgents((prev) => {
-        const n = new Set(prev);
-        n.delete(agent.id);
-        n.delete(agent.slug);
-        return n;
-      });
-      showToast(`🗑️ ${agent.name} removed from dock.`, "info");
-    },
-    [agents, installedAgentDbIds],
-  );
-
-  const listForSale = useCallback(async (agentId: string, price: number) => {
-    setListedAgents((prev) => new Set([...prev, agentId]));
-    showToast(
-      `🏪 Agent listed at ${formatLbc(price)}. Listing rewards require server verification.`,
-      "info",
-    );
-    setSellModalAgent(null);
-    setSellPrice("");
+    showToast(`${item.name} removed`, "info");
   }, []);
 
-  // Require authentication for actions (install/purchase), not browsing
+  const filteredItems = items
+    .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
+    .filter(
+      (item) =>
+        !searchQuery ||
+        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        item.description.toLowerCase().includes(searchQuery.toLowerCase()),
+    );
+
+  const featuredItems = filteredItems.filter((item) => item.is_featured);
+  const nonFeaturedItems = filteredItems.filter((item) => !item.is_featured);
+
+  const stats: MarketplaceStats = {
+    totalItems: items.length,
+    freeItems: items.filter((i) => i.price_cents === 0).length,
+    installedItems: installedIds.size,
+    availableItems: items.length,
+  };
+
   if (!isLoaded) {
     return (
-      <div
-        style={{
-          backgroundColor: T?.bgColor || "#0a0a0f",
-          minHeight: "100vh",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          color: T?.textColor || "#00ff41",
-          fontFamily: "monospace",
-        }}
-      >
-        <div style={{ textAlign: "center" }}>
-          <div style={{ fontSize: "32px", marginBottom: "16px" }}>⏳</div>
-          <div>Loading marketplace...</div>
+      <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f] text-white/50">
+        <div className="text-center">
+          <div className="mb-4 animate-pulse text-3xl">⚡</div>
+          <div className="text-sm">Loading marketplace...</div>
         </div>
       </div>
     );
   }
 
-  const stats: Record<string, number | string> = {
-    total: agents.length,
-    free: agents.filter((a) => a.price_cents === 0).length,
-    installed: installedAgents.size,
-    coins: formatLbc(litBitCoins),
-  };
-
   return (
-    <div
-      className="marketplace-page flex min-h-screen flex-col"
-      style={{
-        backgroundColor: T.bgColor + "d0",
-        color: T.textColor,
-        position: "relative",
-      }}
-    >
-      <style jsx global>{`
-        .marketplace-page {
-          min-height: 100dvh;
-          overflow-x: hidden;
-        }
-        .marketplace-hero-grid {
-          display: grid;
-          grid-template-columns: minmax(0, 1.15fr) minmax(0, 0.85fr);
-          gap: 20px;
-          align-items: stretch;
-        }
-        .marketplace-tab-row {
-          overflow-x: auto;
-          scrollbar-width: none;
-        }
-        .marketplace-tab-row::-webkit-scrollbar {
-          display: none;
-        }
-        .marketplace-tier-grid {
-          display: grid !important;
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-          gap: 18px !important;
-          align-items: stretch;
-        }
-        .marketplace-spend-grid {
-          display: grid !important;
-          grid-template-columns: repeat(3, minmax(0, 1fr)) !important;
-          gap: 16px !important;
-        }
-        .marketplace-buy-grid {
-          display: grid !important;
-          grid-template-columns: repeat(
-            auto-fit,
-            minmax(170px, 1fr)
-          ) !important;
-          gap: 10px !important;
-        }
-        .marketplace-tier-card,
-        .marketplace-spend-card,
-        .marketplace-buy-chip {
-          min-width: 0;
-          overflow-wrap: anywhere;
-        }
-        .marketplace-price {
-          font-variant-numeric: tabular-nums;
-          letter-spacing: -0.01em;
-        }
-        @media (max-width: 900px) {
-          .marketplace-hero-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .marketplace-tier-grid,
-          .marketplace-spend-grid {
-            grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
-          }
-        }
-        @media (max-width: 640px) {
-          .marketplace-page [style*="padding: 24px"] {
-            padding-left: 16px !important;
-            padding-right: 16px !important;
-          }
-          .marketplace-tier-grid,
-          .marketplace-spend-grid,
-          .marketplace-buy-grid {
-            grid-template-columns: 1fr !important;
-          }
-          .marketplace-tier-card {
-            padding: 28px 18px 18px !important;
-          }
-          .marketplace-spend-card {
-            padding: 16px !important;
-          }
-          .marketplace-tab-row {
-            justify-content: flex-start !important;
-            padding-inline: 16px;
-            margin-inline: -16px;
-          }
-        }
-      `}</style>
-      {/* Toast notification */}
+    <div className="min-h-screen bg-[#070812] text-white" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
+      {/* Toast */}
       {toast && (
         <div
+          className="fixed right-4 top-20 z-200 max-w-xs rounded-xl border px-4 py-3 text-xs font-bold"
           style={{
-            position: "fixed",
-            top: "80px",
-            right: "20px",
-            zIndex: 200,
-            padding: "12px 20px",
-            backgroundColor:
-              toast.type === "success"
-                ? "#0a2e0a"
-                : toast.type === "error"
-                  ? "#2e0a0a"
-                  : "#0a1a2e",
-            border:
-              "2px solid " +
-              (toast.type === "success"
-                ? T.accentColor
-                : toast.type === "error"
-                  ? "#ff4444"
-                  : T.linkColor),
-            color:
-              toast.type === "success"
-                ? T.accentColor
-                : toast.type === "error"
-                  ? "#ff4444"
-                  : T.linkColor,
-            fontSize: "12px",
-            fontWeight: "bold",
-            maxWidth: "320px",
+            backgroundColor: toast.type === "success" ? "#0a2e0a" : toast.type === "error" ? "#2e0a0a" : "#0a1a2e",
+            borderColor: toast.type === "success" ? T.accentColor : toast.type === "error" ? "#ff4444" : T.linkColor,
+            color: toast.type === "success" ? T.accentColor : toast.type === "error" ? "#ff4444" : T.linkColor,
           }}
         >
           {toast.msg}
         </div>
       )}
 
-      <div
-        style={{
-          borderBottom: "1px solid " + T.borderColor,
-          padding: "28px 24px 20px",
-          background:
-            "linear-gradient(180deg, " +
-            T.boxBg +
-            " 0%, " +
-            T.bgColor +
-            " 100%)",
-        }}
-      >
+      {/* === HEADER === */}
+      <div className="border-b border-white/10 bg-gradient-to-b from-white/[.03] to-transparent px-4 py-8 sm:px-6 sm:py-10">
         <div className="mx-auto max-w-6xl">
-          <div
-            className="marketplace-hero-grid"
-            style={{
-              display: "grid",
-              gridTemplateColumns: "1.15fr 0.85fr",
-              gap: "20px",
-              alignItems: "stretch",
-            }}
-          >
-            <div
-              style={{
-                textAlign: "left",
-                padding: "26px",
-                border: "1px solid " + T.borderColor,
-                borderRadius: "18px",
-                background:
-                  "linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.015))",
-                boxShadow: "0 18px 50px rgba(0,0,0,0.22)",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "flex-start",
-                  gap: "12px",
-                  marginBottom: "10px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <h1
-                  style={{
-                    color: T.headerColor,
-                    fontSize: "28px",
-                    fontWeight: "bold",
-                    letterSpacing: "2px",
-                    margin: 0,
-                  }}
-                >
-                  AGENT MARKETPLACE
-                </h1>
-                <span
-                  style={{
-                    padding: "4px 10px",
-                    backgroundColor: "rgba(255,107,107,0.12)",
-                    border: "1px solid #ff6b6b66",
-                    color: "#ff8d8d",
-                    fontSize: "10px",
-                    fontWeight: "bold",
-                    borderRadius: "6px",
-                    letterSpacing: "1px",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Beta
-                </span>
-              </div>
-              <p
-                style={{
-                  color: T.textColor,
-                  fontSize: "14px",
-                  opacity: 0.72,
-                  maxWidth: "620px",
-                  margin: "0 0 18px",
-                  lineHeight: 1.6,
-                }}
-              >
-                All agents are free during beta. Install any specialist instantly —
-                no purchases, no credits required. Your feedback shapes what we build next.
-              </p>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "10px",
-                  flexWrap: "wrap",
-                  marginBottom: "18px",
-                }}
-              >
-                <span className="badge badge-pink">Marketplace</span>
-                <span className="badge">Stable rules</span>
-                <span className="badge badge-success">
-                  Server-side installs
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fit, minmax(180px, 1fr))",
-                  gap: "12px",
-                  marginBottom: "18px",
-                }}
-              >
-                {[
-                  { label: "Agents", value: stats.total, icon: Sparkles },
-                  { label: "Free", value: stats.free, icon: ShieldCheck },
-                  {
-                    label: "Installed",
-                    value: stats.installed,
-                    icon: WandSparkles,
-                  },
-                  { label: "Balance", value: stats.coins, icon: Coins },
-                ].map((item) => {
-                  const Icon = item.icon;
-                  return (
-                    <div
-                      key={item.label}
-                      style={{
-                        display: "flex",
-                        alignItems: "center",
-                        gap: "12px",
-                        padding: "14px 16px",
-                        borderRadius: "14px",
-                        border: "1px solid " + T.borderColor,
-                        backgroundColor: "rgba(255,255,255,0.025)",
-                      }}
-                    >
-                      <div
-                        style={{
-                          width: "38px",
-                          height: "38px",
-                          borderRadius: "12px",
-                          display: "flex",
-                          alignItems: "center",
-                          justifyContent: "center",
-                          backgroundColor: T.accentColor + "18",
-                          color: T.accentColor,
-                        }}
-                      >
-                        <Icon size={18} />
-                      </div>
-                      <div>
-                        <div
-                          style={{
-                            color: T.textColor,
-                            fontSize: "18px",
-                            fontWeight: "bold",
-                            lineHeight: 1.1,
-                          }}
-                        >
-                          {item.value}
-                        </div>
-                        <div
-                          style={{
-                            color: T.textColor,
-                            fontSize: "10px",
-                            opacity: 0.6,
-                            textTransform: "uppercase",
-                            letterSpacing: "1px",
-                          }}
-                        >
-                          {item.label}
-                        </div>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "12px",
-                  flexWrap: "wrap",
-                }}
-              >
-                <Link
-                  href="/studio"
-                  style={{
-                    padding: "12px 18px",
-                    backgroundColor: T.linkColor,
-                    color: "white",
-                    textDecoration: "none",
-                    fontSize: "12px",
-                    fontWeight: "bold",
-                    borderRadius: "10px",
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  Open in Studio <ArrowRight size={15} />
-                </Link>
-                <button
-                  onClick={() => setActiveTab("beta")}
-                  style={{
-                    padding: "12px 18px",
-                    backgroundColor: "rgba(255,215,0,0.08)",
-                    border: "1px solid rgba(255,215,0,0.35)",
-                    color: "gold",
-                    fontSize: "12px",
-                    cursor: "pointer",
-                    fontWeight: "bold",
-                    borderRadius: "10px",
-                  }}
-                >
-                  Beta Access
-                </button>
-              </div>
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "1fr 1fr",
-                gap: "10px",
-              }}
-            >
-              {MARKETPLACE_SHOWCASE.map((item, idx) => (
-                <div
-                  key={item.title}
-                  style={{
-                    position: "relative",
-                    minHeight: idx === 0 ? "220px" : "155px",
-                    borderRadius: "18px",
-                    overflow: "hidden",
-                    border: "1px solid " + T.borderColor,
-                    backgroundColor: T.bgColor,
-                    gridColumn: idx === 0 ? "1 / -1" : "auto",
-                  }}
-                >
-                  <Image
-                    src={item.src}
-                    alt={item.title}
-                    fill
-                    sizes="(max-width: 768px) 100vw, 50vw"
-                    style={{ objectFit: "cover" }}
-                    priority={idx === 0}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      background:
-                        "linear-gradient(180deg, rgba(0,0,0,0.05) 0%, rgba(0,0,0,0.68) 100%)",
-                    }}
-                  />
-                  <div
-                    style={{
-                      position: "absolute",
-                      inset: 0,
-                      display: "flex",
-                      flexDirection: "column",
-                      justifyContent: "flex-end",
-                      padding: "14px",
-                    }}
-                  >
-                    <div
-                      style={{
-                        color: "#fff",
-                        fontSize: idx === 0 ? "18px" : "14px",
-                        fontWeight: "bold",
-                        marginBottom: "4px",
-                      }}
-                    >
-                      {item.title}
-                    </div>
-                    <div
-                      style={{
-                        color: "rgba(255,255,255,0.75)",
-                        fontSize: "11px",
-                        lineHeight: 1.45,
-                      }}
-                    >
-                      {item.subtitle}
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-2xl font-black tracking-tight sm:text-3xl" style={{ color: T.headerColor }}>Marketplace</h1>
+            <span className="rounded-md border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-300">Beta</span>
           </div>
-          <div
-            className="marketplace-tab-row"
-            style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: "8px",
-              marginTop: "20px",
-            }}
-          >
-            <button
-              onClick={() => setActiveTab("agents")}
-              style={{
-                padding: "12px 32px",
-                fontSize: "14px",
-                fontWeight: "bold",
-                border:
-                  "2px solid " +
-                  (activeTab === "agents" ? T.accentColor : T.borderColor),
-                backgroundColor:
-                  activeTab === "agents" ? T.accentColor + "20" : "transparent",
-                color: activeTab === "agents" ? T.accentColor : T.textColor,
-                borderRadius: "8px 8px 0 0",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span>🤖</span> Agents{" "}
-              <span
-                style={{
-                  padding: "2px 8px",
-                  backgroundColor:
-                    activeTab === "agents" ? T.accentColor : T.borderColor,
-                  color: "#000",
-                  fontSize: "11px",
-                  borderRadius: "4px",
-                }}
-              >
-                {stats.total}
-              </span>
-            </button>
-            <button
-              onClick={() => setActiveTab("beta")}
-              style={{
-                padding: "12px 32px",
-                fontSize: "14px",
-                fontWeight: "bold",
-                border:
-                  "2px solid " +
-                  (activeTab === "beta" ? "gold" : T.borderColor),
-                backgroundColor:
-                  activeTab === "beta"
-                    ? "rgba(255,215,0,0.15)"
-                    : "transparent",
-                color: activeTab === "beta" ? "gold" : T.textColor,
-                borderRadius: "8px 8px 0 0",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: "8px",
-              }}
-            >
-              <span>�</span> Beta Access
+          <p className="mt-2 max-w-xl text-sm text-white/55">
+            Add skills, workflows, and specialist tools to LiTT and Spark. Everything is free during beta.
+          </p>
+
+          {/* Stats row */}
+          <div className="mt-6 flex flex-wrap gap-3">
+            {[
+              { label: "Available", value: stats.availableItems, icon: Sparkles },
+              { label: "Installed", value: stats.installedItems, icon: Check },
+              { label: "Free during beta", value: stats.freeItems, icon: ShieldCheck },
+            ].map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.label} className="flex items-center gap-2.5 rounded-xl border border-white/10 bg-white/[.03] px-4 py-2.5">
+                  <Icon size={16} className="text-white/40" />
+                  <span className="text-lg font-black" style={{ color: T.headerColor }}>{stat.value}</span>
+                  <span className="text-[10px] uppercase tracking-wider text-white/40">{stat.label}</span>
+                </div>
+              );
+            })}
+          </div>
+
+          {/* LiTT and Spark explainer */}
+          <div className="mt-5 flex flex-wrap gap-4 text-xs text-white/45">
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-cyan-400" />
+              LiTT uses installed engineering, research, automation, and project tools
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="h-2 w-2 rounded-full bg-violet-400" />
+              Spark uses installed creative, media, branding, and content tools
+            </span>
+          </div>
+
+          <div className="mt-5 flex gap-3">
+            <Link href="/studio" className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2.5 text-sm font-black text-black transition hover:bg-white/90">
+              Open in Studio <ArrowRight size={14} />
+            </Link>
+            <button onClick={() => setActiveTab("beta")} className="inline-flex items-center gap-2 rounded-xl border border-amber-400/30 bg-amber-400/10 px-4 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15">
+              Beta Access
             </button>
           </div>
         </div>
       </div>
 
-      {activeTab === "agents" && (
-        <div className="flex-1 flex flex-col">
-          <div
-            style={{
-              padding: "16px 24px",
-              borderBottom: "1px solid " + T.borderColor,
-              display: "flex",
-              gap: "12px",
-              flexWrap: "wrap",
-              alignItems: "center",
-              justifyContent: "space-between",
-              backgroundColor: T.boxBg,
-            }}
+      {/* === TAB BAR === */}
+      <div className="border-b border-white/10 px-4 sm:px-6">
+        <div className="mx-auto flex max-w-6xl gap-2">
+          <button
+            onClick={() => setActiveTab("marketplace")}
+            className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
+              activeTab === "marketplace" ? "border-orange-500 text-orange-400" : "border-transparent text-white/40 hover:text-white/70"
+            }`}
           >
-            <div
-              style={{
-                display: "flex",
-                gap: "6px",
-                flexWrap: "wrap",
-                flex: 1,
-                alignItems: "center",
-              }}
-            >
-              <button
-                onClick={() => setSelectedCategory("")}
-                style={{
-                  padding: "6px 14px",
-                  fontSize: "11px",
-                  borderRadius: "6px",
-                  border:
-                    "1px solid " +
-                    (selectedCategory === "" ? T.accentColor : T.borderColor),
-                  backgroundColor:
-                    selectedCategory === ""
-                      ? "rgba(255,255,0,0.15)"
-                      : "transparent",
-                  color: selectedCategory === "" ? T.accentColor : T.textColor,
-                  cursor: "pointer",
-                  fontFamily: "monospace",
-                  fontWeight: selectedCategory === "" ? "bold" : "normal",
-                  transition: "all 0.15s",
-                }}
-              >
-                All ({agents.length})
-              </button>
-              {categories.map((cat) => (
+            Browse
+          </button>
+          <button
+            onClick={() => setActiveTab("beta")}
+            className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
+              activeTab === "beta" ? "border-amber-400 text-amber-300" : "border-transparent text-white/40 hover:text-white/70"
+            }`}
+          >
+            Beta Access
+          </button>
+        </div>
+      </div>
+
+      {/* === MARKETPLACE TAB === */}
+      {activeTab === "marketplace" && (
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+          {/* Filters + Search */}
+          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-wrap gap-2">
+              {CATEGORIES.map((cat) => (
                 <button
-                  key={cat}
-                  onClick={() =>
-                    setSelectedCategory(cat === selectedCategory ? "" : cat)
-                  }
-                  style={{
-                    padding: "6px 14px",
-                    fontSize: "11px",
-                    borderRadius: "6px",
-                    border:
-                      "1px solid " +
-                      (selectedCategory === cat
-                        ? T.accentColor
-                        : T.borderColor),
-                    backgroundColor:
-                      selectedCategory === cat
-                        ? "rgba(255,255,0,0.15)"
-                        : "transparent",
-                    color:
-                      selectedCategory === cat ? T.accentColor : T.textColor,
-                    cursor: "pointer",
-                    fontFamily: "monospace",
-                    textTransform: "capitalize",
-                    fontWeight: selectedCategory === cat ? "bold" : "normal",
-                    transition: "all 0.15s",
-                  }}
+                  key={cat.id}
+                  onClick={() => setSelectedCategory(cat.id)}
+                  className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition ${
+                    selectedCategory === cat.id ? "border-orange-500/50 bg-orange-500/10 text-orange-400" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
+                  }`}
                 >
-                  {CATEGORY_LABELS[cat] || cat} (
-                  {agents.filter((a) => a.category === cat).length})
+                  {cat.label}
                 </button>
               ))}
             </div>
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+            <div className="relative w-full max-w-48">
+              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" size={14} />
               <input
                 type="text"
+                placeholder="Search..."
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
-                placeholder="Search agents..."
-                style={{
-                  padding: "8px 14px",
-                  backgroundColor: T.bgColor,
-                  border: "1px solid " + T.borderColor,
-                  borderRadius: "6px",
-                  color: "#e0e0e0",
-                  fontSize: "12px",
-                  fontFamily: "monospace",
-                  width: "200px",
-                  outline: "none",
-                }}
+                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-orange-500/40"
               />
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value)}
-                style={{
-                  padding: "8px 10px",
-                  backgroundColor: T.bgColor,
-                  border: "1px solid " + T.borderColor,
-                  borderRadius: "6px",
-                  color: T.textColor,
-                  fontSize: "11px",
-                  fontFamily: "monospace",
-                  cursor: "pointer",
-                }}
-              >
-                <option value="featured">Featured</option>
-                <option value="popular">Popular</option>
-                <option value="rating">Rating</option>
-                <option value="price">Price</option>
-                <option value="name">Name</option>
-              </select>
-              <Link
-                href="/studio"
-                style={{
-                  padding: "8px 16px",
-                  backgroundColor: T.linkColor,
-                  color: "white",
-                  textDecoration: "none",
-                  fontSize: "11px",
-                  fontWeight: "bold",
-                  borderRadius: "6px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "4px",
-                }}
-              >
-                Open in Studio
-              </Link>
             </div>
           </div>
 
-          <div
-            className="flex-1"
-            style={{
-              padding: "24px",
-              maxWidth: "1200px",
-              margin: "0 auto",
-              width: "100%",
-            }}
-          >
-            {featuredAgents.length > 0 && !searchQuery && (
-              <div style={{ marginBottom: "32px" }}>
-                <div
-                  style={{
-                    color: T.accentColor,
-                    fontSize: "11px",
-                    letterSpacing: "2px",
-                    marginBottom: "12px",
-                    fontWeight: "bold",
-                  }}
-                >
-                  ⭐ FEATURED AGENTS
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fill, minmax(260px, 1fr))",
-                    gap: "16px",
-                  }}
-                >
-                  {featuredAgents.map((agent) => (
-                    <AgentCard
-                      key={agent.id}
-                      agent={agent}
-                      isInstalled={installedAgents.has(agent.id)}
-                      onInstall={() => installAgent(agent.id)}
-                      onPreview={() => setPreviewAgent(agent)}
-                      theme={T}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* NEW ARRIVALS */}
-            {newArrivals.length > 0 && !searchQuery && !selectedCategory && (
-              <div style={{ marginBottom: "32px" }}>
-                <div
-                  style={{
-                    color: "#22d3ee",
-                    fontSize: "11px",
-                    letterSpacing: "2px",
-                    marginBottom: "12px",
-                    fontWeight: "bold",
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                  }}
-                >
-                  <span>✨</span> NEW ARRIVALS
-                  <span
-                    style={{
-                      backgroundColor: "#22d3ee20",
-                      color: "#22d3ee",
-                      padding: "2px 8px",
-                      borderRadius: "4px",
-                      fontSize: "10px",
-                    }}
-                  >
-                    Just Added
-                  </span>
-                </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns:
-                      "repeat(auto-fill, minmax(260px, 1fr))",
-                    gap: "16px",
-                  }}
-                >
-                  {newArrivals.map((agent) => (
-                    <AgentCard
-                      key={agent.id}
-                      agent={agent}
-                      isInstalled={installedAgents.has(agent.id)}
-                      onInstall={() => installAgent(agent.id)}
-                      onPreview={() => setPreviewAgent(agent)}
-                      theme={T}
-                    />
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* ALL/REGULAR AGENTS */}
-            <div>
-              <div
-                style={{
-                  color: T.accentColor,
-                  fontSize: "11px",
-                  letterSpacing: "2px",
-                  marginBottom: "12px",
-                  fontWeight: "bold",
-                }}
-              >
-                {selectedCategory
-                  ? selectedCategory.toUpperCase() + " AGENTS"
-                  : searchQuery
-                    ? "SEARCH RESULTS"
-                    : "ALL AGENTS"}
-                <span
-                  style={{
-                    color: T.textColor,
-                    opacity: 0.5,
-                    marginLeft: "8px",
-                  }}
-                >
-                  ({filteredAgents.length})
-                </span>
-              </div>
-              <div
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-                  gap: "16px",
-                }}
-              >
-                {(searchQuery ? filteredAgents : regularAgents).map((agent) => (
-                  <AgentCard
-                    key={agent.id}
-                    agent={agent}
-                    isInstalled={installedAgents.has(agent.id)}
-                    onInstall={() => installAgent(agent.id)}
-                    onPreview={() => setPreviewAgent(agent)}
-                    theme={T}
+          {/* Featured section (unique items only, excluded from main list) */}
+          {featuredItems.length > 0 && !searchQuery && selectedCategory === "all" && (
+            <div className="mb-8">
+              <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-orange-400">Featured</p>
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {featuredItems.map((item) => (
+                  <MarketplaceCard
+                    key={item.id}
+                    item={item}
+                    isInstalled={installedIds.has(item.id) || installedIds.has(item.slug)}
+                    onInstall={() => installItem(item)}
+                    onUninstall={() => uninstallItem(item)}
+                    accentColor={T.accentColor}
+                    borderColor={T.borderColor}
+                    boxBg={T.boxBg}
+                    textColor={T.textColor}
+                    textMuted={T.textMuted}
+                    headerColor={T.headerColor}
                   />
                 ))}
               </div>
             </div>
-            {filteredAgents.length === 0 && (
-              <div
-                style={{
-                  textAlign: "center",
-                  padding: "60px 20px",
-                  color: T.textColor,
-                  opacity: 0.5,
-                }}
-              >
-                <div
-                  style={{
-                    fontSize: "24px",
-                    fontWeight: "bold",
-                    marginBottom: "12px",
-                    color: T.headerColor,
-                  }}
-                >
-                  ?
-                </div>
-                <div>No agents found matching your search.</div>
+          )}
+
+          {/* All items (excluding featured when featured is shown) */}
+          <div>
+            <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-white/40">
+              {searchQuery ? "Search results" : "All tools"}
+              <span className="ml-2 text-white/30">({filteredItems.length})</span>
+            </p>
+            {filteredItems.length === 0 ? (
+              <div className="py-12 text-center">
+                <p className="text-white/40">
+                  {items.length === 0
+                    ? "No marketplace items available yet. Items will appear here when the database is seeded."
+                    : `No items found matching "${searchQuery}".`}
+                </p>
+                {searchQuery && (
+                  <button onClick={() => { setSearchQuery(""); setSelectedCategory("all"); }} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">
+                    Clear filters
+                  </button>
+                )}
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {(searchQuery ? filteredItems : nonFeaturedItems).map((item) => (
+                  <MarketplaceCard
+                    key={item.id}
+                    item={item}
+                    isInstalled={installedIds.has(item.id) || installedIds.has(item.slug)}
+                    onInstall={() => installItem(item)}
+                    onUninstall={() => uninstallItem(item)}
+                    accentColor={T.accentColor}
+                    borderColor={T.borderColor}
+                    boxBg={T.boxBg}
+                    textColor={T.textColor}
+                    textMuted={T.textMuted}
+                    headerColor={T.headerColor}
+                  />
+                ))}
               </div>
             )}
           </div>
         </div>
       )}
 
+      {/* === BETA TAB === */}
       {activeTab === "beta" && (
-        <div
-          className="flex-1"
-          style={{
-            padding: "24px",
-            maxWidth: "900px",
-            margin: "0 auto",
-            width: "100%",
-          }}
-        >
-          {/* BETA STATUS BANNER */}
-          <div
-            style={{
-              borderRadius: "16px",
-              border: "1px solid rgba(255,215,0,0.3)",
-              background: "linear-gradient(135deg, rgba(255,215,0,0.08), rgba(168,85,247,0.06))",
-              padding: "24px",
-              marginBottom: "24px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "12px", marginBottom: "12px" }}>
-              <span style={{ fontSize: "28px" }}>🧪</span>
+        <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
+          {/* Beta status */}
+          <div className="rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-400/[.06] to-transparent p-6">
+            <div className="flex items-center gap-3">
+              <span className="text-2xl">🧪</span>
               <div>
-                <div style={{ color: "gold", fontSize: "18px", fontWeight: "bold" }}>
-                  Public Beta
-                </div>
-                <div style={{ color: T.textColor, fontSize: "12px", opacity: 0.7 }}>
-                  All agents and features are free during beta. No real purchases.
-                </div>
+                <div className="text-lg font-black text-amber-300">Public Beta</div>
+                <div className="text-xs text-white/55">All items are free during beta. No purchases required.</div>
               </div>
             </div>
-            <p style={{ color: T.textColor, fontSize: "13px", lineHeight: 1.6, opacity: 0.8 }}>
-              Welcome to LiTTree Lab Studios Beta. Every specialist agent is available for free
+            <p className="mt-4 text-sm leading-6 text-white/60">
+              Welcome to LiTTree Lab Studios Beta. Every skill, specialist, workflow, and tool is available for free
               while we test and improve the platform. Your feedback shapes what we build next.
             </p>
           </div>
 
-          {/* BETA PLAN CARD */}
-          <div
-            style={{
-              borderRadius: "16px",
-              border: `2px solid ${T.accentColor}`,
-              background: T.boxBg,
-              padding: "28px",
-              marginBottom: "24px",
-              textAlign: "center",
-            }}
-          >
-            <div style={{ color: T.accentColor, fontSize: "12px", fontWeight: "bold", letterSpacing: "2px", marginBottom: "8px" }}>
-              BETA PLAN
-            </div>
-            <div style={{ color: T.headerColor, fontSize: "32px", fontWeight: "bold", marginBottom: "4px" }}>
-              Free
-            </div>
-            <div style={{ color: T.textMuted, fontSize: "12px", marginBottom: "20px" }}>
-              Everything unlocked · No credit card needed
-            </div>
-            <div
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(200px, 1fr))",
-                gap: "8px",
-                textAlign: "left",
-                maxWidth: "500px",
-                margin: "0 auto",
-              }}
-            >
-              {BETA_BETA_FEATURES.map((feat) => (
-                <div
-                  key={feat}
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "8px",
-                    color: T.textColor,
-                    fontSize: "12px",
-                  }}
-                >
-                  <Check size={14} style={{ color: T.accentColor, flexShrink: 0 }} />
-                  {feat}
+          {/* Beta plan */}
+          <div className="mt-6 rounded-2xl border-2 border-orange-500/30 bg-white/[.03] p-6 text-center">
+            <div className="text-xs font-black uppercase tracking-wider text-orange-400">Beta Plan</div>
+            <div className="mt-2 text-3xl font-black text-white">Free</div>
+            <div className="mt-1 text-xs text-white/45">Everything unlocked · No credit card needed</div>
+            <div className="mt-5 grid gap-2 text-left sm:grid-cols-2">
+              {[
+                "Full Studio access",
+                "LiTT and Spark",
+                "All beta specialists",
+                "Image, audio, code, and workflows",
+                "Beta LiTBits for testing",
+                "Feedback rewards",
+              ].map((feat) => (
+                <div key={feat} className="flex items-center gap-2 text-sm text-white/70">
+                  <Check size={14} className="shrink-0 text-orange-400" /> {feat}
                 </div>
               ))}
             </div>
           </div>
 
-          {/* BETA LiTBits BALANCE & REFILL */}
-          <div
-            style={{
-              borderRadius: "16px",
-              border: `1px solid ${T.borderColor}`,
-              background: T.boxBg,
-              padding: "20px",
-              marginBottom: "24px",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              flexWrap: "wrap",
-              gap: "16px",
-            }}
-          >
-            <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-              <Coins size={28} style={{ color: T.accentColor }} />
+          {/* Beta LiTBits */}
+          <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-5">
+            <div className="flex items-center gap-3">
+              <Coins size={28} className="text-amber-400" />
               <div>
-                <div style={{ color: T.headerColor, fontSize: "16px", fontWeight: "bold" }}>
-                  {litBitCoins.toLocaleString()} Beta LiTBits
-                </div>
-                <div style={{ color: T.textMuted, fontSize: "11px" }}>
-                  Testing credits — not real currency. Refill daily for free.
-                </div>
+                <div className="font-bold text-white">{litBitCoins.toLocaleString()} Beta LiTBits</div>
+                <div className="text-[11px] text-white/45">Testing credits · No cash value</div>
               </div>
             </div>
             <button
-              onClick={earnCoins}
-              disabled={claimLoading}
-              style={{
-                padding: "10px 20px",
-                backgroundColor: `${T.accentColor}20`,
-                border: `2px solid ${T.accentColor}`,
-                color: T.accentColor,
-                fontSize: "13px",
-                cursor: claimLoading ? "not-allowed" : "pointer",
-                fontWeight: "bold",
-                borderRadius: "8px",
-                opacity: claimLoading ? 0.6 : 1,
+              onClick={async () => {
+                try {
+                  const res = await fetch("/api/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "daily" }) });
+                  const data = await res.json();
+                  if (res.ok) { setLiTTCoins(data.balance); showToast(`+50 LBC daily bonus claimed`, "success"); }
+                  else showToast(data.error || "Failed to claim daily bonus.", "error");
+                } catch { showToast("Network error.", "error"); }
               }}
+              className="rounded-xl border-2 border-amber-400/40 bg-amber-400/10 px-5 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15"
             >
-              {claimLoading ? "⏳ Refilling..." : "⚡ Daily Beta Refill"}
+              Daily Beta Refill
             </button>
           </div>
 
-          {/* BETA SPEND FEATURES */}
-          <div style={{ marginBottom: "24px" }}>
-            <div
-              style={{
-                color: T.textColor,
-                fontSize: "13px",
-                fontWeight: "bold",
-                marginBottom: "16px",
-                opacity: 0.8,
-              }}
-            >
-              🎮 WHAT YOU CAN DO WITH BETA LiTBits
-            </div>
-            <div
-              className="marketplace-spend-grid"
-              style={{
-                display: "grid",
-                gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
-                gap: "12px",
-              }}
-            >
-              {BETA_SPEND_FEATURES.map((feat) => (
-                <div
-                  key={feat.id}
-                  className="marketplace-spend-card"
-                  style={{
-                    padding: "16px",
-                    border: `1px solid ${T.borderColor}`,
-                    borderRadius: "12px",
-                    backgroundColor: T.boxBg,
-                  }}
-                >
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
-                    <span style={{ color: T.headerColor, fontSize: "14px", fontWeight: "bold" }}>
-                      {feat.title}
-                    </span>
-                    <span
-                      style={{
-                        color: feat.free ? T.accentColor : "gold",
-                        fontSize: "12px",
-                        fontWeight: "bold",
-                        padding: "2px 8px",
-                        borderRadius: "4px",
-                        backgroundColor: feat.free ? `${T.accentColor}20` : "rgba(255,215,0,0.1)",
-                      }}
-                    >
-                      {feat.free ? "FREE" : `${feat.cost} LBC`}
-                    </span>
-                  </div>
-                  <p style={{ color: T.textColor, fontSize: "11px", opacity: 0.7, lineHeight: 1.5 }}>
-                    {feat.desc}
-                  </p>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* FEEDBACK SECTION */}
-          <div
-            style={{
-              borderRadius: "16px",
-              border: `1px solid ${T.borderColor}`,
-              background: T.boxBg,
-              padding: "20px",
-              textAlign: "center",
-            }}
-          >
-            <div style={{ color: T.headerColor, fontSize: "14px", fontWeight: "bold", marginBottom: "8px" }}>
-              💬 Beta Feedback
-            </div>
-            <p style={{ color: T.textMuted, fontSize: "12px", marginBottom: "16px" }}>
-              Found a bug? Have a feature request? Let us know — beta feedback earns bonus LiTBits.
-            </p>
-            <div style={{ display: "flex", gap: "12px", justifyContent: "center", flexWrap: "wrap" }}>
-              <Link
-                href="/studio?tool=chat"
-                style={{
-                  padding: "10px 20px",
-                  backgroundColor: T.accentColor,
-                  color: "#000",
-                  textDecoration: "none",
-                  fontSize: "13px",
-                  fontWeight: "bold",
-                  borderRadius: "8px",
-                  display: "inline-flex",
-                  alignItems: "center",
-                  gap: "8px",
-                }}
-              >
+          {/* Feedback */}
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/[.03] p-5 text-center">
+            <div className="font-bold text-white">💬 Beta Feedback</div>
+            <p className="mt-1 text-xs text-white/45">Found a bug? Have a feature request? Let us know.</p>
+            <div className="mt-4 flex justify-center gap-3">
+              <Link href="/studio?tool=chat" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-orange-400">
                 <Sparkles size={14} /> Report via LiTT
               </Link>
-              <a
-                href="mailto:beta@litlabs.net"
-                style={{
-                  padding: "10px 20px",
-                  border: `1px solid ${T.borderColor}`,
-                  color: T.textColor,
-                  textDecoration: "none",
-                  fontSize: "13px",
-                  fontWeight: "bold",
-                  borderRadius: "8px",
-                }}
-              >
+              <a href="mailto:beta@litlabs.net" className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-4 py-2 text-sm font-bold text-white/60 transition hover:bg-white/5">
                 Email Feedback
               </a>
             </div>
           </div>
         </div>
       )}
-
-      {previewAgent && (
-        <div
-          onClick={() => setPreviewAgent(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0,0,0,0.85)",
-            zIndex: 100,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "600px",
-              width: "100%",
-              backgroundColor: T.boxBg,
-              border: "2px solid " + T.borderColor,
-              maxHeight: "90vh",
-              overflowY: "auto",
-            }}
-          >
-            <div
-              style={{
-                padding: "24px",
-                borderBottom: "1px solid " + T.borderColor,
-                display: "flex",
-                justifyContent: "space-between",
-                alignItems: "flex-start",
-              }}
-            >
-              <div
-                style={{ display: "flex", gap: "16px", alignItems: "center" }}
-              >
-                <AgentAvatar slug={previewAgent.slug} size={64} />
-                <div>
-                  <div
-                    style={{
-                      color: T.headerColor,
-                      fontSize: "20px",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {previewAgent.name}
-                  </div>
-                  <div
-                    style={{
-                      color: T.textColor,
-                      fontSize: "11px",
-                      opacity: 0.7,
-                      textTransform: "capitalize",
-                    }}
-                  >
-                    {previewAgent.category} · {previewAgent.personality}
-                  </div>
-                </div>
-              </div>
-              <button
-                onClick={() => setPreviewAgent(null)}
-                style={{
-                  backgroundColor: "transparent",
-                  border: "none",
-                  color: T.textColor,
-                  cursor: "pointer",
-                  fontSize: "18px",
-                }}
-              >
-                ✕
-              </button>
-            </div>
-            <div style={{ padding: "24px" }}>
-              <p
-                style={{
-                  color: T.textColor,
-                  fontSize: "13px",
-                  lineHeight: 1.6,
-                  marginBottom: "20px",
-                }}
-              >
-                {previewAgent.description}
-              </p>
-              <div style={{ marginBottom: "20px" }}>
-                <div
-                  style={{
-                    color: T.accentColor,
-                    fontSize: "10px",
-                    letterSpacing: "1px",
-                    marginBottom: "8px",
-                  }}
-                >
-                  FEATURES
-                </div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
-                  {previewAgent.features.map((f, i) => (
-                    <span
-                      key={i}
-                      style={{
-                        padding: "4px 10px",
-                        backgroundColor: "rgba(255,0,128,0.15)",
-                        border: "1px solid " + T.linkColor,
-                        color: T.linkColor,
-                        fontSize: "11px",
-                      }}
-                    >
-                      {f}
-                    </span>
-                  ))}
-                </div>
-              </div>
-              <div
-                style={{
-                  display: "flex",
-                  gap: "16px",
-                  marginBottom: "20px",
-                  fontSize: "12px",
-                }}
-              >
-                <span style={{ color: T.textColor }}>
-                  ⭐ {previewAgent.rating}/5.0
-                </span>
-                <span style={{ color: T.textColor }}>
-                  📥 {(previewAgent.installs || 0).toLocaleString()} installs
-                </span>
-                <span
-                  style={{
-                    color:
-                      previewAgent.price_cents === 0
-                        ? T.accentColor
-                        : T.headerColor,
-                    fontWeight: "bold",
-                  }}
-                >
-                  {formatPrice(previewAgent.price_cents)}
-                </span>
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                {installedAgents.has(previewAgent.id) ? (
-                  <>
-                    <button
-                      disabled
-                      style={{
-                        flex: 1,
-                        padding: "12px",
-                        backgroundColor: "#333",
-                        color: "#666",
-                        border: "none",
-                        fontWeight: "bold",
-                      }}
-                    >
-                      ✓ Installed
-                    </button>
-                    <button
-                      onClick={() => {
-                        uninstallAgent(previewAgent.id);
-                        setPreviewAgent(null);
-                      }}
-                      style={{
-                        padding: "12px 14px",
-                        border: "1px solid #ff4444",
-                        color: "#ff4444",
-                        backgroundColor: "rgba(255,68,68,0.1)",
-                        cursor: "pointer",
-                        fontWeight: "bold",
-                        fontSize: "12px",
-                      }}
-                    >
-                      Uninstall
-                    </button>
-                    {!listedAgents.has(previewAgent.id) && (
-                      <button
-                        onClick={() => {
-                          setPreviewAgent(null);
-                          setSellModalAgent(previewAgent);
-                        }}
-                        style={{
-                          padding: "12px 16px",
-                          border: "2px solid gold",
-                          color: "gold",
-                          backgroundColor: "rgba(255,215,0,0.1)",
-                          cursor: "pointer",
-                          fontWeight: "bold",
-                          fontSize: "12px",
-                        }}
-                      >
-                        🏪 Sell
-                      </button>
-                    )}
-                  </>
-                ) : (
-                  <button
-                    onClick={() => {
-                      installAgent(previewAgent.id);
-                      if (
-                        previewAgent.price_cents === 0 ||
-                        litBitCoins >= previewAgent.price_cents
-                      )
-                        setPreviewAgent(null);
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: "12px",
-                      backgroundColor: T.linkColor,
-                      color: "white",
-                      border: "none",
-                      cursor: "pointer",
-                      fontWeight: "bold",
-                    }}
-                  >
-                    {previewAgent.price_cents === 0 || ALL_AGENTS_FREE_DURING_BETA
-                      ? "🚀 Install Free"
-                      : "🪙 Buy — " + formatPrice(previewAgent.price_cents)}
-                  </button>
-                )}
-                <Link
-                  href="/studio"
-                  onClick={() => setPreviewAgent(null)}
-                  style={{
-                    padding: "12px 20px",
-                    border: "2px solid " + T.linkColor,
-                    color: T.linkColor,
-                    textDecoration: "none",
-                    fontWeight: "bold",
-                    fontSize: "12px",
-                    display: "flex",
-                    alignItems: "center",
-                  }}
-                >
-                  Open in Studio
-                </Link>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* Sell Modal */}
-      {sellModalAgent && (
-        <div
-          onClick={() => setSellModalAgent(null)}
-          style={{
-            position: "fixed",
-            inset: 0,
-            backgroundColor: "rgba(0,0,0,0.85)",
-            zIndex: 100,
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "center",
-            padding: "24px",
-          }}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              maxWidth: "400px",
-              width: "100%",
-              backgroundColor: T.boxBg,
-              border: "2px solid gold",
-              padding: "28px",
-            }}
-          >
-            <h2
-              style={{
-                color: "gold",
-                fontSize: "18px",
-                fontWeight: "bold",
-                marginBottom: "8px",
-              }}
-            >
-              🏪 List Agent for Sale
-            </h2>
-            <p
-              style={{
-                color: T.textColor,
-                fontSize: "12px",
-                marginBottom: "20px",
-                opacity: 0.8,
-              }}
-            >
-              List{" "}
-              <strong style={{ color: T.headerColor }}>
-                {sellModalAgent.name}
-              </strong>{" "}
-              on the marketplace. Other users can buy it with 🪙 LiTBit Coins.
-              You earn 90% of each sale.
-            </p>
-            <div style={{ marginBottom: "16px" }}>
-              <label
-                style={{
-                  color: T.accentColor,
-                  fontSize: "10px",
-                  letterSpacing: "1px",
-                  display: "block",
-                  marginBottom: "6px",
-                }}
-              >
-                SET PRICE (🪙 LiTBit Coins)
-              </label>
-              <input
-                type="number"
-                min="1"
-                max="9999"
-                value={sellPrice}
-                onChange={(e) => setSellPrice(e.target.value)}
-                placeholder="e.g. 250"
-                style={{
-                  width: "100%",
-                  padding: "10px",
-                  backgroundColor: T.bgColor,
-                  border: "1px solid gold",
-                  color: T.textColor,
-                  fontSize: "14px",
-                  fontFamily: "monospace",
-                  outline: "none",
-                  boxSizing: "border-box",
-                }}
-              />
-              {sellPrice && (
-                <p
-                  style={{
-                    color: T.textColor,
-                    fontSize: "10px",
-                    marginTop: "4px",
-                    opacity: 0.6,
-                  }}
-                >
-                  You earn ~{Math.floor(Number(sellPrice) * 0.9)} 🪙 per sale
-                  (10% platform fee)
-                </p>
-              )}
-            </div>
-            <div style={{ display: "flex", gap: "8px" }}>
-              <button
-                onClick={() => {
-                  if (sellPrice && Number(sellPrice) > 0)
-                    listForSale(sellModalAgent.id, Number(sellPrice));
-                }}
-                disabled={!sellPrice || Number(sellPrice) <= 0}
-                style={{
-                  flex: 1,
-                  padding: "12px",
-                  backgroundColor: Number(sellPrice) > 0 ? "gold" : "#333",
-                  color: Number(sellPrice) > 0 ? "black" : "#666",
-                  border: "none",
-                  cursor: Number(sellPrice) > 0 ? "pointer" : "not-allowed",
-                  fontWeight: "bold",
-                  fontSize: "13px",
-                }}
-              >
-                🚀 List Now
-              </button>
-              <button
-                onClick={() => setSellModalAgent(null)}
-                style={{
-                  padding: "12px 20px",
-                  border: "1px solid " + T.borderColor,
-                  color: T.textColor,
-                  backgroundColor: "transparent",
-                  cursor: "pointer",
-                  fontSize: "12px",
-                }}
-              >
-                Cancel
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }
 
-function AgentAvatar({ slug, size = 40 }: { slug: string; size?: number }) {
-  const meta: AgentAvatarMeta | undefined = AGENT_AVATAR_META[slug];
-  if (!meta)
-    return (
-      <div
-        style={{
-          width: size,
-          height: size,
-          borderRadius: size * 0.2,
-          background: "#333",
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "center",
-          fontSize: size * 0.45,
-          border: "1px solid #555",
-        }}
-      >
-        🤖
-      </div>
-    );
-  return (
-    <div
-      style={{
-        width: size,
-        height: size,
-        borderRadius: size * 0.2,
-        background: meta.bg,
-        border: `1.5px solid ${meta.color}`,
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontSize: size * 0.5,
-        lineHeight: 1,
-      }}
-    >
-      {meta.emoji}
-    </div>
-  );
-}
+// --- Card component ---
 
-function AgentCard({
-  agent,
+function MarketplaceCard({
+  item,
   isInstalled,
   onInstall,
-  onPreview,
-  theme,
+  onUninstall,
+  accentColor,
+  borderColor,
+  boxBg,
+  textColor,
+  textMuted,
+  headerColor,
 }: {
-  agent: Agent;
+  item: MarketplaceItem;
   isInstalled: boolean;
   onInstall: () => void;
-  onPreview: () => void;
-  theme: Record<string, string>;
+  onUninstall: () => void;
+  accentColor: string;
+  borderColor: string;
+  boxBg: string;
+  textColor: string;
+  textMuted: string;
+  headerColor: string;
 }) {
-  const T = theme;
-  const [hovered, setHovered] = useState(false);
-  const categoryColor = getCategoryColor(agent.category);
-  const artSrc = CATEGORY_ART[agent.category] || "/showcase/control-center.png";
+  const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
+  const TypeIcon = TYPE_ICONS[item.type];
+  const isInstalled_ = isInstalled;
 
   return (
-    <div
-      onMouseEnter={() => setHovered(true)}
-      onMouseLeave={() => setHovered(false)}
-      className="group relative rounded-2xl overflow-hidden transition-all duration-300"
-      style={{
-        background: hovered
-          ? `linear-gradient(135deg, ${T.boxBg}, ${categoryColor}08)`
-          : T.boxBg,
-        border: `1px solid ${hovered ? categoryColor : T.borderColor + "40"}`,
-        transform: hovered ? "translateY(-6px)" : "translateY(0)",
-        boxShadow: hovered
-          ? `0 20px 40px ${categoryColor}15`
-          : "0 4px 20px rgba(0,0,0,0.2)",
-      }}
+    <article
+      className="group flex flex-col overflow-hidden rounded-2xl border transition-all hover:-translate-y-1"
+      style={{ borderColor: borderColor + "40", backgroundColor: boxBg }}
     >
-      {/* Category accent line */}
+      {/* Category accent */}
       <div className="h-1 w-full" style={{ background: categoryColor }} />
 
-      <div
-        style={{ position: "relative", height: "132px", overflow: "hidden" }}
-      >
-        <Image
-          src={artSrc}
-          alt={agent.name}
-          fill
-          sizes="(max-width: 768px) 100vw, 25vw"
-          style={{ objectFit: "cover" }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            inset: 0,
-            background:
-              "linear-gradient(180deg, rgba(0,0,0,0.1) 0%, rgba(0,0,0,0.72) 100%)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            left: "14px",
-            right: "14px",
-            bottom: "12px",
-            display: "flex",
-            justifyContent: "space-between",
-            gap: "10px",
-            alignItems: "end",
-          }}
-        >
-          <div>
-            <div
-              style={{
-                color: "#fff",
-                fontSize: "14px",
-                fontWeight: "bold",
-                marginBottom: "4px",
-              }}
-            >
-              {agent.name}
-            </div>
-            <div
-              style={{
-                color: "rgba(255,255,255,0.7)",
-                fontSize: "10px",
-                textTransform: "uppercase",
-                letterSpacing: "1px",
-              }}
-            >
-              {CATEGORY_LABELS[agent.category] || agent.category}
-            </div>
-          </div>
+      <div className="flex flex-1 flex-col p-5">
+        {/* Header: icon + name + type */}
+        <div className="flex items-start gap-3">
           <div
-            style={{
-              padding: "4px 8px",
-              borderRadius: "999px",
-              backgroundColor:
-                agent.price_cents === 0
-                  ? "rgba(255,255,255,0.15)"
-                  : "rgba(0,0,0,0.5)",
-              color: "#fff",
-              fontSize: "10px",
-              fontWeight: "bold",
-              border: "1px solid rgba(255,255,255,0.14)",
-            }}
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+            style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
           >
-            {formatPrice(agent.price_cents)}
+            <TypeIcon size={20} style={{ color: categoryColor }} />
           </div>
-        </div>
-      </div>
-
-      <div className="p-5">
-        {/* Header */}
-        <div className="flex items-start gap-3 mb-4">
-          <AgentAvatar slug={agent.slug} size={48} />
-          <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span
-                className="text-sm font-bold truncate"
-                style={{ color: T.textColor }}
-              >
-                {agent.name}
-              </span>
-              {agent.is_featured && (
-                <span
-                  className="text-[10px] px-1.5 py-0.5 rounded-full font-bold"
-                  style={{
-                    background: categoryColor + "20",
-                    color: categoryColor,
-                  }}
-                >
-                  ★
-                </span>
-              )}
-            </div>
-            <div
-              className="flex items-center gap-2 text-[10px]"
-              style={{ color: T.textMuted }}
-            >
-              <span className="capitalize">
-                {CATEGORY_LABELS[agent.category] || agent.category}
-              </span>
+          <div className="min-w-0 flex-1">
+            <h3 className="truncate text-sm font-black" style={{ color: headerColor }}>{item.name}</h3>
+            <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wide" style={{ color: textMuted }}>
+              <span style={{ color: categoryColor }}>{TYPE_LABELS[item.type]}</span>
               <span>·</span>
-              <span className="flex items-center gap-0.5">
-                <span className="text-yellow-400">★</span> {agent.rating}
-              </span>
-              <span>·</span>
-              <span>{(agent.installs || 0).toLocaleString()} installs</span>
+              <span className="capitalize">{item.category}</span>
             </div>
-          </div>
-          <div
-            className="px-2.5 py-1 rounded-lg text-[10px] font-bold shrink-0"
-            style={{
-              background:
-                agent.price_cents === 0
-                  ? categoryColor + "20"
-                  : categoryColor + "30",
-              color: agent.price_cents === 0 ? categoryColor : "#fff",
-              border: `1px solid ${categoryColor}50`,
-            }}
-          >
-            {formatPrice(agent.price_cents)}
           </div>
         </div>
 
         {/* Description */}
-        <p
-          className="text-xs leading-relaxed mb-4 line-clamp-2"
-          style={{ color: T.textMuted }}
-        >
-          {agent.description}
+        <p className="mt-3 line-clamp-2 text-xs leading-relaxed" style={{ color: textMuted }}>
+          {item.description}
         </p>
 
         {/* Features */}
-        <div className="flex flex-wrap gap-1.5 mb-4">
-          {agent.features.slice(0, 3).map((f, i) => (
-            <span
-              key={i}
-              className="px-2 py-0.5 rounded-md text-[9px] font-medium"
-              style={{
-                background: categoryColor + "10",
-                color: categoryColor,
-                border: `1px solid ${categoryColor}20`,
-              }}
-            >
-              {f}
-            </span>
-          ))}
+        {item.features.length > 0 && (
+          <div className="mt-3 flex flex-wrap gap-1.5">
+            {item.features.slice(0, 3).map((f, i) => (
+              <span
+                key={i}
+                className="rounded-md px-2 py-0.5 text-[9px] font-medium"
+                style={{ background: categoryColor + "10", color: categoryColor, border: `1px solid ${categoryColor}20` }}
+              >
+                {f}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Compatibility */}
+        <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
+          <span>Works with:</span>
+          {item.compatibleWith.includes("litt") && (
+            <span className="rounded-md bg-cyan-400/10 px-1.5 py-0.5 font-bold text-cyan-300">LiTT</span>
+          )}
+          {item.compatibleWith.includes("spark") && (
+            <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>
+          )}
         </div>
 
-        {/* Actions */}
-        <div className="flex gap-2">
-          <button
-            onClick={onPreview}
-            className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
-            style={{
-              background: T.bgColor,
-              color: T.textColor,
-              border: `1px solid ${T.borderColor}40`,
-            }}
-          >
-            Preview
-          </button>
-          {isInstalled ? (
-            <button
-              disabled
-              className="flex-1 py-2.5 rounded-xl text-xs font-bold cursor-not-allowed"
-              style={{
-                background: T.borderColor + "30",
-                color: T.textMuted,
-                border: `1px solid ${T.borderColor}30`,
-              }}
-            >
-              <span className="flex items-center justify-center gap-1">
+        {/* Action */}
+        <div className="mt-4 pt-3 border-t" style={{ borderColor: borderColor + "20" }}>
+          {isInstalled_ ? (
+            <div className="flex gap-2">
+              <span
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
+                style={{ background: borderColor + "20", color: textMuted }}
+              >
                 <Check size={12} /> Installed
               </span>
-            </button>
+              <button
+                onClick={onUninstall}
+                className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10"
+                aria-label={`Uninstall ${item.name}`}
+              >
+                Remove
+              </button>
+            </div>
           ) : (
             <button
               onClick={onInstall}
-              className="flex-1 py-2.5 rounded-xl text-xs font-bold transition-all hover:scale-[1.02] active:scale-[0.98]"
-              style={{
-                background: categoryColor,
-                color: "#000",
-              }}
+              className="w-full rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02]"
+              style={{ background: categoryColor }}
+              aria-label={`Install ${item.name}`}
             >
-              {agent.price_cents === 0 ? "Install Free" : "Buy Now"}
+              {ALL_ITEMS_FREE_DURING_BETA ? "Install — Free during beta" : "Install"}
             </button>
           )}
         </div>
       </div>
-    </div>
+    </article>
   );
 }
 
-/* Wrap in Suspense for useSearchParams */
 export default function Marketplace() {
   return (
     <Suspense
       fallback={
-        <div
-          className="min-h-screen flex items-center justify-center"
-          style={{ backgroundColor: "#0a0a0f" }}
-        >
+        <div className="flex min-h-screen items-center justify-center bg-[#0a0a0f]">
           <div className="text-center">
-            <div className="text-3xl mb-4 animate-pulse">⚡</div>
-            <div className="text-sm font-bold opacity-60">
-              Loading Marketplace...
-            </div>
+            <div className="mb-4 animate-pulse text-3xl">⚡</div>
+            <div className="text-sm font-bold text-white/50">Loading Marketplace...</div>
           </div>
         </div>
       }

@@ -23,12 +23,21 @@ export interface RetroGameRecord {
 
 export const RETRO_SYSTEMS: RetroSystem[] = [
   { id: "nes", name: "Nintendo Entertainment System", shortName: "NES", extensions: ["nes"], color: "#ff4d67" },
-  { id: "snes", name: "Super Nintendo", shortName: "SNES", extensions: ["sfc", "smc"], color: "#a78bfa" },
+  { id: "snes", name: "Super Nintendo", shortName: "SNES", extensions: ["sfc", "smc", "swc", "fig"], color: "#a78bfa" },
   { id: "gb", name: "Game Boy", shortName: "GB", extensions: ["gb"], color: "#a3e635" },
   { id: "gbc", name: "Game Boy Color", shortName: "GBC", extensions: ["gbc"], color: "#fbbf24" },
   { id: "gba", name: "Game Boy Advance", shortName: "GBA", extensions: ["gba"], color: "#38bdf8" },
   { id: "segaMD", name: "Sega Genesis / Mega Drive", shortName: "GEN", extensions: ["gen", "md", "smd"], color: "#22d3ee" },
 ];
+
+export const EMULATOR_CORE_BY_SYSTEM: Record<RetroSystemId, string> = {
+  nes: "nes",
+  snes: "snes",
+  gb: "gb",
+  gbc: "gb",
+  gba: "gba",
+  segaMD: "segaMD",
+};
 
 const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
@@ -145,4 +154,20 @@ export async function deleteRetroGame(id: string): Promise<void> {
 export function formatRomSize(bytes: number): string {
   if (bytes < 1024 * 1024) return `${Math.max(1, Math.round(bytes / 1024))} KB`;
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+export async function readRomAsBase64(rom: Blob): Promise<string> {
+  const buffer = await rom.arrayBuffer();
+  let binary = "";
+  const bytes = new Uint8Array(buffer);
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + chunk)));
+  }
+  return btoa(binary);
+}
+
+export function detectSatellaview(fileName: string): boolean {
+  const lower = fileName.toLowerCase();
+  return lower.endsWith(".bs") || lower.endsWith(".bsa") || lower.endsWith(".fig") || lower.includes("satellaview") || lower.includes("bs-x") || lower.includes("bsx");
 }
