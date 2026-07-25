@@ -44,6 +44,7 @@ const PluginsTool = dynamic(() => import("../tools/PluginsTool"), {
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 const HomeTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
+const OnboardingCanvas = dynamic(() => import("./OnboardingCanvas"), { ssr: false });
 
 const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   home: HomeTool,
@@ -215,7 +216,7 @@ export default function StudioOS() {
           {/* Center workspace — renders active tool directly, no overlay */}
           <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden">
             {isChatOrHome ? (
-              <WelcomeWorkspace T={T} onToolChange={handleToolChange} />
+              <OnboardingCanvas onToolChange={handleToolChange} />
             ) : WorkspaceComponent ? (
               <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
                 <WorkspaceComponent />
@@ -271,110 +272,6 @@ export default function StudioOS() {
   );
 }
 
-/* ── Welcome / Empty workspace state ─────────────────────────────── */
-function WelcomeWorkspace({
-  T,
-  onToolChange,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-  onToolChange: (tool: StudioTool) => void;
-}) {
-  const actions = [
-    {
-      tool: "image" as StudioTool,
-      label: "Create Image",
-      desc: "Generate art, logos, products",
-      accent: T.accentColor,
-    },
-    {
-      tool: "video" as StudioTool,
-      label: "Create Video",
-      desc: "Animate a shot or scene",
-      accent: "#67e8f9",
-    },
-    {
-      tool: "code" as StudioTool,
-      label: "Open Code Editor",
-      desc: "Build and edit directly",
-      accent: "#a855f7",
-    },
-    {
-      tool: "terminal" as StudioTool,
-      label: "Open Terminal",
-      desc: "Run commands and scripts",
-      accent: "#22c55e",
-    },
-  ];
-
-  return (
-    <div className="flex h-full w-full items-center justify-center overflow-auto p-6">
-      <div className="flex max-w-2xl flex-col items-center text-center">
-        <div
-          className="mb-6 grid h-16 w-16 place-items-center rounded-2xl border"
-          style={{
-            borderColor: `${T.accentColor}30`,
-            backgroundColor: `${T.accentColor}08`,
-          }}
-        >
-          <span className="text-3xl">🚀</span>
-        </div>
-        <h1
-          className="mb-2 text-2xl font-black tracking-tight"
-          style={{ color: "rgba(255,255,255,0.9)" }}
-        >
-          Welcome to your workspace
-        </h1>
-        <p
-          className="mb-8 text-sm"
-          style={{ color: "rgba(255,255,255,0.6)" }}
-        >
-          Choose how you want to start building, or ask LiTT in the conversation panel.
-        </p>
-        <div className="grid w-full grid-cols-2 gap-3 sm:grid-cols-4">
-          {actions.map((action) => (
-            <button
-              key={action.label}
-              type="button"
-              onClick={() => onToolChange(action.tool)}
-              aria-label={action.label}
-              title={action.desc}
-              className="group flex flex-col items-center gap-2 rounded-2xl border p-4 transition-all hover:scale-[1.03]"
-              style={{
-                borderColor: "rgba(255,255,255,0.06)",
-                backgroundColor: "rgba(255,255,255,0.02)",
-              }}
-            >
-              <span
-                className="grid h-10 w-10 place-items-center rounded-xl transition-transform group-hover:scale-110"
-                style={{
-                  backgroundColor: `${action.accent}12`,
-                  border: `1px solid ${action.accent}30`,
-                }}
-              >
-                <span
-                  className="h-3 w-3 rounded-full"
-                  style={{ backgroundColor: action.accent, boxShadow: `0 0 8px ${action.accent}80` }}
-                />
-              </span>
-              <span
-                className="text-[11px] font-bold"
-                style={{ color: "rgba(255,255,255,0.85)" }}
-              >
-                {action.label}
-              </span>
-              <span
-                className="text-[9px]"
-                style={{ color: "rgba(255,255,255,0.55)" }}
-              >
-                {action.desc}
-              </span>
-            </button>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-}
 
 function DockBadge({ label, onClose, onMove }: { label: string; onClose: () => void; onMove: () => void }) {
   const { resolvedColors: T } = useTheme();
