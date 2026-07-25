@@ -184,7 +184,7 @@ export default function StudioOS() {
 
       {/* Desktop: 3-column grid layout */}
       <div
-        className="hidden md:grid h-[100dvh] w-full overflow-hidden"
+        className="hidden md:grid h-dvh w-full overflow-hidden"
         style={{
           gridTemplateRows: "auto minmax(0, 1fr)",
           backgroundColor: "#06070b",
@@ -199,11 +199,11 @@ export default function StudioOS() {
           T={T}
         />
 
-        {/* 3-column grid: ToolRail | Workspace | ChatPanel */}
+        {/* 3-column grid: ToolRail | Workspace | LiTT panel */}
         <div
-          className="grid min-h-0 overflow-hidden"
+          className="grid min-h-0 min-w-0 overflow-hidden studio-shell"
           style={{
-            gridTemplateColumns: "48px minmax(520px, 1fr) clamp(320px, 26vw, 420px)",
+            gridTemplateColumns: "48px minmax(0, 1fr) 340px",
           }}
         >
           <StudioSidebar
@@ -223,9 +223,9 @@ export default function StudioOS() {
             ) : null}
           </main>
 
-          {/* Persistent right chat panel — desktop only */}
+          {/* Persistent right LiTT panel — desktop only */}
           <aside
-            className="hidden md:flex shrink-0 min-w-0 min-h-0 flex-col border-l overflow-hidden"
+            className="hidden md:flex shrink-0 min-w-0 min-h-0 flex-col border-l overflow-hidden litt-panel"
             style={{
               backgroundColor: "rgba(8,9,13,0.96)",
               borderColor: "rgba(255,255,255,0.06)",
@@ -236,7 +236,7 @@ export default function StudioOS() {
               style={{ borderColor: "rgba(255,255,255,0.06)" }}
             >
               <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
-                Conversation
+                LiTT
               </span>
               <span
                 className="w-1.5 h-1.5 rounded-full"
@@ -281,31 +281,27 @@ function WelcomeWorkspace({
 }) {
   const actions = [
     {
-      tool: "code" as StudioTool,
-      label: "Start Blank",
-      desc: "Open the code editor",
-      icon: "📝",
+      tool: "image" as StudioTool,
+      label: "Create Image",
+      desc: "Generate art, logos, products",
       accent: T.accentColor,
     },
     {
-      tool: "code" as StudioTool,
-      label: "Connect Project",
-      desc: "Link a Git repository",
-      icon: "🔗",
+      tool: "video" as StudioTool,
+      label: "Create Video",
+      desc: "Animate a shot or scene",
       accent: "#67e8f9",
     },
     {
       tool: "code" as StudioTool,
-      label: "Upload Files",
-      desc: "Import existing code",
-      icon: "📤",
+      label: "Open Code Editor",
+      desc: "Build and edit directly",
       accent: "#a855f7",
     },
     {
-      tool: "code" as StudioTool,
-      label: "Generate",
-      desc: "AI-generate from prompt",
-      icon: "✨",
+      tool: "terminal" as StudioTool,
+      label: "Open Terminal",
+      desc: "Run commands and scripts",
       accent: "#22c55e",
     },
   ];
@@ -330,7 +326,7 @@ function WelcomeWorkspace({
         </h1>
         <p
           className="mb-8 text-sm"
-          style={{ color: "rgba(255,255,255,0.45)" }}
+          style={{ color: "rgba(255,255,255,0.6)" }}
         >
           Choose how you want to start building, or ask LiTT in the conversation panel.
         </p>
@@ -340,6 +336,8 @@ function WelcomeWorkspace({
               key={action.label}
               type="button"
               onClick={() => onToolChange(action.tool)}
+              aria-label={action.label}
+              title={action.desc}
               className="group flex flex-col items-center gap-2 rounded-2xl border p-4 transition-all hover:scale-[1.03]"
               style={{
                 borderColor: "rgba(255,255,255,0.06)",
@@ -347,23 +345,26 @@ function WelcomeWorkspace({
               }}
             >
               <span
-                className="grid h-10 w-10 place-items-center rounded-xl text-xl transition-transform group-hover:scale-110"
+                className="grid h-10 w-10 place-items-center rounded-xl transition-transform group-hover:scale-110"
                 style={{
                   backgroundColor: `${action.accent}12`,
                   border: `1px solid ${action.accent}30`,
                 }}
               >
-                {action.icon}
+                <span
+                  className="h-3 w-3 rounded-full"
+                  style={{ backgroundColor: action.accent, boxShadow: `0 0 8px ${action.accent}80` }}
+                />
               </span>
               <span
                 className="text-[11px] font-bold"
-                style={{ color: "rgba(255,255,255,0.8)" }}
+                style={{ color: "rgba(255,255,255,0.85)" }}
               >
                 {action.label}
               </span>
               <span
                 className="text-[9px]"
-                style={{ color: "rgba(255,255,255,0.4)" }}
+                style={{ color: "rgba(255,255,255,0.55)" }}
               >
                 {action.desc}
               </span>

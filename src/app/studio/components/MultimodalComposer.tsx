@@ -11,7 +11,6 @@ import {
   Send,
   Square,
   Loader2,
-  Settings2,
   Image as ImageIcon,
   Clapperboard,
   Music2,
@@ -108,7 +107,6 @@ export default function MultimodalComposer({
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
-  const [showMicSetup, setShowMicSetup] = useState(false);
   const [createMode, setCreateMode] = useState<"image" | "video" | null>(null);
   const [createPrompt, setCreatePrompt] = useState("");
   const [createAspect, setCreateAspect] = useState("16:9");
@@ -145,9 +143,6 @@ export default function MultimodalComposer({
     setOnTurn,
     errorMessage,
     voiceMode,
-    selectedDeviceId,
-    availableDevices,
-    selectDevice,
   } = useVoiceSession();
 
   // Set turn handler for voice sessions
@@ -350,7 +345,7 @@ export default function MultimodalComposer({
   };
 
   return (
-    <div className="relative mx-auto flex w-full max-w-5xl min-w-0 flex-col gap-2 rounded-t-2xl border-x border-t border-white/10 bg-[#060a16]/95 p-2.5 pb-[calc(.625rem+env(safe-area-inset-bottom))] shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl sm:pb-2.5">
+    <div className="relative flex w-full min-w-0 flex-col gap-2 border-t border-white/10 bg-[#060a16]/95 p-2.5 pb-[calc(.625rem+env(safe-area-inset-bottom))] shadow-[0_-18px_60px_rgba(0,0,0,.3)] backdrop-blur-xl sm:pb-2.5">
       {createMode && (
         <div className="fixed inset-0 z-[100] grid place-items-center bg-black/75 p-3 backdrop-blur-md" onMouseDown={(event) => event.target === event.currentTarget && setCreateMode(null)}>
           <section role="dialog" aria-modal="true" aria-label={`Generate ${createMode}`} className="w-full max-w-lg overflow-hidden rounded-2xl border border-white/12 bg-[#090a12] shadow-[0_30px_120px_rgba(0,0,0,.8)]">
@@ -481,42 +476,7 @@ export default function MultimodalComposer({
         </div>
       )}
 
-      {showMicSetup && (
-        <div className="mb-2 rounded-2xl border border-violet-300/20 bg-[#0b0c16] p-3 shadow-2xl">
-          <div className="mb-2 flex items-center justify-between gap-3">
-            <div>
-              <strong className="block text-xs text-white">Microphone setup</strong>
-              <span className="text-[9px] text-white/40">
-                Chrome uses live voice. Firefox records a turn, then transcribes it.
-              </span>
-            </div>
-            <span className={`rounded-full px-2 py-1 text-[8px] font-black uppercase tracking-wider ${voiceState === "error" ? "bg-red-400/10 text-red-300" : availableDevices.length ? "bg-emerald-400/10 text-emerald-300" : "bg-amber-400/10 text-amber-300"}`}>
-              {voiceState === "error" ? "Needs attention" : availableDevices.length ? "Mic detected" : "Permission needed"}
-            </span>
-          </div>
-          <label className="mb-1 block text-[9px] font-bold uppercase tracking-wider text-white/35" htmlFor="studio-mic-device">
-            Input device
-          </label>
-          <select
-            id="studio-mic-device"
-            value={selectedDeviceId || ""}
-            onChange={(event) => selectDevice(event.target.value)}
-            className="w-full rounded-xl border border-white/10 bg-black/40 px-3 py-2 text-xs text-white outline-none focus:border-violet-300/50"
-          >
-            <option value="">System default microphone</option>
-            {availableDevices.map((device, index) => (
-              <option key={device.deviceId} value={device.deviceId}>
-                {device.label || `Microphone ${index + 1}`}
-              </option>
-            ))}
-          </select>
-          <p className="mt-2 text-[9px] leading-4 text-white/40">
-            If no device appears, click the mic once and choose Allow. In Firefox, use the microphone icon beside the address bar to reset a blocked permission.
-          </p>
-        </div>
-      )}
-
-      {/* Add sheet */}
+        {/* Add sheet */}
       {showAdd && (
         <button aria-label="Close create menu" className="fixed inset-0 z-[10010] bg-black/60 md:hidden" onClick={() => setShowAdd(false)} />
       )}
@@ -540,6 +500,7 @@ export default function MultimodalComposer({
             { label: "Terminal", tool: "terminal" as StudioTool, icon: TerminalIcon, color: "text-emerald-300" },
             { label: "Camera", tool: "camera" as StudioTool, icon: Camera, color: "text-cyan-300" },
             { label: "Screen", tool: "screen" as StudioTool, icon: MonitorUp, color: "text-blue-300" },
+            { label: "Assets", tool: "assets" as StudioTool, icon: Sparkles, color: "text-violet-300" },
             { label: "Plugins", tool: "plugins" as StudioTool, icon: Sparkles, color: "text-violet-300" },
           ].map((item) => (
             <button
@@ -584,15 +545,15 @@ export default function MultimodalComposer({
       />
 
       {/* Input row */}
-      <div className="flex items-center gap-2 rounded-2xl border border-white/15 bg-white/4 px-2.5 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
+      <div className="flex items-end gap-2 rounded-2xl border border-white/15 bg-white/4 px-2.5 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
         <button
           type="button"
           onClick={() => setShowAdd((value) => !value)}
-          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
+          className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
           aria-label={showAdd ? "Close tools" : "Add tool or attachment"}
           title="Tools and attachments"
         >
-          <Plus size={16} className="pointer-events-none" />
+          <Plus size={18} className="pointer-events-none" />
         </button>
         <textarea
           ref={textareaRef}
@@ -605,34 +566,22 @@ export default function MultimodalComposer({
             }
           }}
           placeholder={agentMeta.placeholder}
-          className="flex-1 resize-none bg-transparent text-sm text-white placeholder-white/40 outline-none"
-          style={{ minHeight: "44px", maxHeight: "160px" }}
+          className="flex-1 resize-none bg-transparent py-2.5 text-sm text-white placeholder-white/50 outline-none"
+          style={{ minHeight: "52px", maxHeight: "160px" }}
           rows={1}
         />
-
-        <button
-          type="button"
-          onClick={() => setShowMicSetup((value) => !value)}
-          className={`grid h-9 w-9 shrink-0 place-items-center rounded-xl transition ${showMicSetup ? "bg-violet-400/12 text-violet-200" : "text-white/35 hover:bg-white/8 hover:text-white"}`}
-          aria-label="Microphone setup"
-          title="Microphone setup"
-        >
-          <Settings2 size={15} className="pointer-events-none" />
-        </button>
-
-        {/* Mic button */}
         <button
           type="button"
           onClick={micButtonState.onClick}
           disabled={micButtonState.disabled}
-          className={`rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all ${micButtonState.color} ${
+          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${micButtonState.color} ${
             !micButtonState.disabled && "hover:bg-white/10"
           } ${micButtonState.disabled && "cursor-not-allowed"}`}
           style={getMicButtonStyle()}
           aria-label={voiceState === "idle" ? "Start voice" : "Stop voice"}
         >
           <MicIcon
-            size={16}
+            size={18}
             className={`pointer-events-none ${
               voiceState === "requesting_permission" ||
               voiceState === "connecting" ||
@@ -648,20 +597,16 @@ export default function MultimodalComposer({
           type="button"
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
-          className="rounded-full p-2 w-9 h-9 flex items-center justify-center transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send message"
+          title="Send message"
         >
-          <Send size={16} className="pointer-events-none" />
+          <Send size={18} className="pointer-events-none" />
         </button>
       </div>
 
-      <div className="flex items-center justify-between px-1 text-[8px] text-white/25">
-        <span>Press / for exact commands</span>
-        <span className="flex items-center gap-1.5">
-          <span className="hidden sm:inline">Enter to send · Shift+Enter for a new line</span>
-          <span className="text-white/40">·</span>
-          <span className="font-bold text-white/45">{modelName}</span>
-        </span>
+      <div className="flex items-center justify-end px-1 text-[9px] text-white/40">
+        <span className="font-bold text-cyan-200/60">{modelName}</span>
       </div>
     </div>
   );

@@ -1,35 +1,28 @@
 "use client";
 
-import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { useState, useRef, useEffect, useMemo } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import {
-  Sparkles,
   Zap,
   Copy,
   Check,
   RefreshCw,
-  Menu,
   MoreHorizontal,
-  Terminal as TerminalIcon,
-  X,
-  ChevronUp,
   Image as ImageIcon,
   Clapperboard,
-  ArrowUpRight,
   BrainCircuit,
   MessageSquareText,
   Layers3,
   CircleCheck,
   ChevronDown,
+  History,
 } from "lucide-react";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import ReactMarkdown from "react-markdown";
 import MultimodalComposer from "./MultimodalComposer";
 import type { StudioTool } from "./StudioSidebar";
-import { type TerminalPanelHandle } from "@/components/litt-terminal/TerminalPanel";
-import type { TerminalBuilderBlock } from "../types/builder-blocks";
 import SessionSidebar from "./SessionSidebar";
 import type { BuilderSession } from "../hooks/useBuilderSessions";
 import { parseJarvisActions } from "@/lib/litt-context";
@@ -39,6 +32,7 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import { useTerminalStore } from "@/stores/useTerminalStore";
+import { type ConnectionCapabilities } from "../hooks/useConnectionSummary";
 
 type Message = {
   role: "user" | "assistant";
@@ -67,8 +61,8 @@ interface ChatShellProps {
   onDuplicateSession: (session: BuilderSession) => void;
   onDeleteSession: (id: string) => void;
   onDeleteAllSessions: () => void;
-  shellAction?: { id: number; type: "terminal" | "sessions" } | null;
   fallbackNotice?: string | null;
+  capabilities?: ConnectionCapabilities;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -94,6 +88,35 @@ function CopyButton({ text }: { text: string }) {
   );
 }
 
+function CapabilityChip({
+  label,
+  active,
+  color = "#22c55e",
+  title,
+}: {
+  label: string;
+  active: boolean;
+  color?: string;
+  title?: string;
+}) {
+  return (
+    <span
+      className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-md border border-white/8 bg-black/30 px-2 py-0.5"
+      title={title}
+      aria-label={label}
+    >
+      <span
+        className="h-1.5 w-1.5 shrink-0 rounded-full"
+        style={{ backgroundColor: active ? color : "#6b7280" }}
+        aria-hidden
+      />
+      <span className="whitespace-nowrap text-[9px] font-bold text-white/70">
+        {label}
+      </span>
+    </span>
+  );
+}
+
 export default function ChatShell({
   selectedModel = "adaptive",
   messages,
@@ -102,8 +125,6 @@ export default function ChatShell({
   onNewChat,
   onRegenerate,
   onRouteTool,
-  requestedTool = "chat",
-  pendingCommand = "",
   initialPrompt = "",
   activeAgentId,
   sessions,
@@ -115,8 +136,8 @@ export default function ChatShell({
   onDuplicateSession,
   onDeleteSession,
   onDeleteAllSessions,
-  shellAction,
   fallbackNotice,
+  capabilities: _capabilities,
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -126,23 +147,22 @@ export default function ChatShell({
   const agentColor = agentMeta.color;
   const [input, setInput] = useState("");
   const transcriptRef = useRef<HTMLDivElement>(null);
-  const terminalRef = useRef<TerminalPanelHandle>(null);
-  const lastCommandRef = useRef("");
-  const pendingTerminalCommandRef = useRef("");
-  const pendingInsertCommandRef = useRef("");
-  const terminalConnectedRef = useRef(false);
-  const [terminalOpen, setTerminalOpen] = useState(requestedTool === "terminal");
-  const [terminalBlocks, setTerminalBlocks] = useState<TerminalBuilderBlock[]>([]);
   const [activityOpen, setActivityOpen] = useState(true);
   const [busySeconds, setBusySeconds] = useState(0);
   const [sessionsOpen, setSessionsOpen] = useState(false);
+  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
   const ptyUsable = useTerminalStore((s) => s.isUsable());
+  const capabilities = _capabilities ?? { repository: "none", terminalExecution: "unavailable", writeAccess: false, connectionSummary: "No services connected." } as ConnectionCapabilities;
 
+  // Close drawer on Escape
   useEffect(() => {
-    if (!shellAction) return;
-    if (shellAction.type === "terminal") setTerminalOpen(true);
-    if (shellAction.type === "sessions") setSessionsOpen(true);
-  }, [shellAction]);
+    if (!sessionsOpen) return;
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSessionsOpen(false);
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, [sessionsOpen]);
 
   useEffect(() => {
     if (initialPrompt) setInput((current) => current || initialPrompt);
@@ -160,27 +180,6 @@ export default function ChatShell({
     return () => window.clearInterval(timer);
   }, [busy]);
 
-  const runTerminalCommand = useCallback((command: string) => {
-    const clean = command.replace(/^\/run\s+/, "").trim();
-    setTerminalOpen(true);
-    if (!clean || clean === "/terminal" || lastCommandRef.current === clean) return;
-    lastCommandRef.current = clean;
-    const id = `terminal-${Date.now()}`;
-    setTerminalBlocks((current) => [...current, {
-      id, type: "terminal", command: clean,
-      output: "Waiting for terminal output…", status: "running", startedBy: "user",
-    }]);
-    pendingTerminalCommandRef.current = clean;
-    if (terminalConnectedRef.current) {
-      terminalRef.current?.runCommand(clean);
-      pendingTerminalCommandRef.current = "";
-    }
-  }, [setTerminalOpen, setTerminalBlocks]);
-
-  useEffect(() => {
-    if (requestedTool === "terminal") runTerminalCommand(pendingCommand);
-  }, [pendingCommand, requestedTool, runTerminalCommand]);
-
   const displayName = useMemo(
     () => profile?.displayName || "Member",
     [profile],
@@ -196,23 +195,41 @@ export default function ChatShell({
   }, [messages, busy]);
 
   const isEmpty = messages.length === 0;
-  const currentSession = sessions.find((session) => session.id === activeSessionId);
 
   return (
     <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-[#0a0a0f]">
-      <SessionSidebar
-        sessions={sessions}
-        activeId={activeSessionId}
-        open={sessionsOpen}
-        onOpenChange={setSessionsOpen}
-        onSelect={onSelectSession}
-        onNew={onNewSession}
-        onRename={onRenameSession}
-        onPin={onPinSession}
-        onDuplicate={onDuplicateSession}
-        onDelete={onDeleteSession}
-        onDeleteAll={onDeleteAllSessions}
-      />
+      {/* Session drawer — floating overlay, not permanent */}
+      {sessionsOpen && (
+        <>
+          <div
+            className="fixed inset-0 z-40 bg-black/55"
+            onClick={() => setSessionsOpen(false)}
+            aria-hidden
+          />
+          <div
+            className="fixed left-12 top-0 z-50 flex h-full w-[300px] flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
+            role="dialog"
+            aria-modal="true"
+            aria-label="Chat sessions"
+          >
+            <SessionSidebar
+              sessions={sessions}
+              activeId={activeSessionId}
+              open={true}
+              onOpenChange={setSessionsOpen}
+              onSelect={(id) => { onSelectSession(id); setSessionsOpen(false); }}
+              onNew={() => { onNewSession(); setSessionsOpen(false); }}
+              onRename={onRenameSession}
+              onPin={onPinSession}
+              onDuplicate={onDuplicateSession}
+              onDelete={onDeleteSession}
+              onDeleteAll={onDeleteAllSessions}
+            />
+          </div>
+        </>
+      )}
+
+      {/* Main chat column */}
       <div
         className="relative flex h-full min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[#0a0a0f]"
         style={{ color: T.textColor }}
@@ -227,93 +244,185 @@ export default function ChatShell({
         }}
       />
 
-      {/* Header — Agent Console */}
-      <header className="relative z-10 flex h-11 shrink-0 items-center justify-between border-b bg-[#0a0a0f]/90 px-3 backdrop-blur-md" style={{ borderColor: `${agentColor}20` }}>
-        <div className="flex items-center gap-3">
-          <button
-            className="rounded-lg p-2 hover:bg-white/5 md:hidden"
-            aria-label="Open sidebar"
-          >
-            <Menu size={18} style={{ color: T.textMuted }} />
-          </button>
-
-          {/* Agent switcher */}
-          <div className="flex items-center gap-1 rounded-xl border border-white/8 bg-black/40 p-1">
-            {(Object.keys(AGENT_META) as AgentId[]).map((id) => {
-              const meta = AGENT_META[id];
-              const active = activeAgentId === id;
-              return (
-                <button
-                  key={id}
-                  onClick={() => setActiveAgent(id)}
-                  className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-black transition-all"
-                  style={{
-                    backgroundColor: active ? `${meta.color}18` : "transparent",
-                    color: active ? meta.color : "rgba(255,255,255,0.4)",
-                  }}
-                  aria-label={`Switch to ${meta.displayName}`}
-                >
-                  <span
-                    className="h-1.5 w-1.5 rounded-full"
-                    style={{
-                      backgroundColor: meta.color,
-                      boxShadow: active ? `0 0 6px ${meta.color}` : "none",
-                    }}
-                  />
-                  {meta.displayName}
-                </button>
-              );
-            })}
-          </div>
-
-          <div className="hidden flex-col sm:flex">
+      {/* Header — LiTT panel (3-row) */}
+      <header
+        className="relative z-10 flex shrink-0 flex-col border-b bg-[#0a0a0f]/90 px-3 backdrop-blur-md"
+        style={{ borderColor: `${agentColor}20` }}
+      >
+        {/* Row 1: LiTT avatar + agent switcher | history | more */}
+        <div className="flex h-10 shrink-0 items-center justify-between gap-2">
+          <div className="flex min-w-0 items-center gap-2">
+            {/* LiTT avatar */}
+            <div
+              className="grid h-7 w-7 shrink-0 place-items-center rounded-lg border"
+              style={{
+                borderColor: `${agentColor}30`,
+                backgroundColor: `${agentColor}10`,
+              }}
+            >
+              <span className="text-[11px] font-black" style={{ color: agentColor }}>
+                {agentMeta.displayName[0]}
+              </span>
+            </div>
             <span
-              className="text-[11px] font-black leading-tight"
+              className="text-[11px] font-black leading-tight shrink-0"
               style={{ color: agentColor }}
             >
-              {agentMeta.displayName}
+              LiTT
             </span>
-            <span
-              className="text-[9px] font-medium leading-tight"
-              style={{ color: T.textMuted }}
+
+            {/* Agent switcher */}
+            <div
+              className="flex shrink-0 items-center gap-0.5 rounded-lg border border-white/8 bg-black/40 p-0.5"
+              role="tablist"
+              aria-label="Select agent"
             >
-              {agentMeta.role}
-            </span>
+              {(Object.keys(AGENT_META) as AgentId[]).map((id) => {
+                const meta = AGENT_META[id];
+                const active = activeAgentId === id;
+                return (
+                  <button
+                    key={id}
+                    type="button"
+                    role="tab"
+                    aria-selected={active}
+                    onClick={() => setActiveAgent(id)}
+                    className="flex items-center gap-1 rounded-md px-1.5 py-0.5 text-[9px] font-black transition-all"
+                    style={{
+                      backgroundColor: active ? `${meta.color}18` : "transparent",
+                      color: active ? meta.color : "rgba(255,255,255,0.5)",
+                    }}
+                    title={`Switch to ${meta.displayName}`}
+                    aria-label={`Switch to ${meta.displayName}`}
+                  >
+                    <span
+                      className="h-1.5 w-1.5 rounded-full"
+                      style={{
+                        backgroundColor: meta.color,
+                        boxShadow: active ? `0 0 6px ${meta.color}` : "none",
+                      }}
+                    />
+                    {meta.displayName}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          <div className="flex shrink-0 items-center gap-1">
+            {/* History button */}
+            <button
+              type="button"
+              onClick={() => setSessionsOpen(true)}
+              className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5"
+              aria-label="Chat history"
+              title="Chat history"
+            >
+              <History size={15} style={{ color: T.textMuted }} />
+            </button>
+
+            {/* More menu with Clear */}
+            <div className="relative">
+              <button
+                type="button"
+                onClick={() => setMoreMenuOpen((v) => !v)}
+                className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/5"
+                aria-label="More options"
+                title="More options"
+              >
+                <MoreHorizontal size={15} style={{ color: T.textMuted }} />
+              </button>
+              {moreMenuOpen && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} aria-hidden />
+                  <div className="absolute right-0 top-9 z-50 w-40 rounded-xl border border-white/10 bg-[#171721] p-1 shadow-2xl">
+                    <button
+                      type="button"
+                      onClick={() => { onNewChat?.(); setMoreMenuOpen(false); }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-white/65 hover:bg-white/8"
+                    >
+                      <Zap size={12} style={{ color: agentColor }} /> Clear conversation
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => { setSessionsOpen(true); setMoreMenuOpen(false); }}
+                      className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[10px] font-bold text-white/65 hover:bg-white/8"
+                    >
+                      <History size={12} style={{ color: T.textMuted }} /> Chat history
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
 
-        <div className="flex items-center gap-2">
+        {/* Row 2: online indicator + agent/model name */}
+        <div className="flex h-7 shrink-0 items-center gap-2 border-t border-white/6">
           <span
-            className="hidden items-center gap-1.5 text-[9px] font-bold sm:flex"
-            style={{ color: "rgba(255,255,255,0.4)" }}
+            className="flex items-center gap-1.5 text-[9px] font-bold text-white/60"
+            title={capabilities.connectionSummary}
           >
             <span
               className="h-1.5 w-1.5 rounded-full"
-              style={{ backgroundColor: agentColor, boxShadow: `0 0 4px ${agentColor}` }}
+              style={{
+                backgroundColor: capabilities.connectedProviders.length ? T.success : "#f59e0b",
+                boxShadow: `0 0 4px ${capabilities.connectedProviders.length ? T.success : "#f59e0b"}`,
+              }}
             />
-            Online
+            {capabilities.connectedProviders.length ? "Online" : "Standby"}
           </span>
-          <button
-            onClick={() => onNewChat?.()}
-            className="flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1.5 text-[10px] font-bold hover:bg-white/5"
-            aria-label="Clear conversation"
-          >
-            <Zap size={12} style={{ color: agentColor }} /> Clear
-          </button>
-          <button
-            className="rounded-full border border-white/10 p-2 hover:bg-white/5"
-            aria-label="More options"
-          >
-            <MoreHorizontal size={14} style={{ color: T.textMuted }} />
-          </button>
+          <span className="text-[9px] font-bold" style={{ color: agentColor }}>
+            {agentMeta.displayName}
+          </span>
+          <span className="text-[9px] text-white/40">·</span>
+          <span className="text-[9px] font-bold text-white/55">{selectedModel}</span>
+        </div>
+
+        {/* Row 3: scrollable status chips */}
+        <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-white/6 py-1.5">
+          <CapabilityChip
+            label={capabilities.repository === "connected" ? "Repo: Connected" : "Repo: Disconnected"}
+            active={capabilities.repository === "connected"}
+            color={T.success}
+            title={
+              capabilities.repository === "connected"
+                ? "Repository is connected and indexed"
+                : "No repository connected"
+            }
+          />
+          <CapabilityChip
+            label={
+              capabilities.terminalExecution === "available"
+                ? "PTY: Connected"
+                : capabilities.terminalExecution === "connecting"
+                  ? "PTY: Connecting"
+                  : capabilities.terminalExecution === "error"
+                    ? "PTY: Error"
+                    : "PTY: Disconnected"
+            }
+            active={capabilities.terminalExecution === "available"}
+            color={capabilities.terminalExecution === "error" ? T.warning : T.success}
+            title={
+              capabilities.terminalExecution === "available"
+                ? "Project terminal is ready for execution"
+                : capabilities.terminalExecution === "error"
+                  ? `PTY connection failed: ${capabilities.terminalStatus === "error" ? "Connection error" : "Unknown error"}`
+                  : "Project terminal is not connected"
+            }
+          />
+          <CapabilityChip
+            label={capabilities.writeAccess ? "Writes: Allowed" : "Writes: Approval"}
+            active={capabilities.writeAccess}
+            color={T.success}
+            title={
+              capabilities.writeAccess
+                ? "Write access is enabled"
+                : "Write access requires approval"
+            }
+          />
         </div>
       </header>
-
-      <div className="relative z-10 flex shrink-0 items-center gap-2 overflow-x-auto border-b border-white/7 bg-black/20 px-3 py-1.5 text-[8px] font-bold text-white/38 scrollbar-hide">
-        <span className={currentSession?.context.repositoryState === "connected" ? "text-emerald-300" : "text-amber-300"}>{currentSession?.context.repositoryState === "connected" ? "● Repository connected" : currentSession?.context.repositoryState === "partial" ? "◐ Repository partially indexed" : currentSession?.context.repositoryState === "read-only" ? "◐ Read-only repository" : "○ No repository connected"}</span>
-        <span>·</span><span className={ptyUsable ? "text-emerald-300" : "text-white/35"}>{ptyUsable ? "● Terminal execution enabled" : "○ Terminal execution unavailable"}</span>
-        <span>·</span><span className="text-white/35">Write access requires approval</span>
-      </div>
 
       {/* Transcript */}
       <main
@@ -321,69 +430,45 @@ export default function ChatShell({
         className="relative z-10 min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-4"
       >
         {isEmpty ? (
-          <div className="mx-auto flex h-full w-full max-w-6xl flex-col justify-center gap-3 py-2 sm:gap-4">
-            <section className="creative-hero group relative min-h-[270px] overflow-hidden rounded-[24px] border border-white/10 bg-[#07070b] shadow-[0_30px_100px_rgba(0,0,0,.55)] sm:min-h-[430px] sm:rounded-[28px]">
-              <div className="creative-engine absolute inset-0" />
-              <div className="creative-glow absolute inset-0" />
-              <div className="absolute inset-0 bg-[linear-gradient(90deg,rgba(4,5,10,.96)_0%,rgba(4,5,10,.68)_34%,rgba(4,5,10,.08)_68%,rgba(4,5,10,.5)_100%)]" />
-              <div className="absolute inset-0 bg-[linear-gradient(0deg,rgba(4,5,10,.82)_0%,transparent_50%)]" />
-
-              <div className="relative z-10 flex h-full min-h-[270px] max-w-xl flex-col justify-center p-5 sm:min-h-[430px] sm:p-10 lg:p-12">
-                <div className="mb-5 flex w-fit items-center gap-2 rounded-full border border-cyan-300/20 bg-cyan-300/8 px-3 py-1.5 text-[9px] font-black uppercase tracking-[.24em] text-cyan-200 backdrop-blur-xl">
-                  <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300 shadow-[0_0_12px_#67e8f9]" />
-                  LiTT creative engine
-                </div>
-                <h1 className="max-w-lg text-balance text-3xl font-black leading-[.94] tracking-[-.05em] text-white sm:text-6xl">
-                  Make something
-                  <span className="block bg-gradient-to-r from-cyan-300 via-violet-300 to-orange-300 bg-clip-text text-transparent">
-                    impossible to ignore.
-                  </span>
-                </h1>
-                <p className="mt-3 hidden max-w-md text-sm leading-6 text-white/58 sm:block sm:text-base">
-                  Describe the shot once. Create the image, bring it to life,
-                  and keep building with LiTT in the same conversation.
-                </p>
-
-                <div className="mt-5 flex flex-wrap gap-2 sm:mt-7 sm:gap-3">
-                  <button
-                    onClick={() => onRouteTool?.("image")}
-                    className="flex items-center gap-3 rounded-2xl bg-white px-4 py-3 text-left text-black shadow-[0_14px_40px_rgba(255,255,255,.12)] transition duration-300 hover:-translate-y-1 hover:shadow-[0_18px_50px_rgba(34,211,238,.22)]"
-                  >
-                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-cyan-400 text-black"><ImageIcon size={17} /></span>
-                    <span><b className="block text-xs">Create an image</b><small className="text-[9px] text-black/55">Art, logos, products</small></span>
-                    <ArrowUpRight size={15} className="ml-2" />
-                  </button>
-                  <button
-                    onClick={() => onRouteTool?.("video")}
-                    className="flex items-center gap-3 rounded-2xl border border-white/15 bg-white/8 px-4 py-3 text-left text-white backdrop-blur-xl transition duration-300 hover:-translate-y-1 hover:border-violet-300/40 hover:bg-white/12"
-                  >
-                    <span className="grid h-9 w-9 place-items-center rounded-xl bg-violet-400/20 text-violet-200"><Clapperboard size={17} /></span>
-                    <span><b className="block text-xs">Create a video</b><small className="text-[9px] text-white/45">Animate any idea</small></span>
-                    <ArrowUpRight size={15} className="ml-2" />
-                  </button>
-                </div>
+          <div className="mx-auto flex w-full min-w-0 flex-col gap-3 py-2" style={{ maxHeight: "250px" }}>
+            <section className="relative w-full min-w-0 overflow-hidden rounded-xl border border-white/10 bg-[#07070b] p-4">
+              <div className="mb-2 flex w-fit items-center gap-1.5 rounded-full border border-cyan-300/20 bg-cyan-300/8 px-2 py-1 text-[8px] font-black uppercase tracking-[.18em] text-cyan-200">
+                <span className="h-1 w-1 animate-pulse rounded-full bg-cyan-300" />
+                LiTT creative engine
               </div>
+              <h1 className="max-w-full text-balance text-sm font-black leading-tight tracking-tight text-white">
+                Make something impossible to ignore.
+              </h1>
+              <p className="mt-1 max-w-full text-[10px] leading-4 text-white/55">
+                Describe the shot once. Create the image, bring it to life, and keep building with LiTT.
+              </p>
 
-              <div className="absolute bottom-4 right-5 z-10 hidden items-center gap-2 text-[9px] font-bold uppercase tracking-widest text-white/35 sm:flex">
-                <Sparkles size={11} className="text-violet-300" /> Image · Video · Motion
+              <div className="mt-2 flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => onRouteTool?.("image")}
+                  className="flex items-center gap-2 rounded-lg bg-white px-2.5 py-1.5 text-left text-black transition hover:bg-cyan-50"
+                  aria-label="Create an image"
+                  title="Create an image"
+                >
+                  <ImageIcon size={14} className="pointer-events-none" aria-hidden />
+                  <span className="text-[10px] font-bold">Image</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => onRouteTool?.("video")}
+                  className="flex items-center gap-2 rounded-lg border border-white/15 bg-white/8 px-2.5 py-1.5 text-left text-white transition hover:bg-white/12"
+                  aria-label="Create a video"
+                  title="Create a video"
+                >
+                  <Clapperboard size={14} className="pointer-events-none" aria-hidden />
+                  <span className="text-[10px] font-bold">Video</span>
+                </button>
               </div>
             </section>
-
-            <div className="scrollbar-hide hidden max-w-full items-center gap-2 overflow-x-auto overscroll-x-contain pb-1 sm:flex">
-              <span className="shrink-0 px-1 text-[9px] font-black uppercase tracking-[.18em] text-white/35">Try</span>
-              {["A cinematic product shot", "Turn my photo into a video", "Design a bold album cover", "Make a logo move"].map((item) => (
-                <button
-                  key={item}
-                  onClick={() => setInput(item)}
-                  className="shrink-0 rounded-full border border-white/10 bg-white/4 px-3 py-2 text-[10px] font-medium text-white/65 transition hover:border-cyan-300/30 hover:bg-white/8 hover:text-white"
-                >
-                  {item}
-                </button>
-              ))}
-            </div>
           </div>
         ) : (
-          <div className="mx-auto flex w-full max-w-4xl flex-col gap-5 pb-4">
+          <div className="mx-auto flex w-full min-w-0 flex-col gap-5 pb-4">
             {fallbackNotice && (
               <div
                 className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/8 px-3 py-2 text-[10px] font-bold text-amber-300"
@@ -426,15 +511,24 @@ export default function ChatShell({
                     </div>
                     {!isUser && command && (
                       <div className="mt-2 flex flex-wrap items-center gap-2 px-1">
-                        <button type="button" onClick={() => { setTerminalOpen(true); if (terminalConnectedRef.current) terminalRef.current?.insertCommand(command); else pendingInsertCommandRef.current = command; }} className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 px-2.5 py-1.5 text-[9px] font-bold text-cyan-200 hover:bg-cyan-300/10">Insert into terminal</button>
-                        <button type="button" disabled={!ptyUsable} onClick={() => { if (window.confirm(`Run in the connected PTY?\n\n${command}`)) terminalRef.current?.runCommand(command); }} className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 disabled:cursor-not-allowed disabled:opacity-35">Run in terminal</button>
-                        {!ptyUsable && <span className="text-[8px] text-amber-300/65">Connect the real PTY to run</span>}
+                        <button
+                          type="button"
+                          onClick={() => onRouteTool?.("terminal", command)}
+                          disabled={!ptyUsable}
+                          className="rounded-lg border border-emerald-300/20 bg-emerald-300/5 px-2.5 py-1.5 text-[9px] font-bold text-emerald-200 transition hover:bg-emerald-300/10 disabled:cursor-not-allowed disabled:opacity-35"
+                          aria-label={`Run ${command} in terminal`}
+                          title={`Run ${command} in terminal`}
+                        >
+                          Run in terminal
+                        </button>
+                        {!ptyUsable && <span className="text-[8px] text-amber-300/65">Terminal not connected</span>}
                       </div>
                     )}
                     <div
-                      className="relative min-w-0 overflow-hidden overflow-wrap-anywhere rounded-2xl border px-4 py-3 text-[13px] leading-6 shadow-[0_12px_35px_rgba(0,0,0,.18)]"
+                      className="relative min-w-0 max-w-full overflow-hidden rounded-2xl border px-4 py-3 text-[13px] leading-6 shadow-[0_12px_35px_rgba(0,0,0,.18)]"
                       style={{
                         overflowWrap: "anywhere",
+                        wordBreak: "break-word",
                         borderColor: isUser
                           ? "rgba(249,115,22,0.25)"
                           : `${agentColor}26`,
@@ -448,7 +542,26 @@ export default function ChatShell({
                         message.content
                       ) : (
                         <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
-                          <ReactMarkdown>{message.content}</ReactMarkdown>
+                          <ReactMarkdown
+                            components={{
+                              img: ({ src, alt }) => (
+                                // eslint-disable-next-line @next/next/no-img-element
+                                <img
+                                  src={src}
+                                  alt={alt}
+                                  className="h-auto max-w-full rounded-lg object-contain"
+                                  loading="lazy"
+                                />
+                              ),
+                              pre: ({ children }) => (
+                                <pre className="overflow-x-auto rounded-lg bg-black/40 p-2 text-[11px]">
+                                  {children}
+                                </pre>
+                              ),
+                            }}
+                          >
+                            {message.content}
+                          </ReactMarkdown>
                         </div>
                       )}
                     </div>
@@ -493,17 +606,6 @@ export default function ChatShell({
                 </div>
               );
             })}
-            {terminalBlocks.map((block) => (
-              <section key={block.id} className="rounded-2xl border border-emerald-400/20 bg-black/60 p-3 font-mono text-[11px]">
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <span className="flex items-center gap-2 font-bold text-emerald-300"><TerminalIcon size={13} className="pointer-events-none" /> Terminal · You</span>
-                  <button type="button" onClick={() => setTerminalOpen(true)} className="flex items-center gap-1 text-white/60 hover:text-white"><ChevronUp size={12} className="pointer-events-none" /> Expand</button>
-                </div>
-                <div className="text-white/90">$ {block.command}</div>
-                <div className="mt-2 max-h-20 overflow-hidden whitespace-pre-wrap text-white/45">{block.output}</div>
-                <div className="mt-2 text-[9px] uppercase tracking-wider text-amber-300">{block.status}</div>
-              </section>
-            ))}
             {busy && (() => {
               const stages = [
                 { label: "Understanding your request", detail: "Identifying intent and the best response path", icon: MessageSquareText, at: 0 },
@@ -538,14 +640,14 @@ export default function ChatShell({
                               </span>
                               <span className="min-w-0">
                                 <span className="block text-[10px] font-bold text-white/85">{stage.label}</span>
-                                <span className="block text-[9px] leading-4 text-white/38">{stage.detail}</span>
+                                <span className="block text-[9px] leading-4 text-white/55">{stage.detail}</span>
                               </span>
                               {active && <span className="ml-auto mt-2 flex gap-0.5"><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.12s]" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.24s]" /></span>}
                             </div>
                           );
                         })}
                       </div>
-                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/28">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
+                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/45">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
                     </div>
                   )}
                 </section>
@@ -567,45 +669,7 @@ export default function ChatShell({
           activeAgentId={activeAgentId}
         />
       </div>
-
-      <style jsx>{`
-        @keyframes spin {
-          from {
-            transform: rotate(0deg);
-          }
-          to {
-            transform: rotate(360deg);
-          }
-        }
-        @keyframes creative-drift {
-          0%, 100% { transform: scale(1.04) translate3d(0, 0, 0); }
-          50% { transform: scale(1.1) translate3d(1.2%, -1%, 0); }
-        }
-        @keyframes creative-light {
-          0%, 100% { opacity: .36; transform: translate3d(-8%, 0, 0) rotate(-8deg); }
-          50% { opacity: .7; transform: translate3d(8%, -2%, 0) rotate(6deg); }
-        }
-        .creative-engine {
-          background-image: url('/brand/litt-mascot-hero.png');
-          background-position: 68% 25%;
-          background-size: cover;
-          animation: creative-drift 18s ease-in-out infinite;
-          will-change: transform;
-        }
-        .creative-glow {
-          background: linear-gradient(115deg, transparent 22%, rgba(34,211,238,.12) 43%, rgba(168,85,247,.16) 54%, transparent 70%);
-          filter: blur(22px);
-          animation: creative-light 9s ease-in-out infinite;
-          will-change: transform, opacity;
-        }
-        @media (max-width: 639px) {
-          .creative-engine { background-position: 61% 22%; }
-        }
-        @media (prefers-reduced-motion: reduce) {
-          .creative-engine, .creative-glow { animation: none; }
-        }
-      `}</style>
-      </div>
+    </div>
     </div>
   );
 }

@@ -46,9 +46,12 @@ export const TerminalPanel = forwardRef<
   const [connected, setConnected] = useState(false);
   const [sessionInfo, setSessionInfo] = useState<{ sessionId: string; cwd: string; shell: string } | null>(null);
   const [fullScreen, setFullScreen] = useState(false);
+  const [retryCount, setRetryCount] = useState(0);
   const { isLoaded, isSignedIn } = useClerkAuth();
   const terminalStore = useTerminalStore();
   const heartbeatRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const connectTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const CONNECTION_TIMEOUT_MS = 10_000;
 
   useEffect(() => {
     if (!containerRef.current || !isLoaded || !isSignedIn) return;
@@ -94,6 +97,21 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
+    terminalStore.setStatus("connecting");
+
+    // Connection timeout — if not connected within 10s, show error
+    if (connectTimeoutRef.current) clearTimeout(connectTimeoutRef.current);
+    connectTimeoutRef.current = setTimeout(() => {
+      if (disposed) return;
+      if (terminalStore.status !== "connected") {
+        terminalStore.setError("PTY connection timed out after 10 seconds");
+        terminalStore.setStatus("error");
+        term.writeln("\x1b[31m❌ PTY connection timed out. Click Retry to try again.\x1b[0m");
+        onLog?.("[WS] Connection timed out after 10s");
+        socketRef.current?.disconnect();
+        socketRef.current = null;
+      }
+    }, CONNECTION_TIMEOUT_MS);
 
     const wsUrl =
       process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
@@ -115,6 +133,17 @@ export const TerminalPanel = forwardRef<
         });
 
         socketRef.current = connectedSocket;
+
+        connectedSocket.on("reconnect_failed", () => {
+          if (connectTimeoutRef.current) {
+            clearTimeout(connectTimeoutRef.current);
+            connectTimeoutRef.current = null;
+          }
+          terminalStore.setError("PTY server unavailable after 5 reconnection attempts");
+          terminalStore.setStatus("error");
+          term.writeln("\x1b[31m❌ PTY server unavailable. Click Retry to try again.\x1b[0m");
+          onLog?.("[WS] Reconnection failed after 5 attempts");
+        });
 
         connectedSocket.on("connect", () => {
           setConnected(true);
@@ -146,6 +175,11 @@ export const TerminalPanel = forwardRef<
         });
 
         connectedSocket.on("session:ready", ({ sessionId: sid, cwd = "Unknown workspace", shell = "Unknown shell" }) => {
+          // Clear connection timeout — session is verified
+          if (connectTimeoutRef.current) {
+            clearTimeout(connectTimeoutRef.current);
+            connectTimeoutRef.current = null;
+          }
           setSessionInfo({ sessionId: sid, cwd, shell });
           terminalStore.setSession(sid, cwd);
           terminalStore.setStatus("connected");
@@ -155,7 +189,13 @@ export const TerminalPanel = forwardRef<
         });
 
         connectedSocket.on("connect_error", (err: Error) => {
+          if (connectTimeoutRef.current) {
+            clearTimeout(connectTimeoutRef.current);
+            connectTimeoutRef.current = null;
+          }
           terminalStore.setError(err.message);
+          terminalStore.setStatus("error");
+          term.writeln(`\x1b[31m❌ PTY connection failed: ${err.message}\x1b[0m`);
           onLog?.(`[WS] Connect error: ${err.message}`);
         });
 
@@ -211,6 +251,10 @@ export const TerminalPanel = forwardRef<
     return () => {
       disposed = true;
       window.removeEventListener("resize", resize);
+      if (connectTimeoutRef.current) {
+        clearTimeout(connectTimeoutRef.current);
+        connectTimeoutRef.current = null;
+      }
       if (heartbeatRef.current) {
         clearInterval(heartbeatRef.current);
         heartbeatRef.current = null;
@@ -224,6 +268,7 @@ export const TerminalPanel = forwardRef<
   }, [
     isLoaded,
     isSignedIn,
+    retryCount,
     onLog,
     onCommand,
     onConnectionChange,
@@ -262,10 +307,26 @@ export const TerminalPanel = forwardRef<
       <div className="flex items-center justify-between border-b border-neutral-800 px-4 py-2">
         <div className="min-w-0 text-sm">
           {terminalStore.status === "error" ? (
-            <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
-              <AlertCircle size={10} /> PTY connection failed
-              {terminalStore.error && <span className="ml-1 truncate text-[9px] text-red-300/70">{terminalStore.error}</span>}
-            </span>
+            <div className="flex flex-col gap-1">
+              <span className="inline-flex items-center gap-1.5 rounded bg-red-500/20 px-2 py-1 text-[10px] font-bold text-red-400">
+                <AlertCircle size={10} /> PTY connection failed
+                {terminalStore.error && <span className="ml-1 truncate text-[9px] text-red-300/70">{terminalStore.error}</span>}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setRetryCount((c) => c + 1)}
+                  className="rounded bg-red-500/20 px-2 py-1 text-[9px] font-bold text-red-300 hover:bg-red-500/30"
+                  aria-label="Retry PTY connection"
+                >
+                  <RotateCcw size={10} className="mr-1 inline" /> Retry
+                </button>
+                {terminalStore.error && (
+                  <span className="text-[9px] text-red-300/60" title={terminalStore.error}>
+                    View details
+                  </span>
+                )}
+              </div>
+            </div>
           ) : terminalStore.status === "connecting" ? (
             <span className="inline-flex items-center gap-1.5 rounded bg-blue-500/20 px-2 py-1 text-[10px] font-bold text-blue-400">
               <Plug size={10} className="animate-pulse" /> Connecting to PTY…

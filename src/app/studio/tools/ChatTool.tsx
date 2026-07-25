@@ -27,7 +27,6 @@ export default function ChatTool({
   pendingCommand?: string;
 }) {
   const [busy, setBusy] = useState(false);
-  const [shellAction, setShellAction] = useState<{ id: number; type: "terminal" | "sessions" } | null>(null);
   const sessionManager = useBuilderSessions();
   const { capabilities } = useConnectionSummary();
 
@@ -70,10 +69,9 @@ export default function ChatTool({
           sessionManager.create();
           return "";
         case "terminal":
-          setShellAction({ id: Date.now(), type: "terminal" });
+          onRouteTool?.("terminal");
           return "";
         case "sessions":
-          setShellAction({ id: Date.now(), type: "sessions" });
           return "";
         case "delete":
           if (sessionManager.activeSession && window.confirm(`Delete “${sessionManager.activeSession.title}”?`)) sessionManager.remove(sessionManager.activeSession.id);
@@ -192,7 +190,7 @@ export default function ChatTool({
       onDuplicateSession={(session) => sessionManager.create(session)}
       onDeleteSession={sessionManager.remove}
       onDeleteAllSessions={sessionManager.removeAll}
-      shellAction={shellAction}
+      capabilities={capabilities}
     />
   );
 }

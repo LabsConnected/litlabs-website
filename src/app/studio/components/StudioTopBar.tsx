@@ -4,11 +4,9 @@ import { useState } from "react";
 import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
+import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import {
-  Activity,
   Bell,
-  GitBranch,
-  HeartPulse,
   Home,
   Menu,
   Play,
@@ -60,6 +58,7 @@ export default function StudioTopBar({
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
+  const { capabilities } = useConnectionSummary();
   const [notifOpen, setNotifOpen] = useState(false);
   const [modelOpen, setModelOpen] = useState(false);
 
@@ -115,7 +114,7 @@ export default function StudioTopBar({
         className="hidden md:flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 shrink-0"
         style={{
           borderColor: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.5)",
+          color: "rgba(255,255,255,0.55)",
         }}
         title="Back to Dashboard"
         aria-label="Back to Dashboard"
@@ -124,39 +123,10 @@ export default function StudioTopBar({
         <span className="pointer-events-none">Dashboard</span>
       </a>
 
-      {/* Divider */}
-      <div className="hidden md:block h-5 w-px" style={{ backgroundColor: "rgba(255,255,255,0.08)" }} />
-
-      {/* Project name */}
-      <div className="hidden md:flex items-center gap-1.5 shrink-0">
-        <span className="text-[10px] font-bold uppercase tracking-wider" style={{ color: "rgba(255,255,255,0.4)" }}>
-          Project:
-        </span>
-        <span className="text-[11px] font-bold" style={{ color: "rgba(255,255,255,0.85)" }}>
-          litlabs-website
-        </span>
-      </div>
-
-      {/* Branch */}
-      <div className="hidden lg:flex items-center gap-1 shrink-0">
-        <GitBranch size={11} style={{ color: "rgba(255,255,255,0.4)" }} />
-        <span className="text-[10px] font-mono" style={{ color: T.accentColor }}>
-          main
-        </span>
-      </div>
-
-      {/* Workspace status */}
-      <div className="hidden lg:flex items-center gap-1.5 shrink-0">
-        <span
-          className="w-1.5 h-1.5 rounded-full"
-          style={{
-            backgroundColor: T.success,
-            boxShadow: `0 0 4px ${T.success}`,
-          }}
-        />
-        <span className="text-[10px] font-bold" style={{ color: "rgba(255,255,255,0.5)" }}>
-          Workspace: Ready
-        </span>
+      {/* Connection status — truthful */}
+      <div className="hidden md:flex items-center gap-1.5 shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-bold" title={capabilities.connectionSummary} style={{ backgroundColor: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }}>
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: capabilities.connectedProviders.length ? "#22c55e" : "#6b7280", boxShadow: capabilities.connectedProviders.length ? `0 0 4px ${T.success}` : "none" }} />
+        {capabilities.connectedProviders.length ? `Online · ${capabilities.connectedProviders.length}` : "No services connected"}
       </div>
 
       {/* Model selector dropdown */}
@@ -228,7 +198,7 @@ export default function StudioTopBar({
 
       {/* Fallback notice */}
       {fallbackNotice && (
-        <span className="hidden md:inline text-[9px] font-bold text-amber-300/80" title={fallbackNotice}>
+        <span className="hidden md:inline text-[9px] font-bold text-amber-300" title={fallbackNotice}>
           ⚠ Fallback
         </span>
       )}
@@ -251,7 +221,7 @@ export default function StudioTopBar({
           className="w-full rounded-lg border pl-7 pr-7 py-1.5 text-[11px] outline-none transition-all focus:ring-1"
           style={{
             backgroundColor: "rgba(255,255,255,0.03)",
-            borderColor: "rgba(255,255,255,0.06)",
+            borderColor: "rgba(255,255,255,0.08)",
             color: "rgba(255,255,255,0.85)",
             // @ts-expect-error custom css var
             "--tw-ring-color": T.accentColor + "60",
@@ -273,43 +243,46 @@ export default function StudioTopBar({
 
       <div className="flex-1" />
 
-      {/* Action buttons: Run, Preview, Deploy */}
+      {/* Action buttons */}
       <div className="hidden md:flex items-center gap-1.5 shrink-0">
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5"
+          disabled={!capabilities.connectedProviders.length}
+          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
             borderColor: "rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.7)",
+            color: capabilities.connectedProviders.length ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.35)",
             backgroundColor: "rgba(255,255,255,0.03)",
           }}
           title="Run project"
           aria-label="Run project"
         >
-          <Play size={11} className="pointer-events-none" style={{ color: T.success }} />
+          <Play size={11} className="pointer-events-none" style={{ color: capabilities.connectedProviders.length ? T.success : "#6b7280" }} />
           <span className="pointer-events-none">Run</span>
         </button>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5"
+          disabled={!capabilities.connectedProviders.length}
+          className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
             borderColor: "rgba(255,255,255,0.08)",
-            color: "rgba(255,255,255,0.7)",
+            color: capabilities.connectedProviders.length ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.35)",
             backgroundColor: "rgba(255,255,255,0.03)",
           }}
           title="Preview"
           aria-label="Preview"
         >
-          <Eye size={11} className="pointer-events-none" style={{ color: "rgba(255,255,255,0.5)" }} />
+          <Eye size={11} className="pointer-events-none" style={{ color: capabilities.connectedProviders.length ? "rgba(255,255,255,0.7)" : "#6b7280" }} />
           <span className="pointer-events-none">Preview</span>
         </button>
         <button
           type="button"
-          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-black transition-all hover:opacity-90"
+          disabled={!capabilities.connectedProviders.length}
+          className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-black transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
-            backgroundColor: T.accentColor,
-            color: "#000",
-            boxShadow: `0 4px 16px ${T.accentColor}30`,
+            backgroundColor: capabilities.connectedProviders.length ? T.accentColor : "#374151",
+            color: capabilities.connectedProviders.length ? "#000" : "rgba(255,255,255,0.45)",
+            boxShadow: capabilities.connectedProviders.length ? `0 4px 16px ${T.accentColor}30` : "none",
           }}
           title="Deploy"
           aria-label="Deploy"
@@ -319,8 +292,7 @@ export default function StudioTopBar({
         </button>
       </div>
 
-      {/* Health */}
-      <HealthPulse T={T} />
+      {/* Health removed — no fake percentage */}
 
       {/* Wallet */}
       <div
@@ -356,7 +328,7 @@ export default function StudioTopBar({
         </button>
         {notifOpen &&
           createPortal(
-            <NotifPanel onClose={() => setNotifOpen(false)} T={T} />,
+            <NotifPanel onClose={() => setNotifOpen(false)} />,
             document.body,
           )}
       </div>
@@ -379,30 +351,9 @@ export default function StudioTopBar({
           background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`,
         }}
         title="User profile"
+        aria-label="User profile"
       />
     </header>
-  );
-}
-
-/* ── Health pulse ─────────────────────────────────────────────── */
-function HealthPulse({
-  T,
-}: {
-  T: ReturnType<typeof useTheme>["resolvedColors"];
-}) {
-  return (
-    <div
-      className="hidden md:flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold"
-      title="System health"
-      style={{
-        backgroundColor: "rgba(255,255,255,0.03)",
-        borderColor: "rgba(255,255,255,0.06)",
-        color: "rgba(255,255,255,0.7)",
-      }}
-    >
-      <HeartPulse size={11} style={{ color: T.success }} />
-      <span style={{ color: T.success }}>99.9%</span>
-    </div>
   );
 }
 
@@ -445,16 +396,9 @@ function ModelRow({
 /* ── Notifications panel ──────────────────────────────────────── */
 function NotifPanel({
   onClose,
-  T,
 }: {
   onClose: () => void;
-  T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
-  const items = [
-    { icon: Sparkles, label: "Copilot finished planning", time: "now" },
-    { icon: Activity, label: "Code Champion deployed v1.2", time: "2m" },
-    { icon: Rocket, label: "Wallet claimed 250 LBC", time: "12m" },
-  ];
   return (
     <>
       <div className="fixed inset-0 z-10000" onClick={onClose} aria-hidden />
@@ -485,35 +429,9 @@ function NotifPanel({
           </button>
         </div>
         <div className="space-y-1">
-          {items.map((it, i) => {
-            const Icon = it.icon;
-            return (
-              <div
-                key={i}
-                className="flex items-start gap-2 rounded-xl p-2 transition-colors hover:bg-white/5 cursor-pointer"
-                style={{ backgroundColor: "rgba(255,255,255,0.03)" }}
-              >
-                <Icon
-                  size={12}
-                  style={{ color: T.accentColor, marginTop: 1 }}
-                />
-                <div className="flex-1 min-w-0">
-                  <div
-                    className="text-[11px] font-bold"
-                    style={{ color: "rgba(255,255,255,0.85)" }}
-                  >
-                    {it.label}
-                  </div>
-                  <div
-                    className="text-[9px] uppercase tracking-wider mt-0.5"
-                    style={{ color: "rgba(255,255,255,0.4)" }}
-                  >
-                    {it.time}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
+          <div className="rounded-xl p-3 text-center text-[11px] font-medium text-white/50">
+            No new notifications
+          </div>
         </div>
       </div>
     </>

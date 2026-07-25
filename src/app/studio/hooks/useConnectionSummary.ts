@@ -6,7 +6,7 @@ import type { TerminalStatus } from "@/lib/capabilities/types";
 export interface ConnectionCapabilities {
   repository: string;
   repositoryIndexed: boolean;
-  terminalExecution: "available" | "unavailable" | "connecting" | "degraded";
+  terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
   writeAccess: boolean;
   connectedProviders: string[];
   availableTools: string[];
@@ -69,7 +69,7 @@ export function useConnectionSummary() {
             : termData.terminalStatus === "connecting"
               ? "connecting"
               : termData.terminalStatus === "error"
-                ? "unavailable"
+                ? "error"
                 : "unavailable";
       }
 
