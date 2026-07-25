@@ -159,20 +159,19 @@ type MobileNavItem = {
 };
 
 export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
-  { label: "Dashboard", href: "/dashboard", icon: LayoutDashboard },
   { label: "Studio", href: "/studio?tool=chat", icon: Sparkles },
+  { label: "Projects", href: "/dashboard", icon: LayoutDashboard },
   { label: "Agents", href: "/agents", icon: Bot },
-  { label: "Games", href: "/games", icon: Gamepad2 },
-  { label: "More", href: "#menu", icon: Menu },
+  { label: "Account", href: "/profile", icon: User },
 ];
 
 export const MOBILE_MORE_ITEMS: MobileNavItem[] = [
   { label: "Gallery", href: "/gallery", icon: Image },
   { label: "Social", href: "/social", icon: Users },
   { label: "Marketplace", href: "/marketplace", icon: Store },
+  { label: "Games", href: "/games", icon: Gamepad2 },
   { label: "Settings", href: "/settings", icon: Settings },
   { label: "Connections", href: "/settings/connections", icon: Settings },
-  { label: "Account", href: "/profile", icon: User },
 ];
 
 export const AI_SUGGESTIONS = [

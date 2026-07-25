@@ -205,6 +205,9 @@ export default function StudioOS() {
   const isChat = activeTool === "chat";
   const WorkspaceComponent = isChat ? null : TOOL_COMPONENTS[activeTool];
 
+  // On mobile, non-chat tools render as overlay sheets on top of chat
+  const showMobileToolSheet = !isChat;
+
   return (
     <VoiceSessionProvider>
       <AgentVoiceSync />
@@ -225,12 +228,71 @@ export default function StudioOS() {
           T={T}
         />
 
-        {/* Main content area: 1-col on mobile, 3-col on desktop */}
+        {/* ── MOBILE: Chat-first layout ─────────────────────────────── */}
+        {/* Chat is always the base layer. Tools open as overlay sheets. */}
+        <div className="md:hidden flex min-h-0 flex-1 flex-col overflow-hidden pb-[calc(56px+env(safe-area-inset-bottom))]">
+          {/* Chat is always present underneath */}
+          <main className="relative flex min-w-0 min-h-0 flex-1 flex-col overflow-hidden">
+            <ChatTool
+              onRouteTool={handleCommandRoute}
+              requestedTool={activeTool}
+              pendingCommand={pendingCommand}
+            />
+          </main>
+
+          {/* Tool overlay sheet — slides up over chat when a non-chat tool is active */}
+          {showMobileToolSheet && WorkspaceComponent && (
+            <>
+              {/* Backdrop */}
+              <div
+                className="fixed inset-0 z-40 bg-black/50 md:hidden"
+                onClick={() => handleToolChange("chat")}
+              />
+              {/* Sheet */}
+              <div
+                className="fixed inset-x-0 bottom-[calc(56px+env(safe-area-inset-bottom))] top-12 z-40 flex flex-col overflow-hidden rounded-t-2xl md:hidden"
+                style={{
+                  backgroundColor: "#0a0b10",
+                  borderTop: "1px solid rgba(255,255,255,0.1)",
+                  boxShadow: "0 -8px 32px rgba(0,0,0,0.6)",
+                }}
+              >
+                {/* Sheet header with close button */}
+                <div
+                  className="flex shrink-0 items-center justify-between px-4 h-10 border-b"
+                  style={{ borderColor: "rgba(255,255,255,0.06)" }}
+                >
+                  <span className="text-[11px] font-black uppercase tracking-widest text-white/60">
+                    {activeTool}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => handleToolChange("chat")}
+                    className="flex items-center gap-1.5 rounded-lg px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/10"
+                    style={{ color: "rgba(255,255,255,0.6)" }}
+                    aria-label="Close tool and return to chat"
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M18 6 6 18M6 6l12 12" />
+                    </svg>
+                    Close
+                  </button>
+                </div>
+                {/* Tool content */}
+                <div className="min-h-0 min-w-0 flex-1 overflow-auto">
+                  <WorkspaceComponent />
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* ── DESKTOP: 3-column layout ──────────────────────────────── */}
         <div
-          className="grid min-h-0 min-w-0 flex-1 overflow-hidden studio-grid-responsive pb-[calc(56px+env(safe-area-inset-bottom))] md:pb-0"
+          className="hidden md:grid min-h-0 min-w-0 flex-1 overflow-hidden studio-grid-responsive"
           style={{ ["--litt-panel-width" as string]: `${littPanelWidth}px` }}
         >
-          {/* Tool rail — hidden on mobile, MobileTabBar at bottom handles tool switching */}
+          {/* Tool rail */}
           <div className="hidden md:block">
             <StudioSidebar
               activeTool={activeTool}
@@ -254,7 +316,7 @@ export default function StudioOS() {
             ) : null}
           </main>
 
-          {/* Draggable resizer between workspace and LiTT panel — desktop only */}
+          {/* Draggable resizer between workspace and LiTT panel */}
           <div
             className={`hidden md:flex w-1 shrink-0 cursor-col-resize items-center justify-center transition-colors ${isResizing ? "bg-cyan-300/30" : "bg-white/4 hover:bg-white/10"}`}
             onMouseDown={startResize}

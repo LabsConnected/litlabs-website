@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { createPortal } from "react-dom";
+import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useWallet } from "@/context/WalletContext";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -151,8 +152,8 @@ export default function StudioTopBar({
               boxShadow: `0 0 4px ${HEALTH_DOT[providerHealth[selectedModel.provider] ?? "available"].color}`,
             }}
           />
-          <span className="pointer-events-none">{selectedModel.label}</span>
-          <ChevronDown size={10} className="pointer-events-none" style={{ color: "rgba(255,255,255,0.4)" }} />
+          <span className="pointer-events-none hidden sm:inline">{selectedModel.label}</span>
+          <ChevronDown size={10} className="pointer-events-none hidden sm:inline" style={{ color: "rgba(255,255,255,0.4)" }} />
         </button>
         {modelOpen && (
           <>
@@ -344,15 +345,17 @@ export default function StudioTopBar({
         <Settings size={14} className="pointer-events-none" />
       </button>
 
-      {/* User avatar */}
-      <div
-        className="w-7 h-7 rounded-full shrink-0"
-        style={{
-          background: `linear-gradient(135deg, ${T.accentColor}, ${T.linkColor})`,
-        }}
-        title="User profile"
-        aria-label="User profile"
-      />
+      {/* User avatar — Clerk UserButton with profile dropdown + sign out */}
+      <div className="shrink-0">
+        <UserButton
+          afterSignOutUrl="/"
+          appearance={{
+            elements: {
+              avatarBox: "w-7 h-7 rounded-full",
+            },
+          }}
+        />
+      </div>
     </header>
   );
 }

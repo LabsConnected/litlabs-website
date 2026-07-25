@@ -2687,15 +2687,91 @@ export default function ImageTool() {
                     </div>
                   </div>
                 ) : (
-                  <div className="text-center select-none opacity-30">
-                    <ImageIcon
-                      size={48}
-                      className="mx-auto mb-2"
-                      style={{ color: T.textMuted }}
-                    />
-                    <p className="text-sm" style={{ color: T.textMuted }}>
-                      Your creation appears here
-                    </p>
+                  <div className="w-full h-full overflow-y-auto p-4 space-y-4">
+                    {/* Recent generations */}
+                    {history.length > 0 && (
+                      <div>
+                        <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                          <History size={10} />
+                          <span>Recent</span>
+                        </div>
+                        <div className="grid grid-cols-3 sm:grid-cols-4 gap-1.5">
+                          {history.slice(0, 8).map((g) => (
+                            <button
+                              key={g.id}
+                              onClick={() => setCurrentResult(g)}
+                              className="relative aspect-square rounded-lg border overflow-hidden group transition-all hover:scale-[1.03] hover:z-10"
+                              style={{
+                                borderColor: currentResult?.id === g.id ? T.accentColor : T.borderColor + "40",
+                              }}
+                            >
+                              {g.fileUrl ? (
+                                <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
+                              ) : (
+                                <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
+                                  <ImageIcon size={14} style={{ color: T.textMuted, opacity: 0.3 }} />
+                                </div>
+                              )}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Prompt presets */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                        <Sparkles size={10} />
+                        <span>Try a prompt</span>
+                      </div>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
+                        {PROMPT_PRESETS.slice(0, 6).map((preset) => (
+                          <button
+                            key={preset}
+                            onClick={() => { setPrompt(preset); }}
+                            className="text-left p-2.5 rounded-lg border text-[10px] leading-relaxed transition-all hover:scale-[1.01]"
+                            style={{
+                              borderColor: T.borderColor + "30",
+                              backgroundColor: T.bgColor,
+                              color: T.textMuted,
+                            }}
+                          >
+                            <span className="line-clamp-2">{preset}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Inspiration gallery */}
+                    <div>
+                      <div className="flex items-center gap-2 mb-2 text-[10px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>
+                        <Palette size={10} />
+                        <span>Styles</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {STYLE_PRESETS.slice(0, 10).map((style) => (
+                          <button
+                            key={style}
+                            onClick={() => { setPrompt(prompt ? `${prompt}, ${style}` : style); }}
+                            className="px-2.5 py-1 text-[9px] font-bold rounded-full border transition-all hover:scale-105"
+                            style={{
+                              borderColor: T.borderColor + "60",
+                              color: T.textMuted,
+                              backgroundColor: T.bgColor,
+                            }}
+                          >
+                            {style}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+
+                    {/* Empty hint */}
+                    <div className="text-center pt-2">
+                      <p className="text-[10px] opacity-30" style={{ color: T.textMuted }}>
+                        Write a prompt and hit Forge to create
+                      </p>
+                    </div>
                   </div>
                 )}
               </div>
