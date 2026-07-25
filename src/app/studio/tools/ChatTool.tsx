@@ -16,7 +16,7 @@ import {
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 
 export default function ChatTool({
-  selectedModel: _selectedModel = "adaptive",
+  selectedModel: _selectedModel = "auto",
   onRouteTool,
   requestedTool = "chat",
   pendingCommand = "",

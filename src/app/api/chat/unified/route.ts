@@ -148,12 +148,15 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
 
   const validProviders: LLMProvider[] = [
     "gemini",
+    "groq",
+    "groq-whisper",
     "openrouter-free",
     "openrouter-qwen",
     "openrouter-deepseek",
     "openrouter-mistral",
     "openrouter-llama",
     "openrouter-trinity",
+    "openrouter-vision",
   ];
   const llmProvider: LLMProvider = validProviders.includes(provider as LLMProvider)
     ? (provider as LLMProvider)

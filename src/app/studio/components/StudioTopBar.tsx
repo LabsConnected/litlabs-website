@@ -25,7 +25,6 @@ import {
 import {
   useStudioModelStore,
   MODELS,
-  RECOMMENDED_IDS,
   type SelectedModel,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
@@ -146,39 +145,42 @@ export default function StudioTopBar({
           <>
             <button className="fixed inset-0 z-10000" onClick={() => setModelOpen(false)} aria-label="Close model selector" />
             <div
-              className="absolute left-0 top-full mt-1 z-10001 w-56 rounded-xl border py-1.5 shadow-2xl"
+              className="absolute left-0 top-full mt-1 z-10001 w-56 max-h-80 overflow-auto rounded-xl border py-1.5 shadow-2xl"
               style={{
                 backgroundColor: "rgba(10,12,18,0.98)",
                 borderColor: "rgba(255,255,255,0.08)",
                 boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
               }}
             >
-              {/* Recommended section */}
-              <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
-                Recommended
-              </div>
-              {MODELS.filter((m) => RECOMMENDED_IDS.includes(m.id)).map((m) => (
-                <ModelRow
-                  key={m.id}
-                  model={m}
-                  selected={selectedModel.id === m.id}
-                  health={providerHealth[m.provider] ?? "available"}
-                  onSelect={() => { selectModel(m); setModelOpen(false); }}
-                />
-              ))}
-              {/* Other providers */}
-              <div className="mt-1 border-t border-white/5 px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
-                Other providers
-              </div>
-              {MODELS.filter((m) => !RECOMMENDED_IDS.includes(m.id)).map((m) => (
-                <ModelRow
-                  key={m.id}
-                  model={m}
-                  selected={selectedModel.id === m.id}
-                  health={providerHealth[m.provider] ?? "available"}
-                  onSelect={() => { selectModel(m); setModelOpen(false); }}
-                />
-              ))}
+              {[
+                { label: "Auto Best", filter: (m: SelectedModel) => m.id === "auto" },
+                { label: "Free AI", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "free" },
+                { label: "Fast", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "fast" },
+                { label: "Coding", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "code" },
+                { label: "Creative", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "creative" },
+                { label: "Vision", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "vision" },
+                { label: "BYOK", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "byok" },
+              ].map(({ label, filter }, idx) => {
+                const models = MODELS.filter(filter);
+                if (models.length === 0) return null;
+                return (
+                  <div key={label}>
+                    {idx > 0 && <div className="my-1 border-t border-white/5" />}
+                    <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
+                      {label}
+                    </div>
+                    {models.map((m) => (
+                      <ModelRow
+                        key={m.id}
+                        model={m}
+                        selected={selectedModel.id === m.id}
+                        health={providerHealth[m.provider] ?? "available"}
+                        onSelect={() => { selectModel(m); setModelOpen(false); }}
+                      />
+                    ))}
+                  </div>
+                );
+              })}
             </div>
           </>
         )}

@@ -120,7 +120,7 @@ function CapabilityChip({
 }
 
 export default function ChatShell({
-  selectedModel = "adaptive",
+  selectedModel = "auto",
   messages,
   busy,
   onSend,

@@ -12,6 +12,7 @@ export type SelectedModel = {
   icon: string;
   apiModel?: string;
   apiProvider?: string;
+  category?: "auto" | "free" | "fast" | "code" | "creative" | "vision" | "byok";
 };
 
 export type ProviderHealth = "available" | "degraded" | "unavailable" | "locked";
@@ -27,6 +28,7 @@ export const MODELS: SelectedModel[] = CHAT_MODELS.map((m) => ({
   icon: m.icon,
   apiModel: m.apiModel,
   apiProvider: m.apiProvider,
+  category: m.category,
 }));
 
 export const RECOMMENDED_IDS = CHAT_MODELS.filter((m) => m.recommended).map((m) => m.id);
@@ -45,6 +47,7 @@ function toSelectedModel(m: StudioModel): SelectedModel {
     icon: m.icon,
     apiModel: m.apiModel,
     apiProvider: m.apiProvider,
+    category: m.category,
   };
 }
 

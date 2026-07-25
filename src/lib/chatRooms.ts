@@ -10,7 +10,7 @@ export const CHAT_ROOMS: ChatRoom[] = [
   {
     id: "studio-hq",
     label: "Studio HQ",
-    modelId: "adaptive",
+    modelId: "auto",
     description: "The default command room for planning, execution, and orchestration.",
     members: ["LiTT", "Studio"],
   },
@@ -31,7 +31,7 @@ export const CHAT_ROOMS: ChatRoom[] = [
   {
     id: "reasoning-room",
     label: "Reasoning Room",
-    modelId: "claude-3.5-sonnet",
+    modelId: "claude-sonnet",
     description: "Long-form analysis, decisions, and planning workflows.",
     members: ["Analyst", "Planner", "Reviewer"],
   },

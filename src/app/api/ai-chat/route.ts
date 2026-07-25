@@ -15,7 +15,8 @@ function getSupermemory() {
 
 const MODELS: Record<string, string> = {
   "gemini-flash": "gemini",
-  "llama-nemotron": "openrouter-llama",
+  "gemini-2.5-flash": "gemini",
+  "groq-llama-70b": "groq",
   "gpt-4o": "openrouter-free",
   "claude-sonnet": "openrouter-free",
   "qwen-coder": "openrouter-qwen",

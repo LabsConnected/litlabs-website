@@ -66,11 +66,11 @@ const PRESET_COLORS = [
 ];
 
 const MODELS = [
-  { id: "adaptive", name: "Adaptive" },
+  { id: "auto", name: "Auto Best" },
   { id: "gemini-2.5-flash", name: "Gemini 2.5 Flash" },
-  { id: "gemini-2.5-pro", name: "Gemini 2.5 Pro" },
-  { id: "gpt-4o", name: "GPT-4o" },
-  { id: "claude-3.5-sonnet", name: "Claude 3.5 Sonnet" },
+  { id: "groq-llama-70b", name: "Groq Llama 70B" },
+  { id: "gpt-4o", name: "GPT-4o (BYOK)" },
+  { id: "claude-sonnet", name: "Claude Sonnet (BYOK)" },
 ];
 
 interface AgentBuilderProps {
@@ -93,7 +93,7 @@ export default function AgentBuilder({
     color: PRESET_COLORS[0],
     icon: "brain",
     tags: [],
-    model: "adaptive",
+    model: "auto",
     temperature: 0.7,
     status: "draft",
   });
@@ -149,7 +149,7 @@ export default function AgentBuilder({
       color: agent.color || PRESET_COLORS[0],
       icon: agent.icon || "brain",
       tags: agent.tags || [],
-      model: agent.model || "adaptive",
+      model: agent.model || "auto",
       temperature: agent.temperature || 0.7,
       status: "active",
     };
