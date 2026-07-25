@@ -240,7 +240,7 @@ export default function StudioOS() {
           </div>
 
           {/* Center workspace — renders active tool */}
-          <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden">
+          <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
             {isChat ? (
               <ChatTool
                 onRouteTool={handleCommandRoute}

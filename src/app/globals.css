@@ -2545,13 +2545,13 @@ main {
   grid-template-columns: minmax(0, 1fr);
 }
 
-@media (min-width: 1051px) {
+@media (min-width: 769px) {
   .studio-grid-responsive {
     grid-template-columns: 48px minmax(0, 1fr) 4px var(--litt-panel-width, 340px);
   }
 }
 
-@media (max-width: 1050px) {
+@media (max-width: 768px) {
   .studio-grid-responsive {
     grid-template-columns: minmax(0, 1fr) !important;
   }

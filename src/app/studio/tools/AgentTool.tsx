@@ -702,7 +702,7 @@ export default function AgentTool() {
     <div className="flex h-full overflow-hidden select-none">
       {/* ── LEFT SIDEBAR ── */}
       <div
-        className="w-[210px] shrink-0 flex flex-col border-r"
+        className="hidden md:flex w-[210px] shrink-0 flex-col border-r"
         style={{
           borderColor: T.borderColor + "20",
           backgroundColor: T.boxBg + "90",
