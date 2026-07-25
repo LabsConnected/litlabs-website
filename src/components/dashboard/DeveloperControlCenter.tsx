@@ -211,10 +211,11 @@ function ConnectionCard({ account, onReconnect, onDisconnect }: {
 
   return (
     <div
-      className="rounded-xl p-4 transition-all hover:scale-[1.01]"
+      className="rounded-2xl p-4 transition-all hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
       style={{
         background: `linear-gradient(135deg, ${color}10 0%, ${T.boxBg} 60%)`,
         border: `1px solid ${color}30`,
+        borderLeft: `3px solid ${color}`,
       }}
     >
       <div className="flex items-center justify-between mb-2">
@@ -283,7 +284,7 @@ function ProjectCard({ project, onSync }: {
 
   return (
     <div
-      className="rounded-xl p-4 transition-all hover:scale-[1.005]"
+      className="rounded-2xl p-4 transition-all hover:scale-[1.005] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
       style={{
         background: `linear-gradient(135deg, ${T.boxBg} 0%, ${T.bgColor} 100%)`,
         border: `1px solid ${T.borderColor}40`,
@@ -426,7 +427,7 @@ function LegacyProjectCard({ project }: { project: LegacyProject }) {
   const T = useTheme().resolvedColors;
   return (
     <div
-      className="rounded-xl p-4 transition-all"
+      className="rounded-2xl p-4 transition-all hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
       style={{
         background: `linear-gradient(135deg, ${T.boxBg} 0%, ${T.bgColor} 100%)`,
         border: `1px solid ${T.borderColor}40`,
@@ -486,7 +487,10 @@ function ActivityItem({ event }: { event: IntegrationEvent }) {
   return (
     <div
       className="flex items-start gap-3 rounded-lg p-2.5 transition-all hover:opacity-80"
-      style={{ background: event.read_at ? "transparent" : `${color}08` }}
+      style={{
+        background: event.read_at ? "transparent" : `${color}08`,
+        borderLeft: `2px solid ${color}`,
+      }}
     >
       <div
         className="mt-1 flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
@@ -534,7 +538,7 @@ function ActivityItem({ event }: { event: IntegrationEvent }) {
 
 function SkeletonCard() {
   return (
-    <div className="rounded-xl p-4 animate-pulse" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
+    <div className="rounded-2xl p-4 animate-pulse" style={{ background: "rgba(255,255,255,0.03)", border: "1px solid rgba(255,255,255,0.05)" }}>
       <div className="h-4 w-32 rounded bg-white/5 mb-3" />
       <div className="h-3 w-48 rounded bg-white/5 mb-2" />
       <div className="h-3 w-24 rounded bg-white/5 mb-4" />
@@ -684,10 +688,16 @@ export function DeveloperControlCenter() {
   ];
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
+    <div className="min-h-screen backdrop-blur-sm" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
       <div className="mx-auto max-w-[1400px] p-4 lg:p-8">
         {/* Header */}
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div
+          className="mb-8 flex flex-col gap-4 rounded-2xl p-5 sm:flex-row sm:items-center sm:justify-between"
+          style={{
+            background: `linear-gradient(135deg, ${T.accentColor}08 0%, transparent 70%)`,
+            borderBottom: `1px solid ${T.borderColor}20`,
+          }}
+        >
           <div>
             <div className="text-xs font-bold uppercase tracking-[0.18em] opacity-40 mb-1">
               LiTTree-LabStudios™ · Developer Control Center
@@ -717,10 +727,13 @@ export function DeveloperControlCenter() {
           </div>
         </div>
 
+        {/* Section divider */}
+        <div className="mb-8 h-px" style={{ background: `linear-gradient(90deg, transparent, ${T.borderColor}40, transparent)` }} />
+
         {/* Stats Overview Bar */}
         <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div
-            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
             style={{ background: `linear-gradient(135deg, ${T.accentColor}08 0%, ${T.boxBg} 80%)`, border: `1px solid ${T.borderColor}30` }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -733,7 +746,7 @@ export function DeveloperControlCenter() {
           </div>
           <Link
             href="/agents"
-            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
             style={{ background: `linear-gradient(135deg, #22d3ee08 0%, ${T.boxBg} 80%)`, border: "1px solid #22d3ee25" }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -745,7 +758,7 @@ export function DeveloperControlCenter() {
           </Link>
           <Link
             href="/studio?tool=chat"
-            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
             style={{ background: `linear-gradient(135deg, #a855f708 0%, ${T.boxBg} 80%)`, border: "1px solid #a855f725" }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -759,7 +772,7 @@ export function DeveloperControlCenter() {
           </Link>
           <Link
             href="/studio?tool=image"
-            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
             style={{ background: `linear-gradient(135deg, #ff00a008 0%, ${T.boxBg} 80%)`, border: "1px solid #ff00a025" }}
           >
             <div className="flex items-center gap-2 mb-1">
@@ -772,6 +785,9 @@ export function DeveloperControlCenter() {
             <div className="text-xs opacity-40">Total events</div>
           </Link>
         </div>
+
+        {/* Section divider */}
+        <div className="mb-8 h-px" style={{ background: `linear-gradient(90deg, transparent, ${T.borderColor}40, transparent)` }} />
 
         {error && (
           <div
@@ -855,8 +871,8 @@ export function DeveloperControlCenter() {
                 return (
                   <div
                     key={p}
-                    className="rounded-2xl p-4 transition-all hover:scale-[1.01]"
-                    style={{ background: T.boxBg, border: `1px dashed ${T.borderColor}40` }}
+                    className="rounded-2xl p-4 transition-all hover:scale-[1.01] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
+                    style={{ background: T.boxBg, border: `1px dashed ${T.borderColor}40`, borderLeft: `3px solid ${T.borderColor}60` }}
                   >
                     <div className="flex items-center gap-2 mb-2">
                       <ConnectionPulse status="disconnected" />
@@ -880,6 +896,9 @@ export function DeveloperControlCenter() {
           )}
         </section>
 
+        {/* Section divider */}
+        <div className="mb-8 h-px" style={{ background: `linear-gradient(90deg, transparent, ${T.borderColor}40, transparent)` }} />
+
         {/* Main grid: Projects + Activity */}
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Projects — takes 2 columns on desktop */}
@@ -895,6 +914,14 @@ export function DeveloperControlCenter() {
               >
                 <Icon name="plug" size={12} className="inline mr-1" />
                 Connect Repository
+              </Link>
+              <Link
+                href="/studio?tool=chat"
+                className="rounded-lg px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
+                style={{ background: `${T.accentColor}20`, color: T.accentColor }}
+              >
+                <Icon name="rocket" size={12} className="inline mr-1" />
+                New Project
               </Link>
             </div>
             {loading ? (
@@ -977,7 +1004,9 @@ export function DeveloperControlCenter() {
                 data.events.map((event) => <ActivityItem key={event.id} event={event} />)
               ) : (
                 <div className="py-8 text-center">
-                  <Icon name="activity" size={24} className="mx-auto mb-2 opacity-30" />
+                  <div className="mx-auto mb-3 flex h-12 w-12 items-center justify-center rounded-full animate-pulse" style={{ background: `${T.accentColor}10`, border: `1px solid ${T.accentColor}20` }}>
+                    <Icon name="activity" size={20} style={{ color: T.accentColor }} />
+                  </div>
                   <p className="text-xs opacity-40">No activity yet</p>
                   <p className="text-xs opacity-30 mt-1">
                     Events from GitHub, Meta, and agents will appear here in real time.
@@ -999,6 +1028,9 @@ export function DeveloperControlCenter() {
           </section>
         </div>
 
+        {/* Section divider */}
+        <div className="mb-8 h-px" style={{ background: `linear-gradient(90deg, transparent, ${T.borderColor}40, transparent)` }} />
+
         {/* AI Crew section */}
         <section className="mt-8">
           <h2 className="mb-4 text-sm font-bold uppercase tracking-[0.15em] opacity-40">
@@ -1007,7 +1039,7 @@ export function DeveloperControlCenter() {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Link
               href="/studio?tool=chat"
-              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(34,211,238,0.12)]"
               style={{ background: `linear-gradient(135deg, #22d3ee10 0%, ${T.boxBg} 60%)`, border: "1px solid #22d3ee25" }}
             >
               <div className="flex items-center gap-2 mb-2">
@@ -1021,7 +1053,7 @@ export function DeveloperControlCenter() {
             </Link>
             <Link
               href="/studio?tool=chat"
-              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(168,85,247,0.12)]"
               style={{ background: `linear-gradient(135deg, #a855f710 0%, ${T.boxBg} 60%)`, border: "1px solid #a855f725" }}
             >
               <div className="flex items-center gap-2 mb-2">
@@ -1035,7 +1067,7 @@ export function DeveloperControlCenter() {
             </Link>
             <Link
               href="/studio?tool=chat"
-              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(0,240,255,0.08)]"
               style={{ background: `linear-gradient(135deg, ${T.accentColor}10 0%, ${T.boxBg} 60%)`, border: `1px solid ${T.accentColor}25` }}
             >
               <div className="flex items-center gap-2 mb-2">
@@ -1048,7 +1080,7 @@ export function DeveloperControlCenter() {
             </Link>
             <Link
               href="/settings/connections"
-              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02] hover:shadow-[0_0_30px_rgba(34,197,94,0.12)]"
               style={{ background: `linear-gradient(135deg, #22c55e10 0%, ${T.boxBg} 60%)`, border: "1px solid #22c55e25" }}
             >
               <div className="flex items-center gap-2 mb-2">
