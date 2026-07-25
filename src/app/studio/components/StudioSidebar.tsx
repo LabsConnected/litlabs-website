@@ -150,7 +150,7 @@ export default function StudioSidebar({
           DESKTOP Tool Rail — 72px icon-only, hidden on mobile
       ═══════════════════════════════════════════════════════════ */}
       <aside
-        className="hidden md:flex h-full w-12 shrink-0 flex-col items-center border-r py-2"
+        className="hidden md:flex h-full w-16 shrink-0 flex-col items-center border-r py-2"
         style={{
           backgroundColor: "rgba(8,9,13,0.96)",
           borderRight: "1px solid rgba(255,255,255,0.06)",
@@ -222,7 +222,8 @@ export default function StudioSidebar({
               backgroundColor: T.success,
               boxShadow: `0 0 6px ${T.success}`,
             }}
-            aria-hidden
+            aria-label="System status: active"
+            role="img"
           />
         </div>
       </aside>
@@ -232,7 +233,7 @@ export default function StudioSidebar({
       ═══════════════════════════════════════════════════════════ */}
       {moreOpen && (
         <div
-          className="fixed left-12 top-0 z-50 hidden h-full w-55 flex-col border-r md:flex"
+          className="fixed left-16 top-0 z-50 hidden h-full w-55 flex-col border-r md:flex"
           style={{
             backgroundColor: "rgba(10,12,18,0.98)",
             borderRight: "1px solid rgba(255,255,255,0.08)",
@@ -342,6 +343,8 @@ export function MobileTabBar({
                     backgroundColor: active ? `${T.accentColor}20` : "rgba(255,255,255,0.03)",
                     border: `1px solid ${active ? `${T.accentColor}50` : "rgba(255,255,255,0.06)"}`,
                   }}
+                  aria-label={tool.label}
+                  title={tool.label}
                 >
                   <Icon
                     size={18}
@@ -379,6 +382,8 @@ export function MobileTabBar({
               }}
               className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
               style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}
+              aria-label={tool.label}
+              title={tool.label}
             >
               {active && (
                 <span
@@ -397,6 +402,8 @@ export function MobileTabBar({
           onClick={() => setDrawerOpen((v) => !v)}
           className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
           style={{ color: activeIsSecondary ? T.accentColor : "rgba(255,255,255,0.4)" }}
+          aria-label="More tools"
+          title="More tools"
         >
           {activeIsSecondary && (
             <span

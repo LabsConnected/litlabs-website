@@ -104,6 +104,7 @@ function CapabilityChip({
       className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-md border border-white/8 bg-black/30 px-2 py-0.5"
       title={title}
       aria-label={label}
+      role="status"
     >
       <span
         className="h-1.5 w-1.5 shrink-0 rounded-full"
@@ -197,7 +198,7 @@ export default function ChatShell({
   const isEmpty = messages.length === 0;
 
   return (
-    <div className="relative flex h-full min-h-0 w-full overflow-hidden bg-[#0a0a0f]">
+    <div className="relative flex h-full min-h-0 min-w-0 w-full overflow-hidden bg-[#0a0a0f]">
       {/* Session drawer — floating overlay, not permanent */}
       {sessionsOpen && (
         <>
@@ -207,7 +208,7 @@ export default function ChatShell({
             aria-label="Close sessions"
           />
           <div
-            className="fixed left-12 top-0 z-50 flex h-full w-75 flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
+            className="fixed left-16 top-0 z-50 flex h-full w-75 flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
             role="dialog"
             aria-modal="true"
             aria-label="Chat sessions"
@@ -369,13 +370,15 @@ export default function ChatShell({
                 backgroundColor: capabilities.connectedProviders.length ? T.success : "#f59e0b",
                 boxShadow: `0 0 4px ${capabilities.connectedProviders.length ? T.success : "#f59e0b"}`,
               }}
+              aria-label={capabilities.connectedProviders.length ? "Services connected" : "No services connected"}
+              role="img"
             />
-            {capabilities.connectedProviders.length ? "Online" : "Standby"}
+            {capabilities.connectedProviders.length ? "Connected" : "Standby"}
           </span>
           <span className="text-[9px] font-bold" style={{ color: agentColor }}>
             {agentMeta.displayName}
           </span>
-          <span className="text-[9px] text-white/40">·</span>
+          <span className="text-[9px] text-white/55">·</span>
           <span className="text-[9px] font-bold text-white/55">{selectedModel}</span>
         </div>
 
@@ -439,7 +442,7 @@ export default function ChatShell({
               <h1 className="max-w-full text-balance text-sm font-black leading-tight tracking-tight text-white">
                 Make something impossible to ignore.
               </h1>
-              <p className="mt-1 max-w-full text-[10px] leading-4 text-white/55">
+              <p className="mt-1 max-w-full text-[10px] leading-4 text-white/65">
                 Describe the shot once. Create the image, bring it to life, and keep building with LiTT.
               </p>
 
@@ -521,7 +524,7 @@ export default function ChatShell({
                         >
                           Run in terminal
                         </button>
-                        {!ptyUsable && <span className="text-[8px] text-amber-300/65">Terminal not connected</span>}
+                        {!ptyUsable && <span className="text-[8px] text-amber-300/80">Terminal not connected</span>}
                       </div>
                     )}
                     <div
@@ -622,7 +625,7 @@ export default function ChatShell({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs font-black text-white">{agentMeta.displayName} is working</span>
-                      <span className="block truncate text-[9px] text-white/42">Operational trace · {busySeconds}s</span>
+                      <span className="block truncate text-[9px] text-white/55">Operational trace · {busySeconds}s</span>
                     </span>
                     <ChevronDown size={14} className={`pointer-events-none text-white/35 transition ${activityOpen ? "rotate-180" : ""}`} />
                   </button>
@@ -640,14 +643,14 @@ export default function ChatShell({
                               </span>
                               <span className="min-w-0">
                                 <span className="block text-[10px] font-bold text-white/85">{stage.label}</span>
-                                <span className="block text-[9px] leading-4 text-white/55">{stage.detail}</span>
+                                <span className="block text-[9px] leading-4 text-white/65">{stage.detail}</span>
                               </span>
                               {active && <span className="ml-auto mt-2 flex gap-0.5"><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.12s]" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.24s]" /></span>}
                             </div>
                           );
                         })}
                       </div>
-                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/45">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
+                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/55">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
                     </div>
                   )}
                 </section>

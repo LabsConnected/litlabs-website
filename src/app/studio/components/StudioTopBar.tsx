@@ -9,7 +9,6 @@ import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import {
   Bell,
   Home,
-  Menu,
   Play,
   Rocket,
   Search,
@@ -47,7 +46,7 @@ export default function StudioTopBar({
   onSearchChange,
   selectedModel: _selectedModel,
   onModelChange: _onModelChange,
-  onMenuToggle,
+  onMenuToggle: _onMenuToggle,
   T,
 }: {
   search: string;
@@ -77,20 +76,6 @@ export default function StudioTopBar({
         backdropFilter: "blur(14px) saturate(180%)",
       }}
     >
-      {/* Mobile menu */}
-      {onMenuToggle && (
-        <button
-          type="button"
-          onClick={onMenuToggle}
-          className="md:hidden grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10"
-          style={{ color: "rgba(255,255,255,0.5)" }}
-          aria-label="Open menu"
-          title="Open menu"
-        >
-          <Menu size={16} className="pointer-events-none" />
-        </button>
-      )}
-
       {/* Logo + Studio label */}
       <div className="flex items-center gap-2 shrink-0">
         <div
@@ -127,7 +112,7 @@ export default function StudioTopBar({
       {/* Connection status — truthful */}
       <div className="hidden md:flex items-center gap-1.5 shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-bold" title={capabilities.connectionSummary} style={{ backgroundColor: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }}>
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: capabilities.connectedProviders.length ? "#22c55e" : "#6b7280", boxShadow: capabilities.connectedProviders.length ? `0 0 4px ${T.success}` : "none" }} />
-        {capabilities.connectedProviders.length ? `Online · ${capabilities.connectedProviders.length}` : "No services connected"}
+        {capabilities.connectedProviders.length ? `Connected · ${capabilities.connectedProviders.length}` : "No services connected"}
       </div>
 
       {/* Model selector dropdown */}
@@ -345,13 +330,22 @@ export default function StudioTopBar({
         <Settings size={14} className="pointer-events-none" />
       </button>
 
-      {/* User avatar — Clerk UserButton with profile dropdown + sign out */}
+      {/* User avatar — Clerk UserButton with styled profile card for dark theme */}
       <div className="shrink-0">
         <UserButton
           afterSignOutUrl="/"
           appearance={{
             elements: {
               avatarBox: "w-7 h-7 rounded-full",
+              userButtonPopoverCard: "bg-[#0a0b12] border border-white/10 shadow-2xl",
+              userButtonPopoverActionButton: "text-white/85 hover:bg-white/8",
+              userButtonPopoverActionButtonText: "text-white/85",
+              userButtonPopoverFooter: "text-white/40",
+              userButtonPopoverHeaderTitle: "text-white/90",
+              userButtonPopoverHeaderSubtitle: "text-white/55",
+              userButtonPopoverProfile: "text-white/85",
+              userButtonPopoverProfilePrimaryText: "text-white/90",
+              userButtonPopoverProfileSecondaryText: "text-white/55",
             },
           }}
         />

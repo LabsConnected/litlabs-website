@@ -2540,14 +2540,14 @@ main {
 }
 
 /* ── Studio responsive layout ──────────────────────────────────── */
-/* Mobile: 1-col (only main visible). Desktop: 4-col grid */
+/* Mobile: 1-col (only main visible). Desktop: 3-col grid with clamp panel */
 .studio-grid-responsive {
   grid-template-columns: minmax(0, 1fr);
 }
 
 @media (min-width: 769px) {
   .studio-grid-responsive {
-    grid-template-columns: 48px minmax(0, 1fr) 4px var(--litt-panel-width, 340px);
+    grid-template-columns: 64px minmax(0, 1fr) clamp(400px, 28vw, 460px);
   }
 }
 

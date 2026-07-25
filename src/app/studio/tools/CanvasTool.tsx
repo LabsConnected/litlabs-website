@@ -249,7 +249,7 @@ export default function CanvasTool() {
 
   return (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-[10000]" : "h-full"}`}
+      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-10000" : "h-full"}`}
       style={{ backgroundColor: T.bgColor }}
     >
       {/* Header with Model Switcher */}
@@ -267,7 +267,7 @@ export default function CanvasTool() {
               className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full"
               style={{ backgroundColor: "#a78bfa15", color: "#a78bfa" }}
             >
-              <Brain size={10} /> {memories.length} memories
+              <Brain size={10} /> {memories.length} {memories.length === 1 ? "memory" : "memories"}
             </span>
           )}
         </div>
