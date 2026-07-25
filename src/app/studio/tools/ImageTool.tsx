@@ -1002,18 +1002,18 @@ export default function ImageTool() {
               className="text-[11px] font-black uppercase tracking-widest"
               style={{ color: T.headerColor }}
             >
-              Agent Forge
+              Image Studio
             </span>
           </div>
 
           {/* Divider */}
           <span
-            className="w-px h-4 shrink-0 opacity-20"
+            className="hidden md:block w-px h-4 shrink-0 opacity-20"
             style={{ backgroundColor: T.borderColor }}
           />
 
-          {/* Workspace tabs */}
-          <div className="flex items-center gap-1 overflow-x-auto no-scrollbar">
+          {/* Workspace tabs — desktop only */}
+          <div className="hidden md:flex items-center gap-1 overflow-x-auto no-scrollbar">
             {workspaces.map((ws) => (
               <div
                 key={ws.id}
@@ -1135,10 +1135,10 @@ export default function ImageTool() {
           </button>
         </div>
 
-        {/* Right: coins + claim + log toggle */}
+        {/* Right: coins + claim + log toggle — desktop only on mobile, just log toggle */}
         <div className="flex items-center gap-1.5 shrink-0">
           <div
-            className="flex items-center gap-1 h-6 px-2 rounded border text-[10px] font-bold"
+            className="hidden md:flex items-center gap-1 h-6 px-2 rounded border text-[10px] font-bold"
             style={{
               borderColor: T.borderColor + "40",
               color: T.accentColor,
@@ -1150,7 +1150,7 @@ export default function ImageTool() {
           <button
             onClick={handleClaimBonus}
             disabled={claiming}
-            className="h-6 px-2 flex items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
+            className="hidden md:flex h-6 px-2 items-center gap-1 rounded border text-[10px] font-bold transition-all hover:opacity-80 disabled:opacity-40"
             style={{
               borderColor: T.accentColor + "60",
               color: T.accentColor,
@@ -2541,6 +2541,16 @@ export default function ImageTool() {
                     </div>
 
                     <button
+                      onClick={() => { setPrompt(currentResult.prompt); setMobileLeftOpen(true); }}
+                      className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
+                      style={{
+                        borderColor: T.borderColor + "50",
+                        color: T.textMuted,
+                      }}
+                    >
+                      <Wand2 size={9} /> Edit
+                    </button>
+                    <button
                       onClick={handleGenerate}
                       className="h-6 px-2.5 flex items-center gap-1 rounded border text-[9px] font-bold transition-all hover:opacity-80"
                       style={{
@@ -2551,7 +2561,7 @@ export default function ImageTool() {
                       <RefreshCw size={9} /> Regen
                     </button>
                     <span
-                      className="text-[9px] opacity-40"
+                      className="hidden sm:inline text-[9px] opacity-40"
                       style={{ color: T.textMuted }}
                     >
                       {currentResult.provider} · {aspectRatio}
@@ -2706,6 +2716,7 @@ export default function ImageTool() {
                               }}
                             >
                               {g.fileUrl ? (
+                                /* eslint-disable-next-line @next/next/no-img-element */
                                 <img src={g.fileUrl} alt="" className="w-full h-full object-cover" onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = "none"; }} />
                               ) : (
                                 <div className="w-full h-full flex items-center justify-center" style={{ backgroundColor: T.bgColor }}>
@@ -2768,8 +2779,11 @@ export default function ImageTool() {
 
                     {/* Empty hint */}
                     <div className="text-center pt-2">
-                      <p className="text-[10px] opacity-30" style={{ color: T.textMuted }}>
-                        Write a prompt and hit Forge to create
+                      <p className="text-[11px] font-bold" style={{ color: T.textMuted }}>
+                        Create something original.
+                      </p>
+                      <p className="text-[10px] mt-0.5 opacity-50" style={{ color: T.textMuted }}>
+                        Describe the image, choose a style, and generate.
                       </p>
                     </div>
                   </div>
