@@ -121,3 +121,6 @@ lighthouse-*.json
 eslint-full.txt
 
 .env*
+
+.vercel
+.env*

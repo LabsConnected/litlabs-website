@@ -52,12 +52,33 @@ export function getSupabaseAdmin(): SupabaseClient | null {
   return _supabaseAdmin;
 }
 
+// Chainable mock that returns { data: null, error } from any query method
+const _adminMockError = {
+  data: null,
+  error: { message: "Supabase service role key not configured" },
+  count: null,
+};
+
+function _chainableMock() {
+  const obj: Record<string, unknown> = {};
+  const handler: ProxyHandler<Record<string, unknown>> = {
+    get(_t, prop) {
+      if (prop === "then") return (resolve: (v: unknown) => void) => resolve(_adminMockError);
+      if (prop === "catch") return () => Promise.resolve(_adminMockError);
+      if (prop === "single") return () => Promise.resolve(_adminMockError);
+      if (prop === "maybeSingle") return () => Promise.resolve(_adminMockError);
+      return () => new Proxy(obj, handler);
+    },
+  };
+  return new Proxy(obj, handler);
+}
+
 export const supabaseAdmin = new Proxy({} as SupabaseClient, {
   get(_target, prop) {
     const client = getSupabaseAdmin();
     if (!client) {
       return typeof prop === "string" && ["from"].includes(prop)
-        ? () => ({ select: () => ({}), insert: () => ({}), update: () => ({}) })
+        ? () => _chainableMock()
         : undefined;
     }
     return (client as unknown as Record<string | symbol, unknown>)[prop];
