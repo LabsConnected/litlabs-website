@@ -165,15 +165,6 @@ export const MOBILE_BOTTOM_ITEMS: MobileNavItem[] = [
   { label: "Account", href: "/profile", icon: User },
 ];
 
-export const MOBILE_MORE_ITEMS: MobileNavItem[] = [
-  { label: "Gallery", href: "/gallery", icon: Image },
-  { label: "Social", href: "/social", icon: Users },
-  { label: "Marketplace", href: "/marketplace", icon: Store },
-  { label: "Games", href: "/games", icon: Gamepad2 },
-  { label: "Settings", href: "/settings", icon: Settings },
-  { label: "Connections", href: "/settings/connections", icon: Settings },
-];
-
 export const AI_SUGGESTIONS = [
   "Take me to my unfinished images",
   "Open my agents",
