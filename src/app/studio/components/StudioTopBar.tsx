@@ -111,7 +111,7 @@ export default function StudioTopBar({
 
       {/* Connection status — truthful */}
       <div className="hidden md:flex items-center gap-1.5 shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-bold" title={capabilities.connectionSummary} style={{ backgroundColor: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }}>
-        <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: capabilities.connectedProviders.length ? "#22c55e" : "#6b7280", boxShadow: capabilities.connectedProviders.length ? `0 0 4px ${T.success}` : "none" }} />
+        <span className="h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden style={{ backgroundColor: capabilities.connectedProviders.length ? "#22c55e" : "#6b7280", boxShadow: capabilities.connectedProviders.length ? `0 0 4px ${T.success}` : "none" }} />
         {capabilities.connectedProviders.length ? `Connected · ${capabilities.connectedProviders.length}` : "No services connected"}
       </div>
 
@@ -132,6 +132,7 @@ export default function StudioTopBar({
           <Cpu size={11} className="pointer-events-none" style={{ color: T.accentColor }} />
           <span
             className="pointer-events-none h-1.5 w-1.5 rounded-full"
+            aria-hidden
             style={{
               backgroundColor: HEALTH_DOT[providerHealth[selectedModel.provider] ?? "available"].color,
               boxShadow: `0 0 4px ${HEALTH_DOT[providerHealth[selectedModel.provider] ?? "available"].color}`,
@@ -309,6 +310,7 @@ export default function StudioTopBar({
           <Bell size={14} className="pointer-events-none" />
           <span
             className="pointer-events-none absolute top-1 right-1 w-1.5 h-1.5 rounded-full"
+            aria-hidden
             style={{ backgroundColor: "#ff3a3a", boxShadow: "0 0 4px #ff3a3a" }}
           />
         </button>

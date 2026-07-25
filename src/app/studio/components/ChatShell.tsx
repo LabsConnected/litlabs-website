@@ -81,6 +81,7 @@ function CopyButton({ text }: { text: string }) {
       onClick={handleCopy}
       className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
       title="Copy"
+      aria-label={copied ? "Copied to clipboard" : "Copy to clipboard"}
     >
       {copied ? <Check size={10} /> : <Copy size={10} />}
       {copied ? "Copied" : "Copy"}
@@ -588,6 +589,7 @@ export default function ChatShell({
                             onClick={() => speakText(message.content)}
                             className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300"
                             title="Read aloud"
+                            aria-label="Read aloud"
                           >
                             <Zap size={10} className="pointer-events-none" /> Speak
                           </button>
@@ -598,6 +600,7 @@ export default function ChatShell({
                               disabled={busy}
                               className="flex items-center gap-1 text-[9px] transition hover:text-cyan-300 disabled:opacity-40"
                               title="Regenerate"
+                              aria-label="Regenerate response"
                             >
                               <RefreshCw size={10} className="pointer-events-none" /> Regen
                             </button>
