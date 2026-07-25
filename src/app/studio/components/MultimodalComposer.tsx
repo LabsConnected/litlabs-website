@@ -545,11 +545,11 @@ export default function MultimodalComposer({
       />
 
       {/* Input row */}
-      <div className="flex items-end gap-2 rounded-2xl border border-white/15 bg-white/4 px-2.5 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
+      <div className="flex items-end gap-1.5 rounded-2xl border border-white/15 bg-white/4 px-2 py-2 shadow-[0_12px_45px_rgba(0,0,0,.35)] focus-within:border-cyan-300/30">
         <button
           type="button"
           onClick={() => setShowAdd((value) => !value)}
-          className={`grid h-11 w-11 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
           aria-label={showAdd ? "Close tools" : "Add tool or attachment"}
           title="Tools and attachments"
         >
@@ -574,7 +574,7 @@ export default function MultimodalComposer({
           type="button"
           onClick={micButtonState.onClick}
           disabled={micButtonState.disabled}
-          className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all ${micButtonState.color} ${
+          className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all ${micButtonState.color} ${
             !micButtonState.disabled && "hover:bg-white/10"
           } ${micButtonState.disabled && "cursor-not-allowed"}`}
           style={getMicButtonStyle()}
@@ -597,7 +597,7 @@ export default function MultimodalComposer({
           type="button"
           onClick={submit}
           disabled={busy || (!value.trim() && snapshots.length === 0)}
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
+          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all text-white/60 hover:text-white hover:bg-white/10 disabled:cursor-not-allowed disabled:opacity-50"
           aria-label="Send message"
           title="Send message"
         >

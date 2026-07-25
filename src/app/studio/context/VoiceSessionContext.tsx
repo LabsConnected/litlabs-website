@@ -12,6 +12,7 @@ import {
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
+import { useInworldSession } from "@/features/voice/hooks/useInworldSession";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -164,6 +165,47 @@ export function VoiceSessionProvider({
   const onTurnRef = useRef<(text: string) => void>(noop);
   const prevMicLevelRef = useRef(0);
   const submittedTranscriptRef = useRef("");
+
+  // --- Inworld session (primary voice provider) ---
+  // Use refs for callbacks to avoid capturing mutable refs in hook closures
+  const inworldOnTranscriptRef = useRef<(text: string, final: boolean) => void>(() => {});
+  const inworldOnAgentTextRef = useRef<(delta: string) => void>(() => {});
+  const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
+
+  useEffect(() => {
+    inworldOnTranscriptRef.current = (text: string, final: boolean) => {
+      if (final) {
+        const trimmed = text.trim();
+        if (trimmed && trimmed !== submittedTranscriptRef.current) {
+          submittedTranscriptRef.current = trimmed;
+          setTranscript(trimmed);
+          setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
+          activeRef.current = false;
+          onTurnRef.current(trimmed);
+          setTiming({ aiResponseCompletedAt: Date.now() });
+        }
+      } else {
+        setTranscript(text);
+      }
+    };
+    inworldOnAgentTextRef.current = (delta: string) => {
+      setTranscript((prev) => prev + delta);
+    };
+    inworldOnErrorRef.current = (msg: string) => {
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setErrorMessage(msg);
+    };
+  });
+
+  const inworldSession = useInworldSession({
+    onTranscript: (text: string, final: boolean) => inworldOnTranscriptRef.current(text, final),
+    onAgentText: (delta: string) => inworldOnAgentTextRef.current(delta),
+    onError: (msg: string) => inworldOnErrorRef.current(msg),
+  });
+
+  // Sync Inworld connection state to voiceState
+  const inworldConnectedRef = useRef(false);
 
   // Keep voiceStateRef in sync
   useEffect(() => {
@@ -418,7 +460,66 @@ export function VoiceSessionProvider({
       // non-fatal — mic level won't work but recognition can continue
     }
 
-    // --- SpeechRecognition ---
+    // --- Try Inworld first (primary voice provider) ---
+    try {
+      console.debug("[Voice] attempting Inworld session");
+      // Stop our local stream — Inworld manages its own mic capture
+      activeStream?.getTracks().forEach((t) => t.stop());
+      activeStream = null;
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach((t) => t.stop());
+        streamRef.current = null;
+      }
+      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
+        audioCtxRef.current.close().catch(() => {});
+        audioCtxRef.current = null;
+      }
+      analyserRef.current = null;
+
+      setVoiceState("connecting");
+      voiceStateRef.current = "connecting";
+      await inworldSession.startListening();
+      inworldConnectedRef.current = true;
+      setVoiceMode("live");
+      setVoiceState("listening");
+      voiceStateRef.current = "listening";
+      console.debug("[Voice] Inworld session connected");
+      return;
+    } catch (inworldErr) {
+      console.warn("[Voice] Inworld failed, falling back to SpeechRecognition:", inworldErr);
+      inworldConnectedRef.current = false;
+      // Re-acquire mic stream for fallback path
+      try {
+        const fallbackStream = await navigator.mediaDevices.getUserMedia({
+          audio: {
+            echoCancellation: true,
+            noiseSuppression: true,
+            autoGainControl: true,
+            channelCount: 1,
+            ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
+          },
+        });
+        activeStream = fallbackStream;
+        streamRef.current = fallbackStream;
+        const ctx = new AudioContext();
+        audioCtxRef.current = ctx;
+        if (ctx.state === "suspended") await ctx.resume();
+        const analyser = ctx.createAnalyser();
+        analyser.fftSize = 256;
+        analyserRef.current = analyser;
+        const source = ctx.createMediaStreamSource(fallbackStream);
+        source.connect(analyser);
+      } catch {
+        // If we can't re-acquire mic, report error
+        setVoiceState("error");
+        voiceStateRef.current = "error";
+        setErrorMessage("Voice connection failed and microphone could not be re-acquired.");
+        cleanup();
+        return;
+      }
+    }
+
+    // --- SpeechRecognition fallback ---
     const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
     if (!SR) {
       try {
@@ -602,7 +703,7 @@ export function VoiceSessionProvider({
     } catch (err) {
       console.error("[Voice] recognition.start() failed:", err);
     }
-  }, [cleanup, enumerateDevices, selectedDeviceId, startMicLevelLoop]);
+  }, [cleanup, enumerateDevices, selectedDeviceId, startMicLevelLoop, inworldSession, setTiming]);
 
   // ---------------------------------------------------------------------------
   // stopVoice
@@ -610,6 +711,12 @@ export function VoiceSessionProvider({
 
   const stopVoice = useCallback(() => {
     console.debug("[Voice] stopVoice");
+    // Disconnect Inworld if active
+    if (inworldConnectedRef.current) {
+      inworldSession.stopListening();
+      inworldSession.disconnect();
+      inworldConnectedRef.current = false;
+    }
     if (recorderRef.current?.state === "recording") {
       setVoiceState("processing");
       voiceStateRef.current = "processing";
@@ -625,7 +732,7 @@ export function VoiceSessionProvider({
     setVoiceMode(null);
     submittedTranscriptRef.current = "";
     prevMicLevelRef.current = 0;
-  }, [cleanup]);
+  }, [cleanup, inworldSession]);
 
   // ---------------------------------------------------------------------------
   // toggleMute
@@ -822,6 +929,10 @@ export function VoiceSessionProvider({
   const interrupt = useCallback(() => {
     console.debug("[Voice] interrupt");
     stopSpeaking();
+    if (inworldConnectedRef.current) {
+      inworldSession.interrupt();
+      return;
+    }
     if (activeRef.current) {
       setVoiceState("listening");
       voiceStateRef.current = "listening";
@@ -832,7 +943,7 @@ export function VoiceSessionProvider({
         // ignore
       }
     }
-  }, [stopSpeaking, startMicLevelLoop]);
+  }, [stopSpeaking, startMicLevelLoop, inworldSession]);
 
   // ---------------------------------------------------------------------------
   // selectDevice

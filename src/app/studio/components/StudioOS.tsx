@@ -112,6 +112,36 @@ export default function StudioOS() {
     open: boolean;
     pos: DockPosition;
   }>({ open: false, pos: "bottom-left" });
+  const [littPanelWidth, setLittPanelWidth] = useState(() => {
+    if (typeof window === "undefined") return 340;
+    const stored = localStorage.getItem("litlabs:studio:panel-width");
+    return stored ? Math.max(280, Math.min(600, Number(stored))) : 340;
+  });
+  const [isResizing, setIsResizing] = useState(false);
+
+  const startResize = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    setIsResizing(true);
+    const startX = e.clientX;
+    const startWidth = littPanelWidth;
+    const onMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX;
+      const newWidth = Math.max(280, Math.min(600, startWidth + delta));
+      setLittPanelWidth(newWidth);
+    };
+    const onUp = () => {
+      setIsResizing(false);
+      document.removeEventListener("mousemove", onMove);
+      document.removeEventListener("mouseup", onUp);
+      try {
+        localStorage.setItem("litlabs:studio:panel-width", String(littPanelWidth));
+      } catch {
+        // ignore
+      }
+    };
+    document.addEventListener("mousemove", onMove);
+    document.addEventListener("mouseup", onUp);
+  }, [littPanelWidth]);
 
   // Sync tool to localStorage immediately, and to URL only after the
   // user changes them (not on initial mount).
@@ -204,7 +234,7 @@ export default function StudioOS() {
         <div
           className="grid min-h-0 min-w-0 overflow-hidden studio-shell"
           style={{
-            gridTemplateColumns: "48px minmax(0, 1fr) 340px",
+            gridTemplateColumns: `48px minmax(0, 1fr) ${littPanelWidth}px`,
           }}
         >
           <StudioSidebar
@@ -223,6 +253,18 @@ export default function StudioOS() {
               </div>
             ) : null}
           </main>
+
+          {/* Draggable resizer between workspace and LiTT panel */}
+          <div
+            className={`hidden md:flex w-1 shrink-0 cursor-col-resize items-center justify-center transition-colors ${isResizing ? "bg-cyan-300/30" : "bg-white/4 hover:bg-white/10"}`}
+            onMouseDown={startResize}
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize chat panel"
+            title="Drag to resize"
+          >
+            <div className="h-8 w-0.5 rounded-full bg-white/15" />
+          </div>
 
           {/* Persistent right LiTT panel — desktop only */}
           <aside

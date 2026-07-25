@@ -2540,16 +2540,7 @@ main {
 }
 
 /* ── Studio responsive layout ──────────────────────────────────── */
-@media (max-width: 1280px) {
-  .studio-shell {
-    grid-template-columns: 48px minmax(0, 1fr) 320px !important;
-  }
-  .litt-panel {
-    width: 320px !important;
-    min-width: 320px !important;
-    max-width: 320px !important;
-  }
-}
+/* Panel width is JS-controlled via gridTemplateColumns inline style */
 
 @media (max-width: 1050px) {
   .studio-shell {
