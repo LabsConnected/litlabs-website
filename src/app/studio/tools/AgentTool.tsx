@@ -10,7 +10,6 @@ import {
   Loader2,
   X,
   Swords,
-  MessageSquare,
   ChevronRight,
   Zap,
 } from "lucide-react";
@@ -833,7 +832,7 @@ export default function AgentTool() {
 
       {/* ── CENTER: CHAT ── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Chat header */}
+        {/* Chat header — clean, separated agent identity from controls */}
         <div
           className="flex items-center justify-between px-4 h-11 border-b shrink-0"
           style={{
@@ -841,30 +840,28 @@ export default function AgentTool() {
             backgroundColor: T.boxBg + "50",
           }}
         >
-          <div className="flex items-center gap-2.5">
-            <span className="text-xl">{selectedAvatar.emoji}</span>
-            <div>
+          <div className="flex items-center gap-2.5 min-w-0">
+            <span className="text-lg shrink-0">{selectedAvatar.emoji}</span>
+            <div className="min-w-0">
               <div
-                className="text-xs font-bold leading-tight"
+                className="text-xs font-bold leading-tight truncate"
                 style={{ color: selectedAgent.color }}
               >
                 {selectedAgent.name}
               </div>
               <div
-                className="text-[9px] opacity-60"
+                className="text-[9px] opacity-60 truncate"
                 style={{ color: T.textMuted }}
               >
-                {selectedAgent.role} ·{" "}
-                {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ??
-                  "Gemini"}
+                {selectedAgent.role}
               </div>
             </div>
             <span
-              className="w-1.5 h-1.5 rounded-full animate-pulse ml-1"
+              className="w-1.5 h-1.5 rounded-full animate-pulse ml-1 shrink-0"
               style={{ backgroundColor: selectedAgent.color }}
             />
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-1.5 shrink-0">
             {/* ActivePieces FLOW trigger — Director only */}
             {selectedAgent.id === "director" && (
               <button
@@ -881,33 +878,19 @@ export default function AgentTool() {
                 <Zap size={9} /> FLOW
               </button>
             )}
-            {/* Provider toggle */}
-            {PROVIDER_OPTIONS.map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() =>
-                  setProvider(opt.id as "gemini" | "openrouter-free")
-                }
-                title={opt.hint}
-                className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
-                style={{
-                  backgroundColor:
-                    provider === opt.id ? T.accentColor + "20" : "transparent",
-                  color:
-                    provider === opt.id ? T.accentColor : T.textMuted + "60",
-                  border: `1px solid ${provider === opt.id ? T.accentColor + "40" : T.borderColor + "15"}`,
-                }}
+            {/* Provider — single dropdown, not dual toggle */}
+            <button
+              onClick={() => setProvider(provider === "gemini" ? "openrouter-free" : "gemini")}
+              title="Switch provider"
+              className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
+              style={{
+                backgroundColor: T.accentColor + "15",
+                color: T.accentColor,
+                border: `1px solid ${T.accentColor}30`,
+              }}
               >
-                {opt.label}
-              </button>
-            ))}
-            <span
-              className="text-[9px] font-mono hidden sm:block"
-              style={{ color: T.textMuted }}
-            >
-              <MessageSquare size={9} className="inline mr-1 opacity-50" />
-              {messages.length} msgs
-            </span>
+              {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ?? "Gemini"}
+            </button>
             <button
               onClick={clearChat}
               className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border opacity-50 hover:opacity-100 transition-all"
@@ -921,38 +904,32 @@ export default function AgentTool() {
         {/* Messages */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
           {messages.length === 0 && !streaming && (
-            <div className="flex flex-col items-center justify-center h-full pb-8 text-center">
-              <div className="text-5xl mb-3 opacity-90">
+            <div className="flex flex-col items-center justify-center h-full pb-4 text-center px-4">
+              <div className="text-3xl mb-2 opacity-90">
                 {selectedAvatar.emoji}
               </div>
               <div
-                className="text-sm font-bold mb-1"
+                className="text-sm font-bold mb-0.5"
                 style={{ color: selectedAgent.color }}
               >
-                {selectedAgent.name}
+                {selectedAgent.name} is ready.
               </div>
               <div
-                className="text-xs mb-1 opacity-50"
+                className="text-[10px] mb-3 opacity-50"
                 style={{ color: T.textMuted }}
               >
-                {selectedAgent.role}
+                Ask it to build, debug, plan, research, or create.
               </div>
-              <div
-                className="text-xs max-w-sm mx-auto mb-5 opacity-60 leading-relaxed"
-                style={{ color: T.textMuted }}
-              >
-                {selectedAgent.desc}
-              </div>
-              <div className="flex flex-wrap gap-2 justify-center max-w-lg">
+              <div className="w-full max-w-sm space-y-1.5">
                 {(QUICK[selectedAgent.id] || []).map((q) => (
                   <button
                     key={q}
                     onClick={() => sendMessage(q)}
-                    className="px-3 py-1.5 text-[10px] rounded-full border transition-all hover:scale-105"
+                    className="w-full text-left px-3 py-2 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
                     style={{
-                      borderColor: selectedAgent.color + "40",
-                      color: selectedAgent.color,
-                      backgroundColor: selectedAgent.color + "08",
+                      borderColor: selectedAgent.color + "30",
+                      color: T.textColor,
+                      backgroundColor: selectedAgent.color + "06",
                     }}
                   >
                     {q}

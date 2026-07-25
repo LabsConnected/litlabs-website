@@ -75,7 +75,7 @@ const MORE_TOOLS: ToolItem[] = [
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "code", "agents"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "build", "agents"];
 
 /* ── Desktop Tool Rail (72px, expands on hover) ──────────────────── */
 function RailButton({
@@ -295,39 +295,119 @@ export function MobileTabBar({
   onToolChange: (t: StudioTool) => void;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
+  const [drawerOpen, setDrawerOpen] = useState(false);
+
   const primaryTools = ALL_TOOLS.filter((t) => MOBILE_PRIMARY.includes(t.id));
+  const secondaryTools = ALL_TOOLS.filter(
+    (t) => !MOBILE_PRIMARY.includes(t.id),
+  );
+  const activeIsSecondary = secondaryTools.some((t) => t.id === activeTool);
 
   return (
-    <div
-      className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(56px+env(safe-area-inset-bottom))] items-stretch pb-[env(safe-area-inset-bottom)] md:hidden"
-      style={{
-        backgroundColor: "rgba(8,9,13,0.98)",
-        backdropFilter: "blur(20px) saturate(180%)",
-        borderTop: "1px solid rgba(255,255,255,0.08)",
-      }}
-    >
-      {primaryTools.map((tool) => {
-        const Icon = tool.icon;
-        const active = activeTool === tool.id;
-        return (
-          <button
-            key={tool.id}
-            type="button"
-            onClick={() => onToolChange(tool.id)}
-            className="flex-1 flex flex-col items-center justify-center gap-0.5 transition-all relative"
-            style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}
-          >
-            {active && (
-              <span
-                className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-b-full"
-                style={{ backgroundColor: T.accentColor, boxShadow: `0 0 8px ${T.accentColor}` }}
-              />
-            )}
-            <Icon size={19} strokeWidth={active ? 2.5 : 1.8} />
-            <span className="text-[9px] font-bold">{tool.label}</span>
-          </button>
-        );
-      })}
-    </div>
+    <>
+      {drawerOpen && (
+        <div
+          className="fixed inset-0 z-10000 md:hidden"
+          style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
+          onClick={() => setDrawerOpen(false)}
+        />
+      )}
+
+      {drawerOpen && (
+        <div
+          className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-10000 max-h-[min(58dvh,480px)] overflow-y-auto rounded-t-2xl border-t px-3 pt-3 pb-2 md:hidden"
+          style={{
+            backgroundColor: "#08090d",
+            borderColor: "rgba(255,255,255,0.08)",
+            boxShadow: `0 -8px 32px rgba(0,0,0,0.5)`,
+          }}
+        >
+          <div className="mb-2 text-[9px] font-bold uppercase tracking-widest text-white/70">
+            More Tools
+          </div>
+          <div className="grid grid-cols-4 gap-2">
+            {secondaryTools.map((tool) => {
+              const Icon = tool.icon;
+              const active = activeTool === tool.id;
+              return (
+                <button
+                  key={tool.id}
+                  type="button"
+                  onClick={() => {
+                    onToolChange(tool.id);
+                    setDrawerOpen(false);
+                  }}
+                  className="flex min-h-11 flex-col items-center justify-center gap-1 rounded-xl transition-all"
+                  style={{
+                    backgroundColor: active ? `${T.accentColor}20` : "rgba(255,255,255,0.03)",
+                    border: `1px solid ${active ? `${T.accentColor}50` : "rgba(255,255,255,0.06)"}`,
+                  }}
+                >
+                  <Icon
+                    size={18}
+                    strokeWidth={active ? 2.5 : 1.8}
+                    style={{ color: active ? T.accentColor : "rgba(255,255,255,0.5)" }}
+                  />
+                  <span className="text-[9px] font-bold" style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}>
+                    {tool.label}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      <div
+        className="fixed bottom-0 left-0 right-0 z-50 flex h-[calc(56px+env(safe-area-inset-bottom))] items-stretch pb-[env(safe-area-inset-bottom)] md:hidden"
+        style={{
+          backgroundColor: "rgba(8,9,13,0.98)",
+          backdropFilter: "blur(20px) saturate(180%)",
+          borderTop: "1px solid rgba(255,255,255,0.08)",
+        }}
+      >
+        {primaryTools.map((tool) => {
+          const Icon = tool.icon;
+          const active = activeTool === tool.id;
+          return (
+            <button
+              key={tool.id}
+              type="button"
+              onClick={() => {
+                onToolChange(tool.id);
+                setDrawerOpen(false);
+              }}
+              className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
+              style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}
+            >
+              {active && (
+                <span
+                  className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-b-full"
+                  style={{ backgroundColor: T.accentColor }}
+                />
+              )}
+              <Icon size={19} strokeWidth={active ? 2.5 : 1.8} />
+              <span className="text-[9px] font-bold">{tool.label}</span>
+            </button>
+          );
+        })}
+
+        <button
+          type="button"
+          onClick={() => setDrawerOpen((v) => !v)}
+          className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
+          style={{ color: activeIsSecondary ? T.accentColor : "rgba(255,255,255,0.4)" }}
+        >
+          {activeIsSecondary && (
+            <span
+              className="absolute top-0 left-1/2 -translate-x-1/2 w-8 h-0.5 rounded-b-full"
+              style={{ backgroundColor: T.accentColor }}
+            />
+          )}
+          <MoreHorizontal size={19} strokeWidth={activeIsSecondary ? 2.5 : 1.8} />
+          <span className="text-[9px] font-bold">More</span>
+        </button>
+      </div>
+    </>
   );
 }
