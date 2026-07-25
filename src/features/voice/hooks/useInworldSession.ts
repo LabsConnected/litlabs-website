@@ -21,6 +21,7 @@ interface UseInworldSessionReturn {
   startListening: () => Promise<void>;
   stopListening: () => void;
   interrupt: () => void;
+  speakText: (text: string) => void;
   isConnected: boolean;
   isListening: boolean;
   error: string | null;
@@ -515,6 +516,43 @@ export function useInworldSession(
     }, 200);
   }, [isListening, setState, startListening, stopPlayback]);
 
+  const speakText = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+
+      // Stop any current playback (barge-in)
+      stopPlayback();
+      interruptedRef.current = false;
+
+      // Ensure playback context exists
+      if (!playbackContextRef.current) {
+        playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+      }
+
+      setState("speaking");
+
+      // Send the text as a conversation item, then trigger a response
+      // This makes Inworld TTS speak the text using the configured voice
+      wsRef.current.send(JSON.stringify({
+        type: "conversation.item.create",
+        item: {
+          type: "message",
+          role: "user",
+          content: [{ type: "text", text }],
+        },
+      }));
+
+      wsRef.current.send(JSON.stringify({
+        type: "response.create",
+        response: {
+          modalities: ["audio"],
+        },
+      }));
+    },
+    [setState, stopPlayback],
+  );
+
   useEffect(() => {
     interruptRef.current = interrupt;
   }, [interrupt]);
@@ -541,6 +579,7 @@ export function useInworldSession(
     startListening,
     stopListening,
     interrupt,
+    speakText,
     isConnected,
     isListening,
     error,

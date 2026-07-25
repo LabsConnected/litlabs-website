@@ -784,6 +784,14 @@ export function VoiceSessionProvider({
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
+      // If Inworld is connected, use it for TTS (uses the configured Inworld voice)
+      if (inworldConnectedRef.current) {
+        inworldSession.speakText(sanitized);
+        setVoiceState("assistant_speaking");
+        voiceStateRef.current = "assistant_speaking";
+        return;
+      }
+
       // Stop any current TTS first (barge-in)
       stopSpeaking();
 
@@ -919,7 +927,7 @@ export function VoiceSessionProvider({
             });
         });
     },
-    [stopSpeaking, startMicLevelLoop, setTiming],
+    [stopSpeaking, startMicLevelLoop, setTiming, inworldSession],
   );
 
   // ---------------------------------------------------------------------------

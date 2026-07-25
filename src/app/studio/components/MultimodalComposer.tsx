@@ -143,14 +143,19 @@ export default function MultimodalComposer({
     setOnTurn,
     errorMessage,
     voiceMode,
+    speakText,
   } = useVoiceSession();
 
   // Set turn handler for voice sessions
   useEffect(() => {
     setOnTurn((text) => {
-      void onSend(text);
+      void onSend(text).then((reply) => {
+        if (reply && voiceMode === "live") {
+          speakText(reply);
+        }
+      });
     });
-  }, [onSend, setOnTurn]);
+  }, [onSend, setOnTurn, voiceMode, speakText]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -240,9 +245,13 @@ export default function MultimodalComposer({
       onChange("");
       return;
     }
-    await onSend(value, snapshots.length ? snapshots : undefined);
+    const reply = await onSend(value, snapshots.length ? snapshots : undefined);
     onChange("");
     setSnapshots([]);
+    // Auto-speak the AI response when voice mode is active
+    if (reply && voiceMode === "live" && voiceState !== "idle") {
+      speakText(reply);
+    }
   };
 
   const handleFile = (file: File) => {
