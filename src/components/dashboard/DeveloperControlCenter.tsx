@@ -380,7 +380,7 @@ function ProjectCard({ project, onSync }: {
       {/* Actions */}
       <div className="flex flex-wrap gap-2">
         <Link
-          href="/studio"
+          href="/studio?tool=chat"
           className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:opacity-80"
           style={{ background: `${T.accentColor}20`, color: T.accentColor }}
         >
@@ -455,7 +455,7 @@ function LegacyProjectCard({ project }: { project: LegacyProject }) {
       </div>
       <div className="flex gap-2">
         <Link
-          href="/studio"
+          href="/studio?tool=chat"
           className="rounded-lg px-3 py-1.5 text-xs font-semibold transition-all hover:opacity-80"
           style={{ background: `${T.accentColor}20`, color: T.accentColor }}
         >
@@ -685,11 +685,11 @@ export function DeveloperControlCenter() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
-      <div className="mx-auto max-w-7xl p-4 lg:p-6">
+      <div className="mx-auto max-w-[1400px] p-4 lg:p-8">
         {/* Header */}
-        <div className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="text-xs font-bold uppercase tracking-wider opacity-40 mb-1">
+            <div className="text-xs font-bold uppercase tracking-[0.18em] opacity-40 mb-1">
               LiTTree-LabStudios™ · Developer Control Center
             </div>
             <h1 className="text-2xl font-black lg:text-3xl" style={{ color: T.headerColor }}>
@@ -715,6 +715,62 @@ export function DeveloperControlCenter() {
               Diagnostics
             </button>
           </div>
+        </div>
+
+        {/* Stats Overview Bar */}
+        <div className="mb-8 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            style={{ background: `linear-gradient(135deg, ${T.accentColor}08 0%, ${T.boxBg} 80%)`, border: `1px solid ${T.borderColor}30` }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Icon name="folder" size={16} style={{ color: T.accentColor }} />
+              <span className="text-xs font-bold uppercase tracking-wider opacity-40">Projects</span>
+            </div>
+            <div className="text-2xl font-black" style={{ color: T.headerColor }}>
+              {loading ? "—" : allProjects.length}
+            </div>
+          </div>
+          <Link
+            href="/agents"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            style={{ background: `linear-gradient(135deg, #22d3ee08 0%, ${T.boxBg} 80%)`, border: "1px solid #22d3ee25" }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Icon name="bot" size={16} style={{ color: "#22d3ee" }} />
+              <span className="text-xs font-bold uppercase tracking-wider opacity-40">Agents</span>
+            </div>
+            <div className="text-2xl font-black" style={{ color: T.headerColor }}>2</div>
+            <div className="text-xs opacity-40">LiTT + Spark active</div>
+          </Link>
+          <Link
+            href="/studio?tool=chat"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            style={{ background: `linear-gradient(135deg, #a855f708 0%, ${T.boxBg} 80%)`, border: "1px solid #a855f725" }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Icon name="terminal" size={16} style={{ color: "#a855f7" }} />
+              <span className="text-xs font-bold uppercase tracking-wider opacity-40">Commands</span>
+            </div>
+            <div className="text-2xl font-black" style={{ color: T.headerColor }}>
+              {loading ? "—" : data?.unreadCount ? data.unreadCount : "0"}
+            </div>
+            <div className="text-xs opacity-40">Recent events</div>
+          </Link>
+          <Link
+            href="/studio?tool=image"
+            className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+            style={{ background: `linear-gradient(135deg, #ff00a008 0%, ${T.boxBg} 80%)`, border: "1px solid #ff00a025" }}
+          >
+            <div className="flex items-center gap-2 mb-1">
+              <Icon name="rocket" size={16} style={{ color: "#ff00a0" }} />
+              <span className="text-xs font-bold uppercase tracking-wider opacity-40">Generations</span>
+            </div>
+            <div className="text-2xl font-black" style={{ color: T.headerColor }}>
+              {loading ? "—" : data?.events?.length ? data.events.length : "0"}
+            </div>
+            <div className="text-xs opacity-40">Total events</div>
+          </Link>
         </div>
 
         {error && (
@@ -773,31 +829,33 @@ export function DeveloperControlCenter() {
         )}
 
         {/* Connection Health */}
-        <section className="mb-6">
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider opacity-40">
+        <section className="mb-8">
+          <h2 className="mb-4 text-sm font-bold uppercase tracking-[0.15em] opacity-40">
             Connection Health
           </h2>
           {loading ? (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
               {Array.from({ length: 4 }).map((_, i) => <SkeletonCard key={i} />)}
             </div>
-          ) : (data?.accounts && data.accounts.length > 0) ? (
+          ) : (
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {data.accounts.map((acc) => (
-                <ConnectionCard
-                  key={acc.id}
-                  account={acc}
-                  onReconnect={() => handleSync()}
-                  onDisconnect={() => handleDisconnect(acc.provider)}
-                />
-              ))}
-              {/* Show placeholder for missing providers */}
-              {["github", "meta", "vercel", "supabase"]
-                .filter((p) => !data.accounts.some((a) => a.provider === p))
-                .map((p) => (
+              {["github", "meta", "vercel", "supabase"].map((p) => {
+                const acc = data?.accounts?.find((a) => a.provider === p);
+                if (acc) {
+                  return (
+                    <ConnectionCard
+                      key={acc.id}
+                      account={acc}
+                      onReconnect={() => handleSync()}
+                      onDisconnect={() => handleDisconnect(acc.provider)}
+                    />
+                  );
+                }
+                const connectUrl = p === "github" ? "/studio/github" : "/settings/connections";
+                return (
                   <div
                     key={p}
-                    className="rounded-xl p-4 opacity-40"
+                    className="rounded-2xl p-4 transition-all hover:scale-[1.01]"
                     style={{ background: T.boxBg, border: `1px dashed ${T.borderColor}40` }}
                   >
                     <div className="flex items-center gap-2 mb-2">
@@ -806,57 +864,18 @@ export function DeveloperControlCenter() {
                         {PROVIDER_LABELS[p]}
                       </span>
                     </div>
-                    <div className="text-xs opacity-60">Not connected</div>
-                    {p === "github" && (
-                      <Link href="/studio/github" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
-                        Connect →
-                      </Link>
-                    )}
-                    {p === "meta" && (
-                      <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
-                        Connect →
-                      </Link>
-                    )}
-                    {p === "vercel" && (
-                      <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
-                        Connect →
-                      </Link>
-                    )}
-                    {p === "supabase" && (
-                      <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
-                        Connect →
-                      </Link>
-                    )}
-                  </div>
-                ))}
-            </div>
-          ) : (
-            <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
-              {["github", "meta", "vercel", "supabase"].map((p) => (
-                <div
-                  key={p}
-                  className="rounded-xl p-4 opacity-40"
-                  style={{ background: T.boxBg, border: `1px dashed ${T.borderColor}40` }}
-                >
-                  <div className="flex items-center gap-2 mb-2">
-                    <ConnectionPulse status="disconnected" />
-                    <span className="text-sm font-bold" style={{ color: T.headerColor }}>
-                      {PROVIDER_LABELS[p]}
-                    </span>
-                  </div>
-                  <div className="text-xs opacity-60">Not connected</div>
-                  {p === "github" && (
-                    <Link href="/studio/github" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
+                    <div className="text-xs opacity-50 mb-3">Not connected</div>
+                    <Link
+                      href={connectUrl}
+                      className="inline-flex items-center gap-1.5 rounded-lg px-3 py-1.5 text-xs font-bold transition-all hover:opacity-80"
+                      style={{ background: `${T.accentColor}20`, color: T.accentColor }}
+                    >
+                      <Icon name="link" size={12} />
                       Connect →
                     </Link>
-                  )}
-                  {p !== "github" && (
-                    <Link href="/settings/connections" className="mt-2 inline-block text-xs font-semibold" style={{ color: T.accentColor }}>
-                      Connect →
-                    </Link>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
           )}
         </section>
@@ -865,8 +884,8 @@ export function DeveloperControlCenter() {
         <div className="grid grid-cols-1 gap-6 lg:grid-cols-3">
           {/* Projects — takes 2 columns on desktop */}
           <section className="lg:col-span-2">
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider opacity-40">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] opacity-40">
                 Live Projects
               </h2>
               <Link
@@ -897,19 +916,27 @@ export function DeveloperControlCenter() {
               </div>
             ) : (
               <div
-                className="rounded-xl p-8 text-center"
+                className="rounded-2xl p-10 text-center"
                 style={{ background: T.boxBg, border: `1px dashed ${T.borderColor}40` }}
               >
-                <Icon name="folder" size={32} className="mx-auto mb-3 opacity-30" />
-                <p className="text-sm opacity-50 mb-4">
-                  No projects connected yet. Connect a GitHub repository to get started.
+                <div
+                  className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl"
+                  style={{ background: `${T.accentColor}10`, border: `1px solid ${T.accentColor}20` }}
+                >
+                  <Icon name="folder" size={28} style={{ color: T.accentColor }} />
+                </div>
+                <p className="text-sm font-bold mb-1" style={{ color: T.headerColor }}>
+                  No projects connected yet
+                </p>
+                <p className="text-xs opacity-50 mb-5">
+                  Connect a GitHub repository to get started.
                 </p>
                 <Link
                   href="/studio/github"
-                  className="inline-block rounded-xl px-4 py-2 text-sm font-bold transition-all hover:opacity-80"
-                  style={{ background: `${T.accentColor}20`, color: T.accentColor }}
+                  className="inline-flex items-center gap-2 rounded-xl px-5 py-2.5 text-sm font-bold transition-all hover:opacity-90 hover:scale-[1.02]"
+                  style={{ background: T.accentColor, color: T.bgColor }}
                 >
-                  <Icon name="git" size={14} className="inline mr-2" />
+                  <Icon name="git" size={14} />
                   Connect GitHub Repository
                 </Link>
               </div>
@@ -918,8 +945,8 @@ export function DeveloperControlCenter() {
 
           {/* Live Activity — takes 1 column on desktop */}
           <section>
-            <div className="mb-3 flex items-center justify-between">
-              <h2 className="text-sm font-bold uppercase tracking-wider opacity-40">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 className="text-sm font-bold uppercase tracking-[0.15em] opacity-40">
                 Live Activity
               </h2>
               {data && data.unreadCount > 0 && (
@@ -933,11 +960,11 @@ export function DeveloperControlCenter() {
             </div>
             <div
               ref={eventsRef}
-              className="space-y-2 overflow-y-auto rounded-xl p-3"
+              className="space-y-2 overflow-y-auto rounded-2xl p-3"
               style={{
                 background: T.boxBg,
                 border: `1px solid ${T.borderColor}30`,
-                maxHeight: "calc(100vh - 200px)",
+                maxHeight: "calc(100vh - 280px)",
               }}
             >
               {loading ? (
@@ -974,43 +1001,61 @@ export function DeveloperControlCenter() {
 
         {/* AI Crew section */}
         <section className="mt-8">
-          <h2 className="mb-3 text-sm font-bold uppercase tracking-wider opacity-40">
+          <h2 className="mb-4 text-sm font-bold uppercase tracking-[0.15em] opacity-40">
             AI Crew
           </h2>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
             <Link
-              href="/agents"
-              className="rounded-xl p-4 transition-all hover:scale-[1.02]"
-              style={{ background: `linear-gradient(135deg, ${T.accentColor}10 0%, ${T.boxBg} 60%)`, border: `1px solid ${T.accentColor}25` }}
+              href="/studio?tool=chat"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              style={{ background: `linear-gradient(135deg, #22d3ee10 0%, ${T.boxBg} 60%)`, border: "1px solid #22d3ee25" }}
             >
-              <Icon name="bot" size={20} className="mb-2" style={{ color: T.accentColor }} />
-              <div className="text-sm font-bold" style={{ color: T.headerColor }}>Crew Room</div>
-              <div className="text-xs opacity-50">Direct LiTT, Spark, and agents</div>
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#22d3ee15", border: "1px solid #22d3ee30" }}>
+                  <Icon name="bot" size={16} style={{ color: "#22d3ee" }} />
+                </div>
+                <ConnectionPulse status="connected" />
+              </div>
+              <div className="text-sm font-bold" style={{ color: T.headerColor }}>LiTT</div>
+              <div className="text-xs opacity-50">Operating Agent</div>
             </Link>
             <Link
-              href="/studio"
-              className="rounded-xl p-4 transition-all hover:scale-[1.02]"
+              href="/studio?tool=chat"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
               style={{ background: `linear-gradient(135deg, #a855f710 0%, ${T.boxBg} 60%)`, border: "1px solid #a855f725" }}
             >
-              <Icon name="rocket" size={20} className="mb-2" style={{ color: "#a855f7" }} />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#a855f715", border: "1px solid #a855f730" }}>
+                  <Icon name="bot" size={16} style={{ color: "#a855f7" }} />
+                </div>
+                <ConnectionPulse status="connected" />
+              </div>
+              <div className="text-sm font-bold" style={{ color: T.headerColor }}>Spark</div>
+              <div className="text-xs opacity-50">Creative Agent</div>
+            </Link>
+            <Link
+              href="/studio?tool=chat"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
+              style={{ background: `linear-gradient(135deg, ${T.accentColor}10 0%, ${T.boxBg} 60%)`, border: `1px solid ${T.accentColor}25` }}
+            >
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: `${T.accentColor}15`, border: `1px solid ${T.accentColor}30` }}>
+                  <Icon name="rocket" size={16} style={{ color: T.accentColor }} />
+                </div>
+              </div>
               <div className="text-sm font-bold" style={{ color: T.headerColor }}>Studio</div>
               <div className="text-xs opacity-50">Build, generate, and ship</div>
             </Link>
             <Link
-              href="/studio?tool=build"
-              className="rounded-xl p-4 transition-all hover:scale-[1.02]"
-              style={{ background: `linear-gradient(135deg, #3b82f610 0%, ${T.boxBg} 60%)`, border: "1px solid #3b82f625" }}
-            >
-              <Icon name="terminal" size={20} className="mb-2" style={{ color: "#3b82f6" }} />
-              <div className="text-sm font-bold" style={{ color: T.headerColor }}>Build Command</div>
-              <div className="text-xs opacity-50">Plan and scaffold projects</div>
-            </Link>
-            <Link
               href="/settings/connections"
-              className="rounded-xl p-4 transition-all hover:scale-[1.02]"
+              className="rounded-2xl p-4 transition-all hover:scale-[1.02]"
               style={{ background: `linear-gradient(135deg, #22c55e10 0%, ${T.boxBg} 60%)`, border: "1px solid #22c55e25" }}
             >
-              <Icon name="plug" size={20} className="mb-2" style={{ color: "#22c55e" }} />
+              <div className="flex items-center gap-2 mb-2">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg" style={{ background: "#22c55e15", border: "1px solid #22c55e30" }}>
+                  <Icon name="plug" size={16} style={{ color: "#22c55e" }} />
+                </div>
+              </div>
               <div className="text-sm font-bold" style={{ color: T.headerColor }}>Connections</div>
               <div className="text-xs opacity-50">Manage integrations</div>
             </Link>
@@ -1018,28 +1063,6 @@ export function DeveloperControlCenter() {
         </section>
       </div>
 
-      {/* Mobile sticky command bar */}
-      <div
-        className="fixed bottom-0 left-0 right-0 z-30 flex items-center justify-around border-t py-2 lg:hidden"
-        style={{ background: T.bgColor, borderColor: `${T.borderColor}40` }}
-      >
-        <Link href="/dashboard" className="flex flex-col items-center gap-0.5 text-xs" style={{ color: T.accentColor }}>
-          <Icon name="activity" size={18} />
-          <span>Dashboard</span>
-        </Link>
-        <Link href="/studio" className="flex flex-col items-center gap-0.5 text-xs opacity-60">
-          <Icon name="rocket" size={18} />
-          <span>Studio</span>
-        </Link>
-        <Link href="/agents" className="flex flex-col items-center gap-0.5 text-xs opacity-60">
-          <Icon name="bot" size={18} />
-          <span>Crew</span>
-        </Link>
-        <Link href="/settings/connections" className="flex flex-col items-center gap-0.5 text-xs opacity-60">
-          <Icon name="settings" size={18} />
-          <span>Settings</span>
-        </Link>
-      </div>
       <FloatingVoiceButton />
     </div>
   );
