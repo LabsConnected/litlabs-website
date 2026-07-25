@@ -156,7 +156,7 @@ export default function StudioTopBar({
         </button>
         {modelOpen && (
           <>
-            <div className="fixed inset-0 z-10000" onClick={() => setModelOpen(false)} aria-hidden />
+            <button className="fixed inset-0 z-10000" onClick={() => setModelOpen(false)} aria-label="Close model selector" />
             <div
               className="absolute left-0 top-full mt-1 z-10001 w-56 rounded-xl border py-1.5 shadow-2xl"
               style={{
@@ -166,7 +166,7 @@ export default function StudioTopBar({
               }}
             >
               {/* Recommended section */}
-              <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/40">
+              <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
                 Recommended
               </div>
               {MODELS.filter((m) => RECOMMENDED_IDS.includes(m.id)).map((m) => (
@@ -179,7 +179,7 @@ export default function StudioTopBar({
                 />
               ))}
               {/* Other providers */}
-              <div className="mt-1 border-t border-white/5 px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/40">
+              <div className="mt-1 border-t border-white/5 px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
                 Other providers
               </div>
               {MODELS.filter((m) => !RECOMMENDED_IDS.includes(m.id)).map((m) => (
@@ -387,7 +387,7 @@ function ModelRow({
         title={dot.label}
       />
       <span className="pointer-events-none flex-1 text-left">{model.label}</span>
-      {isLocked && <Lock size={10} className="pointer-events-none text-white/30" />}
+      {isLocked && <Lock size={10} className="pointer-events-none text-white/60" />}
       {selected && <Check size={12} className="pointer-events-none" />}
     </button>
   );
@@ -401,7 +401,7 @@ function NotifPanel({
 }) {
   return (
     <>
-      <div className="fixed inset-0 z-10000" onClick={onClose} aria-hidden />
+      <button className="fixed inset-0 z-10000" onClick={onClose} aria-label="Close notifications" />
       <div
         className="fixed right-4 top-14 z-10001 w-72 rounded-2xl border p-3 shadow-2xl"
         style={{
@@ -429,7 +429,7 @@ function NotifPanel({
           </button>
         </div>
         <div className="space-y-1">
-          <div className="rounded-xl p-3 text-center text-[11px] font-medium text-white/50">
+          <div className="rounded-xl p-3 text-center text-[11px] font-medium text-white/65">
             No new notifications
           </div>
         </div>

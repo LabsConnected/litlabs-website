@@ -249,7 +249,7 @@ export default function StudioSidebar({
             <button
               type="button"
               onClick={() => setMoreOpen(false)}
-              className="grid h-8 w-8 place-items-center rounded-lg text-white/40 transition hover:bg-white/10 hover:text-white/80"
+              className="grid h-8 w-8 place-items-center rounded-lg text-white/60 transition hover:bg-white/10 hover:text-white/80"
               aria-label="Close more tools"
             >
               <X size={14} className="pointer-events-none" />
@@ -322,7 +322,7 @@ export function MobileTabBar({
             boxShadow: `0 -8px 32px rgba(0,0,0,0.5)`,
           }}
         >
-          <div className="mb-2 text-[9px] font-bold uppercase tracking-widest opacity-50 text-white/60">
+          <div className="mb-2 text-[9px] font-bold uppercase tracking-widest opacity-70 text-white/70">
             More Tools
           </div>
           <div className="grid grid-cols-4 gap-2">

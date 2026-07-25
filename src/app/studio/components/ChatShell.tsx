@@ -201,10 +201,10 @@ export default function ChatShell({
       {/* Session drawer — floating overlay, not permanent */}
       {sessionsOpen && (
         <>
-          <div
+          <button
             className="fixed inset-0 z-40 bg-black/55"
             onClick={() => setSessionsOpen(false)}
-            aria-hidden
+            aria-label="Close sessions"
           />
           <div
             className="fixed left-12 top-0 z-50 flex h-full w-[300px] flex-col overflow-y-auto border-r border-white/10 bg-[#090910]/98 shadow-2xl"
@@ -334,7 +334,7 @@ export default function ChatShell({
               </button>
               {moreMenuOpen && (
                 <>
-                  <div className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} aria-hidden />
+                  <button className="fixed inset-0 z-40" onClick={() => setMoreMenuOpen(false)} aria-label="Close menu" />
                   <div className="absolute right-0 top-9 z-50 w-40 rounded-xl border border-white/10 bg-[#171721] p-1 shadow-2xl">
                     <button
                       type="button"

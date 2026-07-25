@@ -42,13 +42,13 @@ export default function SessionSidebar(props: Props) {
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between border-b border-white/8 px-3 py-3">
         <strong className="text-xs text-white">Chat sessions</strong>
-        <button onClick={() => props.onOpenChange(false)} className="rounded-lg p-1.5 text-white/40 hover:bg-white/8 hover:text-white" aria-label="Close sessions">
+        <button onClick={() => props.onOpenChange(false)} className="rounded-lg p-1.5 text-white/60 hover:bg-white/8 hover:text-white" aria-label="Close sessions">
           <X size={15} />
         </button>
       </div>
       <div className="space-y-2 p-3">
         <button onClick={props.onNew} className="flex w-full items-center justify-center gap-2 rounded-xl bg-violet-500 py-2.5 text-xs font-black text-white"><Plus size={14} />New chat</button>
-        <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[.035] px-3 py-2"><Search size={13} className="text-white/30" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-white/25" /></label>
+        <label className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/[.035] px-3 py-2"><Search size={13} className="text-white/60" /><input id="session-search" name="session-search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search chats" className="min-w-0 flex-1 bg-transparent text-xs text-white outline-none placeholder:text-white/40" /></label>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
         {groups.map((group) => group.items.length > 0 && <section key={group.label} className="mt-3"><div className="px-2 text-[9px] font-black uppercase tracking-[.18em] text-white/25">{group.label}</div><div className="mt-1 space-y-1">{group.items.map((session) => <div key={session.id} className="group relative"><button onClick={() => { props.onSelect(session.id); if (window.innerWidth < 768) props.onOpenChange(false); }} className={`flex w-full items-center gap-2 rounded-xl px-3 py-2.5 pr-9 text-left text-xs transition ${props.activeId === session.id ? "bg-violet-400/12 text-violet-100" : "text-white/55 hover:bg-white/5 hover:text-white"}`}><span className={`h-1.5 w-1.5 shrink-0 rounded-full ${session.pinned ? "bg-amber-300" : "bg-white/20"}`} /><span className="min-w-0 flex-1 truncate">{session.title}</span></button><button onClick={() => setMenuId(menuId === session.id ? null : session.id)} className="absolute right-2 top-2 rounded-lg p-1.5 text-white/25 opacity-60 hover:bg-white/8 hover:text-white md:opacity-0 md:group-hover:opacity-100" aria-label="Session options"><MoreHorizontal size={13} /></button>{menuId === session.id && <div className="absolute right-2 top-9 z-30 w-36 rounded-xl border border-white/10 bg-[#171721] p-1 shadow-2xl">{[

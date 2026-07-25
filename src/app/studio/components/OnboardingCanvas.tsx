@@ -114,7 +114,7 @@ export default function OnboardingCanvas({
           >
             Welcome back
           </h1>
-          <p className="mb-4 text-xs text-white/55">
+          <p className="mb-4 text-xs text-white/70">
             Ask LiTT in the panel to start building, or pick a tool from the rail.
           </p>
           <div className="flex flex-wrap justify-center gap-2">
@@ -195,7 +195,7 @@ export default function OnboardingCanvas({
       <div className="flex h-full w-full items-center justify-center p-6">
         <div className="flex flex-col items-center gap-3">
           <Loader2 size={24} className="animate-spin" style={{ color: T.accentColor }} />
-          <span className="text-[10px] font-bold uppercase tracking-widest text-white/40">
+          <span className="text-[10px] font-bold uppercase tracking-widest text-white/60">
             Loading your studio
           </span>
         </div>
@@ -212,7 +212,7 @@ export default function OnboardingCanvas({
             <h1 className="text-xl font-black tracking-tight text-white/90">
               {allDone ? "You're all set!" : "Set up your Studio"}
             </h1>
-            <p className="text-xs text-white/55">
+            <p className="text-xs text-white/70">
               {allDone
                 ? "Every step is complete. Start building something great."
                 : "Complete these steps to get the most out of LiTTree LabStudios."}
@@ -221,7 +221,7 @@ export default function OnboardingCanvas({
           <button
             type="button"
             onClick={dismiss}
-            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white/30 hover:bg-white/8 hover:text-white/60"
+            className="grid h-7 w-7 shrink-0 place-items-center rounded-lg text-white/60 hover:bg-white/8 hover:text-white/80"
             aria-label="Dismiss onboarding"
             title="Dismiss"
           >
@@ -241,7 +241,7 @@ export default function OnboardingCanvas({
               }}
             />
           </div>
-          <span className="text-[10px] font-black tabular-nums text-white/50">
+          <span className="text-[10px] font-black tabular-nums text-white/65">
             {completedCount}/{steps.length}
           </span>
         </div>
@@ -331,7 +331,7 @@ export default function OnboardingCanvas({
                         </span>
                       )}
                     </div>
-                    <p className="text-[10px] leading-relaxed text-white/50">
+                    <p className="text-[10px] leading-relaxed text-white/65">
                       {step.description}
                     </p>
                     {status === "active" && (
@@ -367,7 +367,7 @@ export default function OnboardingCanvas({
             <button
               type="button"
               onClick={dismiss}
-              className="text-[9px] font-bold text-white/40 hover:text-white/70"
+              className="text-[9px] font-bold text-white/60 hover:text-white/80"
             >
               Dismiss setup guide
             </button>
@@ -377,7 +377,7 @@ export default function OnboardingCanvas({
           <button
             type="button"
             onClick={dismiss}
-            className="mt-3 self-center text-[9px] font-bold text-white/30 hover:text-white/50"
+            className="mt-3 self-center text-[9px] font-bold text-white/60 hover:text-white/80"
           >
             Skip setup
           </button>

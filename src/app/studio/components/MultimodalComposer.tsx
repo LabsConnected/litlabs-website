@@ -270,7 +270,7 @@ export default function MultimodalComposer({
       case "idle":
         return {
           icon: Mic,
-          color: "text-white/40",
+          color: "text-white/60",
           disabled: false,
           onClick: startVoice,
         };
@@ -333,7 +333,7 @@ export default function MultimodalComposer({
       default:
         return {
           icon: Mic,
-          color: "text-white/40",
+          color: "text-white/60",
           disabled: false,
           onClick: startVoice,
         };
@@ -363,7 +363,7 @@ export default function MultimodalComposer({
               <button type="button" onClick={() => setCreateMode(null)} className="rounded-lg p-1.5 text-white/45 hover:bg-white/8 hover:text-white" aria-label="Close"><X size={16} /></button>
             </header>
             <div className="space-y-4 p-4">
-              <label className="block text-[9px] font-black uppercase tracking-[.18em] text-white/45">Prompt<textarea autoFocus value={createPrompt} onChange={(e) => setCreatePrompt(e.target.value)} rows={4} placeholder={`Describe the ${createMode} you want to create…`} className="mt-1.5 w-full resize-none rounded-xl border border-white/12 bg-white/5 p-3 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-white/30 focus:border-cyan-300/45" /></label>
+              <label htmlFor="create-prompt" className="block text-[9px] font-black uppercase tracking-[.18em] text-white/60">Prompt<textarea id="create-prompt" name="create-prompt" autoFocus value={createPrompt} onChange={(e) => setCreatePrompt(e.target.value)} rows={4} placeholder={`Describe the ${createMode} you want to create…`} className="mt-1.5 w-full resize-none rounded-xl border border-white/12 bg-white/5 p-3 text-sm font-normal normal-case tracking-normal text-white outline-none placeholder:text-white/40 focus:border-cyan-300/45" /></label>
               <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Aspect ratio</span><div className="mt-1.5 flex flex-wrap gap-2">{["1:1", "16:9", "9:16", "4:3", "3:4"].map((ratio) => <button type="button" key={ratio} onClick={() => setCreateAspect(ratio)} className={`rounded-lg border px-3 py-2 text-[10px] font-bold ${createAspect === ratio ? "border-cyan-300/60 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{ratio}</button>)}</div></div>
               <div><span className="text-[9px] font-black uppercase tracking-[.18em] text-white/45">Style</span><div className="mt-1.5 flex flex-wrap gap-2">{(createMode === "image" ? ["None", "LiTLabs brand", "Photorealistic", "Anime", "3D render", "Cinematic"] : ["Cinematic", "Product", "Anime motion", "Slow motion", "Music visualizer"]).map((style) => <button type="button" key={style} onClick={() => setCreateStyle(style)} className={`rounded-full border px-3 py-1.5 text-[9px] font-bold ${createStyle === style ? "border-violet-300/55 bg-violet-300/10 text-violet-200" : "border-white/10 text-white/55 hover:bg-white/5"}`}>{style}</button>)}</div></div>
               {createMode === "video" && <div className="grid grid-cols-2 gap-3"><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Duration<select value={createDuration} onChange={(e) => setCreateDuration(Number(e.target.value))} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option value={4}>4 seconds</option><option value={6}>6 seconds</option><option value={8}>8 seconds</option></select></label><label className="text-[9px] font-black uppercase tracking-wider text-white/45">Resolution<select value={createResolution} onChange={(e) => setCreateResolution(e.target.value)} className="mt-1.5 w-full rounded-lg border border-white/10 bg-[#11131d] p-2 text-xs text-white"><option>720p</option><option>1080p</option></select></label></div>}
@@ -558,13 +558,15 @@ export default function MultimodalComposer({
         <button
           type="button"
           onClick={() => setShowAdd((value) => !value)}
-          className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/45 hover:bg-white/8 hover:text-white"}`}
+          className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl border transition ${showAdd ? "rotate-45 border-cyan-300/40 bg-cyan-300/10 text-cyan-200" : "border-white/10 text-white/60 hover:bg-white/8 hover:text-white"}`}
           aria-label={showAdd ? "Close tools" : "Add tool or attachment"}
           title="Tools and attachments"
         >
           <Plus size={18} className="pointer-events-none" />
         </button>
         <textarea
+          id="composer-message"
+          name="composer-message"
           ref={textareaRef}
           value={value}
           onChange={(e) => onChange(e.target.value)}
@@ -578,6 +580,7 @@ export default function MultimodalComposer({
           className="flex-1 resize-none bg-transparent py-2.5 text-sm text-white placeholder-white/50 outline-none"
           style={{ minHeight: "52px", maxHeight: "160px" }}
           rows={1}
+          aria-label="Message input"
         />
         <button
           type="button"
@@ -614,7 +617,7 @@ export default function MultimodalComposer({
         </button>
       </div>
 
-      <div className="flex items-center justify-end px-1 text-[9px] text-white/40">
+      <div className="flex items-center justify-end px-1 text-[9px] text-white/60">
         <span className="font-bold text-cyan-200/60">{modelName}</span>
       </div>
     </div>
