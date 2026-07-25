@@ -304,11 +304,50 @@ export function useInworldSession(
 
         let sessionConfigured = false;
 
-        ws.onopen = () => {
-          setIsConnected(true);
-          // Don't set idle yet — wait for session to be configured
-        };
+        // Wait for the WebSocket to actually open before resolving connect()
+        let connectionOpen = false;
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            if (!connectionOpen) {
+              reject(new Error("Voice connection timed out. Please try again."));
+            }
+          }, 10_000);
 
+          ws.onopen = () => {
+            connectionOpen = true;
+            clearTimeout(timeout);
+            setIsConnected(true);
+            resolve();
+          };
+
+          ws.onerror = () => {
+            if (!connectionOpen) {
+              clearTimeout(timeout);
+              reject(new Error("Voice connection failed. Please try again."));
+            }
+          };
+
+          ws.onclose = (event) => {
+            clearTimeout(timeout);
+            setIsConnected(false);
+            setIsListening(false);
+            stopMicCapture();
+            stopPlayback();
+            if (useVoiceStore.getState().state !== "error") {
+              setState("idle");
+            }
+            if (event.code === 4001) {
+              setErrorState("Authentication failed. Please sign in again.");
+            } else if (event.code === 4002) {
+              setErrorState("Voice service is not configured.");
+            }
+            if (!connectionOpen) {
+              reject(new Error(`Voice connection closed (code ${event.code}).`));
+            }
+          };
+        });
+
+        // Set up message handler after connection is open
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
@@ -428,6 +467,7 @@ export function useInworldSession(
           }
         };
 
+        // Post-connection error/close handlers (these override the promise ones after resolve)
         ws.onerror = () => {
           setErrorState("Voice connection failed. Please try again.");
           setError("Voice connection failed.");

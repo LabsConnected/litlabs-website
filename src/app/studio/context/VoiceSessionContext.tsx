@@ -207,6 +207,14 @@ export function VoiceSessionProvider({
   // Sync Inworld connection state to voiceState
   const inworldConnectedRef = useRef(false);
 
+  // Sync Inworld mic level to context micLevel for waveform visualization
+  const inworldAudioLevel = useVoiceStore((s) => s.audioLevel);
+  useEffect(() => {
+    if (inworldConnectedRef.current) {
+      setMicLevel(inworldAudioLevel);
+    }
+  }, [inworldAudioLevel]);
+
   // Keep voiceStateRef in sync
   useEffect(() => {
     voiceStateRef.current = voiceState;
