@@ -2540,23 +2540,20 @@ main {
 }
 
 /* ── Studio responsive layout ──────────────────────────────────── */
-/* Desktop: 3-col grid with JS-controlled panel width */
+/* Mobile: 1-col (only main visible). Desktop: 4-col grid */
 .studio-grid-responsive {
-  grid-template-columns: 48px minmax(0, 1fr) 340px;
+  grid-template-columns: minmax(0, 1fr);
 }
 
 @media (min-width: 1051px) {
   .studio-grid-responsive {
-    grid-template-columns: 48px minmax(0, 1fr) var(--litt-panel-width, 340px);
+    grid-template-columns: 48px minmax(0, 1fr) 4px var(--litt-panel-width, 340px);
   }
 }
 
 @media (max-width: 1050px) {
   .studio-grid-responsive {
     grid-template-columns: minmax(0, 1fr) !important;
-  }
-  .studio-shell {
-    grid-template-columns: 48px minmax(0, 1fr) !important;
   }
   .litt-panel {
     display: none !important;

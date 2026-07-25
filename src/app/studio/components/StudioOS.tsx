@@ -227,7 +227,7 @@ export default function StudioOS() {
 
         {/* Main content area: 1-col on mobile, 3-col on desktop */}
         <div
-          className="grid min-h-0 min-w-0 flex-1 overflow-hidden studio-shell studio-grid-responsive"
+          className="grid min-h-0 min-w-0 flex-1 overflow-hidden studio-grid-responsive pb-[calc(56px+env(safe-area-inset-bottom))] md:pb-0"
           style={{ ["--litt-panel-width" as string]: `${littPanelWidth}px` }}
         >
           {/* Tool rail — hidden on mobile, MobileTabBar at bottom handles tool switching */}
