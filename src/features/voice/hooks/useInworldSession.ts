@@ -244,10 +244,10 @@ export function useInworldSession(
       } else {
         setErrorState(`Microphone error: ${message}`);
       }
-      setError(error);
+      setError(message);
       setState("error");
     }
-  }, [error, setState, setError]);
+  }, [setState, setError]);
 
   const stopMicCapture = useCallback(() => {
     if (animationFrameRef.current) {
