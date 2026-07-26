@@ -1,5 +1,4 @@
 import type { Metadata, Viewport } from "next";
-import { Inter, JetBrains_Mono, Space_Grotesk, Sora, Pixelify_Sans, Orbitron, Press_Start_2P, Chakra_Petch, Rajdhani } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import { ClerkAuthContextProvider } from "@/context/ClerkAuthContext";
 import { ThemeProvider } from "@/context/ThemeContext";
@@ -12,63 +11,6 @@ import { GoogleAnalytics } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./globals.css";
-
-const inter = Inter({
-  subsets: ["latin"],
-  variable: "--font-inter",
-  display: "swap",
-});
-
-const jetbrainsMono = JetBrains_Mono({
-  subsets: ["latin"],
-  variable: "--font-jetbrains",
-  display: "swap",
-});
-
-const spaceGrotesk = Space_Grotesk({
-  subsets: ["latin"],
-  variable: "--font-space-grotesk",
-  display: "swap",
-});
-
-const sora = Sora({
-  subsets: ["latin"],
-  variable: "--font-sora",
-  display: "swap",
-});
-
-const pixelifySans = Pixelify_Sans({
-  subsets: ["latin"],
-  variable: "--font-pixelify-sans",
-  display: "swap",
-});
-
-const orbitron = Orbitron({
-  subsets: ["latin"],
-  variable: "--font-orbitron",
-  display: "swap",
-});
-
-const pressStart2P = Press_Start_2P({
-  subsets: ["latin"],
-  variable: "--font-press-start-2p",
-  display: "swap",
-  weight: ["400"],
-});
-
-const chakraPetch = Chakra_Petch({
-  subsets: ["latin"],
-  variable: "--font-chakra-petch",
-  display: "swap",
-  weight: ["400", "500", "600", "700"],
-});
-
-const rajdhani = Rajdhani({
-  subsets: ["latin"],
-  variable: "--font-rajdhani",
-  display: "swap",
-  weight: ["300", "400", "500", "600", "700"],
-});
 
 export const viewport: Viewport = {
   width: "device-width",
@@ -165,7 +107,13 @@ export default function RootLayout({
   );
 
   return (
-    <html lang="en" className={`${inter.variable} ${jetbrainsMono.variable} ${spaceGrotesk.variable} ${sora.variable} ${pixelifySans.variable} ${orbitron.variable} ${pressStart2P.variable} ${chakraPetch.variable} ${rajdhani.variable}`}>
+    <html lang="en">
+      <link rel="preconnect" href="https://fonts.googleapis.com" />
+      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
+      <link
+        rel="stylesheet"
+        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Pixelify+Sans:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Press+Start+2P&family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@300;400;500;600;700&display=swap"
+      />
       <link
         rel="preconnect"
         href="https://accounts.dev"

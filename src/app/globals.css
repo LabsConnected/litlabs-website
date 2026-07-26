@@ -7,6 +7,20 @@
    ============================================================ */
 
 :root {
+  /* Font families — loaded via <link> in layout.tsx (Google Fonts CDN).
+     Previously used next/font/google which fetched at build time and
+     timed out on slow networks. These CSS vars match the old next/font
+     variable names so all existing var(--font-*) references work. */
+  --font-inter: "Inter", "Segoe UI", system-ui, sans-serif;
+  --font-jetbrains: "JetBrains Mono", "Fira Code", "Courier New", monospace;
+  --font-space-grotesk: "Space Grotesk", "Inter", system-ui, sans-serif;
+  --font-sora: "Sora", "Inter", system-ui, sans-serif;
+  --font-pixelify-sans: "Pixelify Sans", "Press Start 2P", monospace;
+  --font-orbitron: "Orbitron", "Chakra Petch", system-ui, sans-serif;
+  --font-press-start-2p: "Press Start 2P", "Pixelify Sans", monospace;
+  --font-chakra-petch: "Chakra Petch", "Inter", system-ui, sans-serif;
+  --font-rajdhani: "Rajdhani", "Inter", system-ui, sans-serif;
+
   /* Cinematic Studio — deep space, electric cyan, violet and ember */
   --bg-color: #03050b;
   --bg-elevated: #080b16;
