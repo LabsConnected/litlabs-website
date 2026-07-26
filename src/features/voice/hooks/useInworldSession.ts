@@ -6,10 +6,8 @@ import { getVoiceConnection } from "@/lib/voice-client";
 import type { VoiceAgentId } from "@/features/voice/types";
 
 const TARGET_SAMPLE_RATE = 24000;
-const CHUNK_SIZE = 4096;
+const CHUNK_SIZE = 2048;
 const FADE_SAMPLES = 48;
-// Pre-buffer this many chunks before starting playback to avoid underruns.
-const PREBUFFER_CHUNKS = 3;
 
 interface UseInworldSessionOptions {
   onTranscript?: (text: string, final: boolean) => void;
@@ -58,57 +56,50 @@ export function useInworldSession(
   const [error, setErrorState] = useState<string | null>(null);
 
   // --- Audio playback ---
-  // Uses scheduled seamless playback: each chunk's start time is computed
-  // from the previous chunk's end time, eliminating gaps between chunks.
+  // Matches the official Inworld quickstart pattern: onended chaining with
+  // nextPlayTime scheduling + 48-sample fades to avoid clicks at chunk boundaries.
   const nextPlayTimeRef = useRef(0);
-  const prebufferCountRef = useRef(0);
+  const playNextChunkRef = useRef<() => void>(() => {});
 
-  const drainQueue = useCallback(() => {
+  const playNextChunk = useCallback(() => {
     if (interruptedRef.current) {
       playbackQueueRef.current = [];
       isPlayingRef.current = false;
       nextPlayTimeRef.current = 0;
-      prebufferCountRef.current = 0;
       return;
     }
 
+    const chunk = playbackQueueRef.current.shift();
+    if (!chunk) {
+      isPlayingRef.current = false;
+      nextPlayTimeRef.current = 0;
+      return;
+    }
+
+    isPlayingRef.current = true;
     const ctx = playbackContextRef.current;
     if (!ctx) return;
 
-    // Pre-buffer: wait until we have enough chunks before starting playback.
-    // This prevents underruns on the first burst of audio.
-    if (!isPlayingRef.current && prebufferCountRef.current < PREBUFFER_CHUNKS) {
-      return;
-    }
+    const source = ctx.createBufferSource();
+    source.buffer = chunk;
+    source.connect(ctx.destination);
+    playbackSourceRef.current = source;
 
-    if (!isPlayingRef.current) {
-      // Initialize play time to current context time + small lead
-      nextPlayTimeRef.current = ctx.currentTime + 0.05;
-      isPlayingRef.current = true;
-    }
+    // Schedule this chunk to start exactly when the previous one ends
+    const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
+    nextPlayTimeRef.current = startTime + chunk.duration;
 
-    while (playbackQueueRef.current.length > 0) {
-      const chunk = playbackQueueRef.current.shift();
-      if (!chunk) break;
+    source.onended = () => {
+      playbackSourceRef.current = null;
+      playNextChunkRef.current();
+    };
 
-      const source = ctx.createBufferSource();
-      source.buffer = chunk;
-      source.connect(ctx.destination);
-
-      // Schedule this chunk to start exactly when the previous one ends
-      const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
-      source.start(startTime);
-      nextPlayTimeRef.current = startTime + chunk.duration;
-    }
-
-    // If we've drained everything, mark as not playing so the next
-    // enqueue cycle can re-arm with a fresh pre-buffer.
-    if (playbackQueueRef.current.length === 0) {
-      isPlayingRef.current = false;
-      prebufferCountRef.current = 0;
-      nextPlayTimeRef.current = 0;
-    }
+    source.start(startTime);
   }, []);
+
+  useEffect(() => {
+    playNextChunkRef.current = playNextChunk;
+  }, [playNextChunk]);
 
   const enqueueAudioChunk = useCallback(
     (base64Pcm16: string) => {
@@ -132,21 +123,23 @@ export function useInworldSession(
         float32[i] = int16 / 32768;
       }
 
-      // NOTE: No per-chunk fade — seamless scheduled playback eliminates
-      // clicks at chunk boundaries. Fades were causing volume dips.
+      // Apply fade in/out to avoid clicks at chunk boundaries
+      const fadeSamples = Math.min(FADE_SAMPLES, sampleCount);
+      for (let i = 0; i < fadeSamples; i++) {
+        const gain = i / fadeSamples;
+        float32[i] *= gain;
+        float32[sampleCount - 1 - i] *= gain;
+      }
 
       const audioBuffer = ctx.createBuffer(1, sampleCount, TARGET_SAMPLE_RATE);
       audioBuffer.copyToChannel(float32, 0);
       playbackQueueRef.current.push(audioBuffer);
 
       if (!isPlayingRef.current) {
-        prebufferCountRef.current++;
+        playNextChunk();
       }
-
-      // Try to drain — will only start playing once pre-buffer is satisfied
-      drainQueue();
     },
-    [drainQueue],
+    [playNextChunk],
   );
 
   const stopPlayback = useCallback(() => {
@@ -161,7 +154,6 @@ export function useInworldSession(
     }
     isPlayingRef.current = false;
     nextPlayTimeRef.current = 0;
-    prebufferCountRef.current = 0;
   }, []);
 
   // --- Microphone capture ---
@@ -223,11 +215,7 @@ export function useInworldSession(
       };
 
       source.connect(processor);
-      // NOTE: Do NOT connect processor to audioContext.destination — that
-      // would route microphone audio to the speakers, causing echo/feedback.
-      // ScriptProcessorNode still fires onaudioprocess even without a
-      // destination connection as long as it's connected to the source.
-      processor.connect(audioContext.createGain());
+      processor.connect(audioContext.destination);
 
       setIsListening(true);
       setState("listening");
@@ -382,6 +370,7 @@ export function useInworldSession(
                       output_modalities: ["audio"],
                       audio: {
                         input: {
+                          format: { type: "audio/pcm", rate: 24000 },
                           transcription: {
                             model: "assemblyai/u3-rt-pro",
                           },
@@ -393,6 +382,7 @@ export function useInworldSession(
                           },
                         },
                         output: {
+                          format: { type: "audio/pcm", rate: 24000 },
                           model: "inworld-tts-2",
                           voice,
                         },
@@ -401,6 +391,13 @@ export function useInworldSession(
                         stt: {
                           voice_profile: false,
                         },
+                        tts: {
+                          delivery_mode: "CREATIVE",
+                          segmenter_strategy: "full_turn",
+                          steering_handling: "emit_once",
+                        },
+                        backchannel: { enabled: true },
+                        responsiveness: { enabled: true },
                       },
                     },
                   }));

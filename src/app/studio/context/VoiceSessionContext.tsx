@@ -469,10 +469,11 @@ export function VoiceSessionProvider({
       // non-fatal — mic level won't work but recognition can continue
     }
 
-    // --- Try Inworld first (primary voice provider) ---
+    // --- Inworld is the only voice provider ---
+    // Old fallback paths (SpeechRecognition, MediaRecorder, ElevenLabs TTS,
+    // browser speechSynthesis) have been removed. Inworld handles STT + LLM + TTS.
     try {
-      console.debug("[Voice] attempting Inworld session");
-      // Stop our local stream — Inworld manages its own mic capture
+      console.debug("[Voice] starting Inworld session");
       activeStream?.getTracks().forEach((t) => t.stop());
       activeStream = null;
       if (streamRef.current) {
@@ -495,224 +496,16 @@ export function VoiceSessionProvider({
       console.debug("[Voice] Inworld session connected");
       return;
     } catch (inworldErr) {
-      console.warn("[Voice] Inworld failed, falling back to SpeechRecognition:", inworldErr);
+      console.warn("[Voice] Inworld failed:", inworldErr);
       inworldConnectedRef.current = false;
-      // Re-acquire mic stream for fallback path
-      try {
-        const fallbackStream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-            ...(selectedDeviceId ? { deviceId: { exact: selectedDeviceId } } : {}),
-          },
-        });
-        activeStream = fallbackStream;
-        streamRef.current = fallbackStream;
-        const ctx = new AudioContext();
-        audioCtxRef.current = ctx;
-        if (ctx.state === "suspended") await ctx.resume();
-        const analyser = ctx.createAnalyser();
-        analyser.fftSize = 256;
-        analyserRef.current = analyser;
-        const source = ctx.createMediaStreamSource(fallbackStream);
-        source.connect(analyser);
-      } catch {
-        // If we can't re-acquire mic, report error
-        setVoiceState("error");
-        voiceStateRef.current = "error";
-        setErrorMessage("Voice connection failed and microphone could not be re-acquired.");
-        cleanup();
-        return;
-      }
-    }
-
-    // --- SpeechRecognition fallback ---
-    const SR = window.SpeechRecognition ?? window.webkitSpeechRecognition;
-    if (!SR) {
-      try {
-        const preferredType = [
-          "audio/webm;codecs=opus",
-          "audio/webm",
-          "audio/ogg;codecs=opus",
-        ].find((type) => MediaRecorder.isTypeSupported(type));
-        const recorder = new MediaRecorder(
-          stream,
-          preferredType ? { mimeType: preferredType } : undefined,
-        );
-        recorderRef.current = recorder;
-        recorderChunksRef.current = [];
-        setVoiceMode("recording");
-        recorder.ondataavailable = (event) => {
-          if (event.data.size) recorderChunksRef.current.push(event.data);
-        };
-        recorder.onerror = () => {
-          setVoiceState("error");
-          voiceStateRef.current = "error";
-          setErrorMessage("This browser could not record the selected microphone.");
-        };
-        recorder.onstop = async () => {
-          const chunks = recorderChunksRef.current;
-          recorderChunksRef.current = [];
-          if (!chunks.length) {
-            setVoiceState("error");
-            voiceStateRef.current = "error";
-            setErrorMessage("No audio was captured. Check your microphone and try again.");
-            cleanup();
-            return;
-          }
-          setVoiceState("processing");
-          voiceStateRef.current = "processing";
-          setTiming({ recordingEndedAt: Date.now(), transcriptionStartedAt: Date.now() });
-          try {
-            const blob = new Blob(chunks, { type: recorder.mimeType || "audio/webm" });
-            const dataUrl = await blobToDataUrl(blob);
-            const response = await fetch("/api/media/transcribe", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                audioBytes: dataUrl.split(",")[1],
-                mimeType: blob.type,
-              }),
-            });
-            const data = (await response.json()) as { text?: string; error?: string };
-            if (!response.ok || !data.text?.trim()) {
-              throw new Error(data.error || "No speech was detected.");
-            }
-            const spokenText = data.text.trim();
-            setTranscript(spokenText);
-            setTiming({ transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
-            onTurnRef.current(spokenText);
-            setTiming({ aiResponseCompletedAt: Date.now() });
-            setVoiceState("idle");
-            voiceStateRef.current = "idle";
-            setVoiceMode(null);
-            cleanup();
-          } catch (error) {
-            setVoiceState("error");
-            voiceStateRef.current = "error";
-            setErrorMessage(
-              error instanceof Error ? error.message : "Voice transcription failed.",
-            );
-            cleanup();
-          }
-        };
-        recorder.start(250);
-        setVoiceState("listening");
-        voiceStateRef.current = "listening";
-        startMicLevelLoop();
-      } catch (error) {
-        setVoiceState("error");
-        voiceStateRef.current = "error";
-        setErrorMessage(
-          error instanceof Error
-            ? error.message
-            : "Voice recording is not supported in this browser.",
-        );
-        cleanup();
-      }
+      const msg = inworldErr instanceof Error ? inworldErr.message : "Voice connection failed.";
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setErrorMessage(msg);
+      cleanup();
       return;
     }
-
-    setVoiceMode("live");
-
-    const buildRecognition = () => {
-      const rec = new SR();
-      rec.continuous = true;
-      rec.interimResults = true;
-      rec.lang = "en-US";
-
-      rec.onstart = () => {
-        console.debug("[Voice] recognition started");
-        setVoiceState("listening");
-        voiceStateRef.current = "listening";
-        startMicLevelLoop();
-      };
-
-      rec.onresult = (ev: SpeechRecognitionEvent) => {
-        let finalText = "";
-        let interimText = "";
-        for (let i = ev.resultIndex; i < ev.results.length; i++) {
-          const r = ev.results[i];
-          if (r.isFinal) {
-            finalText += r[0].transcript;
-          } else {
-            interimText += r[0].transcript;
-          }
-        }
-        const combined = (finalText + interimText).trim();
-        setTranscript(combined);
-
-        if (combined) {
-          setVoiceState("user_speaking");
-          voiceStateRef.current = "user_speaking";
-
-          // Reset silence timer
-          if (silenceTimerRef.current !== null) {
-            clearTimeout(silenceTimerRef.current);
-          }
-          silenceTimerRef.current = setTimeout(() => {
-            silenceTimerRef.current = null;
-            const t = combined.trim();
-            if (t && t !== submittedTranscriptRef.current) {
-              submittedTranscriptRef.current = t;
-              console.debug("[Voice] silence detected, turn:", t);
-              activeRef.current = false;
-              setVoiceState("processing");
-              voiceStateRef.current = "processing";
-              setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
-              cleanup();
-              onTurnRef.current(t);
-              setTiming({ aiResponseCompletedAt: Date.now() });
-              setVoiceState("idle");
-              voiceStateRef.current = "idle";
-              setVoiceMode(null);
-            }
-          }, SILENCE_TIMEOUT_MS);
-        }
-      };
-
-      rec.onerror = (ev: SpeechRecognitionErrorEvent) => {
-        if (ev.error === "aborted" || ev.error === "no-speech") return;
-        console.error("[Voice] recognition error:", ev.error);
-        setVoiceState("error");
-        voiceStateRef.current = "error";
-        setErrorMessage(`Speech recognition error: ${ev.error}`);
-      };
-
-      rec.onend = () => {
-        console.debug("[Voice] recognition ended, active:", activeRef.current);
-        const shouldRestart =
-          activeRef.current &&
-          voiceStateRef.current !== "assistant_speaking" &&
-          voiceStateRef.current !== "muted" &&
-          voiceStateRef.current !== "error";
-
-        if (shouldRestart) {
-          setTimeout(() => {
-            if (activeRef.current && recognitionRef.current === rec) {
-              try {
-                rec.start();
-              } catch {
-                // recognition may already be restarted or closed
-              }
-            }
-          }, 500);
-        }
-      };
-
-      return rec;
-    };
-
-    const rec = buildRecognition();
-    recognitionRef.current = rec;
-    try {
-      rec.start();
-    } catch (err) {
-      console.error("[Voice] recognition.start() failed:", err);
-    }
-  }, [cleanup, enumerateDevices, selectedDeviceId, startMicLevelLoop, inworldSession, setTiming]);
+  }, [cleanup, enumerateDevices, selectedDeviceId, inworldSession, setTiming]);
 
   // ---------------------------------------------------------------------------
   // stopVoice
@@ -801,151 +594,11 @@ export function VoiceSessionProvider({
         return;
       }
 
-      // Stop any current TTS first (barge-in)
-      stopSpeaking();
-
-      // Pause recognition while speaking to avoid echo loops
-      if (recognitionRef.current) {
-        try {
-          recognitionRef.current.stop();
-        } catch {
-          // ignore
-        }
-      }
-
-      setVoiceState("assistant_speaking");
-      voiceStateRef.current = "assistant_speaking";
-      setTiming({ ttsStartedAt: Date.now() });
-
-      const onSpeechEnd = () => {
-        setTiming({ playbackEndedAt: Date.now() });
-        if (activeRef.current) {
-          setVoiceState("listening");
-          voiceStateRef.current = "listening";
-          startMicLevelLoop();
-          // Resume recognition after assistant finished speaking
-          try {
-            recognitionRef.current?.start();
-          } catch {
-            // ignore
-          }
-        } else {
-          setVoiceState("idle");
-          voiceStateRef.current = "idle";
-        }
-      };
-
-      // Try streaming TTS via /api/voice/speak (ElevenLabs)
-      fetch("/api/voice/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sanitized, agentId: voiceStore.activeAgent }),
-      })
-        .then(async (res) => {
-          if (!res.ok) throw new Error(`API ${res.status}`);
-
-          const contentType = res.headers.get("Content-Type") ?? "";
-          if (contentType.includes("application/json")) {
-            const data = await res.json();
-            if (data.fallback) {
-              fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-              return;
-            }
-            throw new Error(data.error ?? "Unknown TTS error");
-          }
-
-          setTiming({ ttsFirstByteAt: Date.now() });
-
-          const audioBlob = await res.blob();
-          const audioUrl = URL.createObjectURL(audioBlob);
-          const audio = new Audio(audioUrl);
-          currentAudioRef.current = audio;
-
-          audio.onended = () => {
-            URL.revokeObjectURL(audioUrl);
-            if (currentAudioRef.current === audio) {
-              currentAudioRef.current = null;
-            }
-            onSpeechEnd();
-          };
-
-          audio.onerror = () => {
-            URL.revokeObjectURL(audioUrl);
-            console.warn(
-              "[Voice] HTMLAudio error — falling back to speechSynthesis",
-            );
-            if (currentAudioRef.current === audio) {
-              currentAudioRef.current = null;
-            }
-            fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-          };
-
-          setTiming({ playbackStartedAt: Date.now() });
-          try {
-            await audio.play();
-          } catch (err) {
-            console.warn("[Voice] audio.play() blocked:", err);
-            fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-          }
-        })
-        .catch((err) => {
-          console.warn(
-            "[Voice] /api/voice/speak failed:",
-            err,
-            "— falling back to /api/media/generate-audio",
-          );
-          // Fallback to old generate-audio endpoint
-          fetch("/api/media/generate-audio", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ prompt: sanitized, voice: "Kore" }),
-          })
-            .then(async (res2) => {
-              if (!res2.ok) throw new Error(`API ${res2.status}`);
-              const data = (await res2.json()) as {
-                audioBase64?: string;
-                audioUrl?: string;
-              };
-
-              let src = "";
-              if (data.audioBase64) {
-                src = data.audioBase64.startsWith("data:")
-                  ? data.audioBase64
-                  : `data:audio/mpeg;base64,${data.audioBase64}`;
-              } else if (data.audioUrl) {
-                src = data.audioUrl;
-              } else {
-                throw new Error("No audio data in response");
-              }
-
-              const audio = new Audio(src);
-              currentAudioRef.current = audio;
-              setTiming({ playbackStartedAt: Date.now() });
-
-              audio.onended = () => {
-                if (currentAudioRef.current === audio) {
-                  currentAudioRef.current = null;
-                }
-                onSpeechEnd();
-              };
-
-              audio.onerror = () => {
-                if (currentAudioRef.current === audio) {
-                  currentAudioRef.current = null;
-                }
-                fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-              };
-
-              try {
-                await audio.play();
-              } catch {
-                fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-              }
-            })
-            .catch(() => {
-              fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
-            });
-        });
+      // Inworld not connected — can't speak
+      console.warn("[Voice] speakText called but Inworld is not connected");
+      setVoiceState("error");
+      voiceStateRef.current = "error";
+      setErrorMessage("Voice session is not active. Start a voice session first.");
     },
     [stopSpeaking, startMicLevelLoop, setTiming, inworldSession, voiceStore.activeAgent],
   );
@@ -960,16 +613,6 @@ export function VoiceSessionProvider({
     if (inworldConnectedRef.current) {
       inworldSession.interrupt();
       return;
-    }
-    if (activeRef.current) {
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
-      startMicLevelLoop();
-      try {
-        recognitionRef.current?.start();
-      } catch {
-        // ignore
-      }
     }
   }, [stopSpeaking, startMicLevelLoop, inworldSession]);
 
