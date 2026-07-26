@@ -23,7 +23,7 @@ export async function GET() {
       hasGemini: health.gemini.available,
       hasOpenRouter: health.openrouter.available,
     });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: "Health check failed" }, { status: 500 });
   }
 }

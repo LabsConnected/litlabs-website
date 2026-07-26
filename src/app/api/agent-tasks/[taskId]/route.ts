@@ -29,7 +29,7 @@ export async function GET(
     }
 
     return NextResponse.json({ task });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json(
       { error: "Internal error" },
       { status: 500 },

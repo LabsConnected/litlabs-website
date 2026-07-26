@@ -46,7 +46,7 @@ async function recallMemories(
             .limit(limit);
           if (data?.length) return data;
         }
-      } catch (err) {
+      } catch (_err) {
       }
     }
     const { data } = await supabaseAdmin
@@ -56,7 +56,7 @@ async function recallMemories(
       .order("created_at", { ascending: false })
       .limit(limit);
     return data || [];
-  } catch (err) {
+  } catch (_err) {
     return [];
   }
 }
@@ -105,7 +105,7 @@ async function persistMemory(
           metadata,
         })) as { id?: string; memoryId?: string; memory_id?: string; externalId?: string };
         supermemoryId = result.id || result.memoryId || result.memory_id || result.externalId || null;
-      } catch (err) {
+      } catch (_err) {
       }
     }
 
@@ -119,7 +119,7 @@ async function persistMemory(
       .eq("id", record.id);
 
     return record.id;
-  } catch (err) {
+  } catch (_err) {
     return null;
   }
 }

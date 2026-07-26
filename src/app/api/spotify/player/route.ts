@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
     if (res.status === 204) return NextResponse.json({ playing: false, track: null });
     if (!res.ok) return NextResponse.json({ error: "player_error" }, { status: res.status });
     return NextResponse.json(await res.json());
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
@@ -86,7 +86,7 @@ export async function POST(req: NextRequest) {
     if (res.status === 204 || res.status === 200) return NextResponse.json({ ok: true });
     const err = await res.text();
     return NextResponse.json({ error: err }, { status: res.status });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

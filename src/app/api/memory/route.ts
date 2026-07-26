@@ -99,7 +99,7 @@ export async function POST(req: NextRequest) {
           },
         });
         supermemoryId = extractSupermemoryId(supermemoryResult);
-      } catch (indexError) {
+      } catch (_indexError) {
         // Do not fail the request if indexing fails; record stays in Supabase.
       }
     }
@@ -296,7 +296,7 @@ export async function DELETE(req: NextRequest) {
           id: record.supermemory_id,
           content: record.content,
         });
-      } catch (err) {
+      } catch (_err) {
       }
     }
 

@@ -14,7 +14,7 @@ export async function GET() {
     return NextResponse.json(createTerminalToken(userId), {
       headers: { "Cache-Control": "no-store" },
     });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json(
       { error: "Terminal authentication is unavailable" },
       { status: 503 },

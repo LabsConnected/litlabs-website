@@ -6,17 +6,17 @@ export interface ConnectionAuditEntry {
 }
 
 export async function logAudit(
-  userId: string,
-  provider: string,
-  action: string,
+  _userId: string,
+  _provider: string,
+  _action: string,
   _error?: string,
-  metadata?: Record<string, unknown>,
+  _metadata?: Record<string, unknown>,
 ): Promise<void> {
 }
 
 export async function auditConnection(
-  userId: string,
-  entry: Omit<ConnectionAuditEntry, "timestamp">,
+  _userId: string,
+  _entry: Omit<ConnectionAuditEntry, "timestamp">,
 ): Promise<void> {
 }
 

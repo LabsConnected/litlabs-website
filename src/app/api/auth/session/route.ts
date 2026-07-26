@@ -16,7 +16,7 @@ export async function GET(req: NextRequest) {
         name: (payload.name as string) || null,
       },
     });
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ user: null });
   }
 }

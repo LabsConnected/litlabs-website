@@ -93,7 +93,7 @@ export async function GET() {
       },
       { headers: { "Cache-Control": "no-store" } },
     );
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json(
       { error: "Voice authentication is unavailable" },
       { status: 503 },

@@ -81,7 +81,7 @@ async function getHandler() {
         created_at: user.created_at,
       },
     });
-  } catch (err) {
+  } catch (_err) {
     return NextResponse.json(
       { error: "Failed to fetch profile" },
       { status: 500 },

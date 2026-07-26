@@ -82,7 +82,7 @@ async function creditCoinPack(
       description: `Purchased ${coinAmount} LiTTBits via Stripe`,
       metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
     });
-  } catch (err) {
+  } catch (_err) {
   }
 }
 
@@ -106,7 +106,7 @@ async function grantSubscriptionCredits(
       p_reference_type: "subscription",
       p_expires_at: expiresAt ?? undefined,
     });
-  } catch (err) {
+  } catch (_err) {
   }
 }
 
@@ -340,7 +340,7 @@ export async function POST(req: NextRequest) {
         break;
       }
     }
-  } catch (err) {
+  } catch (_err) {
     // Do not acknowledge or record failed events. Stripe must retry them.
     return NextResponse.json(
       { error: "Webhook processing failed" },

@@ -50,7 +50,7 @@ export async function GET() {
       maxAge: 60 * 60 * 24 * 180, path: "/",
     });
     return res;
-  } catch (error) {
+  } catch (_error) {
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
