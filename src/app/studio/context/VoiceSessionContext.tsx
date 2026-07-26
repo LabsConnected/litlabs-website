@@ -10,7 +10,6 @@ import {
   useState,
 } from "react";
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
-import { pickBrowserVoice, storeVoiceName, getBrowserVoiceConfig } from "@/features/voice/lib/voiceConfig";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
 import { useInworldSession } from "@/features/voice/hooks/useInworldSession";
@@ -59,39 +58,6 @@ export interface VoiceSessionCtx {
 let activeStream: MediaStream | null = null;
 
 // ---------------------------------------------------------------------------
-// SpeechRecognition type shim (not in lib.dom.d.ts by default)
-// ---------------------------------------------------------------------------
-
-interface SpeechRecognitionEvent extends Event {
-  resultIndex: number;
-  results: SpeechRecognitionResultList;
-}
-
-interface SpeechRecognitionErrorEvent extends Event {
-  error: string;
-}
-
-interface SpeechRecognitionInstance extends EventTarget {
-  continuous: boolean;
-  interimResults: boolean;
-  lang: string;
-  start(): void;
-  stop(): void;
-  abort(): void;
-  onstart: ((ev: Event) => void) | null;
-  onresult: ((ev: SpeechRecognitionEvent) => void) | null;
-  onerror: ((ev: SpeechRecognitionErrorEvent) => void) | null;
-  onend: ((ev: Event) => void) | null;
-}
-
-declare global {
-  interface Window {
-    SpeechRecognition?: new () => SpeechRecognitionInstance;
-    webkitSpeechRecognition?: new () => SpeechRecognitionInstance;
-  }
-}
-
-// ---------------------------------------------------------------------------
 // Context default
 // ---------------------------------------------------------------------------
 
@@ -125,7 +91,6 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 // ---------------------------------------------------------------------------
 
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
-const SILENCE_TIMEOUT_MS = 900;
 
 export function VoiceSessionProvider({
   children,
@@ -155,17 +120,11 @@ export function VoiceSessionProvider({
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const recognitionRef = useRef<SpeechRecognitionInstance | null>(null);
-  const recorderRef = useRef<MediaRecorder | null>(null);
-  const recorderChunksRef = useRef<Blob[]>([]);
-  const currentAudioRef = useRef<HTMLAudioElement | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const silenceTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const activeRef = useRef(false); // true while a session is live
   const voiceStateRef = useRef<VoiceState>("idle"); // mirror for RAF/async callbacks
   const onTurnRef = useRef<(text: string) => void>(noop);
-  const prevMicLevelRef = useRef(0);
   const submittedTranscriptRef = useRef("");
+  const sessionGenerationRef = useRef(0);
 
   // --- Inworld session (primary voice provider) ---
   // Use refs for callbacks to avoid capturing mutable refs in hook closures
@@ -177,7 +136,7 @@ export function VoiceSessionProvider({
     inworldOnTranscriptRef.current = (text: string, final: boolean) => {
       if (final) {
         const trimmed = text.trim();
-        if (trimmed && trimmed !== submittedTranscriptRef.current) {
+        if (trimmed && trimmed !== submittedTranscriptRef.current && activeRef.current) {
           submittedTranscriptRef.current = trimmed;
           setTranscript(trimmed);
           setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
@@ -242,40 +201,6 @@ export function VoiceSessionProvider({
       audioCtxRef.current = null;
     }
     analyserRef.current = null;
-
-    // 3. Abort SpeechRecognition
-    if (recognitionRef.current) {
-      recognitionRef.current.abort();
-      recognitionRef.current = null;
-    }
-    if (recorderRef.current) {
-      recorderRef.current.onstop = null;
-      if (recorderRef.current.state === "recording") recorderRef.current.stop();
-      recorderRef.current = null;
-      recorderChunksRef.current = [];
-    }
-
-    // 4. Stop TTS
-    if (typeof window !== "undefined") {
-      window.speechSynthesis?.cancel();
-    }
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current.src = "";
-      currentAudioRef.current = null;
-    }
-
-    // 5. Cancel RAF
-    if (rafRef.current !== null) {
-      cancelAnimationFrame(rafRef.current);
-      rafRef.current = null;
-    }
-
-    // 6. Clear silence timer
-    if (silenceTimerRef.current !== null) {
-      clearTimeout(silenceTimerRef.current);
-      silenceTimerRef.current = null;
-    }
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -308,44 +233,6 @@ export function VoiceSessionProvider({
   }, [enumerateDevices]);
 
   // ---------------------------------------------------------------------------
-  // Mic level RAF loop
-  // ---------------------------------------------------------------------------
-
-  const startMicLevelLoop = useCallback(() => {
-    const analyser = analyserRef.current;
-    if (!analyser) return;
-
-    const data = new Uint8Array(analyser.frequencyBinCount);
-
-    const tick = () => {
-      const state = voiceStateRef.current;
-      if (state !== "listening" && state !== "user_speaking") {
-        rafRef.current = null;
-        return;
-      }
-
-      analyser.getByteTimeDomainData(data);
-      let sum = 0;
-      for (let i = 0; i < data.length; i++) {
-        const v = data[i] / 128 - 1;
-        sum += v * v;
-      }
-      const rms = Math.sqrt(sum / data.length);
-      const level = Math.min(1, rms * 2.5);
-
-      if (Math.abs(level - prevMicLevelRef.current) > 0.02) {
-        prevMicLevelRef.current = level;
-        setMicLevel(level);
-      }
-
-      rafRef.current = requestAnimationFrame(tick);
-    };
-
-    if (rafRef.current !== null) cancelAnimationFrame(rafRef.current);
-    rafRef.current = requestAnimationFrame(tick);
-  }, []);
-
-  // ---------------------------------------------------------------------------
   // startVoice
   // ---------------------------------------------------------------------------
 
@@ -370,6 +257,8 @@ export function VoiceSessionProvider({
 
     // Always clean up before starting
     activeRef.current = false;
+    sessionGenerationRef.current += 1;
+    const generation = sessionGenerationRef.current;
     cleanup();
 
     // --- getUserMedia ---
@@ -414,6 +303,11 @@ export function VoiceSessionProvider({
             channelCount: 1,
           },
         });
+      }
+      // Invalidate if user stopped voice while permission prompt was open
+      if (generation !== sessionGenerationRef.current) {
+        stream.getTracks().forEach((track) => track.stop());
+        return;
       }
     } catch (err: unknown) {
       const e = err as DOMException;
@@ -519,13 +413,8 @@ export function VoiceSessionProvider({
       inworldSession.disconnect();
       inworldConnectedRef.current = false;
     }
-    if (recorderRef.current?.state === "recording") {
-      setVoiceState("processing");
-      voiceStateRef.current = "processing";
-      recorderRef.current.stop();
-      return;
-    }
     activeRef.current = false;
+    sessionGenerationRef.current += 1;
     setVoiceState("idle");
     voiceStateRef.current = "idle";
     cleanup();
@@ -533,7 +422,6 @@ export function VoiceSessionProvider({
     setMicLevel(0);
     setVoiceMode(null);
     submittedTranscriptRef.current = "";
-    prevMicLevelRef.current = 0;
   }, [cleanup, inworldSession]);
 
   // ---------------------------------------------------------------------------
@@ -543,36 +431,24 @@ export function VoiceSessionProvider({
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const next = !prev;
-      const tracks = streamRef.current?.getAudioTracks() ?? [];
-      tracks.forEach((t) => {
-        t.enabled = !next;
-      });
       if (next) {
         setVoiceState("muted");
         voiceStateRef.current = "muted";
       } else {
         setVoiceState("listening");
         voiceStateRef.current = "listening";
-        startMicLevelLoop();
       }
       console.debug("[Voice] mute toggled:", next);
       return next;
     });
-  }, [startMicLevelLoop]);
+  }, []);
 
   // ---------------------------------------------------------------------------
   // stopSpeaking
   // ---------------------------------------------------------------------------
 
   const stopSpeaking = useCallback(() => {
-    if (typeof window !== "undefined") {
-      window.speechSynthesis?.cancel();
-    }
-    if (currentAudioRef.current) {
-      currentAudioRef.current.pause();
-      currentAudioRef.current.src = "";
-      currentAudioRef.current = null;
-    }
+    // Inworld manages its own TTS; interrupt() handles stopping via inworldSession.interrupt()
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -600,7 +476,7 @@ export function VoiceSessionProvider({
       voiceStateRef.current = "error";
       setErrorMessage("Voice session is not active. Start a voice session first.");
     },
-    [stopSpeaking, startMicLevelLoop, setTiming, inworldSession, voiceStore.activeAgent],
+    [stopSpeaking, setTiming, inworldSession, voiceStore.activeAgent],
   );
 
   // ---------------------------------------------------------------------------
@@ -614,7 +490,7 @@ export function VoiceSessionProvider({
       inworldSession.interrupt();
       return;
     }
-  }, [stopSpeaking, startMicLevelLoop, inworldSession]);
+  }, [stopSpeaking, inworldSession]);
 
   // ---------------------------------------------------------------------------
   // selectDevice
@@ -715,65 +591,4 @@ export function VoiceSessionProvider({
 
 export function useVoiceSession(): VoiceSessionCtx {
   return useContext(VoiceSessionContext);
-}
-
-// ---------------------------------------------------------------------------
-// Helpers (module-level, not closures, so they don't capture stale refs)
-// ---------------------------------------------------------------------------
-
-function fallbackSynth(text: string, onEnd: () => void, agentId: "litt" | "spark" = "litt") {
-  if (typeof window === "undefined" || !window.speechSynthesis) {
-    onEnd();
-    return;
-  }
-
-  const synth = window.speechSynthesis;
-  const config = getBrowserVoiceConfig(agentId);
-
-  const speakWithVoice = () => {
-    const voices = synth.getVoices();
-    const voice = pickBrowserVoice(voices, agentId);
-
-    const utt = new SpeechSynthesisUtterance(text);
-    utt.onend = onEnd;
-    utt.onerror = onEnd;
-    utt.rate = config.rate;
-    utt.pitch = config.pitch;
-    utt.volume = config.volume;
-    if (voice) {
-      utt.voice = voice;
-      utt.lang = voice.lang;
-      storeVoiceName(agentId, voice.name);
-    }
-
-    synth.cancel();
-    synth.speak(utt);
-  };
-
-  const voices = synth.getVoices();
-  if (voices.length > 0) {
-    speakWithVoice();
-  } else {
-    synth.onvoiceschanged = () => {
-      synth.onvoiceschanged = null;
-      speakWithVoice();
-    };
-    setTimeout(() => {
-      if (synth.getVoices().length > 0) {
-        speakWithVoice();
-      } else {
-        onEnd();
-      }
-    }, 1000);
-  }
-}
-
-function blobToDataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () =>
-      reject(reader.error || new Error("Could not read microphone audio."));
-    reader.readAsDataURL(blob);
-  });
 }
