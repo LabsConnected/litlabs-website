@@ -384,6 +384,8 @@ export default function VideoTool() {
               </label>
               {uploadedImagePreview ? (
                 <div className="relative rounded-lg overflow-hidden">
+                  {/* blob: URLs are not optimisable by next/image — keep <img> */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
                   <img
                     src={uploadedImagePreview}
                     alt="First frame"
@@ -456,9 +458,10 @@ export default function VideoTool() {
               {VIDEO_MODELS.map((m) => (
                 <button
                   key={m.id}
-                  onClick={() => setModel(m.id)}
-                  disabled={isGenerating}
-                  className="w-full p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50"
+                  onClick={() => m.available && setModel(m.id)}
+                  disabled={isGenerating || !m.available}
+                  title={m.available ? undefined : `${m.label} is not yet available — server-side integration pending`}
+                  className="w-full p-2.5 text-left text-[11px] rounded border transition-all hover:scale-[1.01] disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:scale-100"
                   style={{
                     backgroundColor:
                       model === m.id ? T.accentColor + "20" : T.bgColor,
@@ -468,7 +471,9 @@ export default function VideoTool() {
                 >
                   <div className="font-bold flex items-center justify-between">
                     <span>{m.label}</span>
-                    <span className="text-[9px] opacity-60">{m.provider}</span>
+                    <span className="flex items-center gap-1 text-[9px] opacity-60">
+                      {m.available ? m.provider : <span style={{ color: "#fb7185" }}>Coming soon</span>}
+                    </span>
                   </div>
                   <div className="text-[9px] opacity-60 mt-0.5">
                     {m.desc} · {m.cost} 🪙

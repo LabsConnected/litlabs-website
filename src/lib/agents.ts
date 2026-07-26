@@ -184,7 +184,7 @@ export class AgentOrchestrator {
 
   // Create a conversation between agents
   createConversation(participants: string[], topic: string): AgentConversation {
-    const id = `conv_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const id = `conv_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`;
     const conversation: AgentConversation = {
       id,
       participants,
@@ -207,7 +207,7 @@ export class AgentOrchestrator {
     metadata?: Record<string, unknown>,
   ): AgentMessage {
     const message: AgentMessage = {
-      id: `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      id: `msg_${Date.now()}_${Math.random().toString(36).slice(2, 11)}`,
       from,
       to,
       content,

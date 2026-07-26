@@ -461,14 +461,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   title="Menu"
                 >
                   {profile?.avatarUrl ? (
-                    <>
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
-                      <img
-                        src={profile.avatarUrl}
-                        alt="Profile"
-                        className="w-6 h-6 rounded-full object-cover"
-                      />
-                    </>
+                    <Image
+                      src={profile.avatarUrl}
+                      alt="Profile"
+                      width={24}
+                      height={24}
+                      unoptimized
+                      className="w-6 h-6 rounded-full object-cover"
+                    />
                   ) : (
                     <div
                       className="w-6 h-6 rounded-full flex items-center justify-center text-[10px] font-black"

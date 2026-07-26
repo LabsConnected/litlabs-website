@@ -153,7 +153,7 @@ class LiTT {
           body: payload.body,
           data: payload.data,
           timestamp: new Date().toISOString(),
-          source: "jarvis",
+          source: "lit",
         }),
       });
       return response.ok;

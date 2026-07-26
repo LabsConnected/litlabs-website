@@ -132,6 +132,9 @@ export function VoiceSessionProvider({
   const inworldOnAgentTextRef = useRef<(delta: string) => void>(() => {});
   const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
 
+  // Intentionally no dependency array — the ref callbacks must always reflect
+  // the latest closures (so `activeRef`, `submittedTranscriptRef`, `setTiming`,
+  // `onTurnRef`, etc. are up-to-date). This is a documented React pattern.
   useEffect(() => {
     inworldOnTranscriptRef.current = (text: string, final: boolean) => {
       if (final) {
@@ -382,7 +385,7 @@ export function VoiceSessionProvider({
       voiceStateRef.current = "error";
       setErrorMessage("Voice session is not active. Start a voice session first.");
     },
-    [stopSpeaking, setTiming, inworldSession, voiceStore.activeAgent],
+    [inworldSession],
   );
 
   // ---------------------------------------------------------------------------

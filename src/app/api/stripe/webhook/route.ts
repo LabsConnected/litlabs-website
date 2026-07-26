@@ -327,7 +327,8 @@ export async function POST(req: NextRequest) {
             try {
               await sb.rpc("debit_credits", {
                 p_user_id: refundUser.id,
-                p_amount: charge.amount_refunded / 100 * 100, // convert cents to LiTTBits (approx)
+                // Stripe amount is in cents; convert to LiTTBits (1:1 with USD cents in this system).
+                p_amount: charge.amount_refunded / 100,
                 p_category: "refund",
                 p_description: `Refund for charge ${charge.id}`,
                 p_idempotency_key: `refund_${charge.id}`,

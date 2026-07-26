@@ -338,8 +338,8 @@ export default function MissionForge() {
     return () => clearTimeout(timer);
   }, [nodes, edges, missionName, hydrated]);
 
-  /* Build dynamic capability library items */
-  const capabilityLibrary: LibraryCategory = {
+  /* Build dynamic capability library items — memoized so reference is stable across renders */
+  const capabilityLibrary = useMemo<LibraryCategory>(() => ({
     label: "Installed Capabilities",
     items: installedCaps
       .filter((c) => c.enabled)
@@ -358,7 +358,7 @@ export default function MissionForge() {
           keywords: [c.capability_key, c.name],
         };
       }),
-  };
+  }), [installedCaps]);
 
   const allLibraryCategories = useMemo(() => [...STATIC_LIBRARY, capabilityLibrary], [capabilityLibrary]);
 

@@ -347,7 +347,7 @@ export async function PATCH(req: NextRequest) {
           content: record.content,
           newContent,
         });
-      } catch (err) {
+      } catch (_err) {
       }
     }
 

@@ -31,10 +31,12 @@ export class AgentWorkerMatrix {
         );
       }
 
-      const supabaseUrl =
-        process.env.NEXT_PUBLIC_SUPABASE_URL ||
-        "https://rokbfvuoqildggnhappy.supabase.co";
-
+      const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
+      if (!supabaseUrl) {
+        throw new Error(
+          "NEXT_PUBLIC_SUPABASE_URL is not configured — agent daemon cannot start without it.",
+        );
+      }
       this._supabaseAdmin = createClient(supabaseUrl, secretKey);
     }
     return this._supabaseAdmin;
