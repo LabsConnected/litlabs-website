@@ -58,8 +58,6 @@ type MarketplaceStats = {
 
 // --- Item pricing state ---
 
-type ItemPricingState = "free" | "included" | "beta_free" | "paid" | "coming_soon";
-
 const ALL_ITEMS_FREE_DURING_BETA = false;
 
 // --- Category config ---
@@ -410,7 +408,6 @@ function MarketplaceInner() {
                     accentColor={T.accentColor}
                     borderColor={T.borderColor}
                     boxBg={T.boxBg}
-                    textColor={T.textColor}
                     textMuted={T.textMuted}
                     headerColor={T.headerColor}
                   />
@@ -453,7 +450,6 @@ function MarketplaceInner() {
                     accentColor={T.accentColor}
                     borderColor={T.borderColor}
                     boxBg={T.boxBg}
-                    textColor={T.textColor}
                     textMuted={T.textMuted}
                     headerColor={T.headerColor}
                   />
@@ -604,7 +600,6 @@ const MarketplaceCard = memo(function MarketplaceCard({
   accentColor,
   borderColor,
   boxBg,
-  textColor,
   textMuted,
   headerColor,
 }: {
@@ -616,7 +611,6 @@ const MarketplaceCard = memo(function MarketplaceCard({
   accentColor: string;
   borderColor: string;
   boxBg: string;
-  textColor: string;
   textMuted: string;
   headerColor: string;
 }) {

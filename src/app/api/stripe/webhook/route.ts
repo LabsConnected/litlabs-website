@@ -149,7 +149,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  let result = "processed";
+  const result = "processed";
 
   try {
     switch (event.type) {

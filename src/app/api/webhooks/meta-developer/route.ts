@@ -38,7 +38,6 @@ export async function POST(request: NextRequest) {
   }
 
   const data = JSON.parse(body);
-  const objectType = data.object;
   const entries = data.entry || [];
 
   for (const entry of entries) {
