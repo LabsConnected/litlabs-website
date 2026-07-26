@@ -103,6 +103,15 @@ work/
 Zoo-Code/
 OmniRoute/
 
+# Generated docs and file listings
+BLUEPRINT.md
+all-src-files.txt
+
+# Railway CLI local artifacts
+voice-server/.railway/
+voice-server/.railway-config-pull-*/
+voice-server/.agents/
+
 # Misc
 *.backup
 bun.lock
