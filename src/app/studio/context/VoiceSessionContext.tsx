@@ -261,134 +261,41 @@ export function VoiceSessionProvider({
     const generation = sessionGenerationRef.current;
     cleanup();
 
-    // --- getUserMedia ---
-    let stream: MediaStream;
-    try {
-      if (!navigator.mediaDevices?.getUserMedia) {
-        throw new DOMException(
-          "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.",
-          "NotSupportedError",
-        );
-      }
-
-      const audio: MediaTrackConstraints = {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true,
-        channelCount: 1,
-        ...(selectedDeviceId
-          ? { deviceId: { exact: selectedDeviceId } }
-          : {}),
-      };
-
-      try {
-        stream = await navigator.mediaDevices.getUserMedia({ audio });
-      } catch (deviceError) {
-        const deviceException = deviceError as DOMException;
-        const savedDeviceIsStale =
-          Boolean(selectedDeviceId) &&
-          (deviceException.name === "NotFoundError" ||
-            deviceException.name === "OverconstrainedError" ||
-            deviceException.name === "DevicesNotFoundError");
-
-        if (!savedDeviceIsStale) throw deviceError;
-
-        localStorage.removeItem(DEVICE_STORAGE_KEY);
-        setSelectedDeviceId(null);
-        stream = await navigator.mediaDevices.getUserMedia({
-          audio: {
-            echoCancellation: true,
-            noiseSuppression: true,
-            autoGainControl: true,
-            channelCount: 1,
-          },
-        });
-      }
-      // Invalidate if user stopped voice while permission prompt was open
-      if (generation !== sessionGenerationRef.current) {
-        stream.getTracks().forEach((track) => track.stop());
-        return;
-      }
-    } catch (err: unknown) {
-      const e = err as DOMException;
-      let msg = "Microphone error.";
-      if (e.name === "NotAllowedError" || e.name === "PermissionDeniedError") {
-        msg =
-          "Microphone permission denied. Please allow access in browser settings and check for hardware privacy switches.";
-      } else if (
-        e.name === "NotFoundError" ||
-        e.name === "DevicesNotFoundError"
-      ) {
-        msg = "No microphone found.";
-      } else if (
-        e.name === "NotReadableError" ||
-        e.name === "TrackStartError"
-      ) {
-        msg = "Microphone is in use by another application.";
-      } else if (e.name === "NotSupportedError") {
-        msg = e.message;
-      } else if (e.message) {
-        msg = e.message;
-      }
-      console.error("[Voice] getUserMedia error:", e.name, msg);
+    // Check microphone availability (without acquiring — Inworld will acquire it)
+    if (!navigator.mediaDevices?.getUserMedia) {
+      const msg = "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.";
       setVoiceState("error");
       voiceStateRef.current = "error";
       setErrorMessage(msg);
       return;
     }
 
-    console.debug("[Voice] stream id:", stream.id);
-    activeStream = stream;
-    streamRef.current = stream;
-    activeRef.current = true;
-    await enumerateDevices();
-
-    // --- AudioContext + Analyser ---
+    // --- Inworld is the only voice provider ---
+    // Inworld handles STT + LLM + TTS. It acquires the microphone internally
+    // via startMicCapture(). We no longer do a redundant getUserMedia here.
     setVoiceState("connecting");
     voiceStateRef.current = "connecting";
 
     try {
-      const ctx = new AudioContext();
-      audioCtxRef.current = ctx;
-      if (ctx.state === "suspended") {
-        await ctx.resume();
-      }
-      const analyser = ctx.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      const source = ctx.createMediaStreamSource(stream);
-      source.connect(analyser);
-    } catch (err) {
-      console.warn("[Voice] AudioContext setup failed:", err);
-      // non-fatal — mic level won't work but recognition can continue
-    }
-
-    // --- Inworld is the only voice provider ---
-    // Old fallback paths (SpeechRecognition, MediaRecorder, ElevenLabs TTS,
-    // browser speechSynthesis) have been removed. Inworld handles STT + LLM + TTS.
-    try {
       console.debug("[Voice] starting Inworld session");
-      activeStream?.getTracks().forEach((t) => t.stop());
-      activeStream = null;
-      if (streamRef.current) {
-        streamRef.current.getTracks().forEach((t) => t.stop());
-        streamRef.current = null;
-      }
-      if (audioCtxRef.current && audioCtxRef.current.state !== "closed") {
-        audioCtxRef.current.close().catch(() => {});
-        audioCtxRef.current = null;
-      }
-      analyserRef.current = null;
-
-      setVoiceState("connecting");
-      voiceStateRef.current = "connecting";
       await inworldSession.startListening();
+
+      // Invalidate if user stopped voice while connecting
+      if (generation !== sessionGenerationRef.current) {
+        inworldSession.stopListening();
+        inworldSession.disconnect();
+        return;
+      }
+
       inworldConnectedRef.current = true;
+      activeRef.current = true;
       setVoiceMode("live");
       setVoiceState("listening");
       voiceStateRef.current = "listening";
       console.debug("[Voice] Inworld session connected");
-      return;
+
+      // Enumerate devices after permission was granted by startMicCapture
+      await enumerateDevices();
     } catch (inworldErr) {
       console.warn("[Voice] Inworld failed:", inworldErr);
       inworldConnectedRef.current = false;
@@ -397,9 +304,8 @@ export function VoiceSessionProvider({
       voiceStateRef.current = "error";
       setErrorMessage(msg);
       cleanup();
-      return;
     }
-  }, [cleanup, enumerateDevices, selectedDeviceId, inworldSession, setTiming]);
+  }, [cleanup, enumerateDevices, inworldSession, setTiming]);
 
   // ---------------------------------------------------------------------------
   // stopVoice

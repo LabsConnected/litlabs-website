@@ -306,51 +306,13 @@ export function useInworldSession(
 
         let sessionConfigured = false;
 
-        // Wait for the WebSocket to actually open before resolving connect()
-        let connectionOpen = false;
-        await new Promise<void>((resolve, reject) => {
-          const timeout = setTimeout(() => {
-            if (!connectionOpen) {
-              reject(new Error("Voice connection timed out. Please try again."));
-            }
-          }, 10_000);
+        // Set up ALL handlers BEFORE the WebSocket opens to avoid missing
+        // the session.created message (which can arrive immediately after open).
+        const handleOpen = () => {
+          setIsConnected(true);
+        };
 
-          ws.onopen = () => {
-            connectionOpen = true;
-            clearTimeout(timeout);
-            setIsConnected(true);
-            resolve();
-          };
-
-          ws.onerror = () => {
-            if (!connectionOpen) {
-              clearTimeout(timeout);
-              reject(new Error("Voice connection failed. Please try again."));
-            }
-          };
-
-          ws.onclose = (event) => {
-            clearTimeout(timeout);
-            setIsConnected(false);
-            setIsListening(false);
-            stopMicCapture();
-            stopPlayback();
-            if (useVoiceStore.getState().state !== "error") {
-              setState("idle");
-            }
-            if (event.code === 4001) {
-              setErrorState("Authentication failed. Please sign in again.");
-            } else if (event.code === 4002) {
-              setErrorState("Voice service is not configured.");
-            }
-            if (!connectionOpen) {
-              reject(new Error(`Voice connection closed (code ${event.code}).`));
-            }
-          };
-        });
-
-        // Set up message handler after connection is open
-        ws.onmessage = (event) => {
+        const handleMessage = (event: MessageEvent) => {
           try {
             const data = JSON.parse(event.data);
 
@@ -405,7 +367,7 @@ export function useInworldSession(
                 break;
 
               case "session.updated":
-                setState("idle");
+                // Session is configured — ready for audio
                 break;
 
               case "input_audio_buffer.speech_started":
@@ -478,14 +440,7 @@ export function useInworldSession(
           }
         };
 
-        // Post-connection error/close handlers (these override the promise ones after resolve)
-        ws.onerror = () => {
-          setErrorState("Voice connection failed. Please try again.");
-          setError("Voice connection failed.");
-          setState("error");
-        };
-
-        ws.onclose = (event) => {
+        const handleClose = (event: CloseEvent) => {
           setIsConnected(false);
           setIsListening(false);
           stopMicCapture();
@@ -499,6 +454,50 @@ export function useInworldSession(
             setErrorState("Voice service is not configured.");
           }
         };
+
+        const handleError = () => {
+          setErrorState("Voice connection failed. Please try again.");
+          setError("Voice connection failed.");
+          setState("error");
+        };
+
+        // Wait for the WebSocket to open before resolving connect()
+        let connectionOpen = false;
+        await new Promise<void>((resolve, reject) => {
+          const timeout = setTimeout(() => {
+            if (!connectionOpen) {
+              reject(new Error("Voice connection timed out. Please try again."));
+            }
+          }, 10_000);
+
+          ws.onopen = () => {
+            connectionOpen = true;
+            clearTimeout(timeout);
+            handleOpen();
+            resolve();
+          };
+
+          ws.onerror = () => {
+            if (!connectionOpen) {
+              clearTimeout(timeout);
+              reject(new Error("Voice connection failed. Please try again."));
+            } else {
+              handleError();
+            }
+          };
+
+          ws.onclose = (event) => {
+            clearTimeout(timeout);
+            if (!connectionOpen) {
+              reject(new Error(`Voice connection closed (code ${event.code}).`));
+            } else {
+              handleClose(event);
+            }
+          };
+
+          // Set up message handler immediately to avoid missing session.created
+          ws.onmessage = handleMessage;
+        });
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to connect";
         setErrorState(message);
