@@ -8,6 +8,10 @@ const INWORLD_ENDPOINT =
   "wss://api.inworld.ai/api/v1/realtime/session";
 const INWORLD_API_KEY = process.env.INWORLD_API_KEY;
 const VOICE_AUTH_SECRET = process.env.VOICE_AUTH_SECRET;
+const MAX_CONCURRENT_SESSIONS_PER_USER = Number(
+  process.env.MAX_CONCURRENT_SESSIONS_PER_USER || 3,
+);
+const MAX_TOTAL_SESSIONS = Number(process.env.MAX_TOTAL_SESSIONS || 50);
 
 if (!INWORLD_API_KEY) {
   console.error("[voice-proxy] INWORLD_API_KEY is not set. Exiting.");
@@ -17,6 +21,34 @@ if (!INWORLD_API_KEY) {
 if (!VOICE_AUTH_SECRET || VOICE_AUTH_SECRET.length < 32) {
   console.error("[voice-proxy] VOICE_AUTH_SECRET must be set (>= 32 chars). Exiting.");
   process.exit(1);
+}
+
+// ---------------------------------------------------------------------------
+// Per-user and global connection accounting (in-memory, single-replica)
+// Uses string session IDs instead of WebSocket refs for reliable Set ops.
+// ---------------------------------------------------------------------------
+let sessionCounter = 0;
+const activeSessionsByUser = new Map(); // userId -> Set<sessionId>
+const totalActiveSessions = new Set(); // all active sessionIds
+
+function registerSession(userId) {
+  const sessionId = `s${++sessionCounter}`;
+  const userSessions = activeSessionsByUser.get(userId) ?? new Set();
+  userSessions.add(sessionId);
+  activeSessionsByUser.set(userId, userSessions);
+  totalActiveSessions.add(sessionId);
+  return { sessionId, userSessionCount: userSessions.size };
+}
+
+function cleanupSession(userId, sessionId) {
+  const userSessions = activeSessionsByUser.get(userId);
+  if (userSessions) {
+    userSessions.delete(sessionId);
+    if (userSessions.size === 0) {
+      activeSessionsByUser.delete(userId);
+    }
+  }
+  totalActiveSessions.delete(sessionId);
 }
 
 function verifyToken(token) {
@@ -41,8 +73,21 @@ function verifyToken(token) {
 }
 
 const server = createServer((req, res) => {
-  res.writeHead(200, { "Content-Type": "application/json" });
-  res.end(JSON.stringify({ status: "ok", service: "voice-proxy" }));
+  // Railway healthcheck — lightweight, no auth
+  if (req.url === "/health" || req.url === "/") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        status: "ok",
+        service: "voice-proxy",
+        activeSessions: totalActiveSessions.size,
+        activeUsers: activeSessionsByUser.size,
+      }),
+    );
+    return;
+  }
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Not found" }));
 });
 
 const wss = new WebSocketServer({ server, path: PATH });
@@ -64,10 +109,41 @@ wss.on("connection", (browserWs, req) => {
     return;
   }
 
-  console.debug(`[voice-proxy] Authenticated user: ${payload.sub}`);
+  const userId = payload.sub || "unknown";
 
-  const sessionId = `voice-${Date.now()}`;
-  const inworldUrl = `${INWORLD_ENDPOINT}?key=${sessionId}&protocol=realtime`;
+  // --- Rate limiting: per-user concurrent sessions ---
+  const existingUserSessions = activeSessionsByUser.get(userId);
+  if (existingUserSessions && existingUserSessions.size >= MAX_CONCURRENT_SESSIONS_PER_USER) {
+    console.warn(
+      `[voice-proxy] User ${userId} exceeded concurrent session limit (${MAX_CONCURRENT_SESSIONS_PER_USER})`,
+    );
+    browserWs.close(4003, "Too many concurrent voice sessions");
+    return;
+  }
+
+  // --- Rate limiting: global concurrent sessions ---
+  if (totalActiveSessions.size >= MAX_TOTAL_SESSIONS) {
+    console.warn(
+      `[voice-proxy] Global session limit reached (${MAX_TOTAL_SESSIONS})`,
+    );
+    browserWs.close(1013, "Voice service at capacity");
+    return;
+  }
+
+  // Register this session for accounting IMMEDIATELY (before async Inworld dial)
+  // so concurrent connections from the same user are counted correctly.
+  const { sessionId: acctSessionId, userSessionCount } = registerSession(userId);
+  let cleanedUp = false;
+  const cleanup = () => {
+    if (cleanedUp) return;
+    cleanedUp = true;
+    cleanupSession(userId, acctSessionId);
+  };
+
+  console.info(`[voice-proxy] Authenticated user: ${userId} (sessions: ${userSessionCount})`);
+
+  const inworldSessionId = `voice-${Date.now()}`;
+  const inworldUrl = `${INWORLD_ENDPOINT}?key=${inworldSessionId}&protocol=realtime`;
 
   let inworldWs;
   try {
@@ -78,6 +154,7 @@ wss.on("connection", (browserWs, req) => {
     });
   } catch (err) {
     console.error("[voice-proxy] Failed to connect to Inworld:", err.message);
+    cleanup();
     browserWs.close(1011, "Voice service unavailable");
     return;
   }
@@ -90,14 +167,16 @@ wss.on("connection", (browserWs, req) => {
   });
 
   inworldWs.on("close", (code, reason) => {
-    console.debug(`[voice-proxy] Inworld closed: ${code}`);
+    console.info(`[voice-proxy] Inworld closed: ${code} (user: ${userId})`);
+    cleanup();
     if (browserWs.readyState === WebSocket.OPEN) {
       browserWs.close(code, reason);
     }
   });
 
   inworldWs.on("error", (err) => {
-    console.error("[voice-proxy] Inworld error:", err.message);
+    console.error("[voice-proxy] Inworld error:", err.message, `(user: ${userId})`);
+    cleanup();
     if (browserWs.readyState === WebSocket.OPEN) {
       browserWs.close(1011, "Voice service error");
     }
@@ -111,14 +190,16 @@ wss.on("connection", (browserWs, req) => {
   });
 
   browserWs.on("close", () => {
-    console.debug("[voice-proxy] Browser closed connection");
+    console.info(`[voice-proxy] Browser closed connection (user: ${userId})`);
+    cleanup();
     if (inworldWs.readyState === WebSocket.OPEN) {
       inworldWs.close(1000, "Client disconnect");
     }
   });
 
   browserWs.on("error", (err) => {
-    console.error("[voice-proxy] Browser error:", err.message);
+    console.error("[voice-proxy] Browser error:", err.message, `(user: ${userId})`);
+    cleanup();
     if (inworldWs.readyState === WebSocket.OPEN) {
       inworldWs.close(1000, "Client error");
     }
