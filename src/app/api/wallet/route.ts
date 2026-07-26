@@ -1,9 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { getUserWallet } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
-import { adjustWalletBalance } from "@/lib/wallet-ledger";
+import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
 
 /**
  * GET /api/wallet
@@ -16,11 +15,15 @@ async function getHandler() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
-    const wallet = await getUserWallet(clerkId);
+    const wallet = await getCreditBalances(clerkId);
     return NextResponse.json({
-      balance: wallet.balance,
-      last_claim_date: wallet.last_claim_date,
-      updated_at: wallet.updated_at,
+      balance: wallet.total,
+      balances: {
+        monthly: wallet.monthly,
+        purchased: wallet.purchased,
+        beta_promotional: wallet.betaPromotional,
+      },
+      last_claim_date: wallet.lastDailyClaim,
     });
   } catch {
     return NextResponse.json(

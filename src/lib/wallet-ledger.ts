@@ -7,6 +7,53 @@ export type WalletAdjustment = {
   replayed: boolean;
 };
 
+export type CreditBalances = {
+  monthly: number;
+  purchased: number;
+  betaPromotional: number;
+  total: number;
+  lastDailyClaim: string | null;
+};
+
+async function getUserId(clerkId: string): Promise<string> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Wallet service is not configured");
+  const { data, error } = await admin
+    .from("users")
+    .select("id")
+    .eq("clerk_id", clerkId)
+    .single();
+  if (error || !data?.id) throw new Error("Wallet user was not found");
+  return data.id;
+}
+
+export async function getCreditBalances(clerkId: string): Promise<CreditBalances> {
+  const admin = getSupabaseAdmin();
+  if (!admin) throw new Error("Wallet service is not configured");
+  const userId = await getUserId(clerkId);
+  const [{ data, error }, { data: daily }] = await Promise.all([
+    admin.rpc("get_user_balances", { p_user_id: userId }),
+    admin
+      .from("credit_ledger")
+      .select("created_at")
+      .eq("user_id", userId)
+      .eq("category", "promotion")
+      .like("idempotency_key", "daily:%")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle(),
+  ]);
+  if (error) throw new Error(`Wallet balance lookup failed: ${error.message}`);
+  const row = Array.isArray(data) ? data[0] : data;
+  return {
+    monthly: Math.max(0, Number(row?.monthly ?? 0)),
+    purchased: Math.max(0, Number(row?.purchased ?? 0)),
+    betaPromotional: Math.max(0, Number(row?.beta_promotional ?? 0)),
+    total: Math.max(0, Number(row?.total ?? 0)),
+    lastDailyClaim: daily?.created_at ?? null,
+  };
+}
+
 export async function adjustWalletBalance(params: {
   clerkId: string;
   amount: number;
@@ -17,22 +64,38 @@ export async function adjustWalletBalance(params: {
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("Wallet service is not configured");
 
-  const { data, error } = await admin.rpc("adjust_wallet_balance", {
-    p_clerk_id: params.clerkId,
-    p_amount: params.amount,
-    p_type: params.type,
-    p_description: params.reason,
-    p_idempotency_key: params.idempotencyKey,
-  });
+  const userId = await getUserId(params.clerkId);
+  const before = await getCreditBalances(params.clerkId);
+  const isDebit = params.amount < 0;
+  const { data, error } = isDebit
+    ? await admin.rpc("debit_credits", {
+        p_user_id: userId,
+        p_amount: Math.abs(params.amount),
+        p_category: params.type === "refund" ? "refund" : "usage",
+        p_description: params.reason,
+        p_idempotency_key: params.idempotencyKey,
+      })
+    : await admin.rpc("grant_credits", {
+        p_user_id: userId,
+        p_amount: params.amount,
+        p_category: params.type === "purchase" ? "purchase" : params.type === "correction" ? "adjustment" : "promotion",
+        p_balance_bucket: params.type === "purchase" || params.type === "correction" ? "purchased" : "beta_promotional",
+        p_description: params.reason,
+        p_idempotency_key: params.idempotencyKey,
+      });
   if (error) throw new Error(`Wallet adjustment failed: ${error.message}`);
 
   const row = Array.isArray(data) ? data[0] : data;
-  if (!row || typeof row.balance !== "number") {
+  const balance = Number(row?.remaining ?? row?.total_after);
+  if (!row || !Number.isFinite(balance)) {
     throw new Error("Wallet adjustment returned an invalid result");
   }
+  if (isDebit && row.success === false && balance < Math.abs(params.amount)) {
+    throw new Error("Insufficient balance");
+  }
   return {
-    balance: row.balance,
-    previousBalance: Number(row.previous_balance ?? row.balance - params.amount),
-    replayed: Boolean(row.replayed),
+    balance,
+    previousBalance: before.total,
+    replayed: isDebit ? row.success === false && balance === before.total : row.granted === false,
   };
 }
