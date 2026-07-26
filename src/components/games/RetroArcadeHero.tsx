@@ -1,7 +1,7 @@
 import Image from "next/image";
 import Link from "next/link";
 
-const HERO_SRC = "/images/games/litt-retro-arcade-hero.svg";
+const HERO_SRC = "/images/games/litt-retro-arcade-hero.png";
 
 export function RetroArcadeHero({ variant = "full" }: { variant?: "full" | "banner" }) {
   return (
@@ -27,25 +27,19 @@ export function RetroArcadeHero({ variant = "full" }: { variant?: "full" | "bann
             fill
             priority
             sizes="(max-width: 768px) 100vw, (max-width: 1440px) 92vw, 1400px"
-            className="object-cover object-center sm:object-center"
+            className="object-cover object-center"
           />
-          <div className="pointer-events-none absolute inset-0 bg-linear-to-r from-black/30 via-transparent to-transparent" />
+          <Link
+            href="/games/retro"
+            aria-label="Open Retro Arcade"
+            className="absolute left-[4.2%] top-[68.5%] h-[16%] w-[17.2%] rounded-xl focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-lime-300"
+          />
+          <Link
+            href="/games/retro?import=1"
+            aria-label="Import ROMs"
+            className="absolute left-[23.4%] top-[70.5%] h-[14%] w-[14.5%] rounded-xl focus-visible:outline-none focus-visible:ring-4 focus-visible:ring-purple-300"
+          />
         </div>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <Link
-          href="/games/retro"
-          className="inline-flex min-h-11 items-center justify-center rounded-xl bg-lime-400 px-5 py-3 font-semibold text-black transition hover:bg-lime-300 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-lime-300"
-        >
-          Open Retro Arcade
-        </Link>
-        <Link
-          href="/games/retro?import=1"
-          className="inline-flex min-h-11 items-center justify-center rounded-xl border border-purple-400/70 bg-black/40 px-5 py-3 font-semibold text-white backdrop-blur transition hover:bg-purple-500/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-purple-300"
-        >
-          Import ROMs
-        </Link>
       </div>
     </section>
   );
