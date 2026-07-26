@@ -8,6 +8,8 @@ import type { VoiceAgentId } from "@/features/voice/types";
 const TARGET_SAMPLE_RATE = 24000;
 const CHUNK_SIZE = 4096;
 const FADE_SAMPLES = 48;
+// Pre-buffer this many chunks before starting playback to avoid underruns.
+const PREBUFFER_CHUNKS = 3;
 
 interface UseInworldSessionOptions {
   onTranscript?: (text: string, final: boolean) => void;
@@ -56,41 +58,57 @@ export function useInworldSession(
   const [error, setErrorState] = useState<string | null>(null);
 
   // --- Audio playback ---
-  const playNextChunkRef = useRef<() => void>(() => {});
+  // Uses scheduled seamless playback: each chunk's start time is computed
+  // from the previous chunk's end time, eliminating gaps between chunks.
+  const nextPlayTimeRef = useRef(0);
+  const prebufferCountRef = useRef(0);
 
-  const playNextChunk = useCallback(() => {
+  const drainQueue = useCallback(() => {
     if (interruptedRef.current) {
       playbackQueueRef.current = [];
       isPlayingRef.current = false;
+      nextPlayTimeRef.current = 0;
+      prebufferCountRef.current = 0;
       return;
     }
 
-    const chunk = playbackQueueRef.current.shift();
-    if (!chunk) {
-      isPlayingRef.current = false;
-      return;
-    }
-
-    isPlayingRef.current = true;
     const ctx = playbackContextRef.current;
     if (!ctx) return;
 
-    const source = ctx.createBufferSource();
-    source.buffer = chunk;
-    source.connect(ctx.destination);
-    playbackSourceRef.current = source;
+    // Pre-buffer: wait until we have enough chunks before starting playback.
+    // This prevents underruns on the first burst of audio.
+    if (!isPlayingRef.current && prebufferCountRef.current < PREBUFFER_CHUNKS) {
+      return;
+    }
 
-    source.onended = () => {
-      playbackSourceRef.current = null;
-      playNextChunkRef.current();
-    };
+    if (!isPlayingRef.current) {
+      // Initialize play time to current context time + small lead
+      nextPlayTimeRef.current = ctx.currentTime + 0.05;
+      isPlayingRef.current = true;
+    }
 
-    source.start();
+    while (playbackQueueRef.current.length > 0) {
+      const chunk = playbackQueueRef.current.shift();
+      if (!chunk) break;
+
+      const source = ctx.createBufferSource();
+      source.buffer = chunk;
+      source.connect(ctx.destination);
+
+      // Schedule this chunk to start exactly when the previous one ends
+      const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
+      source.start(startTime);
+      nextPlayTimeRef.current = startTime + chunk.duration;
+    }
+
+    // If we've drained everything, mark as not playing so the next
+    // enqueue cycle can re-arm with a fresh pre-buffer.
+    if (playbackQueueRef.current.length === 0) {
+      isPlayingRef.current = false;
+      prebufferCountRef.current = 0;
+      nextPlayTimeRef.current = 0;
+    }
   }, []);
-
-  useEffect(() => {
-    playNextChunkRef.current = playNextChunk;
-  }, [playNextChunk]);
 
   const enqueueAudioChunk = useCallback(
     (base64Pcm16: string) => {
@@ -114,26 +132,21 @@ export function useInworldSession(
         float32[i] = int16 / 32768;
       }
 
-      // Apply fade in/out to avoid clicks
-      const fadeSamples = Math.min(FADE_SAMPLES, sampleCount);
-      for (let i = 0; i < fadeSamples; i++) {
-        const gain = i / fadeSamples;
-        float32[i] *= gain;
-      }
-      for (let i = 0; i < fadeSamples; i++) {
-        const gain = (fadeSamples - i) / fadeSamples;
-        float32[sampleCount - 1 - i] *= gain;
-      }
+      // NOTE: No per-chunk fade — seamless scheduled playback eliminates
+      // clicks at chunk boundaries. Fades were causing volume dips.
 
       const audioBuffer = ctx.createBuffer(1, sampleCount, TARGET_SAMPLE_RATE);
       audioBuffer.copyToChannel(float32, 0);
       playbackQueueRef.current.push(audioBuffer);
 
       if (!isPlayingRef.current) {
-        playNextChunk();
+        prebufferCountRef.current++;
       }
+
+      // Try to drain — will only start playing once pre-buffer is satisfied
+      drainQueue();
     },
-    [playNextChunk],
+    [drainQueue],
   );
 
   const stopPlayback = useCallback(() => {
@@ -147,6 +160,8 @@ export function useInworldSession(
       playbackSourceRef.current = null;
     }
     isPlayingRef.current = false;
+    nextPlayTimeRef.current = 0;
+    prebufferCountRef.current = 0;
   }, []);
 
   // --- Microphone capture ---
@@ -208,7 +223,11 @@ export function useInworldSession(
       };
 
       source.connect(processor);
-      processor.connect(audioContext.destination);
+      // NOTE: Do NOT connect processor to audioContext.destination — that
+      // would route microphone audio to the speakers, causing echo/feedback.
+      // ScriptProcessorNode still fires onaudioprocess even without a
+      // destination connection as long as it's connected to the source.
+      processor.connect(audioContext.createGain());
 
       setIsListening(true);
       setState("listening");
