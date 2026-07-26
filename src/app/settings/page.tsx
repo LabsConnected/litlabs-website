@@ -718,6 +718,8 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         <div className="flex items-center gap-4">
           {/* Profile picture with upload overlay */}
           <div className="relative group shrink-0">
+            {/* Clerk avatar URL — not optimisable by next/image */}
+            {/* eslint-disable-next-line @next/next/no-img-element */}
             <img
               src={imageUrl}
               alt={name}
@@ -1383,12 +1385,6 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     spokenLength: "medium",
   });
   const [voicePreviewing, setVoicePreviewing] = useState<string | null>(null);
-  const [voiceMeta, setVoiceMeta] = useState<{
-    provider: string;
-    fallbackUsed: boolean;
-    fallbackReason?: string;
-    actualVoiceId: string;
-  } | null>(null);
   const [inworldStatus, setInworldStatus] = useState<{
     configured: boolean;
     apiKey: boolean;
@@ -1444,74 +1440,47 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
 
   const previewVoice = useCallback(async (agentId: "litt" | "spark") => {
     setVoicePreviewing(agentId);
-    setVoiceMeta(null);
     try {
       const sampleText = agentId === "litt"
         ? "Connection established. I'm scanning the project now."
         : "Oh, that's clean. The preview is live.";
-      const res = await fetch("/api/voice/speak", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sampleText, agentId }),
-      });
 
-      const contentType = res.headers.get("Content-Type") ?? "";
-      if (contentType.includes("application/json")) {
-        const data = await res.json();
-        if (data.metadata) {
-          setVoiceMeta({
-            provider: data.metadata.provider,
-            fallbackUsed: data.metadata.fallbackUsed,
-            fallbackReason: data.metadata.fallbackReason,
-            actualVoiceId: data.metadata.actualVoiceId,
-          });
+      // Use browser speechSynthesis for preview — the real voice is Inworld's
+      // live realtime API, which can't be previewed with a simple TTS call.
+      // This browser preview gives a rough idea of pacing/tone.
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        const { pickBrowserVoice, getBrowserVoiceConfig } = await import("@/features/voice/lib/voiceConfig");
+        const synth = window.speechSynthesis;
+        const config = getBrowserVoiceConfig(agentId);
+        const speak = () => {
+          const voice = pickBrowserVoice(synth.getVoices(), agentId);
+          const utt = new SpeechSynthesisUtterance(sampleText);
+          utt.rate = config.rate;
+          utt.pitch = config.pitch;
+          utt.volume = config.volume;
+          if (voice) { utt.voice = voice; utt.lang = voice.lang; }
+          utt.onend = () => setVoicePreviewing(null);
+          utt.onerror = () => setVoicePreviewing(null);
+          synth.cancel();
+          synth.speak(utt);
+        };
+        if (synth.getVoices().length > 0) speak();
+        else {
+          synth.onvoiceschanged = () => { synth.onvoiceschanged = null; speak(); };
+          setTimeout(() => { if (synth.getVoices().length > 0) speak(); else setVoicePreviewing(null); }, 1000);
         }
-        if (data.fallback) {
-          if (typeof window !== "undefined" && window.speechSynthesis) {
-            const { pickBrowserVoice, storeVoiceName, getBrowserVoiceConfig } = await import("@/features/voice/lib/voiceConfig");
-            const synth = window.speechSynthesis;
-            const config = getBrowserVoiceConfig(agentId);
-            const speak = () => {
-              const voice = pickBrowserVoice(synth.getVoices(), agentId);
-              const utt = new SpeechSynthesisUtterance(sampleText);
-              utt.rate = config.rate;
-              utt.pitch = config.pitch;
-              utt.volume = config.volume;
-              if (voice) { utt.voice = voice; utt.lang = voice.lang; storeVoiceName(agentId, voice.name); }
-              synth.cancel();
-              synth.speak(utt);
-            };
-            if (synth.getVoices().length > 0) speak();
-            else { synth.onvoiceschanged = () => { synth.onvoiceschanged = null; speak(); }; }
-          }
-        }
-      } else if (res.ok) {
-        const provider = res.headers.get("X-TTS-Provider") ?? "elevenlabs";
-        const voiceId = res.headers.get("X-TTS-Voice-Id") ?? "unknown";
-        const fallback = res.headers.get("X-TTS-Fallback") === "true";
-        const reason = res.headers.get("X-TTS-Fallback-Reason") ?? undefined;
-        setVoiceMeta({ provider, fallbackUsed: fallback, fallbackReason: reason, actualVoiceId: voiceId });
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const audio = new Audio(url);
-        audio.onended = () => URL.revokeObjectURL(url);
-        await audio.play();
+      } else {
+        setVoicePreviewing(null);
       }
     } catch {
-      // non-fatal
-    } finally {
       setVoicePreviewing(null);
     }
   }, []);
 
-  const resetVoice = useCallback(async () => {
-    try {
-      await fetch("/api/voice/settings", { method: "DELETE" });
-    } catch { /* non-fatal */ }
+  const resetVoice = useCallback(() => {
     if (typeof window !== "undefined") {
       try { localStorage.removeItem("litt-voice-browser-selection"); } catch { /* non-fatal */ }
     }
-    setVoiceMeta(null);
   }, []);
 
   const micStatusInfo = {
@@ -1584,6 +1553,9 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       {/* Agent voice */}
       <SettingsCard title="Agent voice" description="LiTT and Spark voice identity" icon={<Volume2 size={16} />}>
         <div className="space-y-3">
+          <p className="text-[10px] text-white/40">
+            Voice is powered by Inworld realtime API. Preview uses your browser's built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld's neural voice.
+          </p>
           {[
             { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: "#06b6d4", sample: "Connection established. I'm scanning the project now." },
             { id: "spark" as const, name: "Spark", style: "Bright · Warm · Expressive", color: "#22c55e", sample: "Oh, that's clean. The preview is live." },
@@ -1606,30 +1578,17 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
             </div>
           ))}
 
-          {voiceMeta && (
-            <div className="rounded-lg border border-white/5 bg-black/30 px-3 py-2.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Voice diagnostics</div>
-              <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
-                <div>Provider: <span className="font-bold text-white/80">{voiceMeta.provider}</span></div>
-                <div>Voice ID: <span className="font-mono text-white/70">{voiceMeta.actualVoiceId}</span></div>
-                {voiceMeta.fallbackUsed ? (
-                  <div className="text-amber-400">Fallback: {voiceMeta.fallbackReason ?? "Provider unavailable"}</div>
-                ) : (
-                  <div className="text-emerald-400">No fallback — provider voice active</div>
-                )}
-              </div>
-            </div>
-          )}
-
           {inworldStatus && (
             <div className="rounded-lg border border-white/5 bg-black/30 px-3 py-2.5">
-              <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Inworld provider status</div>
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Voice provider status (Inworld)</div>
               <div className="mt-1.5 space-y-1 text-[10px] text-white/60">
                 <div>API Key: <span className={inworldStatus.apiKey ? "text-emerald-400" : "text-red-400"}>{inworldStatus.apiKey ? "Set" : "Missing"}</span></div>
                 <div>LiTT Voice: <span className={inworldStatus.littVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.littVoice ? "Set" : "Missing"}</span></div>
                 <div>Spark Voice: <span className={inworldStatus.sparkVoice ? "text-emerald-400" : "text-red-400"}>{inworldStatus.sparkVoice ? "Set" : "Missing"}</span></div>
                 <div>WebSocket URL: <span className={inworldStatus.wsUrl ? "text-emerald-400" : "text-red-400"}>{inworldStatus.wsUrl ? "Set" : "Missing"}</span></div>
-                {!inworldStatus.configured && (
+                {inworldStatus.configured ? (
+                  <div className="mt-1.5 text-emerald-400">Inworld realtime voice is configured and ready.</div>
+                ) : (
                   <div className="mt-1.5 text-amber-400">
                     Inworld is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE in Vercel env.
                   </div>

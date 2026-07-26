@@ -10,23 +10,6 @@ export type VoiceSessionState =
   | "interrupted"
   | "error";
 
-export type VoiceProvider = "elevenlabs";
-
-export interface AgentVoiceProfile {
-  agentId: VoiceAgentId;
-  provider: VoiceProvider;
-  providerVoiceId: string;
-  speed: number;
-  stability: number;
-  similarity: number;
-  style: number;
-  speakerBoost: boolean;
-  autoSpeak: boolean;
-  allowInterruptions: boolean;
-  maxSpokenParagraphs: number;
-  muteCodeAndLogs: boolean;
-}
-
 export interface VoiceTranscriptEvent {
   type: "transcript";
   text: string;
@@ -114,38 +97,4 @@ export function computeLatencies(timing: VoiceTimingMetrics): {
     ? timing.playbackStartedAt - timing.recordingStartedAt
     : null;
   return { transcriptionMs, aiResponseMs, ttsMs, totalMs, ttsTimeToFirstByteMs };
-}
-
-export const DEFAULT_LITT_PROFILE: AgentVoiceProfile = {
-  agentId: "litt",
-  provider: "elevenlabs",
-  providerVoiceId: "",
-  speed: 0.9,
-  stability: 0.72,
-  similarity: 0.82,
-  style: 0.22,
-  speakerBoost: true,
-  autoSpeak: true,
-  allowInterruptions: true,
-  maxSpokenParagraphs: 3,
-  muteCodeAndLogs: true,
-};
-
-export const DEFAULT_SPARK_PROFILE: AgentVoiceProfile = {
-  agentId: "spark",
-  provider: "elevenlabs",
-  providerVoiceId: "",
-  speed: 1.04,
-  stability: 0.40,
-  similarity: 0.78,
-  style: 0.68,
-  speakerBoost: true,
-  autoSpeak: true,
-  allowInterruptions: true,
-  maxSpokenParagraphs: 2,
-  muteCodeAndLogs: true,
-};
-
-export function getDefaultProfile(agentId: VoiceAgentId): AgentVoiceProfile {
-  return agentId === "spark" ? DEFAULT_SPARK_PROFILE : DEFAULT_LITT_PROFILE;
 }

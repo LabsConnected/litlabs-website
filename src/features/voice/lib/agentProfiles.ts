@@ -1,10 +1,8 @@
-import type { AgentVoiceProfile, VoiceAgentId } from "@/features/voice/types";
-import { DEFAULT_LITT_PROFILE, DEFAULT_SPARK_PROFILE } from "@/features/voice/types";
+import type { VoiceAgentId } from "@/features/voice/types";
 
 export const AGENT_PROFILES: Record<VoiceAgentId, {
   displayName: string;
   role: string;
-  defaultProfile: AgentVoiceProfile;
   systemPrompt: string;
   color: string;
 }> = {
@@ -12,7 +10,6 @@ export const AGENT_PROFILES: Record<VoiceAgentId, {
     displayName: "LiTT",
     role: "Main AI operator, builder and strategist",
     color: "#06b6d4",
-    defaultProfile: DEFAULT_LITT_PROFILE,
     systemPrompt: `You are LiTT, the primary AI operator for LiTT LabStudios.
 
 Speak with calm authority. Your voice should be deep, controlled, precise and
@@ -32,7 +29,6 @@ Sound capable, focused and loyal.`,
     displayName: "Spark",
     role: "Companion, guide and creative sidekick",
     color: "#22c55e",
-    defaultProfile: DEFAULT_SPARK_PROFILE,
     systemPrompt: `You are Spark, LiTT's intelligent AI companion.
 
 Speak quickly but clearly. Sound playful, curious, warm and animated.
@@ -51,21 +47,4 @@ Sound excited when something works and focused when something breaks.`,
 
 export function getAgentProfile(agentId: VoiceAgentId) {
   return AGENT_PROFILES[agentId];
-}
-
-export function getVoiceSettings(agentId: VoiceAgentId, profile: AgentVoiceProfile) {
-  if (agentId === "spark") {
-    return {
-      stability: profile.stability,
-      similarity_boost: profile.similarity,
-      style: profile.style,
-      use_speaker_boost: profile.speakerBoost,
-    };
-  }
-  return {
-    stability: profile.stability,
-    similarity_boost: profile.similarity,
-    style: profile.style,
-    use_speaker_boost: profile.speakerBoost,
-  };
 }

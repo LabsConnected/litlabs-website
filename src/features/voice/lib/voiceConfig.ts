@@ -19,40 +19,6 @@ export const AGENT_VOICE_CONFIG = {
   },
 } as const;
 
-export type ProviderVoiceMap = {
-  elevenlabs?: string;
-  openai?: string;
-  google?: string;
-  browser?: string;
-};
-
-export const LITT_PROVIDER_VOICES: ProviderVoiceMap = {
-  elevenlabs: process.env.ELEVENLABS_LITT_VOICE_ID,
-  openai: process.env.OPENAI_LITT_VOICE_ID,
-  google: process.env.GOOGLE_LITT_VOICE_NAME,
-  browser: "preferred-deep-us-voice",
-};
-
-export const SPARK_PROVIDER_VOICES: ProviderVoiceMap = {
-  elevenlabs: process.env.ELEVENLABS_SPARK_VOICE_ID,
-  openai: process.env.OPENAI_SPARK_VOICE_ID,
-  google: process.env.GOOGLE_SPARK_VOICE_NAME,
-  browser: "preferred-bright-us-voice",
-};
-
-export function getProviderVoices(agentId: VoiceAgentId): ProviderVoiceMap {
-  return agentId === "spark" ? SPARK_PROVIDER_VOICES : LITT_PROVIDER_VOICES;
-}
-
-export interface TtsResponseMetadata {
-  provider: string;
-  requestedAgent: "litt" | "spark";
-  requestedVoiceId: string | null;
-  actualVoiceId: string;
-  fallbackUsed: boolean;
-  fallbackReason?: string;
-}
-
 const DEEP_VOICE_PATTERNS = [
   /david/i,
   /mark/i,

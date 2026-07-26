@@ -70,17 +70,6 @@ export const PLUGIN_REGISTRY: PluginDefinition[] = [
     capabilities: ["image", "video"],
   },
   {
-    id: "elevenlabs",
-    name: "ElevenLabs",
-    description: "Text-to-speech and voice cloning.",
-    category: "AI",
-    authMethod: "api-key",
-    status: "available",
-    installed: false,
-    enabled: false,
-    capabilities: ["tts", "voice"],
-  },
-  {
     id: "minimax",
     name: "MiniMax",
     description: "Skybox and 3D space generation.",
