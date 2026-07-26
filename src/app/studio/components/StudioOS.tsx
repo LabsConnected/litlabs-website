@@ -6,9 +6,11 @@ import { useTheme } from "@/context/ThemeContext";
 import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StudioSidebar, { type StudioTool, MobileTabBar } from "./StudioSidebar";
 import StudioTopBar from "./StudioTopBar";
+import StudioOnboarding from "./StudioOnboarding";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import DemoBootstrap from "./DemoBootstrap";
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
@@ -83,6 +85,10 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
+  const { capabilities, loading: connectionsLoading } = useConnectionSummary();
+  const projectReady =
+    capabilities.repository === "connected" ||
+    capabilities.terminalExecution === "available";
 
   const DEFAULT_STUDIO_TOOL: StudioTool = "chat";
   const initialTool = (() => {
@@ -107,6 +113,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
   const [search, setSearch] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
+  const [assistantOpen, setAssistantOpen] = useState(false);
   const isInitialMount = useRef(true);
   const [cameraDock, setCameraDock] = useState<{
     open: boolean;
@@ -116,6 +123,20 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
     open: boolean;
     pos: DockPosition;
   }>({ open: false, pos: "bottom-left" });
+
+  const handleStartBlank = useCallback(async () => {
+    try {
+      await fetch("/api/projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name: "Blank Project", source: "blank" }),
+      });
+    } catch {
+      // ignore — still proceed to studio
+    }
+    // Force a reload so the connection summary refetches and projectReady becomes true
+    if (typeof window !== "undefined") window.location.reload();
+  }, []);
 
   // Sync tool to localStorage immediately, and to URL only after the
   // user changes them (not on initial mount).
@@ -198,6 +219,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
           onSearchChange={setSearch}
           selectedModel=""
           onModelChange={() => {}}
+          projectReady={projectReady}
           T={T}
         />
 
@@ -211,12 +233,15 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
               activeTool={activeTool}
               onToolChange={handleToolChange}
               search={search}
+              projectReady={projectReady}
             />
           </div>
 
           {/* Center workspace — renders active tool full-screen on mobile */}
           <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
-            {isChat ? (
+            {!connectionsLoading && !projectReady ? (
+              <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
+            ) : isChat ? (
               <ChatTool
                 onRouteTool={handleCommandRoute}
                 requestedTool={activeTool}
@@ -227,11 +252,20 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
                 <WorkspaceComponent />
               </div>
             ) : null}
+            {projectReady && !isChat && (
+              <button
+                onClick={() => setAssistantOpen(true)}
+                className="absolute bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border border-cyan-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-cyan-100 shadow-2xl backdrop-blur-xl transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
+              >
+                <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_#6ee7b7]" />
+                Ask LiTT
+              </button>
+            )}
           </main>
 
-          {/* Persistent right LiTT panel — desktop only */}
-          <aside
-            className="hidden md:flex shrink-0 min-w-0 min-h-0 flex-col border-l overflow-hidden litt-panel"
+          {/* LiTT assistant drawer — closed by default so tools keep the full workspace */}
+          {assistantOpen && projectReady && !isChat && <aside
+            className="fixed bottom-0 right-0 top-12 z-10010 flex w-full max-w-[380px] min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay"
             style={{
               backgroundColor: "rgba(8,9,13,0.96)",
               borderColor: "rgba(255,255,255,0.06)",
@@ -244,15 +278,13 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
               <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
                 LiTT
               </span>
-              <span
-                className="w-1.5 h-1.5 rounded-full"
-                style={{
-                  backgroundColor: T.success,
-                  boxShadow: `0 0 4px ${T.success}`,
-                }}
-                aria-label="LiTT agent active"
-                role="img"
-              />
+              <button
+                onClick={() => setAssistantOpen(false)}
+                className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
+                aria-label="Close LiTT drawer"
+              >
+                ✕
+              </button>
             </div>
             <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
               <ChatTool
@@ -261,7 +293,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
                 pendingCommand={pendingCommand}
               />
             </div>
-          </aside>
+          </aside>}
         </div>
 
         {/* Mobile bottom tab bar — tool switching */}

@@ -2596,7 +2596,7 @@ main {
 
 @media (min-width: 769px) {
   .studio-grid-responsive {
-    grid-template-columns: 64px minmax(0, 1fr) clamp(400px, 28vw, 460px);
+    grid-template-columns: 64px minmax(0, 1fr);
   }
 }
 

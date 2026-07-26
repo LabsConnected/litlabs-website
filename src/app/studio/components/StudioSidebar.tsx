@@ -61,12 +61,12 @@ type ToolItem = {
 
 /* ── Primary rail tools (always visible) ─────────────────────────── */
 const PRIMARY_TOOLS: ToolItem[] = [
+  { id: "code", label: "Code", icon: Code, shortcut: "K" },
+  { id: "build", label: "Build", icon: Hammer, shortcut: "B" },
   { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "C" },
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
-  { id: "build", label: "Build", icon: Hammer, shortcut: "B" },
-  { id: "code", label: "Code", icon: Code, shortcut: "K" },
   { id: "agents", label: "LiTT & Spark", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
@@ -145,10 +145,12 @@ function RailButton({
 export default function StudioSidebar({
   activeTool,
   onToolChange,
+  projectReady = true,
 }: {
   activeTool: StudioTool;
   onToolChange: (tool: StudioTool) => void;
   search?: string;
+  projectReady?: boolean;
 }) {
   const { resolvedColors: T } = useTheme();
   const [moreOpen, setMoreOpen] = useState(false);
@@ -181,7 +183,7 @@ export default function StudioSidebar({
 
         {/* Primary tools */}
         <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
-          {PRIMARY_TOOLS.map((tool) => (
+          {PRIMARY_TOOLS.filter((tool) => projectReady || ["code", "build", "chat"].includes(tool.id)).map((tool) => (
             <RailButton
               key={tool.id}
               tool={tool}
@@ -192,13 +194,13 @@ export default function StudioSidebar({
           ))}
 
           {/* Divider */}
-          <div
+          {projectReady && <div
             className="my-1.5 h-px w-8"
             style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-          />
+          />}
 
           {/* More Tools button */}
-          <button
+          {projectReady && <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
             className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
@@ -220,7 +222,7 @@ export default function StudioSidebar({
             >
               More Tools
             </span>
-          </button>
+          </button>}
         </div>
 
         {/* Bottom status dot */}
@@ -240,7 +242,7 @@ export default function StudioSidebar({
       {/* ═══════════════════════════════════════════════════════════
           More Tools drawer (desktop) — slides out from rail
       ═══════════════════════════════════════════════════════════ */}
-      {moreOpen && (
+      {projectReady && moreOpen && (
         <div
           className="fixed left-16 top-0 z-50 hidden h-full w-55 flex-col border-r md:flex"
           style={{

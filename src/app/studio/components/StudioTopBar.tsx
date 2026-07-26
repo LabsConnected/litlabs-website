@@ -47,6 +47,7 @@ export default function StudioTopBar({
   selectedModel: _selectedModel,
   onModelChange: _onModelChange,
   onMenuToggle: _onMenuToggle,
+  projectReady = true,
   T,
 }: {
   search: string;
@@ -55,6 +56,7 @@ export default function StudioTopBar({
   onModelChange: (m: string) => void;
   onMenuToggle?: () => void;
   onInspectorToggle?: () => void;
+  projectReady?: boolean;
   T: ReturnType<typeof useTheme>["resolvedColors"];
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
@@ -234,7 +236,7 @@ export default function StudioTopBar({
       <div className="flex-1" />
 
       {/* Action buttons */}
-      <div className="hidden md:flex items-center gap-1.5 shrink-0">
+      {projectReady && <div className="hidden md:flex items-center gap-1.5 shrink-0">
         <button
           type="button"
           disabled={!capabilities.connectedProviders.length}
@@ -280,7 +282,7 @@ export default function StudioTopBar({
           <Rocket size={11} className="pointer-events-none" />
           <span className="pointer-events-none">Deploy</span>
         </button>
-      </div>
+      </div>}
 
       {/* Health removed — no fake percentage */}
 

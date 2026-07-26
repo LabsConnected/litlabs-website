@@ -33,6 +33,7 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
 };
 
 export function useConnectionSummary() {
+  const [loading, setLoading] = useState(true);
   const [capabilities, setCapabilities] = useState<ConnectionCapabilities>(
     DEFAULT_CAPABILITIES,
   );
@@ -101,6 +102,8 @@ export function useConnectionSummary() {
       setCapabilities(next);
     } catch {
       // leave previous state
+    } finally {
+      setLoading(false);
     }
   }, [terminalStatus, terminalSessionId, terminalError]);
 
@@ -110,5 +113,5 @@ export function useConnectionSummary() {
     return () => window.clearInterval(interval);
   }, [refresh]);
 
-  return { capabilities, refresh };
+  return { capabilities, refresh, loading };
 }
