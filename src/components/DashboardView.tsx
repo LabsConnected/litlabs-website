@@ -1,6 +1,7 @@
 "use client";
 
 import dynamic from "next/dynamic";
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 const CommandCenter = dynamic(
   () => import("@/components/dashboard/CommandCenter").then((m) => m.CommandCenter),
@@ -15,5 +16,10 @@ const CommandCenter = dynamic(
 );
 
 export default function DashboardView() {
-  return <CommandCenter />;
+  return (
+    <>
+      <AutonomicLoopBanner />
+      <CommandCenter />
+    </>
+  );
 }

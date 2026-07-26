@@ -4,6 +4,18 @@ import { DirectorGraphPlanner } from "@/lib/director-graph";
 
 export const dynamic = "force-dynamic";
 
+export async function GET() {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+  return NextResponse.json({
+    status: "ok",
+    service: "director-planner",
+    ready: true,
+  });
+}
+
 export async function POST(request: Request) {
   try {
     const { userId } = await auth();

@@ -2,11 +2,11 @@ import type { Metadata } from "next";
 import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
 export const metadata: Metadata = {
-  title: "Studio",
-  description: "AI-powered creative studio. Generate images, videos, music, and code with specialized AI agents.",
+  title: "Agent",
+  description: "Interact with your AI agents.",
 };
 
-export default function StudioLayout({
+export default function AgentLayout({
   children,
 }: {
   children: React.ReactNode;
