@@ -360,7 +360,7 @@ function SystemPanel({
   const { balance, isLoading } = useWallet();
   return (
     <div className="space-y-4">
-      <Section title="LiTBit credits">
+      <Section title="LiTTBit credits">
         <div
           className="rounded-xl p-3 mb-2"
           style={{

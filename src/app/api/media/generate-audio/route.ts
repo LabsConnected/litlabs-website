@@ -20,7 +20,7 @@ async function handler(req: NextRequest) {
   const wallet = await getUserWallet(userId);
   if (wallet.balance < COST) {
     return NextResponse.json(
-      { error: `Need ${COST} LiTBit Coins` },
+      { error: `Need ${COST} LiTTBits` },
       { status: 402 },
     );
   }

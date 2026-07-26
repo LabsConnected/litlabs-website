@@ -31,7 +31,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "connections", label: "Connections", description: "GitHub, Vercel, Supabase, AI keys", icon: "Plug", minMode: "standard" },
   { id: "automation", label: "Automation", description: "Triggers, schedules, retries", icon: "Zap", minMode: "advanced" },
   { id: "notifications", label: "Notifications", description: "Alerts, email, quiet hours", icon: "Bell", minMode: "standard" },
-  { id: "billing", label: "Billing & LiTBits", description: "Plan, usage, beta credits", icon: "Coins", minMode: "standard" },
+  { id: "billing", label: "Billing & LiTTBits", description: "Plan, usage, beta credits", icon: "Coins", minMode: "standard" },
   { id: "privacy", label: "Privacy & Security", description: "Sessions, data, audit log", icon: "Shield", minMode: "standard" },
   { id: "performance", label: "Performance", description: "Battery, effects, lazy loading", icon: "Gauge", minMode: "standard" },
   { id: "advanced", label: "Advanced", description: "Diagnostics, debug, feature flags", icon: "Terminal", minMode: "advanced" },

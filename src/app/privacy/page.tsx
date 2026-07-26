@@ -54,7 +54,7 @@ export default function PrivacyPage() {
                 and other diagnostic data.
               </li>
               <li>
-                <strong>Local Storage:</strong> Theme preferences, LiTBit Coins
+                <strong>Local Storage:</strong> Theme preferences, LiTTBits
                 balance, profile settings, and visitor counts stored locally in
                 your browser.
               </li>
@@ -80,7 +80,7 @@ export default function PrivacyPage() {
               <li>Providing and maintaining the Platform functionality.</li>
               <li>Authenticating users and securing accounts via Clerk.</li>
               <li>
-                Processing marketplace transactions and LiTBit Coins economy.
+                Processing marketplace transactions and LiTTBits economy.
               </li>
               <li>Analyzing usage patterns to improve the Platform.</li>
               <li>

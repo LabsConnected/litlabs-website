@@ -96,7 +96,7 @@ export default function VideoTool() {
       return;
     }
     if (!canAfford) {
-      setError(`Need ${cost} LiTBit Coins.`);
+      setError(`Need ${cost} LiTTBits.`);
       return;
     }
     setError(null);
@@ -251,7 +251,7 @@ export default function VideoTool() {
             backgroundColor: T.boxBg,
           }}
         >
-          <Sparkles size={10} /> {coinBalance ?? "—"} LiTBit
+          <Sparkles size={10} /> {coinBalance ?? "—"} LiTTBits
         </div>
       </div>
 

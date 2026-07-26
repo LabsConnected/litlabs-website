@@ -56,7 +56,7 @@ function WalletContent() {
     const ok = await claim();
     setClaimMsg(
       ok
-        ? "Daily bonus claimed! +50 LiTBits"
+        ? "Daily bonus claimed! +50 LiTTBits"
         : "Already claimed today or sign in required.",
     );
   }, [claim]);
@@ -69,7 +69,7 @@ function WalletContent() {
   return (
     <PageShell
       title="Wallet"
-      subtitle="LiTBit Coins balance, daily rewards, and purchases"
+      subtitle="LiTTBits balance, daily rewards, and purchases"
       icon={<Wallet size={28} />}
     >
       <div className="max-w-4xl mx-auto px-4 py-6 space-y-6">
@@ -96,7 +96,7 @@ function WalletContent() {
                       {balance.toLocaleString()}
                     </span>
                     <span className="text-sm font-bold opacity-60">
-                      LiTBits
+                      LiTTBits
                     </span>
                   </>
                 )}
@@ -193,11 +193,11 @@ function WalletContent() {
               className="text-lg font-black mb-3"
               style={{ color: T.headerColor }}
             >
-              How LiTBits work
+              How LiTTBits work
             </h2>
             <ul className="space-y-2 text-sm opacity-75">
               <li>• New accounts start with starter credits.</li>
-              <li>• Claim +50 LiTBits every day for free.</li>
+              <li>• Claim +50 LiTTBits every day for free.</li>
               <li>
                 • Spend on Studio generation, agents, and marketplace items.
               </li>

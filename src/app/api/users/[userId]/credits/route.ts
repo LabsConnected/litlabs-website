@@ -9,7 +9,7 @@ import { adjustWalletBalance } from "@/lib/wallet-ledger";
 
 /**
  * POST /api/users/[userId]/credits
- * Updates user credits (LiTBit Coins) - Admin or system use
+ * Updates user credits (LiTTBits) - Admin or system use
  */
 export async function POST(
   req: NextRequest,
@@ -117,7 +117,7 @@ export async function POST(
 
 /**
  * GET /api/users/[userId]/credits
- * Get user credits (LiTBit Coins)
+ * Get user credits (LiTTBits)
  */
 export async function GET(
   req: NextRequest,

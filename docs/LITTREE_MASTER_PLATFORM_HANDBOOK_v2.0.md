@@ -353,7 +353,7 @@ LiTTree should compete on **orchestration and continuity** rather than raw model
 | `/admin` | Privileged platform operations (canonical) | A client-gated hidden page |
 | `/profile` | User profile, public presence, connected accounts | A disconnected settings page |
 | `/profile/[username]` | Public profile view | A duplicate `/profile` |
-| `/wallet` | LiTBits, credits, billing history | A nested settings screen |
+| `/wallet` | LiTTBits, credits, billing history | A nested settings screen |
 | `/memories` | User memories and agent recall | An orphan conversation list |
 | `/library/files` | Saved files and asset library | A dead download-only page |
 | `/library/saved` | Saved content and bookmarks | A separate social feed |
@@ -1153,7 +1153,7 @@ The registry is the **source of truth** for UI rendering, server validation, def
 
 | Category | Controls |
 | --- | --- |
-| Account | Profile, username, security, connected accounts, billing, LiTBits |
+| Account | Profile, username, security, connected accounts, billing, LiTTBits |
 | Appearance | Theme preset, light/dark/system, accent, global wallpaper, font size, reduced motion |
 | Notifications | Messages, agent updates, project updates, billing alerts |
 | Studio | Default model mode, voice enabled, auto-speak, entry experience, save history |
@@ -1182,7 +1182,7 @@ The registry is the **source of truth** for UI rendering, server validation, def
 - Server-confirmed owner or administrator role.
 - Recent reauthentication, with optional two-factor confirmation for high-risk actions.
 - Global page enablement, maintenance mode, flags, roles, branding, themes, navigation, and default AI configuration.
-- LiTBits pricing, plans, credit limits, promotions, marketplace fees, and payouts.
+- LiTTBits pricing, plans, credit limits, promotions, marketplace fees, and payouts.
 - Provider order, rate limits, fallback models, token budgets, health, global prompts, and safety controls.
 - Environment, database, queue, terminal server, deployment, errors, cache, search, migrations.
 - User search, suspension, credit adjustment, plan changes, settings reset, and audited impersonation.

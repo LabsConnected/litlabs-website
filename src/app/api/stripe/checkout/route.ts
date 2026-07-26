@@ -48,7 +48,7 @@ export async function POST(req: NextRequest) {
       params.append("line_items[0][price_data][unit_amount]", String(amount));
       params.append(
         "line_items[0][price_data][product_data][name]",
-        name || "LiTBit Coins",
+        name || "LiTTBits",
       );
       if (description)
         params.append(

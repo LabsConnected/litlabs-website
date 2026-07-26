@@ -1,4 +1,4 @@
-# Supabase + Stripe checklist for LiTBits billing
+# Supabase + Stripe checklist for LiTTBits billing
 
 This is the production handoff checklist for LiTTree-LabStudios. The
 `credit_ledger` is the source of truth. `wallets.balance` and `transactions`
@@ -70,7 +70,7 @@ Use separate Stripe price IDs and webhook secrets for preview and production.
 
 Create exactly these server-side price mappings:
 
-| Plan | Stripe mode | Beta price | LiTBits |
+| Plan | Stripe mode | Beta price | LiTTBits |
 |---|---|---:|---:|
 | Starter | no checkout | Free | 500 per calendar month |
 | Creator Beta | recurring monthly | $7 | 6,000 per paid period |
@@ -178,7 +178,7 @@ and return estimates to the client.
 
 Suggested beta starting points:
 
-| Action | Suggested LiTBits |
+| Action | Suggested LiTTBits |
 |---|---:|
 | Standard chat turn | 1–3 |
 | Premium-model chat turn | 5–15 |

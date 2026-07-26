@@ -18,7 +18,9 @@ import {
   Globe,
   Loader2,
   Mail,
+  Maximize2,
   MessageSquare,
+  Minus,
   Network,
   Package,
   Play,
@@ -261,6 +263,7 @@ export default function MissionForge() {
   const { userId } = useClerkAuth();
   const canvasRef = useRef<HTMLDivElement>(null);
   const nodeIdCounter = useRef(0);
+  const panRef = useRef<{ pointerId: number; clientX: number; clientY: number; x: number; y: number } | null>(null);
 
   const [nodes, setNodes] = useState<MissionNode[]>(STARTER_NODES);
   const [edges, setEdges] = useState<MissionEdge[]>(STARTER_EDGES);
@@ -280,6 +283,8 @@ export default function MissionForge() {
   const [installedCaps, setInstalledCaps] = useState<InstalledCap[]>([]);
   const [, setCapsLoading] = useState(false);
   const [mobileSheet, setMobileSheet] = useState<"library" | "inspector" | "copilot" | null>(null);
+  const [viewport, setViewport] = useState({ x: 0, y: 0, scale: 1 });
+  const [isPanning, setIsPanning] = useState(false);
 
   const selected = nodes.find((n) => n.id === selectedId) ?? null;
 
@@ -396,10 +401,47 @@ export default function MissionForge() {
   const canvasPoint = (clientX: number, clientY: number) => {
     const rect = canvasRef.current?.getBoundingClientRect();
     return {
-      x: Math.max(12, clientX - (rect?.left ?? 0) - NODE_WIDTH / 2),
-      y: Math.max(12, clientY - (rect?.top ?? 0) - NODE_HEIGHT / 2),
+      x: Math.max(12, (clientX - (rect?.left ?? 0) - viewport.x) / viewport.scale - NODE_WIDTH / 2),
+      y: Math.max(12, (clientY - (rect?.top ?? 0) - viewport.y) / viewport.scale - NODE_HEIGHT / 2),
     };
   };
+
+  const canvasBounds = useMemo(() => ({
+    width: Math.max(1400, ...nodes.map((node) => node.x + NODE_WIDTH + 240)),
+    height: Math.max(900, ...nodes.map((node) => node.y + NODE_HEIGHT + 240)),
+  }), [nodes]);
+
+  const zoomCanvas = useCallback((nextScale: number, clientX?: number, clientY?: number) => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    setViewport((current) => {
+      const scale = Math.min(2, Math.max(0.35, nextScale));
+      const anchorX = clientX == null ? (rect?.width ?? 0) / 2 : clientX - (rect?.left ?? 0);
+      const anchorY = clientY == null ? (rect?.height ?? 0) / 2 : clientY - (rect?.top ?? 0);
+      const worldX = (anchorX - current.x) / current.scale;
+      const worldY = (anchorY - current.y) / current.scale;
+      return { x: anchorX - worldX * scale, y: anchorY - worldY * scale, scale };
+    });
+  }, []);
+
+  const fitCanvas = useCallback(() => {
+    const rect = canvasRef.current?.getBoundingClientRect();
+    if (!rect || nodes.length === 0) {
+      setViewport({ x: 0, y: 0, scale: 1 });
+      return;
+    }
+    const minX = Math.min(...nodes.map((node) => node.x));
+    const minY = Math.min(...nodes.map((node) => node.y));
+    const maxX = Math.max(...nodes.map((node) => node.x + NODE_WIDTH));
+    const maxY = Math.max(...nodes.map((node) => node.y + NODE_HEIGHT));
+    const width = Math.max(1, maxX - minX);
+    const height = Math.max(1, maxY - minY);
+    const scale = Math.min(1.35, Math.max(0.35, Math.min((rect.width - 96) / width, (rect.height - 96) / height)));
+    setViewport({
+      x: (rect.width - width * scale) / 2 - minX * scale,
+      y: (rect.height - height * scale) / 2 - minY * scale,
+      scale,
+    });
+  }, [nodes]);
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
@@ -852,7 +894,30 @@ export default function MissionForge() {
           ref={canvasRef}
           onDragOver={(e) => { e.preventDefault(); e.dataTransfer.dropEffect = e.dataTransfer.types.includes("application/x-mission-node") ? "move" : "copy"; }}
           onDrop={handleDrop}
-          className="relative flex-1 overflow-auto"
+          onWheel={(e) => {
+            e.preventDefault();
+            zoomCanvas(viewport.scale * (e.deltaY > 0 ? 0.9 : 1.1), e.clientX, e.clientY);
+          }}
+          onPointerDown={(e) => {
+            if (e.button !== 0 || (e.target as HTMLElement).closest("button,input,textarea,select,a")) return;
+            panRef.current = { pointerId: e.pointerId, clientX: e.clientX, clientY: e.clientY, x: viewport.x, y: viewport.y };
+            e.currentTarget.setPointerCapture(e.pointerId);
+            setIsPanning(true);
+          }}
+          onPointerMove={(e) => {
+            const pan = panRef.current;
+            if (!pan || pan.pointerId !== e.pointerId) return;
+            setViewport((current) => ({ ...current, x: pan.x + e.clientX - pan.clientX, y: pan.y + e.clientY - pan.clientY }));
+          }}
+          onPointerUp={(e) => {
+            if (panRef.current?.pointerId === e.pointerId) {
+              panRef.current = null;
+              setIsPanning(false);
+              e.currentTarget.releasePointerCapture(e.pointerId);
+            }
+          }}
+          onDoubleClick={fitCanvas}
+          className={`relative flex-1 overflow-hidden touch-none ${isPanning ? "cursor-grabbing" : "cursor-grab"}`}
           style={{
             backgroundImage:
               "linear-gradient(105deg,rgba(3,5,11,.96),rgba(3,5,11,.72) 48%,rgba(3,5,11,.88)),url('/wallpapers/litt-afterglow.webp')",
@@ -860,6 +925,10 @@ export default function MissionForge() {
         >
           <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_48%_30%,rgba(101,244,255,.08),transparent_32%),radial-gradient(circle_at_78%_68%,rgba(169,112,255,.09),transparent_30%)]" />
 
+          <div
+            className="absolute left-0 top-0 origin-top-left"
+            style={{ width: canvasBounds.width, height: canvasBounds.height, transform: `translate(${viewport.x}px, ${viewport.y}px) scale(${viewport.scale})` }}
+          >
           {/* SVG edges */}
           <svg className="pointer-events-none absolute inset-0 h-full w-full overflow-visible" aria-hidden="true">
             <defs>
@@ -939,6 +1008,19 @@ export default function MissionForge() {
               </div>
             </div>
           )}
+          </div>
+
+          <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-xl border p-1 shadow-2xl backdrop-blur-xl" style={{ backgroundColor: `${T.boxBg}e8`, borderColor: `${T.borderColor}35` }}>
+            <button onClick={() => zoomCanvas(viewport.scale / 1.15)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10" title="Zoom out"><Minus size={14} /></button>
+            <button onClick={() => setViewport((current) => ({ ...current, scale: 1 }))} className="min-w-[54px] rounded-lg px-2 py-2 text-[9px] font-black hover:bg-white/10" title="Reset zoom">{Math.round(viewport.scale * 100)}%</button>
+            <button onClick={() => zoomCanvas(viewport.scale * 1.15)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10" title="Zoom in"><Plus size={14} /></button>
+            <span className="mx-1 h-5 w-px" style={{ backgroundColor: `${T.borderColor}35` }} />
+            <button onClick={fitCanvas} className="flex h-8 items-center gap-1 rounded-lg px-2 text-[9px] font-bold hover:bg-white/10" title="Fit mission to canvas"><Maximize2 size={12} /> Fit</button>
+            <button onClick={() => setViewport({ x: 0, y: 0, scale: 1 })} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10" title="Reset canvas"><RefreshCw size={12} /></button>
+          </div>
+          <div className="pointer-events-none absolute bottom-3 left-1/2 z-10 -translate-x-1/2 rounded-full border px-3 py-1.5 text-[8px] font-bold backdrop-blur-xl" style={{ backgroundColor: `${T.boxBg}d8`, borderColor: `${T.borderColor}25`, color: T.textMuted }}>
+            Drag empty space to move · Wheel to zoom · Double-click to fit
+          </div>
         </div>
 
         {/* Execution log (collapsible) */}

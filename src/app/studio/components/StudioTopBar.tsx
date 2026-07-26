@@ -287,7 +287,7 @@ export default function StudioTopBar({
       {/* Wallet */}
       <div
         className="hidden sm:flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-[10px] font-bold"
-        title="LiTBit Coins balance"
+        title="LiTTBits balance"
         style={{
           backgroundColor: "rgba(255,255,255,0.03)",
           borderColor: "rgba(255,255,255,0.06)",

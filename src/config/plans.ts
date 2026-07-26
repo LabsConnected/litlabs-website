@@ -34,7 +34,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     activeProjectLimit: 1,
     features: [
       "1 active project",
-      "500 monthly LiTBits",
+      "500 monthly LiTTBits",
       "LiTT and Spark",
       "Free AI routing",
       "Basic code generation",
@@ -58,7 +58,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     activeProjectLimit: 5,
     features: [
       "5 active projects",
-      "6,000 monthly LiTBits",
+      "6,000 monthly LiTTBits",
       "Private projects",
       "GitHub connection",
       "Project downloads",
@@ -83,7 +83,7 @@ export const PLANS: Record<PlanId, PlanDefinition> = {
     activeProjectLimit: 25,
     features: [
       "25 active projects",
-      "20,000 monthly LiTBits",
+      "20,000 monthly LiTTBits",
       "Terminal runtime",
       "Advanced coding models",
       "Diff and approval",

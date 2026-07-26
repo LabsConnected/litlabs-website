@@ -89,7 +89,7 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
         color: accentColor,
         border: `1px solid ${accentColor}30`,
       }}
-      title="Your LiTBit Coins balance"
+      title="Your LiTTBits balance"
     >
       <Coins size={10} /> {isLoading ? "ΓÇö" : balance.toLocaleString()}
     </span>

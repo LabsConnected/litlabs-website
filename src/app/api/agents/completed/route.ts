@@ -9,7 +9,7 @@ const FALLBACK_COMPLETED = [
   "Responsive design overhaul — all breakpoints",
   "AnimatedBackground with aurora & particles",
   "Pollinations free image generation",
-  "LiTBit Coins wallet — Supabase sync",
+  "LiTTBits wallet — Supabase sync",
   "PageShell applied to all pages",
   "Gallery Lightbox with keyboard nav",
 ];

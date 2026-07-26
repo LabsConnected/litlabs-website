@@ -11,7 +11,7 @@ const FALLBACK_COMMITS = [
   "3a74d21 feat: gallery Lightbox component with keyboard nav",
   "2f65b10 feat: PageShell wrapper applied to all pages",
   "1e53a09 feat: Pollinations image generation (free, no key)",
-  "0d41c97 feat: LiTBit Coins wallet with Supabase sync",
+  "0d41c97 feat: LiTTBits wallet with Supabase sync",
 ];
 
 export async function GET() {

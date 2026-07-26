@@ -1,6 +1,6 @@
 // Media provider catalog — shared by /api/media/generate, /api/flow, and the /flow UI.
 // To add a new renderer: append a MediaProvider entry, then add a handler in
-// src/app/api/media/generate/route.ts. Costs are in LiTBit Coins.
+// src/app/api/media/generate/route.ts. Costs are in LiTTBits.
 
 export type MediaFormat = "image" | "video";
 

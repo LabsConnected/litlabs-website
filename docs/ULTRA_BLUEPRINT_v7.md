@@ -882,7 +882,7 @@ Most specific valid setting wins.
 - Connections
 - Automation
 - Notifications
-- Billing & LiTBits
+- Billing & LiTTBits
 - Privacy & Security
 - Performance
 - Advanced
@@ -916,7 +916,7 @@ Server-side enforcement required.
 ## Beta currency
 Display:
 ```text
-Beta LiTBits
+Beta LiTTBits
 Testing credits · No cash value
 ```
 

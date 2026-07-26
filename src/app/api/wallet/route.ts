@@ -6,7 +6,7 @@ import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
 
 /**
  * GET /api/wallet
- * Returns the user's LiTBit Coins wallet balance.
+ * Returns the user's LiTTBits wallet balance.
  */
 async function getHandler() {
   try {
@@ -35,7 +35,7 @@ async function getHandler() {
 
 /**
  * POST /api/wallet/claim
- * Claims the daily bonus of 50 LiTBit Coins.
+ * Claims the daily bonus of 50 LiTTBits.
  * Body: { type: "daily" }
  */
 async function postHandler(req: NextRequest) {
@@ -82,7 +82,7 @@ async function postHandler(req: NextRequest) {
         idempotencyKey,
       });
       return NextResponse.json({
-        message: `${amount} LiTBit Coins spent`,
+        message: `${amount} LiTTBits spent`,
         balance: wallet.balance,
         spent: amount,
         reason,
@@ -108,7 +108,7 @@ async function postHandler(req: NextRequest) {
     return NextResponse.json({
       message: claimed.replayed
         ? "Daily bonus already claimed today"
-        : "Daily bonus claimed! +50 LiTBit Coins",
+        : "Daily bonus claimed! +50 LiTTBits",
       balance: claimed.balance,
       last_claim_date: today,
       replayed: claimed.replayed,
@@ -176,8 +176,8 @@ async function putHandler(req: NextRequest) {
     return NextResponse.json({
       message:
         body.amount > 0
-          ? `+${body.amount} LiTBit Coins added`
-          : `${Math.abs(body.amount)} LiTBit Coins deducted`,
+          ? `+${body.amount} LiTTBits added`
+          : `${Math.abs(body.amount)} LiTTBits deducted`,
       balance: wallet.balance,
       previousBalance: wallet.previousBalance,
       change: body.amount,

@@ -6,6 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import { FloatingVoiceButton } from "@/features/voice/components/FloatingVoiceButton";
+import MusicPlayer from "@/components/dashboard/MusicPlayer";
 
 /* ---------- Inline SVG icons (lucide-react pinned to old version) ---------- */
 function Icon({ name, size = 16, className = "", style }: { name: string; size?: number; className?: string; style?: CSSProperties }) {
@@ -44,6 +45,7 @@ function Icon({ name, size = 16, className = "", style }: { name: string; size?:
     eye: "M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6z",
     eyeOff: "M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24 M1 1l22 22",
     grip: "M9 5h.01 M9 12h.01 M9 19h.01 M15 5h.01 M15 12h.01 M15 19h.01",
+    music: "M9 18V5l12-2v13 M9 9l12-2 M6 21a3 3 0 1 0 0-6 3 3 0 0 0 0 6z M18 19a3 3 0 1 0 0-6 3 3 0 0 0 0 6z",
   };
   return (
     <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={className} style={style}>
@@ -100,6 +102,10 @@ type ConnectionOverview = {
 };
 
 type WalletData = { balance: number | null; plan: string };
+type LlmHealth = {
+  gemini?: { available: boolean; model: string };
+  openrouter?: { available: boolean; model: string };
+};
 type UsageData = {
   summary: { totalCommands: number; totalAgentTasks: number; totalGenerations: number; plan: string };
   daily: Array<{ date: string; commands: number; agentTasks: number; generations: number }>;
@@ -112,24 +118,25 @@ type InstalledCap = { capability_key: string; name: string; compatible_assistant
 type WidgetId =
   | "hero" | "quickActions" | "missions" | "attention" | "projects"
   | "creations" | "connections" | "usage" | "activity" | "suggestions"
-  | "deployments" | "capabilities" | "assistants";
+  | "deployments" | "capabilities" | "assistants" | "music";
 
 type WidgetConfig = { id: WidgetId; label: string; visible: boolean; order: number };
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: "hero", label: "Continue Building", visible: true, order: 0 },
   { id: "quickActions", label: "Quick Actions", visible: true, order: 1 },
-  { id: "missions", label: "Active Missions", visible: true, order: 2 },
-  { id: "attention", label: "Needs Attention", visible: true, order: 3 },
-  { id: "projects", label: "Recent Projects", visible: true, order: 4 },
-  { id: "connections", label: "Connection Health", visible: true, order: 5 },
-  { id: "creations", label: "Recent Creations", visible: true, order: 6 },
-  { id: "usage", label: "Usage & LiTBits", visible: true, order: 7 },
-  { id: "activity", label: "Live Activity", visible: true, order: 8 },
-  { id: "suggestions", label: "LiTT Suggestions", visible: true, order: 9 },
-  { id: "deployments", label: "Deployments", visible: true, order: 10 },
-  { id: "capabilities", label: "Installed Capabilities", visible: true, order: 11 },
-  { id: "assistants", label: "Assistants", visible: true, order: 12 },
+  { id: "music", label: "Now Playing", visible: true, order: 2 },
+  { id: "missions", label: "Active Missions", visible: true, order: 3 },
+  { id: "attention", label: "Needs Attention", visible: true, order: 4 },
+  { id: "projects", label: "Recent Projects", visible: true, order: 5 },
+  { id: "connections", label: "Connection Health", visible: true, order: 6 },
+  { id: "creations", label: "Recent Creations", visible: true, order: 7 },
+  { id: "usage", label: "Usage & LiTTBits", visible: true, order: 8 },
+  { id: "activity", label: "Live Activity", visible: true, order: 9 },
+  { id: "suggestions", label: "LiTT Suggestions", visible: true, order: 10 },
+  { id: "deployments", label: "Deployments", visible: true, order: 11 },
+  { id: "capabilities", label: "Installed Capabilities", visible: true, order: 12 },
+  { id: "assistants", label: "Assistants", visible: true, order: 13 },
 ];
 
 const WIDGET_STORAGE_KEY = "littree-dashboard-widgets-v1";
@@ -298,7 +305,7 @@ function QuickActionsWidget() {
     { label: "New Project", href: "/projects/new", icon: "plus", color: "#B6FF4A" },
     { label: "Start Mission", href: "/studio?tool=workflows", icon: "target", color: "#22D3EE" },
     { label: "Create Image", href: "/studio?tool=image", icon: "image", color: "#ec4899" },
-    { label: "Mission Forge", href: "/studio?tool=workflows", icon: "layers", color: "#a855f7" },
+    { label: "Play Music", href: "/dashboard?app=music", icon: "music", color: "#a855f7" },
     { label: "Connect GitHub", href: "/studio/github", icon: "git", color: "#f97316" },
     { label: "View Gallery", href: "/gallery", icon: "package", color: "#3b82f6" },
     { label: "Review Usage", href: "/wallet", icon: "wallet", color: "#B6FF4A" },
@@ -452,8 +459,8 @@ function RecentProjectsWidget({ data, loading }: { data: DashboardData | null; l
 }
 
 /* ---------- Connection Health Widget ---------- */
-function ConnectionHealthWidget({ data, connections, loading }: {
-  data: DashboardData | null; connections: ConnectionOverview[]; loading: boolean;
+function ConnectionHealthWidget({ data, connections, llmHealth, loading }: {
+  data: DashboardData | null; connections: ConnectionOverview[]; llmHealth: LlmHealth | null; loading: boolean;
 }) {
   const T = useTheme().resolvedColors;
 
@@ -485,8 +492,22 @@ function ConnectionHealthWidget({ data, connections, loading }: {
       }
     }
     // AI providers
-    result.push({ label: "Gemini", status: "ready", detail: "Ready", actionHref: "/settings", actionLabel: "Test", category: "AI" });
-    result.push({ label: "OpenRouter", status: "ready", detail: "Ready", actionHref: "/settings", actionLabel: "Test", category: "AI" });
+    result.push({
+      label: "Gemini",
+      status: llmHealth?.gemini?.available ? "ready" : "disconnected",
+      detail: llmHealth?.gemini?.available ? llmHealth.gemini.model : "API key required",
+      actionHref: "/settings/connections",
+      actionLabel: llmHealth?.gemini?.available ? "Ready" : "Connect",
+      category: "AI",
+    });
+    result.push({
+      label: "OpenRouter",
+      status: llmHealth?.openrouter?.available ? "ready" : "disconnected",
+      detail: llmHealth?.openrouter?.available ? llmHealth.openrouter.model : "API key required",
+      actionHref: "/settings/connections",
+      actionLabel: llmHealth?.openrouter?.available ? "Ready" : "Connect",
+      category: "AI",
+    });
     // Terminal
     result.push({ label: "Terminal", status: "disconnected", detail: "Waiting for workspace", actionHref: "/settings?tab=cli", actionLabel: "Details", category: "Project" });
     // Meta (optional)
@@ -497,7 +518,7 @@ function ConnectionHealthWidget({ data, connections, loading }: {
       actionHref: "/settings/connections", actionLabel: metaAcc ? "Manage" : "Connect", category: "Publishing",
     });
     return result;
-  }, [data, connections]);
+  }, [data, connections, llmHealth]);
 
   if (loading) return <SkeletonCard />;
 
@@ -539,8 +560,11 @@ function RecentCreationsWidget({ data, loading }: { data: DashboardData | null; 
           <Icon name="image" size={20} style={{ color: "#ec4899" }} />
         </div>
         <p className="text-sm font-bold mb-1" style={{ color: T.headerColor }}>No recent creations</p>
-        <p className="text-xs opacity-50 mb-4">Generate an image, code snippet, or document in Studio and it will appear here.</p>
-        <ActionButton href="/studio?tool=image" label="Create Image" icon="image" color="#ec4899" />
+        <p className="text-xs opacity-50 mb-4">Generate an image, song, code snippet, or document in Studio and it will appear here.</p>
+        <div className="flex justify-center gap-2">
+          <ActionButton href="/studio?tool=image" label="Create Image" icon="image" color="#ec4899" />
+          <ActionButton href="/studio?tool=audio" label="Make Music" icon="music" color="#a855f7" />
+        </div>
       </div>
     );
   }
@@ -582,7 +606,7 @@ function UsageWidget({ wallet, usage, loading }: { wallet: WalletData | null; us
       </div>
       <div>
         <div className="flex items-center justify-between text-xs mb-1">
-          <span className="opacity-50">Monthly LiTBits</span>
+          <span className="opacity-50">Monthly LiTTBits</span>
           <span className="font-bold" style={{ color: T.accentColor }}>{balance.toLocaleString()} remaining</span>
         </div>
         <div className="h-2 rounded-full overflow-hidden" style={{ background: `${T.borderColor}20` }}>
@@ -597,6 +621,21 @@ function UsageWidget({ wallet, usage, loading }: { wallet: WalletData | null; us
         <ActionButton href="/wallet" label="View Usage" icon="wallet" />
         {plan === "Free" && <ActionButton href="/pricing" label="Upgrade" icon="zap" color="#B6FF4A" />}
       </div>
+    </div>
+  );
+}
+
+/* ---------- Music Widget ---------- */
+function MusicWidget() {
+  const T = useTheme().resolvedColors;
+  return (
+    <div className="space-y-3">
+      <MusicPlayer mode="mini" />
+      <div className="flex gap-2">
+        <ActionButton href="/dashboard?app=music" label="Open Music Hub" icon="music" color="#a855f7" />
+        <ActionButton href="/studio?tool=audio" label="Create Audio" icon="sparkles" color="#22d3ee" />
+      </div>
+      <p className="text-[10px]" style={{ color: T.textMuted }}>Your player keeps working while you build. Add streams, playlists, or your own generated audio in Music Hub.</p>
     </div>
   );
 }
@@ -700,7 +739,7 @@ function LiTTSuggestionsWidget({ data, wallet, usage }: {
       list.push({ reason: "Your Image Studio has no saved project.", benefit: "Create your first image to see the creative engine.", action: "Create Image", href: "/studio?tool=image" });
     }
     if (wallet && typeof wallet.balance === "number" && wallet.balance < 1000) {
-      list.push({ reason: "Your LiTBit balance is running low.", benefit: "Claim daily bonus or upgrade your plan.", action: "View Wallet", href: "/wallet" });
+      list.push({ reason: "Your LiTTBit balance is running low.", benefit: "Claim daily bonus or upgrade your plan.", action: "View Wallet", href: "/wallet" });
     }
     const errorEvents = (data?.events || []).filter((e) => e.severity === "error");
     if (errorEvents.length > 0) {
@@ -873,6 +912,7 @@ export function CommandCenter() {
   const [wallet, setWallet] = useState<WalletData | null>(null);
   const [usage, setUsage] = useState<UsageData | null>(null);
   const [installedCaps, setInstalledCaps] = useState<InstalledCap[]>([]);
+  const [llmHealth, setLlmHealth] = useState<LlmHealth | null>(null);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -885,7 +925,13 @@ export function CommandCenter() {
       const stored = localStorage.getItem(WIDGET_STORAGE_KEY);
       if (stored) {
         const parsed = JSON.parse(stored) as WidgetConfig[];
-        if (Array.isArray(parsed) && parsed.length > 0) setWidgets(parsed);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const storedIds = new Set(parsed.map((widget) => widget.id));
+          const additions = DEFAULT_WIDGETS
+            .filter((widget) => !storedIds.has(widget.id))
+            .map((widget, index) => ({ ...widget, order: parsed.length + index }));
+          setWidgets([...parsed, ...additions]);
+        }
       }
     } catch { /* ignore */ }
   }, []);
@@ -897,8 +943,8 @@ export function CommandCenter() {
 
   const fetchDashboard = useCallback(async () => {
     try {
-      const [dashRes, connRes, walletRes, usageRes, capsRes] = await Promise.allSettled([
-        fetch("/api/dashboard"), fetch("/api/connections"), fetch("/api/wallet"), fetch("/api/usage/stats"), fetch("/api/marketplace/installations"),
+      const [dashRes, connRes, walletRes, usageRes, capsRes, subscriptionRes, healthRes] = await Promise.allSettled([
+        fetch("/api/dashboard"), fetch("/api/connections"), fetch("/api/wallet"), fetch("/api/usage/stats"), fetch("/api/marketplace/installations"), fetch("/api/billing/subscription"), fetch("/api/llm/health"),
       ]);
       if (dashRes.status === "fulfilled" && dashRes.value.ok) {
         const json = await dashRes.value.json();
@@ -919,6 +965,16 @@ export function CommandCenter() {
       if (capsRes.status === "fulfilled" && capsRes.value.ok) {
         const cJson = await capsRes.value.json();
         setInstalledCaps(cJson.installations ?? cJson ?? []);
+      }
+      if (subscriptionRes.status === "fulfilled" && subscriptionRes.value.ok) {
+        const subscriptionJson = await subscriptionRes.value.json();
+        setWallet((current) => ({
+          balance: subscriptionJson.balances?.total ?? current?.balance ?? null,
+          plan: subscriptionJson.plan?.name ?? subscriptionJson.subscription?.plan ?? current?.plan ?? "Free",
+        }));
+      }
+      if (healthRes.status === "fulfilled" && healthRes.value.ok) {
+        setLlmHealth(await healthRes.value.json());
       }
       setError(null);
     } catch (err) {
@@ -989,10 +1045,11 @@ export function CommandCenter() {
     switch (id) {
       case "hero": return <HeroWidget data={data} loading={loading} />;
       case "quickActions": return <QuickActionsWidget />;
+      case "music": return <MusicWidget />;
       case "missions": return <ActiveMissionsWidget data={data} loading={loading} />;
       case "attention": return <NeedsAttentionWidget data={data} loading={loading} />;
       case "projects": return <RecentProjectsWidget data={data} loading={loading} />;
-      case "connections": return <ConnectionHealthWidget data={data} connections={connections} loading={loading} />;
+      case "connections": return <ConnectionHealthWidget data={data} connections={connections} llmHealth={llmHealth} loading={loading} />;
       case "creations": return <RecentCreationsWidget data={data} loading={loading} />;
       case "usage": return <UsageWidget wallet={wallet} usage={usage} loading={loading} />;
       case "activity": return <LiveActivityWidget data={data} loading={loading} onMarkAllRead={handleMarkAllRead} />;
@@ -1007,7 +1064,7 @@ export function CommandCenter() {
   /* Column spans for desktop grid */
   const colSpanFor = (id: WidgetId): string => {
     const wide: WidgetId[] = ["hero", "quickActions"];
-    const medium: WidgetId[] = ["missions", "projects", "creations", "activity"];
+    const medium: WidgetId[] = ["missions", "projects", "creations", "activity", "music"];
     if (wide.includes(id)) return "lg:col-span-12";
     if (medium.includes(id)) return "lg:col-span-8";
     return "lg:col-span-4";

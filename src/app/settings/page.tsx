@@ -1761,7 +1761,7 @@ function NotificationsSection({ T }: { T: ReturnType<typeof useTheme>["resolvedC
   );
 }
 
-/* ── Billing & LiTBits ─────────────────────────────────────────────── */
+/* ── Billing & LiTTBits ─────────────────────────────────────────────── */
 
 type BillingData = {
   plan: {
@@ -1885,8 +1885,8 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         )}
       </SettingsCard>
 
-      {/* LiTBits Balance */}
-      <SettingsCard title="LiTBits" description="Platform credits for AI actions">
+      {/* LiTTBits Balance */}
+      <SettingsCard title="LiTTBits" description="Platform credits for AI actions">
         {loading ? (
           <div className="flex items-center gap-2 text-xs text-white/40">
             <Loader2 size={12} className="animate-spin" /> Loading…
@@ -1894,9 +1894,9 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         ) : (
           <>
             <div className="rounded-xl border p-4" style={{ borderColor: `${T.accentColor}30`, backgroundColor: `${T.accentColor}08` }}>
-              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} LiTBits</div>
+              <div className="text-2xl font-black" style={{ color: T.accentColor }}>{totalBalance.toLocaleString()} LiTTBits</div>
               <p className="mt-1 text-xs text-white/40">
-                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta LiTBits (no cash value)`}
+                {betaBalance > 0 && `Includes ${betaBalance.toLocaleString()} Beta LiTTBits (no cash value)`}
                 {betaBalance === 0 && "Available balance"}
               </p>
             </div>
@@ -1916,7 +1916,7 @@ function BillingSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
             </div>
             {betaBalance > 0 && (
               <p className="mt-2 text-[10px] text-white/30">
-                Beta LiTBits are consumed after paid credits. They expire 90 days after paid beta launch.
+                Beta LiTTBits are consumed after paid credits. They expire 90 days after paid beta launch.
               </p>
             )}
           </>

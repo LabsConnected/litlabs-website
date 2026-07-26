@@ -122,7 +122,7 @@ export const NAV_GROUPS: NavGroup[] = [
     accent: GROUP_ACCENTS.Marketplace,
     items: [
       { label: "Browse Agents", href: "/marketplace", icon: Store },
-      { label: "LiTBits", href: "/marketplace?tab=coins", icon: Wallet },
+      { label: "LiTTBits", href: "/marketplace?tab=coins", icon: Wallet },
       { label: "Purchases", href: "/wallet?tab=history", icon: Receipt },
       { label: "Creator Hub", href: "/creator", icon: BarChart3 },
     ],

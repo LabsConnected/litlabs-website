@@ -54,7 +54,7 @@ async function creditCoinPack(
         p_amount: coinAmount,
         p_category: "purchase",
         p_balance_bucket: "purchased",
-        p_description: `Purchased ${coinAmount} LiTBits via Stripe`,
+        p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
         p_idempotency_key: `coinpack_${sessionId}`,
         p_reference_type: "stripe_checkout",
         p_reference_id: sessionId,
@@ -79,7 +79,7 @@ async function creditCoinPack(
       type: "purchase",
       amount: coinAmount,
       balance_after: newBalance,
-      description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
+      description: `Purchased ${coinAmount} LiTTBits via Stripe`,
       metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
     });
   } catch (err) {
@@ -102,7 +102,7 @@ async function grantSubscriptionCredits(
       p_amount: plan.monthlyCredits,
       p_category: "subscription_grant",
       p_balance_bucket: "monthly",
-      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTBits`,
+      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTTBits`,
       p_idempotency_key: idempotencyKey,
       p_reference_type: "subscription",
       p_expires_at: expiresAt ?? undefined,
@@ -330,7 +330,7 @@ export async function POST(req: NextRequest) {
             try {
               await sb.rpc("debit_credits", {
                 p_user_id: refundUser.id,
-                p_amount: charge.amount_refunded / 100 * 100, // convert cents to LiTBits (approx)
+                p_amount: charge.amount_refunded / 100 * 100, // convert cents to LiTTBits (approx)
                 p_category: "refund",
                 p_description: `Refund for charge ${charge.id}`,
                 p_idempotency_key: `refund_${charge.id}`,

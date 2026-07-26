@@ -493,7 +493,7 @@ async function handler(req: NextRequest) {
     if (wallet.balance < cost) {
       return NextResponse.json(
         {
-          error: `Insufficient LiTBit Coins. Need ${cost}, have ${wallet.balance}`,
+          error: `Insufficient LiTTBits. Need ${cost}, have ${wallet.balance}`,
         },
         { status: 402 },
       );

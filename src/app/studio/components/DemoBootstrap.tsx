@@ -212,7 +212,7 @@ const demoAnswers: { match: RegExp; reply: string }[] = [
       "Here's what an image request would look like in real Studio:\n\n" +
       "• The `Image` tool in the left rail opens a generation workspace.\n" +
       "• Models include FLUX, Imagen, and Ideogram (BYOK on the **Pro** plan).\n" +
-      "• Each generation burns LiTBit Coins — you start with 500.\n" +
+      "• Each generation burns LiTTBits — you start with 500.\n" +
       "• Outputs stream into your Assets library and can be remixed.\n\n" +
       "_This is a demo response — sign in to actually generate._",
   },
@@ -266,7 +266,7 @@ const demoAnswers: { match: RegExp; reply: string }[] = [
   {
     match: /pricing|plan|cost|credit|coin|lbc|litbit/i,
     reply:
-      "LiTTree is free to join, with 500 starter LiTBit Coins.\n\n" +
+      "LiTTree is free to join, with 500 starter LiTTBits.\n\n" +
       "• BYOK models are free (you bring the API key).\n" +
       "• Hosted models and image / video generation spend Coins.\n" +
       "• Daily check-in refills a small amount each day.\n\n" +

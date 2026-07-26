@@ -64,7 +64,7 @@ export default function PricingPage() {
             private projects, GitHub workflows, terminal access, and deployment features.
           </p>
           <p className="mt-3 text-xs text-white/40">
-            No plan claims unlimited external compute. LiTBits cover platform actions, not third-party infrastructure costs.
+            No plan claims unlimited external compute. LiTTBits cover platform actions, not third-party infrastructure costs.
           </p>
         </div>
       </div>
@@ -141,7 +141,7 @@ export default function PricingPage() {
                       {plan.monthlyCredits.toLocaleString()}
                     </div>
                     <div className="text-[9px] uppercase tracking-wider text-white/40">
-                      {isFounder ? "included founding LiTBits" : "monthly LiTBits"}
+                      {isFounder ? "included founding LiTTBits" : "monthly LiTTBits"}
                     </div>
                   </div>
 
@@ -201,12 +201,12 @@ export default function PricingPage() {
             {
               icon: Coins,
               title: "One visible balance",
-              copy: "Monthly, promotional, and purchased LiTBits are shown separately and summed honestly.",
+              copy: "Monthly, promotional, and purchased LiTTBits are shown separately and summed honestly.",
             },
             {
               icon: RefreshCw,
               title: "Monthly credits reset",
-              copy: "Plan LiTBits refresh each paid billing period. Purchased LiTBits do not silently expire.",
+              copy: "Plan LiTTBits refresh each paid billing period. Purchased LiTTBits do not silently expire.",
             },
             {
               icon: LockKeyhole,
@@ -255,11 +255,11 @@ export default function PricingPage() {
           <h3 className="text-sm font-black text-white/70">Beta Pricing FAQ</h3>
           {[
             {
-              q: "What are LiTBits?",
-              a: "LiTBits are platform credits used for AI actions like chat, code generation, image creation, and terminal minutes. Each plan includes a monthly allowance.",
+              q: "What are LiTTBits?",
+              a: "LiTTBits are platform credits used for AI actions like chat, code generation, image creation, and terminal minutes. Each plan includes a monthly allowance.",
             },
             {
-              q: "Do I keep my existing Beta LiTBits?",
+              q: "Do I keep my existing Beta LiTTBits?",
               a: "Yes. Your existing wallet balance is migrated once into the promotional bucket. Monthly plan credits are used first, then promotional credits, then purchased credits.",
             },
             {
@@ -268,7 +268,7 @@ export default function PricingPage() {
             },
             {
               q: "Is this unlimited AI?",
-              a: "No. Billable AI and runtime actions have a LiTBit cost. Free navigation, project organization, and local editing do not. Estimated cost should be shown before expensive operations.",
+              a: "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Estimated cost should be shown before expensive operations.",
             },
           ].map((faq) => (
             <div key={faq.q} className="rounded-xl border border-white/5 bg-black/20 px-4 py-3">
