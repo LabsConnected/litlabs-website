@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { streamText, generateText } from "@/lib/llm";
+import { streamText, generateText, type ModelCategory } from "@/lib/llm";
 import { AGENTS, Agent } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -180,7 +180,8 @@ async function handler(req: NextRequest) {
       agentSlug = DEFAULT_AGENT_SLUG,
       message,
       history = [],
-      provider = "gemini",
+      provider,
+      category,
       model: requestedModel,
       stream = false,
       userName,
@@ -230,9 +231,10 @@ async function handler(req: NextRequest) {
         prompt,
         {
           task: "chat",
-          provider,
+          provider: category ? undefined : provider,
+          category: category as ModelCategory | undefined,
           maxTokens: 2048,
-          modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+          modelOverride: requestedModel && provider ? { [provider]: requestedModel } : undefined,
         },
         undefined,
       );
@@ -265,9 +267,10 @@ async function handler(req: NextRequest) {
             },
             {
               task: "chat",
-              provider,
+              provider: category ? undefined : provider,
+              category: category as ModelCategory | undefined,
               maxTokens: 2048,
-              modelOverride: requestedModel ? { [provider]: requestedModel } : undefined,
+              modelOverride: requestedModel && provider ? { [provider]: requestedModel } : undefined,
             },
           );
           controller.enqueue(

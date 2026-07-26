@@ -322,7 +322,7 @@ export default function ImageTool() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   /* ── Provider / format state ── */
-  const [providerId, setProviderId] = useState<MediaProviderId>("pollinations");
+  const [providerId, setProviderId] = useState<MediaProviderId>("gemini");
   const [aspectRatio, setAspectRatio] = useState<
     "1:1" | "4:3" | "3:4" | "16:9" | "9:16"
   >("1:1");

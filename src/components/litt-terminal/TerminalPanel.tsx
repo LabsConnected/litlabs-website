@@ -96,6 +96,19 @@ export const TerminalPanel = forwardRef<
     term.writeln("\x1b[1;32m🔥 LiTT Terminal\x1b[0m");
     term.writeln("\x1b[1;30mReal shell. Real power. AI-backed.\x1b[0m");
     term.writeln("");
+
+    const wsUrl = process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "";
+
+    if (!wsUrl) {
+      terminalStore.setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_WS_URL.");
+      terminalStore.setStatus("error");
+      term.writeln("\x1b[31m❌ Terminal server is not configured.\x1b[0m");
+      term.writeln("\x1b[33mThe PTY backend runs as a separate service.\x1b[0m");
+      term.writeln("\x1b[33mIn production, a terminal server must be deployed and NEXT_PUBLIC_TERMINAL_WS_URL must point to it.\x1b[0m");
+      onLog?.("[WS] Terminal server URL not configured");
+      return;
+    }
+
     term.writeln("\x1b[33mConnecting to terminal server...\x1b[0m");
     terminalStore.setStatus("connecting");
 
@@ -112,9 +125,6 @@ export const TerminalPanel = forwardRef<
         socketRef.current = null;
       }
     }, CONNECTION_TIMEOUT_MS);
-
-    const wsUrl =
-      process.env.NEXT_PUBLIC_TERMINAL_WS_URL || "http://localhost:4001";
     const resize = () => {
       fit.fit();
       socketRef.current?.emit("terminal:resize", {

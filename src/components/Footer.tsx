@@ -9,6 +9,7 @@ const PRODUCT_LINKS = [
   { href: "/studio", label: "Studio" },
   { href: "/gallery", label: "Gallery" },
   { href: "/marketplace", label: "Marketplace" },
+  { href: "/pricing", label: "Pricing" },
 ];
 
 const RESOURCE_LINKS = [

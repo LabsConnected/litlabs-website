@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { withRateLimit } from "@/lib/rate-limiter";
-import { streamText, generateText, type LLMProvider } from "@/lib/llm";
+import { streamText, generateText, type LLMProvider, type ModelCategory } from "@/lib/llm";
 import { AGENTS, Agent, orchestrator } from "@/lib/agents";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
@@ -34,6 +34,7 @@ interface UnifiedChatRequest {
   metadata?: Record<string, unknown>;
   history?: HistoryEntry[];
   provider?: string;
+  category?: string;
   stream?: boolean;
   simulateResponse?: boolean;
 }
@@ -138,7 +139,8 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     agentSlug = DEFAULT_AGENT_SLUG,
     message,
     history = [],
-    provider = "gemini",
+    provider,
+    category,
     stream = false,
   } = body;
 
@@ -158,9 +160,10 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
     "openrouter-trinity",
     "openrouter-vision",
   ];
-  const llmProvider: LLMProvider = validProviders.includes(provider as LLMProvider)
+  const llmProvider: LLMProvider | undefined = validProviders.includes(provider as LLMProvider)
     ? (provider as LLMProvider)
-    : "gemini";
+    : undefined;
+  const modelCategory: ModelCategory | undefined = category as ModelCategory | undefined;
 
   const agent =
     AGENTS[agentSlug as keyof typeof AGENTS] ??
@@ -170,7 +173,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
   if (!stream) {
     const r = await generateText(
       prompt,
-      { task: "chat", provider: llmProvider, maxTokens: 2048 },
+      { task: "chat", provider: modelCategory ? undefined : llmProvider, category: modelCategory, maxTokens: 2048 },
       undefined,
     );
     await logConversation(agent, userId, message, r.text);
@@ -197,7 +200,7 @@ async function handleLLMChat(body: UnifiedChatRequest, userId: string | null) {
               encoder.encode(`data: ${JSON.stringify({ text: chunk })}\n\n`),
             );
           },
-          { task: "chat", provider: llmProvider, maxTokens: 2048 },
+          { task: "chat", provider: modelCategory ? undefined : llmProvider, category: modelCategory, maxTokens: 2048 },
         );
         controller.enqueue(
           encoder.encode(
@@ -247,7 +250,7 @@ async function handleSimpleChat(body: UnifiedChatRequest, userId: string | null)
   const prompt = buildPrompt(targetAgent, message, []);
   const r = await generateText(
     prompt,
-    { task: "chat", provider: "gemini", maxTokens: 2048 },
+    { task: "chat", category: "auto", maxTokens: 2048 },
     undefined,
   );
 

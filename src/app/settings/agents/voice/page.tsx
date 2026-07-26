@@ -20,7 +20,7 @@ export default function VoiceSettingsPage() {
 
   return (
     <div className="min-h-screen" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
-      <div className="mx-auto max-w-3xl p-4 lg:p-6">
+      <div className="mx-auto w-full max-w-[1500px] p-4 lg:p-6">
         <Link
           href="/settings"
           className="mb-4 inline-flex items-center gap-2 text-sm opacity-60 transition-all hover:opacity-100"

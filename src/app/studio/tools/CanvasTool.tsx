@@ -10,16 +10,19 @@ import {
   Eye,
   Code,
   FileCode,
+  FilePlus,
   Loader2,
   Check,
   Send,
   Terminal,
+  Trash2,
   User,
   Wand2,
   Maximize2,
   Minimize2,
   Play,
   Brain,
+  RotateCcw,
 } from "lucide-react";
 
 type Message = {
@@ -57,6 +60,27 @@ const STARTER_TEMPLATES = [
   },
 ];
 
+const BUILD_INTENTS = [
+  { label: "Landing Page", prompt: "Build a modern landing page with hero, features, pricing, and footer" },
+  { label: "Dashboard", prompt: "Build a responsive dashboard with stat cards, sidebar, and data table" },
+  { label: "SaaS App", prompt: "Build a SaaS marketing site with features, pricing tiers, and signup CTA" },
+  { label: "Portfolio", prompt: "Build a portfolio website with project showcase, about, and contact form" },
+  { label: "Store", prompt: "Build a product storefront with product grid, cart icon, and product cards" },
+  { label: "Blog", prompt: "Build a blog layout with article list, featured post, and newsletter signup" },
+  { label: "Admin Panel", prompt: "Build an admin panel with sidebar navigation, data table, and stats" },
+  { label: "Custom", prompt: "" },
+];
+
+const QUALITY_LEVELS = [
+  { id: "draft", label: "Fast Draft", desc: "Quick structure, basic styles" },
+  { id: "polished", label: "Polished", desc: "Refined, responsive, accessible" },
+  { id: "premium", label: "Premium", desc: "Custom visuals, animation, branded" },
+  { id: "production", label: "Production", desc: "Tests, types, deployment-ready" },
+];
+
+const PERSIST_KEY = "litlabs:canvas:files";
+const PERSIST_MSG_KEY = "litlabs:canvas:messages";
+
 export default function CanvasTool() {
   const { resolvedColors: T } = useTheme();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -69,8 +93,44 @@ export default function CanvasTool() {
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
   const [memories, setMemories] = useState<string[]>([]);
+  const [qualityLevel, setQualityLevel] = useState("polished");
+  const [selectedIntent, setSelectedIntent] = useState("");
+  const [previewDevice, setPreviewDevice] = useState<"desktop" | "tablet" | "mobile">("desktop");
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  // Load persisted files and messages on mount
+  useEffect(() => {
+    try {
+      const savedFiles = localStorage.getItem(PERSIST_KEY);
+      if (savedFiles) {
+        const files = JSON.parse(savedFiles) as GeneratedFile[];
+        if (files.length > 0) {
+          setGeneratedFiles(files);
+          setActiveFile(files[0].name);
+        }
+      }
+      const savedMsgs = localStorage.getItem(PERSIST_MSG_KEY);
+      if (savedMsgs) {
+        const msgs = JSON.parse(savedMsgs) as Message[];
+        if (msgs.length > 0) setMessages(msgs);
+      }
+    } catch { /* ignore corrupt storage */ }
+  }, []);
+
+  // Persist files when they change
+  useEffect(() => {
+    if (generatedFiles.length > 0) {
+      localStorage.setItem(PERSIST_KEY, JSON.stringify(generatedFiles));
+    }
+  }, [generatedFiles]);
+
+  // Persist messages when they change
+  useEffect(() => {
+    if (messages.length > 0) {
+      localStorage.setItem(PERSIST_MSG_KEY, JSON.stringify(messages.slice(-20)));
+    }
+  }, [messages]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({
@@ -140,6 +200,11 @@ export default function CanvasTool() {
             ? `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}`
             : "";
 
+        const qualityPrompt = QUALITY_LEVELS.find((q) => q.id === qualityLevel);
+        const qualityInstruction = qualityPrompt
+          ? `\nQuality level: ${qualityPrompt.label} — ${qualityPrompt.desc}.`
+          : "";
+
         const res = await fetch("/api/ai-chat", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -152,7 +217,7 @@ export default function CanvasTool() {
               })),
               {
                 role: "user",
-                content: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${memoryContext}\n\nUser request: ${text}`,
+                content: `You are a code builder assistant. Generate clean, working code. Always wrap code in triple backticks with the language specified. If generating HTML, make it a complete standalone file. If multiple files, use comments like // filename.ext before each code block.${qualityInstruction}${memoryContext}\n\nUser request: ${text}`,
               },
             ],
           }),
@@ -205,7 +270,7 @@ export default function CanvasTool() {
         setIsLoading(false);
       }
     },
-    [isLoading, messages, extractCode, model, memories],
+    [isLoading, messages, extractCode, model, memories, qualityLevel],
   );
 
   const handleKey = (e: React.KeyboardEvent) => {
@@ -239,13 +304,94 @@ export default function CanvasTool() {
 
   const getPreviewHtml = () => {
     const htmlFile = generatedFiles.find((f) => f.name.endsWith(".html"));
-    if (htmlFile) return htmlFile.content;
+    const cssFile = generatedFiles.find((f) => f.name.endsWith(".css"));
+    const jsFile = generatedFiles.find(
+      (f) => f.name.endsWith(".js") && !f.name.endsWith(".test.js"),
+    );
+
+    if (htmlFile) {
+      let html = htmlFile.content;
+      if (cssFile) {
+        const styleTag = `<style>\n${cssFile.content}\n</style>`;
+        if (html.includes("</head>")) {
+          html = html.replace("</head>", `${styleTag}\n</head>`);
+        } else if (html.includes("<body")) {
+          html = html.replace(/<body/, `${styleTag}\n<body`);
+        } else {
+          html = styleTag + "\n" + html;
+        }
+      }
+      if (jsFile) {
+        const scriptTag = `<script>\n${jsFile.content}\n</script>`;
+        if (html.includes("</body>")) {
+          html = html.replace("</body>", `${scriptTag}\n</body>`);
+        } else {
+          html = html + "\n" + scriptTag;
+        }
+      }
+      return html;
+    }
+
     const allCode = generatedFiles.map((f) => f.content).join("\n\n");
     return `<!DOCTYPE html><html><head><style>body{font-family:system-ui;padding:20px;background:#0a0a0a;color:#e0e0e0;margin:0}*{box-sizing:border-box}button{cursor:pointer;padding:8px 16px;border:none;border-radius:8px;font-weight:bold}input,textarea{padding:8px;border:1px solid #333;border-radius:8px;background:#111;color:#fff;width:100%;margin:4px 0}.card{background:#141414;border:1px solid #222;border-radius:12px;padding:16px;margin:8px 0}.flex{display:flex;gap:8px;align-items:center}.accent{background:#00f0ff;color:#000}</style></head><body><pre style="white-space:pre-wrap;font-size:13px">${allCode.replace(/</g, "&lt;").replace(/>/g, "&gt;")}</pre></body></html>`;
   };
 
+  const downloadAllAsZip = () => {
+    if (generatedFiles.length === 0) return;
+    const readme = `# Generated Project\n\nGenerated by LiTT via LiTTree LabStudios.\n\n## Files\n\n${generatedFiles.map((f) => `- \`${f.name}\``).join("\n")}\n\n## Setup\n\n1. Open \`index.html\` in your browser, or\n2. Serve the directory with any static server\n\n## Commands\n\n\`\`\`bash\nnpx serve .\n# or\npython -m http.server 8000\n\`\`\`\n\nGenerated on ${new Date().toISOString()}\n`;
+
+    const files = [...generatedFiles, { name: "README.md", content: readme, language: "markdown" }];
+    const blob = new Blob([files.map((f) => `// ${f.name}\n${f.content}`).join("\n\n---\n\n")], { type: "text/plain" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `litlabs-project-${Date.now()}.txt`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
   const activeFileContent =
     generatedFiles.find((f) => f.name === activeFile)?.content || "";
+
+  const deleteFile = useCallback(
+    (fileName: string) => {
+      setGeneratedFiles((prev) => {
+        const next = prev.filter((f) => f.name !== fileName);
+        if (activeFile === fileName) {
+          setActiveFile(next.length > 0 ? next[0].name : "");
+        }
+        if (next.length === 0) {
+          localStorage.removeItem(PERSIST_KEY);
+        } else {
+          localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+        }
+        return next;
+      });
+    },
+    [activeFile],
+  );
+
+  const startNew = useCallback(() => {
+    setGeneratedFiles([]);
+    setMessages([]);
+    setActiveFile("");
+    setInput("");
+    setSelectedIntent("");
+    localStorage.removeItem(PERSIST_KEY);
+    localStorage.removeItem(PERSIST_MSG_KEY);
+  }, []);
+
+  const createBlankFile = useCallback(() => {
+    const name = `untitled-${Date.now()}.html`;
+    const newFile: GeneratedFile = { name, content: "<!DOCTYPE html>\n<html>\n<head>\n  <meta charset=\"utf-8\">\n  <title>Untitled</title>\n</head>\n<body>\n  \n</body>\n</html>", language: "html" };
+    setGeneratedFiles((prev) => {
+      const next = [...prev, newFile];
+      localStorage.setItem(PERSIST_KEY, JSON.stringify(next));
+      return next;
+    });
+    setActiveFile(name);
+    setPreviewMode("code");
+  }, []);
 
   return (
     <div
@@ -262,6 +408,30 @@ export default function CanvasTool() {
           <span className="text-sm font-black" style={{ color: T.headerColor }}>
             Canvas
           </span>
+          <button
+            onClick={startNew}
+            title="Start fresh — clear all files and chat"
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all hover:scale-105"
+            style={{
+              backgroundColor: T.accentColor + "10",
+              color: T.accentColor,
+              border: `1px solid ${T.accentColor}25`,
+            }}
+          >
+            <RotateCcw size={10} /> New
+          </button>
+          <button
+            onClick={createBlankFile}
+            title="Add a blank HTML file"
+            className="flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold transition-all hover:scale-105"
+            style={{
+              backgroundColor: T.boxBg,
+              color: T.textMuted,
+              border: `1px solid ${T.borderColor}25`,
+            }}
+          >
+            <FilePlus size={10} /> File
+          </button>
           {memories.length > 0 && (
             <span
               className="flex items-center gap-1 text-[10px] px-2 py-0.5 rounded-full"
@@ -331,11 +501,64 @@ export default function CanvasTool() {
                   What do you want to build?
                 </h3>
                 <p
-                  className="text-xs mb-5 max-w-xs"
+                  className="text-xs mb-4 max-w-xs"
                   style={{ color: T.textMuted }}
                 >
                   Describe it and I&apos;ll generate the code. Chat to refine.
                 </p>
+
+                {/* Build Intent Presets */}
+                <div className="flex flex-wrap gap-1.5 justify-center mb-3 max-w-sm">
+                  {BUILD_INTENTS.map((intent) => (
+                    <button
+                      key={intent.label}
+                      onClick={() => {
+                        setSelectedIntent(intent.label);
+                        if (intent.prompt) {
+                          setInput(intent.prompt);
+                        }
+                      }}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all hover:scale-105"
+                      style={{
+                        backgroundColor:
+                          selectedIntent === intent.label
+                            ? T.accentColor + "20"
+                            : T.boxBg,
+                        border: `1px solid ${selectedIntent === intent.label ? T.accentColor + "40" : T.borderColor + "25"}`,
+                        color:
+                          selectedIntent === intent.label
+                            ? T.accentColor
+                            : T.textColor,
+                      }}
+                    >
+                      {intent.label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Quality Level Selector */}
+                <div className="flex gap-1.5 mb-4">
+                  {QUALITY_LEVELS.map((q) => (
+                    <button
+                      key={q.id}
+                      onClick={() => setQualityLevel(q.id)}
+                      title={q.desc}
+                      className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all"
+                      style={{
+                        backgroundColor:
+                          qualityLevel === q.id
+                            ? T.accentColor + "20"
+                            : "transparent",
+                        border: `1px solid ${qualityLevel === q.id ? T.accentColor + "40" : T.borderColor + "20"}`,
+                        color:
+                          qualityLevel === q.id ? T.accentColor : T.textMuted,
+                      }}
+                    >
+                      {q.label}
+                    </button>
+                  ))}
+                </div>
+
                 <div className="grid grid-cols-2 gap-2 w-full max-w-xs">
                   {STARTER_TEMPLATES.map((t) => (
                     <button
@@ -516,10 +739,9 @@ export default function CanvasTool() {
           >
             <div className="flex items-center gap-1.5 overflow-x-auto">
               {generatedFiles.map((file) => (
-                <button
+                <div
                   key={file.name}
-                  onClick={() => setActiveFile(file.name)}
-                  className="flex items-center gap-1 px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap"
+                  className="group flex items-center gap-0.5 rounded-lg text-[10px] font-bold transition-all whitespace-nowrap"
                   style={{
                     backgroundColor:
                       activeFile === file.name
@@ -530,8 +752,24 @@ export default function CanvasTool() {
                     border: `1px solid ${activeFile === file.name ? T.accentColor + "30" : "transparent"}`,
                   }}
                 >
-                  <FileCode size={10} /> {file.name}
-                </button>
+                  <button
+                    onClick={() => setActiveFile(file.name)}
+                    className="flex items-center gap-1 px-2.5 py-1"
+                  >
+                    <FileCode size={10} /> {file.name}
+                  </button>
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      deleteFile(file.name);
+                    }}
+                    title={`Delete ${file.name}`}
+                    className="p-0.5 rounded opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
+                    style={{ color: "#ef4444" }}
+                  >
+                    <Trash2 size={9} />
+                  </button>
+                </div>
               ))}
               {generatedFiles.length === 0 && (
                 <span className="text-[11px]" style={{ color: T.textMuted }}>
@@ -540,6 +778,24 @@ export default function CanvasTool() {
               )}
             </div>
             <div className="flex items-center gap-1 shrink-0">
+              {/* Device preview switcher */}
+              {previewMode === "preview" && generatedFiles.length > 0 && (
+                <div className="flex items-center gap-0.5 mr-1 rounded-lg p-0.5" style={{ backgroundColor: T.bgColor + "40" }}>
+                  {(["desktop", "tablet", "mobile"] as const).map((d) => (
+                    <button
+                      key={d}
+                      onClick={() => setPreviewDevice(d)}
+                      className="px-1.5 py-0.5 rounded text-[9px] font-bold transition-all"
+                      style={{
+                        backgroundColor: previewDevice === d ? T.accentColor + "20" : "transparent",
+                        color: previewDevice === d ? T.accentColor : T.textMuted,
+                      }}
+                    >
+                      {d.charAt(0).toUpperCase()}
+                    </button>
+                  ))}
+                </div>
+              )}
               <button
                 onClick={() => setPreviewMode("code")}
                 className="p-1.5 rounded-lg"
@@ -578,10 +834,19 @@ export default function CanvasTool() {
                   </button>
                   <button
                     onClick={downloadFile}
+                    title="Download current file"
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
                     <Download size={13} />
+                  </button>
+                  <button
+                    onClick={downloadAllAsZip}
+                    title="Download all files"
+                    className="p-1.5 rounded-lg hover:bg-white/5"
+                    style={{ color: T.textMuted }}
+                  >
+                    <FileCode size={13} />
                   </button>
                   <button
                     onClick={() => {
@@ -591,10 +856,19 @@ export default function CanvasTool() {
                         win.document.close();
                       }
                     }}
+                    title="Open in new tab"
                     className="p-1.5 rounded-lg hover:bg-white/5"
                     style={{ color: T.textMuted }}
                   >
                     <Play size={13} />
+                  </button>
+                  <button
+                    onClick={startNew}
+                    title="Delete all files and start fresh"
+                    className="p-1.5 rounded-lg hover:bg-red-500/10"
+                    style={{ color: "#ef4444" }}
+                  >
+                    <Trash2 size={13} />
                   </button>
                 </>
               )}
@@ -620,6 +894,19 @@ export default function CanvasTool() {
                 <p className="text-[10px] mt-1" style={{ color: T.textMuted }}>
                   Ask me to build something
                 </p>
+                <div className="mt-4 flex gap-2">
+                  <button
+                    onClick={createBlankFile}
+                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-[10px] font-bold transition-all hover:scale-105"
+                    style={{
+                      backgroundColor: T.accentColor + "10",
+                      color: T.accentColor,
+                      border: `1px solid ${T.accentColor}25`,
+                    }}
+                  >
+                    <FilePlus size={11} /> New blank file
+                  </button>
+                </div>
               </div>
             ) : previewMode === "code" ? (
               <pre
@@ -632,12 +919,20 @@ export default function CanvasTool() {
                 {activeFileContent}
               </pre>
             ) : (
-              <iframe
-                srcDoc={getPreviewHtml()}
-                className="w-full h-full border-0"
-                title="Preview"
-                sandbox="allow-scripts"
-              />
+              <div className="flex justify-center h-full bg-neutral-950 p-2">
+                <iframe
+                  srcDoc={getPreviewHtml()}
+                  className="border-0 transition-all"
+                  title="Preview"
+                  sandbox="allow-scripts"
+                  style={{
+                    width: previewDevice === "mobile" ? "375px" : previewDevice === "tablet" ? "768px" : "100%",
+                    height: "100%",
+                    borderRadius: previewDevice === "desktop" ? "0" : "8px",
+                    boxShadow: previewDevice === "desktop" ? "none" : "0 0 20px rgba(0,0,0,0.3)",
+                  }}
+                />
+              </div>
             )}
           </div>
         </div>

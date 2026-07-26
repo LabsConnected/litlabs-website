@@ -11,6 +11,7 @@ import { createPortal } from "react-dom";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { AGENTS as REAL_AGENTS } from "@/lib/agents";
+import { pickBrowserVoice, getBrowserVoiceConfig, storeVoiceName } from "@/features/voice/lib/voiceConfig";
 import {
   Terminal,
   Mic,
@@ -376,14 +377,11 @@ export default function LiTTTerminal() {
       const voices = window.speechSynthesis.getVoices();
       setAvailableVoices(voices);
       if (voices.length > 0 && !selectedVoiceURI) {
-        const preferred =
-          voices.find((v) => v.name.includes("Google UK English Male")) ||
-          voices.find((v) => v.name.includes("Microsoft David")) ||
-          voices.find(
-            (v) => v.name.includes("Male") && v.lang.startsWith("en"),
-          ) ||
-          voices[0];
-        if (preferred) setSelectedVoiceURI(preferred.voiceURI);
+        const preferred = pickBrowserVoice(voices, "litt");
+        if (preferred) {
+          setSelectedVoiceURI(preferred.voiceURI);
+          storeVoiceName("litt", preferred.name);
+        }
       }
     };
     loadVoices();
@@ -484,11 +482,13 @@ export default function LiTTTerminal() {
         const utterance = new SpeechSynthesisUtterance(
           ttsQueue.current.shift()!,
         );
-        utterance.rate = 1.15;
-        utterance.pitch = 0.85;
+        const voiceConfig = getBrowserVoiceConfig("litt");
+        utterance.rate = voiceConfig.rate;
+        utterance.pitch = voiceConfig.pitch;
+        utterance.volume = voiceConfig.volume;
         const voice =
           availableVoices.find((v) => v.voiceURI === selectedVoiceURI) ||
-          availableVoices[0];
+          pickBrowserVoice(availableVoices, "litt");
         if (voice) utterance.voice = voice;
         utterance.onend = processQueue;
         utterance.onerror = processQueue;
@@ -757,8 +757,10 @@ export default function LiTTTerminal() {
               });
               const u = new SpeechSynthesisUtterance("Voice activated.");
               u.voice = voice;
-              u.rate = 1.15;
-              u.pitch = 0.85;
+              const vc = getBrowserVoiceConfig("litt");
+              u.rate = vc.rate;
+              u.pitch = vc.pitch;
+              u.volume = vc.volume;
               window.speechSynthesis.speak(u);
             } else {
               addLog({
@@ -1183,8 +1185,10 @@ export default function LiTTTerminal() {
                             "Voice activated.",
                           );
                           u.voice = voice;
-                          u.rate = 1.15;
-                          u.pitch = 0.85;
+                          const vc = getBrowserVoiceConfig("litt");
+                          u.rate = vc.rate;
+                          u.pitch = vc.pitch;
+                          u.volume = vc.volume;
                           window.speechSynthesis.speak(u);
                         }}
                         className={`w-full text-left px-2.5 py-1.5 text-[10px] font-mono transition-colors hover:bg-white/5 ${voice.voiceURI === selectedVoiceURI ? "text-[#00ff9d] bg-[#00ff9d]/5" : "text-white/70"}`}

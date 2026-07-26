@@ -2,7 +2,7 @@
 
 import { create } from "zustand";
 import type { TerminalConnectionState, TerminalStatus } from "@/lib/capabilities/types";
-import { HEARTBEAT_TIMEOUT_MS } from "@/lib/capabilities/types";
+import { HEARTBEAT_TIMEOUT_MS, HEARTBEAT_STALE_MS } from "@/lib/capabilities/types";
 
 const INITIAL_STATE: TerminalConnectionState = {
   status: "disconnected",
@@ -23,7 +23,10 @@ interface TerminalStore extends TerminalConnectionState {
   setError: (error: string | null) => void;
   reset: () => void;
   isUsable: () => boolean;
+  checkStaleHeartbeat: () => void;
 }
+
+let staleCheckInterval: ReturnType<typeof setInterval> | null = null;
 
 export const useTerminalStore = create<TerminalStore>((set, get) => ({
   ...INITIAL_STATE,
@@ -63,4 +66,24 @@ export const useTerminalStore = create<TerminalStore>((set, get) => ({
       Date.now() - new Date(state.lastHeartbeatAt).getTime() < HEARTBEAT_TIMEOUT_MS
     );
   },
+
+  checkStaleHeartbeat: () => {
+    const state = get();
+    if (state.status === "connected" && state.lastHeartbeatAt) {
+      const elapsed = Date.now() - new Date(state.lastHeartbeatAt).getTime();
+      if (elapsed > HEARTBEAT_STALE_MS) {
+        set({
+          status: "error",
+          error: `Heartbeat stale by ${Math.round(elapsed / 1000)}s`,
+        });
+      }
+    }
+  },
 }));
+
+// Start a global stale heartbeat checker (runs every 5s)
+if (typeof window !== "undefined" && !staleCheckInterval) {
+  staleCheckInterval = setInterval(() => {
+    useTerminalStore.getState().checkStaleHeartbeat();
+  }, 5_000);
+}

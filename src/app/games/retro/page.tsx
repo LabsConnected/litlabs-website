@@ -5,6 +5,7 @@ import Link from "next/link";
 import { ArrowLeft, Check, ChevronRight, Gamepad2, HardDrive, Heart, Library, LockKeyhole, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import PageShell from "@/components/PageShell";
 import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getRetroSystem, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
+import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
 
 type PendingUpload = { file: File; title: string; system: RetroSystemId; legal: boolean };
 
@@ -82,13 +83,9 @@ export default function RetroArcadePage() {
           </div>
         </header>
 
-        {/* === RETRO ARCADE HERO BANNER === */}
-        <div className="relative mx-auto max-w-375 px-4 pt-4 lg:px-6">
-          <div className="relative aspect-16/5 overflow-hidden rounded-3xl border border-fuchsia-400/20 sm:aspect-16/4">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src="/games/artwork/retro-arcade-hero.svg" alt="LiTT Retro Arcade — your private browser-powered game library" className="h-full w-full object-cover" sizes="(max-width: 768px) 100vw, 1500px" />
-            <div className="absolute inset-0 bg-linear-to-t from-[#07070b] via-transparent to-transparent" />
-          </div>
+        {/* === RETRO ARCADE HERO === */}
+        <div className="mx-auto max-w-375 px-4 pt-4 lg:px-6">
+          <RetroArcadeHero />
         </div>
 
         <div className="mx-auto grid max-w-375 gap-4 p-4 lg:grid-cols-[240px_minmax(0,1fr)_280px] lg:p-6">

@@ -33,8 +33,8 @@ export async function getVoiceConnection(forceRefresh = false): Promise<VoiceCon
         token: body.token,
         expiresAt: body.expiresAt ?? Date.now() + 120_000,
         endpoint: body.endpoint,
-        littVoice: body.littVoice || "rustic-banana-5826__design-voice-e5899468",
-        sparkVoice: body.sparkVoice || body.littVoice || "rustic-banana-5826__design-voice-e5899468",
+        littVoice: body.littVoice || "",
+        sparkVoice: body.sparkVoice || body.littVoice || "",
       };
       return cached;
     })

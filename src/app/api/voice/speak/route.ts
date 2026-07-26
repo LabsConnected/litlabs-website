@@ -2,10 +2,12 @@ import { NextRequest } from "next/server";
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
 import type { VoiceAgentId } from "@/features/voice/types";
 import { streamTextToSpeech, getDefaultVoiceSettings } from "@/server/voice/elevenlabs";
+import { getProviderVoices, type TtsResponseMetadata } from "@/features/voice/lib/voiceConfig";
 
 export const runtime = "nodejs";
 
 export async function POST(request: NextRequest): Promise<Response> {
+  let agentId: VoiceAgentId = "litt";
   try {
     const body = (await request.json()) as {
       text?: string;
@@ -18,8 +20,8 @@ export async function POST(request: NextRequest): Promise<Response> {
       };
     };
 
+    agentId = body.agentId === "spark" ? "spark" : "litt";
     const text = sanitizeSpeech(body.text ?? "");
-    const agentId: VoiceAgentId = body.agentId === "spark" ? "spark" : "litt";
 
     if (!text) {
       return Response.json(
@@ -29,10 +31,30 @@ export async function POST(request: NextRequest): Promise<Response> {
     }
 
     const apiKey = process.env.ELEVENLABS_API_KEY;
-    if (!apiKey) {
+    const providerVoices = getProviderVoices(agentId);
+    const requestedVoiceId = providerVoices.elevenlabs ?? null;
+
+    if (!apiKey || !requestedVoiceId) {
+      const reason = !apiKey
+        ? "ElevenLabs API key not configured"
+        : `ElevenLabs voice ID not configured for ${agentId}`;
+
+      const metadata: TtsResponseMetadata = {
+        provider: "browser",
+        requestedAgent: agentId,
+        requestedVoiceId,
+        actualVoiceId: "browser-fallback",
+        fallbackUsed: true,
+        fallbackReason: reason,
+      };
+
       return Response.json(
-        { error: "ElevenLabs is not configured. Set ELEVENLABS_API_KEY." },
-        { status: 500 },
+        {
+          error: "Voice provider not configured. Using browser fallback.",
+          metadata,
+          fallback: true,
+        },
+        { status: 200 },
       );
     }
 
@@ -46,15 +68,41 @@ export async function POST(request: NextRequest): Promise<Response> {
 
     const response = await streamTextToSpeech(text, agentId, voiceSettings, request.signal);
 
+    const metadata: TtsResponseMetadata = {
+      provider: "elevenlabs",
+      requestedAgent: agentId,
+      requestedVoiceId,
+      actualVoiceId: requestedVoiceId,
+      fallbackUsed: false,
+    };
+
     return new Response(response.body, {
       headers: {
         "Content-Type": "audio/mpeg",
         "Cache-Control": "no-store",
+        "X-TTS-Provider": metadata.provider,
+        "X-TTS-Agent": metadata.requestedAgent,
+        "X-TTS-Voice-Id": metadata.actualVoiceId,
+        "X-TTS-Fallback": String(metadata.fallbackUsed),
+        "X-TTS-Fallback-Reason": metadata.fallbackReason ?? "",
       },
     });
   } catch (error) {
     console.error("Voice route error:", error);
     const message = error instanceof Error ? error.message : "Unable to generate voice.";
-    return Response.json({ error: message }, { status: 500 });
+
+    const metadata: TtsResponseMetadata = {
+      provider: "browser",
+      requestedAgent: agentId,
+      requestedVoiceId: null,
+      actualVoiceId: "browser-fallback",
+      fallbackUsed: true,
+      fallbackReason: message,
+    };
+
+    return Response.json(
+      { error: message, metadata, fallback: true },
+      { status: 200 },
+    );
   }
 }

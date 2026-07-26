@@ -94,28 +94,35 @@ function CapabilityChip({
   active,
   color = "#22c55e",
   title,
+  onClick,
 }: {
   label: string;
   active: boolean;
   color?: string;
   title?: string;
+  onClick?: () => void;
 }) {
+  const Component = onClick ? "button" : "span";
   return (
-    <span
-      className="inline-flex min-w-0 shrink-0 items-center gap-1 rounded-md border border-white/8 bg-black/30 px-2 py-0.5"
+    <Component
+      className="inline-flex min-w-0 shrink-0 items-center gap-1.5 rounded-md border border-white/8 bg-black/30 px-2.5 py-1 transition-colors hover:border-white/15"
       title={title}
       aria-label={label}
       role="status"
+      onClick={onClick}
     >
       <span
-        className="h-1.5 w-1.5 shrink-0 rounded-full"
-        style={{ backgroundColor: active ? color : "#6b7280" }}
+        className="h-2 w-2 shrink-0 rounded-full"
+        style={{
+          backgroundColor: active ? color : "#6b7280",
+          boxShadow: active ? `0 0 6px ${color}80` : "none",
+        }}
         aria-hidden
       />
       <span className="whitespace-nowrap text-[9px] font-bold text-white/70">
         {label}
       </span>
-    </span>
+    </Component>
   );
 }
 
@@ -374,7 +381,9 @@ export default function ChatShell({
               aria-label={capabilities.connectedProviders.length ? "Services connected" : "No services connected"}
               role="img"
             />
-            {capabilities.connectedProviders.length ? "Connected" : "Standby"}
+            {capabilities.connectedProviders.length
+              ? `AI providers: ${capabilities.connectedProviders.length} connected`
+              : "AI: Standby"}
           </span>
           <span className="text-[9px] font-bold" style={{ color: agentColor }}>
             {agentMeta.displayName}
@@ -384,23 +393,28 @@ export default function ChatShell({
         </div>
 
         {/* Row 3: scrollable status chips */}
-        <div className="flex min-w-0 flex-wrap items-center gap-2 border-t border-white/6 py-1.5">
+        <div className="flex min-w-0 flex-wrap items-center gap-1.5 border-t border-white/6 py-1.5">
           <CapabilityChip
-            label={capabilities.repository === "connected" ? "Repo: Connected" : "Repo: Disconnected"}
+            label={
+              capabilities.repository === "connected"
+                ? `Repo: ${capabilities.repositoryName ?? "Connected"}`
+                : "Repo: Not Connected"
+            }
             active={capabilities.repository === "connected"}
             color={T.success}
             title={
               capabilities.repository === "connected"
-                ? "Repository is connected and indexed"
-                : "No repository connected"
+                ? `Connected to ${capabilities.repositoryName ?? "repository"}`
+                : "No repository connected. Click to connect GitHub."
             }
+            onClick={() => onRouteTool?.("agents")}
           />
           <CapabilityChip
             label={
               capabilities.terminalExecution === "available"
                 ? "PTY: Connected"
                 : capabilities.terminalExecution === "connecting"
-                  ? "PTY: Connecting"
+                  ? "PTY: Connecting…"
                   : capabilities.terminalExecution === "error"
                     ? "PTY: Error"
                     : "PTY: Disconnected"
@@ -409,11 +423,14 @@ export default function ChatShell({
             color={capabilities.terminalExecution === "error" ? T.warning : T.success}
             title={
               capabilities.terminalExecution === "available"
-                ? "Project terminal is ready for execution"
-                : capabilities.terminalExecution === "error"
-                  ? `PTY connection failed: ${capabilities.terminalStatus === "error" ? "Connection error" : "Unknown error"}`
-                  : "Project terminal is not connected"
+                ? "Project terminal is ready for command execution"
+                : capabilities.terminalExecution === "connecting"
+                  ? "Connecting to terminal server…"
+                  : capabilities.terminalExecution === "error"
+                    ? `PTY connection failed: ${capabilities.terminalError ?? "Unknown error"}`
+                    : "Terminal is not connected. Open the Terminal tool to connect."
             }
+            onClick={() => onRouteTool?.("terminal")}
           />
           <CapabilityChip
             label={capabilities.writeAccess ? "Writes: Allowed" : "Writes: Approval"}
@@ -421,11 +438,40 @@ export default function ChatShell({
             color={T.success}
             title={
               capabilities.writeAccess
-                ? "Write access is enabled"
-                : "Write access requires approval"
+                ? "File writes are enabled without approval"
+                : "File writes require approval before applying"
             }
           />
         </div>
+
+        {/* Setup CTA — shown when workspace is not ready */}
+        {capabilities.repository !== "connected" && capabilities.terminalExecution !== "available" && (
+          <div
+            className="flex flex-col gap-2 border-t border-white/6 px-3 py-2.5"
+            style={{ backgroundColor: "rgba(255,255,255,0.02)" }}
+          >
+            <span className="text-[10px] font-bold text-white/60">
+              Project setup required
+            </span>
+            <span className="text-[9px] text-white/40">
+              Connect a repository or start a blank project to enable files, terminal, preview, and code changes.
+            </span>
+            <div className="flex items-center gap-2 mt-0.5">
+              <a
+                href="/api/github/install"
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[9px] font-bold text-white/80 transition-colors hover:bg-white/10"
+              >
+                Connect GitHub
+              </a>
+              <button
+                onClick={() => onRouteTool?.("code")}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[9px] font-bold text-white/80 transition-colors hover:bg-white/10"
+              >
+                Start Blank Project
+              </button>
+            </div>
+          </div>
+        )}
       </header>
 
       {/* Transcript */}

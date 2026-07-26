@@ -153,8 +153,11 @@ function LandingPage() {
               <Link href="/sign-up" className="inline-flex items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-[#a8ff2f] to-[#5df5d0] px-6 py-4 text-sm font-black text-[#03050a] shadow-[0_0_40px_rgba(168,255,47,.22)] transition hover:-translate-y-1 hover:shadow-[0_0_55px_rgba(168,255,47,.38)]">
                 Create your free space <ArrowRight size={16} />
               </Link>
+              <Link href="/studio?demo=1" data-testid="cta-try-demo" className="inline-flex items-center justify-center gap-2 rounded-xl border border-amber-300/40 bg-amber-300/10 px-6 py-4 text-sm font-black text-amber-200 transition hover:-translate-y-1 hover:border-amber-300/70 hover:bg-amber-300/15 hover:shadow-[0_0_35px_rgba(252,211,77,.25)]">
+                <Play size={15} fill="currentColor" /> Try the Studio (no sign-in)
+              </Link>
               <a href="#discover" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-bold transition hover:border-[#a970ff]/60 hover:bg-white/10">
-                <Play size={15} fill="currentColor" /> Explore the community
+                Explore the community
               </a>
             </div>
             <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/45">

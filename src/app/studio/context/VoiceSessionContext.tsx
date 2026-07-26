@@ -10,6 +10,7 @@ import {
   useState,
 } from "react";
 import { sanitizeSpeech } from "@/features/voice/lib/sanitizeSpeech";
+import { pickBrowserVoice, storeVoiceName, getBrowserVoiceConfig } from "@/features/voice/lib/voiceConfig";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { createInitialTimingMetrics, computeLatencies, type VoiceTimingMetrics } from "@/features/voice/types";
 import { useInworldSession } from "@/features/voice/hooks/useInworldSession";
@@ -838,10 +839,21 @@ export function VoiceSessionProvider({
       fetch("/api/voice/speak", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text: sanitized, agentId: "litt" }),
+        body: JSON.stringify({ text: sanitized, agentId: voiceStore.activeAgent }),
       })
         .then(async (res) => {
           if (!res.ok) throw new Error(`API ${res.status}`);
+
+          const contentType = res.headers.get("Content-Type") ?? "";
+          if (contentType.includes("application/json")) {
+            const data = await res.json();
+            if (data.fallback) {
+              fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
+              return;
+            }
+            throw new Error(data.error ?? "Unknown TTS error");
+          }
+
           setTiming({ ttsFirstByteAt: Date.now() });
 
           const audioBlob = await res.blob();
@@ -865,7 +877,7 @@ export function VoiceSessionProvider({
             if (currentAudioRef.current === audio) {
               currentAudioRef.current = null;
             }
-            fallbackSynth(sanitized, onSpeechEnd);
+            fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
           };
 
           setTiming({ playbackStartedAt: Date.now() });
@@ -873,7 +885,7 @@ export function VoiceSessionProvider({
             await audio.play();
           } catch (err) {
             console.warn("[Voice] audio.play() blocked:", err);
-            fallbackSynth(sanitized, onSpeechEnd);
+            fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
           }
         })
         .catch((err) => {
@@ -921,21 +933,21 @@ export function VoiceSessionProvider({
                 if (currentAudioRef.current === audio) {
                   currentAudioRef.current = null;
                 }
-                fallbackSynth(sanitized, onSpeechEnd);
+                fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
               };
 
               try {
                 await audio.play();
               } catch {
-                fallbackSynth(sanitized, onSpeechEnd);
+                fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
               }
             })
             .catch(() => {
-              fallbackSynth(sanitized, onSpeechEnd);
+              fallbackSynth(sanitized, onSpeechEnd, voiceStore.activeAgent);
             });
         });
     },
-    [stopSpeaking, startMicLevelLoop, setTiming, inworldSession],
+    [stopSpeaking, startMicLevelLoop, setTiming, inworldSession, voiceStore.activeAgent],
   );
 
   // ---------------------------------------------------------------------------
@@ -1066,15 +1078,51 @@ export function useVoiceSession(): VoiceSessionCtx {
 // Helpers (module-level, not closures, so they don't capture stale refs)
 // ---------------------------------------------------------------------------
 
-function fallbackSynth(text: string, onEnd: () => void) {
+function fallbackSynth(text: string, onEnd: () => void, agentId: "litt" | "spark" = "litt") {
   if (typeof window === "undefined" || !window.speechSynthesis) {
     onEnd();
     return;
   }
-  const utt = new SpeechSynthesisUtterance(text);
-  utt.onend = onEnd;
-  utt.onerror = onEnd;
-  window.speechSynthesis.speak(utt);
+
+  const synth = window.speechSynthesis;
+  const config = getBrowserVoiceConfig(agentId);
+
+  const speakWithVoice = () => {
+    const voices = synth.getVoices();
+    const voice = pickBrowserVoice(voices, agentId);
+
+    const utt = new SpeechSynthesisUtterance(text);
+    utt.onend = onEnd;
+    utt.onerror = onEnd;
+    utt.rate = config.rate;
+    utt.pitch = config.pitch;
+    utt.volume = config.volume;
+    if (voice) {
+      utt.voice = voice;
+      utt.lang = voice.lang;
+      storeVoiceName(agentId, voice.name);
+    }
+
+    synth.cancel();
+    synth.speak(utt);
+  };
+
+  const voices = synth.getVoices();
+  if (voices.length > 0) {
+    speakWithVoice();
+  } else {
+    synth.onvoiceschanged = () => {
+      synth.onvoiceschanged = null;
+      speakWithVoice();
+    };
+    setTimeout(() => {
+      if (synth.getVoices().length > 0) {
+        speakWithVoice();
+      } else {
+        onEnd();
+      }
+    }, 1000);
+  }
 }
 
 function blobToDataUrl(blob: Blob): Promise<string> {

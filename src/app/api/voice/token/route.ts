@@ -24,8 +24,17 @@ export async function GET() {
   const apiKey = process.env.INWORLD_API_KEY;
   if (!apiKey) {
     return NextResponse.json(
-      { error: "Voice service is not configured" },
-      { status: 503 },
+      {
+        error: "Voice service is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE.",
+        configured: false,
+        details: {
+          apiKey: false,
+          littVoice: false,
+          sparkVoice: false,
+          wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+        },
+      },
+      { status: 503, headers: { "Cache-Control": "no-store" } },
     );
   }
 
@@ -43,8 +52,24 @@ export async function GET() {
     const encoded = Buffer.from(JSON.stringify(payload)).toString("base64url");
     const sig = createHmac("sha256", secret).update(encoded).digest("base64url");
 
-    const littVoice = process.env.INWORLD_LITT_VOICE || "rustic-banana-5826__design-voice-e5899468";
-    const sparkVoice = process.env.INWORLD_SPARK_VOICE || littVoice;
+    const littVoice = process.env.INWORLD_LITT_VOICE || "";
+    const sparkVoice = process.env.INWORLD_SPARK_VOICE || "";
+
+    if (!littVoice) {
+      return NextResponse.json(
+        {
+          error: "INWORLD_LITT_VOICE is not configured. Set it to a valid Inworld voice ID for LiTT.",
+          configured: false,
+          details: {
+            apiKey: true,
+            littVoice: false,
+            sparkVoice: !!sparkVoice,
+            wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+          },
+        },
+        { status: 503, headers: { "Cache-Control": "no-store" } },
+      );
+    }
 
     return NextResponse.json(
       {
@@ -52,7 +77,14 @@ export async function GET() {
         expiresAt: payload.exp * 1000,
         endpoint: process.env.NEXT_PUBLIC_VOICE_WS_URL || "ws://localhost:4002/voice",
         littVoice,
-        sparkVoice,
+        sparkVoice: sparkVoice || littVoice,
+        configured: true,
+        details: {
+          apiKey: true,
+          littVoice: true,
+          sparkVoice: !!sparkVoice,
+          wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+        },
       },
       { headers: { "Cache-Control": "no-store" } },
     );

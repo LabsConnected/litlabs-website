@@ -13,24 +13,29 @@ export interface SettingsSection {
 
 export const MODE_ORDER: ControlMode[] = ["standard", "advanced", "pro", "owner"];
 
+export const MODE_META: Record<ControlMode, { label: string; description: string; color: string }> = {
+  standard: { label: "Standard", description: "Essential settings with safer defaults.", color: "#22c55e" },
+  advanced: { label: "Advanced", description: "More control over models, workspace, integrations, and automation.", color: "#3b82f6" },
+  pro: { label: "Pro", description: "Developer and power-user controls.", color: "#a855f7" },
+  owner: { label: "Owner", description: "Administrative and system-wide controls.", color: "#ef4444" },
+};
+
 export const SETTINGS_SECTIONS: SettingsSection[] = [
-  { id: "overview", label: "Overview", description: "Settings hub summary", icon: "LayoutGrid", minMode: "standard" },
-  { id: "account", label: "Account", description: "Profile and security", icon: "User", minMode: "standard" },
-  { id: "appearance", label: "Appearance", description: "Theme, wallpaper, fonts", icon: "Palette", minMode: "standard" },
-  { id: "living-ui", label: "Living UI", description: "Animations and effects", icon: "Sparkles", minMode: "standard" },
-  { id: "pages", label: "Pages", description: "Per-page customization", icon: "Layers", minMode: "advanced" },
-  { id: "navigation", label: "Navigation", description: "Sidebar and mobile tabs", icon: "Compass", minMode: "advanced" },
-  { id: "workspace", label: "Workspace", description: "Layout and density", icon: "Briefcase", minMode: "advanced" },
-  { id: "ai-models", label: "AI Models", description: "Model routing and credentials", icon: "Cpu", minMode: "pro" },
-  { id: "agents", label: "Agents", description: "Agent configuration", icon: "Bot", minMode: "pro" },
-  { id: "integrations", label: "Integrations", description: "Third-party connections", icon: "Plug", minMode: "pro" },
-  { id: "connections", label: "Connections", description: "Service connections", icon: "Link", minMode: "pro" },
-  { id: "voice", label: "Voice", description: "TTS and speech settings", icon: "Mic", minMode: "pro" },
-  { id: "billing", label: "Billing", description: "Plan and usage", icon: "CreditCard", minMode: "standard" },
-  { id: "notifications", label: "Notifications", description: "Alerts and digests", icon: "Bell", minMode: "standard" },
-  { id: "privacy", label: "Privacy", description: "Data and visibility", icon: "Shield", minMode: "standard" },
-  { id: "developer", label: "Developer", description: "Debug and API keys", icon: "Terminal", minMode: "owner", ownerOnly: true },
-  { id: "danger", label: "Danger Zone", description: "Reset and delete", icon: "AlertTriangle", minMode: "owner", ownerOnly: true },
+  { id: "overview", label: "Overview", description: "System status and quick actions", icon: "LayoutGrid", minMode: "standard" },
+  { id: "account", label: "Account", description: "Profile, identity, and security", icon: "User", minMode: "standard" },
+  { id: "appearance", label: "Appearance", description: "Theme, colors, fonts, effects", icon: "Palette", minMode: "standard" },
+  { id: "workspace", label: "Workspace", description: "Studio layout and defaults", icon: "Briefcase", minMode: "standard" },
+  { id: "ai-models", label: "AI & Models", description: "Model routing and providers", icon: "Cpu", minMode: "standard" },
+  { id: "agents", label: "LiTT & Spark", description: "Agent behavior and permissions", icon: "Bot", minMode: "standard" },
+  { id: "voice-camera", label: "Voice & Camera", description: "Microphone, camera, and voice", icon: "Mic", minMode: "standard" },
+  { id: "connections", label: "Connections", description: "GitHub, Vercel, Supabase, AI keys", icon: "Plug", minMode: "standard" },
+  { id: "automation", label: "Automation", description: "Triggers, schedules, retries", icon: "Zap", minMode: "advanced" },
+  { id: "notifications", label: "Notifications", description: "Alerts, email, quiet hours", icon: "Bell", minMode: "standard" },
+  { id: "billing", label: "Billing & LiTBits", description: "Plan, usage, beta credits", icon: "Coins", minMode: "standard" },
+  { id: "privacy", label: "Privacy & Security", description: "Sessions, data, audit log", icon: "Shield", minMode: "standard" },
+  { id: "performance", label: "Performance", description: "Battery, effects, lazy loading", icon: "Gauge", minMode: "standard" },
+  { id: "advanced", label: "Advanced", description: "Diagnostics, debug, feature flags", icon: "Terminal", minMode: "advanced" },
+  { id: "system", label: "System Control", description: "Owner-only platform controls", icon: "Server", minMode: "owner", ownerOnly: true },
 ];
 
 interface SettingsStore {

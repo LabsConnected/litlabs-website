@@ -57,6 +57,8 @@ export interface TerminalCapability {
 }
 
 export const HEARTBEAT_TIMEOUT_MS = 15_000;
+export const CONNECT_TIMEOUT_MS = 10_000;
+export const HEARTBEAT_STALE_MS = 20_000;
 
 export function isTerminalUsable(state: TerminalConnectionState): boolean {
   return (

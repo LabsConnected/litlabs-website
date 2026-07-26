@@ -10,50 +10,57 @@ import {
   ArrowRight,
   Sparkles,
   ShieldCheck,
-  Coins,
-  Gamepad2,
-  Code2,
-  PenTool,
-  BarChart3,
-  Music,
   Search as SearchIcon,
   Wrench,
   Zap,
   FileText,
-  Bot,
+  Code2,
+  Palette,
+  Plug,
 } from "lucide-react";
 
 // --- Types ---
 
-type MarketplaceItemType = "skill" | "specialist" | "workflow" | "tool" | "template";
+type MarketplaceItemType = "skill" | "tool" | "workflow" | "template" | "integration" | "creative_pack";
 
 type MarketplaceItem = {
   id: string;
   slug: string;
   name: string;
   description: string;
-  type: MarketplaceItemType;
+  item_type: MarketplaceItemType;
   category: string;
-  compatibleWith: ("litt" | "spark")[];
-  features: string[];
+  status: "available" | "coming_soon" | "unavailable" | "beta";
+  compatible_assistants: ("litt" | "spark")[];
+  capability_key: string;
+  version: string;
+  icon: string;
   is_featured: boolean;
+  is_official: boolean;
+  is_beta: boolean;
   price_cents: number;
-  created_at?: string;
+  required_connections: string[];
+};
+
+type Installation = {
+  id: string;
+  marketplace_item_id: string;
+  enabled: boolean;
+  installed_at: string;
 };
 
 type MarketplaceStats = {
   totalItems: number;
-  freeItems: number;
   installedItems: number;
   availableItems: number;
+  comingSoonItems: number;
 };
 
-// --- Beta flags ---
+// --- Item pricing state ---
 
-const BETA_MODE = true;
-const BILLING_ENABLED = false;
-const MARKETPLACE_PURCHASES_ENABLED = false;
-const ALL_ITEMS_FREE_DURING_BETA = true;
+type ItemPricingState = "free" | "included" | "beta_free" | "paid" | "coming_soon";
+
+const ALL_ITEMS_FREE_DURING_BETA = false;
 
 // --- Category config ---
 
@@ -61,118 +68,41 @@ const CATEGORIES = [
   { id: "all", label: "All" },
   { id: "development", label: "Development" },
   { id: "creative", label: "Creative" },
-  { id: "research", label: "Research" },
   { id: "automation", label: "Automation" },
-  { id: "data", label: "Data" },
-  { id: "media", label: "Media" },
+  { id: "integration", label: "Integrations" },
 ] as const;
 
 const CATEGORY_COLORS: Record<string, string> = {
   development: "#818cf8",
   creative: "#ec4899",
-  research: "#60a5fa",
   automation: "#fbbf24",
-  data: "#a78bfa",
-  media: "#22d3ee",
+  integration: "#22d3ee",
 };
 
 const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   skill: "Skill",
-  specialist: "Specialist",
-  workflow: "Workflow",
   tool: "Tool",
+  workflow: "Workflow",
   template: "Template",
+  integration: "Integration",
+  creative_pack: "Creative Pack",
 };
 
 const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
   skill: Zap,
-  specialist: Bot,
-  workflow: Wrench,
   tool: Code2,
+  workflow: Wrench,
   template: FileText,
+  integration: Plug,
+  creative_pack: Palette,
 };
 
-// --- Migration map (old agent slug → new marketplace item) ---
-
-const OLD_TO_NEW: Record<string, { name: string; type: MarketplaceItemType; category: string; description: string; compatibleWith: ("litt" | "spark")[]; features: string[] }> = {
-  director: {
-    name: "Mission Orchestration",
-    type: "skill",
-    category: "automation",
-    description: "Multi-agent workflow orchestration, strategy planning, and task automation.",
-    compatibleWith: ["litt"],
-    features: ["Workflow orchestration", "Strategy planning", "Task automation"],
-  },
-  champion: {
-    name: "General Productivity",
-    type: "skill",
-    category: "automation",
-    description: "General assistance, task handling, and FAQ documentation.",
-    compatibleWith: ["litt", "spark"],
-    features: ["Task handling", "FAQ documentation", "General assistance"],
-  },
-  "code-champion": {
-    name: "Software Engineering",
-    type: "specialist",
-    category: "development",
-    description: "Code review, debugging, implementation, and test support.",
-    compatibleWith: ["litt"],
-    features: ["Code review", "Debugging", "Implementation", "Test support"],
-  },
-  "social-dominator": {
-    name: "Social Growth",
-    type: "specialist",
-    category: "creative",
-    description: "Growth, content, and social scheduling for creators.",
-    compatibleWith: ["spark"],
-    features: ["Social scheduling", "Growth strategy", "Content planning"],
-  },
-  "data-slayer": {
-    name: "Analytics",
-    type: "specialist",
-    category: "data",
-    description: "Data science, telemetry analysis, and reporting.",
-    compatibleWith: ["litt"],
-    features: ["Data analysis", "Telemetry", "Reporting"],
-  },
-  "writing-coach": {
-    name: "Writing and Editing",
-    type: "skill",
-    category: "creative",
-    description: "Content writing, editing, and proofreading.",
-    compatibleWith: ["spark"],
-    features: ["Content writing", "Editing", "Proofreading"],
-  },
-  "music-producer": {
-    name: "Music Creation",
-    type: "skill",
-    category: "media",
-    description: "Audio and music generation tools.",
-    compatibleWith: ["spark"],
-    features: ["Audio generation", "Music composition", "Sound design"],
-  },
+const CONNECTION_LABELS: Record<string, string> = {
+  github: "GitHub repository",
+  terminal: "Terminal (PTY)",
+  vercel: "Vercel account",
+  supabase: "Supabase project",
 };
-
-// --- Convert API agent rows to marketplace items ---
-
-function apiAgentToItem(a: Record<string, unknown>): MarketplaceItem {
-  const slug = String(a.slug || "");
-  const mapped = OLD_TO_NEW[slug];
-
-  return {
-    id: String(a.id || slug),
-    slug,
-    name: mapped?.name || String(a.display_name || a.name || slug),
-    description: mapped?.description || String(a.description || ""),
-    type: mapped?.type || "skill",
-    category: mapped?.category || String(a.category || a.role || "general"),
-    compatibleWith: mapped?.compatibleWith || ["litt"],
-    features: mapped?.features || (Array.isArray(a.features) ? (a.features as string[]) : []),
-    is_featured: Boolean(a.is_featured ?? false),
-    price_cents: typeof a.price_cents === "number" ? a.price_cents : 0,
-    created_at: a.created_at ? String(a.created_at) : undefined,
-  };
-}
 
 // --- Component ---
 
@@ -181,11 +111,11 @@ function MarketplaceInner() {
   const { resolvedColors: T } = useTheme();
   const searchParams = useSearchParams();
   const [items, setItems] = useState<MarketplaceItem[]>([]);
-  const [installedIds, setInstalledIds] = useState<Set<string>>(new Set());
+  const [installations, setInstallations] = useState<Map<string, Installation>>(new Map());
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
   const [searchQuery, setSearchQuery] = useState("");
-  const [litBitCoins, setLiTTCoins] = useState(500);
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
+  const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"marketplace" | "beta">(() =>
     searchParams.get("tab") === "beta" ? "beta" : "marketplace",
   );
@@ -195,76 +125,77 @@ function MarketplaceInner() {
     setTimeout(() => setToast(null), 3000);
   };
 
-  // Load items from /api/agents, migrate to marketplace items
+  // Load items from /api/marketplace/items
   const loadItems = useCallback(async () => {
     try {
-      const res = await fetch("/api/agents");
+      const res = await fetch("/api/marketplace/items");
       const data = await res.json();
-      if (Array.isArray(data.agents)) {
-        const mapped = data.agents.map(apiAgentToItem);
-        setItems(mapped);
+      if (Array.isArray(data.items)) {
+        setItems(data.items);
       }
     } catch {
       // Keep empty list on error
+    } finally {
+      setLoading(false);
     }
   }, []);
 
-  // Fetch wallet
-  const fetchWallet = useCallback(async () => {
+  // Load installed items from /api/marketplace/installations
+  const loadInstalled = useCallback(async () => {
+    if (!isSignedIn) return;
     try {
-      const res = await fetch("/api/wallet");
+      const res = await fetch("/api/marketplace/installations");
       const data = await res.json();
-      if (typeof data.balance === "number") setLiTTCoins(data.balance);
-    } catch {
-      // silent
-    }
-  }, []);
-
-  // Load installed items
-  const loadInstalled = async () => {
-    try {
-      const res = await fetch("/api/user-agents");
-      const data = await res.json();
-      if (Array.isArray(data.agents)) {
-        const ids = new Set<string>();
-        for (const ua of data.agents) {
-          const agentId = ua.agent?.id || ua.agent_id || "";
-          const agentSlug = ua.agent?.slug || "";
-          if (agentId) ids.add(agentId);
-          if (agentSlug) ids.add(agentSlug);
+      if (Array.isArray(data.installations)) {
+        const map = new Map<string, Installation>();
+        for (const inst of data.installations) {
+          map.set(inst.marketplace_item_id, inst);
         }
-        setInstalledIds(ids);
+        setInstallations(map);
       }
     } catch {
       // silent
     }
-  };
+  }, [isSignedIn]);
 
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       loadItems();
-      fetchWallet();
       if (isSignedIn) loadInstalled();
     });
     return () => cancelAnimationFrame(id);
-  }, [loadItems, fetchWallet, isSignedIn]);
+  }, [loadItems, loadInstalled, isSignedIn]);
 
   const installItem = useCallback(async (item: MarketplaceItem) => {
     if (!isSignedIn) {
       showToast("Please sign in to install.", "error");
       return;
     }
+    if (item.status === "coming_soon") {
+      showToast("This capability is coming soon.", "info");
+      return;
+    }
     try {
-      const res = await fetch("/api/user-agents", {
+      const res = await fetch("/api/marketplace/installations", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ agentId: item.id }),
+        body: JSON.stringify({ itemId: item.id }),
       });
       if (res.ok || res.status === 200) {
-        setInstalledIds((prev) => new Set([...prev, item.id, item.slug]));
+        const data = await res.json();
+        setInstallations((prev) => {
+          const next = new Map(prev);
+          next.set(item.id, {
+            id: data.installation?.id || "",
+            marketplace_item_id: item.id,
+            enabled: true,
+            installed_at: new Date().toISOString(),
+          });
+          return next;
+        });
         showToast(`${item.name} installed`, "success");
       } else {
-        const data = await res.json();
+        const data = await res.json().catch(() => ({}));
         showToast(data.error || "Install failed.", "error");
       }
     } catch {
@@ -273,19 +204,42 @@ function MarketplaceInner() {
   }, [isSignedIn]);
 
   const uninstallItem = useCallback(async (item: MarketplaceItem) => {
+    const inst = installations.get(item.id);
+    if (!inst) return;
     try {
-      await fetch(`/api/user-agents?agentId=${item.id}`, { method: "DELETE" });
+      await fetch(`/api/marketplace/installations/${inst.id}`, { method: "DELETE" });
     } catch {
       // silent
     }
-    setInstalledIds((prev) => {
-      const n = new Set(prev);
-      n.delete(item.id);
-      n.delete(item.slug);
-      return n;
+    setInstallations((prev) => {
+      const next = new Map(prev);
+      next.delete(item.id);
+      return next;
     });
     showToast(`${item.name} removed`, "info");
-  }, []);
+  }, [installations]);
+
+  const toggleEnabled = useCallback(async (item: MarketplaceItem) => {
+    const inst = installations.get(item.id);
+    if (!inst) return;
+    try {
+      const res = await fetch(`/api/marketplace/installations/${inst.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ enabled: !inst.enabled }),
+      });
+      if (res.ok) {
+        setInstallations((prev) => {
+          const next = new Map(prev);
+          next.set(item.id, { ...inst, enabled: !inst.enabled });
+          return next;
+        });
+        showToast(`${item.name} ${!inst.enabled ? "enabled" : "disabled"}`, "info");
+      }
+    } catch {
+      showToast("Failed to update.", "error");
+    }
+  }, [installations]);
 
   const filteredItems = items
     .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
@@ -301,9 +255,9 @@ function MarketplaceInner() {
 
   const stats: MarketplaceStats = {
     totalItems: items.length,
-    freeItems: items.filter((i) => i.price_cents === 0).length,
-    installedItems: installedIds.size,
-    availableItems: items.length,
+    installedItems: installations.size,
+    availableItems: items.filter((i) => i.status === "available" || i.status === "beta").length,
+    comingSoonItems: items.filter((i) => i.status === "coming_soon").length,
   };
 
   if (!isLoaded) {
@@ -341,7 +295,7 @@ function MarketplaceInner() {
             <span className="rounded-md border border-rose-400/30 bg-rose-400/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-rose-300">Beta</span>
           </div>
           <p className="mt-2 max-w-xl text-sm text-white/55">
-            Add skills, workflows, and specialist tools to LiTT and Spark. Everything is free during beta.
+            Extend LiTT and Spark with real tools, workflows, integrations, and creative packs.
           </p>
 
           {/* Stats row */}
@@ -349,7 +303,7 @@ function MarketplaceInner() {
             {[
               { label: "Available", value: stats.availableItems, icon: Sparkles },
               { label: "Installed", value: stats.installedItems, icon: Check },
-              { label: "Free during beta", value: stats.freeItems, icon: ShieldCheck },
+              { label: "Coming soon", value: stats.comingSoonItems, icon: ShieldCheck },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
@@ -446,9 +400,10 @@ function MarketplaceInner() {
                   <MarketplaceCard
                     key={item.id}
                     item={item}
-                    isInstalled={installedIds.has(item.id) || installedIds.has(item.slug)}
+                    installation={installations.get(item.id)}
                     onInstall={() => installItem(item)}
                     onUninstall={() => uninstallItem(item)}
+                    onToggleEnabled={() => toggleEnabled(item)}
                     accentColor={T.accentColor}
                     borderColor={T.borderColor}
                     boxBg={T.boxBg}
@@ -464,15 +419,17 @@ function MarketplaceInner() {
           {/* All items (excluding featured when featured is shown) */}
           <div>
             <p className="mb-3 text-[10px] font-black uppercase tracking-[.25em] text-white/40">
-              {searchQuery ? "Search results" : "All tools"}
+              {searchQuery ? "Search results" : "All capabilities"}
               <span className="ml-2 text-white/30">({filteredItems.length})</span>
             </p>
             {filteredItems.length === 0 ? (
               <div className="py-12 text-center">
                 <p className="text-white/40">
-                  {items.length === 0
-                    ? "No marketplace items available yet. Items will appear here when the database is seeded."
-                    : `No items found matching "${searchQuery}".`}
+                  {loading
+                    ? "Loading capabilities..."
+                    : items.length === 0
+                      ? "No marketplace items available yet. Run the database migration to seed items."
+                      : `No items found matching "${searchQuery}".`}
                 </p>
                 {searchQuery && (
                   <button onClick={() => { setSearchQuery(""); setSelectedCategory("all"); }} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">
@@ -486,9 +443,10 @@ function MarketplaceInner() {
                   <MarketplaceCard
                     key={item.id}
                     item={item}
-                    isInstalled={installedIds.has(item.id) || installedIds.has(item.slug)}
+                    installation={installations.get(item.id)}
                     onInstall={() => installItem(item)}
                     onUninstall={() => uninstallItem(item)}
+                    onToggleEnabled={() => toggleEnabled(item)}
                     accentColor={T.accentColor}
                     borderColor={T.borderColor}
                     boxBg={T.boxBg}
@@ -507,68 +465,115 @@ function MarketplaceInner() {
       {activeTab === "beta" && (
         <div className="mx-auto max-w-3xl px-4 py-8 sm:px-6">
           {/* Beta status */}
-          <div className="rounded-2xl border border-amber-400/20 bg-gradient-to-br from-amber-400/[.06] to-transparent p-6">
+          <div className="rounded-2xl border border-amber-400/20 bg-linear-to-br from-amber-400/6 to-transparent p-6">
             <div className="flex items-center gap-3">
               <span className="text-2xl">🧪</span>
               <div>
-                <div className="text-lg font-black text-amber-300">Public Beta</div>
-                <div className="text-xs text-white/55">All items are free during beta. No purchases required.</div>
+                <div className="text-lg font-black text-amber-300">Founder Beta Access</div>
+                <div className="text-xs text-white/55">Core tools remain free while testing. Paid beta plans unlock higher limits and features.</div>
               </div>
             </div>
             <p className="mt-4 text-sm leading-6 text-white/60">
-              Welcome to LiTTree Lab Studios Beta. Every skill, specialist, workflow, and tool is available for free
-              while we test and improve the platform. Your feedback shapes what we build next.
+              Welcome to LiTTree Lab Studios Beta. Your feedback shapes what we build next.
+              Paid plans are available at founder pricing — well below future standard rates.
             </p>
           </div>
 
-          {/* Beta plan */}
-          <div className="mt-6 rounded-2xl border-2 border-orange-500/30 bg-white/[.03] p-6 text-center">
-            <div className="text-xs font-black uppercase tracking-wider text-orange-400">Beta Plan</div>
-            <div className="mt-2 text-3xl font-black text-white">Free</div>
-            <div className="mt-1 text-xs text-white/45">Everything unlocked · No credit card needed</div>
-            <div className="mt-5 grid gap-2 text-left sm:grid-cols-2">
+          {/* Plan cards */}
+          <div className="mt-6 grid gap-4 sm:grid-cols-2">
+            {/* Starter */}
+            <div className="rounded-2xl border border-white/10 bg-white/3 p-5">
+              <div className="text-xs font-black uppercase tracking-wider text-white/50">Starter</div>
+              <div className="mt-1 text-2xl font-black text-white">Free</div>
+              <div className="text-[10px] text-white/40">Free forever</div>
+              <div className="mt-3 space-y-1">
+                {["1 active project", "500 monthly LiTBits", "LiTT and Spark", "Basic tools"].map((f) => (
+                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                    <Check size={11} className="shrink-0 text-emerald-400" /> {f}
+                  </div>
+                ))}
+              </div>
+              <Link href="/studio" className="mt-4 flex w-full items-center justify-center rounded-xl border border-white/10 py-2 text-xs font-bold text-white/60 transition hover:bg-white/5">
+                Get Started
+              </Link>
+            </div>
+
+            {/* Creator Beta */}
+            <div className="rounded-2xl border-2 border-cyan-400/30 bg-cyan-400/5 p-5">
+              <div className="text-xs font-black uppercase tracking-wider text-cyan-400">Creator Beta</div>
+              <div className="mt-1 text-2xl font-black text-white">$7/month</div>
+              <div className="text-[10px] text-white/40">Founder pricing · later $15</div>
+              <div className="mt-3 space-y-1">
+                {["5 active projects", "6,000 monthly LiTBits", "GitHub connection", "Voice mode"].map((f) => (
+                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                    <Check size={11} className="shrink-0 text-cyan-400" /> {f}
+                  </div>
+                ))}
+              </div>
+              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-cyan-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+                Subscribe
+              </Link>
+            </div>
+
+            {/* Pro Builder Beta */}
+            <div className="rounded-2xl border-2 border-violet-400/30 bg-violet-400/5 p-5">
+              <div className="text-xs font-black uppercase tracking-wider text-violet-400">Pro Builder Beta</div>
+              <div className="mt-1 text-2xl font-black text-white">$19/month</div>
+              <div className="text-[10px] text-white/40">Founder pricing · later $39</div>
+              <div className="mt-3 space-y-1">
+                {["25 active projects", "20,000 monthly LiTBits", "Terminal runtime", "Vercel deployment"].map((f) => (
+                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                    <Check size={11} className="shrink-0 text-violet-400" /> {f}
+                  </div>
+                ))}
+              </div>
+              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-violet-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+                Subscribe
+              </Link>
+            </div>
+
+            {/* Founding Member */}
+            <div className="rounded-2xl border-2 border-amber-400/40 bg-amber-400/5 p-5">
+              <div className="flex items-center justify-between">
+                <div className="text-xs font-black uppercase tracking-wider text-amber-400">Founding Member</div>
+                <span className="rounded-md bg-amber-400 px-1.5 py-0.5 text-[8px] font-black uppercase text-black">Limited</span>
+              </div>
+              <div className="mt-1 text-2xl font-black text-white">$149</div>
+              <div className="text-[10px] text-white/40">One-time · permanent benefits</div>
+              <div className="mt-3 space-y-1">
+                {["Permanent Creator account", "Founder badge", "20% off credit packs", "Price protection"].map((f) => (
+                  <div key={f} className="flex items-center gap-1.5 text-[11px] text-white/60">
+                    <Check size={11} className="shrink-0 text-amber-400" /> {f}
+                  </div>
+                ))}
+              </div>
+              <Link href="/pricing" className="mt-4 flex w-full items-center justify-center rounded-xl bg-amber-400 py-2 text-xs font-black text-black transition hover:scale-[1.02]">
+                Become a Founder
+              </Link>
+            </div>
+          </div>
+
+          {/* Marketplace item states */}
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/3 p-5">
+            <div className="text-xs font-black uppercase tracking-wider text-white/50">How Marketplace Items Work</div>
+            <div className="mt-3 space-y-2">
               {[
-                "Full Studio access",
-                "LiTT and Spark",
-                "All beta specialists",
-                "Image, audio, code, and workflows",
-                "Beta LiTBits for testing",
-                "Feedback rewards",
-              ].map((feat) => (
-                <div key={feat} className="flex items-center gap-2 text-sm text-white/70">
-                  <Check size={14} className="shrink-0 text-orange-400" /> {feat}
+                { state: "Free", desc: "Core skills and tools — no charge", color: "text-emerald-300" },
+                { state: "Included", desc: "Included with Creator or Pro plan", color: "text-cyan-300" },
+                { state: "LiTBit usage", desc: "External-cost tools charge LiTBits per use", color: "text-violet-300" },
+                { state: "Coming soon", desc: "Not yet available", color: "text-amber-300" },
+              ].map((item) => (
+                <div key={item.state} className="flex items-center gap-2 text-[11px]">
+                  <span className={`font-bold ${item.color}`}>{item.state}</span>
+                  <span className="text-white/40">— {item.desc}</span>
                 </div>
               ))}
             </div>
           </div>
 
-          {/* Beta LiTBits */}
-          <div className="mt-6 flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-white/10 bg-white/[.03] p-5">
-            <div className="flex items-center gap-3">
-              <Coins size={28} className="text-amber-400" />
-              <div>
-                <div className="font-bold text-white">{litBitCoins.toLocaleString()} Beta LiTBits</div>
-                <div className="text-[11px] text-white/45">Testing credits · No cash value</div>
-              </div>
-            </div>
-            <button
-              onClick={async () => {
-                try {
-                  const res = await fetch("/api/wallet", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "daily" }) });
-                  const data = await res.json();
-                  if (res.ok) { setLiTTCoins(data.balance); showToast(`+50 LBC daily bonus claimed`, "success"); }
-                  else showToast(data.error || "Failed to claim daily bonus.", "error");
-                } catch { showToast("Network error.", "error"); }
-              }}
-              className="rounded-xl border-2 border-amber-400/40 bg-amber-400/10 px-5 py-2.5 text-sm font-bold text-amber-300 transition hover:bg-amber-400/15"
-            >
-              Daily Beta Refill
-            </button>
-          </div>
-
           {/* Feedback */}
-          <div className="mt-6 rounded-2xl border border-white/10 bg-white/[.03] p-5 text-center">
-            <div className="font-bold text-white">💬 Beta Feedback</div>
+          <div className="mt-6 rounded-2xl border border-white/10 bg-white/3 p-5 text-center">
+            <div className="font-bold text-white">Beta Feedback</div>
             <p className="mt-1 text-xs text-white/45">Found a bug? Have a feature request? Let us know.</p>
             <div className="mt-4 flex justify-center gap-3">
               <Link href="/studio?tool=chat" className="inline-flex items-center gap-2 rounded-xl bg-orange-500 px-4 py-2 text-sm font-bold text-black transition hover:bg-orange-400">
@@ -589,9 +594,10 @@ function MarketplaceInner() {
 
 function MarketplaceCard({
   item,
-  isInstalled,
+  installation,
   onInstall,
   onUninstall,
+  onToggleEnabled,
   accentColor,
   borderColor,
   boxBg,
@@ -600,9 +606,10 @@ function MarketplaceCard({
   headerColor,
 }: {
   item: MarketplaceItem;
-  isInstalled: boolean;
+  installation: Installation | undefined;
   onInstall: () => void;
   onUninstall: () => void;
+  onToggleEnabled: () => void;
   accentColor: string;
   borderColor: string;
   boxBg: string;
@@ -611,13 +618,16 @@ function MarketplaceCard({
   headerColor: string;
 }) {
   const categoryColor = CATEGORY_COLORS[item.category] || "#fbbf24";
-  const TypeIcon = TYPE_ICONS[item.type];
-  const isInstalled_ = isInstalled;
+  const TypeIcon = TYPE_ICONS[item.item_type] || Code2;
+  const isInstalled = !!installation;
+  const isEnabled = installation?.enabled ?? false;
+  const isComingSoon = item.status === "coming_soon";
+  const needsSetup = item.required_connections.length > 0;
 
   return (
     <article
       className="group flex flex-col overflow-hidden rounded-2xl border transition-all hover:-translate-y-1"
-      style={{ borderColor: borderColor + "40", backgroundColor: boxBg }}
+      style={{ borderColor: borderColor + "40", backgroundColor: boxBg, opacity: isComingSoon ? 0.65 : 1 }}
     >
       {/* Category accent */}
       <div className="h-1 w-full" style={{ background: categoryColor }} />
@@ -626,17 +636,23 @@ function MarketplaceCard({
         {/* Header: icon + name + type */}
         <div className="flex items-start gap-3">
           <div
-            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl"
+            className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xl"
             style={{ background: categoryColor + "15", border: `1px solid ${categoryColor}30` }}
           >
-            <TypeIcon size={20} style={{ color: categoryColor }} />
+            {item.icon || <TypeIcon size={20} style={{ color: categoryColor }} />}
           </div>
           <div className="min-w-0 flex-1">
             <h3 className="truncate text-sm font-black" style={{ color: headerColor }}>{item.name}</h3>
             <div className="mt-0.5 flex items-center gap-2 text-[10px] uppercase tracking-wide" style={{ color: textMuted }}>
-              <span style={{ color: categoryColor }}>{TYPE_LABELS[item.type]}</span>
+              <span style={{ color: categoryColor }}>{TYPE_LABELS[item.item_type]}</span>
               <span>·</span>
               <span className="capitalize">{item.category}</span>
+              {item.is_official && (
+                <>
+                  <span>·</span>
+                  <span style={{ color: accentColor }}>Official</span>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -646,42 +662,79 @@ function MarketplaceCard({
           {item.description}
         </p>
 
-        {/* Features */}
-        {item.features.length > 0 && (
-          <div className="mt-3 flex flex-wrap gap-1.5">
-            {item.features.slice(0, 3).map((f, i) => (
-              <span
-                key={i}
-                className="rounded-md px-2 py-0.5 text-[9px] font-medium"
-                style={{ background: categoryColor + "10", color: categoryColor, border: `1px solid ${categoryColor}20` }}
-              >
-                {f}
-              </span>
-            ))}
-          </div>
-        )}
-
         {/* Compatibility */}
         <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
           <span>Works with:</span>
-          {item.compatibleWith.includes("litt") && (
+          {item.compatible_assistants.includes("litt") && (
             <span className="rounded-md bg-cyan-400/10 px-1.5 py-0.5 font-bold text-cyan-300">LiTT</span>
           )}
-          {item.compatibleWith.includes("spark") && (
+          {item.compatible_assistants.includes("spark") && (
             <span className="rounded-md bg-violet-400/10 px-1.5 py-0.5 font-bold text-violet-300">Spark</span>
           )}
         </div>
 
+        {/* Requirements */}
+        {needsSetup && (
+          <div className="mt-2 flex items-center gap-1.5 text-[10px]" style={{ color: textMuted }}>
+            <span>Requires:</span>
+            <span className="font-medium" style={{ color: isInstalled && !isEnabled ? "#fbbf24" : textMuted }}>
+              {item.required_connections.map((c) => CONNECTION_LABELS[c] || c).join(", ")}
+            </span>
+          </div>
+        )}
+
+        {/* Status badge */}
+        <div className="mt-2 flex items-center gap-2 text-[10px]">
+          {isComingSoon ? (
+            <span className="rounded-md bg-amber-400/10 px-2 py-0.5 font-bold text-amber-300">Coming soon</span>
+          ) : isInstalled ? (
+            <span className="flex items-center gap-1 rounded-md bg-emerald-400/10 px-2 py-0.5 font-bold text-emerald-300">
+              <Check size={10} /> {isEnabled ? "Installed" : "Disabled"}
+            </span>
+          ) : item.is_beta ? (
+            <span className="rounded-md bg-rose-400/10 px-2 py-0.5 font-bold text-rose-300">Beta</span>
+          ) : (
+            <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold" style={{ color: textMuted }}>Available</span>
+          )}
+          <span className="text-[9px]" style={{ color: textMuted }}>v{item.version}</span>
+        </div>
+
         {/* Action */}
-        <div className="mt-4 pt-3 border-t" style={{ borderColor: borderColor + "20" }}>
-          {isInstalled_ ? (
+        <div className="mt-4 border-t pt-3" style={{ borderColor: borderColor + "20" }}>
+          {isComingSoon ? (
+            <span
+              className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
+              style={{ background: borderColor + "10", color: textMuted }}
+            >
+              Coming soon
+            </span>
+          ) : isInstalled ? (
             <div className="flex gap-2">
-              <span
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
-                style={{ background: borderColor + "20", color: textMuted }}
+              {isEnabled ? (
+                <Link
+                  href={`/studio?tool=chat&capability=${item.capability_key}`}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold transition hover:scale-[1.02]"
+                  style={{ background: categoryColor + "20", color: categoryColor }}
+                >
+                  <ArrowRight size={12} /> Use in Studio
+                </Link>
+              ) : (
+                <button
+                  onClick={onToggleEnabled}
+                  className="flex flex-1 items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-bold"
+                  style={{ background: borderColor + "20", color: textMuted }}
+                >
+                  Enable
+                </button>
+              )}
+              <button
+                onClick={onToggleEnabled}
+                className="rounded-xl border px-3 py-2.5 text-xs font-bold transition hover:bg-white/5"
+                style={{ borderColor: borderColor + "30", color: textMuted }}
+                aria-label={`Toggle ${item.name}`}
               >
-                <Check size={12} /> Installed
-              </span>
+                {isEnabled ? "Disable" : "Enable"}
+              </button>
               <button
                 onClick={onUninstall}
                 className="rounded-xl border border-rose-400/30 px-3 py-2.5 text-xs font-bold text-rose-300 transition hover:bg-rose-400/10"

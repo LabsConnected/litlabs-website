@@ -46,7 +46,6 @@ export default function VideoTool() {
   const [aspectRatio, setAspectRatio] = useState("16:9");
   const [resolution, setResolution] = useState("720p");
   const [motionStyle, setMotionStyle] = useState("Cinematic");
-  const [referenceImage, setReferenceImage] = useState<string | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<VideoGen | null>(null);
@@ -73,13 +72,12 @@ export default function VideoTool() {
     try {
       const raw = sessionStorage.getItem("litlabs:video:draft");
       if (!raw) return;
-      const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string; style?: string; referenceImage?: string | null };
+      const draft = JSON.parse(raw) as { prompt?: string; duration?: number; aspectRatio?: string; resolution?: string; style?: string };
       if (draft.prompt) setPrompt(draft.prompt);
       if (draft.duration) setDuration(draft.duration);
       if (draft.aspectRatio) setAspectRatio(draft.aspectRatio);
       if (draft.resolution) setResolution(draft.resolution);
       if (draft.style) setMotionStyle(draft.style);
-      if (draft.referenceImage) setReferenceImage(draft.referenceImage);
       sessionStorage.removeItem("litlabs:video:draft");
     } catch { /* ignore invalid drafts */ }
   }, []);
@@ -117,45 +115,80 @@ export default function VideoTool() {
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
 
     try {
-      const res = await fetch("/api/studio/video", {
+      const res = await fetch("/api/media/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           prompt: `${prompt.trim()}, ${motionStyle} motion`,
-          model,
-          duration,
+          model: "veo-3.1-fast-generate-preview",
           aspectRatio,
           resolution,
-          referenceImage,
         }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
-      const blob = await res.blob();
-      const videoUrl = URL.createObjectURL(blob);
-      setCurrent((prev) =>
-        prev?.id === id ? { ...prev, status: "succeeded", videoUrl } : prev,
-      );
-      setHistory((prev) =>
-        prev.map((g) =>
-          g.id === id ? { ...g, status: "succeeded", videoUrl } : g,
-        ),
-      );
-      // Deduct coins via server
-      const wres = await fetch("/api/wallet", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          type: "spend",
-          amount: cost,
-          reason: `video_${model}`,
-          idempotencyKey: `video:${id}`,
-        }),
-      });
-      await wres.json();
-      refreshWallet().catch(() => {});
+      const data = await res.json();
+      if (!data.operationName) {
+        throw new Error("Video generation started but no operation ID returned.");
+      }
+
+      const operationName = data.operationName as string;
+      const pollStart = Date.now();
+      const POLL_TIMEOUT = 120_000;
+      const POLL_INTERVAL = 5_000;
+
+      while (Date.now() - pollStart < POLL_TIMEOUT) {
+        await new Promise((r) => setTimeout(r, POLL_INTERVAL));
+
+        const statusRes = await fetch("/api/media/video-status", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ operationName }),
+        });
+        if (!statusRes.ok) {
+          const err = await statusRes.json().catch(() => ({}));
+          throw new Error(err.error || `Polling failed: HTTP ${statusRes.status}`);
+        }
+        const statusData = await statusRes.json();
+        if (statusData.done && statusData.videoUri) {
+          const videoRes = await fetch(statusData.videoUri);
+          if (!videoRes.ok) throw new Error("Failed to download generated video.");
+          const blob = await videoRes.blob();
+          const videoUrl = URL.createObjectURL(blob);
+
+          setCurrent((prev) =>
+            prev?.id === id ? { ...prev, status: "succeeded", videoUrl } : prev,
+          );
+          setHistory((prev) =>
+            prev.map((g) =>
+              g.id === id ? { ...g, status: "succeeded", videoUrl } : g,
+            ),
+          );
+
+          const wres = await fetch("/api/wallet", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              type: "spend",
+              amount: cost,
+              reason: `video_${model}`,
+              idempotencyKey: `video:${id}`,
+            }),
+          });
+          await wres.json();
+          refreshWallet().catch(() => {});
+          break;
+        }
+        if (statusData.done && !statusData.videoUri) {
+          throw new Error("Video generation completed but no video URL returned.");
+        }
+      }
+
+      if (Date.now() - pollStart >= POLL_TIMEOUT) {
+        throw new Error("Video generation timed out after 120 seconds.");
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Video generation failed");
       setCurrent((prev) =>
@@ -181,7 +214,7 @@ export default function VideoTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, referenceImage, cost, canAfford, refreshWallet]);
+  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, cost, canAfford, refreshWallet]);
 
   const handleDownload = useCallback((url: string) => {
     const a = document.createElement("a");

@@ -54,6 +54,7 @@ const leftNavLinks = [
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+  { href: "/pricing", label: "Pricing", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 

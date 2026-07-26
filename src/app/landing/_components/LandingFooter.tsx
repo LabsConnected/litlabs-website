@@ -11,7 +11,7 @@ const COLS: Array<{
       { label: "Studio", href: "/studio" },
       { label: "Agents", href: "/agents" },
       { label: "Marketplace", href: "/marketplace" },
-      { label: "Pricing", href: "/settings" },
+      { label: "Pricing", href: "/pricing" },
     ],
   },
   {

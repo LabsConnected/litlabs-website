@@ -137,13 +137,23 @@ export const MEDIA_PROVIDERS: MediaProvider[] = [
 export const getProvider = (id: MediaProviderId) =>
   MEDIA_PROVIDERS.find(p => p.id === id);
 
-/** Resolve a "default" provider for a given format (free over paid when possible). */
+/** Resolve a "default" provider for a given format (prefer configured API keys over free services). */
 export const defaultProviderFor = (format: MediaFormat): MediaProviderId => {
   const candidates = MEDIA_PROVIDERS.filter(p =>
     p.supportedFormats.includes(format)
   );
-  // Default to Pollinations for images (free, reliable, no API key)
+  // For images, prefer Gemini if API key is configured (more reliable than Pollinations)
   if (format === "image") {
+    if (process.env.GEMINI_API_KEY) {
+      const gemini = candidates.find(p => p.id === "gemini");
+      if (gemini) return gemini.id;
+    }
+    // Fall back to FAL if configured
+    if (process.env.FAL_KEY) {
+      const fal = candidates.find(p => p.id === "fal");
+      if (fal) return fal.id;
+    }
+    // Last resort: Pollinations (free, no key, but unreliable)
     const free = candidates.find(p => p.id === "pollinations");
     if (free) return free.id;
   }

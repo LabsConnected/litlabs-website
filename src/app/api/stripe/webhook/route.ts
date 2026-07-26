@@ -1,10 +1,33 @@
-// Stripe webhook handler — credits wallet on coin pack purchases
+// Stripe webhook handler — idempotent event processing, plan-based credit grants
 import { NextRequest, NextResponse } from "next/server";
 import Stripe from "stripe";
 import {
   getAdminSupabase,
   isAdminSupabaseConfigured,
 } from "@/lib/supabase-admin";
+import { PLANS, type PlanId } from "@/config/plans";
+
+async function isEventProcessed(sb: NonNullable<ReturnType<typeof getAdminSupabase>>, eventId: string): Promise<boolean> {
+  const { data } = await sb
+    .from("stripe_events")
+    .select("id")
+    .eq("stripe_event_id", eventId)
+    .single();
+  return !!data;
+}
+
+async function markEventProcessed(
+  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  eventId: string,
+  eventType: string,
+  result: string,
+): Promise<void> {
+  await sb.from("stripe_events").insert({
+    stripe_event_id: eventId,
+    event_type: eventType,
+    result,
+  });
+}
 
 async function creditCoinPack(
   clerkId: string,
@@ -24,6 +47,22 @@ async function creditCoinPack(
     if (!user) {
       return;
     }
+    // Try credit_ledger first (new system)
+    try {
+      await sb.rpc("grant_credits", {
+        p_user_id: user.id,
+        p_amount: coinAmount,
+        p_category: "purchase",
+        p_balance_bucket: "purchased",
+        p_description: `Purchased ${coinAmount} LiTBits via Stripe`,
+        p_idempotency_key: `coinpack_${sessionId}`,
+        p_reference_type: "stripe_checkout",
+        p_reference_id: sessionId,
+      });
+      return;
+    } catch {
+      // Ledger not available — fall through to legacy wallet update
+    }
     const { data: wallet } = await sb
       .from("wallets")
       .select("balance")
@@ -41,10 +80,33 @@ async function creditCoinPack(
       amount: coinAmount,
       balance_after: newBalance,
       description: `Purchased ${coinAmount} LiTBit Coins via Stripe`,
-      metadata: { stripe_session_id: sessionId },
+      metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
     });
   } catch (err) {
     console.error("[stripe/webhook] creditCoinPack failed:", err);
+  }
+}
+
+async function grantSubscriptionCredits(
+  sb: NonNullable<ReturnType<typeof getAdminSupabase>>,
+  userId: string,
+  planId: PlanId,
+  idempotencyKey: string,
+): Promise<void> {
+  const plan = PLANS[planId];
+  if (!plan || plan.monthlyCredits <= 0) return;
+  try {
+    await sb.rpc("grant_credits", {
+      p_user_id: userId,
+      p_amount: plan.monthlyCredits,
+      p_category: "subscription_grant",
+      p_balance_bucket: "monthly",
+      p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTBits`,
+      p_idempotency_key: idempotencyKey,
+      p_reference_type: "subscription",
+    });
+  } catch (err) {
+    console.error("[stripe/webhook] grantSubscriptionCredits failed:", err);
   }
 }
 
@@ -78,6 +140,15 @@ export async function POST(req: NextRequest) {
 
   const sb = isAdminSupabaseConfigured() ? getAdminSupabase() : null;
 
+  // Idempotency: check if event already processed
+  if (sb) {
+    if (await isEventProcessed(sb, event.id)) {
+      return NextResponse.json({ received: true, replayed: true });
+    }
+  }
+
+  let result = "processed";
+
   try {
     switch (event.type) {
       case "checkout.session.completed": {
@@ -85,8 +156,31 @@ export async function POST(req: NextRequest) {
         const meta = session.metadata || {};
         const coinAmount = parseInt(meta.coin_amount || "0", 10);
         const clerkId = meta.clerk_id;
+        const planId = meta.plan_id as PlanId | undefined;
         if (coinAmount > 0 && clerkId) {
           await creditCoinPack(clerkId, coinAmount, session.id);
+        }
+        // If this was a one-time founder purchase, grant credits
+        if (planId && clerkId && sb) {
+          const plan = PLANS[planId];
+          if (plan && plan.billingType === "one_time") {
+            const { data: user } = await sb
+              .from("users")
+              .select("id")
+              .eq("clerk_id", clerkId)
+              .single();
+            if (user) {
+              await grantSubscriptionCredits(sb, user.id, planId, `founder_${session.id}`);
+              // Record as a permanent subscription
+              await sb.from("subscriptions").upsert({
+                user_id: user.id,
+                stripe_customer_id: typeof session.customer === "string" ? session.customer : session.customer?.id ?? null,
+                plan: planId,
+                status: "active",
+                updated_at: new Date().toISOString(),
+              }, { onConflict: "user_id", ignoreDuplicates: false });
+            }
+          }
         }
         break;
       }
@@ -97,6 +191,7 @@ export async function POST(req: NextRequest) {
         const sub = event.data.object as Stripe.Subscription;
         const subMeta = sub.metadata || {};
         const subClerkId = subMeta.clerk_id;
+        const subPlanId = (subMeta.plan_id as PlanId) || null;
         let subUserId: string | null = null;
         if (subClerkId) {
           const { data: subUser } = await sb
@@ -115,6 +210,7 @@ export async function POST(req: NextRequest) {
           subUserId = subMatch?.user_id ?? null;
         }
         if (subUserId) {
+          const planId: PlanId = subPlanId ?? "creator_beta";
           await sb.from("subscriptions").upsert(
             {
               user_id: subUserId,
@@ -123,7 +219,7 @@ export async function POST(req: NextRequest) {
                   ? sub.customer
                   : sub.customer?.id,
               stripe_subscription_id: sub.id,
-              plan: sub.items?.data?.[0]?.price?.nickname || "pro",
+              plan: planId,
               status: sub.status,
               current_period_start: sub.items?.data?.[0]?.current_period_start
                 ? new Date(sub.items.data[0].current_period_start * 1000).toISOString()
@@ -135,6 +231,10 @@ export async function POST(req: NextRequest) {
             },
             { onConflict: "user_id", ignoreDuplicates: false },
           );
+          // Grant monthly credits on creation
+          if (event.type === "customer.subscription.created" && sub.status === "active") {
+            await grantSubscriptionCredits(sb, subUserId, planId, `sub_created_${sub.id}`);
+          }
         }
         break;
       }
@@ -159,6 +259,7 @@ export async function POST(req: NextRequest) {
         break;
       }
 
+      case "invoice.paid":
       case "invoice.payment_succeeded": {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
@@ -166,7 +267,7 @@ export async function POST(req: NextRequest) {
         if (invSubId && typeof invSubId === "string") {
           const { data: invMatch } = await sb
             .from("subscriptions")
-            .select("user_id")
+            .select("user_id, plan")
             .eq("stripe_subscription_id", invSubId)
             .single();
           if (invMatch) {
@@ -177,6 +278,11 @@ export async function POST(req: NextRequest) {
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", invMatch.user_id);
+            // Grant monthly credits on renewal
+            if (event.type === "invoice.payment_succeeded") {
+              const planId = (invMatch.plan as PlanId) || "creator_beta";
+              await grantSubscriptionCredits(sb, invMatch.user_id, planId, `sub_renewal_${invSubId}_${inv.id}`);
+            }
           }
         }
         break;
@@ -204,9 +310,48 @@ export async function POST(req: NextRequest) {
         }
         break;
       }
+
+      case "charge.refunded": {
+        if (!sb) break;
+        const charge = event.data.object as Stripe.Charge;
+        const refundMeta = charge.metadata || {};
+        const refundClerkId = refundMeta.clerk_id;
+        if (refundClerkId) {
+          const { data: refundUser } = await sb
+            .from("users")
+            .select("id")
+            .eq("clerk_id", refundClerkId)
+            .single();
+          if (refundUser) {
+            // Debit the refunded amount from purchased balance via ledger
+            try {
+              await sb.rpc("debit_credits", {
+                p_user_id: refundUser.id,
+                p_amount: charge.amount_refunded / 100 * 100, // convert cents to LiTBits (approx)
+                p_category: "refund",
+                p_description: `Refund for charge ${charge.id}`,
+                p_idempotency_key: `refund_${charge.id}`,
+              });
+            } catch {
+              // Ledger not available — skip
+            }
+          }
+        }
+        break;
+      }
     }
   } catch (err) {
     console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
+    result = "error";
+  }
+
+  // Mark event as processed (idempotency)
+  if (sb) {
+    try {
+      await markEventProcessed(sb, event.id, event.type, result);
+    } catch {
+      // Non-fatal if we can't record the event
+    }
   }
 
   return NextResponse.json({ received: true });

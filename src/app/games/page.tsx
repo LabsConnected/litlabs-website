@@ -11,7 +11,6 @@ import {
   ExternalLink,
   Wand2,
   ShieldCheck,
-  Upload,
   Code2,
   X,
 } from "lucide-react";
@@ -23,15 +22,7 @@ import {
   type Game,
 } from "@/lib/games";
 import { listRetroGames, type RetroGameRecord } from "@/lib/retro-arcade";
-
-const RETRO_HERO_ART = "/games/artwork/retro-arcade-hero.svg";
-
-const RETRO_FEATURES = [
-  "Private ROM library",
-  "Automatic system detection",
-  "Local saves and states",
-  "Custom controls",
-];
+import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
 
 const FREE_DISCOVERY = [
   { label: "Open-source games", detail: "1,300+ browser games", href: "https://itch.io/games/free/html5/tag-open-source" },
@@ -203,45 +194,9 @@ export default function GamesPage() {
           )}
         </section>
 
-        {/* === LiTT RETRO ARCADE FEATURE === */}
+        {/* === LiTT RETRO ARCADE HERO === */}
         <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
-          <div className="overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-[#0a0a14] shadow-[0_30px_80px_rgba(0,0,0,.4)]">
-            {/* Hero artwork */}
-            <div className="relative aspect-16/6 overflow-hidden sm:aspect-16/5">
-              {/* eslint-disable-next-line @next/next/no-img-element */}
-              <img
-                src={RETRO_HERO_ART}
-                alt="LiTT Retro Arcade — your private browser-powered game library with NES, SNES, Genesis, Game Boy, and Game Boy Advance support"
-                className="h-full w-full object-cover"
-                sizes="(max-width: 768px) 100vw, 1200px"
-              />
-              <div className="absolute inset-0 bg-linear-to-t from-[#0a0a14] via-transparent to-transparent" />
-            </div>
-
-            {/* Feature content */}
-            <div className="grid gap-6 p-6 sm:p-8 lg:grid-cols-[1fr_auto]">
-              <div>
-                <p className="text-[10px] font-black uppercase tracking-[.3em] text-fuchsia-400">Chapter 01</p>
-                <h2 className="mt-2 text-2xl font-black sm:text-3xl">LiTT Retro Arcade</h2>
-                <p className="mt-2 max-w-md text-sm text-white/55">Your private browser-powered game library. Import legal ROMs, play through a real emulator, and keep saves locally.</p>
-                <ul className="mt-4 grid gap-2 sm:grid-cols-2">
-                  {RETRO_FEATURES.map((feature) => (
-                    <li key={feature} className="flex items-center gap-2 text-sm text-white/65">
-                      <span className="h-1.5 w-1.5 rounded-full bg-fuchsia-400" aria-hidden /> {feature}
-                    </li>
-                  ))}
-                </ul>
-              </div>
-              <div className="flex flex-col gap-3 lg:items-end lg:justify-center">
-                <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-fuchsia-500 to-violet-600 px-6 py-3 text-sm font-black text-white shadow-[0_0_30px_rgba(217,70,239,.25)] transition hover:scale-[1.02]">
-                  <Gamepad2 size={16} /> Open Retro Arcade
-                </Link>
-                <Link href="/games/retro" className="inline-flex items-center gap-2 rounded-xl border border-white/15 px-6 py-3 text-sm font-bold text-white/70 transition hover:bg-white/5 hover:text-white">
-                  <Upload size={16} /> Import ROMs
-                </Link>
-              </div>
-            </div>
-          </div>
+          <RetroArcadeHero variant="banner" />
         </section>
 
         {/* === OPEN-SOURCE BROWSER GAMES === */}

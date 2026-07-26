@@ -7,6 +7,7 @@ import ChatShell from "../components/ChatShell";
 import type { StudioTool } from "../components/StudioSidebar";
 import { useBuilderSessions } from "../hooks/useBuilderSessions";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
+import { detectIntent, type IntentResult } from "../lib/studio-intent";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import {
   useStudioAgentStore,
@@ -59,6 +60,7 @@ export default function ChatTool({
   ): Promise<string> => {
     const text = value.trim();
     if ((!text && !attachments?.length) || busy) return "";
+    // 1. Check slash commands first
     const localCommand = parseBuilderLocalCommand(text);
     if (localCommand) {
       switch (localCommand.type) {
@@ -88,6 +90,24 @@ export default function ChatTool({
           return "";
       }
     }
+    // 2. Check deterministic product intents before calling any LLM
+    const intent = detectIntent(text);
+    if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
+      const intentMessage = buildIntentResponseMessage(intent);
+      setMessages((current) => [
+        ...current,
+        { role: "user", content: text, createdAt: Date.now() },
+        { role: "assistant", content: intentMessage, createdAt: Date.now() },
+      ]);
+      if (intent.tool) {
+        onRouteTool?.(intent.tool);
+      }
+      if (intent.intent === "connect_github" && typeof window !== "undefined") {
+        window.location.href = "/api/github/install";
+      }
+      return intentMessage;
+    }
+
     const historyForApi = [
       ...messages,
       { role: "user" as const, content: text || "(image)" },
@@ -103,13 +123,17 @@ export default function ChatTool({
     if (sessionManager.activeSession?.title === "New chat") sessionManager.rename(sessionManager.activeSession.id, text.slice(0, 56) || "Image request");
     setBusy(true);
     try {
+      const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
       const response = await fetch("/api/gemini/chat", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           agentSlug: activeAgentId,
           systemPrompt: AGENT_META[activeAgentId].systemPrompt,
-          provider: selectedModel.provider,
+          // For Auto Best, send category so the server uses the full fallback chain
+          // For specific model selections, send provider to pin that model
+          provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
+          category: isAutoBest ? "auto" : selectedModel.category,
           model: selectedModel.model,
           message: text || "Describe what you see.",
           history: historyForApi,
@@ -147,8 +171,8 @@ export default function ChatTool({
       ]);
       return reply;
     } catch (error) {
-      const reply =
-        error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
+      const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
+      const reply = sanitizeErrorMessage(rawMessage);
       setMessages((current) => [
         ...current,
         { role: "assistant", content: reply, createdAt: Date.now() },
@@ -193,4 +217,39 @@ export default function ChatTool({
       capabilities={capabilities}
     />
   );
+}
+
+function buildIntentResponseMessage(intent: IntentResult): string {
+  if (intent.intent === "open_terminal") {
+    return "Opening Terminal.\n\nYour project workspace is not ready yet, so the PTY cannot start.\n\n[Connect GitHub] [Start Blank Project]";
+  }
+  if (intent.intent === "connect_github") {
+    return "Connecting GitHub. Redirecting to GitHub App installation...";
+  }
+  if (intent.intent === "start_blank_project") {
+    return "Starting a blank project. Workspace will be ready in a moment.";
+  }
+  if (intent.intent === "run_command") {
+    return "Opening Terminal to run that command.";
+  }
+  if (intent.intent === "generate_image") {
+    return "Opening the image generator.";
+  }
+  return intent.message || "Done.";
+}
+
+function sanitizeErrorMessage(raw: string): string {
+  if (/All LLM providers failed/i.test(raw)) {
+    return "LiTT couldn't reach the selected AI model. I tried the available backups, but none responded.\n\nTry again, or choose a different model from the selector.";
+  }
+  if (/OpenRouter \d{3}/i.test(raw)) {
+    return "The selected model is temporarily unavailable. Try Auto Best or choose another model.";
+  }
+  if (/GROQ_API_KEY not set/i.test(raw)) {
+    return "Groq is not configured. Try Auto Best or Gemini.";
+  }
+  if (/OPENROUTER_API_KEY not set/i.test(raw)) {
+    return "OpenRouter is not configured. Try Auto Best or Gemini.";
+  }
+  return raw;
 }

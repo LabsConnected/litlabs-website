@@ -68,13 +68,15 @@ async function handler() {
       });
     }
 
-    // Server is alive — but we can't verify a specific session from server-side
-    // without session tracking. Return "connecting" so the client verifies
-    // its own WebSocket session.
+    // Server is alive — but we can't verify a specific client session from
+    // server-side without session tracking. Return "disconnected" so the UI
+    // shows the truthful state: the server exists but no PTY session is
+    // established. The client-side TerminalPanel manages the "connecting"
+    // state when it actively opens a WebSocket.
     return NextResponse.json({
       ...baseCapability,
-      status: "connecting",
-      terminalStatus: "connecting",
+      status: "unavailable",
+      terminalStatus: "disconnected",
       lastVerifiedAt: new Date().toISOString(),
     });
   } catch {

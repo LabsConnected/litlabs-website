@@ -1,0 +1,108 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1400 467" width="1400" height="467">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0%" stop-color="#0a0a14"/>
+      <stop offset="50%" stop-color="#12101f"/>
+      <stop offset="100%" stop-color="#0a0a14"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#d946ef"/>
+      <stop offset="100%" stop-color="#7c3aed"/>
+    </linearGradient>
+    <linearGradient id="lime" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0%" stop-color="#a3e635"/>
+      <stop offset="100%" stop-color="#84cc16"/>
+    </linearGradient>
+    <filter id="glow">
+      <feGaussianBlur stdDeviation="6" result="blur"/>
+      <feMerge><feMergeNode in="blur"/><feMergeNode in="SourceGraphic"/></feMerge>
+    </filter>
+  </defs>
+
+  <!-- Background -->
+  <rect width="1400" height="467" fill="url(#bg)"/>
+
+  <!-- Grid pattern -->
+  <g opacity="0.06" stroke="#d946ef" stroke-width="1">
+    <line x1="0" y1="80" x2="1400" y2="80"/>
+    <line x1="0" y1="160" x2="1400" y2="160"/>
+    <line x1="0" y1="240" x2="1400" y2="240"/>
+    <line x1="0" y1="320" x2="1400" y2="320"/>
+    <line x1="0" y1="400" x2="1400" y2="400"/>
+    <line x1="200" y1="0" x2="200" y2="467"/>
+    <line x1="400" y1="0" x2="400" y2="467"/>
+    <line x1="600" y1="0" x2="600" y2="467"/>
+    <line x1="800" y1="0" x2="800" y2="467"/>
+    <line x1="1000" y1="0" x2="1000" y2="467"/>
+    <line x1="1200" y1="0" x2="1200" y2="467"/>
+  </g>
+
+  <!-- Glow orbs -->
+  <circle cx="200" cy="100" r="120" fill="#d946ef" opacity="0.08" filter="url(#glow)"/>
+  <circle cx="1200" cy="350" r="100" fill="#06b6d4" opacity="0.06" filter="url(#glow)"/>
+
+  <!-- Title -->
+  <text x="60" y="120" font-family="monospace" font-size="14" font-weight="bold" fill="#d946ef" letter-spacing="6" opacity="0.7">CHAPTER 01</text>
+  <text x="60" y="180" font-family="Arial,sans-serif" font-size="52" font-weight="900" fill="#fff" letter-spacing="-1">LiTT Retro Arcade</text>
+  <text x="60" y="220" font-family="Arial,sans-serif" font-size="16" fill="#fff" opacity="0.5">Your private browser-powered game library</text>
+
+  <!-- System panels -->
+  <g font-family="monospace" font-size="11" font-weight="bold">
+    <!-- NES -->
+    <rect x="60" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#ef4444" stroke-width="1.5" opacity="0.8"/>
+    <text x="120" y="290" text-anchor="middle" fill="#ef4444">NES</text>
+
+    <!-- SNES -->
+    <rect x="195" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#a3e635" stroke-width="1.5" opacity="0.8"/>
+    <text x="255" y="290" text-anchor="middle" fill="#a3e635">SNES</text>
+
+    <!-- Genesis -->
+    <rect x="330" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#06b6d4" stroke-width="1.5" opacity="0.8"/>
+    <text x="390" y="290" text-anchor="middle" fill="#06b6d4">GENESIS</text>
+
+    <!-- GB -->
+    <rect x="465" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#f59e0b" stroke-width="1.5" opacity="0.8"/>
+    <text x="525" y="290" text-anchor="middle" fill="#f59e0b">GAME BOY</text>
+
+    <!-- GBC -->
+    <rect x="600" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#8b5cf6" stroke-width="1.5" opacity="0.8"/>
+    <text x="660" y="290" text-anchor="middle" fill="#8b5cf6">GBC</text>
+
+    <!-- GBA -->
+    <rect x="735" y="260" width="120" height="50" rx="10" fill="#1a1a2e" stroke="#ec4899" stroke-width="1.5" opacity="0.8"/>
+    <text x="795" y="290" text-anchor="middle" fill="#ec4899">GBA</text>
+  </g>
+
+  <!-- Feature labels -->
+  <g font-family="Arial,sans-serif" font-size="13" fill="#fff" opacity="0.45">
+    <text x="60" y="350">Private ROM library</text>
+    <text x="60" y="375">Local saves and states</text>
+    <text x="60" y="400">Custom controls</text>
+    <text x="350" y="350">Automatic system detection</text>
+    <text x="350" y="375">Keyboard, touch &amp; gamepad</text>
+    <text x="350" y="400">No downloads required</text>
+  </g>
+
+  <!-- Mascot placeholder (simple robot face) -->
+  <g transform="translate(1150, 140)">
+    <rect x="0" y="0" width="120" height="120" rx="20" fill="#1a1a2e" stroke="url(#accent)" stroke-width="2"/>
+    <circle cx="35" cy="45" r="12" fill="url(#lime)"/>
+    <circle cx="85" cy="45" r="12" fill="url(#lime)"/>
+    <rect x="30" y="75" width="60" height="8" rx="4" fill="url(#accent)"/>
+    <rect x="-10" y="50" width="15" height="20" rx="5" fill="#1a1a2e" stroke="url(#accent)" stroke-width="1.5"/>
+    <rect x="115" y="50" width="15" height="20" rx="5" fill="#1a1a2e" stroke="url(#accent)" stroke-width="1.5"/>
+    <text x="60" y="155" text-anchor="middle" font-family="monospace" font-size="10" fill="#d946ef" font-weight="bold">LiTTree</text>
+  </g>
+
+  <!-- CTA buttons (in artwork) -->
+  <g transform="translate(900, 340)">
+    <rect x="0" y="0" width="180" height="44" rx="12" fill="url(#lime)"/>
+    <text x="90" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="900" fill="#000">Open Retro Arcade</text>
+
+    <rect x="200" y="0" width="160" height="44" rx="12" fill="none" stroke="#a855f7" stroke-width="1.5" opacity="0.7"/>
+    <text x="280" y="28" text-anchor="middle" font-family="Arial,sans-serif" font-size="14" font-weight="700" fill="#fff" opacity="0.8">Import ROMs</text>
+  </g>
+
+  <!-- Placeholder notice -->
+  <text x="1340" y="457" text-anchor="end" font-family="monospace" font-size="9" fill="#fff" opacity="0.15">PLACEHOLDER — replace with litt-retro-arcade-hero.png</text>
+</svg>

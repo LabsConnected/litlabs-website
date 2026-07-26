@@ -30,6 +30,15 @@ export type SkinPreset =
   | "miami"
   | "honeycomb";
 
+// Layout style — controls visual structure, not just color
+export type LayoutStyle =
+  | "classic"
+  | "glass"
+  | "honeycomb"
+  | "minimal"
+  | "terminal"
+  | "arcade";
+
 // Theme mode
 export type ThemeMode = "dark" | "light" | "system";
 
@@ -50,6 +59,7 @@ export interface Theme {
   skin: SkinPreset;
   accent: AccentColor;
   backgroundMode: BackgroundMode;
+  layoutStyle: LayoutStyle;
   customColors?: {
     bgColor?: string;
     textColor?: string;
@@ -444,12 +454,108 @@ const accentOverrides: Record<
   },
 };
 
+// Visual pack — a complete preset that applies multiple theme settings at once
+export interface VisualPack {
+  id: string;
+  name: string;
+  description: string;
+  themeMode: ThemeMode;
+  skin: SkinPreset;
+  accent: AccentColor;
+  backgroundMode: BackgroundMode;
+  layoutStyle: LayoutStyle;
+  wallpaperId?: string;
+  overlayOpacity?: number;
+  effects?: {
+    glow: boolean;
+    particles: boolean;
+    motion: boolean;
+  };
+}
+
+export const VISUAL_PACKS: VisualPack[] = [
+  {
+    id: "honeycomb-core",
+    name: "Honeycomb Core",
+    description: "Amber gold palette with hexagonal structure and warm glow",
+    themeMode: "dark",
+    skin: "honeycomb",
+    accent: "cyber-yellow",
+    backgroundMode: "nebula",
+    layoutStyle: "honeycomb",
+    wallpaperId: "honeycomb",
+    effects: { glow: true, particles: true, motion: true },
+  },
+  {
+    id: "littree-forest",
+    name: "LiTTree Forest",
+    description: "Deep emerald greens with glass panels over a midnight forest",
+    themeMode: "dark",
+    skin: "emerald",
+    accent: "matrix-green",
+    backgroundMode: "constellation",
+    layoutStyle: "glass",
+    wallpaperId: "forest",
+    overlayOpacity: 0.72,
+    effects: { glow: false, particles: true, motion: true },
+  },
+  {
+    id: "cyber-lab",
+    name: "Cyber Lab",
+    description: "Electric blue neon over a cyberpunk grid",
+    themeMode: "dark",
+    skin: "cyberpunk",
+    accent: "electric-blue",
+    backgroundMode: "holo",
+    layoutStyle: "glass",
+    wallpaperId: "cyberpunk",
+    effects: { glow: true, particles: false, motion: false },
+  },
+  {
+    id: "retro-arcade",
+    name: "Retro Arcade",
+    description: "Warm retro palette with arcade-style layout",
+    themeMode: "dark",
+    skin: "retro",
+    accent: "sunset-orange",
+    backgroundMode: "waves",
+    layoutStyle: "arcade",
+    wallpaperId: "sunset",
+    effects: { glow: true, particles: false, motion: true },
+  },
+  {
+    id: "midnight-os",
+    name: "Midnight OS",
+    description: "Clean minimal dark interface for focused work",
+    themeMode: "dark",
+    skin: "midnight",
+    accent: "electric-blue",
+    backgroundMode: "minimal",
+    layoutStyle: "minimal",
+    wallpaperId: "default",
+    effects: { glow: false, particles: false, motion: false },
+  },
+  {
+    id: "terminal-pro",
+    name: "Terminal Pro",
+    description: "Matrix-green monospace energy for builders",
+    themeMode: "dark",
+    skin: "neon",
+    accent: "neon-green",
+    backgroundMode: "constellation",
+    layoutStyle: "terminal",
+    wallpaperId: "matrix",
+    effects: { glow: true, particles: true, motion: true },
+  },
+];
+
 // Default theme
 const defaultTheme: Theme = {
   mode: "dark",
   skin: "volcanic",
   accent: "purple-haze",
   backgroundMode: "nebula",
+  layoutStyle: "glass",
 };
 
 // Context
@@ -486,6 +592,8 @@ interface ThemeContextType {
   setSkin: (skin: SkinPreset) => void;
   setAccent: (accent: AccentColor) => void;
   setBackgroundMode: (mode: BackgroundMode) => void;
+  setLayoutStyle: (style: LayoutStyle) => void;
+  applyVisualPack: (packId: string) => void;
   setCustomColors: (colors: {
     bgColor?: string;
     textColor?: string;
@@ -624,6 +732,24 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     setTheme((prev) => ({ ...prev, backgroundMode }));
   };
 
+  const setLayoutStyle = (layoutStyle: LayoutStyle) => {
+    setTheme((prev) => ({ ...prev, layoutStyle }));
+  };
+
+  const applyVisualPack = (packId: string) => {
+    const pack = VISUAL_PACKS.find((p) => p.id === packId);
+    if (!pack) return;
+    setTheme((prev) => ({
+      ...prev,
+      mode: pack.themeMode,
+      skin: pack.skin,
+      accent: pack.accent,
+      backgroundMode: pack.backgroundMode,
+      layoutStyle: pack.layoutStyle,
+      customColors: undefined,
+    }));
+  };
+
   const setCustomColors = (colors: {
     bgColor?: string;
     textColor?: string;
@@ -653,6 +779,8 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
         setSkin,
         setAccent,
         setBackgroundMode,
+        setLayoutStyle,
+        applyVisualPack,
         setCustomColors,
         resetTheme,
       }}

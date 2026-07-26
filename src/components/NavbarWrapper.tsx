@@ -12,6 +12,7 @@ const desktopLinks = [
   ["Agents", "/agents"],
   ["Gallery", "/gallery"],
   ["Marketplace", "/marketplace"],
+  ["Pricing", "/pricing"],
   ["Games", "/games"],
 ] as const;
 

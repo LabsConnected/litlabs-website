@@ -20,7 +20,8 @@
     "terminal:build": "tsc -p terminal-server/tsconfig.json",
     "terminal:start": "node terminal-server/dist/server.js",
     "terminal:build-image": "docker build -t littree-terminal:latest -f docker/Dockerfile.terminal .",
-    "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\""
+    "dev:all": "concurrently \"pnpm dev\" \"pnpm terminal:dev\"",
+    "diagnose:connections": "tsx scripts/diagnose-connections.ts"
   },
   "dependencies": {
     "@ai-sdk/openai": "^4.0.7",

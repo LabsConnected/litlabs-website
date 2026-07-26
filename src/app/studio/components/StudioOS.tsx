@@ -9,6 +9,7 @@ import StudioTopBar from "./StudioTopBar";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
+import DemoBootstrap from "./DemoBootstrap";
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
@@ -77,7 +78,7 @@ function AgentVoiceSync() {
   return null;
 }
 
-export default function StudioOS() {
+export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) {
   const { resolvedColors: T } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
@@ -181,7 +182,7 @@ export default function StudioOS() {
 
       {/* Unified Studio shell — responsive, one layout for mobile + desktop */}
       <div
-        className="flex h-dvh w-full flex-col overflow-hidden"
+        className={`flex h-dvh w-full flex-col overflow-hidden ${isDemo ? "pt-9" : ""}`}
         style={{
           backgroundColor: "#06070b",
           color: T.textColor,
@@ -273,6 +274,8 @@ export default function StudioOS() {
         onCameraPosChange={(pos) => setCameraDock((v) => ({ ...v, pos }))}
         onScreenPosChange={(pos) => setScreenDock((v) => ({ ...v, pos }))}
       />
+
+      {isDemo ? <DemoBootstrap /> : null}
     </VoiceSessionProvider>
   );
 }

@@ -16,12 +16,12 @@ export function SettingsCard({
   children: ReactNode;
 }) {
   return (
-    <div className="rounded-2xl border border-white/10 bg-black/30 p-4">
+    <div className="rounded-2xl border border-white/10 bg-black/30 p-5">
       <div className="mb-3 flex items-center gap-2">
         {icon && <span className="text-cyan-300">{icon}</span>}
         <div>
           <h3 className="text-sm font-bold text-white">{title}</h3>
-          {description && <p className="text-[10px] text-white/40">{description}</p>}
+          {description && <p className="mt-0.5 text-xs text-white/40">{description}</p>}
         </div>
       </div>
       {children}
@@ -32,8 +32,8 @@ export function SettingsCard({
 export function SectionHeader({ title, description }: { title: string; description?: string }) {
   return (
     <div className="mb-4">
-      <h1 className="text-lg font-black text-white">{title}</h1>
-      {description && <p className="text-xs text-white/40">{description}</p>}
+      <h1 className="text-2xl font-black tracking-tight text-white">{title}</h1>
+      {description && <p className="mt-1 text-[13px] text-white/40">{description}</p>}
     </div>
   );
 }

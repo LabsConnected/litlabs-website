@@ -4,6 +4,7 @@ export const dynamic = "force-dynamic";
 
 import { Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
 import StudioOS from "./components/StudioOS";
@@ -11,7 +12,17 @@ import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
 
 function StudioHub() {
   const { isLoaded, isSignedIn } = useClerkAuth();
+  const searchParams = useSearchParams();
   const { tokens } = useTheme();
+
+  // Public, unauthenticated demo mode. Append `?demo=1` to any /studio
+  // route to enter a read-only preview that mounts the real Studio
+  // components with mocked data (see ./components/DemoBootstrap.tsx).
+  const isDemo = searchParams.get("demo") === "1";
+
+  if (isDemo) {
+    return <StudioOS isDemo />;
+  }
 
   if (!isLoaded) {
     return (
@@ -119,6 +130,13 @@ function StudioHub() {
             }}
           >
             <Sparkles size={14} /> Sign in to Studio
+          </Link>
+          <Link
+            href="/studio?demo=1"
+            className="mb-3 flex items-center justify-center gap-1 rounded-xl border border-amber-300/40 bg-amber-300/8 px-5 py-2.5 text-xs font-bold transition-all hover:opacity-80"
+            style={{ color: "#fbbf24" }}
+          >
+            ✨ Try the public demo first
           </Link>
           <Link
             href="/sign-up"

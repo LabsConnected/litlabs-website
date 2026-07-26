@@ -98,8 +98,13 @@ const OPENROUTER_BASE = "https://openrouter.ai/api/v1";
 const GROQ_KEY = process.env.GROQ_API_KEY || "";
 const GROQ_BASE = "https://api.groq.com/openai/v1";
 
+const GEMINI_PRIMARY_MODEL =
+  process.env.GEMINI_PRIMARY_MODEL || "gemini-2.5-flash";
+const GEMINI_FALLBACK_MODEL =
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.0-flash";
+
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
-  gemini: "gemini-2.5-flash",
+  gemini: GEMINI_PRIMARY_MODEL,
   groq: "llama-3.3-70b-versatile",
   "groq-whisper": "whisper-large-v3",
   "openrouter-free": "openrouter/free",
@@ -111,15 +116,32 @@ export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   "openrouter-vision": "google/gemini-2.5-flash:free",
 };
 
-// Gemini 2.0-flash as stable fallback
-const GEMINI_FALLBACK_MODEL = "gemini-2.0-flash";
-
 /* Lazy singleton — don't construct until first use. */
 let _genAI: GoogleGenerativeAI | null = null;
 function getGenAI(): GoogleGenerativeAI | null {
   if (!GEMINI_KEY) return null;
   if (!_genAI) _genAI = new GoogleGenerativeAI(GEMINI_KEY);
   return _genAI;
+}
+
+/* ------------------------------------------------------------------ */
+/*  Circuit breaker — temporarily skip unavailable models              */
+/* ------------------------------------------------------------------ */
+const MODEL_COOLDOWN_MS = 15 * 60 * 1000; // 15 minutes
+const _modelCooldowns = new Map<string, number>(); // provider -> expiry timestamp
+
+function isModelInCooldown(provider: string): boolean {
+  const expiry = _modelCooldowns.get(provider);
+  if (!expiry) return false;
+  if (Date.now() > expiry) {
+    _modelCooldowns.delete(provider);
+    return false;
+  }
+  return true;
+}
+
+function markModelUnavailable(provider: string): void {
+  _modelCooldowns.set(provider, Date.now() + MODEL_COOLDOWN_MS);
 }
 
 /* ------------------------------------------------------------------ */
@@ -420,6 +442,11 @@ export async function generateText(
 
   let lastErr: unknown = null;
   for (const provider of chain) {
+    // Circuit breaker: skip models temporarily marked unavailable
+    if (isModelInCooldown(provider)) {
+      failover.push(provider);
+      continue;
+    }
     try {
       const r = await dispatchProvider(
         provider,
@@ -437,6 +464,10 @@ export async function generateText(
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      // Mark model unavailable on 404 (model not found)
+      if (isProviderError && err.status === 404) {
+        markModelUnavailable(provider);
+      }
       // Don't retry non-retryable errors (e.g. 400 bad request) — skip to next
       if (!isProviderError || !err.isRetryable) {
         // For non-retryable, skip to the next provider in the chain
@@ -515,6 +546,11 @@ export async function streamText(
 
   let lastErr: unknown = null;
   for (const provider of chain) {
+    // Circuit breaker: skip models temporarily marked unavailable
+    if (isModelInCooldown(provider)) {
+      failover.push(provider);
+      continue;
+    }
     try {
       if (provider === "gemini") {
         return await streamViaGemini(
@@ -545,6 +581,10 @@ export async function streamText(
     } catch (err) {
       lastErr = err;
       const isProviderError = err instanceof ProviderError;
+      // Mark model unavailable on 404 (model not found)
+      if (isProviderError && err.status === 404) {
+        markModelUnavailable(provider);
+      }
       if (!isProviderError || !err.isRetryable) {
         failover.push(provider);
         continue;
