@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useCallback, useEffect, Suspense } from "react";
+import { useState, useCallback, useEffect, useMemo, Suspense, memo } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -241,24 +241,27 @@ function MarketplaceInner() {
     }
   }, [installations]);
 
-  const filteredItems = items
-    .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
-    .filter(
-      (item) =>
-        !searchQuery ||
-        item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-        item.description.toLowerCase().includes(searchQuery.toLowerCase()),
-    );
+  const filteredItems = useMemo(() =>
+    items
+      .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
+      .filter(
+        (item) =>
+          !searchQuery ||
+          item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          item.description.toLowerCase().includes(searchQuery.toLowerCase()),
+      ),
+    [items, selectedCategory, searchQuery],
+  );
 
-  const featuredItems = filteredItems.filter((item) => item.is_featured);
-  const nonFeaturedItems = filteredItems.filter((item) => !item.is_featured);
+  const featuredItems = useMemo(() => filteredItems.filter((item) => item.is_featured), [filteredItems]);
+  const nonFeaturedItems = useMemo(() => filteredItems.filter((item) => !item.is_featured), [filteredItems]);
 
-  const stats: MarketplaceStats = {
+  const stats = useMemo<MarketplaceStats>(() => ({
     totalItems: items.length,
     installedItems: installations.size,
     availableItems: items.filter((i) => i.status === "available" || i.status === "beta").length,
     comingSoonItems: items.filter((i) => i.status === "coming_soon").length,
-  };
+  }), [items, installations]);
 
   if (!isLoaded) {
     return (
@@ -592,7 +595,7 @@ function MarketplaceInner() {
 
 // --- Card component ---
 
-function MarketplaceCard({
+const MarketplaceCard = memo(function MarketplaceCard({
   item,
   installation,
   onInstall,
@@ -757,7 +760,7 @@ function MarketplaceCard({
       </div>
     </article>
   );
-}
+});
 
 export default function Marketplace() {
   return (
