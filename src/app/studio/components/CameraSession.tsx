@@ -30,8 +30,11 @@ export type CameraStatus =
 
 interface CameraSessionProps {
   onSnapshot?: (dataUrl: string) => void;
+  onCaptureReady?: (capture: (() => string | null) | null) => void;
   onClose?: () => void;
   modelName?: string;
+  compact?: boolean;
+  visionOnSend?: boolean;
 }
 
 const STATUS_LABELS: Record<CameraStatus, string> = {
@@ -51,8 +54,11 @@ const STATUS_LABELS: Record<CameraStatus, string> = {
 
 export default function CameraSession({
   onSnapshot,
+  onCaptureReady,
   onClose,
   modelName = "Gemini 2.5 Flash Vision",
+  compact = false,
+  visionOnSend = false,
 }: CameraSessionProps) {
   const { lastError, requestVideo, enumerateCameras, resetPermission } =
     useMediaPermissions();
@@ -191,24 +197,28 @@ export default function CameraSession({
     return () => window.removeEventListener("beforeunload", handler);
   }, [stopStream]);
 
-  const capture = useCallback(() => {
+  const captureFrame = useCallback(() => {
     const video = videoRef.current;
-    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return;
-
-    setStatus("capturing");
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) return null;
     const canvas = document.createElement("canvas");
-    canvas.width = video.videoWidth;
-    canvas.height = video.videoHeight;
+    canvas.width = Math.min(video.videoWidth, 1280);
+    canvas.height = Math.min(video.videoHeight, 720);
     const ctx = canvas.getContext("2d");
-    if (!ctx) {
-      setStatus("live");
-      return;
-    }
+    if (!ctx) return null;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.88);
-    onSnapshot?.(dataUrl);
-    setStatus("live");
-  }, [onSnapshot]);
+    return canvas.toDataURL("image/jpeg", 0.9);
+  }, []);
+
+  // Expose captureFrame to parent so it can grab a fresh frame on send
+  useEffect(() => {
+    onCaptureReady?.(status === "live" ? captureFrame : null);
+    return () => onCaptureReady?.(null);
+  }, [captureFrame, onCaptureReady, status]);
+
+  const capture = useCallback(() => {
+    const dataUrl = captureFrame();
+    if (dataUrl) onSnapshot?.(dataUrl);
+  }, [captureFrame, onSnapshot]);
 
   const close = useCallback(() => {
     stopStream();
@@ -313,7 +323,7 @@ export default function CameraSession({
         <div className="flex items-center gap-1.5">
           <ScanFace size={12} className="text-emerald-400" />
           <span className="text-[10px] font-bold text-emerald-400">
-            {modelName}
+            {visionOnSend ? "LiTT sees on send" : modelName}
           </span>
         </div>
       </div>
@@ -324,7 +334,7 @@ export default function CameraSession({
         playsInline
         muted
         onLoadedData={attachStream}
-        className="aspect-video w-full object-cover"
+        className={compact ? "aspect-[4/3] w-full object-cover" : "aspect-video w-full object-cover"}
       />
 
       {/* Starting overlay */}

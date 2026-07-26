@@ -106,6 +106,7 @@ export default function MultimodalComposer({
   const agentMeta = AGENT_META[activeAgentId];
   const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
+  const cameraCaptureRef = useRef<(() => string | null) | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [createMode, setCreateMode] = useState<"image" | "video" | null>(null);
   const [createPrompt, setCreatePrompt] = useState("");
@@ -245,7 +246,13 @@ export default function MultimodalComposer({
       onChange("");
       return;
     }
-    const reply = await onSend(value, snapshots.length ? snapshots : undefined);
+    // If camera is open, capture a fresh frame and attach it
+    const attachments = [...snapshots];
+    if (mode === "camera" && cameraCaptureRef.current) {
+      const liveFrame = cameraCaptureRef.current();
+      if (liveFrame) attachments.push(liveFrame);
+    }
+    const reply = await onSend(value, attachments.length ? attachments : undefined);
     onChange("");
     setSnapshots([]);
     // Auto-speak the AI response when voice mode is active
@@ -378,12 +385,19 @@ export default function MultimodalComposer({
       {mode === "camera" && (
         <div className="mb-2">
           <CameraSession
+            compact
+            visionOnSend
+            onCaptureReady={(capture) => {
+              cameraCaptureRef.current = capture;
+            }}
             onSnapshot={(url) => {
               setSnapshots((prev) => [...prev, url]);
               void onSend("Describe what you see.", [url]);
+            }}
+            onClose={() => {
+              cameraCaptureRef.current = null;
               setMode("text");
             }}
-            onClose={() => setMode("text")}
             modelName={modelName}
           />
         </div>
