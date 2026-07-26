@@ -169,21 +169,25 @@ export default function StudioSidebar({
       >
         {/* Logo */}
         <div className="mb-2 flex h-10 w-10 items-center justify-center">
-          <span
+          <button
+            type="button"
+            onClick={() => onToolChange("home")}
             className="grid h-9 w-9 place-items-center rounded-xl border"
             style={{
               color: T.accentColor,
               borderColor: `${T.accentColor}40`,
               backgroundColor: `${T.accentColor}10`,
             }}
+            aria-label="Studio home"
+            title="Studio home"
           >
             <Sparkles size={18} className="pointer-events-none" />
-          </span>
+          </button>
         </div>
 
         {/* Primary tools */}
         <div className="flex flex-1 flex-col items-center gap-1 overflow-y-auto py-1">
-          {PRIMARY_TOOLS.filter((tool) => projectReady || ["code", "build", "chat"].includes(tool.id)).map((tool) => (
+          {PRIMARY_TOOLS.map((tool) => (
             <RailButton
               key={tool.id}
               tool={tool}
@@ -194,13 +198,13 @@ export default function StudioSidebar({
           ))}
 
           {/* Divider */}
-          {projectReady && <div
+          <div
             className="my-1.5 h-px w-8"
             style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
-          />}
+          />
 
           {/* More Tools button */}
-          {projectReady && <button
+          <button
             type="button"
             onClick={() => setMoreOpen((v) => !v)}
             className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
@@ -222,7 +226,7 @@ export default function StudioSidebar({
             >
               More Tools
             </span>
-          </button>}
+          </button>
         </div>
 
         {/* Bottom status dot */}
@@ -242,7 +246,7 @@ export default function StudioSidebar({
       {/* ═══════════════════════════════════════════════════════════
           More Tools drawer (desktop) — slides out from rail
       ═══════════════════════════════════════════════════════════ */}
-      {projectReady && moreOpen && (
+      {moreOpen && (
         <div
           className="fixed left-16 top-0 z-50 hidden h-full w-55 flex-col border-r md:flex"
           style={{

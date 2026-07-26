@@ -114,7 +114,9 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [search, setSearch] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
   const [assistantOpen, setAssistantOpen] = useState(false);
-  const [localDraftActive, setLocalDraftActive] = useState(false);
+  const [onboardingOpen, setOnboardingOpen] = useState(
+    () => !searchParams.has("tool"),
+  );
   const isInitialMount = useRef(true);
   const [cameraDock, setCameraDock] = useState<{
     open: boolean;
@@ -127,7 +129,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
   const handleStartBlank = useCallback(() => {
     setActiveTool("build");
-    setLocalDraftActive(true);
+    setOnboardingOpen(false);
   }, []);
 
   // Sync tool to localStorage immediately, and to URL only after the
@@ -160,6 +162,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
       const tool = custom.detail;
       if (tool && VALID_TOOLS.includes(tool as StudioTool)) {
         setActiveTool(tool as StudioTool);
+        setOnboardingOpen(false);
       }
     };
     window.addEventListener("studio:switch-tool", handler);
@@ -168,9 +171,15 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
   const handleToolChange = useCallback(
     (tool: StudioTool) => {
+      if (tool === "home" && !projectReady) {
+        setOnboardingOpen(true);
+        setActiveTool("home");
+        return;
+      }
+      setOnboardingOpen(false);
       setActiveTool(tool);
     },
-    [setActiveTool],
+    [projectReady],
   );
 
   const handleCommandRoute = useCallback(
@@ -184,6 +193,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
         return;
       }
       setPendingCommand(command);
+      setOnboardingOpen(false);
       setActiveTool(tool);
     },
     [],
@@ -231,7 +241,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
           {/* Center workspace — renders active tool full-screen on mobile */}
           <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
-            {!connectionsLoading && !projectReady && !localDraftActive ? (
+            {!connectionsLoading && !projectReady && onboardingOpen ? (
               <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : isChat ? (
               <ChatTool
