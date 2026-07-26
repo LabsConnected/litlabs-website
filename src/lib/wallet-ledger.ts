@@ -31,6 +31,31 @@ export async function getCreditBalances(clerkId: string): Promise<CreditBalances
   const admin = getSupabaseAdmin();
   if (!admin) throw new Error("Wallet service is not configured");
   const userId = await getUserId(clerkId);
+  const { data: subscription } = await admin
+    .from("subscriptions")
+    .select("status")
+    .eq("user_id", userId)
+    .in("status", ["active", "trialing"])
+    .maybeSingle();
+  if (!subscription) {
+    const now = new Date();
+    const period = now.toISOString().slice(0, 7);
+    const expiresAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
+    const { error: grantError } = await admin.rpc("grant_credits", {
+      p_user_id: userId,
+      p_amount: 500,
+      p_category: "subscription_grant",
+      p_balance_bucket: "monthly",
+      p_description: `Starter monthly grant — ${period}`,
+      p_idempotency_key: `starter:${userId}:${period}`,
+      p_reference_type: "starter_plan",
+      p_reference_id: period,
+      p_expires_at: expiresAt.toISOString(),
+    });
+    if (grantError) {
+      throw new Error(`Starter credit grant failed: ${grantError.message}`);
+    }
+  }
   const [{ data, error }, { data: daily }] = await Promise.all([
     admin.rpc("get_user_balances", { p_user_id: userId }),
     admin

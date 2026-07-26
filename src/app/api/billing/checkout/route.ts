@@ -60,6 +60,10 @@ export async function POST(req: NextRequest) {
     params.append("automatic_tax[enabled]", "false");
     params.append(`metadata[clerk_id]`, clerkId);
     params.append(`metadata[plan_id]`, plan.id);
+    if (mode === "subscription") {
+      params.append("subscription_data[metadata][clerk_id]", clerkId);
+      params.append("subscription_data[metadata][plan_id]", plan.id);
+    }
 
     const stripeResponse = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",

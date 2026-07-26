@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import { PLANS, type PlanId } from "@/config/plans";
+import { getCreditBalances } from "@/lib/wallet-ledger";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -18,7 +19,7 @@ export async function GET() {
       return NextResponse.json({
         plan: PLANS.starter,
         subscription: null,
-        balances: { monthly: 0, purchased: 0, beta_promotional: 9999, total: 9999 },
+        balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
       });
     }
 
@@ -32,7 +33,7 @@ export async function GET() {
       return NextResponse.json({
         plan: PLANS.starter,
         subscription: null,
-        balances: { monthly: 0, purchased: 0, beta_promotional: 9999, total: 9999 },
+        balances: { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 },
       });
     }
 
@@ -48,20 +49,15 @@ export async function GET() {
       if (!PLANS[planId]) planId = "starter";
     }
 
-    let balances = { monthly: 0, purchased: 0, beta_promotional: 9999, total: 9999 };
+    let balances = { monthly: 0, purchased: 0, beta_promotional: 0, total: 0 };
     try {
-      const { data: balData } = await admin.rpc("get_user_balances", { p_user_id: user.id });
-      if (balData) {
-        const row = Array.isArray(balData) ? balData[0] : balData;
-        if (row) {
-          balances = {
-            monthly: row.monthly ?? 0,
-            purchased: row.purchased ?? 0,
-            beta_promotional: row.beta_promotional ?? 9999,
-            total: row.total ?? 9999,
-          };
-        }
-      }
+      const creditBalances = await getCreditBalances(clerkId);
+      balances = {
+        monthly: creditBalances.monthly,
+        purchased: creditBalances.purchased,
+        beta_promotional: creditBalances.betaPromotional,
+        total: creditBalances.total,
+      };
     } catch {
       // Ledger not yet migrated — fallback
     }

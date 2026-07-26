@@ -92,6 +92,7 @@ async function grantSubscriptionCredits(
   userId: string,
   planId: PlanId,
   idempotencyKey: string,
+  expiresAt?: string | null,
 ): Promise<void> {
   const plan = PLANS[planId];
   if (!plan || plan.monthlyCredits <= 0) return;
@@ -104,6 +105,7 @@ async function grantSubscriptionCredits(
       p_description: `${plan.name} monthly grant — ${plan.monthlyCredits} LiTBits`,
       p_idempotency_key: idempotencyKey,
       p_reference_type: "subscription",
+      p_expires_at: expiresAt ?? undefined,
     });
   } catch (err) {
     console.error("[stripe/webhook] grantSubscriptionCredits failed:", err);
@@ -231,10 +233,6 @@ export async function POST(req: NextRequest) {
             },
             { onConflict: "user_id", ignoreDuplicates: false },
           );
-          // Grant monthly credits on creation
-          if (event.type === "customer.subscription.created" && sub.status === "active") {
-            await grantSubscriptionCredits(sb, subUserId, planId, `sub_created_${sub.id}`);
-          }
         }
         break;
       }
@@ -259,8 +257,7 @@ export async function POST(req: NextRequest) {
         break;
       }
 
-      case "invoice.paid":
-      case "invoice.payment_succeeded": {
+      case "invoice.paid": {
         if (!sb) break;
         const inv = event.data.object as Stripe.Invoice;
         const invSubId = inv.parent?.subscription_details?.subscription;
@@ -278,11 +275,17 @@ export async function POST(req: NextRequest) {
                 updated_at: new Date().toISOString(),
               })
               .eq("user_id", invMatch.user_id);
-            // Grant monthly credits on renewal
-            if (event.type === "invoice.payment_succeeded") {
-              const planId = (invMatch.plan as PlanId) || "creator_beta";
-              await grantSubscriptionCredits(sb, invMatch.user_id, planId, `sub_renewal_${invSubId}_${inv.id}`);
-            }
+            // Invoice payment is the only source of subscription grants. This
+            // prevents the first billing period from being granted twice.
+            const planId = (invMatch.plan as PlanId) || "creator_beta";
+            const periodEnd = inv.lines.data[0]?.period?.end;
+            await grantSubscriptionCredits(
+              sb,
+              invMatch.user_id,
+              planId,
+              `invoice_grant_${inv.id}`,
+              periodEnd ? new Date(periodEnd * 1000).toISOString() : null,
+            );
           }
         }
         break;
@@ -342,7 +345,11 @@ export async function POST(req: NextRequest) {
     }
   } catch (err) {
     console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
-    result = "error";
+    // Do not acknowledge or record failed events. Stripe must retry them.
+    return NextResponse.json(
+      { error: "Webhook processing failed" },
+      { status: 500 },
+    );
   }
 
   // Mark event as processed (idempotency)

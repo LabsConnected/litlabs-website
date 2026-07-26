@@ -4,8 +4,8 @@ import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { Check, Sparkles, ArrowRight, Loader2, Shield } from "lucide-react";
-import { PLAN_LIST, formatPriceMonthly, type PlanDefinition } from "@/config/plans";
+import { Check, Sparkles, ArrowRight, Loader2, Shield, Coins, RefreshCw, LockKeyhole } from "lucide-react";
+import { PLAN_LIST, formatPrice, formatPriceMonthly, type PlanDefinition } from "@/config/plans";
 
 const PLAN_ACCENTS: Record<string, string> = {
   starter: "#6b7280",
@@ -76,6 +76,7 @@ export default function PricingPage() {
             const accent = PLAN_ACCENTS[plan.id] || T.accentColor;
             const isFree = plan.billingType === "free";
             const isFounder = plan.id === "founder";
+            const isRecommended = plan.id === "creator_beta";
             const isLoading = loading === plan.id;
 
             return (
@@ -83,7 +84,7 @@ export default function PricingPage() {
                 key={plan.id}
                 className="relative flex flex-col overflow-hidden rounded-2xl border-2 transition-all hover:-translate-y-1"
                 style={{
-                  borderColor: isFounder ? `${accent}60` : `${accent}30`,
+                  borderColor: isFounder || isRecommended ? `${accent}70` : `${accent}30`,
                   backgroundColor: `${accent}08`,
                 }}
               >
@@ -91,6 +92,11 @@ export default function PricingPage() {
                 {isFounder && (
                   <div className="absolute right-0 top-0 rounded-bl-xl px-3 py-1 text-[9px] font-black uppercase tracking-wider text-black" style={{ backgroundColor: accent }}>
                     Limited
+                  </div>
+                )}
+                {isRecommended && (
+                  <div className="absolute right-3 top-3 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950" style={{ backgroundColor: accent }}>
+                    Best for creators
                   </div>
                 )}
 
@@ -103,7 +109,9 @@ export default function PricingPage() {
                   {/* Price */}
                   <div className="mt-2 flex items-baseline gap-1">
                     <span className="text-3xl font-black" style={{ color: T.headerColor }}>
-                      {formatPriceMonthly(plan.monthlyPriceCents)}
+                      {plan.billingType === "one_time"
+                        ? formatPrice(plan.monthlyPriceCents)
+                        : formatPriceMonthly(plan.monthlyPriceCents)}
                     </span>
                     {plan.billingType === "one_time" && (
                       <span className="text-[10px] text-white/40">one-time</span>
@@ -133,7 +141,7 @@ export default function PricingPage() {
                       {plan.monthlyCredits.toLocaleString()}
                     </div>
                     <div className="text-[9px] uppercase tracking-wider text-white/40">
-                      monthly LiTBits
+                      {isFounder ? "included founding LiTBits" : "monthly LiTBits"}
                     </div>
                   </div>
 
@@ -167,7 +175,10 @@ export default function PricingPage() {
                         {isLoading ? (
                           <Loader2 size={12} className="animate-spin" />
                         ) : (
-                          <>Subscribe <ArrowRight size={12} /></>
+                          <>
+                            {isFounder ? "Become a Founder" : plan.id === "creator_beta" ? "Choose Creator" : "Choose Pro"}
+                            <ArrowRight size={12} />
+                          </>
                         )}
                       </button>
                     )}
@@ -185,6 +196,32 @@ export default function PricingPage() {
           </div>
         )}
 
+        <div className="mt-10 grid gap-3 md:grid-cols-3">
+          {[
+            {
+              icon: Coins,
+              title: "One visible balance",
+              copy: "Monthly, promotional, and purchased LiTBits are shown separately and summed honestly.",
+            },
+            {
+              icon: RefreshCw,
+              title: "Monthly credits reset",
+              copy: "Plan LiTBits refresh each paid billing period. Purchased LiTBits do not silently expire.",
+            },
+            {
+              icon: LockKeyhole,
+              title: "Atomic usage ledger",
+              copy: "Every grant and charge has an idempotency key, preventing duplicate billing or double-spend.",
+            },
+          ].map((item) => (
+            <div key={item.title} className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
+              <item.icon size={17} style={{ color: T.accentColor }} />
+              <h2 className="mt-3 text-sm font-black text-white/90">{item.title}</h2>
+              <p className="mt-1 text-[11px] leading-5 text-white/50">{item.copy}</p>
+            </div>
+          ))}
+        </div>
+
         {/* Trust section */}
         <div className="mt-10 rounded-2xl border border-white/10 bg-white/[.02] p-6">
           <div className="flex items-center gap-2">
@@ -196,7 +233,7 @@ export default function PricingPage() {
           <div className="mt-4 grid gap-3 sm:grid-cols-2">
             <div className="flex items-start gap-2 text-[11px] text-white/50">
               <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-              Existing Beta LiTBits are preserved and remain visible
+              Existing balances are migrated once and remain visible
             </div>
             <div className="flex items-start gap-2 text-[11px] text-white/50">
               <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
@@ -222,8 +259,8 @@ export default function PricingPage() {
               a: "LiTBits are platform credits used for AI actions like chat, code generation, image creation, and terminal minutes. Each plan includes a monthly allowance.",
             },
             {
-              q: "Do I keep my existing 9,999 Beta LiTBits?",
-              a: "Yes. Existing Beta LiTBits remain visible, have no cash value, and are consumed after paid monthly credits. They will expire 90 days after paid beta launches.",
+              q: "Do I keep my existing Beta LiTBits?",
+              a: "Yes. Your existing wallet balance is migrated once into the promotional bucket. Monthly plan credits are used first, then promotional credits, then purchased credits.",
             },
             {
               q: "Can I cancel anytime?",
@@ -231,7 +268,7 @@ export default function PricingPage() {
             },
             {
               q: "Is this unlimited AI?",
-              a: "No. Every action has a LiTBit cost. This protects our ability to keep the platform sustainable. You can always see estimated costs before expensive operations.",
+              a: "No. Billable AI and runtime actions have a LiTBit cost. Free navigation, project organization, and local editing do not. Estimated cost should be shown before expensive operations.",
             },
           ].map((faq) => (
             <div key={faq.q} className="rounded-xl border border-white/5 bg-black/20 px-4 py-3">
