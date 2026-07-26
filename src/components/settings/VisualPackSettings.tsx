@@ -13,6 +13,10 @@ const PACK_PREVIEWS: Record<string, string> = {
   "retro-arcade": "radial-gradient(ellipse at 20% 80%, #fb923c40 0%, transparent 50%), radial-gradient(ellipse at 80% 20%, #f472b640 0%, transparent 50%), linear-gradient(135deg, #2d1a12 0%, #4a2510 30%, #7c2d12 60%, #c2410c 100%)",
   "midnight-os": "linear-gradient(180deg, #080a12 0%, #0f1220 100%)",
   "terminal-pro": "linear-gradient(180deg, #001a00 0%, #000a00 100%)",
+  "holo-command": "radial-gradient(circle at 72% 20%, #a855f735, transparent 36%), linear-gradient(145deg, #060914, #17102b 58%, #070914)",
+  "cosmic-creator": "radial-gradient(circle at 25% 75%, #ec489940, transparent 38%), radial-gradient(circle at 75% 20%, #8b5cf640, transparent 38%), #080612",
+  "arctic-focus": "radial-gradient(circle at 75% 10%, #38bdf825, transparent 42%), linear-gradient(160deg, #07131d, #0c2230)",
+  "miami-night": "linear-gradient(155deg, #1a0828, #29103d 48%, #08213a), repeating-linear-gradient(90deg, transparent 0 28px, #ec489912 29px)",
 };
 
 function packMatchesTheme(pack: VisualPack, theme: ReturnType<typeof useTheme>["theme"]): boolean {
@@ -33,7 +37,12 @@ export function VisualPackSettings() {
   const handleApply = useCallback((pack: VisualPack) => {
     applyVisualPack(pack.id);
     if (pack.wallpaperId) {
-      updateProfile({ wallpaper: pack.wallpaperId as WallpaperId });
+      updateProfile({
+        wallpaper: pack.wallpaperId as WallpaperId,
+        wallpaperOverlay: pack.overlayOpacity ?? 0.46,
+        wallpaperBlur: pack.layoutStyle === "glass" ? 2 : 0,
+        wallpaperFit: "cover",
+      });
     }
   }, [applyVisualPack, updateProfile]);
 
@@ -98,4 +107,3 @@ export function VisualPackSettings() {
     </div>
   );
 }
-

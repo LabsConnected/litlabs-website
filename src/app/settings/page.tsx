@@ -4,7 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
-import { useUser } from "@clerk/nextjs";
+import { useClerk, useUser } from "@clerk/nextjs";
 import {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
@@ -665,6 +665,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
 
 function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { user, isLoaded } = useUser();
+  const { openUserProfile, signOut } = useClerk();
 
   if (!isLoaded) {
     return <div className="flex items-center gap-2 text-xs text-white/40"><Loader2 size={14} className="animate-spin" /> Loading account…</div>;
@@ -697,19 +698,27 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
           </div>
         </div>
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <SettingsInput label="Display name" value={name} onChange={() => {}} />
-          <SettingsInput label="Email" value={email} onChange={() => {}} type="email" />
+          <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Display name</div>
+            <div className="mt-1 text-xs font-semibold text-white/85">{name}</div>
+          </div>
+          <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
+            <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Primary email</div>
+            <div className="mt-1 truncate text-xs font-semibold text-white/85">{email}</div>
+          </div>
         </div>
         <div className="mt-4 flex flex-wrap gap-2">
-          <Link
-            href="/account"
-            className="rounded-lg px-3 py-1.5 text-xs font-bold transition-all hover:opacity-90"
-            style={{ backgroundColor: T.accentColor, color: "#000" }}
-          >
-            Manage Clerk account
-          </Link>
           <button
             type="button"
+            onClick={() => openUserProfile()}
+            className="rounded-lg px-3 py-1.5 text-xs font-bold transition-all hover:opacity-90"
+            style={{ backgroundColor: T.accentColor, color: T.bgColor }}
+          >
+            Manage account & security
+          </button>
+          <button
+            type="button"
+            onClick={() => void signOut({ redirectUrl: "/" })}
             className="rounded-lg border border-white/10 px-3 py-1.5 text-xs font-bold text-white/60 hover:bg-white/5"
           >
             Sign out
@@ -753,22 +762,20 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
 
       {/* Security */}
       <SettingsCard title="Security" description="Password and authentication">
-        <div className="space-y-3">
-          <ToggleRow
-            icon={<Shield size={14} />}
-            title="Two-factor authentication"
-            description="Add an extra layer of security"
-            checked={false}
-            onChange={() => {}}
-          />
-          <ToggleRow
-            icon={<Lock size={14} />}
-            title="Require reauthentication"
-            description="For sensitive actions"
-            checked={false}
-            onChange={() => {}}
-          />
-        </div>
+        <button
+          type="button"
+          onClick={() => openUserProfile()}
+          className="flex min-h-12 w-full items-center justify-between rounded-xl border border-white/8 bg-white/[0.025] px-3 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+        >
+          <span className="flex items-center gap-3">
+            <Shield size={15} className="text-violet-300" />
+            <span>
+              <span className="block text-xs font-bold text-white">Password, passkeys & 2FA</span>
+              <span className="block text-[10px] text-white/45">Managed securely by Clerk</span>
+            </span>
+          </span>
+          <ChevronRight size={15} className="text-white/35" />
+        </button>
       </SettingsCard>
     </div>
   );
@@ -970,7 +977,7 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
 /* ── Workspace ─────────────────────────────────────────────────────── */
 
 function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
-  const [defaults, setDefaults] = useState({
+  const fallbackDefaults = {
     defaultView: "chat",
     defaultTool: "chat",
     autosave: true,
@@ -979,10 +986,59 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
     previewBehavior: "auto",
     filePanelDefault: "left",
     mobileLayout: "compact",
+    compactDensity: false,
+    overlayEffects: true,
+  };
+  const [defaults, setDefaults] = useState<typeof fallbackDefaults>(() => {
+    if (typeof window === "undefined") return fallbackDefaults;
+    try {
+      const saved = localStorage.getItem("littree:workspace-preferences");
+      return saved ? { ...fallbackDefaults, ...JSON.parse(saved) } : fallbackDefaults;
+    } catch {
+      return fallbackDefaults;
+    }
   });
+
+  useEffect(() => {
+    localStorage.setItem("littree:workspace-preferences", JSON.stringify(defaults));
+  }, [defaults]);
+
+  const workspaceProfiles = [
+    {
+      name: "Creator",
+      description: "Chat-first with automatic preview and spacious controls",
+      values: { defaultView: "chat", defaultTool: "chat", previewBehavior: "auto", terminalBehavior: "manual", compactDensity: false, overlayEffects: true, mobileLayout: "comfortable" },
+    },
+    {
+      name: "Builder",
+      description: "Code-first with terminal ready and dense information",
+      values: { defaultView: "code", defaultTool: "code", previewBehavior: "auto", terminalBehavior: "auto", compactDensity: true, overlayEffects: false, mobileLayout: "compact" },
+    },
+    {
+      name: "Focus",
+      description: "Quiet chat workspace with fewer automatic panels",
+      values: { defaultView: "chat", defaultTool: "chat", previewBehavior: "manual", terminalBehavior: "manual", compactDensity: false, overlayEffects: false, mobileLayout: "comfortable" },
+    },
+  ] as const;
 
   return (
     <div className="space-y-4">
+      <SettingsCard title="Workspace profiles" description="Coordinated layouts that set sensible Studio defaults" icon={<LayoutGrid size={16} />}>
+        <div className="grid gap-2 md:grid-cols-3">
+          {workspaceProfiles.map((profile) => (
+            <button
+              key={profile.name}
+              type="button"
+              onClick={() => setDefaults((current) => ({ ...current, ...profile.values }))}
+              className="rounded-xl border border-white/8 bg-white/[0.02] p-3 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+            >
+              <span className="text-xs font-black" style={{ color: T.accentColor }}>{profile.name}</span>
+              <span className="mt-1 block text-[10px] leading-4 text-white/45">{profile.description}</span>
+            </button>
+          ))}
+        </div>
+      </SettingsCard>
+
       <SettingsCard title="Studio defaults" description="What opens when you enter Studio" icon={<Briefcase size={16} />}>
         <div className="grid gap-4 sm:grid-cols-2">
           <div>
@@ -1028,8 +1084,8 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
 
       <SettingsCard title="Layout" description="Density and mobile">
         <div className="space-y-3">
-          <ToggleRow title="Compact density" description="Reduce padding and spacing" checked={false} onChange={() => {}} />
-          <ToggleRow title="Overlay effects" description="Blur and transparency" checked={true} onChange={() => {}} />
+          <ToggleRow title="Compact density" description="Reduce padding and spacing" checked={defaults.compactDensity} onChange={(v) => setDefaults({ ...defaults, compactDensity: v })} />
+          <ToggleRow title="Overlay effects" description="Blur and transparency" checked={defaults.overlayEffects} onChange={(v) => setDefaults({ ...defaults, overlayEffects: v })} />
           <div>
             <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Mobile layout</span>
             <div className="mt-1 flex gap-2">

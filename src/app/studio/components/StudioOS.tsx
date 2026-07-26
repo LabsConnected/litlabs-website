@@ -79,7 +79,7 @@ function AgentVoiceSync() {
 }
 
 export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) {
-  const { resolvedColors: T } = useTheme();
+  const { theme, resolvedColors: T } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -186,9 +186,10 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
       {/* Unified Studio shell — responsive, one layout for mobile + desktop */}
       <div
-        className={`flex h-dvh w-full flex-col overflow-hidden ${isDemo ? "pt-9" : ""}`}
+        className={`studio-shell flex h-dvh w-full flex-col overflow-hidden ${isDemo ? "pt-9" : ""}`}
+        data-layout={theme.layoutStyle}
         style={{
-          backgroundColor: "#06070b",
+          backgroundColor: theme.layoutStyle === "glass" ? `${T.bgColor}d9` : T.bgColor,
           color: T.textColor,
         }}
       >

@@ -217,13 +217,35 @@ export default function RootLayout({
                   boxShadow: "0 24px 70px rgba(0,0,0,.55), 0 0 38px rgba(169,112,255,.12)",
                 },
                 userButtonPopoverCard: {
-                  backgroundColor: "#090d1b",
-                  border: "1px solid #29345e",
+                  backgroundColor: "#0b1020",
+                  border: "1px solid #3b4773",
+                  boxShadow: "0 24px 70px rgba(0,0,0,.68), 0 0 42px rgba(169,112,255,.18)",
                 },
                 userButtonPopoverActionButton: {
+                  color: "#eef4ff",
+                  fontWeight: "600",
+                  minHeight: "44px",
                   "&:hover": {
-                    backgroundColor: "rgba(169,112,255,0.12)",
+                    color: "#ffffff",
+                    backgroundColor: "rgba(169,112,255,0.2)",
                   },
+                },
+                userButtonPopoverActionButtonText: {
+                  color: "#eef4ff",
+                },
+                userButtonPopoverActionButtonIcon: {
+                  color: "#c4b5fd",
+                },
+                userPreviewMainIdentifier: {
+                  color: "#ffffff",
+                  fontWeight: "700",
+                },
+                userPreviewSecondaryIdentifier: {
+                  color: "#b7c2df",
+                },
+                userButtonPopoverFooter: {
+                  backgroundColor: "#080c18",
+                  borderTop: "1px solid #29345e",
                 },
                 badge: {
                   backgroundColor: "#a970ff",

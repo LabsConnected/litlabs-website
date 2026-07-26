@@ -43,6 +43,9 @@ export interface UserProfile {
   badges: string[];
   wallpaper: WallpaperId;
   customWallpaperUrl: string | null;
+  wallpaperFit: "cover" | "contain" | "fill";
+  wallpaperOverlay: number;
+  wallpaperBlur: number;
   sidebarStyle: "compact" | "comfortable" | "spacious";
   accentColor: string;
 }
@@ -63,6 +66,9 @@ const defaultProfile: UserProfile = {
   badges: ["🔥 Early Adopter", "🤖 Agent Creator", "💬 Community"],
   wallpaper: "afterglow",
   customWallpaperUrl: null,
+  wallpaperFit: "cover",
+  wallpaperOverlay: 0.46,
+  wallpaperBlur: 0,
   sidebarStyle: "comfortable",
   accentColor: "#fbbf24",
 };

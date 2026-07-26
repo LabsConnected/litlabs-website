@@ -11,9 +11,9 @@ const CATEGORIES = ["all", "abstract", "nature", "tech", "minimal"] as const;
 export function WallpaperSection() {
   const { profile, updateProfile } = useProfile();
   const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("all");
-  const [overlayOpacity, setOverlayOpacity] = useState(0.4);
-  const [blurPx, setBlurPx] = useState(0);
-  const [fit, setFit] = useState<"cover" | "contain" | "fill">("cover");
+  const overlayOpacity = profile.wallpaperOverlay;
+  const blurPx = profile.wallpaperBlur;
+  const fit = profile.wallpaperFit;
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -195,7 +195,7 @@ export function WallpaperSection() {
               <button
                 key={f}
                 type="button"
-                onClick={() => setFit(f)}
+              onClick={() => updateProfile({ wallpaperFit: f })}
                 className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize transition-all"
                 style={{
                   borderColor: fit === f ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)",
@@ -220,7 +220,7 @@ export function WallpaperSection() {
             max={0.8}
             step={0.05}
             value={overlayOpacity}
-            onChange={(e) => setOverlayOpacity(Number(e.target.value))}
+            onChange={(e) => updateProfile({ wallpaperOverlay: Number(e.target.value) })}
             className="mt-2 w-full accent-amber-500"
           />
         </div>
@@ -236,7 +236,7 @@ export function WallpaperSection() {
             max={20}
             step={1}
             value={blurPx}
-            onChange={(e) => setBlurPx(Number(e.target.value))}
+            onChange={(e) => updateProfile({ wallpaperBlur: Number(e.target.value) })}
             className="mt-2 w-full accent-amber-500"
           />
         </div>

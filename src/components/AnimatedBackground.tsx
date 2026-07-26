@@ -436,14 +436,22 @@ export default function AnimatedBackground() {
             ...(customWallpaper
               ? {
                   backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
-                  backgroundSize: "cover",
+                  backgroundSize: profile.wallpaperFit,
                   backgroundPosition: "center",
                   backgroundAttachment: "fixed",
                 }
               : wallpaper.fullStyle),
+            backgroundSize: profile.wallpaperFit,
+            filter: profile.wallpaperBlur > 0 ? `blur(${profile.wallpaperBlur}px)` : undefined,
+            transform: profile.wallpaperBlur > 0 ? "scale(1.03)" : undefined,
             transition: "background 0.5s ease",
           }}
-        />
+        >
+          <div
+            className="absolute inset-0"
+            style={{ backgroundColor: `rgba(2, 4, 10, ${profile.wallpaperOverlay})` }}
+          />
+        </div>
       ) : mode === "constellation" ? (
         <canvas
           ref={canvasRef}

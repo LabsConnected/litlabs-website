@@ -2545,6 +2545,55 @@ main {
   grid-template-columns: minmax(0, 1fr);
 }
 
+/* Layout choices alter the real Studio shell, not only the Settings preview. */
+.studio-shell[data-layout="glass"] :is(.studio-tool-surface, .litt-panel) {
+  background: color-mix(in srgb, var(--box-bg) 68%, transparent) !important;
+  backdrop-filter: blur(20px) saturate(125%);
+}
+
+.studio-shell[data-layout="classic"] :is(.studio-tool-surface, .litt-panel) {
+  background: var(--box-bg) !important;
+  backdrop-filter: none;
+}
+
+.studio-shell[data-layout="minimal"] .litt-panel {
+  border-left-color: transparent !important;
+  background: color-mix(in srgb, var(--bg-color) 94%, white 6%) !important;
+}
+
+.studio-shell[data-layout="minimal"] :is(button, input, textarea) {
+  border-radius: 8px !important;
+  box-shadow: none !important;
+}
+
+.studio-shell[data-layout="terminal"] {
+  font-family: var(--font-geist-mono), ui-monospace, SFMono-Regular, Consolas, monospace;
+}
+
+.studio-shell[data-layout="terminal"] :is(.studio-tool-surface, .litt-panel) {
+  border-color: color-mix(in srgb, var(--accent-color) 24%, transparent) !important;
+  background: color-mix(in srgb, #020805 92%, var(--accent-color) 8%) !important;
+}
+
+.studio-shell[data-layout="terminal"] :is(button, input, textarea) {
+  border-radius: 3px !important;
+}
+
+.studio-shell[data-layout="arcade"] :is(button, input, textarea) {
+  border-radius: 6px !important;
+  box-shadow: 3px 3px 0 color-mix(in srgb, var(--accent-color) 22%, transparent);
+}
+
+.studio-shell[data-layout="honeycomb"] :is(.studio-tool-surface, .litt-panel) {
+  background-image:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent-color) 10%, transparent), transparent 32%),
+    linear-gradient(color-mix(in srgb, var(--box-bg) 94%, transparent), color-mix(in srgb, var(--box-bg) 94%, transparent));
+}
+
+.studio-shell[data-layout="honeycomb"] :is(button, input, textarea) {
+  border-radius: 14px 5px 14px 5px !important;
+}
+
 @media (min-width: 769px) {
   .studio-grid-responsive {
     grid-template-columns: 64px minmax(0, 1fr) clamp(400px, 28vw, 460px);

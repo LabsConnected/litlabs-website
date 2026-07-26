@@ -547,6 +547,58 @@ export const VISUAL_PACKS: VisualPack[] = [
     wallpaperId: "matrix",
     effects: { glow: true, particles: true, motion: true },
   },
+  {
+    id: "holo-command",
+    name: "Holo Command",
+    description: "LiTT's signature violet command center with glass workflow rails",
+    themeMode: "dark",
+    skin: "volcanic",
+    accent: "purple-haze",
+    backgroundMode: "holo",
+    layoutStyle: "glass",
+    wallpaperId: "afterglow",
+    overlayOpacity: 0.58,
+    effects: { glow: true, particles: false, motion: true },
+  },
+  {
+    id: "cosmic-creator",
+    name: "Cosmic Creator",
+    description: "Deep-space canvas with vivid pink energy for image and video work",
+    themeMode: "dark",
+    skin: "cosmic",
+    accent: "hot-pink",
+    backgroundMode: "nebula",
+    layoutStyle: "glass",
+    wallpaperId: "liquid-signal",
+    overlayOpacity: 0.52,
+    effects: { glow: true, particles: true, motion: true },
+  },
+  {
+    id: "arctic-focus",
+    name: "Arctic Focus",
+    description: "Crisp blue minimal workspace tuned for long focused sessions",
+    themeMode: "dark",
+    skin: "arctic",
+    accent: "ocean-blue",
+    backgroundMode: "minimal",
+    layoutStyle: "minimal",
+    wallpaperId: "crystal",
+    overlayOpacity: 0.76,
+    effects: { glow: false, particles: false, motion: false },
+  },
+  {
+    id: "miami-night",
+    name: "Miami Night",
+    description: "High-energy synthwave panels with neon arcade character",
+    themeMode: "dark",
+    skin: "miami",
+    accent: "hot-pink",
+    backgroundMode: "waves",
+    layoutStyle: "arcade",
+    wallpaperId: "tokyo",
+    overlayOpacity: 0.6,
+    effects: { glow: true, particles: false, motion: true },
+  },
 ];
 
 // Default theme
@@ -713,6 +765,10 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
       root.style.setProperty("--border-color", colors.borderColor);
       root.style.setProperty("--accent-color", colors.accentColor);
       root.style.setProperty("--box-bg", colors.boxBg);
+      root.dataset.themeMode = theme.mode;
+      root.dataset.themeSkin = theme.skin;
+      root.dataset.layoutStyle = theme.layoutStyle;
+      root.dataset.backgroundMode = theme.backgroundMode;
     }
   }, [theme, mounted]);
 
