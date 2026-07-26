@@ -82,6 +82,47 @@ export default function CameraSession({
     }
   }, [onTrackEnded]);
 
+  // Attach the acquired stream to the <video> element after it mounts.
+  // Called from a useEffect (after React commits the video to the DOM)
+  // and again from onLoadedData (in case play() was blocked during the effect).
+  const attachStream = useCallback(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+
+    if (video.srcObject !== stream) {
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+    }
+
+    void video.play().catch(() => {
+      // Autoplay may briefly be blocked while the element is mounting.
+      // The onLoadedData handler provides another attempt.
+    });
+
+    const track = stream.getVideoTracks()[0];
+    if (track && track.readyState === "live") {
+      track.addEventListener("ended", onTrackEnded);
+    }
+
+    // Transition to "live" once the stream is attached and play() has been
+    // called.  Don't gate on videoWidth/videoHeight — those may be 0 until
+    // the first frame fires, and the <video> element only renders in the
+    // "live"/"paused" states so gating would deadlock.
+    if (track && track.readyState === "live") {
+      setStatus("live");
+    }
+  }, [onTrackEnded]);
+
+  // The <video> element only renders when status is "starting" or beyond.
+  // Attach the stream after React mounts it.
+  useEffect(() => {
+    if (status === "starting") {
+      attachStream();
+    }
+  }, [attachStream, status]);
+
   const startCamera = useCallback(
     async (
       mode: "user" | "environment" = facingMode,
@@ -94,62 +135,19 @@ export default function CameraSession({
 
       const stream = await requestVideo(mode, deviceId);
       if (!stream) {
-        if (lastError) {
-          setStatus(lastError.code as CameraStatus);
-          setErrorMsg(lastError.message);
-        } else {
-          setStatus("error");
-          setErrorMsg("Could not access the camera.");
-        }
+        // lastError is set by the hook; the error render path reads it fresh.
+        setStatus("error");
         return;
       }
 
-      setStatus("starting");
       streamRef.current = stream;
+      setStatus("starting");
 
-      const video = videoRef.current;
-      if (!video) {
-        stopStream();
-        setStatus("error");
-        setErrorMsg("Camera video element is unavailable.");
-        return;
-      }
-
-      video.srcObject = stream;
-      video.muted = true;
-      video.playsInline = true;
-
-      try {
-        await video.play();
-      } catch {
-        stopStream();
-        setStatus("error");
-        setErrorMsg("Video playback failed to start.");
-        return;
-      }
-
-      const track = stream.getVideoTracks()[0];
-
-      if (
-        !track ||
-        track.readyState !== "live" ||
-        video.videoWidth === 0 ||
-        video.videoHeight === 0
-      ) {
-        stopStream();
-        setStatus("error");
-        setErrorMsg("Camera started but no video frames were received.");
-        return;
-      }
-
-      track.addEventListener("ended", onTrackEnded);
-
+      // Enumerate cameras while the stream attaches
       const cams = await enumerateCameras();
       setDevices(cams);
-
-      setStatus("live");
     },
-    [facingMode, requestVideo, stopStream, enumerateCameras, lastError, onTrackEnded],
+    [facingMode, requestVideo, stopStream, enumerateCameras],
   );
 
   const flipCamera = useCallback(async () => {
@@ -255,15 +253,8 @@ export default function CameraSession({
     );
   }
 
-  // ── Starting ──
-  if (status === "starting") {
-    return (
-      <div className="flex items-center gap-2 rounded-2xl border border-white/10 bg-black/60 px-4 py-3 text-xs text-cyan-300">
-        <Aperture size={16} className="animate-spin" />
-        Starting camera…
-      </div>
-    );
-  }
+  // ── Starting (falls through to main render with overlay) ──
+  // The <video> element must be in the DOM so attachStream can bind the stream.
 
   // ── Error states ──
   const errorStates: CameraStatus[] = [
@@ -298,9 +289,10 @@ export default function CameraSession({
     );
   }
 
-  // ── Live or paused ──
+  // ── Live, paused, or starting (video element must be in DOM for all three) ──
   const cameraLabel = facingMode === "user" ? "Front" : "Rear";
   const isLive = status === "live";
+  const isStarting = status === "starting";
 
   return (
     <div className="relative overflow-hidden rounded-2xl border border-cyan-400/30 bg-black/80 shadow-2xl">
@@ -331,8 +323,19 @@ export default function CameraSession({
         autoPlay
         playsInline
         muted
+        onLoadedData={attachStream}
         className="aspect-video w-full object-cover"
       />
+
+      {/* Starting overlay */}
+      {isStarting && (
+        <div className="absolute inset-0 z-5 flex items-center justify-center bg-black/60">
+          <div className="flex items-center gap-2 text-xs text-cyan-300">
+            <Aperture size={16} className="animate-spin" />
+            Starting camera…
+          </div>
+        </div>
+      )}
 
       {/* Bottom toolbar */}
       <div className="flex items-center justify-between gap-2 border-t border-white/10 bg-[#0a0f1c] p-2">
