@@ -1392,6 +1392,11 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
     sparkVoice: boolean;
     wsUrl: boolean;
   } | null>(null);
+  const [connectionTest, setConnectionTest] = useState<{
+    state: "idle" | "testing" | "ok" | "fail";
+    message: string;
+    latencyMs?: number;
+  }>({ state: "idle", message: "" });
 
   useEffect(() => {
     fetch("/api/voice/token", { cache: "no-store" })
@@ -1474,6 +1479,101 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       }
     } catch {
       setVoicePreviewing(null);
+    }
+  }, []);
+
+  const testConnection = useCallback(async () => {
+    setConnectionTest({ state: "testing", message: "Connecting to voice proxy…" });
+    const startTime = Date.now();
+    try {
+      // 1. Get auth token
+      const tokenRes = await fetch("/api/voice/token", { cache: "no-store" });
+      if (!tokenRes.ok) {
+        setConnectionTest({ state: "fail", message: `Auth failed (${tokenRes.status})` });
+        return;
+      }
+      const { token } = await tokenRes.json();
+      if (!token) {
+        setConnectionTest({ state: "fail", message: "No voice token returned" });
+        return;
+      }
+
+      // 2. Open WebSocket to the proxy
+      const wsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL;
+      if (!wsUrl) {
+        setConnectionTest({ state: "fail", message: "NEXT_PUBLIC_VOICE_WS_URL not set" });
+        return;
+      }
+      const fullUrl = wsUrl + (wsUrl.includes("?") ? "&" : "?") + `token=${encodeURIComponent(token)}`;
+
+      await new Promise<void>((resolve, reject) => {
+        const ws = new WebSocket(fullUrl);
+        const timeout = setTimeout(() => {
+          ws.close();
+          reject(new Error("Connection timed out (10s)"));
+        }, 10_000);
+
+        let gotSessionCreated = false;
+
+        ws.onopen = () => {
+          setConnectionTest({ state: "testing", message: "WebSocket open — waiting for Inworld session…" });
+        };
+
+        ws.onmessage = (event) => {
+          try {
+            const data = JSON.parse(event.data);
+            if (data.type === "session.created") {
+              gotSessionCreated = true;
+              setConnectionTest({ state: "testing", message: "Session created — configuring voice…" });
+              // Send a minimal session.update to verify the full round-trip
+              ws.send(JSON.stringify({
+                type: "session.update",
+                session: {
+                  type: "realtime",
+                  model: "inworld/models/gemma-4-26b-a4b-it",
+                  instructions: "You are a test. Reply with: ok.",
+                  output_modalities: ["audio"],
+                  audio: {
+                    input: { format: { type: "audio/pcm", rate: 24000 }, transcription: { model: "assemblyai/u3-rt-pro" }, turn_detection: { type: "semantic_vad", eagerness: "low", create_response: false, interrupt_response: false } },
+                    output: { format: { type: "audio/pcm", rate: 24000 }, model: "inworld-tts-2", voice: "inworld_tts_pro" },
+                  },
+                },
+              }));
+            } else if (data.type === "session.updated" && gotSessionCreated) {
+              const latency = Date.now() - startTime;
+              clearTimeout(timeout);
+              ws.close(1000, "Test complete");
+              setConnectionTest({ state: "ok", message: "Voice connection verified end-to-end", latencyMs: latency });
+              resolve();
+            } else if (data.type === "error") {
+              clearTimeout(timeout);
+              ws.close();
+              reject(new Error(data.message || data.error || "Inworld session error"));
+            }
+          } catch {
+            // Non-JSON — ignore
+          }
+        };
+
+        ws.onerror = () => {
+          clearTimeout(timeout);
+          reject(new Error("WebSocket error"));
+        };
+
+        ws.onclose = (event) => {
+          clearTimeout(timeout);
+          if (!gotSessionCreated) {
+            reject(new Error(`Connection closed (code ${event.code}) before session was created`));
+          } else {
+            resolve();
+          }
+        };
+      });
+    } catch (err) {
+      setConnectionTest({
+        state: "fail",
+        message: err instanceof Error ? err.message : "Connection test failed",
+      });
     }
   }, []);
 
@@ -1592,6 +1692,42 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
                   <div className="mt-1.5 text-amber-400">
                     Inworld is not configured. Set INWORLD_API_KEY, INWORLD_LITT_VOICE, and INWORLD_SPARK_VOICE in Vercel env.
                   </div>
+                )}
+              </div>
+
+              {/* Connection test button + result */}
+              <div className="mt-3 flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={testConnection}
+                  disabled={connectionTest.state === "testing"}
+                  className="rounded-lg border px-3 py-1.5 text-xs font-bold transition-all disabled:opacity-40"
+                  style={{
+                    borderColor: connectionTest.state === "ok" ? "#22c55e40" : connectionTest.state === "fail" ? "#ef444440" : `${T.accentColor}40`,
+                    color: connectionTest.state === "ok" ? "#22c55e" : connectionTest.state === "fail" ? "#ef4444" : T.accentColor,
+                  }}
+                >
+                  {connectionTest.state === "testing" ? (
+                    <span className="flex items-center gap-1.5"><Loader2 size={12} className="animate-spin" /> Testing…</span>
+                  ) : connectionTest.state === "ok" ? (
+                    <span className="flex items-center gap-1.5"><Check size={12} /> Test again</span>
+                  ) : connectionTest.state === "fail" ? (
+                    <span className="flex items-center gap-1.5"><Zap size={12} /> Retry test</span>
+                  ) : (
+                    <span className="flex items-center gap-1.5"><Zap size={12} /> Test voice connection</span>
+                  )}
+                </button>
+                {connectionTest.state !== "idle" && connectionTest.state !== "testing" && (
+                  <span
+                    className="text-[10px] font-medium"
+                    style={{ color: connectionTest.state === "ok" ? "#22c55e" : "#ef4444" }}
+                  >
+                    {connectionTest.message}
+                    {connectionTest.latencyMs ? ` (${connectionTest.latencyMs}ms)` : ""}
+                  </span>
+                )}
+                {connectionTest.state === "testing" && (
+                  <span className="text-[10px] font-medium text-white/50">{connectionTest.message}</span>
                 )}
               </div>
             </div>
