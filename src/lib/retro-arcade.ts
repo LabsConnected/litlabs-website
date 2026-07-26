@@ -43,23 +43,62 @@ const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
 const DB_VERSION = 1;
 
+/**
+ * Open the retro arcade IndexedDB without forcing a specific version.
+ *
+ * Previously this called `indexedDB.open(DB_NAME, 1)` unconditionally. If the
+ * browser already had a newer-version database (e.g. from a prior build),
+ * IndexedDB threw a VersionError and the user could not add or list games.
+ *
+ * Now we first probe the existing database version with an open-without-version
+ * call (which opens at the current version without requesting an upgrade), then
+ * re-open at that version so `onupgradeneeded` still fires for fresh databases
+ * that need the object store created.
+ */
 function openRetroDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
     if (typeof indexedDB === "undefined") {
       reject(new Error("Local game storage is not available in this browser."));
       return;
     }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
-    request.onupgradeneeded = () => {
-      const db = request.result;
+
+    // First, open without specifying a version to discover what already exists.
+    const probe = indexedDB.open(DB_NAME);
+    probe.onupgradeneeded = () => {
+      // Fresh database — create the object store at version 1.
+      const db = probe.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {
         const store = db.createObjectStore(STORE_NAME, { keyPath: "id" });
         store.createIndex("lastPlayedAt", "lastPlayedAt");
         store.createIndex("system", "system");
       }
     };
-    request.onsuccess = () => resolve(request.result);
-    request.onerror = () => reject(request.error ?? new Error("Could not open the local game library."));
+    probe.onsuccess = () => {
+      const db = probe.result;
+      // If the existing version already has our store, we are done.
+      if (db.objectStoreNames.contains(STORE_NAME)) {
+        resolve(db);
+        return;
+      }
+      // Existing database is missing the store — bump to the next version and
+      // create it in the upgrade callback.
+      const targetVersion = Math.max(db.version + 1, DB_VERSION);
+      db.close();
+      const upgrade = indexedDB.open(DB_NAME, targetVersion);
+      upgrade.onupgradeneeded = () => {
+        const udb = upgrade.result;
+        if (!udb.objectStoreNames.contains(STORE_NAME)) {
+          const store = udb.createObjectStore(STORE_NAME, { keyPath: "id" });
+          store.createIndex("lastPlayedAt", "lastPlayedAt");
+          store.createIndex("system", "system");
+        }
+      };
+      upgrade.onsuccess = () => resolve(upgrade.result);
+      upgrade.onerror = () =>
+        reject(upgrade.error ?? new Error("Could not open the local game library."));
+    };
+    probe.onerror = () =>
+      reject(probe.error ?? new Error("Could not open the local game library."));
   });
 }
 

@@ -182,7 +182,7 @@ export async function POST(req: NextRequest) {
     // Fetch real capability state for the studio context
     let capabilityContext = "";
     try {
-      const ctx = await getStudioContext();
+      const ctx = await getStudioContext(userId);
       capabilityContext = buildCapabilityContextForChat(ctx);
     } catch {
       // non-fatal — continue without capability context

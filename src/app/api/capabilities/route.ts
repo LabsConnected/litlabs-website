@@ -31,11 +31,14 @@ async function handler() {
         .eq("user_id", userId);
 
       if (installations && installations.length > 0) {
-        // Check if any integration_projects are linked
+        // Check if any projects are linked. The connection flow writes to the
+        // `projects` table (see /api/projects POST and /api/github/connection-state),
+        // so that is the source of truth here — not integration_projects.
         const { data: projects } = await supabaseAdmin
-          .from("integration_projects")
-          .select("id, repository_full_name")
+          .from("projects")
+          .select("id, repository_full_name, connection_status")
           .eq("user_id", userId)
+          .order("updated_at", { ascending: false })
           .limit(1);
 
         if (projects && projects.length > 0) {

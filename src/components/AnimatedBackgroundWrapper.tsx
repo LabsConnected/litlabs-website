@@ -3,30 +3,9 @@
 import { usePathname } from "next/navigation";
 import AnimatedBackground from "@/components/AnimatedBackground";
 
-const SHOW_BACKGROUND_PATHS = [
-  "/",
-  "/sign-in",
-  "/sign-up",
-  "/settings",
-  "/studio",
-  "/dashboard",
-  "/profile",
-  "/marketplace",
-  "/wallet",
-  "/showcase",
-  "/agents",
-  "/gallery",
-  "/library",
-  "/projects",
-  "/creator",
-  "/social",
-  "/deployments",
-  "/wallet",
-  "/showcase",
-  "/order",
-];
-
-const HIDE_BACKGROUND_PATHS = ["/admin/terminal", "/code", "/games"];
+// Pages where the animated wallpaper would actively break a dense, interactive
+// surface (terminal emulator, in-browser code editor). Everything else shows it.
+const HIDE_BACKGROUND_PATHS = ["/admin/terminal", "/code"];
 
 export default function AnimatedBackgroundWrapper() {
   const pathname = usePathname();
@@ -34,13 +13,6 @@ export default function AnimatedBackgroundWrapper() {
   if (!pathname) return null;
   if (
     HIDE_BACKGROUND_PATHS.some(
-      (p) => pathname === p || pathname.startsWith(`${p}/`),
-    )
-  ) {
-    return null;
-  }
-  if (
-    !SHOW_BACKGROUND_PATHS.some(
       (p) => pathname === p || pathname.startsWith(`${p}/`),
     )
   ) {
