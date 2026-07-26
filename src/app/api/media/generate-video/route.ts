@@ -3,27 +3,14 @@ import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { GoogleGenAI } from "@google/genai";
+import { submitAlibabaVideoTask, isAlibabaConfigured } from "@/lib/alibaba-video";
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
-const COST = 5;
 
 async function handler(req: NextRequest) {
   const { userId } = await auth();
   if (!userId)
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  if (!GEMINI_API_KEY)
-    return NextResponse.json(
-      { error: "Gemini API key not configured" },
-      { status: 500 },
-    );
-
-  const wallet = await getUserWallet(userId);
-  if (wallet.balance < COST) {
-    return NextResponse.json(
-      { error: `Need ${COST} LiTTBits` },
-      { status: 402 },
-    );
-  }
 
   try {
     const body = await req.json();
@@ -34,7 +21,61 @@ async function handler(req: NextRequest) {
       imageBytes,
       mimeType,
       model = "veo-3.1-fast-generate-preview",
+      imageUrl, // public HTTPS URL for Alibaba i2v
+      duration = 5,
+      cost = 5,
     } = body;
+
+    // ── Alibaba HappyHorse path (image-to-video) ──────────────────────
+    if (model.startsWith("happyhorse")) {
+      if (!isAlibabaConfigured())
+        return NextResponse.json(
+          { error: "Alibaba video not configured. Set ALIBABA_DASHSCOPE_API_KEY and ALIBABA_MODELSTUDIO_WORKSPACE_ID." },
+          { status: 503 },
+        );
+      if (!imageUrl)
+        return NextResponse.json(
+          { error: "A public image URL is required for HappyHorse image-to-video." },
+          { status: 400 },
+        );
+
+      const wallet = await getUserWallet(userId);
+      if (wallet.balance < cost)
+        return NextResponse.json({ error: `Need ${cost} LiTTBits` }, { status: 402 });
+
+      const result = await submitAlibabaVideoTask({
+        model,
+        prompt: prompt?.trim(),
+        imageUrl,
+        resolution: resolution === "1080p" ? "1080P" : "720P",
+        duration: Math.min(Math.max(Number(duration) || 5, 3), 15),
+      });
+
+      const newBalance = await updateWalletBalance(userId, -cost);
+      return NextResponse.json({
+        provider: "alibaba",
+        taskId: result.taskId,
+        taskStatus: result.taskStatus,
+        cost,
+        balance: newBalance,
+      });
+    }
+
+    // ── Google Veo path (default) ─────────────────────────────────────
+    if (!GEMINI_API_KEY)
+      return NextResponse.json(
+        { error: "Gemini API key not configured" },
+        { status: 500 },
+      );
+
+    const wallet = await getUserWallet(userId);
+    if (wallet.balance < cost) {
+      return NextResponse.json(
+        { error: `Need ${cost} LiTTBits` },
+        { status: 402 },
+      );
+    }
+
     if (!prompt?.trim())
       return NextResponse.json({ error: "Prompt required" }, { status: 400 });
 
@@ -63,12 +104,12 @@ async function handler(req: NextRequest) {
       );
     }
 
-    // Deduct coins
-    const newBalance = await updateWalletBalance(userId, -COST);
+    const newBalance = await updateWalletBalance(userId, -cost);
 
     return NextResponse.json({
+      provider: "veo",
       operationName: operation.name,
-      cost: COST,
+      cost,
       balance: newBalance,
     });
   } catch (err: unknown) {

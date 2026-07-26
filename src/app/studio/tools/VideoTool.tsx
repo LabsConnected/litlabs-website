@@ -14,6 +14,8 @@ import {
   History,
   Clock,
   Sparkles,
+  ImagePlus,
+  X,
 } from "lucide-react";
 
 const PROMPT_PRESETS = [
@@ -49,6 +51,10 @@ export default function VideoTool() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [current, setCurrent] = useState<VideoGen | null>(null);
+  const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
+  const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
+  const [isUploading, setIsUploading] = useState(false);
+  const isHappyHorse = model === "happyhorse";
   const [history, setHistory] = useState<VideoGen[]>(() => {
     if (typeof window === "undefined") return [];
     try {
@@ -90,7 +96,43 @@ export default function VideoTool() {
       );
   }, [history]);
 
+  const handleImageUpload = useCallback(async (file: File) => {
+    setIsUploading(true);
+    setError(null);
+    try {
+      const preview = URL.createObjectURL(file);
+      setUploadedImagePreview(preview);
+      const form = new FormData();
+      form.append("file", file);
+      const res = await fetch("/api/upload", { method: "POST", body: form });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `Upload failed: HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      if (!data.url || data.fallback) {
+        throw new Error("Upload succeeded but no public URL returned. Supabase Storage may not be configured.");
+      }
+      setUploadedImageUrl(data.url);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Image upload failed");
+      setUploadedImagePreview(null);
+      setUploadedImageUrl(null);
+    } finally {
+      setIsUploading(false);
+    }
+  }, []);
+
+  const handleRemoveImage = () => {
+    setUploadedImageUrl(null);
+    setUploadedImagePreview(null);
+  };
+
   const handleGenerate = useCallback(async () => {
+    if (isHappyHorse && !uploadedImageUrl) {
+      setError("Upload a first-frame image for HappyHorse image-to-video.");
+      return;
+    }
     if (!prompt.trim() || prompt.trim().length < 3) {
       setError("Prompt must be at least 3 characters.");
       return;
@@ -115,48 +157,82 @@ export default function VideoTool() {
     setHistory((prev) => [gen, ...prev].slice(0, MAX_HISTORY));
 
     try {
+      // ── Branch: Alibaba HappyHorse vs Google Veo ───────────────────
+      const isAlibaba = isHappyHorse;
+      const apiModel = isAlibaba ? "happyhorse-1.1-i2v" : "veo-3.1-fast-generate-preview";
+
       const res = await fetch("/api/media/generate-video", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          prompt: `${prompt.trim()}, ${motionStyle} motion`,
-          model: "veo-3.1-fast-generate-preview",
-          aspectRatio,
-          resolution,
-        }),
+        body: JSON.stringify(
+          isAlibaba
+            ? {
+                prompt: prompt.trim(),
+                model: apiModel,
+                imageUrl: uploadedImageUrl,
+                resolution,
+                duration,
+                cost,
+              }
+            : {
+                prompt: `${prompt.trim()}, ${motionStyle} motion`,
+                model: apiModel,
+                aspectRatio,
+                resolution,
+                cost,
+              },
+        ),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || `HTTP ${res.status}`);
       }
       const data = await res.json();
-      if (!data.operationName) {
+
+      // ── Polling: different endpoints for Alibaba vs Veo ────────────
+      const taskId = data.taskId as string | undefined;
+      const operationName = data.operationName as string | undefined;
+
+      if (isAlibaba && !taskId) {
+        throw new Error("Alibaba task started but no task ID returned.");
+      }
+      if (!isAlibaba && !operationName) {
         throw new Error("Video generation started but no operation ID returned.");
       }
 
-      const operationName = data.operationName as string;
       const pollStart = Date.now();
-      const POLL_TIMEOUT = 120_000;
-      const POLL_INTERVAL = 5_000;
+      const POLL_TIMEOUT = isAlibaba ? 300_000 : 120_000; // 5 min for Alibaba, 2 min for Veo
+      const POLL_INTERVAL = isAlibaba ? 15_000 : 5_000;
+      const pollEndpoint = isAlibaba ? "/api/media/alibaba-status" : "/api/media/video-status";
+      const pollBodyKey = isAlibaba ? "taskId" : "operationName";
+      const pollBodyValue = isAlibaba ? taskId : operationName;
+      const videoUrlKey = isAlibaba ? "videoUrl" : "videoUri";
 
       while (Date.now() - pollStart < POLL_TIMEOUT) {
         await new Promise((r) => setTimeout(r, POLL_INTERVAL));
 
-        const statusRes = await fetch("/api/media/video-status", {
+        const statusRes = await fetch(pollEndpoint, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ operationName }),
+          body: JSON.stringify({ [pollBodyKey]: pollBodyValue }),
         });
         if (!statusRes.ok) {
           const err = await statusRes.json().catch(() => ({}));
           throw new Error(err.error || `Polling failed: HTTP ${statusRes.status}`);
         }
         const statusData = await statusRes.json();
-        if (statusData.done && statusData.videoUri) {
-          const videoRes = await fetch(statusData.videoUri);
-          if (!videoRes.ok) throw new Error("Failed to download generated video.");
-          const blob = await videoRes.blob();
-          const videoUrl = URL.createObjectURL(blob);
+        if (statusData.done && statusData[videoUrlKey]) {
+          let videoUrl: string;
+          if (isAlibaba) {
+            // Alibaba: URL is already a public R2 URL (saved server-side)
+            videoUrl = statusData[videoUrlKey];
+          } else {
+            // Veo: download the blob and create an object URL
+            const videoRes = await fetch(statusData[videoUrlKey]);
+            if (!videoRes.ok) throw new Error("Failed to download generated video.");
+            const blob = await videoRes.blob();
+            videoUrl = URL.createObjectURL(blob);
+          }
 
           setCurrent((prev) =>
             prev?.id === id ? { ...prev, status: "succeeded", videoUrl } : prev,
@@ -181,13 +257,13 @@ export default function VideoTool() {
           refreshWallet().catch(() => {});
           break;
         }
-        if (statusData.done && !statusData.videoUri) {
-          throw new Error("Video generation completed but no video URL returned.");
+        if (statusData.done && !statusData[videoUrlKey]) {
+          throw new Error(statusData.error || "Video generation completed but no video URL returned.");
         }
       }
 
       if (Date.now() - pollStart >= POLL_TIMEOUT) {
-        throw new Error("Video generation timed out after 120 seconds.");
+        throw new Error(`Video generation timed out after ${POLL_TIMEOUT / 1000} seconds.`);
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Video generation failed");
@@ -214,7 +290,7 @@ export default function VideoTool() {
     } finally {
       setIsGenerating(false);
     }
-  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, cost, canAfford, refreshWallet]);
+  }, [prompt, model, duration, aspectRatio, resolution, motionStyle, cost, canAfford, refreshWallet, isHappyHorse, uploadedImageUrl]);
 
   const handleDownload = useCallback((url: string) => {
     const a = document.createElement("a");
@@ -294,6 +370,78 @@ export default function VideoTool() {
             </div>
           </div>
 
+          {/* Image upload for HappyHorse i2v */}
+          {isHappyHorse && (
+            <div
+              className="border rounded-lg p-3"
+              style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+            >
+              <label
+                className="block text-[10px] uppercase tracking-widest mb-2"
+                style={{ color: T.textMuted }}
+              >
+                First Frame Image (required)
+              </label>
+              {uploadedImagePreview ? (
+                <div className="relative rounded-lg overflow-hidden">
+                  <img
+                    src={uploadedImagePreview}
+                    alt="First frame"
+                    className="w-full max-h-48 object-contain rounded"
+                  />
+                  <button
+                    onClick={handleRemoveImage}
+                    disabled={isGenerating || isUploading}
+                    className="absolute top-2 right-2 p-1 rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+                  >
+                    <X size={14} />
+                  </button>
+                  {uploadedImageUrl && (
+                    <div
+                      className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/80 text-white"
+                    >
+                      Ready
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <label
+                  className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all hover:scale-[1.01]"
+                  style={{
+                    borderColor: T.borderColor,
+                    backgroundColor: T.bgColor,
+                  }}
+                >
+                  {isUploading ? (
+                    <Loader2 size={20} className="animate-spin" style={{ color: T.accentColor }} />
+                  ) : (
+                    <ImagePlus size={20} style={{ color: T.textMuted }} />
+                  )}
+                  <span className="text-[10px]" style={{ color: T.textMuted }}>
+                    {isUploading ? "Uploading..." : "Click to upload JPEG, PNG, or WebP"}
+                  </span>
+                  <input
+                    type="file"
+                    accept="image/jpeg,image/png,image/webp"
+                    className="hidden"
+                    disabled={isUploading || isGenerating}
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      if (file) handleImageUpload(file);
+                    }}
+                  />
+                </label>
+              )}
+              <div
+                className="text-[9px] mt-1.5"
+                style={{ color: T.textMuted }}
+              >
+                HappyHorse generates a video starting from this image. The video
+                aspect ratio follows the image.
+              </div>
+            </div>
+          )}
+
           <div
             className="border rounded-lg p-3"
             style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
@@ -342,8 +490,8 @@ export default function VideoTool() {
             </label>
             <input
               type="range"
-              min={2}
-              max={8}
+              min={isHappyHorse ? 3 : 2}
+              max={isHappyHorse ? 15 : 8}
               step={1}
               value={duration}
               onChange={(e) => setDuration(parseInt(e.target.value))}

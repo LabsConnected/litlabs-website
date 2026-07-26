@@ -57,6 +57,7 @@ export type MediaModel = {
 
 export const VIDEO_MODELS: MediaModel[] = [
   { id: "veo", label: "Veo", provider: "Google", desc: "High-quality cinematic", cost: 5 },
+  { id: "happyhorse", label: "HappyHorse", provider: "Alibaba", desc: "Image-to-video, smooth motion", cost: 3 },
   { id: "wan", label: "Wan", provider: "Alibaba", desc: "Fast general purpose", cost: 3 },
   { id: "wan-pro", label: "Wan Pro", provider: "Alibaba", desc: "Enhanced quality", cost: 4 },
   { id: "seedance-pro", label: "Seedance Pro", provider: "ByteDance", desc: "Motion mastery", cost: 4 },
