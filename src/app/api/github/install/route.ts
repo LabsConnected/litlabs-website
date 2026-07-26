@@ -3,16 +3,11 @@ import { auth } from "@clerk/nextjs/server";
 import { createInstallState } from "@/lib/github-install-state";
 
 const APP_SLUG = process.env.GITHUB_APP_SLUG;
-const SETUP_URL = process.env.GITHUB_APP_SETUP_URL;
 
 export async function GET() {
   const { userId } = await auth();
   if (!userId) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (SETUP_URL) {
-    return NextResponse.redirect(SETUP_URL);
   }
 
   if (!APP_SLUG) {

@@ -25,6 +25,7 @@ import { useTheme } from "@/context/ThemeContext";
 import type { StudioTool } from "./StudioSidebar";
 
 type SourceOption = {
+  id: string;
   label: string;
   detail: string;
   icon: typeof FolderGit2;
@@ -43,36 +44,36 @@ const SOURCE_CATEGORIES: SourceCategory[] = [
     name: "Code",
     icon: Code2,
     options: [
-      { label: "GitHub Repository", detail: "GitHub App · repositories and branches", icon: FolderGit2, available: true, href: "/studio/github" },
-      { label: "Paste Git URL", detail: "Clone any public or private Git repository — works with any Git host", icon: Link2, available: true, href: "/studio?tool=chat&mission=Clone%20this%20Git%20repository%20and%20set%20up%20the%20project%3A%20" },
-      { label: "GitLab", detail: "OAuth repository connection", icon: FolderGit2, available: false },
-      { label: "Bitbucket", detail: "Atlassian repository connection", icon: FolderGit2, available: false },
-      { label: "Azure DevOps", detail: "Microsoft repository connection", icon: Code2, available: false },
-      { label: "Upload ZIP or Folder", detail: "Bring an existing local project", icon: HardDriveUpload, available: false },
+      { id: "github", label: "GitHub Repository", detail: "GitHub App · repositories and branches", icon: FolderGit2, available: true, href: "/studio/github" },
+      { id: "git-url", label: "Paste Git URL", detail: "Continue in Chat with a public repository URL", icon: Link2, available: true },
+      { id: "gitlab", label: "GitLab", detail: "OAuth repository connection", icon: FolderGit2, available: false },
+      { id: "bitbucket", label: "Bitbucket", detail: "Atlassian repository connection", icon: FolderGit2, available: false },
+      { id: "azure-devops", label: "Azure DevOps", detail: "Microsoft repository connection", icon: Code2, available: false },
+      { id: "upload-project", label: "Upload ZIP or Folder", detail: "Bring an existing local project", icon: HardDriveUpload, available: false },
     ],
   },
   {
     name: "Design",
     icon: Layers,
     options: [
-      { label: "Website URL", detail: "Inspect pages, copy, structure, and assets", icon: Globe2, available: true, href: "/studio?tool=chat&mission=Scan%20this%20website%20and%20create%20a%20project%20plan%3A%20" },
-      { label: "Figma Design", detail: "Screens, components, styles, and tokens", icon: Layers, available: false },
+      { id: "website", label: "Website URL", detail: "Continue in Chat with a website URL to inspect", icon: Globe2, available: true },
+      { id: "figma", label: "Figma Design", detail: "Screens, components, styles, and tokens", icon: Layers, available: false },
     ],
   },
   {
     name: "Documents",
     icon: HardDriveUpload,
     options: [
-      { label: "Upload Files", detail: "PDFs, images, code, documents, ZIP files", icon: HardDriveUpload, available: false },
-      { label: "Google Drive", detail: "Docs, project files, brand material", icon: HardDriveUpload, available: false },
+      { id: "upload-files", label: "Upload Files", detail: "PDFs, images, code, documents, ZIP files", icon: HardDriveUpload, available: false },
+      { id: "google-drive", label: "Google Drive", detail: "Docs, project files, brand material", icon: HardDriveUpload, available: false },
     ],
   },
   {
     name: "Infrastructure",
     icon: Database,
     options: [
-      { label: "API or Database", detail: "OpenAPI, Supabase, schema, or endpoint", icon: Database, available: false },
-      { label: "Existing Deployment", detail: "Vercel or live-site configuration", icon: Rocket, available: false },
+      { id: "api-database", label: "API or Database", detail: "OpenAPI, Supabase, schema, or endpoint", icon: Database, available: false },
+      { id: "deployment", label: "Existing Deployment", detail: "Vercel or live-site configuration", icon: Rocket, available: false },
     ],
   },
 ];
@@ -95,12 +96,58 @@ export default function StudioOnboarding({
   const [activeCategory, setActiveCategory] = useState(0);
   const [showMoreProviders, setShowMoreProviders] = useState(false);
   const [permissionMode, setPermissionMode] = useState<string>("scan");
+  const [sourceInput, setSourceInput] = useState("");
+  const [inputSource, setInputSource] = useState<"git-url" | "website" | null>(null);
   const templates = ["Landing Page", "Dashboard", "SaaS App", "Portfolio", "Store", "Custom"];
 
   // First 4 common providers for the quick grid
   const codeCategory = SOURCE_CATEGORIES[0];
   const quickProviders = codeCategory.options.slice(0, 2); // GitHub + Paste Git URL
   const moreProviders = codeCategory.options.slice(2); // GitLab, Bitbucket, Azure, Upload
+
+  const continueWithSource = () => {
+    const value = sourceInput.trim();
+    if (!inputSource || !value) return;
+    const mission = inputSource === "git-url"
+      ? `Inspect this Git repository in ${permissionMode} mode and set up the project: ${value}`
+      : `Scan this website in ${permissionMode} mode and create a project plan: ${value}`;
+    window.localStorage.setItem("litt:source-permission-mode", permissionMode);
+    window.location.href = `/studio?tool=chat&source=${inputSource}&permission=${permissionMode}&mission=${encodeURIComponent(mission)}`;
+  };
+
+  const sourceCard = (source: SourceOption) => {
+    if (source.available && source.href) {
+      const separator = source.href.includes("?") ? "&" : "?";
+      return (
+        <Link
+          key={source.id}
+          href={`${source.href}${separator}permission=${permissionMode}`}
+          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
+        >
+          <SourceCard source={source} />
+        </Link>
+      );
+    }
+    if (source.available && (source.id === "git-url" || source.id === "website")) {
+      return (
+        <button
+          key={source.id}
+          onClick={() => {
+            setInputSource(source.id as "git-url" | "website");
+            setSourceInput("");
+          }}
+          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 text-left transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
+        >
+          <SourceCard source={source} />
+        </button>
+      );
+    }
+    return (
+      <div key={source.id} className="rounded-2xl border border-white/7 bg-white/[.02] p-4 opacity-75">
+        <SourceCard source={source} />
+      </div>
+    );
+  };
 
   return (
     <div className="relative h-full overflow-y-auto bg-[radial-gradient(circle_at_50%_0%,rgba(101,244,255,.08),transparent_34%),radial-gradient(circle_at_85%_28%,rgba(169,112,255,.09),transparent_30%)] px-4 py-8 sm:px-8 lg:px-12">
@@ -255,22 +302,7 @@ export default function StudioOnboarding({
               {/* Code category: show quick providers, then "More" */}
               {activeCategory === 0 && !showMoreProviders ? (
                 <>
-                  {quickProviders.map((source) => {
-                    const Icon = source.icon;
-                    return source.available && source.href ? (
-                      <Link
-                        key={source.label}
-                        href={source.href}
-                        className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
-                      >
-                        <SourceCard source={source} />
-                      </Link>
-                    ) : (
-                      <div key={source.label} className="rounded-2xl border border-white/7 bg-white/[.02] p-4 opacity-75">
-                        <SourceCard source={source} />
-                      </div>
-                    );
-                  })}
+                  {quickProviders.map(sourceCard)}
                   <button
                     onClick={() => setShowMoreProviders(true)}
                     className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/[.02] p-4 text-xs font-bold text-white/50 transition hover:border-white/25 hover:bg-white/[.04] hover:text-white/80"
@@ -279,24 +311,38 @@ export default function StudioOnboarding({
                   </button>
                 </>
               ) : (
-                SOURCE_CATEGORIES[activeCategory].options.map((source) => {
-                  const Icon = source.icon;
-                  return source.available && source.href ? (
-                    <Link
-                      key={source.label}
-                      href={source.href}
-                      className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
-                    >
-                      <SourceCard source={source} />
-                    </Link>
-                  ) : (
-                    <div key={source.label} className="rounded-2xl border border-white/7 bg-white/[.02] p-4 opacity-75">
-                      <SourceCard source={source} />
-                    </div>
-                  );
-                })
+                SOURCE_CATEGORIES[activeCategory].options.map(sourceCard)
               )}
             </div>
+
+            {inputSource && (
+              <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[.04] p-4">
+                <label htmlFor="source-url" className="text-xs font-black text-white">
+                  {inputSource === "git-url" ? "Repository URL" : "Website URL"}
+                </label>
+                <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                  <input
+                    id="source-url"
+                    type="url"
+                    value={sourceInput}
+                    onChange={(event) => setSourceInput(event.target.value)}
+                    placeholder={inputSource === "git-url" ? "https://github.com/owner/repository.git" : "https://example.com"}
+                    className="min-w-0 flex-1 rounded-xl border border-white/10 bg-black/30 px-3 py-2.5 text-xs text-white outline-none placeholder:text-white/25 focus:border-cyan-300/40"
+                    autoFocus
+                  />
+                  <button
+                    onClick={continueWithSource}
+                    disabled={!sourceInput.trim()}
+                    className="rounded-xl bg-cyan-300 px-4 py-2.5 text-xs font-black text-black transition hover:bg-cyan-200 disabled:cursor-not-allowed disabled:opacity-40"
+                  >
+                    Continue in Chat
+                  </button>
+                </div>
+                <p className="mt-2 text-[10px] leading-4 text-white/35">
+                  This hands the URL and selected permission mode to LiTT. Private Git authentication and automatic cloning are not enabled yet.
+                </p>
+              </div>
+            )}
 
             {/* Back to quick providers when in "More" */}
             {activeCategory === 0 && showMoreProviders && (
