@@ -1,4 +1,5 @@
 import { createServer } from "http";
+import { createHmac } from "crypto";
 import { WebSocketServer, WebSocket } from "ws";
 
 const PORT = process.env.VOICE_PROXY_PORT || 4002;
@@ -6,10 +7,37 @@ const PATH = "/voice";
 const INWORLD_ENDPOINT =
   "wss://api.inworld.ai/api/v1/realtime/session";
 const INWORLD_API_KEY = process.env.INWORLD_API_KEY;
+const VOICE_AUTH_SECRET = process.env.VOICE_AUTH_SECRET;
 
 if (!INWORLD_API_KEY) {
   console.error("[voice-proxy] INWORLD_API_KEY is not set. Exiting.");
   process.exit(1);
+}
+
+if (!VOICE_AUTH_SECRET || VOICE_AUTH_SECRET.length < 32) {
+  console.error("[voice-proxy] VOICE_AUTH_SECRET must be set (>= 32 chars). Exiting.");
+  process.exit(1);
+}
+
+function verifyToken(token) {
+  const parts = token.split(".");
+  if (parts.length !== 2) return null;
+  const [encoded, sig] = parts;
+
+  const expectedSig = createHmac("sha256", VOICE_AUTH_SECRET)
+    .update(encoded)
+    .digest("base64url");
+
+  if (sig !== expectedSig) return null;
+
+  try {
+    const payload = JSON.parse(Buffer.from(encoded, "base64url").toString("utf-8"));
+    const now = Math.floor(Date.now() / 1000);
+    if (payload.exp && payload.exp < now) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 const server = createServer((req, res) => {
@@ -20,10 +48,26 @@ const server = createServer((req, res) => {
 const wss = new WebSocketServer({ server, path: PATH });
 
 wss.on("connection", (browserWs, req) => {
+  const url = new URL(req.url, `http://${req.headers.host}`);
+  const token = url.searchParams.get("token");
+
+  if (!token) {
+    console.warn("[voice-proxy] Connection rejected: missing token");
+    browserWs.close(4001, "Authentication required");
+    return;
+  }
+
+  const payload = verifyToken(token);
+  if (!payload) {
+    console.warn("[voice-proxy] Connection rejected: invalid or expired token");
+    browserWs.close(4001, "Invalid or expired token");
+    return;
+  }
+
+  console.debug(`[voice-proxy] Authenticated user: ${payload.sub}`);
+
   const sessionId = `voice-${Date.now()}`;
   const inworldUrl = `${INWORLD_ENDPOINT}?key=${sessionId}&protocol=realtime`;
-
-  console.debug(`[voice-proxy] New connection from ${req.socket.remoteAddress}`);
 
   let inworldWs;
   try {

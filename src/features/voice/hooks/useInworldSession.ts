@@ -291,7 +291,10 @@ export function useInworldSession(
           ? proxyUrl.replace("ws://", "wss://")
           : proxyUrl;
 
-        const ws = new WebSocket(wsUrl);
+        // Append the auth token as a query param so the proxy can validate it
+        const urlWithToken = wsUrl + (wsUrl.includes("?") ? "&" : "?") + `token=${encodeURIComponent(conn.token)}`;
+
+        const ws = new WebSocket(urlWithToken);
         wsRef.current = ws;
 
         let sessionConfigured = false;
