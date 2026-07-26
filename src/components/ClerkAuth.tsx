@@ -67,7 +67,7 @@ function CustomAuthFallback({ linkColor }: NavAuthProps) {
     return (
       <div className="flex items-center gap-1.5">
         <span
-          className="text-[11px] font-bold truncate max-w-[80px]"
+          className="text-[11px] font-bold truncate max-w-20"
           style={{ color: linkColor }}
         >
           {name}
@@ -142,7 +142,7 @@ function AuthInner({ linkColor }: NavAuthProps) {
           {initial}
         </div>
         <span
-          className="text-[12px] font-semibold truncate max-w-[72px]"
+          className="text-[12px] font-semibold truncate max-w-18"
           style={{ color: linkColor }}
         >
           {firstName}

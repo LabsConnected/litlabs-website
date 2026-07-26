@@ -5,6 +5,9 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useTheme } from "@/context/ThemeContext";
 import { useClerk, useUser } from "@clerk/nextjs";
+import { useClerkAuthContext } from "@/context/ClerkAuthContext";
+
+const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
 import {
   LayoutGrid, User, Palette, Sparkles, Briefcase,
   Cpu, Bot, Mic, Plug, Zap, Bell, Coins, Shield, Gauge, Terminal,
@@ -106,10 +109,10 @@ export default function SettingsPage() {
       <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.82)" }} />
 
       {/* ── Desktop: 260px nav + content, wide shell ─────────────────── */}
-      <div className="relative mx-auto flex w-full max-w-[1500px] flex-col lg:flex-row">
+      <div className="relative mx-auto flex w-full max-w-375 flex-col lg:flex-row">
         {/* Desktop sidebar */}
         <aside
-          className="sticky top-0 z-30 hidden h-screen w-[260px] shrink-0 border-r lg:block 2xl:w-[270px]"
+          className="sticky top-0 z-30 hidden h-screen w-65 shrink-0 border-r lg:block 2xl:w-67.5"
           style={{
             borderColor: "rgba(255,255,255,0.06)",
             backgroundColor: "rgba(9,11,18,0.9)",
@@ -285,7 +288,7 @@ function SettingsNav({
               key={section.id}
               type="button"
               onClick={() => onSectionClick(section.id)}
-              className="flex min-h-[52px] w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white/5"
+              className="flex min-h-13 w-full items-center gap-3 rounded-xl px-3 py-2.5 text-left transition-all hover:bg-white/5"
               style={{
                 backgroundColor: isActive ? `${T.accentColor}10` : "transparent",
               }}
@@ -517,7 +520,7 @@ function SettingsContent({
 /* ── Overview ──────────────────────────────────────────────────────── */
 
 function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["resolvedColors"]; controlMode: ControlMode }) {
-  const { user } = useUser();
+  const { isSignedIn, sessionClaims } = useClerkAuthContext();
   const { capabilities } = useConnectionSummary();
   const { selectedModel } = useStudioModelStore();
   const { setActiveSection } = useSettingsStore();
@@ -542,7 +545,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
   const overviewCards = [
     {
       label: "Account",
-      value: user ? `Signed in as ${user.firstName || user.username || "User"}` : "Not signed in",
+      value: isSignedIn ? `Signed in as ${sessionClaims?.name || sessionClaims?.username || "User"}` : "Not signed in",
       action: "Manage account",
       section: "account",
       icon: <User size={14} />,
@@ -595,7 +598,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
     { label: "Test microphone", onClick: checkMic, show: micStatus !== "available" },
     { label: "Connect GitHub", onClick: () => setActiveSection("connections"), show: !hasGitHub },
     { label: "Change model", onClick: () => setActiveSection("ai-models"), show: true },
-    { label: "Manage account", onClick: () => setActiveSection("account"), show: !!user },
+    { label: "Manage account", onClick: () => setActiveSection("account"), show: isSignedIn },
     { label: "Review usage", onClick: () => setActiveSection("billing"), show: true },
   ].filter((a) => a.show);
 
@@ -608,7 +611,7 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
             key={card.label}
             type="button"
             onClick={() => setActiveSection(card.section)}
-            className="flex min-h-[92px] items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
+            className="flex min-h-23 items-center justify-between rounded-2xl border px-5 py-4 text-left transition-all hover:bg-white/5"
             style={{ borderColor: "rgba(255,255,255,0.06)", backgroundColor: "rgba(255,255,255,0.02)" }}
           >
             <div className="flex items-center gap-3 min-w-0">
@@ -664,6 +667,17 @@ function OverviewSection({ T, controlMode }: { T: ReturnType<typeof useTheme>["r
 /* ── Account ──────────────────────────────────────────────────────── */
 
 function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
+  if (!clerkConfigured) {
+    return (
+      <SettingsCard title="Account" description="Sign in to manage your profile" icon={<User size={16} />}>
+        <Link href="/sign-in" className="text-xs font-bold" style={{ color: T.accentColor }}>Sign in →</Link>
+      </SettingsCard>
+    );
+  }
+  return <AccountSectionClerk T={T} />;
+}
+
+function AccountSectionClerk({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"] }) {
   const { user, isLoaded } = useUser();
   const { openUserProfile, signOut } = useClerk();
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -772,11 +786,11 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
           </div>
         )}
         <div className="mt-4 grid gap-3 sm:grid-cols-2">
-          <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
+          <div className="rounded-xl border border-white/8 bg-white/2.5 px-3 py-2.5">
             <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Display name</div>
             <div className="mt-1 text-xs font-semibold text-white/85">{name}</div>
           </div>
-          <div className="rounded-xl border border-white/8 bg-white/[0.025] px-3 py-2.5">
+          <div className="rounded-xl border border-white/8 bg-white/2.5 px-3 py-2.5">
             <div className="text-[10px] font-bold uppercase tracking-wider text-white/40">Primary email</div>
             <div className="mt-1 truncate text-xs font-semibold text-white/85">{email}</div>
           </div>
@@ -839,7 +853,7 @@ function AccountSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColors"
         <button
           type="button"
           onClick={() => openUserProfile()}
-          className="flex min-h-12 w-full items-center justify-between rounded-xl border border-white/8 bg-white/[0.025] px-3 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+          className="flex min-h-12 w-full items-center justify-between rounded-xl border border-white/8 bg-white/2.5 px-3 text-left transition hover:border-white/15 hover:bg-white/5"
         >
           <span className="flex items-center gap-3">
             <Shield size={15} className="text-violet-300" />
@@ -1041,7 +1055,7 @@ function AppearanceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColo
       </div>
 
       {/* Right: live preview (desktop only) */}
-      <div className="hidden w-[340px] shrink-0 xl:block">
+      <div className="hidden w-85 shrink-0 xl:block">
         <LivePreviewPanel />
       </div>
     </div>
@@ -1104,7 +1118,7 @@ function WorkspaceSection({ T }: { T: ReturnType<typeof useTheme>["resolvedColor
               key={profile.name}
               type="button"
               onClick={() => setDefaults((current) => ({ ...current, ...profile.values }))}
-              className="rounded-xl border border-white/8 bg-white/[0.02] p-3 text-left transition hover:border-white/15 hover:bg-white/[0.05]"
+              className="rounded-xl border border-white/8 bg-white/2 p-3 text-left transition hover:border-white/15 hover:bg-white/5"
             >
               <span className="text-xs font-black" style={{ color: T.accentColor }}>{profile.name}</span>
               <span className="mt-1 block text-[10px] leading-4 text-white/45">{profile.description}</span>
@@ -1654,7 +1668,7 @@ function VoiceCameraSection({ T }: { T: ReturnType<typeof useTheme>["resolvedCol
       <SettingsCard title="Agent voice" description="LiTT and Spark voice identity" icon={<Volume2 size={16} />}>
         <div className="space-y-3">
           <p className="text-[10px] text-white/40">
-            Voice is powered by Inworld realtime API. Preview uses your browser's built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld's neural voice.
+            Voice is powered by Inworld realtime API. Preview uses your browser&apos;s built-in speech synthesis for a rough demo — the actual voice in the Studio is Inworld&apos;s neural voice.
           </p>
           {[
             { id: "litt" as const, name: "LiTT", style: "Deep · Calm · Precise", color: "#06b6d4", sample: "Connection established. I'm scanning the project now." },

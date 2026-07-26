@@ -337,7 +337,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                 <Bell size={16} />
                 {unreadCount > 0 && (
                   <span
-                    className="absolute -top-0.5 -right-0.5 min-w-[14px] h-[14px] rounded-full flex items-center justify-center text-[8px] font-black px-1"
+                    className="absolute -top-0.5 -right-0.5 min-w-3.5 h-3.5 rounded-full flex items-center justify-center text-[8px] font-black px-1"
                     style={{
                       backgroundColor: resolvedColors.headerColor,
                       color: "#fff",
@@ -349,7 +349,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               </button>
               {notifOpen && (
                 <div
-                  className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-[280px] max-h-[400px] overflow-y-auto z-50"
+                  className="absolute top-full right-0 mt-2 py-2 rounded-lg border min-w-70 max-h-100 overflow-y-auto z-50"
                   style={{
                     backgroundColor: resolvedColors.boxBg + "f0",
                     borderColor: resolvedColors.borderColor + "40",
@@ -487,7 +487,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                 </button>
                 {userOpen && (
                   <div
-                    className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-[160px] z-50"
+                    className="absolute top-full right-0 mt-2 py-1 rounded-lg border min-w-40 z-50"
                     style={{
                       backgroundColor: resolvedColors.boxBg + "f0",
                       borderColor: resolvedColors.borderColor + "40",
@@ -540,13 +540,13 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
         <>
           {/* Tap-outside scrim */}
           <div
-            className="fixed inset-0 z-[10000] bg-black/70 lg:hidden"
+            className="fixed inset-0 z-10000 bg-black/70 lg:hidden"
             onClick={() => setMobileOpen(false)}
             onTouchStart={() => setMobileOpen(false)}
           />
           {/* Drawer panel */}
           <div
-            className="fixed inset-y-0 left-0 z-[10001] flex h-[100dvh] w-[min(88vw,340px)] flex-col overflow-hidden border-r lg:hidden"
+            className="fixed inset-y-0 left-0 z-10001 flex h-dvh w-[min(88vw,340px)] flex-col overflow-hidden border-r lg:hidden"
             style={{
               backgroundColor: resolvedColors.bgColor,
               borderColor: resolvedColors.borderColor + "35",
@@ -554,7 +554,14 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             }}
           >
             <header className="flex shrink-0 items-center gap-3 border-b px-4 py-4" style={{ borderColor: resolvedColors.borderColor + "25" }}>
-              {profile?.avatarUrl ? <>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={profile.avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" /></> : <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>}
+              {profile?.avatarUrl ? (
+                <>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src={profile.avatarUrl} alt="" className="h-11 w-11 rounded-full object-cover" />
+                </>
+              ) : (
+                <div className="grid h-11 w-11 place-items-center rounded-full text-sm font-black" style={{ backgroundColor: resolvedColors.accentColor + "22", color: resolvedColors.accentColor }}>{profile?.displayName?.[0]?.toUpperCase() || "U"}</div>
+              )}
               <div className="min-w-0 flex-1"><div className="truncate text-sm font-black" style={{ color: resolvedColors.textColor }}>{profile?.displayName || "Member"}</div><div className="truncate text-[10px]" style={{ color: resolvedColors.textMuted }}>@{profile?.username || "creator"}</div></div>
               <button onClick={() => setMobileOpen(false)} className="rounded-xl p-2" style={{ color: resolvedColors.textMuted }} aria-label="Close menu"><X size={18} /></button>
             </header>
