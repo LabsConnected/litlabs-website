@@ -145,7 +145,7 @@ function RailButton({
 export default function StudioSidebar({
   activeTool,
   onToolChange,
-  projectReady = true,
+  projectReady: _projectReady = true,
 }: {
   activeTool: StudioTool;
   onToolChange: (tool: StudioTool) => void;

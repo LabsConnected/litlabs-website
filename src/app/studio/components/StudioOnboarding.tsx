@@ -17,7 +17,6 @@ import {
   Rocket,
   ShieldCheck,
   Sparkles,
-  Terminal,
   X,
   Zap,
 } from "lucide-react";
@@ -103,7 +102,6 @@ export default function StudioOnboarding({
   // First 4 common providers for the quick grid
   const codeCategory = SOURCE_CATEGORIES[0];
   const quickProviders = codeCategory.options.slice(0, 2); // GitHub + Paste Git URL
-  const moreProviders = codeCategory.options.slice(2); // GitLab, Bitbucket, Azure, Upload
 
   const continueWithSource = () => {
     const value = sourceInput.trim();
