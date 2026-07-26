@@ -9,7 +9,7 @@ const COLS: Array<{
     title: "Product",
     links: [
       { label: "Studio", href: "/studio" },
-      { label: "Agents", href: "/agents" },
+      { label: "Missions", href: "/studio?tool=workflows" },
       { label: "Marketplace", href: "/marketplace" },
       { label: "Pricing", href: "/pricing" },
     ],

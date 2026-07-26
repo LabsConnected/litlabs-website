@@ -7,7 +7,7 @@ import { LandingHeaderAuth } from "./LandingHeaderAuth";
 
 const NAV_LINKS = [
   { label: "Studio", href: "/studio" },
-  { label: "Agents", href: "/agents" },
+  { label: "Missions", href: "/studio?tool=workflows" },
   { label: "Marketplace", href: "/marketplace" },
   { label: "Pricing", href: "/pricing" },
   { label: "How it works", href: "#how" },

@@ -297,7 +297,7 @@ function LandingPage() {
               <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Meet the core crew</div>
               <h2 className="mt-4 max-w-2xl text-4xl font-black leading-none tracking-[-.045em] sm:text-6xl">Real characters.<br />Real roles. One mission.</h2>
             </div>
-            <Link href="/agents" className="inline-flex items-center gap-2 text-sm font-black text-[#a970ff]">Explore all agents <ArrowRight size={15} /></Link>
+            <Link href="/studio?tool=workflows" className="inline-flex items-center gap-2 text-sm font-black text-[#a970ff]">Explore Mission Forge <ArrowRight size={15} /></Link>
           </div>
           <div className="mt-12 grid gap-5 lg:grid-cols-2">
             <article className="group overflow-hidden rounded-[1.75rem] border border-[#a8ff2f]/20 bg-[#090d0b] shadow-[0_25px_80px_rgba(0,0,0,.4)] transition duration-500 hover:-translate-y-1 hover:border-[#a8ff2f]/45 hover:shadow-[0_28px_90px_rgba(168,255,47,.1)]">

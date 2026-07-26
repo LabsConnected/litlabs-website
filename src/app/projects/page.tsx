@@ -32,9 +32,9 @@ const QUICK_ACTIONS = [
     icon: Code2,
   },
   {
-    label: "Manage agents",
-    description: "Choose the specialists that can work on this project.",
-    href: "/agents",
+    label: "Mission Forge",
+    description: "Build reusable Missions by connecting LiTT, Spark, tools, approvals, and outputs.",
+    href: "/studio?tool=workflows",
     icon: Bot,
   },
   {

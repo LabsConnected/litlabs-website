@@ -47,7 +47,7 @@ export type StudioTool =
   | "camera"
   | "screen"
   | "terminal"
-  | "pipeline"
+  | "workflows"
   | "space"
   | "clibridge"
   | "color";
@@ -67,7 +67,7 @@ const PRIMARY_TOOLS: ToolItem[] = [
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
   { id: "build", label: "Build", icon: Hammer, shortcut: "B" },
   { id: "code", label: "Code", icon: Code, shortcut: "K" },
-  { id: "agents", label: "Agents", icon: Bot, shortcut: "5" },
+  { id: "agents", label: "LiTT & Spark", icon: Bot, shortcut: "5" },
   { id: "terminal", label: "Terminal", icon: Terminal, shortcut: "6" },
   { id: "assets", label: "Assets", icon: FolderOpen, shortcut: "8" },
   { id: "plugins", label: "Plugins", icon: Puzzle, shortcut: "P" },
@@ -79,7 +79,7 @@ const MORE_TOOLS: ToolItem[] = [
   { id: "screen", label: "Screen", icon: MonitorUp, shortcut: "S" },
   { id: "color", label: "Color", icon: Palette, shortcut: "4" },
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
-  { id: "pipeline", label: "Workflow Forge", icon: Network, shortcut: "7" },
+  { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
 ];
 

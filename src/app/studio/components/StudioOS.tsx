@@ -28,7 +28,7 @@ const GalleryTool = dynamic(() => import("../tools/GalleryTool"), {
 const TerminalTool = dynamic(() => import("../tools/AgentsTerminalTool"), {
   ssr: false,
 });
-const PipelineTool = dynamic(() => import("../tools/PipelineTool"), {
+const MissionForge = dynamic(() => import("../tools/MissionForge"), {
   ssr: false,
 });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
@@ -59,7 +59,7 @@ const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   camera: CameraTool,
   screen: ScreenTool,
   terminal: TerminalTool,
-  pipeline: PipelineTool,
+  workflows: MissionForge,
   space: SpaceTool,
   clibridge: CLIBridgeTool,
   color: ColorByNumberTool,
@@ -87,6 +87,10 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const DEFAULT_STUDIO_TOOL: StudioTool = "chat";
   const initialTool = (() => {
     const fromUrl = searchParams.get("tool");
+    // Normalize legacy "pipeline" to "workflows"
+    if (fromUrl === "pipeline") {
+      return "workflows" as StudioTool;
+    }
     if (fromUrl && VALID_TOOLS.includes(fromUrl as StudioTool)) {
       return fromUrl as StudioTool;
     }

@@ -587,7 +587,7 @@ export function ProfileOverview({
           <SectionHeader
             title="Published Agents"
             action="View all"
-            actionHref="/agents"
+            actionHref="/studio?tool=workflows"
           />
           {hasAgents ? (
             <div className="proj-grid">
@@ -600,8 +600,8 @@ export function ProfileOverview({
               icon={<Bot size={36} />}
               title="No agents published yet"
               desc="Build a specialized AI worker and add it to your profile."
-              actionLabel="Create agent"
-              actionHref="/agents/new"
+              actionLabel="Open Mission Forge"
+              actionHref="/studio?tool=workflows"
             />
           )}
         </Card>

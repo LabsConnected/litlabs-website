@@ -171,10 +171,10 @@ export default function OnboardingCanvas({
       id: "deploy",
       index: 3,
       title: "Deploy Your Work",
-      description: "Ship your project to production with the pipeline tool.",
+      description: "Ship your project to production with Mission Forge.",
       icon: UploadCloud,
-      ctaLabel: "Open Pipeline",
-      ctaAction: () => onToolChange("pipeline"),
+      ctaLabel: "Open Mission Forge",
+      ctaAction: () => onToolChange("workflows"),
     },
   ];
 

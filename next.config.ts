@@ -209,7 +209,8 @@ const nextConfig: NextConfig = {
         destination: "/studio?intent=image",
         permanent: false,
       },
-      { source: "/agent", destination: "/agents", permanent: false },
+      { source: "/agent", destination: "/studio?tool=workflows", permanent: false },
+      { source: "/agents", destination: "/studio?tool=workflows", permanent: false },
       {
         source: "/agent-chat",
         destination: "/studio?intent=agent",
