@@ -31,7 +31,7 @@ export const RETRO_SYSTEMS: RetroSystem[] = [
 ];
 
 export const EMULATOR_CORE_BY_SYSTEM: Record<RetroSystemId, string> = {
-  nes: "nes",
+  nes: "fceumm",
   snes: "snes",
   gb: "gb",
   gbc: "gb",

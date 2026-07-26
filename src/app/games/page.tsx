@@ -24,11 +24,6 @@ import {
 import { listRetroGames, type RetroGameRecord } from "@/lib/retro-arcade";
 import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
 
-const FREE_DISCOVERY = [
-  { label: "Open-source games", detail: "1,300+ browser games", href: "https://itch.io/games/free/html5/tag-open-source" },
-  { label: "Homegames", detail: "Play, make, and share", href: "https://homegames.io/" },
-];
-
 export default function GamesPage() {
   const [searchQuery, setSearchQuery] = useState("");
   const [favorites, setFavorites] = useState<string[]>(() => {
@@ -199,21 +194,23 @@ export default function GamesPage() {
           <RetroArcadeHero variant="banner" />
         </section>
 
-        {/* === OPEN-SOURCE BROWSER GAMES === */}
+        {/* === PLAY-IN-LITT PROMISE === */}
         <section className="mx-auto max-w-7xl px-4 py-8 sm:px-6">
           <div className="mb-5">
-            <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">Open-source browser games</p>
-            <h2 className="mt-1 text-xl font-black sm:text-2xl">More to explore</h2>
+            <p className="text-[10px] font-black uppercase tracking-[.25em] text-cyan-400">The LiTT play promise</p>
+            <h2 className="mt-1 text-xl font-black sm:text-2xl">Less link-hopping. More playing.</h2>
           </div>
-          <div className="grid gap-3 sm:grid-cols-2">
-            {FREE_DISCOVERY.map((item) => (
-              <a key={item.label} href={item.href} target="_blank" rel="noopener noreferrer" className="group flex items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/3 p-4 transition hover:border-white/20 hover:bg-white/5">
-                <div>
-                  <div className="text-sm font-bold text-white/85">{item.label}</div>
-                  <div className="mt-0.5 text-xs text-white/40">{item.detail}</div>
-                </div>
-                <ExternalLink size={16} className="text-white/30 transition group-hover:text-white/60" />
-              </a>
+          <div className="grid gap-3 md:grid-cols-3">
+            {[
+              { title: "Curated, not dumped", detail: "Every title earns its place with real gameplay, clear controls, and quality cover art.", color: "#a8ff2f" },
+              { title: "Play inside LiTTree", detail: "Featured games launch in the Game Cloud player whenever the publisher supports secure embedding.", color: "#65f4ff" },
+              { title: "Private retro library", detail: "Your own legal cartridges stay in this browser with local saves and recovery controls.", color: "#a970ff" },
+            ].map((item) => (
+              <div key={item.title} className="relative overflow-hidden rounded-2xl border p-5" style={{ borderColor: `${item.color}28`, background: `linear-gradient(145deg, ${item.color}12, rgba(255,255,255,.02))` }}>
+                <div className="mb-4 h-1.5 w-12 rounded-full" style={{ backgroundColor: item.color, boxShadow: `0 0 18px ${item.color}` }} />
+                <h3 className="text-sm font-black text-white">{item.title}</h3>
+                <p className="mt-2 text-xs leading-5 text-white/45">{item.detail}</p>
+              </div>
             ))}
           </div>
         </section>

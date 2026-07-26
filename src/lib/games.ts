@@ -62,6 +62,25 @@ export interface Achievement {
 export const GAME_LIBRARY: Game[] = [
   // HTML5 Games - Verified iframe-friendly embeds
   {
+    id: "xquest",
+    title: "XQuest JS",
+    description: "Momentum-based space combat with escalating enemy waves.",
+    category: "arcade",
+    platform: "html5",
+    coverUrl: "/games/artwork/xquest.png",
+    html5Url: "https://scottrippey.github.io/xquestjs/",
+    sourceUrl: "https://github.com/scottrippey/xquestjs",
+    license: "open-source",
+    licenseLabel: "Open source",
+    launchMode: "embedded",
+    year: 2024,
+    developer: "Scott Rippey",
+    players: 1,
+    rating: 4.8,
+    tags: ["space", "shooter", "action", "momentum"],
+    plays: "New",
+  },
+  {
     id: "pong",
     title: "Browser Pong",
     description: "Classic Atari Pong in your browser.",

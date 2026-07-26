@@ -7,7 +7,16 @@ import { ArrowLeft, Expand, Gamepad2, HardDrive, Keyboard, LockKeyhole, RotateCc
 import { detectSatellaview, EMULATOR_CORE_BY_SYSTEM, getRetroGame, getRetroSystem, readRomAsBase64, updateRetroGame, type RetroGameRecord } from "@/lib/retro-arcade";
 import { RetroControlsModal } from "@/components/games/RetroControlsModal";
 
-const EMULATOR_DATA_PATH = "https://cdn.emulatorjs.org/stable/data/";
+const EMULATOR_DATA_PATH = "https://cdn.emulatorjs.org/4.2.3/data/";
+
+function numericGameId(value: string): number {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return Math.abs(hash) || 1;
+}
 
 function escapeForScript(value: string): string {
   return value.replace(/<\/script/gi, "<\\/script");
@@ -26,11 +35,16 @@ function buildPlayerDocument(opts: {
     `window.EJS_core = ${JSON.stringify(opts.core)};`,
     `window.EJS_gameUrl = ${JSON.stringify(opts.gameUrl)};`,
     `window.EJS_gameName = ${JSON.stringify(opts.gameName)};`,
-    `window.EJS_gameID = ${JSON.stringify(`litt-${opts.gameId}`)};`,
+    `window.EJS_gameID = ${numericGameId(opts.gameId)};`,
     `window.EJS_pathtodata = ${JSON.stringify(EMULATOR_DATA_PATH)};`,
-    `window.EJS_startOnLoaded = true;`,
+    `window.EJS_startOnLoaded = false;`,
+    `window.EJS_startButtonName = ${JSON.stringify(`Start ${opts.gameName}`)};`,
+    `window.EJS_disableAutoLang = true;`,
+    `window.EJS_backgroundColor = "#020204";`,
     `window.EJS_alignStartButton = "center";`,
     `window.EJS_color = ${JSON.stringify(opts.color)};`,
+    `window.EJS_ready = ()=>{try{parent.postMessage({source:"ejs",type:"ready"},"*")}catch(_){}};`,
+    `window.EJS_onGameStart = ()=>{try{parent.postMessage({source:"ejs",type:"started"},"*")}catch(_){}};`,
   ];
   if (opts.biosUrl) {
     configLines.push(`window.EJS_biosUrl = ${JSON.stringify(opts.biosUrl)};`);
@@ -41,7 +55,7 @@ function buildPlayerDocument(opts: {
   const config = configLines.join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body,#game{width:100%;height:100%;margin:0;background:#020204;overflow:hidden}body{font-family:system-ui,sans-serif}</style></head>
-<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${EMULATOR_DATA_PATH}loader.js"><\/script></body></html>`;
+<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${EMULATOR_DATA_PATH}loader.js" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be downloaded. Check your connection or content blocker, then retry.'},'*')"><\/script></body></html>`;
 }
 
 export default function RetroPlayerPage() {
@@ -58,6 +72,9 @@ export default function RetroPlayerPage() {
   const [emulatorError, setEmulatorError] = useState<string | null>(null);
   const [isSatellaview, setIsSatellaview] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  const [playerAttempt, setPlayerAttempt] = useState(0);
+  const [playerStatus, setPlayerStatus] = useState<"loading" | "ready" | "started" | "stalled">("loading");
+  const [coreOverride, setCoreOverride] = useState<string | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -66,11 +83,11 @@ export default function RetroPlayerPage() {
         const record = await getRetroGame(params.gameId);
         if (!active) return;
         if (!record) throw new Error("This game is not stored in this browser.");
-        const b64 = await readRomAsBase64(record.rom);
+        const objectUrl = URL.createObjectURL(record.rom);
         if (!active) return;
         setGame(record);
         setIsSatellaview(detectSatellaview(record.fileName));
-        setRomDataUrl(`data:application/octet-stream;base64,${b64}`);
+        setRomDataUrl(objectUrl);
         if (!launchRecorded.current) {
           launchRecorded.current = true;
           const updated = await updateRetroGame(record.id, { lastPlayedAt: Date.now(), launches: (record.launches ?? 0) + 1 });
@@ -82,7 +99,13 @@ export default function RetroPlayerPage() {
         if (active) setLoading(false);
       }
     })();
-    return () => { active = false; };
+    return () => {
+      active = false;
+      setRomDataUrl((current) => {
+        if (current?.startsWith("blob:")) URL.revokeObjectURL(current);
+        return null;
+      });
+    };
   }, [params.gameId]);
 
   useEffect(() => {
@@ -90,6 +113,13 @@ export default function RetroPlayerPage() {
       const data = event.data as { source?: string; type?: string; message?: string } | null;
       if (data && data.source === "ejs" && data.type === "error" && data.message) {
         setEmulatorError(data.message);
+        setPlayerStatus("stalled");
+      } else if (data?.source === "ejs" && data.type === "ready") {
+        setPlayerStatus("ready");
+        setEmulatorError(null);
+      } else if (data?.source === "ejs" && data.type === "started") {
+        setPlayerStatus("started");
+        setEmulatorError(null);
       }
     }
     window.addEventListener("message", onMessage);
@@ -98,9 +128,25 @@ export default function RetroPlayerPage() {
 
   const system = game ? getRetroSystem(game.system) : null;
   const isSnes = game?.system === "snes";
-  const emulatorCore = !isSnes
+  const emulatorCore = coreOverride ?? (!isSnes
     ? (game ? EMULATOR_CORE_BY_SYSTEM[game.system] : "snes")
-    : (isSatellaview ? "bsnes" : "snes");
+    : (isSatellaview ? "bsnes" : "snes"));
+
+  useEffect(() => {
+    if (!romDataUrl || playerStatus !== "loading") return;
+    const timer = window.setTimeout(() => {
+      setPlayerStatus("stalled");
+      setEmulatorError("The emulator did not finish loading. LiTT stopped waiting so you can retry with a clean player or switch NES cores.");
+    }, 45_000);
+    return () => window.clearTimeout(timer);
+  }, [romDataUrl, playerAttempt, playerStatus]);
+
+  function retryPlayer(nextCore?: string) {
+    if (nextCore) setCoreOverride(nextCore);
+    setEmulatorError(null);
+    setPlayerStatus("loading");
+    setPlayerAttempt((attempt) => attempt + 1);
+  }
 
   const srcDoc = useMemo(() => {
     if (!game || !romDataUrl) return "";
@@ -151,7 +197,12 @@ export default function RetroPlayerPage() {
       <div className="mx-auto grid max-w-[1600px] gap-4 p-3 xl:grid-cols-[minmax(0,1fr)_290px] xl:p-5">
         <section className="min-w-0">
           <div ref={stageRef} className="relative aspect-[16/10] min-h-[360px] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_30px_100px_rgba(0,0,0,.55)] sm:min-h-[520px]">
-            <iframe key={romDataUrl + "|" + (biosDataUrl ?? "")} title={`${game.title} emulator`} srcDoc={srcDoc} className="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock" allow="autoplay; fullscreen; gamepad" allowFullScreen />
+            <iframe key={`${romDataUrl}|${biosDataUrl ?? ""}|${emulatorCore}|${playerAttempt}`} title={`${game.title} emulator`} srcDoc={srcDoc} className="h-full w-full border-0" sandbox="allow-scripts allow-same-origin allow-downloads allow-pointer-lock" allow="autoplay; fullscreen; gamepad" allowFullScreen />
+            {playerStatus === "loading" && (
+              <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-cyan-300/20 bg-black/70 px-3 py-1.5 text-[10px] font-bold text-cyan-100 backdrop-blur">
+                Loading pinned EmulatorJS 4.2.3 · {emulatorCore}
+              </div>
+            )}
           </div>
           <div className="mt-3 flex flex-wrap items-center justify-between gap-3 rounded-2xl border border-white/10 bg-white/[.025] px-4 py-3">
             <div className="flex flex-wrap gap-4 text-[11px] text-white/40">
@@ -166,9 +217,9 @@ export default function RetroPlayerPage() {
               </button>
               <span className="flex items-center gap-1.5"><HardDrive size={13}/> Save states in player menu</span>
             </div>
-            <button onClick={() => window.location.reload()} className="flex items-center gap-1.5 text-xs font-bold text-white/50 hover:text-white" aria-label="Reload player"><RotateCcw size={13}/> Reload player</button>
+            <button onClick={() => retryPlayer()} className="flex items-center gap-1.5 text-xs font-bold text-white/50 hover:text-white" aria-label="Reload player"><RotateCcw size={13}/> Reload player</button>
           </div>
-          {emulatorError && <div className="mt-3 flex items-start gap-3 rounded-2xl border border-rose-400/20 bg-rose-400/[.06] px-4 py-3 text-xs text-rose-100"><span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-rose-400"/><div><b className="block text-rose-200">Emulator reported an error</b><span className="text-rose-100/80">{emulatorError}</span><div className="mt-3 flex gap-2"><button onClick={() => window.location.reload()} className="rounded-lg border border-rose-400/30 px-3 py-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-400/10">Retry</button><Link href="/games/retro" className="rounded-lg border border-white/15 px-3 py-1.5 text-[10px] font-bold text-white/60 hover:bg-white/5">Back to Library</Link></div></div></div>}
+          {emulatorError && <div className="mt-3 flex items-start gap-3 rounded-2xl border border-rose-400/20 bg-rose-400/[.06] px-4 py-3 text-xs text-rose-100"><span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full bg-rose-400"/><div><b className="block text-rose-200">Player recovery available</b><span className="text-rose-100/80">{emulatorError}</span><div className="mt-3 flex flex-wrap gap-2"><button onClick={() => retryPlayer()} className="rounded-lg border border-rose-400/30 px-3 py-1.5 text-[10px] font-bold text-rose-200 hover:bg-rose-400/10">Clean retry</button>{game.system === "nes" && <button onClick={() => retryPlayer(emulatorCore === "fceumm" ? "nestopia" : "fceumm")} className="rounded-lg border border-cyan-400/30 px-3 py-1.5 text-[10px] font-bold text-cyan-200 hover:bg-cyan-400/10">Try {emulatorCore === "fceumm" ? "Nestopia" : "FCEUmm"}</button>}<Link href="/games/retro" className="rounded-lg border border-white/15 px-3 py-1.5 text-[10px] font-bold text-white/60 hover:bg-white/5">Back to Library</Link></div></div></div>}
         </section>
 
         <aside className="space-y-4">
