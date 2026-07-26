@@ -12,8 +12,9 @@ export default function GitHubSetupPage() {
   const searchParams = useSearchParams();
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { tokens } = useTheme();
-  const [status, setStatus] = useState<"loading" | "ready" | "unconfigured" | "error">("loading");
+  const [status, setStatus] = useState<"loading" | "ready" | "connected" | "unconfigured" | "error">("loading");
   const [error, setError] = useState<string | null>(null);
+  const [connectedAccount, setConnectedAccount] = useState<string | null>(null);
 
   const installedId = searchParams.get("installed");
   const errorParam = searchParams.get("error");
@@ -39,7 +40,16 @@ export default function GitHubSetupPage() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "GitHub connection failed");
         }
-        setStatus("ready");
+        const data = await res.json();
+        const installations = Array.isArray(data.installations)
+          ? data.installations
+          : [];
+        if (installations.length > 0) {
+          setConnectedAccount(installations[0]?.account || null);
+          setStatus("connected");
+        } else {
+          setStatus("ready");
+        }
       })
       .catch((err) => {
         setStatus("error");
@@ -127,6 +137,22 @@ export default function GitHubSetupPage() {
           </div>
         )}
 
+        {status === "connected" && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-400">
+              <Check size={14} /> GitHub connected{connectedAccount ? ` as ${connectedAccount}` : ""}.
+            </div>
+            <GitHubProjectConnection />
+            <button
+              onClick={() => router.push("/projects")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
+              style={{ backgroundColor: tokens.primary, color: "#000" }}
+            >
+              Go to Projects <ArrowRight size={14} />
+            </button>
+          </div>
+        )}
+
         {status === "ready" && (
           <>
             {installationsExist(status) ? (
@@ -158,6 +184,6 @@ export default function GitHubSetupPage() {
   );
 }
 
-function installationsExist(status: string): status is "ready" {
-  return status === "ready";
+function installationsExist(status: string): status is "ready" | "connected" {
+  return status === "ready" || status === "connected";
 }
