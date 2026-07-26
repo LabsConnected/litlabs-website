@@ -556,14 +556,14 @@ export function DeveloperControlCenter() {
   const { user } = useAppUser();
   const { profile } = useProfile();
   const [data, setData] = useState<DashboardData | null>(null);
-  const [connections, setConnections] = useState<ConnectionOverview[]>([]);
+  const [, setConnections] = useState<ConnectionOverview[]>([]);
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [diagnostics, setDiagnostics] = useState<Array<{ step: string; status: string; detail: string }> | null>(null);
   const [diagnosticsLoading, setDiagnosticsLoading] = useState(false);
-  const [disconnectingProvider, setDisconnectingProvider] = useState<string | null>(null);
+  const [, setDisconnectingProvider] = useState<string | null>(null);
   const eventsRef = useRef<HTMLDivElement>(null);
 
   const fetchDashboard = useCallback(async () => {

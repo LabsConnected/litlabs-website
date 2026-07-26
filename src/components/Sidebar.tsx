@@ -17,7 +17,6 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   ShieldCheck,
-  Sparkles,
   TerminalSquare,
   X,
   Zap,
