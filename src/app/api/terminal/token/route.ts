@@ -15,7 +15,6 @@ export async function GET() {
       headers: { "Cache-Control": "no-store" },
     });
   } catch (error) {
-    console.error("[terminal/token] Terminal authentication is not configured", error);
     return NextResponse.json(
       { error: "Terminal authentication is unavailable" },
       { status: 503 },

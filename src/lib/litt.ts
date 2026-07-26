@@ -328,10 +328,13 @@ class LiTT {
   }
 }
 
-export const jarvis = new LiTT();
+export const litt = new LiTT();
+
+// Back-compat alias: older code imported `jarvis` — keep it working.
+export const jarvis = litt;
 
 if (typeof window === "undefined") {
-  jarvis.init({
+  litt.init({
     discordWebhookUrl: process.env.DISCORD_WEBHOOK_URL,
     adminEmail: process.env.ADMIN_EMAIL,
     webhookEndpoint: process.env.LiTT_WEBHOOK_URL,
@@ -342,4 +345,4 @@ if (typeof window === "undefined") {
   });
 }
 
-export default jarvis;
+export default litt;

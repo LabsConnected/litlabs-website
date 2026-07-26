@@ -291,7 +291,6 @@ async function handler(req: NextRequest) {
         return await handleLLMChat(body, userId);
     }
   } catch (err) {
-    console.error("[api/chat/unified] error:", err);
     return NextResponse.json(
       { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 },

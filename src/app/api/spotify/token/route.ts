@@ -51,7 +51,6 @@ export async function GET() {
     });
     return res;
   } catch (error) {
-    console.error("Spotify token error:", error);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

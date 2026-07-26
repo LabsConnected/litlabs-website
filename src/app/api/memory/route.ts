@@ -101,7 +101,6 @@ export async function POST(req: NextRequest) {
         supermemoryId = extractSupermemoryId(supermemoryResult);
       } catch (indexError) {
         // Do not fail the request if indexing fails; record stays in Supabase.
-        console.error("Supermemory index failed:", indexError);
       }
     }
 
@@ -193,7 +192,6 @@ export async function GET(req: NextRequest) {
         })) as { memories?: unknown[]; results?: unknown[] };
       } catch (err) {
         supermemoryError = err instanceof Error ? err.message : "Supermemory search failed";
-        console.error("Supermemory search failed:", err);
         source = "supabase";
       }
     }
@@ -299,7 +297,6 @@ export async function DELETE(req: NextRequest) {
           content: record.content,
         });
       } catch (err) {
-        console.error("Supermemory forget failed:", err);
       }
     }
 
@@ -351,7 +348,6 @@ export async function PATCH(req: NextRequest) {
           newContent,
         });
       } catch (err) {
-        console.error("Supermemory update failed:", err);
       }
     }
 

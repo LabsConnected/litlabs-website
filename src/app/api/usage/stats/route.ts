@@ -138,21 +138,18 @@ export async function GET() {
     bucketize(cmdRes.value.data, buckets, "commands");
     if (cmdRes.value.error) failed.push("terminal_command_history");
   } else {
-    console.error("usage/stats: terminal_command_history failed:", cmdRes.reason);
     failed.push("terminal_command_history");
   }
   if (taskRes.status === "fulfilled") {
     bucketize(taskRes.value.data, buckets, "agentTasks");
     if (taskRes.value.error) failed.push("agent_tasks");
   } else {
-    console.error("usage/stats: agent_tasks failed:", taskRes.reason);
     failed.push("agent_tasks");
   }
   if (genRes.status === "fulfilled") {
     bucketize(genRes.value.data, buckets, "generations");
     if (genRes.value.error) failed.push("agent_runs");
   } else {
-    console.error("usage/stats: agent_runs failed:", genRes.reason);
     failed.push("agent_runs");
   }
 

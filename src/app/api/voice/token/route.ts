@@ -54,17 +54,22 @@ export async function GET() {
 
     const littVoice = process.env.INWORLD_LITT_VOICE || "";
     const sparkVoice = process.env.INWORLD_SPARK_VOICE || "";
+    const voiceWsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL || "";
 
-    if (!littVoice) {
+    if (!littVoice || !voiceWsUrl) {
+      const missing = [
+        !littVoice && "INWORLD_LITT_VOICE",
+        !voiceWsUrl && "NEXT_PUBLIC_VOICE_WS_URL",
+      ].filter(Boolean);
       return NextResponse.json(
         {
-          error: "INWORLD_LITT_VOICE is not configured. Set it to a valid Inworld voice ID for LiTT.",
+          error: `Voice service is not configured. Set ${missing.join(" and ")}.`,
           configured: false,
           details: {
             apiKey: true,
-            littVoice: false,
+            littVoice: !!littVoice,
             sparkVoice: !!sparkVoice,
-            wsUrl: !!process.env.NEXT_PUBLIC_VOICE_WS_URL,
+            wsUrl: !!voiceWsUrl,
           },
         },
         { status: 503, headers: { "Cache-Control": "no-store" } },
@@ -75,7 +80,7 @@ export async function GET() {
       {
         token: `${encoded}.${sig}`,
         expiresAt: payload.exp * 1000,
-        endpoint: process.env.NEXT_PUBLIC_VOICE_WS_URL || "ws://localhost:4002/voice",
+        endpoint: voiceWsUrl,
         littVoice,
         sparkVoice: sparkVoice || littVoice,
         configured: true,
@@ -89,7 +94,6 @@ export async function GET() {
       { headers: { "Cache-Control": "no-store" } },
     );
   } catch (error) {
-    console.error("[voice/token] Error:", error);
     return NextResponse.json(
       { error: "Voice authentication is unavailable" },
       { status: 503 },

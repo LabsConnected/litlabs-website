@@ -82,7 +82,6 @@ async function getHandler() {
       },
     });
   } catch (err) {
-    console.error("[api/settings/profile] GET error:", err);
     return NextResponse.json(
       { error: "Failed to fetch profile" },
       { status: 500 },

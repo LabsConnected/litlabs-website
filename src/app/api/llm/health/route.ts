@@ -24,7 +24,6 @@ export async function GET() {
       hasOpenRouter: health.openrouter.available,
     });
   } catch (error) {
-    console.error("LLM health check error:", error);
     return NextResponse.json({ error: "Health check failed" }, { status: 500 });
   }
 }

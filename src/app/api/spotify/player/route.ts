@@ -22,7 +22,6 @@ export async function GET(req: NextRequest) {
     if (!res.ok) return NextResponse.json({ error: "player_error" }, { status: res.status });
     return NextResponse.json(await res.json());
   } catch (error) {
-    console.error("Spotify player GET error:", error);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }
@@ -88,7 +87,6 @@ export async function POST(req: NextRequest) {
     const err = await res.text();
     return NextResponse.json({ error: err }, { status: res.status });
   } catch (error) {
-    console.error("Spotify player POST error:", error);
     return NextResponse.json({ error: "internal_error" }, { status: 500 });
   }
 }

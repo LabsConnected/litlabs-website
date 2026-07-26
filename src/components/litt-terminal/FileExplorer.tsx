@@ -23,10 +23,13 @@ export function FileExplorer({ onOpenFile }: FileExplorerProps) {
   const wsUrl =
     process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "http://localhost:4001";
+    "";
 
   const fetchEntries = useCallback(
     async (path: string) => {
+      if (!wsUrl) {
+        throw new Error("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      }
       const res = await fetch(`${wsUrl}/files?path=${encodeURIComponent(path)}`, {
         headers: await terminalAuthHeaders(),
       });

@@ -73,7 +73,6 @@ async function handler(req: NextRequest) {
     });
   } catch (err: unknown) {
     const msg = err instanceof Error ? err.message : "Video generation failed";
-    console.error("[generate-video] Error:", msg);
     return NextResponse.json(
       { error: msg },
       { status: 500 },

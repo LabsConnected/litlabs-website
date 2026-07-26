@@ -83,7 +83,6 @@ async function creditCoinPack(
       metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
     });
   } catch (err) {
-    console.error("[stripe/webhook] creditCoinPack failed:", err);
   }
 }
 
@@ -108,7 +107,6 @@ async function grantSubscriptionCredits(
       p_expires_at: expiresAt ?? undefined,
     });
   } catch (err) {
-    console.error("[stripe/webhook] grantSubscriptionCredits failed:", err);
   }
 }
 
@@ -133,7 +131,6 @@ export async function POST(req: NextRequest) {
     event = stripe.webhooks.constructEvent(body, sig || "", signingSecret);
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Unknown error";
-    console.error("[stripe/webhook] Signature verification failed:", message);
     return NextResponse.json(
       { error: `Webhook Error: ${message}` },
       { status: 400 },
@@ -344,7 +341,6 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch (err) {
-    console.error(`[stripe/webhook] Error processing ${event.type}:`, err);
     // Do not acknowledge or record failed events. Stripe must retry them.
     return NextResponse.json(
       { error: "Webhook processing failed" },

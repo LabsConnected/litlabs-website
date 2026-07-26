@@ -37,5 +37,4 @@ export async function upsertConnection(
   },
 ): Promise<void> {
   setConnectionState(provider, data.status === "connected", data);
-  console.debug(`[connection] upsert ${userId} ${provider}`, data);
 }

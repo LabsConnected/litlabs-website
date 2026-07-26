@@ -107,7 +107,6 @@ Output the code files immediately.`;
       model: result.model,
     });
   } catch (error: unknown) {
-    console.error("[ai-chat] Error:", error);
     const message = error instanceof Error ? error.message : "Chat failed";
     return NextResponse.json({ error: message }, { status: 500 });
   }

@@ -1,5 +1,6 @@
 // GitLab pipeline webhook — records/updates deployment status
 import { NextRequest, NextResponse } from "next/server";
+import { timingSafeEqual } from "crypto";
 import {
   DeploySource,
   inferEnvironment,
@@ -46,7 +47,12 @@ function verifyGitLabToken(req: NextRequest): boolean {
   const token =
     req.headers.get("x-gitlab-token") ||
     req.headers.get("x-gitlab-webhook-secret");
-  return token === secret;
+  if (!token) return false;
+  // Constant-time comparison to prevent timing attacks
+  const secretBuf = Buffer.from(secret);
+  const tokenBuf = Buffer.from(token);
+  if (secretBuf.length !== tokenBuf.length) return false;
+  return timingSafeEqual(secretBuf, tokenBuf);
 }
 
 export async function POST(req: NextRequest) {

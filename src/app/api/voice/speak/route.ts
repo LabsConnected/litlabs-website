@@ -88,7 +88,6 @@ export async function POST(request: NextRequest): Promise<Response> {
       },
     });
   } catch (error) {
-    console.error("Voice route error:", error);
     const message = error instanceof Error ? error.message : "Unable to generate voice.";
 
     const metadata: TtsResponseMetadata = {

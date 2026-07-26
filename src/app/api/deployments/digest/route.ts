@@ -1,11 +1,24 @@
 // Daily deploy digest endpoint — can be triggered by cron or manually
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { buildDeployDigest } from "@/lib/deployments";
 import { sendDiscordMessage } from "@/lib/discord";
 
 export const dynamic = "force-dynamic";
 
+// Allows cron triggers via Bearer token without a Clerk session
+function isAuthorizedByApiKey(req: NextRequest): boolean {
+  const key = process.env.INTERNAL_API_KEY;
+  if (!key) return false;
+  const header = req.headers.get("authorization") || "";
+  return header === `Bearer ${key}`;
+}
+
 export async function POST(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId && !isAuthorizedByApiKey(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { searchParams } = new URL(req.url);
     const hours = Math.min(
@@ -80,6 +93,10 @@ export async function POST(req: NextRequest) {
 }
 
 export async function GET(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId && !isAuthorizedByApiKey(req)) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { searchParams } = new URL(req.url);
     const hours = Math.min(

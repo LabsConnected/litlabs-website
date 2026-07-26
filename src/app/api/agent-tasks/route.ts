@@ -23,7 +23,6 @@ export async function GET() {
     .limit(50);
 
   if (error) {
-    console.error("agent_tasks list failed", error);
     return NextResponse.json({ error: "Failed to load missions" }, { status: 500 });
   }
 
@@ -80,7 +79,6 @@ export async function POST(request: Request) {
       .eq("session_id", sessionId);
 
     if (countError) {
-      console.error("Failed to compute sequence order", countError);
       return NextResponse.json(
         { error: "Failed to assign sequence order" },
         { status: 500 },
@@ -109,7 +107,6 @@ export async function POST(request: Request) {
       .single();
 
     if (txError || !task) {
-      console.error("agent_tasks insert failed", txError);
       return NextResponse.json(
         { error: "Failed to create agent task" },
         { status: 500 },
@@ -137,7 +134,6 @@ export async function POST(request: Request) {
       { status: 201 },
     );
   } catch (error: unknown) {
-    console.error("Critical Gateway Router Exception:", error);
     return NextResponse.json(
       {
         error:

@@ -35,6 +35,20 @@ import {
   type ScannedFile,
 } from "@/lib/code-scanner";
 
+interface ScanResult {
+  projectName: string;
+  files: ScannedFile[];
+  totalFiles: number;
+  totalLines: number;
+  techStack: string[];
+  keyFeatures: string[];
+  recentChanges: string[];
+  health: {
+    buildStatus: string;
+    envVarsMissing: string[];
+  };
+}
+
 // Demo file content
 const DEMO_FILE_CONTENT: Record<string, string> = {
   "/src/app/page.tsx": `'use client';
@@ -319,7 +333,7 @@ export default function CodeScannerPage() {
   const [scan, setScan] = useState<{
     loading: boolean;
     error: string | null;
-    data: any | null; // eslint-disable-line @typescript-eslint/no-explicit-any
+    data: ScanResult | null;
   }>({ loading: false, error: null, data: null });
 
   const [fileContentCache, setFileContentCache] = useState<

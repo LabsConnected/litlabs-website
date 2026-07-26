@@ -50,7 +50,6 @@ export async function GET(request: NextRequest) {
     if (error instanceof Stripe.errors.StripeInvalidRequestError) {
       return NextResponse.json({ error: "Checkout session not found" }, { status: 404 });
     }
-    console.error("Unable to retrieve Stripe checkout session", error);
     return NextResponse.json({ error: "Unable to load receipt" }, { status: 500 });
   }
 }

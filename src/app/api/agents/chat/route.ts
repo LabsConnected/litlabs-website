@@ -47,7 +47,6 @@ async function recallMemories(
           if (data?.length) return data;
         }
       } catch (err) {
-        console.error("Supermemory recall failed:", err);
       }
     }
     const { data } = await supabaseAdmin
@@ -58,7 +57,6 @@ async function recallMemories(
       .limit(limit);
     return data || [];
   } catch (err) {
-    console.error("recallMemories failed:", err);
     return [];
   }
 }
@@ -88,7 +86,6 @@ async function persistMemory(
       .single();
 
     if (insertError || !record) {
-      console.error("Supabase memory insert failed:", insertError);
       return null;
     }
 
@@ -109,7 +106,6 @@ async function persistMemory(
         })) as { id?: string; memoryId?: string; memory_id?: string; externalId?: string };
         supermemoryId = result.id || result.memoryId || result.memory_id || result.externalId || null;
       } catch (err) {
-        console.error("Supermemory index failed:", err);
       }
     }
 
@@ -124,7 +120,6 @@ async function persistMemory(
 
     return record.id;
   } catch (err) {
-    console.error("persistMemory failed:", err);
     return null;
   }
 }

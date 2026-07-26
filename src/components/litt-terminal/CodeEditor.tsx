@@ -24,10 +24,14 @@ export function CodeEditor({
   const wsUrl =
     process.env.NEXT_PUBLIC_TERMINAL_HTTP_URL ||
     process.env.NEXT_PUBLIC_TERMINAL_WS_URL ||
-    "http://localhost:4001";
+    "";
 
   const loadFile = useCallback(async () => {
     if (!filePath) return;
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     startTransition(() => {
       setLoading(true);
       setError(null);
@@ -55,6 +59,10 @@ export function CodeEditor({
 
   const saveFile = async () => {
     if (!filePath) return;
+    if (!wsUrl) {
+      setError("Terminal server is not configured. Set NEXT_PUBLIC_TERMINAL_HTTP_URL.");
+      return;
+    }
     setSaving(true);
     setError(null);
     try {

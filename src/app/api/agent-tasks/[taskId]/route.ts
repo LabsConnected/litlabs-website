@@ -30,7 +30,6 @@ export async function GET(
 
     return NextResponse.json({ task });
   } catch (error) {
-    console.error("Task fetch failed:", error);
     return NextResponse.json(
       { error: "Internal error" },
       { status: 500 },
@@ -82,7 +81,6 @@ export async function PATCH(
       .single();
 
     if (error || !task) {
-      console.error("agent_tasks update failed", error);
       return NextResponse.json(
         { error: "Failed to update agent task" },
         { status: 500 },
@@ -105,7 +103,6 @@ export async function PATCH(
 
     return NextResponse.json({ ok: true, task });
   } catch (error) {
-    console.error("Critical Task Update Exception:", error);
     return NextResponse.json(
       {
         error:

@@ -17,7 +17,6 @@ export async function GET(req: NextRequest) {
       },
     });
   } catch (error) {
-    console.error("Session error:", error);
     return NextResponse.json({ user: null });
   }
 }

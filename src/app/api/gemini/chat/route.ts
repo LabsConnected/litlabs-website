@@ -305,7 +305,6 @@ async function handler(req: NextRequest) {
     });
   } catch (err) {
     // LLM chat route error:
-    console.error("[api/gemini/chat] error:", err);
     return NextResponse.json(
       { error: "Internal server error", detail: err instanceof Error ? err.message : String(err) },
       { status: 500 },

@@ -31,10 +31,11 @@ export class AgentWorkerMatrix {
         );
       }
 
-      this._supabaseAdmin = createClient(
-        "https://rokbfvuoqildggnhappy.supabase.co",
-        secretKey,
-      );
+      const supabaseUrl =
+        process.env.NEXT_PUBLIC_SUPABASE_URL ||
+        "https://rokbfvuoqildggnhappy.supabase.co";
+
+      this._supabaseAdmin = createClient(supabaseUrl, secretKey);
     }
     return this._supabaseAdmin;
   }
@@ -48,8 +49,10 @@ export class AgentWorkerMatrix {
       void this.supabase;
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
-      console.error(
-        `\x1b[31m[❌ FATAL INITIALIZATION FAULT] ${message}\x1b[0m`,
+      void logAgentEvent(
+        this.config.agentSlug,
+        "error",
+        `Fatal initialization fault: ${message}`,
       );
       this.isRunning = false;
       throw err;
@@ -65,8 +68,10 @@ export class AgentWorkerMatrix {
 
   public stop() {
     this.isRunning = false;
-    console.log(
-      `\x1b[33m[🔱 SYSTEM] Shutting down background worker matrix for ${this.config.agentSlug}...\x1b[0m`,
+    void logAgentEvent(
+      this.config.agentSlug,
+      "info",
+      "Background worker matrix stopped",
     );
   }
 
@@ -77,9 +82,10 @@ export class AgentWorkerMatrix {
           await this.fetchAndProcessNextTask();
         }
       } catch (err) {
-        console.error(
-          "[Worker Fault] Polling loop error:",
-          err instanceof Error ? err.message : String(err),
+        void logAgentEvent(
+          this.config.agentSlug,
+          "error",
+          `Polling loop error: ${err instanceof Error ? err.message : String(err)}`,
         );
       }
 
@@ -128,7 +134,6 @@ export class AgentWorkerMatrix {
       .eq("session_id", task.session_id as string);
 
     if (error) {
-      console.error("Failed to inspect dependency tasks:", error);
       return false;
     }
 

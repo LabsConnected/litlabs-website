@@ -51,7 +51,7 @@ export async function POST(request: Request) {
 
         if (!res.ok) {
           const errText = await res.text();
-          console.error(`❌ Intake rejected step ${step.agentSlug}:`, errText);
+          console.error(`Intake rejected step ${step.agentSlug}:`, errText);
           enqueuedTasks.push({ id: undefined, taskId: undefined });
         } else {
           const saved = await res.json();
@@ -76,7 +76,6 @@ export async function POST(request: Request) {
       { status: 200 },
     );
   } catch (error) {
-    console.error("Director plan failed:", error);
     return NextResponse.json(
       { error: "Failed to build plan" },
       { status: 500 },

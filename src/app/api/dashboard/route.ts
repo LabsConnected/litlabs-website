@@ -60,7 +60,7 @@ export async function GET() {
     // Also fetch legacy projects for backward compat
     const { data: legacyProjects } = await supabaseAdmin
       .from("projects")
-      .select("id, name, status, owner, repository, working_branch, connection_status, repository_full_name, repository_html_url, repository_private, selected_branch, connected_at, last_synced_at")
+      .select("id, status, owner, repository, working_branch, connection_status, repository_full_name, repository_html_url, repository_private, selected_branch, connected_at")
       .eq("user_id", userId)
       .order("created_at", { ascending: false });
 

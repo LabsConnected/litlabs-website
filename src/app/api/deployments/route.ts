@@ -1,10 +1,15 @@
 // List deployment records
 import { NextRequest, NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { getDeployments } from "@/lib/deployments";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const { searchParams } = new URL(req.url);
     const hours = Number(searchParams.get("hours"));

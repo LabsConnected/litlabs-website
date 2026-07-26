@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { auth } from "@clerk/nextjs/server";
 import { execSync } from "child_process";
 
 const FALLBACK_COMMITS = [
@@ -15,6 +16,10 @@ const FALLBACK_COMMITS = [
 ];
 
 export async function GET() {
+  const { userId } = await auth();
+  if (!userId) {
+    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
   try {
     const commits = execSync("git log --oneline -10 2>/dev/null", { timeout: 3000 })
       .toString().trim().split("\n").filter(Boolean);
