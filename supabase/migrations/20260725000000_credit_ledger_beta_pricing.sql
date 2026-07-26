@@ -61,8 +61,9 @@ DROP POLICY IF EXISTS stripe_events_deny_authenticated ON public.stripe_events;
 CREATE POLICY stripe_events_deny_authenticated ON public.stripe_events FOR ALL TO authenticated USING (false) WITH CHECK (false);
 
 -- ── Add plan column to subscriptions (if not already present) ──
--- The subscriptions table already has a 'plan' text column from schema.sql.
--- We just ensure it defaults to 'starter' instead of 'free'.
+-- Older production databases may predate this column.
+ALTER TABLE public.subscriptions
+  ADD COLUMN IF NOT EXISTS plan TEXT NOT NULL DEFAULT 'starter';
 ALTER TABLE public.subscriptions
   ALTER COLUMN plan SET DEFAULT 'starter';
 
