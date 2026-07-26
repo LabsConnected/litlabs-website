@@ -2,8 +2,8 @@
 
 import dynamic from "next/dynamic";
 
-const DeveloperControlCenter = dynamic(
-  () => import("@/components/dashboard/DeveloperControlCenter").then((m) => m.DeveloperControlCenter),
+const CommandCenter = dynamic(
+  () => import("@/components/dashboard/CommandCenter").then((m) => m.CommandCenter),
   {
     ssr: false,
     loading: () => (
@@ -15,5 +15,5 @@ const DeveloperControlCenter = dynamic(
 );
 
 export default function DashboardView() {
-  return <DeveloperControlCenter />;
+  return <CommandCenter />;
 }
