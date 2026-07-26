@@ -30,7 +30,7 @@ type SourceOption = {
 
 const SOURCE_OPTIONS: SourceOption[] = [
   { label: "GitHub Repository", detail: "GitHub App · repositories and branches", icon: FolderGit2, available: true, href: "/studio/github" },
-  { label: "Paste Git URL", detail: "Clone any public or private Git repository", icon: Link2, available: true, href: "/studio?tool=chat&mission=Clone%20this%20Git%20repository%20and%20set%20up%20the%20project%3A%20" },
+  { label: "Paste Git URL", detail: "Clone any public or private Git repository", icon: Link2, available: false },
   { label: "Website URL", detail: "Inspect pages, copy, structure, and assets", icon: Globe2, available: true, href: "/studio?tool=chat&mission=Scan%20this%20website%20and%20create%20a%20project%20plan%3A%20" },
   { label: "Upload ZIP or Folder", detail: "Bring an existing local project", icon: HardDriveUpload, available: false },
   { label: "GitLab", detail: "OAuth repository connection", icon: FolderGit2, available: false },

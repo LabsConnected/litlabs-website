@@ -114,6 +114,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [search, setSearch] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [localDraftActive, setLocalDraftActive] = useState(false);
   const isInitialMount = useRef(true);
   const [cameraDock, setCameraDock] = useState<{
     open: boolean;
@@ -124,18 +125,9 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
     pos: DockPosition;
   }>({ open: false, pos: "bottom-left" });
 
-  const handleStartBlank = useCallback(async () => {
-    try {
-      await fetch("/api/projects", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Blank Project", source: "blank" }),
-      });
-    } catch {
-      // ignore — still proceed to studio
-    }
-    // Force a reload so the connection summary refetches and projectReady becomes true
-    if (typeof window !== "undefined") window.location.reload();
+  const handleStartBlank = useCallback(() => {
+    setActiveTool("build");
+    setLocalDraftActive(true);
   }, []);
 
   // Sync tool to localStorage immediately, and to URL only after the
@@ -239,7 +231,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
           {/* Center workspace — renders active tool full-screen on mobile */}
           <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
-            {!connectionsLoading && !projectReady ? (
+            {!connectionsLoading && !projectReady && !localDraftActive ? (
               <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : isChat ? (
               <ChatTool
