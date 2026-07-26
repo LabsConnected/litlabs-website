@@ -5,6 +5,8 @@
   "tailwindCSS.lint.recommended": false,
   "tailwindCSS.lint.invalidConfigPath": "ignore",
   "tailwindCSS.lint.cssConflict": "ignore",
+  "mssql.intelliSense.enable": false,
+  "sql.validate.enable": false,
   "files.exclude": {
     "**/.git": true,
     "**/node_modules": true,
