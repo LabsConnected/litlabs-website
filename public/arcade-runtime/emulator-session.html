@@ -1,0 +1,179 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>Emulator Session</title>
+  <style>
+    html, body, #game {
+      width: 100%;
+      height: 100%;
+      margin: 0;
+      background: #020204;
+      overflow: hidden;
+    }
+    body { font-family: system-ui, sans-serif; }
+  </style>
+</head>
+<body>
+  <div id="game"></div>
+
+  <!--
+    EmulatorJS 4.2.3 isolated runtime host.
+
+    The parent window injects configuration via URL parameters:
+      ?core=nes          — EJS_core
+      &rom=<blob:url>    — EJS_gameUrl
+      &name=<string>     — EJS_gameName
+      &dataPath=<url>    — EJS_pathtodata (default: /emulatorjs/4.2.3/data/)
+      &cdnTest=1         — use official CDN for diagnostics
+
+    The parent listens for postMessage events from this iframe.
+    All events use { source: "arcade", type: "..." } format.
+  -->
+  <script>
+    (function () {
+      "use strict";
+
+      var params = new URLSearchParams(window.location.search);
+      var core = params.get("core") || "nes";
+      var rom = params.get("rom") || "";
+      var name = params.get("name") || "Game";
+      var dataPath = params.get("dataPath") || "/emulatorjs/4.2.3/data/";
+      var cdnTest = params.get("cdnTest") === "1";
+      var color = params.get("color") || "#6366f1";
+
+      if (cdnTest) {
+        dataPath = "https://cdn.emulatorjs.org/4.2.3/data/";
+      }
+
+      // ─── Post message helper ───────────────────────────────────
+      function send(type, data) {
+        try {
+          parent.postMessage(Object.assign({ source: "arcade", type: type }, data || {}), "*");
+        } catch (e) { /* parent may be gone */ }
+      }
+
+      send("runtime.booting", { core: core, dataPath: dataPath });
+
+      // ─── EmulatorJS configuration ──────────────────────────────
+      window.EJS_player = "#game";
+      window.EJS_core = core;
+      window.EJS_gameUrl = rom;
+      window.EJS_gameName = name;
+      window.EJS_gameID = Math.abs(name.split("").reduce(function (h, c) {
+        h = ((h << 5) - h) + c.charCodeAt(0);
+        return h | 0;
+      }, 0)) || 1;
+      window.EJS_pathtodata = dataPath;
+      window.EJS_startOnLoaded = false;
+      window.EJS_startButtonName = "Start " + name;
+      window.EJS_disableAutoLang = true;
+      window.EJS_backgroundColor = "#020204";
+      window.EJS_alignStartButton = "center";
+      window.EJS_color = color;
+      window.EJS_threads = false;
+      window.EJS_forceLegacyCores = false;
+
+      // ─── Runtime event hooks ───────────────────────────────────
+      // EJS_ready = UI loaded (NOT game started)
+      window.EJS_ready = function () {
+        send("runtime.loader_ready");
+      };
+
+      // EJS_onGameStart = game actually started (canvas rendering)
+      window.EJS_onGameStart = function () {
+        send("runtime.running");
+      };
+
+      // Catch all errors
+      window.addEventListener("error", function (e) {
+        send("runtime.error", {
+          message: (e && e.message) || "emulator error",
+          filename: e && e.filename,
+          lineno: e && e.lineno,
+        });
+      });
+
+      // ─── Loading text observer (supplementary, not primary) ────
+      // We observe the loading text for progress info, but the REAL
+      // state transitions come from EJS_ready and EJS_onGameStart.
+      var lastText = "";
+      var observer = new MutationObserver(function () {
+        var el = document.querySelector(".ejs_loading_text");
+        if (!el) return;
+        var text = (el.innerText || "").trim();
+        if (text && text !== lastText) {
+          lastText = text;
+          send("runtime.progress", { text: text });
+
+          // Infer stage from text for the state machine
+          if (/download.*core/i.test(text)) {
+            send("runtime.core_download_started");
+          } else if (/decompress.*core/i.test(text) && /(\d+)%/.test(text)) {
+            var pct = parseInt(RegExp.$1, 10);
+            send("runtime.core_decompression_progress", { percent: pct });
+            if (pct >= 99) {
+              send("runtime.core_decompression_completed");
+            }
+          }
+        }
+      });
+
+      // Start observing once #game has children
+      function startObserving() {
+        var root = document.getElementById("game");
+        if (root) {
+          observer.observe(root, { subtree: true, childList: true, characterData: true });
+          send("runtime.canvas_created");
+        } else {
+          setTimeout(startObserving, 50);
+        }
+      }
+      startObserving();
+
+      // ─── Load the official loader.js ───────────────────────────
+      send("runtime.preparing_runtime", { dataPath: dataPath });
+
+      var script = document.createElement("script");
+      script.src = dataPath + "loader.js";
+      script.onload = function () {
+        send("runtime.loader_loaded");
+      };
+      script.onerror = function () {
+        send("runtime.error", {
+          message: "loader.js failed to load from " + dataPath,
+        });
+      };
+      document.head.appendChild(script);
+
+      // ─── Heartbeat ─────────────────────────────────────────────
+      var heartbeatInterval = setInterval(function () {
+        send("runtime.heartbeat", { timestamp: Date.now() });
+      }, 5000);
+
+      // ─── Parent command listener ───────────────────────────────
+      window.addEventListener("message", function (event) {
+        if (!event.data || event.data.source !== "arcade-parent") return;
+        var cmd = event.data.type;
+        // Commands: start, pause, resume, reset, fullscreen, save_state, load_state, shutdown
+        if (cmd === "command.start") {
+          try {
+            if (window.EJS_emulator && window.EJS_emulator.start) {
+              window.EJS_emulator.start();
+            }
+          } catch (e) { send("runtime.error", { message: "start failed: " + e.message }); }
+        } else if (cmd === "command.shutdown") {
+          clearInterval(heartbeatInterval);
+          observer.disconnect();
+          try {
+            if (window.EJS_emulator && window.EJS_emulator.exit) {
+              window.EJS_emulator.exit();
+            }
+          } catch (e) { /* ignore */ }
+        }
+      });
+    })();
+  </script>
+</body>
+</html>
