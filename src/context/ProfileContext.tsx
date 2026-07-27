@@ -10,7 +10,7 @@ import {
   ReactNode,
 } from "react";
 import { useAppUser } from "@/hooks/useClerkAuth";
-import type { WallpaperId } from "@/lib/wallpapers";
+import type { WallpaperId, WallpaperEffect } from "@/lib/wallpapers";
 
 export type { WallpaperId } from "@/lib/wallpapers";
 
@@ -46,6 +46,7 @@ export interface UserProfile {
   wallpaperFit: "cover" | "contain" | "fill";
   wallpaperOverlay: number;
   wallpaperBlur: number;
+  wallpaperEffect: WallpaperEffect;
   sidebarStyle: "compact" | "comfortable" | "spacious";
   accentColor: string;
 }
@@ -69,6 +70,7 @@ const defaultProfile: UserProfile = {
   wallpaperFit: "cover",
   wallpaperOverlay: 0.46,
   wallpaperBlur: 0,
+  wallpaperEffect: "constellation",
   sidebarStyle: "comfortable",
   accentColor: "#fbbf24",
 };

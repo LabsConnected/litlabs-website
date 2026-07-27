@@ -2635,3 +2635,143 @@ main {
     box-shadow: -8px 0 32px rgba(0,0,0,0.5) !important;
   }
 }
+
+/* ============================================================
+   WALLPAPER EFFECTS — overlay layers rendered on top of the
+   wallpaper image. Controlled by profile.wallpaperEffect.
+   Respects prefers-reduced-motion.
+   ============================================================ */
+
+.wallpaper-effect {
+  opacity: 0.55;
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+.wallpaper-effect-none {
+  display: none;
+}
+
+.wallpaper-effect-constellation {
+  background-image:
+    radial-gradient(circle at 15% 20%, rgba(255, 255, 255, 0.55) 0 1px, transparent 2px),
+    radial-gradient(circle at 70% 35%, rgba(139, 92, 246, 0.65) 0 1px, transparent 2px),
+    radial-gradient(circle at 40% 75%, rgba(48, 231, 255, 0.5) 0 1px, transparent 2px),
+    radial-gradient(circle at 85% 80%, rgba(255, 255, 255, 0.4) 0 1px, transparent 2px);
+  background-size:
+    180px 180px,
+    240px 240px,
+    320px 320px,
+    420px 420px;
+  animation: litt-constellation-drift 40s linear infinite;
+}
+
+.wallpaper-effect-nebula {
+  background:
+    radial-gradient(circle at 20% 25%, rgba(157, 78, 221, 0.28), transparent 35%),
+    radial-gradient(circle at 80% 35%, rgba(48, 231, 255, 0.2), transparent 30%),
+    radial-gradient(circle at 60% 80%, rgba(236, 72, 153, 0.22), transparent 32%);
+  filter: blur(40px);
+  animation: litt-nebula-pulse 14s ease-in-out infinite alternate;
+}
+
+.wallpaper-effect-waves {
+  background:
+    repeating-radial-gradient(
+      ellipse at bottom,
+      transparent 0,
+      transparent 24px,
+      rgba(48, 231, 255, 0.06) 25px,
+      transparent 27px
+    );
+  transform: scale(1.2);
+  animation: litt-wave-shift 18s linear infinite;
+}
+
+.wallpaper-effect-minimal {
+  background:
+    linear-gradient(
+      115deg,
+      rgba(255, 255, 255, 0.03),
+      transparent 35%,
+      rgba(139, 92, 246, 0.05)
+    );
+}
+
+.wallpaper-effect-holo {
+  background:
+    linear-gradient(
+      90deg,
+      transparent,
+      rgba(48, 231, 255, 0.06),
+      transparent
+    ),
+    repeating-linear-gradient(
+      0deg,
+      rgba(255, 255, 255, 0.025) 0,
+      rgba(255, 255, 255, 0.025) 1px,
+      transparent 1px,
+      transparent 4px
+    );
+  animation: litt-holo-scan 8s linear infinite;
+}
+
+@keyframes litt-constellation-drift {
+  from {
+    background-position:
+      0 0,
+      0 0,
+      0 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      180px 90px,
+      -240px 120px,
+      320px -160px,
+      -420px 210px;
+  }
+}
+
+@keyframes litt-nebula-pulse {
+  from {
+    opacity: 0.35;
+    transform: scale(1);
+  }
+
+  to {
+    opacity: 0.7;
+    transform: scale(1.08);
+  }
+}
+
+@keyframes litt-wave-shift {
+  from {
+    background-position: 0 0;
+  }
+
+  to {
+    background-position: 0 180px;
+  }
+}
+
+@keyframes litt-holo-scan {
+  from {
+    background-position:
+      -100vw 0,
+      0 0;
+  }
+
+  to {
+    background-position:
+      100vw 0,
+      0 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .wallpaper-effect {
+    animation: none !important;
+  }
+}

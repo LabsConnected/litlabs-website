@@ -1,5 +1,6 @@
-// Beautiful AI-generated style wallpapers using CSS only
-// Each wallpaper is designed to look like AI art
+// Beautiful AI-generated style wallpapers.
+// 3 use real .webp assets (afterglow, liquid-signal, biolume-canopy).
+// The rest are CSS-only gradients — no missing image URLs, no broken icons.
 
 export type WallpaperId =
   | 'default' | 'gradient' | 'mesh' | 'dark' | 'custom'
@@ -8,14 +9,70 @@ export type WallpaperId =
   | 'ocean' | 'forest' | 'cosmic' | 'minimal' | 'glass'
   | 'lava' | 'crystal' | 'tokyo' | 'solar' | 'honeycomb';
 
+export type WallpaperCategory =
+  | 'all' | 'abstract' | 'nature' | 'tech' | 'minimal'
+  | 'space' | 'retro' | 'luxury';
+
+export type WallpaperEffect =
+  | 'none' | 'constellation' | 'nebula' | 'waves' | 'minimal' | 'holo';
+
 export interface Wallpaper {
   id: WallpaperId;
   name: string;
   description: string;
-  category: 'abstract' | 'nature' | 'tech' | 'minimal';
+  category: WallpaperCategory;
+  /** Additional categories for multi-category filtering. */
+  categories?: WallpaperCategory[];
   preview: string; // CSS for preview
   fullStyle: React.CSSProperties; // Full page styles
   requiresCustom?: boolean;
+  /** True when this wallpaper uses a real image asset (not CSS-only). */
+  hasAsset?: boolean;
+  /** Accent color for UI highlights when this wallpaper is active. */
+  accent?: string;
+  /** Premium flag for badge display. */
+  premium?: boolean;
+  /** Tags for search and display. */
+  tags?: string[];
+  /** Default effect to apply when this wallpaper is selected. */
+  defaultEffect?: WallpaperEffect;
+}
+
+/**
+ * Fallback gradient shown when a wallpaper image fails to load.
+ * Never displays a broken-image icon — callers should use this
+ * in the onError handler of <img>/<Image> or as a CSS fallback.
+ */
+export const WALLPAPER_FALLBACK_GRADIENT =
+  'linear-gradient(135deg, #0a0a0f 0%, #111118 50%, #0a0a0f 100%)';
+
+/**
+ * Returns true if a wallpaper ID points to a real image asset
+ * (vs. a CSS-only gradient wallpaper).
+ */
+export function hasImageAsset(id: WallpaperId): boolean {
+  const wp = getWallpaperById(id);
+  return Boolean(wp.hasAsset);
+}
+
+/**
+ * Returns all categories that should appear in the filter bar,
+ * derived from the wallpapers actually in the registry.
+ */
+export function getAvailableCategories(): WallpaperCategory[] {
+  const seen = new Set<WallpaperCategory>();
+  for (const w of WALLPAPERS) {
+    seen.add(w.category);
+    if (w.categories) {
+      for (const c of w.categories) seen.add(c);
+    }
+  }
+  // Always include 'all' first
+  const result: WallpaperCategory[] = ['all'];
+  for (const cat of ['abstract', 'nature', 'tech', 'minimal', 'space', 'retro', 'luxury'] as WallpaperCategory[]) {
+    if (seen.has(cat)) result.push(cat);
+  }
+  return result;
 }
 
 export const WALLPAPERS: Wallpaper[] = [
@@ -24,39 +81,56 @@ export const WALLPAPERS: Wallpaper[] = [
     name: 'LiTT Afterglow',
     description: 'Violet auroras over a city of tomorrow',
     category: 'tech',
+    categories: ['all', 'tech', 'space'],
     preview: 'linear-gradient(180deg, transparent 35%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(115deg, rgba(2, 3, 14, .48), rgba(2, 3, 14, .16) 58%, rgba(2, 3, 14, .38)), url("/wallpapers/litt-afterglow.webp")',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed',
-    }
+    },
+    hasAsset: true,
+    accent: '#8b5cf6',
+    premium: true,
+    tags: ['city', 'future', 'violet', 'cyberpunk', 'cinematic'],
+    defaultEffect: 'constellation',
   },
   {
     id: 'liquid-signal',
     name: 'Liquid Signal',
     description: 'Iridescent glass sculpted in deep space',
     category: 'abstract',
+    categories: ['all', 'abstract', 'space'],
     preview: 'linear-gradient(180deg, transparent 35%, rgba(0, 0, 0, .35)), url("/wallpapers/liquid-signal.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(110deg, rgba(0, 0, 0, .46), rgba(0, 0, 0, .12) 62%, rgba(0, 0, 0, .32)), url("/wallpapers/liquid-signal.webp")',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed',
-    }
+    },
+    hasAsset: true,
+    accent: '#ec4899',
+    tags: ['glass', 'liquid', 'pink', 'cyan', 'premium'],
+    defaultEffect: 'nebula',
   },
   {
     id: 'biolume-canopy',
     name: 'Biolume Canopy',
     description: 'A quiet world glowing beyond midnight',
     category: 'nature',
+    categories: ['all', 'nature', 'tech'],
     preview: 'linear-gradient(180deg, transparent 35%, rgba(1, 8, 20, .38)), url("/wallpapers/biolume-canopy.webp") center / cover no-repeat',
     fullStyle: {
       backgroundImage: 'linear-gradient(110deg, rgba(1, 7, 18, .48), rgba(1, 7, 18, .12) 58%, rgba(1, 7, 18, .4)), url("/wallpapers/biolume-canopy.webp")',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed',
-    }
+    },
+    hasAsset: true,
+    accent: '#10b981',
+    premium: true,
+    tags: ['forest', 'emerald', 'organic', 'circuit', 'mystical'],
+    defaultEffect: 'minimal',
   },
   {
     id: 'default',
@@ -109,7 +183,8 @@ export const WALLPAPERS: Wallpaper[] = [
     id: 'cyberpunk',
     name: 'Cyberpunk City',
     description: 'Neon grid with synthwave vibes',
-    category: 'tech',
+    category: 'retro',
+    categories: ['all', 'retro', 'tech'],
     preview: 'repeating-linear-gradient(0deg, transparent, transparent 40px, #ff00ff10 40px, #ff00ff10 41px), repeating-linear-gradient(90deg, transparent, transparent 40px, #00ffff10 40px, #00ffff10 41px), linear-gradient(180deg, #1a0a1a 0%, #0a1a2e 100%)',
     fullStyle: {
       background: `
@@ -158,7 +233,8 @@ export const WALLPAPERS: Wallpaper[] = [
     id: 'sunset',
     name: 'Golden Hour',
     description: 'Warm orange-pink sunset gradient',
-    category: 'nature',
+    category: 'retro',
+    categories: ['all', 'retro', 'nature'],
     preview: 'linear-gradient(135deg, #7c2d12 0%, #c2410c 50%, #fb923c 100%)',
     fullStyle: {
       background: `
@@ -200,7 +276,8 @@ export const WALLPAPERS: Wallpaper[] = [
     id: 'cosmic',
     name: 'Starfield',
     description: 'Deep space with star dots',
-    category: 'abstract',
+    category: 'space',
+    categories: ['all', 'space', 'abstract'],
     preview: 'radial-gradient(circle, white 1px, transparent 1px), #0a0a15',
     fullStyle: {
       background: `
@@ -301,7 +378,8 @@ export const WALLPAPERS: Wallpaper[] = [
     id: 'honeycomb',
     name: 'Honeycomb Drip',
     description: 'Hexagonal honeycomb pattern with amber glow',
-    category: 'abstract',
+    category: 'luxury',
+    categories: ['all', 'luxury', 'abstract'],
     preview: 'repeating-conic-gradient(from 30deg at 50% 50%, #f59e0b10 0deg 60deg, transparent 60deg 120deg), #0d0a05',
     fullStyle: {
       background: `
@@ -327,6 +405,10 @@ export const getWallpaperById = (id: WallpaperId): Wallpaper => {
   return WALLPAPERS.find(w => w.id === id) || WALLPAPERS[0];
 };
 
-export const getWallpapersByCategory = (category: Wallpaper['category']) => {
-  return WALLPAPERS.filter(w => w.category === category && w.id !== 'custom');
+export const getWallpapersByCategory = (category: WallpaperCategory) => {
+  if (category === 'all') return WALLPAPERS.filter(w => w.id !== 'custom');
+  return WALLPAPERS.filter(w =>
+    w.id !== 'custom' &&
+    (w.category === category || (w.categories?.includes(category) ?? false))
+  );
 };

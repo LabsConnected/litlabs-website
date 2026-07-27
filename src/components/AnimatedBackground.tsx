@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
-import { getWallpaperById } from "@/lib/wallpapers";
+import { getWallpaperById, WALLPAPER_FALLBACK_GRADIENT } from "@/lib/wallpapers";
 
 interface Orb {
   x: number;
@@ -68,10 +68,17 @@ export default function AnimatedBackground() {
   const wallpaper = getWallpaperById(profile.wallpaper);
   const customWallpaper = profile.wallpaper === "custom" && profile.customWallpaperUrl;
   const showWallpaper = profile.wallpaper !== "mesh" && (profile.wallpaper !== "custom" || customWallpaper);
+  const wallpaperEffect = profile.wallpaperEffect ?? "none";
+  const [imageFailed, setImageFailed] = useState(false);
 
   useEffect(() => {
     colorsRef.current = resolvedColors;
   }, [resolvedColors]);
+
+  // Reset image-failed flag whenever the wallpaper selection changes
+  useEffect(() => {
+    setImageFailed(false);
+  }, [profile.wallpaper, profile.customWallpaperUrl]);
 
   useEffect(() => {
     if (mode !== "constellation") return;
@@ -433,24 +440,37 @@ export default function AnimatedBackground() {
           style={{
             zIndex: 0,
             backgroundColor: resolvedColors.bgColor,
-            ...(customWallpaper
-              ? {
-                  backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
-                  backgroundSize: profile.wallpaperFit,
-                  backgroundPosition: "center",
-                  backgroundAttachment: "fixed",
-                }
-              : wallpaper.fullStyle),
+            // If the image failed to load, use the fallback gradient.
+            // Never display a broken-image icon.
+            ...(imageFailed
+              ? { background: WALLPAPER_FALLBACK_GRADIENT }
+              : customWallpaper
+                ? {
+                    backgroundImage: `linear-gradient(rgba(3,7,18,.34), rgba(3,7,18,.58)), url(${profile.customWallpaperUrl})`,
+                    backgroundSize: profile.wallpaperFit,
+                    backgroundPosition: "center",
+                    backgroundAttachment: "fixed",
+                  }
+                : wallpaper.fullStyle),
             backgroundSize: profile.wallpaperFit,
             filter: profile.wallpaperBlur > 0 ? `blur(${profile.wallpaperBlur}px)` : undefined,
             transform: profile.wallpaperBlur > 0 ? "scale(1.03)" : undefined,
             transition: "background 0.5s ease",
           }}
+          onError={() => setImageFailed(true)}
         >
           <div
             className="absolute inset-0"
             style={{ backgroundColor: `rgba(2, 4, 10, ${profile.wallpaperOverlay})` }}
           />
+          {/* Effect overlay layer — rendered on top of the wallpaper image.
+              CSS classes defined in globals.css. Respects prefers-reduced-motion. */}
+          {wallpaperEffect !== "none" && !imageFailed && (
+            <div
+              className={`absolute inset-0 wallpaper-effect wallpaper-effect-${wallpaperEffect}`}
+              aria-hidden="true"
+            />
+          )}
         </div>
       ) : mode === "constellation" ? (
         <canvas

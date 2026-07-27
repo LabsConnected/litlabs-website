@@ -2,28 +2,56 @@
 
 import { useState, useCallback, useRef } from "react";
 import { useProfile } from "@/context/ProfileContext";
-import { WALLPAPERS, getWallpaperById, type WallpaperId } from "@/lib/wallpapers";
+import {
+  WALLPAPERS,
+  getWallpaperById,
+  getAvailableCategories,
+  WALLPAPER_FALLBACK_GRADIENT,
+  type WallpaperId,
+  type WallpaperCategory,
+  type WallpaperEffect,
+} from "@/lib/wallpapers";
 import { Check, Upload, X, Sparkles } from "lucide-react";
 import Link from "next/link";
 
-const CATEGORIES = ["all", "abstract", "nature", "tech", "minimal"] as const;
+const EFFECTS: { id: WallpaperEffect; label: string }[] = [
+  { id: "none", label: "None" },
+  { id: "constellation", label: "Constellation" },
+  { id: "nebula", label: "Nebula" },
+  { id: "waves", label: "Waves" },
+  { id: "minimal", label: "Minimal" },
+  { id: "holo", label: "Holo" },
+];
 
 export function WallpaperSection() {
   const { profile, updateProfile } = useProfile();
-  const [category, setCategory] = useState<(typeof CATEGORIES)[number]>("all");
+  const [category, setCategory] = useState<WallpaperCategory>("all");
   const overlayOpacity = profile.wallpaperOverlay;
   const blurPx = profile.wallpaperBlur;
   const fit = profile.wallpaperFit;
+  const effect = profile.wallpaperEffect ?? "none";
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState<string | null>(null);
+  const [failedPreviews, setFailedPreviews] = useState<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  const categories = getAvailableCategories();
 
   const wallpapers = category === "all"
     ? WALLPAPERS.filter((w) => w.id !== "custom")
-    : WALLPAPERS.filter((w) => w.category === category && w.id !== "custom");
+    : WALLPAPERS.filter((w) =>
+        w.id !== "custom" &&
+        (w.category === category || (w.categories?.includes(category) ?? false))
+      );
 
   const handleSelect = useCallback((id: WallpaperId) => {
-    updateProfile({ wallpaper: id, customWallpaperUrl: null });
+    const wp = getWallpaperById(id);
+    updateProfile({
+      wallpaper: id,
+      customWallpaperUrl: null,
+      // Apply the wallpaper's default effect when switching, if it has one
+      ...(wp.defaultEffect ? { wallpaperEffect: wp.defaultEffect } : {}),
+    });
   }, [updateProfile]);
 
   const handleRemove = useCallback(() => {
@@ -74,7 +102,7 @@ export function WallpaperSection() {
     <div className="space-y-4">
       {/* Category tabs */}
       <div className="flex flex-wrap gap-2">
-        {CATEGORIES.map((cat) => (
+        {categories.map((cat) => (
           <button
             key={cat}
             type="button"
@@ -95,6 +123,7 @@ export function WallpaperSection() {
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
         {wallpapers.map((wp) => {
           const isActive = profile.wallpaper === wp.id;
+          const previewFailed = failedPreviews.has(wp.id);
           return (
             <button
               key={wp.id}
@@ -105,10 +134,37 @@ export function WallpaperSection() {
                 borderColor: isActive ? "rgba(245,158,11,0.4)" : "rgba(255,255,255,0.06)",
               }}
             >
-              <div className="absolute inset-0" style={{ background: wp.preview }} />
+              {/* Preview layer — uses CSS background. If the wallpaper has
+                  a real image asset and it fails, fall back to gradient. */}
+              <div
+                className="absolute inset-0"
+                style={{
+                  background: previewFailed
+                    ? WALLPAPER_FALLBACK_GRADIENT
+                    : wp.preview,
+                }}
+                onError={() => {
+                  // Mark this preview as failed so we show the fallback
+                  // gradient instead of a broken-image icon.
+                  if (wp.hasAsset && !previewFailed) {
+                    setFailedPreviews((prev) => new Set(prev).add(wp.id));
+                  }
+                }}
+              />
               <div className="absolute inset-0 bg-linear-to-t from-black/60 to-transparent" />
+              {wp.premium && (
+                <span
+                  className="absolute right-2 top-2 rounded-full px-1.5 py-0.5 text-[8px] font-bold"
+                  style={{
+                    backgroundColor: "rgba(139,92,246,0.8)",
+                    color: "#fff",
+                  }}
+                >
+                  PREMIUM
+                </span>
+              )}
               {isActive && (
-                <span className="absolute right-2 top-2 flex h-5 w-5 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(245,158,11,0.2)" }}>
+                <span className="absolute left-2 top-2 flex h-5 w-5 items-center justify-center rounded-full" style={{ backgroundColor: "rgba(245,158,11,0.2)" }}>
                   <Check size={12} className="text-amber-400" />
                 </span>
               )}
@@ -204,6 +260,28 @@ export function WallpaperSection() {
                 }}
               >
                 {f}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Background effect */}
+        <div>
+          <span className="text-[10px] font-bold uppercase tracking-wider text-white/40">Background effect</span>
+          <div className="mt-1.5 flex flex-wrap gap-2">
+            {EFFECTS.map((eff) => (
+              <button
+                key={eff.id}
+                type="button"
+                onClick={() => updateProfile({ wallpaperEffect: eff.id })}
+                className="rounded-lg border px-3 py-1.5 text-[10px] font-bold capitalize transition-all"
+                style={{
+                  borderColor: effect === eff.id ? "rgba(245,158,11,0.3)" : "rgba(255,255,255,0.06)",
+                  backgroundColor: effect === eff.id ? "rgba(245,158,11,0.06)" : "transparent",
+                  color: effect === eff.id ? "#f59e0b" : "rgba(255,255,255,0.5)",
+                }}
+              >
+                {eff.label}
               </button>
             ))}
           </div>
