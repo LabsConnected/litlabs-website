@@ -87,6 +87,78 @@ function detectBrowser(): string {
 
 // ─── Cache cleanup (preserved from prior implementation) ─────────
 
+// ─── BS-X BIOS IndexedDB persistence ──────────────────────────────
+// Stores the user's legally-obtained BS-X.bin in IndexedDB so they
+// don't have to re-select it every time they launch a Satellaview title.
+
+const BIOS_DB_NAME = "litt-arcade-bios";
+const BIOS_STORE = "bios";
+const BIOS_KEY = "bsx";
+
+async function storeBiosInIndexedDB(name: string, dataUrl: string): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(BIOS_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(BIOS_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      const tx = db.transaction(BIOS_STORE, "readwrite");
+      tx.objectStore(BIOS_STORE).put({ name, dataUrl, savedAt: Date.now() }, BIOS_KEY);
+      tx.oncomplete = () => { db.close(); resolve(); };
+      tx.onerror = () => { db.close(); reject(tx.error); };
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function loadBiosFromIndexedDB(): Promise<{ name: string; dataUrl: string } | null> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(BIOS_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(BIOS_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction(BIOS_STORE, "readonly");
+        const getReq = tx.objectStore(BIOS_STORE).get(BIOS_KEY);
+        getReq.onsuccess = () => {
+          db.close();
+          resolve(getReq.result ?? null);
+        };
+        getReq.onerror = () => { db.close(); reject(getReq.error); };
+      } catch {
+        db.close();
+        resolve(null);
+      }
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function clearBiosFromIndexedDB(): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(BIOS_DB_NAME, 1);
+    req.onupgradeneeded = () => {
+      req.result.createObjectStore(BIOS_STORE);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      try {
+        const tx = db.transaction(BIOS_STORE, "readwrite");
+        tx.objectStore(BIOS_STORE).delete(BIOS_KEY);
+        tx.oncomplete = () => { db.close(); resolve(); };
+        tx.onerror = () => { db.close(); reject(tx.error); };
+      } catch {
+        db.close();
+        resolve();
+      }
+    };
+    req.onerror = () => reject(req.error);
+  });
+}
+
 async function clearEmulatorCache(): Promise<{ cleared: string[]; error?: string }> {
   const cleared: string[] = [];
   try {
@@ -318,13 +390,31 @@ export default function RetroPlayerPage() {
       color: system?.color ?? "#a78bfa",
       legacy: useLegacy ? "1" : "0",
     });
+    // Pass BIOS URL for Satellaview/BS-X titles
+    if (biosDataUrl) {
+      searchParams.set("bios", biosDataUrl);
+    }
     if (runtimeSource === "official-fallback") searchParams.set("cdnTest", "1");
     return `${EMULATOR_SESSION_HOST}?${searchParams.toString()}`;
-  }, [romDataUrl, game, ejsCore, useLegacy, activeDataPath, runtimeSource, system]);
+  }, [romDataUrl, game, ejsCore, useLegacy, activeDataPath, runtimeSource, system, biosDataUrl]);
 
   // ─── Bridge + watchdog setup ───────────────────────────────────
   const handleWatchdogFired = useCallback((fired: WatchdogFired) => {
     setFailureCode(fired.failureCode);
+
+    // Special message for no-video timeout — the most common cause
+    // is a missing BIOS for Satellaview/BS-X titles
+    if (fired.failureCode === "FIRST_FRAME_TIMEOUT") {
+      const biosHint = isSatellaview && !biosDataUrl
+        ? " This is a Satellaview (BS-X) title that requires the BS-X BIOS. Load BS-X.bin from the BIOS panel to launch it."
+        : " The ROM may require a BIOS, another core, or additional subsystem support.";
+      setEmulatorError(
+        `Game core started but produced no video within 8 seconds.${biosHint}`,
+      );
+      setSessionState("failed");
+      return;
+    }
+
     setEmulatorError(
       `Watchdog fired: ${fired.stage} (${fired.failureCode}). Last evidence: "${fired.lastEvidence}". Elapsed: ${fired.elapsedMs}ms.`,
     );
@@ -352,7 +442,7 @@ export default function RetroPlayerPage() {
     } else {
       setSessionState("failed");
     }
-  }, [attempt, ejsCore, useLegacy]);
+  }, [attempt, ejsCore, useLegacy, isSatellaview, biosDataUrl]);
 
   // Create bridge + watchdog instances
   useEffect(() => {
@@ -395,18 +485,27 @@ export default function RetroPlayerPage() {
       setCanvasCreated(true);
     });
 
-    // First frame
+    // First frame — the REAL "running" signal.
+    // EJS_onGameStart fires when the core starts, but the game may
+    // produce no video (e.g. missing BIOS). Only mark "running" after
+    // the canvas has non-zero dimensions (actual pixels rendered).
     const unsubFrame = bridge.on("runtime.first_frame", () => {
       setFirstFrameObserved(true);
-    });
-
-    // Running — EJS_onGameStart (authoritative)
-    const unsubRun = bridge.on("runtime.running", () => {
       watchdog.stopAll();
       setSessionState("running");
       setProgressText(null);
-      // Start heartbeat watchdog
       watchdog.start("heartbeat", "running");
+    });
+
+    // Running — EJS_onGameStart (core started, but video not confirmed yet)
+    // Transition to "waiting_for_first_frame" and start an 8s watchdog.
+    // If no video frame appears within 8s, show a compatibility error.
+    const unsubRun = bridge.on("runtime.running", () => {
+      setSessionState("waiting_for_first_frame");
+      setProgressText("Waiting for video…");
+      // 8s no-video watchdog — if no first_frame event, the ROM may
+      // require a BIOS, another core, or additional subsystem support.
+      watchdog.start("first_frame", "waiting_for_first_frame");
     });
 
     // Paused
@@ -596,9 +695,16 @@ export default function RetroPlayerPage() {
     if (!file) return;
     try {
       const b64 = await readRomAsBase64(file);
-      setBiosDataUrl(`data:application/octet-stream;base64,${b64}`);
+      const dataUrl = `data:application/octet-stream;base64,${b64}`;
+      setBiosDataUrl(dataUrl);
       setBiosName(file.name);
       setEmulatorError(null);
+      // Persist to IndexedDB so the user doesn't have to re-pick it
+      try {
+        await storeBiosInIndexedDB(file.name, dataUrl);
+      } catch {
+        // IndexedDB failure is non-fatal — BIOS works for this session
+      }
     } catch (reason) {
       setEmulatorError(reason instanceof Error ? reason.message : "Could not read BIOS file.");
     }
@@ -607,6 +713,8 @@ export default function RetroPlayerPage() {
   function clearBios() {
     setBiosDataUrl(null);
     setBiosName(null);
+    // Also remove from IndexedDB
+    void clearBiosFromIndexedDB().catch(() => {});
   }
 
   async function enterFullscreen() {
@@ -622,6 +730,19 @@ export default function RetroPlayerPage() {
   const biosRequired = isSatellaview && !biosDataUrl;
   const canLaunch = !biosRequired;
   const isRunning = sessionState === "running";
+
+  // Auto-load BIOS from IndexedDB when a Satellaview title is detected
+  // so the user doesn't have to re-pick it every time
+  useEffect(() => {
+    if (!isSatellaview || biosDataUrl) return;
+    let cancelled = false;
+    void loadBiosFromIndexedDB().then((stored) => {
+      if (cancelled || !stored) return;
+      setBiosDataUrl(stored.dataUrl);
+      setBiosName(stored.name);
+    }).catch(() => { /* non-fatal */ });
+    return () => { cancelled = true; };
+  }, [isSatellaview, biosDataUrl]);
   const isError = sessionState === "failed" || sessionState === "stopped";
   const isLoadingState =
     sessionState === "checking_assets" ||

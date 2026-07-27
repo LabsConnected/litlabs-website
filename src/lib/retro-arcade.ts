@@ -206,7 +206,27 @@ export async function readRomAsBase64(rom: Blob): Promise<string> {
   return btoa(binary);
 }
 
+/**
+ * Detect Satellaview / BS-X content.
+ * Uses filename pattern matching (the ROM header for BS-X is not
+ * reliably distinguishable from normal SNES ROMs in the SNES header
+ * format, so filename heuristics are the primary signal).
+ *
+ * Matches:
+ * - File extensions: .bs, .bsa
+ * - Filename patterns: "BS Mario", "BS-X", "Satellaview", "BSX"
+ * - The common "(J)" + "BS" prefix pattern used in BS-X ROM dumps
+ */
 export function detectSatellaview(fileName: string): boolean {
   const lower = fileName.toLowerCase();
-  return lower.endsWith(".bs") || lower.endsWith(".bsa") || lower.endsWith(".fig") || lower.includes("satellaview") || lower.includes("bs-x") || lower.includes("bsx");
+  // File extensions unique to Satellaview
+  if (lower.endsWith(".bs") || lower.endsWith(".bsa")) return true;
+  // Explicit keywords
+  if (lower.includes("satellaview")) return true;
+  if (lower.includes("bs-x")) return true;
+  if (lower.includes("bsx")) return true;
+  // "BS " prefix pattern — e.g. "BS Mario Collection", "BS Zelda"
+  // Match "bs " at start or after a separator, followed by a word char
+  if (/(^|[\s._-])bs[\s._-]/i.test(lower)) return true;
+  return false;
 }

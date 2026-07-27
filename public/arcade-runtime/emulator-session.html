@@ -86,6 +86,7 @@
       var cdnTest = params.get("cdnTest") === "1";
       var color = params.get("color") || "#6366f1";
       var legacy = params.get("legacy") === "1";
+      var bios = params.get("bios") || "";
 
       if (cdnTest) {
         dataPath = "https://cdn.emulatorjs.org/4.2.3/data/";
@@ -118,6 +119,13 @@
       window.EJS_color = color;
       window.EJS_threads = false;
       window.EJS_forceLegacyCores = legacy;
+
+      // BIOS URL — passed from parent for Satellaview/BS-X titles
+      // that require BS-X.bin. The URL is a blob: or data: URL created
+      // by the parent from a user-selected file. Stays in browser only.
+      if (bios) {
+        window.EJS_biosUrl = bios;
+      }
 
       // Fix file:/// security errors — EmulatorJS may try to load
       // save files or BIOS from file:// paths. Force all paths to

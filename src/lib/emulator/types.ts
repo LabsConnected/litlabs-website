@@ -224,7 +224,7 @@ export const DEFAULT_WATCHDOG_CONFIG: WatchdogConfig = {
   coreDecompression: 20_000,
   wasmInitialization: 20_000,
   romMount: 10_000,
-  firstFrame: 15_000,
+  firstFrame: 8_000,           // 8s — no video = compatibility error
   heartbeatAfterRunning: 10_000,
 };
 
