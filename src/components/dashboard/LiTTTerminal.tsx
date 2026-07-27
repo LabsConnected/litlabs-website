@@ -202,11 +202,11 @@ function AudioBars() {
     return () => clearInterval(interval);
   }, []);
   return (
-    <div className="flex items-end gap-[2px] h-4">
+    <div className="flex items-end gap-0.5 h-4">
       {bars.map((h, i) => (
         <div
           key={i}
-          className="w-[2px] bg-[#00ff9d] transition-all duration-100"
+          className="w-0.5 bg-[#00ff9d] transition-all duration-100"
           style={{ height: `${h}px`, opacity: 0.5 + h / 40 }}
         />
       ))}
@@ -214,7 +214,7 @@ function AudioBars() {
   );
 }
 
-function buildBootLogs(userName = "Member"): LogEntry[] {
+function buildBootLogs(_userName = "Member"): LogEntry[] {
   const bootLogs: LogEntry[] = [
     {
       id: uid(),
@@ -250,14 +250,12 @@ function buildBootLogs(userName = "Member"): LogEntry[] {
       agentName: agent.name,
     });
   });
-  bootLogs.push({
-    id: uid(),
-    timestamp: getTimestamp(),
-    type: "success",
-    text: `WELCOME BACK, ${userName.toUpperCase()}. ALL AGENTS NOMINAL. AWAITING COMMAND.`,
-  });
+  // (Removed 2026-07-26: fake "ALL AGENTS NOMINAL. AWAITING COMMAND." success
+  // line. The terminal now waits for a real capability snapshot from
+  // /api/system/capabilities before claiming anything about system state.)
   return bootLogs;
 }
+
 
 export default function LiTTTerminal() {
   const { resolvedColors: T } = useTheme();
@@ -356,7 +354,7 @@ export default function LiTTTerminal() {
           ? String(window.innerHeight - rect.top + 6)
           : undefined,
         width: String(Math.min(320, window.innerWidth - 16)),
-        maxHeight: "240",
+        maxHeight: "240px",
         overflowY: "auto",
         zIndex: "9999",
       });
@@ -1055,9 +1053,11 @@ export default function LiTTTerminal() {
     }
   };
 
-  const agentList = Object.values(REAL_AGENTS);
-  const onlineCount = agentList.filter((a) => a.status === "online").length;
+  // (Removed 2026-07-26: hardcoded "online count" was derived from a STATIC
+  // field on the AGENTS constant, not a live infrastructure check. The
+  // dashboard now shows no count until /api/system/capabilities is wired.)
   return (
+
     <div
       className={`relative flex flex-col h-full gap-2 overflow-hidden ${flicker ? "brightness-125" : ""} transition-all duration-75`}
     >
@@ -1096,19 +1096,11 @@ export default function LiTTTerminal() {
           <span className="text-xs font-mono uppercase tracking-[0.2em] font-bold text-white">
             LiTT<span className="text-[#00ff9d]">.MAD</span>
           </span>
-          <span
-            className="w-2 h-2 rounded-full animate-pulse"
-            style={{
-              backgroundColor: T.success,
-              boxShadow: `0 0 8px ${T.success}`,
-            }}
-          />
-          <span
-            className="hidden sm:inline text-[10px] font-mono uppercase"
-            style={{ color: T.success }}
-          >
-            NEURAL LINK ACTIVE
-          </span>
+          {/* (Removed 2026-07-26: hardcoded "NEURAL LINK ACTIVE" status text and
+              the static "{onlineCount} ACTIVE" badge. The status bar now
+              reflects the live capability snapshot from /api/system/capabilities
+              once that route is wired. The "LiTT.MAD" wordmark and the
+              resource toggles below remain.) */}
         </div>
         <div className="flex items-center gap-3 sm:gap-5 text-[10px] font-mono">
           <AudioBars />
@@ -1124,12 +1116,7 @@ export default function LiTTTerminal() {
               {stats.mem.toFixed(1)} GB
             </span>
           </div>
-          <div className="flex items-center gap-1.5">
-            <Bot size={10} className="text-[#00b8ff]" />
-            <span className="font-bold text-[#00b8ff] drop-shadow-[0_0_4px_rgba(0,184,255,0.5)]">
-              {onlineCount} ACTIVE
-            </span>
-          </div>
+
           <button
             onClick={() => setTtsEnabled((v) => !v)}
             className="transition-opacity hover:opacity-100"
@@ -1158,7 +1145,7 @@ export default function LiTTTerminal() {
               typeof document !== "undefined" &&
               createPortal(
                 <div
-                  className="fixed rounded-lg border border-white/10 overflow-hidden shadow-xl z-50 min-w-[220px] max-h-[240px] overflow-y-auto"
+                  className="fixed rounded-lg border border-white/10 overflow-hidden shadow-xl z-50 min-w-55 max-h-60 overflow-y-auto"
                   style={{
                     backgroundColor: "rgba(10,15,20,0.95)",
                     backdropFilter: "blur(12px)",
@@ -1495,7 +1482,7 @@ export default function LiTTTerminal() {
                 e.preventDefault();
                 handleMicPointerUp();
               }}
-              className={`p-3 sm:p-2.5 rounded-md transition-all select-none touch-manipulation min-w-[44px] min-h-[44px] flex items-center justify-center ${isListening ? "bg-[#ff0055]/20 text-[#ff0055] ring-2 ring-[#ff0055]/30" : "text-white/40 hover:text-[#00ff9d] hover:bg-white/5"}`}
+              className={`p-3 sm:p-2.5 rounded-md transition-all select-none touch-manipulation min-w-11 min-h-11 flex items-center justify-center ${isListening ? "bg-[#ff0055]/20 text-[#ff0055] ring-2 ring-[#ff0055]/30" : "text-white/40 hover:text-[#00ff9d] hover:bg-white/5"}`}
               style={{
                 WebkitTapHighlightColor: "transparent",
               }}
@@ -1508,7 +1495,7 @@ export default function LiTTTerminal() {
             </button>
             <button
               onClick={toggleCamera}
-              className={`p-3 sm:p-2.5 rounded-md transition-all min-w-[44px] min-h-[44px] flex items-center justify-center ${cameraOn ? "bg-[#00b8ff]/20 text-[#00b8ff]" : "text-white/40 hover:text-[#00ff9d] hover:bg-white/5"}`}
+              className={`p-3 sm:p-2.5 rounded-md transition-all min-w-11 min-h-11 flex items-center justify-center ${cameraOn ? "bg-[#00b8ff]/20 text-[#00b8ff]" : "text-white/40 hover:text-[#00ff9d] hover:bg-white/5"}`}
               aria-label="Toggle camera"
             >
               <Camera size={20} />
@@ -1516,7 +1503,7 @@ export default function LiTTTerminal() {
             <button
               onClick={sendMessage}
               disabled={isProcessing}
-              className="p-3 sm:p-2.5 rounded-md bg-[#00ff9d]/10 text-[#00ff9d] hover:bg-[#00ff9d]/20 transition-all disabled:opacity-30 min-w-[44px] min-h-[44px] flex items-center justify-center"
+              className="p-3 sm:p-2.5 rounded-md bg-[#00ff9d]/10 text-[#00ff9d] hover:bg-[#00ff9d]/20 transition-all disabled:opacity-30 min-w-11 min-h-11 flex items-center justify-center"
               aria-label="Send message"
             >
               <Send size={20} />

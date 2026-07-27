@@ -21,7 +21,6 @@ import {
 } from "lucide-react";
 import {
   detectSatellaview,
-  EMULATOR_CORE_BY_SYSTEM,
   getRetroGame,
   getRetroSystem,
   readRomAsBase64,
@@ -320,11 +319,9 @@ export default function RetroPlayerPage() {
   }, [params.gameId]);
 
   const system = game ? getRetroSystem(game.system) : null;
-  const isSnes = game?.system === "snes";
+  // Map our system IDs to EmulatorJS core names.
   // SNES default is snes9x (the only SNES core shipped in EmulatorJS 4.2.3).
   // bsnes is NOT in 4.2.3 — never auto-switch to it.
-  const emulatorCore = coreOverride ?? (game ? EMULATOR_CORE_BY_SYSTEM[game.system] : "snes");
-  // Map our system IDs to EmulatorJS core names.
   const ejsCore = useMemo(() => {
     if (coreOverride) return coreOverride;
     if (!game) return "snes";
