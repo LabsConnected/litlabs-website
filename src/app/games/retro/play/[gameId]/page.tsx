@@ -40,8 +40,8 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v3";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v4";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -49,8 +49,12 @@ const STALL_TIMEOUT_MS = 15_000;
 // still fail immediately on a worker-error event.
 const FINALIZATION_GRACE_MS = 30_000;
 const CORE_MIN_BYTES = 800_000;
-// 7z archive signature: 37 7A BC AF 27 1C
+// Archive signatures for EmulatorJS core .data files.
+// Cores were originally 7z but have been repackaged as zip to work around
+// a 7z decompression worker bug that stalls at 99% indefinitely.
+// 7z: 37 7A BC AF 27 1C  |  zip: 50 4B 03 04
 const SEVEN_Z_SIGNATURE = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];
+const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 
 // Single source of truth for which NES cores may be offered in the UI.
 // A core is only "available" if its *-wasm.data asset actually shipped.
@@ -198,6 +202,19 @@ function hasSevenZSignature(buffer: ArrayBuffer): boolean {
   return true;
 }
 
+function hasZipSignature(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < ZIP_SIGNATURE.length) return false;
+  const view = new Uint8Array(buffer, 0, ZIP_SIGNATURE.length);
+  for (let i = 0; i < ZIP_SIGNATURE.length; i++) {
+    if (view[i] !== ZIP_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+function hasValidArchiveSignature(buffer: ArrayBuffer): boolean {
+  return hasSevenZSignature(buffer) || hasZipSignature(buffer);
+}
+
 function looksLikeHtml(buffer: ArrayBuffer): boolean {
   if (buffer.byteLength > 1024 * 1024) return false;
   const head = new TextDecoder().decode(new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 512))).toLowerCase();
@@ -280,12 +297,12 @@ async function verifyEmulatorAssets(core: string, dataPath: string): Promise<Ass
         continue;
       }
       if (check.isCore) {
-        const validSig = hasSevenZSignature(buffer);
+        const validSig = hasValidArchiveSignature(buffer);
         entry.validSignature = validSig;
         if (!validSig) {
           const view = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 8));
           const hex = Array.from(view).map((b) => b.toString(16).padStart(2, "0")).join(" ");
-          entry.error = `Missing 7z archive signature. First bytes: ${hex}`;
+          entry.error = `Missing archive signature (7z or zip). First bytes: ${hex}`;
           results.push(entry);
           if (allOk) firstFailure = { url: check.url, reason: entry.error };
           allOk = false;
@@ -1038,9 +1055,10 @@ export default function RetroPlayerPage() {
                       Try {altNesCore === "fceumm" ? "FCEUmm" : "Nestopia"}
                     </button>
                   )}
-                  {/* Phase 6: controlled CDN fallback. Only show when self-hosted
-                      assets failed AND we are not already on the fallback. */}
-                  {runtimeSource === "self-hosted" && assetCheck && !assetCheck.ok && (
+                  {/* Phase 6: controlled CDN fallback. Show whenever the
+                      emulator errors and we're not already on the fallback,
+                      so the user can test whether the CDN runtime works. */}
+                  {runtimeSource === "self-hosted" && (
                     <button
                       onClick={useOfficialRuntime}
                       className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-[10px] font-bold text-violet-200 hover:bg-violet-400/10"
@@ -1107,7 +1125,7 @@ export default function RetroPlayerPage() {
                         <span className="truncate">{c.label}</span>
                         <span className="ml-auto text-white/40">
                           {c.status ?? "—"} · {c.bytes?.toLocaleString() ?? "—"} B
-                          {c.validSignature === false ? " · bad sig" : c.validSignature === true ? " · 7z ok" : ""}
+                          {c.validSignature === false ? " · bad sig" : c.validSignature === true ? " · archive ok" : ""}
                         </span>
                       </div>
                     ))}

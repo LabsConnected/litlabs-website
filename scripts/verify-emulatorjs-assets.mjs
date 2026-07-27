@@ -27,6 +27,7 @@ const DATA_DIR = join(REPO_ROOT, "public", "emulatorjs", "4.2.3", "data");
 const EXPECTED_VERSION = "4.2.3";
 
 const SEVEN_Z_SIGNATURE = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];
+const ZIP_SIGNATURE = [0x50, 0x4b, 0x03, 0x04];
 const CORE_MIN_BYTES = 800_000;
 
 // Runtime + compression files with per-file minimums.
@@ -65,6 +66,18 @@ function hasSevenZSignature(buffer) {
     if (buffer[i] !== SEVEN_Z_SIGNATURE[i]) return false;
   }
   return true;
+}
+
+function hasZipSignature(buffer) {
+  if (buffer.length < ZIP_SIGNATURE.length) return false;
+  for (let i = 0; i < ZIP_SIGNATURE.length; i++) {
+    if (buffer[i] !== ZIP_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+function hasValidArchiveSignature(buffer) {
+  return hasSevenZSignature(buffer) || hasZipSignature(buffer);
 }
 
 function looksLikeHtml(buffer) {
@@ -114,11 +127,11 @@ function verifyFile(rel, minBytes, requireArchiveSignature) {
   }
   if (looksLikeHtml(buffer)) return fail(rel, "File contains an HTML error document");
   if (looksLikeGitLfsPointer(buffer)) return fail(rel, "File contains a Git LFS pointer");
-  if (requireArchiveSignature && !hasSevenZSignature(buffer)) {
+  if (requireArchiveSignature && !hasValidArchiveSignature(buffer)) {
     const hex = Array.from(buffer.subarray(0, 8))
       .map((b) => b.toString(16).padStart(2, "0"))
       .join(" ");
-    return fail(rel, `Missing 7z archive signature. First bytes: ${hex}`);
+    return fail(rel, `Missing archive signature (7z or zip). First bytes: ${hex}`);
   }
   return pass(rel, buffer.length, sha256(buffer));
 }
@@ -155,7 +168,7 @@ function main() {
   if (!verifyVersion()) ok = false;
 
   console.log("");
-  console.log("Core packages (require 7z signature + >= 800,000 bytes):");
+  console.log("Core packages (require zip/7z signature + >= 800,000 bytes):");
   for (const core of REQUIRED_CORES) {
     const rel = `cores/${core}-wasm.data`;
     if (!verifyFile(rel, CORE_MIN_BYTES, true)) ok = false;

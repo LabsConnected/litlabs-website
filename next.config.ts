@@ -180,8 +180,9 @@ const nextConfig: NextConfig = {
           },
         ],
       },
-      // Versioned EmulatorJS runtime assets — immutable, same-origin only.
-      // Cores (.data) are 7z archives; .wasm must be served as application/wasm.
+      // Versioned EmulatorJS runtime assets — immutable.
+      // NOTE: CORP same-origin was removed — it may block the 7z decompression
+      // worker from reading responses inside the srcdoc iframe in some browsers.
       // Missing files must return a real 404, never an HTML fallback.
       {
         source: "/emulatorjs/:path*",
@@ -189,10 +190,6 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=31536000, immutable",
-          },
-          {
-            key: "Cross-Origin-Resource-Policy",
-            value: "same-origin",
           },
         ],
       },
