@@ -8,6 +8,8 @@ type TerminalTokenPayload = {
   aud: typeof TOKEN_AUDIENCE;
   iat: number;
   exp: number;
+  wid?: string; // workspaceId (optional, for project-bound sessions)
+  pid?: string; // projectId (optional, for project-bound sessions)
 };
 
 function getTerminalSecret(): string {
@@ -22,7 +24,10 @@ function sign(encodedPayload: string, secret: string): string {
   return createHmac("sha256", secret).update(encodedPayload).digest("base64url");
 }
 
-export function createTerminalToken(userId: string): {
+export function createTerminalToken(
+  userId: string,
+  options?: { workspaceId?: string; projectId?: string },
+): {
   token: string;
   expiresAt: number;
 } {
@@ -33,6 +38,8 @@ export function createTerminalToken(userId: string): {
     iat: now,
     exp: now + TOKEN_TTL_SECONDS,
   };
+  if (options?.workspaceId) payload.wid = options.workspaceId;
+  if (options?.projectId) payload.pid = options.projectId;
   const encodedPayload = Buffer.from(JSON.stringify(payload)).toString("base64url");
   return {
     token: `${encodedPayload}.${sign(encodedPayload, getTerminalSecret())}`,

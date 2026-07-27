@@ -123,3 +123,198 @@ export async function prepareWorkspace(
 export function listWorkspaces(userId: string): WorkspaceDescriptor[] {
   return Array.from(workspaces.values()).filter((workspace) => workspace.userId === userId);
 }
+
+/**
+ * Prepare a blank workspace (no GitHub clone).
+ * Initializes a git repo and writes template files.
+ */
+export async function prepareBlankWorkspace(input: {
+  userId: string;
+  projectId: string;
+  workspaceRoot: string;
+  templateId: string;
+}): Promise<WorkspaceDescriptor> {
+  const workspaceId = `ws-${input.projectId.slice(0, 8)}-${randomUUID().slice(0, 8)}`;
+  const root = resolve(input.workspaceRoot, input.userId, workspaceId);
+
+  mkdirSync(root, { recursive: true });
+
+  // Initialize template files
+  writeTemplateFiles(root, input.templateId);
+
+  // Initialize git repo
+  const git: SimpleGit = simpleGit(root);
+  await git.init();
+  await git.addConfig("user.name", "LiTTree Studio");
+  await git.addConfig("user.email", "studio@litree.dev");
+  await git.add(".");
+  await git.commit("Initial blank project from LiTTree Studio template");
+
+  const commitSha = (await git.revparse("HEAD")).trim();
+
+  const descriptor: WorkspaceDescriptor = {
+    workspaceId,
+    userId: input.userId,
+    projectId: input.projectId,
+    root,
+    branch: "main",
+    commitSha,
+    ready: true,
+  };
+
+  workspaces.set(workspaceId, descriptor);
+  persistWorkspaces();
+  return descriptor;
+}
+
+/** Write initial template files for blank projects. */
+function writeTemplateFiles(root: string, templateId: string): void {
+  if (templateId === "blank-static") {
+    writeFileSync(
+      join(root, "index.html"),
+      `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>My Project</title>
+  <style>
+    body { font-family: system-ui, sans-serif; max-width: 800px; margin: 2rem auto; padding: 0 1rem; }
+    h1 { color: #a970ff; }
+  </style>
+</head>
+<body>
+  <h1>Hello from LiTTree Studio</h1>
+  <p>Start building your project here.</p>
+</body>
+</html>
+`,
+      "utf-8",
+    );
+    return;
+  }
+
+  if (templateId === "nextjs") {
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify(
+        {
+          name: "my-project",
+          private: true,
+          scripts: {
+            dev: "next dev",
+            build: "next build",
+            start: "next start",
+            lint: "next lint",
+          },
+          dependencies: { next: "^16.0.0", react: "^19.0.0", "react-dom": "^19.0.0" },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    mkdirSync(join(root, "app"), { recursive: true });
+    writeFileSync(
+      join(root, "app", "page.tsx"),
+      `export default function Home() {
+  return (
+    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>
+      <h1>Hello from LiTTree Studio</h1>
+      <p>Start building your Next.js project here.</p>
+    </main>
+  );
+}
+`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, "app", "layout.tsx"),
+      `export default function RootLayout({ children }: { children: React.ReactNode }) {
+  return (
+    <html lang="en">
+      <body>{children}</body>
+    </html>
+  );
+}
+`,
+      "utf-8",
+    );
+    return;
+  }
+
+  if (templateId === "react-vite") {
+    writeFileSync(
+      join(root, "package.json"),
+      JSON.stringify(
+        {
+          name: "my-project",
+          private: true,
+          type: "module",
+          scripts: {
+            dev: "vite",
+            build: "tsc && vite build",
+            preview: "vite preview",
+          },
+          dependencies: { react: "^19.0.0", "react-dom": "^19.0.0" },
+          devDependencies: {
+            "@vitejs/plugin-react": "^4.3.0",
+            typescript: "^5.6.0",
+            vite: "^6.0.0",
+          },
+        },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, "index.html"),
+      `<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>My Project</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+`,
+      "utf-8",
+    );
+    mkdirSync(join(root, "src"), { recursive: true });
+    writeFileSync(
+      join(root, "src", "main.tsx"),
+      `import { createRoot } from "react-dom/client";
+import App from "./App";
+
+createRoot(document.getElementById("root")!).render(<App />);
+`,
+      "utf-8",
+    );
+    writeFileSync(
+      join(root, "src", "App.tsx"),
+      `export default function App() {
+  return (
+    <main style={{ fontFamily: "system-ui", padding: "2rem" }}>
+      <h1>Hello from LiTTree Studio</h1>
+      <p>Start building your React + Vite project here.</p>
+    </main>
+  );
+}
+`,
+      "utf-8",
+    );
+    return;
+  }
+
+  // Unknown template — create a minimal placeholder
+  writeFileSync(
+    join(root, "README.md"),
+    `# My Project\n\nCreated with LiTTree Studio.\n`,
+    "utf-8",
+  );
+}
