@@ -159,7 +159,7 @@ export default function MultimodalComposer({
       // The caller (MultimodalComposer submit handler) auto-speaks the reply
       // if voice mode is live.
       void onSend(text).then((reply) => {
-        if (reply && voiceMode === "live") {
+        if (reply) {
           speakText(reply);
         }
       });
@@ -263,10 +263,11 @@ export default function MultimodalComposer({
     const reply = await onSend(value, attachments.length ? attachments : undefined);
     onChange("");
     setSnapshots([]);
-    // Auto-speak the AI response when voice mode is active.
-    // speakText now uses browser speechSynthesis (not Inworld response.create),
-    // so the spoken text EXACTLY matches the stored chat message.
-    if (reply && voiceMode === "live" && voiceState !== "idle") {
+    // Auto-speak the AI response — TTS fires on every reply when enabled.
+    // Uses OpenAI TTS (high quality) with browser SpeechSynthesis fallback.
+    // No longer requires voice mode to be "live" — the agent speaks its
+    // responses automatically, matching the demo behavior.
+    if (reply) {
       speakText(reply);
     }
   };

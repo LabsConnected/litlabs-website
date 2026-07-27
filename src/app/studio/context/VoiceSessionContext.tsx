@@ -583,6 +583,13 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const stopSpeaking = useCallback(() => {
+    // Cancel OpenAI TTS audio
+    if (ttsAudioRef.current) {
+      ttsAudioRef.current.pause();
+      ttsAudioRef.current.src = "";
+      ttsAudioRef.current = null;
+    }
+    // Cancel browser SpeechSynthesis
     if (typeof window !== "undefined" && window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
@@ -595,20 +602,18 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
-  // speakText — TTS via browser SpeechSynthesis API.
-  // Does NOT activate the microphone. Does NOT use Inworld's response.create
-  // (which generates a NEW response instead of reading the text verbatim).
-  // This ensures the spoken text EXACTLY matches the stored chat message.
+  // speakText — TTS via OpenAI TTS API (high quality) with browser
+  // SpeechSynthesis fallback. Does NOT activate the microphone.
+  // The spoken text EXACTLY matches the stored chat message.
   // ---------------------------------------------------------------------------
+
+  // Track the current audio element so we can cancel it
+  const ttsAudioRef = useRef<HTMLAudioElement | null>(null);
 
   const speakText = useCallback(
     async (text: string): Promise<void> => {
       if (!text.trim()) return;
       if (!ttsEnabledRef.current) return;
-      if (typeof window === "undefined" || !window.speechSynthesis) {
-        console.warn("[Voice] speechSynthesis not available");
-        return;
-      }
 
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
@@ -619,22 +624,21 @@ export function VoiceSessionProvider({
       voiceStateRef.current = "assistant_speaking";
       setErrorMessage(null);
 
-      window.speechSynthesis.cancel();
-
-      const utterance = new SpeechSynthesisUtterance(sanitized);
       const agentId = useVoiceStore.getState().activeAgent;
-      const voices = window.speechSynthesis.getVoices();
-      if (voices.length > 0) {
-        const preferred = agentId === "spark"
-          ? voices.find((v) => /female|zira|aria|jenny|samantha/i.test(v.name) && v.lang.startsWith("en"))
-          : voices.find((v) => /male|david|mark|alex|daniel|fred/i.test(v.name) && v.lang.startsWith("en"));
-        utterance.voice = preferred ?? voices.find((v) => v.lang === "en-US") ?? voices[0];
+      // OpenAI voice per agent: LiTT = onyx (deep male), Spark = nova (warm female)
+      const openaiVoice = agentId === "spark" ? "nova" : "onyx";
+
+      // Cancel any currently playing TTS
+      if (ttsAudioRef.current) {
+        ttsAudioRef.current.pause();
+        ttsAudioRef.current.src = "";
+        ttsAudioRef.current = null;
       }
-      utterance.lang = "en-US";
-      utterance.rate = agentId === "spark" ? 1.05 : 0.95;
-      utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
+      if (typeof window !== "undefined" && window.speechSynthesis) {
+        window.speechSynthesis.cancel();
+      }
 
-      utterance.onend = () => {
+      const finishSpeaking = () => {
         setVoiceOutputState("idle");
         voiceOutputStateRef.current = "idle";
         if (voiceStateRef.current === "assistant_speaking") {
@@ -643,20 +647,73 @@ export function VoiceSessionProvider({
         }
       };
 
-      utterance.onerror = (e) => {
-        console.warn("[Voice] speechSynthesis error:", e.error);
-        setVoiceOutputState("idle");
-        voiceOutputStateRef.current = "idle";
-        if (voiceStateRef.current === "assistant_speaking") {
-          setVoiceState("idle");
-          voiceStateRef.current = "idle";
-        }
-      };
+      // Try OpenAI TTS first (high quality, natural voice)
+      try {
+        const res = await fetch("/api/voice/tts", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text: sanitized, voice: openaiVoice }),
+        });
 
-      window.speechSynthesis.speak(utterance);
+        if (res.ok) {
+          const data = await res.json();
+          if (data.audioUrl) {
+            const audio = new Audio(data.audioUrl);
+            ttsAudioRef.current = audio;
+            audio.onended = () => {
+              ttsAudioRef.current = null;
+              finishSpeaking();
+            };
+            audio.onerror = () => {
+              console.warn("[Voice] OpenAI TTS audio error, falling back to browser TTS");
+              ttsAudioRef.current = null;
+              browserTtsFallback(sanitized, agentId, finishSpeaking);
+            };
+            await audio.play();
+            return;
+          }
+        }
+        // If OpenAI TTS fails, fall back to browser SpeechSynthesis
+        console.warn("[Voice] OpenAI TTS API failed, using browser fallback");
+        browserTtsFallback(sanitized, agentId, finishSpeaking);
+      } catch (err) {
+        console.warn("[Voice] OpenAI TTS error:", err);
+        browserTtsFallback(sanitized, agentId, finishSpeaking);
+      }
     },
     [],
   );
+
+  // Browser SpeechSynthesis fallback (used when OpenAI TTS is unavailable)
+  function browserTtsFallback(
+    text: string,
+    agentId: string,
+    onEnd: () => void,
+  ): void {
+    if (typeof window === "undefined" || !window.speechSynthesis) {
+      console.warn("[Voice] speechSynthesis not available");
+      onEnd();
+      return;
+    }
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    const voices = window.speechSynthesis.getVoices();
+    if (voices.length > 0) {
+      const preferred = agentId === "spark"
+        ? voices.find((v) => /female|zira|aria|jenny|samantha/i.test(v.name) && v.lang.startsWith("en"))
+        : voices.find((v) => /male|david|mark|alex|daniel|fred/i.test(v.name) && v.lang.startsWith("en"));
+      utterance.voice = preferred ?? voices.find((v) => v.lang === "en-US") ?? voices[0];
+    }
+    utterance.lang = "en-US";
+    utterance.rate = agentId === "spark" ? 1.05 : 0.95;
+    utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
+    utterance.onend = onEnd;
+    utterance.onerror = (e) => {
+      console.warn("[Voice] speechSynthesis error:", e.error);
+      onEnd();
+    };
+    window.speechSynthesis.speak(utterance);
+  }
 
   // ---------------------------------------------------------------------------
   // interrupt
