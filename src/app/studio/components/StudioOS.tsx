@@ -7,6 +7,7 @@ import { useSearchParams, useRouter, usePathname } from "next/navigation";
 import StudioSidebar, { type StudioTool, MobileTabBar } from "./StudioSidebar";
 import StudioTopBar from "./StudioTopBar";
 import StudioOnboarding from "./StudioOnboarding";
+import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
@@ -235,6 +236,14 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
           color: T.textColor,
         }}
       >
+        {/* Autonomic banner — shrink-0 so it takes its natural height
+            without pushing the composer below the viewport. Previously
+            this was rendered in studio/layout.tsx OUTSIDE the h-dvh
+            shell, which clipped the bottom ~36px (the composer). */}
+        <div className="shrink-0">
+          <AutonomicLoopBanner />
+        </div>
+
         <StudioTopBar
           search={search}
           onSearchChange={setSearch}
@@ -259,7 +268,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
           </div>
 
           {/* Center workspace — renders active tool full-screen on mobile */}
-          <main className="relative flex min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
+          <main className="relative flex h-full min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
             {!connectionsLoading && !projectReady && onboardingOpen ? (
               <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : isChat ? (
