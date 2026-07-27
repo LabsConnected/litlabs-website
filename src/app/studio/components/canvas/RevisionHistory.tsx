@@ -42,14 +42,21 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
 
   const handleUndo = async () => {
     try {
-      const res = await fetch(`/api/canvases/${canvasId}/undo`, {
+      // The POST handler on the revisions route performs the undo.
+      // (There is no separate /undo route — it's the same file.)
+      const res = await fetch(`/api/canvases/${canvasId}/revisions`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ actor: "user" }),
       });
       if (!res.ok) throw new Error("Undo failed");
+      const result = await res.json();
       await loadRevisions();
-      onRestore?.(revisions[0]?.version ?? 0);
+      // Use the version from the undo result, not the stale `revisions`
+      // closure value (loadRevisions updates state asynchronously, but
+      // the `revisions` variable in this closure is still the pre-undo
+      // value).
+      onRestore?.(result?.undone?.version ?? 0);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Undo failed");
     }
