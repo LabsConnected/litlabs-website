@@ -220,18 +220,22 @@ const nextConfig: NextConfig = {
           {
             key: "Content-Security-Policy",
             value: [
-              "default-src 'self' blob: data:",
-              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdn.emulatorjs.org",
-              "style-src 'self' 'unsafe-inline' blob: data:",
-              "img-src 'self' blob: data: https://cdn.emulatorjs.org",
-              "font-src 'self' blob: data:",
-              "connect-src 'self' blob: data: https://cdn.emulatorjs.org ws: wss:",
-              "worker-src 'self' blob: data: https://cdn.emulatorjs.org",
-              "frame-src 'self' blob: data:",
-              "media-src 'self' blob: data:",
-              "object-src 'self' blob: data:",
+              "default-src 'self'",
               "base-uri 'self'",
-              "form-action 'self'",
+              "object-src 'none'",
+              // unsafe-eval + wasm-unsafe-eval belong in script-src (NOT
+              // script-src-elem). Firefox ignores them in script-src-elem.
+              // EmulatorJS needs them for WASM compilation + 7z worker.
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data:",
+              "script-src-elem 'self' 'unsafe-inline' blob: data:",
+              "style-src 'self' 'unsafe-inline'",
+              "img-src 'self' blob: data:",
+              "font-src 'self' data:",
+              "connect-src 'self' blob:",
+              "media-src 'self' blob: data:",
+              "worker-src 'self' blob:",
+              "child-src 'self' blob:",
+              "frame-ancestors 'self'",
             ].join("; "),
           },
         ],

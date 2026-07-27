@@ -111,7 +111,12 @@
         return h | 0;
       }, 0)) || 1;
       window.EJS_pathtodata = dataPath;
-      window.EJS_startOnLoaded = true;
+      // CRITICAL: Do NOT autostart. EmulatorJS warns that
+      // EJS_startOnLoaded = true may freeze until the user interacts
+      // with the page. An iframe navigation does not reliably preserve
+      // the original click as user activation. Let EmulatorJS show its
+      // real start button — the user clicks it manually.
+      window.EJS_startOnLoaded = false;
       window.EJS_startButtonName = "Start " + name;
       window.EJS_disableAutoLang = true;
       window.EJS_backgroundColor = "#020204";
@@ -365,32 +370,80 @@
           filename: e && e.filename,
           lineno: e && e.lineno,
           colno: e && e.colno,
+          stack: (e && e.error && e.error.stack) || null,
           source: "window.error",
         });
       });
 
       window.addEventListener("unhandledrejection", function (e) {
         var msg = "Unhandled promise rejection";
+        var stack = null;
         if (e && e.reason) {
           msg += ": " + (e.reason.message || String(e.reason));
+          stack = e.reason.stack || null;
         }
-        send("runtime.error", { message: msg, source: "unhandledrejection" });
+        send("runtime.error", { message: msg, stack: stack, source: "unhandledrejection" });
       });
 
-      // ─── Load the official loader.js ───────────────────────────
+      // ─── ROM preflight validation ──────────────────────────────
+      // Verify the ROM blob URL is fetchable and has non-trivial size
+      // BEFORE loading loader.js. This catches revoked blob URLs and
+      // empty/corrupt ROMs early, with a clear error message.
+      async function preflightRom() {
+        if (!rom) {
+          send("runtime.error", { message: "No ROM URL provided", source: "rom_preflight" });
+          return false;
+        }
+        try {
+          var response = await fetch(rom);
+          if (!response.ok) {
+            send("runtime.error", {
+              message: "ROM request failed: " + response.status,
+              source: "rom_preflight",
+            });
+            return false;
+          }
+          var buf = await response.arrayBuffer();
+          if (buf.byteLength < 512) {
+            send("runtime.error", {
+              message: "ROM is empty or invalid: " + buf.byteLength + " bytes",
+              source: "rom_preflight",
+            });
+            return false;
+          }
+          send("runtime.rom_ready", { bytes: buf.byteLength, core: core });
+          return true;
+        } catch (err) {
+          send("runtime.error", {
+            message: "ROM preflight fetch failed: " + (err && err.message || err),
+            source: "rom_preflight",
+          });
+          return false;
+        }
+      }
+
+      // ─── Load the official loader.js (after ROM preflight) ───────
       send("runtime.preparing_runtime", { dataPath: dataPath });
 
-      var script = document.createElement("script");
-      script.src = dataPath + "loader.js";
-      script.onload = function () {
-        send("runtime.loader_loaded");
-      };
-      script.onerror = function () {
-        send("runtime.error", {
-          message: "loader.js failed to load from " + dataPath,
-        });
-      };
-      document.head.appendChild(script);
+      function loadLoader() {
+        var script = document.createElement("script");
+        script.src = dataPath + "loader.js";
+        script.onload = function () {
+          send("runtime.loader_loaded");
+        };
+        script.onerror = function () {
+          send("runtime.error", {
+            message: "loader.js failed to load from " + dataPath,
+          });
+        };
+        document.head.appendChild(script);
+      }
+
+      // Run ROM preflight first, then load loader.js.
+      // If preflight fails, the error is already reported — don't load.
+      preflightRom().then(function (ok) {
+        if (ok) loadLoader();
+      });
 
       // ─── Heartbeat ─────────────────────────────────────────────
       // Sent every 5s so the parent can detect iframe crashes.

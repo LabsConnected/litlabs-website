@@ -33,7 +33,8 @@ export type RuntimeEventType =
   | "runtime.error"
   | "runtime.exited"
   | "runtime.heartbeat"
-  | "runtime.dom_diagnostics";
+  | "runtime.dom_diagnostics"
+  | "runtime.rom_ready";
 
 export interface RuntimeEvent {
   source: "arcade";
@@ -52,6 +53,11 @@ export interface RuntimeEvent {
   canvas?: { width: number; height: number; parentTag: string; parentClass: string } | null;
   contextType?: string | null;
   bodyChildren?: number;
+  // rom_ready fields
+  bytes?: number;
+  // error fields
+  stack?: string | null;
+  colno?: number;
 }
 
 // ─── Parent → Iframe commands ────────────────────────────────────

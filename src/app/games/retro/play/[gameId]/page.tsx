@@ -517,7 +517,9 @@ export default function RetroPlayerPage() {
     const unsubErr = bridge.on("runtime.error", (event) => {
       watchdog.stopAll();
       const msg = event.message ?? "Unknown runtime error";
-      setEmulatorError(msg);
+      // Include stack trace in diagnostics for real debugging
+      const stack = event.stack ? `\n\nStack: ${event.stack}` : "";
+      setEmulatorError(`${msg}${stack}`);
       setFailureCode("UNKNOWN_RUNTIME_ERROR");
       if (shouldFallbackOnFailure("UNKNOWN_RUNTIME_ERROR") && hasMoreAttempts(attempt)) {
         setSessionState("recovering");
@@ -583,6 +585,11 @@ export default function RetroPlayerPage() {
       setDomDiagnostics(`#game children=${event.gameChildren} htmlLen=${event.gameInnerHTMLLen} | ${canvasStr}`);
     });
 
+    // ROM preflight passed — ROM blob is valid and fetchable
+    const unsubRomReady = bridge.on("runtime.rom_ready", (event) => {
+      setProgressText(`ROM verified (${event.bytes} bytes)`);
+    });
+
     return () => {
       unsubAll();
       unsubBoot();
@@ -600,6 +607,7 @@ export default function RetroPlayerPage() {
       unsubDcStart();
       unsubHb();
       unsubDomDiag();
+      unsubRomReady();
     };
   }, [attempt, ejsCore, useLegacy, handleWatchdogFired]);
 
