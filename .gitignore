@@ -5,6 +5,10 @@
 .env.vercel-secrets
 .sb_anon_key
 
+# Devin CLI — personal overrides only (rest of .devin/ is committed)
+.devin/config.local.json
+.devin/*.local.json
+
 # Dependencies
 /node_modules
 **/node_modules

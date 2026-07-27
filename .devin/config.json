@@ -1,0 +1,58 @@
+{
+  "$schema": "https://static.devin.ai/cli/config.schema.json",
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Exec(pnpm)",
+      "Exec(npx)",
+      "Exec(node)",
+      "Exec(git)",
+      "Exec(npm run)",
+      "Exec(pnpm run)",
+      "Exec(pnpm dev)",
+      "Exec(pnpm build)",
+      "Exec(pnpm lint)",
+      "Exec(pnpm test)",
+      "Exec(pnpm typecheck)",
+      "Exec(npx tsc)",
+      "Exec(npx eslint)",
+      "Exec(npx next)",
+      "Exec(npx vitest)",
+      "Exec(rg)",
+      "Exec(supabase)",
+      "Fetch(domain:supabase.co)",
+      "Fetch(domain:clerk.com)",
+      "Fetch(domain:vercel.com)",
+      "Fetch(domain:github.com)",
+      "Fetch(domain:litlabs.net)"
+    ],
+    "deny": [
+      "Exec(rm -rf)",
+      "Exec(rm -rf /)",
+      "Exec(git push --force)",
+      "Exec(git push -f)",
+      "Exec(git reset --hard)",
+      "Exec(git clean -fd)",
+      "Write(.env*)",
+      "Write(.env.local)",
+      "Write(**/.env*)",
+      "Write(**/secrets/**)",
+      "Write(.git/**)",
+      "Write(supabase/schema.sql)"
+    ],
+    "ask": [
+      "Write(**)",
+      "Exec(git push)",
+      "Exec(git commit)",
+      "Exec(docker)",
+      "Exec(supabase db reset)",
+      "Exec(supabase migration)"
+    ]
+  },
+  "mcpServers": {},
+  "read_config_from": {
+    "cursor": true,
+    "windsurf": true,
+    "claude": true
+  }
+}
