@@ -46,7 +46,7 @@ const NavAuth = dynamic(
 );
 
 /* ------------------------------------------------------------------ */
-/*  Primary nav links ΓÇö ALL surfaced, no hidden dropdown               */
+/*  Primary nav links — ALL surfaced, no hidden dropdown               */
 /* ------------------------------------------------------------------ */
 const leftNavLinks = [
   { href: "/", label: "Home", icon: Home },
@@ -54,6 +54,8 @@ const leftNavLinks = [
   { href: "/studio", label: "Studio", icon: Wand2 },
   { href: "/gallery", label: "Gallery", icon: Sparkles },
   { href: "/marketplace", label: "Marketplace", icon: ShoppingBag },
+  { href: "/games", label: "Games", icon: Gamepad2 },
+  { href: "/social", label: "Community", icon: MessageCircle },
   { href: "/pricing", label: "Pricing", icon: Sparkles },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
@@ -91,7 +93,7 @@ function WalletBadge({ accentColor }: { accentColor: string }) {
       }}
       title="Your LiTTBits balance"
     >
-      <Coins size={10} /> {isLoading ? "ΓÇö" : balance.toLocaleString()}
+      <Coins size={10} /> {isLoading ? "—" : balance.toLocaleString()}
     </span>
   );
 }
@@ -213,7 +215,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
             >
               <Image
                 src="/logo.png"
-                alt="LiTTree-LabStudios"
+                alt="LiTTree LabStudios"
                 fill
                 className="object-contain p-0.5"
                 unoptimized
@@ -233,7 +235,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                   textShadow: `0 0 12px ${resolvedColors.accentColor}60, 0 1px 2px ${resolvedColors.bgColor}`,
                 }}
               >
-                LiTTree-LabStudios
+                LiTTree LabStudios
               </span>
               <span
                 className="text-[9px] font-bold tracking-widest uppercase"
@@ -287,12 +289,12 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
 
           {/* Right side */}
           <div className="flex items-center gap-2">
-            {/* LitCoins wallet ΓÇö only when signed in */}
+            {/* LitCoins wallet — only when signed in */}
             {authLoaded && isSignedIn && (
               <WalletBadge accentColor={resolvedColors.accentColor} />
             )}
 
-            {/* Agents ΓÇö dedicated quick-access icon on the far right */}
+            {/* Agents — dedicated quick-access icon on the far right */}
             <Link
               href={agentsLink.href}
               className="hidden sm:flex w-9 h-9 items-center justify-center rounded-lg transition-all duration-200 hover:scale-110"
@@ -396,12 +398,12 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
                             }}
                           >
                             {n.type === "follow"
-                              ? "≡ƒæñ"
+                              ? "👤"
                               : n.type === "like"
-                                ? "Γ¥ñ"
+                                ? "♥"
                                 : n.type === "comment"
-                                  ? "≡ƒÆ¼"
-                                  : "≡ƒöö"}
+                                  ? "💬"
+                                  : "🔔"}
                           </div>
                           <div className="flex-1 min-w-0">
                             <div
@@ -446,7 +448,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               {theme.mode === "dark" ? <Sun size={16} /> : <Moon size={16} />}
             </button>
 
-            {/* User dropdown (profile/settings links) ΓÇö desktop, signed-in only */}
+            {/* User dropdown (profile/settings links) — desktop, signed-in only */}
             {authLoaded && isSignedIn && (
               <div className="hidden md:block relative" ref={userRef}>
                 <button
@@ -513,7 +515,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
               </div>
             )}
 
-            {/* Auth ΓÇö always visible: avatar+name when signed in, Sign In button when not */}
+            {/* Auth — always visible: avatar+name when signed in, Sign In button when not */}
             <NavAuth linkColor={resolvedColors.accentColor} />
 
             {/* Mobile hamburger */}
@@ -535,7 +537,7 @@ export default function Navbar({ onMenuClick }: { onMenuClick?: () => void }) {
         </div>
       </div>
 
-      {/* Mobile drawer ΓÇö slide down from nav bottom */}
+      {/* Mobile drawer — slide down from nav bottom */}
       {mobileOpen && (
         <>
           {/* Tap-outside scrim */}
