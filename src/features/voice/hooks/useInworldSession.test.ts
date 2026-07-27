@@ -20,8 +20,8 @@ class MockWebSocket {
   onmessage: ((ev: { data: string }) => void) | null = null;
   onclose: ((ev: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
-  sent: any[] = [];
-  private listeners: Map<string, Set<(ev: any) => void>> = new Map();
+  sent: Array<Record<string, unknown>> = [];
+  private listeners: Map<string, Set<(ev: { data: string }) => void>> = new Map();
 
   constructor(public url: string) {
     MockWebSocket.instances.push(this);
@@ -35,12 +35,12 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED;
   }
 
-  addEventListener(type: string, listener: (ev: any) => void) {
+  addEventListener(type: string, listener: (ev: { data: string }) => void) {
     if (!this.listeners.has(type)) this.listeners.set(type, new Set());
     this.listeners.get(type)!.add(listener);
   }
 
-  removeEventListener(type: string, listener: (ev: any) => void) {
+  removeEventListener(type: string, listener: (ev: { data: string }) => void) {
     this.listeners.get(type)?.delete(listener);
   }
 
@@ -49,7 +49,7 @@ class MockWebSocket {
     this.readyState = MockWebSocket.OPEN;
     this.onopen?.();
   }
-  __fireMessage(data: any) {
+  __fireMessage(data: unknown) {
     const ev = { data: JSON.stringify(data) };
     this.onmessage?.(ev);
     this.listeners.get("message")?.forEach((fn) => fn(ev));
@@ -70,7 +70,7 @@ class FakeAnalyser {
 }
 
 class FakeScriptProcessor {
-  onaudioprocess: ((e: any) => void) | null = null;
+  onaudioprocess: ((e: { inputBuffer: { getChannelData: () => Float32Array } }) => void) | null = null;
   connect = vi.fn();
   disconnect = vi.fn();
 }
@@ -297,7 +297,7 @@ describe("useInworldSession — TTS state machine", () => {
       // Give the hook a tick to send the messages
       await Promise.resolve();
       await Promise.resolve();
-      types = ws.sent.map((m) => m.type);
+      types = ws.sent.map((m) => m.type as string);
       stateBeforeDone = useVoiceStore.getState().state;
       // Now fire response.done so the promise resolves
       ws.__fireMessage({ type: "response.done" });

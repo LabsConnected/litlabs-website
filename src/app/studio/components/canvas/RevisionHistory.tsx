@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { CanvasRevision } from "@/lib/canvas/types";
 import { cn } from "@/lib/utils";
 
@@ -21,11 +21,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
   const [error, setError] = useState<string | null>(null);
   const [selectedVersion, setSelectedVersion] = useState<number | null>(null);
 
-  useEffect(() => {
-    void loadRevisions();
-  }, [canvasId]);
-
-  const loadRevisions = async () => {
+  const loadRevisions = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
@@ -38,7 +34,11 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
     } finally {
       setLoading(false);
     }
-  };
+  }, [canvasId]);
+
+  useEffect(() => {
+    void loadRevisions();
+  }, [loadRevisions]);
 
   const handleUndo = async () => {
     try {
@@ -176,7 +176,7 @@ export function RevisionHistory({ canvasId, onRestore, onClose }: RevisionHistor
                   <span className="text-white/30"> → {op.blockId.slice(0, 8)}...</span>
                 )}
                 {"newTitle" in op && (
-                  <span className="text-white/30"> → "{op.newTitle}"</span>
+                  <span className="text-white/30"> → &ldquo;{op.newTitle}&rdquo;</span>
                 )}
               </div>
             ))}

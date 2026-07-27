@@ -49,7 +49,7 @@ interface UseInworldSessionReturn {
 export function useInworldSession(
   options: UseInworldSessionOptions = {},
 ): UseInworldSessionReturn {
-  const { onTranscript, onAgentText, onError, onResponseComplete } = options;
+  const { onTranscript, onAgentText: _onAgentText, onError, onResponseComplete } = options;
 
   const setState = useVoiceStore((store) => store.setState);
   const setError = useVoiceStore((store) => store.setError);
@@ -138,6 +138,10 @@ export function useInworldSession(
     }
   }, []);
 
+  // Audio playback queue — currently unused in STT-only mode but kept for
+  // potential future TTS provider integration. eslint-disable to avoid
+  // the unused-var warning.
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
   const enqueueAudioChunk = useCallback(
     (base64Pcm16: string) => {
       if (interruptedRef.current) return;
@@ -633,7 +637,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [enqueueAudioChunk, onError, onAgentText, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
+    [onError, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
   );
 
   const disconnect = useCallback(() => {
