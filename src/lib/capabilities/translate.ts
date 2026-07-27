@@ -57,8 +57,9 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
 
   if (repo === "none" || repo === "not_configured") {
     githubState = "No repository is connected.";
-    githubAction =
-      "Tell the user: \"GitHub is not connected to this workspace yet. Connect a repository to let me inspect files, search the codebase, review changes, and help with commits or pull requests.\" Then offer: [Connect GitHub] or [Start Blank Project].";
+    // Do NOT instruct the LLM to proactively tell the user about GitHub.
+    // Only mention it when the user explicitly asks about code/files/repos.
+    githubAction = "";
   } else if (repo === "connecting" || repo === "validating") {
     githubState = "Repository connection is in progress.";
     githubAction = "Tell the user the connection is being established.";
@@ -75,8 +76,7 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
     githubAction = "Tell the user: \"The repository connection needs attention. Try reconnecting or check permissions.\" Offer: [Repair connection].";
   } else {
     githubState = "No repository is connected.";
-    githubAction =
-      "Tell the user: \"GitHub is not connected to this workspace yet. Connect a repository to let me inspect files, search the codebase, review changes, and help with commits or pull requests.\" Then offer: [Connect GitHub] or [Start Blank Project].";
+    githubAction = "";
   }
 
   // ── Terminal / PTY state ──
@@ -137,12 +137,13 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("");
   parts.push("RULES:");
   parts.push("- Never use internal field names like \"repository capability\", \"repositoryIndexed\", \"terminalExecution\", or raw enum values in conversation.");
-  parts.push("- Always translate state into a clear, user-facing message with one concrete next action.");
   parts.push("- GitHub connection, repository selection, workspace provisioning, file access, indexing, terminal (PTY), and voice are SEPARATE states. Do not blend them.");
   parts.push("- A disconnected terminal does NOT mean GitHub is disconnected.");
   parts.push("- A repository can be usable before indexing finishes. Indexing is optional for basic file access.");
   parts.push("- Never claim you can read files, run commands, access a repository, or use voice/microphone unless the state above explicitly says it is connected and ready.");
   parts.push("- If voice status is unknown, do NOT claim voice is working, good, online, or nominal. Say you don't have live voice status and point to the Settings page.");
+  parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
+  parts.push("- For general conversation (greetings, questions, advice, creative requests), ignore the connection state entirely and answer naturally.");
   parts.push("- If the user wants to see raw diagnostics, they can open the Diagnostics view. Do not dump raw fields in normal conversation.");
 
   return {

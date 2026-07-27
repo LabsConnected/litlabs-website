@@ -691,23 +691,88 @@ export function useInworldSession(
 
       setState("speaking");
 
-      // Send the text as a conversation item, then trigger a response
-      // This makes Inworld TTS speak the text using the configured voice
-      wsRef.current.send(JSON.stringify({
-        type: "conversation.item.create",
-        item: {
-          type: "message",
-          role: "user",
-          content: [{ type: "text", text }],
-        },
-      }));
+      // Inworld TTS rejects text longer than 1000 characters with
+      // "tts_invalid_argument: text length should not exceed 1000 characters".
+      // Split the text into sentence-boundary chunks under 900 chars
+      // (leaving headroom) and send each as its own conversation item +
+      // response.create. The audio chunks arrive sequentially and are
+      // played back in order by the playback queue.
+      const MAX_CHUNK = 900;
+      const cleanText = text.replace(/\s+/g, " ").trim();
+      const chunks: string[] = [];
 
-      wsRef.current.send(JSON.stringify({
-        type: "response.create",
-        response: {
-          modalities: ["audio"],
-        },
-      }));
+      if (cleanText.length <= MAX_CHUNK) {
+        chunks.push(cleanText);
+      } else {
+        // Split on sentence boundaries first, then hard-wrap if needed
+        const sentences = cleanText.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) ?? [cleanText];
+        let current = "";
+        for (const sentence of sentences) {
+          const s = sentence.trim();
+          if (!s) continue;
+          if ((current + " " + s).trim().length <= MAX_CHUNK) {
+            current = (current + " " + s).trim();
+          } else {
+            if (current) chunks.push(current);
+            if (s.length <= MAX_CHUNK) {
+              current = s;
+            } else {
+              // Hard-wrap a very long sentence
+              for (let i = 0; i < s.length; i += MAX_CHUNK) {
+                chunks.push(s.slice(i, i + MAX_CHUNK));
+              }
+              current = "";
+            }
+          }
+        }
+        if (current) chunks.push(current);
+      }
+
+      // Send each chunk sequentially. Each conversation.item.create +
+      // response.create produces one TTS audio response. The playback
+      // queue plays them in order.
+      for (const chunk of chunks) {
+        if (interruptedRef.current) break;
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) break;
+
+        wsRef.current.send(JSON.stringify({
+          type: "conversation.item.create",
+          item: {
+            type: "message",
+            role: "user",
+            content: [{ type: "text", text: chunk }],
+          },
+        }));
+
+        wsRef.current.send(JSON.stringify({
+          type: "response.create",
+          response: {
+            modalities: ["audio"],
+          },
+        }));
+
+        // Wait for this response to finish before sending the next chunk,
+        // otherwise Inworld may cancel the in-flight TTS.
+        await new Promise<void>((resolve) => {
+          const handler = (event: MessageEvent) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type === "response.done" || data.type === "response.cancelled" || data.type === "error") {
+                wsRef.current?.removeEventListener("message", handler);
+                resolve();
+              }
+            } catch {
+              // ignore
+            }
+          };
+          wsRef.current?.addEventListener("message", handler);
+          // Safety timeout — don't wait forever
+          setTimeout(() => {
+            wsRef.current?.removeEventListener("message", handler);
+            resolve();
+          }, 30_000);
+        });
+      }
     },
     [connect, ensureAudioContextRunning, setError, setState, stopPlayback],
   );

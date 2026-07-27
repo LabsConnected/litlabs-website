@@ -40,8 +40,11 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v9";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v8", "ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+// v10: all cores repackaged as STORE (method 0) zip to bypass the
+//      Emscripten extractzip.js deflate decompression worker bug that
+//      stalls at 99% indefinitely. Cores are larger but extract instantly.
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v10";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v9", "ejs-4.2.3-litt-v8", "ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
