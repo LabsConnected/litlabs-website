@@ -244,7 +244,7 @@ describe("Case 11: Canvas operations are reversible", () => {
     };
     const result = CanvasOperationSchema.safeParse(op);
     expect(result.success).toBe(true);
-    if (result.success) {
+    if (result.success && result.data.op === "block.update") {
       // previousContent must be present for undo to work
       expect(result.data.previousContent).toEqual({ text: "Old" });
     }
@@ -257,7 +257,7 @@ describe("Case 11: Canvas operations are reversible", () => {
     };
     const result = CanvasOperationSchema.safeParse(op);
     expect(result.success).toBe(true);
-    if (result.success) {
+    if (result.success && result.data.op === "canvas.rename") {
       expect(result.data.previousTitle).toBe("Old Title");
     }
   });

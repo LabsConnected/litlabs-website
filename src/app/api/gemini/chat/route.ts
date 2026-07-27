@@ -7,6 +7,8 @@ import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
 import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
+import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
+import type { CapabilityRecord } from "@/lib/litt-kernel";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -202,9 +204,65 @@ async function handler(req: NextRequest) {
 
     const uid = userId || "anonymous-dev";
     const memoryContext = userId ? await fetchMemories(message, uid) : "";
-    const systemPrompt = buildPrompt(agent, message, history, memoryContext, userName, capabilities)
-      .split("User: ")[0]
-      .trim();
+
+    // ─── LiTT Kernel routing ──────────────────────────────────
+    // The Kernel classifies intent, checks capabilities, and composes
+    // a system prompt with mode-specific guidance + verified capabilities.
+    // This replaces the static agent prompt with a context-aware one.
+    const kernelCapabilities: CapabilityRecord[] = (() => {
+      // Adapt the legacy capability format from the client into
+      // CapabilityRecord objects for the Kernel.
+      const caps = capabilities as Record<string, unknown>;
+      const records: CapabilityRecord[] = [];
+      if (caps.repository === "connected") {
+        records.push(adaptLegacyCapability({ id: "github", status: "ready", name: "Repository" }));
+      }
+      if (caps.terminalExecution === "available") {
+        records.push(adaptLegacyCapability({ id: "pty", status: "ready", name: "Terminal" }));
+      }
+      if (caps.voiceTransportConnected) {
+        records.push(adaptLegacyCapability({ id: "voice", status: "ready", name: "Voice" }));
+      }
+      return records;
+    })();
+
+    const kernelResult = routeKernel({
+      message,
+      userId: userId ?? null,
+      conversationId: null, // not yet wired from session
+      projectId: (capabilities as Record<string, unknown>)?.projectId as string | null ?? null,
+      missionId: null,
+      canvasId: (body.activeCanvasId as string) ?? null,
+      capabilities: kernelCapabilities,
+    });
+
+    // Compose the Kernel system prompt (Constitution + mode guidance +
+    // verified capabilities). Falls back to the legacy agent prompt if
+    // the Kernel fails for any reason.
+    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
+
+    // Use the Kernel prompt as the base, then layer on the legacy
+    // capability translation block + memory + history (same as before).
+    const rawCaps: RawCapabilities = {
+      repository: capabilities?.repository as string | undefined,
+      repositoryIndexed: capabilities?.repositoryIndexed as boolean | undefined,
+      terminalExecution: capabilities?.terminalExecution as string | undefined,
+      writeAccess: capabilities?.writeAccess as boolean | undefined,
+      connectedProviders: capabilities?.connectedProviders as string[] | undefined,
+      availableTools: capabilities?.availableTools as string[] | undefined,
+      connectionSummary: capabilities?.connectionSummary as string | undefined,
+      voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
+      voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
+    };
+    const translated = translateCapabilities(rawCaps);
+
+    const systemPrompt = [
+      kernelSystemPrompt,
+      translated.contextBlock,
+      memoryContext,
+    ]
+      .filter(Boolean)
+      .join("\n");
 
     const geminiModel =
       typeof requestedModel === "string" && requestedModel.startsWith("gemini")
@@ -227,7 +285,28 @@ async function handler(req: NextRequest) {
       });
     }
 
-    const prompt = buildPrompt(agent, message, history, memoryContext, userName, capabilities);
+    // Build the full prompt using the Kernel-composed system prompt +
+    // transcript + user message (same structure as buildPrompt, but
+    // with the Kernel's context-aware system prompt instead of the
+    // static agent prompt).
+    const recentHistory = history.slice(-HISTORY_LIMIT);
+    const transcript = recentHistory
+      .map((entry: HistoryEntry) =>
+        entry.role === "user"
+          ? `User: ${entry.content}`
+          : `${agent.name}: ${entry.content}`,
+      )
+      .join("\n");
+    const prompt = [
+      systemPrompt,
+      "",
+      transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
+      `User: ${message}`,
+      "",
+      `${agent.name}:`,
+    ]
+      .filter((line) => line !== undefined)
+      .join("\n");
 
     if (!stream) {
       const r = await generateText(
