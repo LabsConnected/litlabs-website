@@ -474,28 +474,22 @@ export function useInworldSession(
                 break;
 
               case "response.output_audio.delta":
-                // Agent audio chunk — play unless the user interrupted this
-                // specific response. interruptedRef is reset on response.created
-                // and on speech_stopped, so only true barge-ins drop audio.
-                if (!interruptedRef.current) {
-                  if (useVoiceStore.getState().state !== "speaking") {
-                    setState("speaking");
-                  }
-                  enqueueAudioChunk(data.delta);
-                }
+                // STT-only mode: We use Inworld for speech-to-text only.
+                // Drop Inworld's auto-generated audio — TTS is handled by
+                // browser speechSynthesis in VoiceSessionContext, which
+                // reads the EXACT stored chat message verbatim. This
+                // prevents Inworld's agent personality (different from
+                // /api/gemini/chat LiTT) from speaking divergent responses.
                 break;
 
               case "response.output_audio_transcript.delta":
-                // Agent speech transcript (for display)
-                if (data.delta) {
-                  onAgentText?.(data.delta);
-                }
+                // STT-only mode: Drop Inworld's agent response text.
+                // The canonical assistant response comes from /api/gemini/chat
+                // via the onSend pipeline, not from Inworld's agent.
                 break;
 
               case "response.output_text.delta":
-                if (data.delta) {
-                  onAgentText?.(data.delta);
-                }
+                // STT-only mode: Drop Inworld's agent response text.
                 break;
 
               case "response.done":
@@ -888,7 +882,6 @@ PERSONALITY:
 SPEAKING STYLE:
 - Low-key, controlled, precise. Short, clean sentences. Do not ramble.
 - Contractions always. Soft hedges ("kind of", "I guess", "maybe") when thinking.
-- Signature beats: a calm "Connection established" / "I found the problem" / "The build is ready."
 - Never read markdown symbols, URLs, code blocks, or file paths aloud.
 - Summarize technical output before speaking it.
 - Pause briefly before important conclusions.

@@ -263,8 +263,6 @@ export default function ChatTool({
       onDeleteSession={sessionManager.remove}
       onDeleteAllSessions={sessionManager.removeAll}
       capabilities={capabilities}
-      onVoiceUserMessage={handleVoiceUserMessage}
-      onVoiceAssistantMessage={handleVoiceAssistantMessage}
     />
   );
 }

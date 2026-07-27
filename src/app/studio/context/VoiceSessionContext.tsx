@@ -92,8 +92,6 @@ export interface VoiceSessionCtx {
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void) => void;
-  /** Register handler fired when Inworld's agent response text completes. */
-  setOnVoiceResponse: (handler: (text: string) => void) => void;
   toggleTts: () => void;
   toggleHandsFree: () => void;
 }
@@ -134,7 +132,6 @@ const defaultCtx: VoiceSessionCtx = {
   stopSpeaking: noop,
   selectDevice: noop,
   setOnTurn: noop,
-  setOnVoiceResponse: noop,
   toggleTts: noop,
   toggleHandsFree: noop,
 };
@@ -195,18 +192,6 @@ export function VoiceSessionProvider({
   const voiceInputStateRef = useRef<VoiceInputState>("idle");
   const voiceOutputStateRef = useRef<VoiceOutputState>("idle");
   const onTurnRef = useRef<(text: string) => void>(noop);
-  // Accumulates Inworld agent text deltas (from response.output_audio_transcript.delta)
-  // so the full response can be committed to chat when onResponseComplete fires.
-  // This is the Option C path: Inworld generates the response, we route its text
-  // to the same chat store used by typed messages.
-  const voiceResponseBufferRef = useRef("");
-  const onVoiceResponseRef = useRef<(text: string) => void>(noop);
-  // Guards against phantom VAD responses: Inworld's turn_detection with
-  // create_response: true auto-generates responses to ANY detected audio
-  // (background noise, typing, breathing). We only flush the assistant
-  // response to chat if a REAL user turn (non-empty transcript) preceded it.
-  // This prevents LiTT from "saying things the user didn't say."
-  const hadRealUserTurnRef = useRef(false);
   const submittedTranscriptRef = useRef("");
   const sessionGenerationRef = useRef(0);
   // Guards for the single microphone entry point — idempotent against
@@ -239,29 +224,18 @@ export function VoiceSessionProvider({
           setTranscript(trimmed);
           setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
           activeRef.current = false;
-          // Mark that a REAL user turn happened — only then will the
-          // assistant response be flushed to chat. This prevents phantom
-          // VAD responses (background noise) from polluting chat.
-          hadRealUserTurnRef.current = true;
+          // Canonical pipeline: final transcript → onTurn → onSend →
+          // /api/gemini/chat → response stored → speakText (browser TTS).
           onTurnRef.current(trimmed);
-          // Manually trigger Inworld's response since create_response is
-          // false. The user's speech is already in the conversation context
-          // via the committed audio buffer — this just asks Inworld to
-          // generate a response to it.
-          inworldSession.triggerResponse();
           setTiming({ aiResponseCompletedAt: Date.now() });
         }
       } else {
         setTranscript(text);
       }
     };
-    inworldOnAgentTextRef.current = (delta: string) => {
-      // Accumulate Inworld's agent text into the response buffer.
-      // On onResponseComplete, the full text is flushed to chat via
-      // onVoiceResponseRef. This is the Option C path: Inworld generates
-      // the response (STT + LLM + TTS), and we route its text to chat.
-      voiceResponseBufferRef.current += delta;
-      setTranscript((prev) => prev + delta);
+    inworldOnAgentTextRef.current = (_delta: string) => {
+      // STT-only mode: Inworld's agent text is dropped. The canonical
+      // assistant response comes from /api/gemini/chat via onSend.
     };
     inworldOnErrorRef.current = (msg: string) => {
       setVoiceState("error");
@@ -273,26 +247,14 @@ export function VoiceSessionProvider({
       setErrorMessage(msg);
     };
     inworldOnResponseCompleteRef.current = () => {
-      // TTS finished — output returns to idle. The microphone is NOT
-      // auto-started here. Hands-free resume is handled by a separate
-      // effect that checks the user preference.
+      // Inworld's auto-response finished. In STT-only mode we ignore this —
+      // TTS is handled by browser speechSynthesis which has its own onend.
       setVoiceOutputState("idle");
       voiceOutputStateRef.current = "idle";
       if (voiceStateRef.current === "assistant_speaking") {
         setVoiceState("idle");
         voiceStateRef.current = "idle";
       }
-      // Flush the accumulated Inworld agent text to chat — BUT only if a
-      // real user turn preceded this response. Inworld's VAD with
-      // create_response: true auto-generates responses to phantom audio
-      // (background noise, typing). Without this guard, LiTT would "say
-      // things the user didn't say" — generating responses to nothing.
-      const fullResponse = voiceResponseBufferRef.current.trim();
-      voiceResponseBufferRef.current = "";
-      if (fullResponse && hadRealUserTurnRef.current) {
-        onVoiceResponseRef.current(fullResponse);
-      }
-      hadRealUserTurnRef.current = false;
     };
   });
 
@@ -621,56 +583,79 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const stopSpeaking = useCallback(() => {
-    // Inworld manages its own TTS; interrupt() handles stopping via inworldSession.interrupt()
+    if (typeof window !== "undefined" && window.speechSynthesis) {
+      window.speechSynthesis.cancel();
+    }
+    setVoiceOutputState("idle");
+    voiceOutputStateRef.current = "idle";
+    if (voiceStateRef.current === "assistant_speaking") {
+      setVoiceState("idle");
+      voiceStateRef.current = "idle";
+    }
   }, []);
 
   // ---------------------------------------------------------------------------
-  // speakText — TTS only. Does NOT activate the microphone.
+  // speakText — TTS via browser SpeechSynthesis API.
+  // Does NOT activate the microphone. Does NOT use Inworld's response.create
+  // (which generates a NEW response instead of reading the text verbatim).
+  // This ensures the spoken text EXACTLY matches the stored chat message.
   // ---------------------------------------------------------------------------
-  //
-  // The transport is connected on demand (without mic capture) so LiTT can
-  // speak while the microphone stays completely off. The microphone input
-  // state is never touched here.
 
   const speakText = useCallback(
     async (text: string): Promise<void> => {
       if (!text.trim()) return;
       if (!ttsEnabledRef.current) return;
+      if (typeof window === "undefined" || !window.speechSynthesis) {
+        console.warn("[Voice] speechSynthesis not available");
+        return;
+      }
 
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
-      setVoiceOutputState("connecting");
-      voiceOutputStateRef.current = "connecting";
+      setVoiceOutputState("speaking");
+      voiceOutputStateRef.current = "speaking";
       setVoiceState("assistant_speaking");
       voiceStateRef.current = "assistant_speaking";
       setErrorMessage(null);
 
-      try {
-        // speakText on the hook connects the transport if needed (no mic)
-        // and sends the TTS request. The microphone is NOT acquired.
-        await inworldSession.speakText(sanitized);
-        inworldConnectedRef.current = true;
-        setVoiceTransportConnected(true);
-        setVoiceOutputState("speaking");
-        voiceOutputStateRef.current = "speaking";
-      } catch (err) {
-        console.warn("[Voice] speakText failed:", err);
-        inworldConnectedRef.current = false;
-        setVoiceTransportConnected(false);
-        const msg = err instanceof Error ? err.message : "Voice transport is not available.";
-        setVoiceOutputState("error");
-        voiceOutputStateRef.current = "error";
-        // Only surface the error to voiceState if we are not actively
-        // listening — otherwise leave the input state alone.
-        if (voiceInputStateRef.current === "idle") {
-          setVoiceState("error");
-          voiceStateRef.current = "error";
-        }
-        setErrorMessage(msg);
+      window.speechSynthesis.cancel();
+
+      const utterance = new SpeechSynthesisUtterance(sanitized);
+      const agentId = useVoiceStore.getState().activeAgent;
+      const voices = window.speechSynthesis.getVoices();
+      if (voices.length > 0) {
+        const preferred = agentId === "spark"
+          ? voices.find((v) => /female|zira|aria|jenny|samantha/i.test(v.name) && v.lang.startsWith("en"))
+          : voices.find((v) => /male|david|mark|alex|daniel|fred/i.test(v.name) && v.lang.startsWith("en"));
+        utterance.voice = preferred ?? voices.find((v) => v.lang === "en-US") ?? voices[0];
       }
+      utterance.lang = "en-US";
+      utterance.rate = agentId === "spark" ? 1.05 : 0.95;
+      utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
+
+      utterance.onend = () => {
+        setVoiceOutputState("idle");
+        voiceOutputStateRef.current = "idle";
+        if (voiceStateRef.current === "assistant_speaking") {
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
+        }
+      };
+
+      utterance.onerror = (e) => {
+        console.warn("[Voice] speechSynthesis error:", e.error);
+        setVoiceOutputState("idle");
+        voiceOutputStateRef.current = "idle";
+        if (voiceStateRef.current === "assistant_speaking") {
+          setVoiceState("idle");
+          voiceStateRef.current = "idle";
+        }
+      };
+
+      window.speechSynthesis.speak(utterance);
     },
-    [inworldSession],
+    [],
   );
 
   // ---------------------------------------------------------------------------
@@ -706,10 +691,6 @@ export function VoiceSessionProvider({
 
   const setOnTurn = useCallback((handler: (text: string) => void) => {
     onTurnRef.current = handler;
-  }, []);
-
-  const setOnVoiceResponse = useCallback((handler: (text: string) => void) => {
-    onVoiceResponseRef.current = handler;
   }, []);
 
   // ---------------------------------------------------------------------------
@@ -820,7 +801,6 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
-      setOnVoiceResponse,
       toggleTts,
       toggleHandsFree,
     }),
@@ -848,7 +828,6 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
-      setOnVoiceResponse,
       toggleTts,
       toggleHandsFree,
     ],

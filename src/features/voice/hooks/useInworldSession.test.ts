@@ -196,12 +196,12 @@ describe("useInworldSession — TTS state machine", () => {
   });
 
   // ---------------------------------------------------------------------------
-  // CRITICAL REGRESSION TEST: the "TTS goes silent after first turn" bug.
-  // Before the fix, `speech_started` set interruptedRef = true unconditionally
-  // and nothing reset it before the agent's reply audio arrived — so every
-  // response after the first user utterance was silently dropped.
+  // STT-ONLY MODE: Inworld is used for speech-to-text only. Agent audio is
+  // dropped — TTS is handled by browser speechSynthesis in VoiceSessionContext,
+  // which reads the EXACT stored chat message verbatim. These tests verify
+  // that agent audio does NOT trigger playback state.
   // ---------------------------------------------------------------------------
-  it("plays agent audio AFTER speech_started (regression: TTS silent after first turn)", async () => {
+  it("drops agent audio in STT-only mode (no playback state transition)", async () => {
     const onAgentText = vi.fn();
     const { result } = renderHook(() =>
       useInworldSession({ onAgentText }),
@@ -213,22 +213,18 @@ describe("useInworldSession — TTS state machine", () => {
     act(() => ws.__fireMessage({ type: "session.created" }));
     expect(ws.sent.some((m) => m.type === "session.update")).toBe(true);
 
-    // User starts speaking — the hook sets state to "listening".
-    // Before the fix, this also set interruptedRef = true unconditionally,
-    // which would drop the agent's reply audio.
+    // User starts speaking
     act(() => ws.__fireMessage({ type: "input_audio_buffer.speech_started" }));
     expect(useVoiceStore.getState().state).toBe("listening");
 
-    // User stops speaking. interruptedRef must be cleared here so the
-    // upcoming agent response audio is not dropped.
+    // User stops speaking
     act(() => ws.__fireMessage({ type: "input_audio_buffer.speech_stopped" }));
 
-    // Agent response begins — response.created also clears interruptedRef
+    // Agent response begins
     act(() => ws.__fireMessage({ type: "response.created" }));
 
-    // Agent audio chunk arrives — MUST be enqueued (not dropped).
-    // The regression bug would have left interruptedRef = true, causing this
-    // chunk to be silently dropped and state to stay "listening".
+    // Agent audio chunk arrives — MUST be dropped (STT-only mode).
+    // State should NOT transition to "speaking".
     act(() =>
       ws.__fireMessage({
         type: "response.output_audio.delta",
@@ -236,15 +232,14 @@ describe("useInworldSession — TTS state machine", () => {
       }),
     );
 
-    // State MUST transition to "speaking" — proving audio was enqueued.
-    expect(useVoiceStore.getState().state).toBe("speaking");
+    // State stays "listening" (or idle) — NOT "speaking"
+    expect(useVoiceStore.getState().state).not.toBe("speaking");
 
     // Agent response finishes
     act(() => ws.__fireMessage({ type: "response.done" }));
-    expect(useVoiceStore.getState().state).toBe("idle");
   });
 
-  it("drops agent audio when user barge-in interrupts a playing response", async () => {
+  it("drops agent audio on barge-in in STT-only mode (no playback)", async () => {
     const { result } = renderHook(() => useInworldSession({}));
     const ws = await connectAndWait(result);
 
@@ -257,28 +252,27 @@ describe("useInworldSession — TTS state machine", () => {
         delta: btoa("chunk1"),
       }),
     );
-    expect(useVoiceStore.getState().state).toBe("speaking");
+    // STT-only mode: state should NOT be "speaking"
+    expect(useVoiceStore.getState().state).not.toBe("speaking");
 
     // User interrupts via interrupt()
     act(() => result.current.interrupt());
     expect(ws.sent.some((m) => m.type === "response.cancel")).toBe(true);
 
-    // Subsequent audio chunks for the cancelled response MUST be dropped.
-    // State should NOT transition back to "speaking" — it should stay
-    // "interrupted" (set by interrupt()).
+    // Subsequent audio chunks are still dropped
     act(() =>
       ws.__fireMessage({
         type: "response.output_audio.delta",
         delta: btoa("chunk2-late"),
       }),
     );
-    expect(useVoiceStore.getState().state).toBe("interrupted");
+    // State should NOT be "speaking" in STT-only mode
+    expect(useVoiceStore.getState().state).not.toBe("speaking");
 
-    // response.cancelled arrives — resets interrupt for the NEXT response
+    // response.cancelled arrives
     act(() => ws.__fireMessage({ type: "response.cancelled" }));
-    expect(useVoiceStore.getState().state).toBe("idle");
 
-    // A new response starts — audio should play again
+    // A new response starts — audio still dropped
     act(() => ws.__fireMessage({ type: "response.created" }));
     act(() =>
       ws.__fireMessage({
@@ -286,7 +280,8 @@ describe("useInworldSession — TTS state machine", () => {
         delta: btoa("chunk3-new"),
       }),
     );
-    expect(useVoiceStore.getState().state).toBe("speaking");
+    // STT-only mode: state should NOT be "speaking"
+    expect(useVoiceStore.getState().state).not.toBe("speaking");
   });
 
   it("speakText sends conversation.item.create + response.create", async () => {
