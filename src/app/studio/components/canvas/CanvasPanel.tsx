@@ -3,6 +3,7 @@
 import { useEffect, useCallback, useState } from "react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
 import { BlockRenderer } from "./BlockRenderer";
+import { RevisionHistory } from "./RevisionHistory";
 import { cn } from "@/lib/utils";
 import type { ArtifactAction, CanvasBlock, Canvas } from "@/lib/canvas/types";
 
@@ -40,6 +41,8 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   } = useCanvasStore();
 
   const [showSwitcher, setShowSwitcher] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
 
   // ─── Load canvases on mount ─────────────────────────────────
   useEffect(() => {
@@ -160,8 +163,34 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
     }
   }, [activeCanvasId, loadBlocks, setError]);
 
-  // ─── Render ─────────────────────────────────────────────────
+  // ─── Promote to project handler ────────────────────────────
   const activeCanvas = canvases.find((c) => c.id === activeCanvasId);
+  const handlePromote = useCallback(async () => {
+    if (!activeCanvasId) return;
+    try {
+      const res = await fetch(`/api/canvases/${activeCanvasId}/promote`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({}),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error ?? "Failed to promote canvas");
+      }
+      const data = await res.json();
+      setShowPromoteConfirm(false);
+      // Reload the canvas to reflect the new project link
+      await loadBlocks(activeCanvasId);
+      // Update the canvas in the store
+      if (data.project) {
+        upsertCanvas({ ...activeCanvas, projectId: data.projectId } as Canvas);
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Promotion failed");
+    }
+  }, [activeCanvasId, loadBlocks, upsertCanvas, activeCanvas, setError]);
+
+  // ─── Render ─────────────────────────────────────────────────
   const activeBlocks = activeCanvasId ? blocks[activeCanvasId] ?? [] : [];
 
   if (loading && canvases.length === 0) {
@@ -189,13 +218,31 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
         </div>
         <div className="flex items-center gap-1.5">
           {activeCanvas && (
-            <button
-              onClick={handleUndo}
-              className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
-              title="Undo last change"
-            >
-              ↶ Undo
-            </button>
+            <>
+              <button
+                onClick={handleUndo}
+                className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
+                title="Undo last change"
+              >
+                ↶ Undo
+              </button>
+              <button
+                onClick={() => setShowHistory(true)}
+                className="text-xs text-white/40 hover:text-white/80 transition-colors px-2 py-1 rounded hover:bg-white/5"
+                title="Revision history"
+              >
+                History
+              </button>
+              {activeCanvas.projectId === null && (
+                <button
+                  onClick={() => setShowPromoteConfirm(true)}
+                  className="text-xs text-violet-300/70 hover:text-violet-300 transition-colors px-2 py-1 rounded hover:bg-violet-500/10"
+                  title="Promote canvas to a Project"
+                >
+                  Promote
+                </button>
+              )}
+            </>
           )}
           <button
             onClick={() => void loadCanvases()}
@@ -268,6 +315,48 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
           ))
         )}
       </div>
+
+      {/* Revision history drawer — slides up from bottom */}
+      {showHistory && activeCanvasId && (
+        <div className="absolute inset-0 z-10 flex flex-col bg-[#08090d]/98 border-t border-white/10">
+          <RevisionHistory
+            canvasId={activeCanvasId}
+            onClose={() => setShowHistory(false)}
+            onRestore={() => {
+              // Reload blocks after undo from the history drawer
+              if (activeCanvasId) void loadBlocks(activeCanvasId);
+            }}
+          />
+        </div>
+      )}
+
+      {/* Promote to project confirmation */}
+      {showPromoteConfirm && activeCanvas && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center bg-black/60 p-4">
+          <div className="max-w-sm rounded-xl border border-violet-500/20 bg-[#0a0b12] p-5 shadow-2xl">
+            <div className="text-sm font-bold text-white mb-2">Promote to Project?</div>
+            <div className="text-xs text-white/60 mb-4">
+              This will create a new blank project named &quot;{activeCanvas.title}&quot; and link
+              this canvas to it. You can then run missions, connect GitHub, and deploy from
+              the project workspace.
+            </div>
+            <div className="flex gap-2 justify-end">
+              <button
+                onClick={() => setShowPromoteConfirm(false)}
+                className="text-xs text-white/50 hover:text-white/80 px-3 py-1.5 rounded hover:bg-white/5"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={() => void handlePromote()}
+                className="text-xs font-bold text-violet-200 bg-violet-500/20 hover:bg-violet-500/30 px-3 py-1.5 rounded border border-violet-500/30"
+              >
+                Create Project
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

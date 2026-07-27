@@ -263,24 +263,43 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
             {!connectionsLoading && !projectReady && onboardingOpen ? (
               <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : isChat ? (
-              <ChatTool
-                onRouteTool={handleCommandRoute}
-                requestedTool={activeTool}
-                pendingCommand={pendingCommand}
-              />
+              <>
+                <ChatTool
+                  onRouteTool={handleCommandRoute}
+                  requestedTool={activeTool}
+                  pendingCommand={pendingCommand}
+                />
+                <button
+                  onClick={() => setCanvasOpen((v) => !v)}
+                  className="absolute bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-3 py-2 text-[10px] font-bold text-violet-100 shadow-xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
+                  title="Toggle Canvas panel"
+                >
+                  <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
+                  {canvasOpen ? "Hide" : "Canvas"}
+                </button>
+              </>
             ) : WorkspaceComponent ? (
               <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
                 <WorkspaceComponent />
               </div>
             ) : null}
             {projectReady && !isChat && (
-              <button
-                onClick={() => setAssistantOpen(true)}
-                className="absolute bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border border-cyan-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-cyan-100 shadow-2xl backdrop-blur-xl transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-              >
-                <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_#6ee7b7]" />
-                Ask LiTT
-              </button>
+              <div className="absolute bottom-4 right-4 z-40 flex flex-col items-end gap-2">
+                <button
+                  onClick={() => setCanvasOpen((v) => !v)}
+                  className="flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-violet-100 shadow-2xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
+                >
+                  <span className="h-2 w-2 rounded-full bg-violet-300 shadow-[0_0_8px_#c4b5fd]" />
+                  {canvasOpen ? "Hide Canvas" : "Canvas"}
+                </button>
+                <button
+                  onClick={() => setAssistantOpen(true)}
+                  className="flex items-center gap-2 rounded-full border border-cyan-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-cyan-100 shadow-2xl backdrop-blur-xl transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
+                >
+                  <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_#6ee7b7]" />
+                  Ask LiTT
+                </button>
+              </div>
             )}
           </main>
 
@@ -316,38 +335,48 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
             </div>
           </aside>}
 
-          {/* Canvas panel — split-pane on desktop, overlay on mobile.
+          {/* Canvas panel — bottom sheet on mobile, split-pane on desktop.
               Opens when a canvas action is executed from chat. */}
           {canvasOpen && (
-            <aside
-              className="fixed bottom-0 right-0 top-12 z-10009 flex w-full max-w-[520px] min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)]"
-              style={{
-                backgroundColor: "rgba(8,9,13,0.97)",
-                borderColor: "rgba(255,255,255,0.06)",
-              }}
-            >
-              <div
-                className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
-                style={{ borderColor: "rgba(255,255,255,0.06)" }}
+            <>
+              {/* Backdrop — mobile only */}
+              <button
+                aria-label="Close Canvas"
+                className="fixed inset-0 z-10008 bg-black/60 md:hidden"
+                onClick={() => setCanvasOpen(false)}
+              />
+              <aside
+                className="fixed z-10009 flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-12 md:w-full md:max-w-[520px] md:min-w-0 md:border-l md:shadow-[-24px_0_70px_rgba(0,0,0,.6)] bottom-0 left-0 right-0 top-auto h-[80dvh] rounded-t-2xl border-t animate-in slide-in-from-bottom-4 md:animate-none md:rounded-none md:border-t-0"
+                style={{
+                  backgroundColor: "rgba(8,9,13,0.97)",
+                  borderColor: "rgba(255,255,255,0.06)",
+                }}
               >
-                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
-                  Canvas
-                </span>
-                <button
-                  onClick={() => setCanvasOpen(false)}
-                  className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
-                  aria-label="Close Canvas panel"
+                {/* Drag handle — mobile only */}
+                <div className="mx-auto mt-2 h-1 w-10 shrink-0 rounded-full bg-white/20 md:hidden" />
+                <div
+                  className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
+                  style={{ borderColor: "rgba(255,255,255,0.06)" }}
                 >
-                  ✕
-                </button>
-              </div>
-              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-                <CanvasPanel
-                  pendingAction={pendingCanvasAction}
-                  onActionExecuted={() => setPendingCanvasAction(null)}
-                />
-              </div>
-            </aside>
+                  <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
+                    Canvas
+                  </span>
+                  <button
+                    onClick={() => setCanvasOpen(false)}
+                    className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
+                    aria-label="Close Canvas panel"
+                  >
+                    ✕
+                  </button>
+                </div>
+                <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                  <CanvasPanel
+                    pendingAction={pendingCanvasAction}
+                    onActionExecuted={() => setPendingCanvasAction(null)}
+                  />
+                </div>
+              </aside>
+            </>
           )}
         </div>
 
