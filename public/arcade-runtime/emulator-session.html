@@ -92,7 +92,7 @@
         return h | 0;
       }, 0)) || 1;
       window.EJS_pathtodata = dataPath;
-      window.EJS_startOnLoaded = false;
+      window.EJS_startOnLoaded = true;
       window.EJS_startButtonName = "Start " + name;
       window.EJS_disableAutoLang = true;
       window.EJS_backgroundColor = "#020204";
@@ -212,11 +212,57 @@
       startTextObserving();
 
       // ─── Error handling ────────────────────────────────────────
+      // Forward ALL errors to the parent — including worker errors,
+      // console errors, and unhandled rejections. This is critical for
+      // diagnosing the "Decompress Game Core 99%" stall.
+
+      // Intercept console.error — the 7z decompression worker logs errors
+      // to console.error that never surface as window error events.
+      var origConsoleError = console.error.bind(console);
+      console.error = function () {
+        var args = Array.prototype.slice.call(arguments);
+        var msg = args.map(function (a) {
+          try { return typeof a === "object" ? JSON.stringify(a) : String(a); }
+          catch (e) { return String(a); }
+        }).join(" ");
+        send("runtime.error", { message: "console.error: " + msg, source: "console" });
+        origConsoleError.apply(console, args);
+      };
+
+      // Intercept console.warn — workers may warn before failing
+      var origConsoleWarn = console.warn.bind(console);
+      console.warn = function () {
+        var args = Array.prototype.slice.call(arguments);
+        var msg = args.map(function (a) {
+          try { return typeof a === "object" ? JSON.stringify(a) : String(a); }
+          catch (e) { return String(a); }
+        }).join(" ");
+        send("runtime.progress", { text: "warn: " + msg });
+        origConsoleWarn.apply(console, args);
+      };
+
+      // Forward console.log for debugging
+      var origConsoleLog = console.log.bind(console);
+      console.log = function () {
+        var args = Array.prototype.slice.call(arguments);
+        var msg = args.map(function (a) {
+          try { return typeof a === "object" ? JSON.stringify(a) : String(a); }
+          catch (e) { return String(a); }
+        }).join(" ");
+        // Only forward if it looks like an emulator message
+        if (/EJS|emulator|core|decompress|download|worker|wasm/i.test(msg)) {
+          send("runtime.progress", { text: "log: " + msg.substring(0, 200) });
+        }
+        origConsoleLog.apply(console, args);
+      };
+
       window.addEventListener("error", function (e) {
         send("runtime.error", {
           message: (e && e.message) || "emulator error",
           filename: e && e.filename,
           lineno: e && e.lineno,
+          colno: e && e.colno,
+          source: "window.error",
         });
       });
 
@@ -225,7 +271,7 @@
         if (e && e.reason) {
           msg += ": " + (e.reason.message || String(e.reason));
         }
-        send("runtime.error", { message: msg });
+        send("runtime.error", { message: msg, source: "unhandledrejection" });
       });
 
       // ─── Load the official loader.js ───────────────────────────

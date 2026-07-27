@@ -198,6 +198,14 @@ const nextConfig: NextConfig = {
       // (loaded from /arcade-runtime/emulator-session.html) can be embedded
       // by the parent page at /games/retro/play/[gameId].
       // SAMEORIGIN is safe — only litlabs.net can embed these pages.
+      //
+      // IMPORTANT: We also override the CSP for this path. The EmulatorJS
+      // 7z decompression worker (extract7z.js) runs inside a blob: Web Worker
+      // and uses WASM. The parent page's strict CSP is inherited by the
+      // same-origin iframe and can block the worker's WASM compilation or
+      // postMessage calls, causing the "Decompress Game Core 99%" stall.
+      // This permissive CSP allows everything the emulator needs while still
+      // blocking external framing (X-Frame-Options: SAMEORIGIN).
       {
         source: "/arcade-runtime/:path*",
         headers: [
@@ -208,6 +216,23 @@ const nextConfig: NextConfig = {
           {
             key: "Cache-Control",
             value: "public, max-age=0, must-revalidate",
+          },
+          {
+            key: "Content-Security-Policy",
+            value: [
+              "default-src 'self' blob: data:",
+              "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdn.emulatorjs.org",
+              "style-src 'self' 'unsafe-inline' blob: data:",
+              "img-src 'self' blob: data: https://cdn.emulatorjs.org",
+              "font-src 'self' blob: data:",
+              "connect-src 'self' blob: data: https://cdn.emulatorjs.org ws: wss:",
+              "worker-src 'self' blob: data: https://cdn.emulatorjs.org",
+              "frame-src 'self' blob: data:",
+              "media-src 'self' blob: data:",
+              "object-src 'self' blob: data:",
+              "base-uri 'self'",
+              "form-action 'self'",
+            ].join("; "),
           },
         ],
       },
