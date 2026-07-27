@@ -146,3 +146,12 @@ build-output*.txt
 build-final.txt
 vitest.stubs/
 
+
+# Smoke test temp files
+__debug_*.js
+__smoke_*.*
+lint-output.txt
+test-output.txt
+page.html
+live-bundle.js
+
