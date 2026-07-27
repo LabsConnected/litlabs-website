@@ -66,6 +66,12 @@ interface ChatShellProps {
   onDeleteAllSessions: () => void;
   fallbackNotice?: string | null;
   capabilities?: ConnectionCapabilities;
+  /** Voice turn: store user transcript as a chat message WITHOUT calling
+   *  /api/gemini/chat. Inworld generates the response (Option C path). */
+  onVoiceUserMessage?: (text: string) => void;
+  /** Voice response: store Inworld's agent response text as an assistant
+   *  chat message. Called when Inworld's response completes. */
+  onVoiceAssistantMessage?: (text: string) => void;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -150,6 +156,8 @@ export default function ChatShell({
   onDeleteAllSessions,
   fallbackNotice,
   capabilities: _capabilities,
+  onVoiceUserMessage,
+  onVoiceAssistantMessage,
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -734,6 +742,8 @@ export default function ChatShell({
           modelName={selectedModel}
           onRouteTool={onRouteTool}
           activeAgentId={activeAgentId}
+          onVoiceUserMessage={onVoiceUserMessage}
+          onVoiceAssistantMessage={onVoiceAssistantMessage}
         />
       </div>
     </div>

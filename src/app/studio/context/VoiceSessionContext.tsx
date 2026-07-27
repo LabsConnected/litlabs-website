@@ -92,6 +92,8 @@ export interface VoiceSessionCtx {
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void) => void;
+  /** Register handler fired when Inworld's agent response text completes. */
+  setOnVoiceResponse: (handler: (text: string) => void) => void;
   toggleTts: () => void;
   toggleHandsFree: () => void;
 }
@@ -132,6 +134,7 @@ const defaultCtx: VoiceSessionCtx = {
   stopSpeaking: noop,
   selectDevice: noop,
   setOnTurn: noop,
+  setOnVoiceResponse: noop,
   toggleTts: noop,
   toggleHandsFree: noop,
 };
@@ -192,6 +195,12 @@ export function VoiceSessionProvider({
   const voiceInputStateRef = useRef<VoiceInputState>("idle");
   const voiceOutputStateRef = useRef<VoiceOutputState>("idle");
   const onTurnRef = useRef<(text: string) => void>(noop);
+  // Accumulates Inworld agent text deltas (from response.output_audio_transcript.delta)
+  // so the full response can be committed to chat when onResponseComplete fires.
+  // This is the Option C path: Inworld generates the response, we route its text
+  // to the same chat store used by typed messages.
+  const voiceResponseBufferRef = useRef("");
+  const onVoiceResponseRef = useRef<(text: string) => void>(noop);
   const submittedTranscriptRef = useRef("");
   const sessionGenerationRef = useRef(0);
   // Guards for the single microphone entry point — idempotent against
@@ -232,6 +241,11 @@ export function VoiceSessionProvider({
       }
     };
     inworldOnAgentTextRef.current = (delta: string) => {
+      // Accumulate Inworld's agent text into the response buffer.
+      // On onResponseComplete, the full text is flushed to chat via
+      // onVoiceResponseRef. This is the Option C path: Inworld generates
+      // the response (STT + LLM + TTS), and we route its text to chat.
+      voiceResponseBufferRef.current += delta;
       setTranscript((prev) => prev + delta);
     };
     inworldOnErrorRef.current = (msg: string) => {
@@ -252,6 +266,14 @@ export function VoiceSessionProvider({
       if (voiceStateRef.current === "assistant_speaking") {
         setVoiceState("idle");
         voiceStateRef.current = "idle";
+      }
+      // Flush the accumulated Inworld agent text to chat. This is the
+      // Option C canonical path: the spoken text and the stored text
+      // come from the same Inworld response, so they always match.
+      const fullResponse = voiceResponseBufferRef.current.trim();
+      voiceResponseBufferRef.current = "";
+      if (fullResponse) {
+        onVoiceResponseRef.current(fullResponse);
       }
     };
   });
@@ -668,6 +690,10 @@ export function VoiceSessionProvider({
     onTurnRef.current = handler;
   }, []);
 
+  const setOnVoiceResponse = useCallback((handler: (text: string) => void) => {
+    onVoiceResponseRef.current = handler;
+  }, []);
+
   // ---------------------------------------------------------------------------
   // toggleTts / toggleHandsFree — persisted user preferences only.
   // Transient mic state is never persisted.
@@ -776,6 +802,7 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
+      setOnVoiceResponse,
       toggleTts,
       toggleHandsFree,
     }),
@@ -803,6 +830,7 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
+      setOnVoiceResponse,
       toggleTts,
       toggleHandsFree,
     ],

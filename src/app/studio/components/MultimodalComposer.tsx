@@ -39,6 +39,12 @@ interface MultimodalComposerProps {
   modelName?: string;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
   activeAgentId?: AgentId;
+  /** Voice turn: store user transcript as a chat message WITHOUT calling
+   *  /api/gemini/chat. Inworld generates the response (Option C path). */
+  onVoiceUserMessage?: (text: string) => void;
+  /** Voice response: store Inworld's agent response text as an assistant
+   *  chat message. Called when Inworld's response completes. */
+  onVoiceAssistantMessage?: (text: string) => void;
 }
 
 const COMMANDS: { command: string; description: string; tool: StudioTool }[] = [
@@ -102,6 +108,8 @@ export default function MultimodalComposer({
   modelName = "Gemini 2.5 Flash",
   onRouteTool,
   activeAgentId = "litt",
+  onVoiceUserMessage,
+  onVoiceAssistantMessage,
 }: MultimodalComposerProps) {
   const agentMeta = AGENT_META[activeAgentId];
   const [mode, setMode] = useState<ComposerMode>("text");
@@ -142,21 +150,34 @@ export default function MultimodalComposer({
     toggleMute,
     interrupt,
     setOnTurn,
+    setOnVoiceResponse,
     errorMessage,
     voiceMode,
-    speakText,
   } = useVoiceSession();
 
-  // Set turn handler for voice sessions
+  // Voice turn handler (Option C canonical path):
+  // - User transcript → store as user message (NO /api/gemini/chat call)
+  // - Inworld generates the response (STT + LLM + TTS in one session)
+  // - onVoiceAssistantMessage stores Inworld's text as the assistant message
+  // - Spoken audio and stored text come from the same Inworld response
   useEffect(() => {
     setOnTurn((text) => {
-      void onSend(text).then((reply) => {
-        if (reply && voiceMode === "live") {
-          speakText(reply);
-        }
-      });
+      // Store the user transcript as a chat message. If no voice user-message
+      // handler is wired, fall back to onSend (legacy path via /api/gemini/chat).
+      if (onVoiceUserMessage) {
+        onVoiceUserMessage(text);
+      } else {
+        void onSend(text);
+      }
     });
-  }, [onSend, setOnTurn, voiceMode, speakText]);
+    setOnVoiceResponse((assistantText) => {
+      // Store Inworld's response text as the assistant chat message.
+      // This is the SAME text that was just spoken, so they always match.
+      if (onVoiceAssistantMessage) {
+        onVoiceAssistantMessage(assistantText);
+      }
+    });
+  }, [onSend, setOnTurn, setOnVoiceResponse, onVoiceUserMessage, onVoiceAssistantMessage]);
 
   // Auto-resize textarea
   useEffect(() => {
@@ -255,10 +276,14 @@ export default function MultimodalComposer({
     const reply = await onSend(value, attachments.length ? attachments : undefined);
     onChange("");
     setSnapshots([]);
-    // Auto-speak the AI response when voice mode is active
-    if (reply && voiceMode === "live" && voiceState !== "idle") {
-      speakText(reply);
-    }
+    // NOTE: We do NOT auto-speak typed replies via speakText() here.
+    // speakText() currently uses Inworld's response.create, which generates
+    // a NEW response instead of TTS-reading the reply text. That would
+    // produce a spoken response that doesn't match the stored chat message.
+    // Voice turns (mic input) go through Inworld's full conversation pipeline
+    // and are handled by onVoiceUserMessage / onVoiceAssistantMessage.
+    // Manual "Speak" button in ChatShell still calls speakText() — that's a
+    // deliberate user action and a separate issue to fix with a real TTS path.
   };
 
   const handleFile = (file: File) => {

@@ -207,6 +207,38 @@ export default function ChatTool({
     void send(trimmed[lastUserIndex].content);
   };
 
+  // Voice turn handlers (Option C canonical path):
+  // In live voice mode, Inworld generates the full response (STT + LLM + TTS).
+  // We store the user transcript and Inworld's assistant text directly in the
+  // chat store WITHOUT calling /api/gemini/chat. This ensures the spoken text
+  // and the stored text always come from the same response.
+  const handleVoiceUserMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setMessages((current) => [
+        ...current,
+        { role: "user", content: trimmed, createdAt: Date.now() },
+      ]);
+      if (sessionManager.activeSession?.title === "New chat") {
+        sessionManager.rename(sessionManager.activeSession.id, trimmed.slice(0, 56));
+      }
+    },
+    [setMessages, sessionManager],
+  );
+
+  const handleVoiceAssistantMessage = useCallback(
+    (text: string) => {
+      const trimmed = text.trim();
+      if (!trimmed) return;
+      setMessages((current) => [
+        ...current,
+        { role: "assistant", content: trimmed, createdAt: Date.now() },
+      ]);
+    },
+    [setMessages],
+  );
+
   return (
     <ChatShell
       selectedModel={selectedModel.label}
@@ -231,6 +263,8 @@ export default function ChatTool({
       onDeleteSession={sessionManager.remove}
       onDeleteAllSessions={sessionManager.removeAll}
       capabilities={capabilities}
+      onVoiceUserMessage={handleVoiceUserMessage}
+      onVoiceAssistantMessage={handleVoiceAssistantMessage}
     />
   );
 }
