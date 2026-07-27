@@ -1,0 +1,23 @@
+
+> litlabs-website@0.1.0 test C:\Users\litbi\CascadeProjects\litlab
+> vitest run
+
+The CJS build of Vite's Node API is deprecated. See https://vite.dev/guide/troubleshooting.html#vite-cjs-node-api-deprecated for more details.
+
+[1m[7m[36m RUN [39m[27m[22m [36mv2.1.9 [39m[90mC:/Users/litbi/CascadeProjects/litlab[39m
+
+ [32mΓ£ô[39m tests/workspace-security.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 14[2mms[22m[39m
+ [32mΓ£ô[39m tests/terminal-security.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32mΓ£ô[39m tests/project-types.test.ts [2m([22m[2m4 tests[22m[2m)[22m[90m 10[2mms[22m[39m
+ [32mΓ£ô[39m tests/terminal-auth.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 16[2mms[22m[39m
+ [32mΓ£ô[39m src/lib/visual-builds/orchestrator.test.ts [2m([22m[2m11 tests[22m[2m)[22m[90m 28[2mms[22m[39m
+ [32mΓ£ô[39m src/lib/visual-builds/qa.test.ts [2m([22m[2m6 tests[22m[2m)[22m[90m 58[2mms[22m[39m
+ [32mΓ£ô[39m tests/code-scanner.test.ts [2m([22m[2m5 tests[22m[2m)[22m[90m 40[2mms[22m[39m
+ [32mΓ£ô[39m src/app/studio/lib/builder-command-router.test.ts [2m([22m[2m3 tests[22m[2m)[22m[90m 8[2mms[22m[39m
+ [32mΓ£ô[39m src/app/studio/components/CameraSession.test.tsx [2m([22m[2m2 tests[22m[2m)[22m[90m 264[2mms[22m[39m
+
+[2m Test Files [22m [1m[32m9 passed[39m[22m[90m (9)[39m
+[2m      Tests [22m [1m[32m51 passed[39m[22m[90m (51)[39m
+[2m   Start at [22m 10:18:40
+[2m   Duration [22m 5.90s[2m (transform 659ms, setup 0ms, collect 3.15s, tests 447ms, environment 13.12s, prepare 5.10s)[22m
+

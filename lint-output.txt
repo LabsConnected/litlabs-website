@@ -1,0 +1,75 @@
+
+> litlabs-website@0.1.0 lint C:\Users\litbi\CascadeProjects\litlab
+> eslint
+
+
+C:\Users\litbi\CascadeProjects\litlab\__debug_stripped.js
+  10:1  error  Parsing error: ')' expected
+
+C:\Users\litbi\CascadeProjects\litlab\live-bundle.js
+  1:2527   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:2728   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:2744   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:5831   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:6020   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:6147   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:6589   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:7151   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:7310   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:7596   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:7794   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:7947   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:8185   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:8286   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:9149   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:9567   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:9585   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:9660   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:9679   warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10324  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10478  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10614  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10695  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10748  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10837  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:10880  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:11267  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:11542  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:13125  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:13339  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:13494  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:13665  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:14493  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  1:15212  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  3:460    warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  3:13219  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+  3:13742  warning  Expected an assignment or function call and instead saw an expression  @typescript-eslint/no-unused-expressions
+
+C:\Users\litbi\CascadeProjects\litlab\scripts\__smoke_build_player.mjs
+  23:0  error  Parsing error: ',' expected
+
+C:\Users\litbi\CascadeProjects\litlab\scripts\__smoke_test_script.mjs
+  16:19  error  Parsing error: ';' expected
+
+C:\Users\litbi\CascadeProjects\litlab\scripts\smoke-test-emulator.mjs
+  104:3  warning  Unused eslint-disable directive (no problems were reported from 'no-new-func')
+
+C:\Users\litbi\CascadeProjects\litlab\src\app\api\studio-projects\[projectId]\checkpoints\route.ts
+  4:45  warning  'getCheckpoint' is defined but never used. Allowed unused vars must match /^_/u           @typescript-eslint/no-unused-vars
+  5:10  warning  'createTerminalToken' is defined but never used. Allowed unused vars must match /^_/u     @typescript-eslint/no-unused-vars
+  7:7   warning  'TERMINAL_BASE' is assigned a value but never used. Allowed unused vars must match /^_/u  @typescript-eslint/no-unused-vars
+
+C:\Users\litbi\CascadeProjects\litlab\src\app\settings\page.tsx
+   332:3   warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+   410:3   warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  1805:31  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  1896:30  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  1921:33  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  2228:28  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  2284:33  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+  2338:26  warning  'T' is defined but never used. Allowed unused args must match /^_/u  @typescript-eslint/no-unused-vars
+
+Γ£û 52 problems (3 errors, 49 warnings)
+  0 errors and 1 warning potentially fixable with the `--fix` option.
+
+ΓÇëELIFECYCLEΓÇë Command failed with exit code 1.

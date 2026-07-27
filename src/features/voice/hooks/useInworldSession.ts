@@ -399,22 +399,48 @@ export function useInworldSession(
                 break;
 
               case "input_audio_buffer.speech_started":
-                // User started speaking — interrupt agent playback
-                interruptedRef.current = true;
-                stopPlayback();
+                // User started speaking — only barge-in if the agent is
+                // actually playing audio. Setting interruptedRef unconditionally
+                // here would drop the NEXT response's audio (the agent's reply
+                // to this very utterance), which is the classic "TTS goes silent
+                // after the first turn" bug.
+                if (isPlayingRef.current) {
+                  interruptedRef.current = true;
+                  stopPlayback();
+                }
                 setState("listening");
                 break;
 
               case "input_audio_buffer.speech_stopped":
               case "input_audio_buffer.committed":
-                // Turn ended — agent will respond
+                // Turn ended — agent will respond. Clear the interrupt flag so
+                // the upcoming response audio is not dropped.
+                interruptedRef.current = false;
                 if (isListeningRef.current) {
                   setState("thinking");
                 }
                 break;
 
+              case "response.created":
+                // A new response is starting — clear any stale interrupt flag
+                // so its audio chunks are not dropped. This handles both VAD
+                // auto-responses and explicit response.create from speakText.
+                interruptedRef.current = false;
+                break;
+
+              case "response.cancelled":
+                // Explicit cancel (from interrupt()) — keep interruptedRef true
+                // so in-flight chunks are dropped, and reset state.
+                interruptedRef.current = true;
+                stopPlayback();
+                setState("idle");
+                onResponseComplete?.();
+                break;
+
               case "response.output_audio.delta":
-                // Agent audio chunk
+                // Agent audio chunk — play unless the user interrupted this
+                // specific response. interruptedRef is reset on response.created
+                // and on speech_stopped, so only true barge-ins drop audio.
                 if (!interruptedRef.current) {
                   if (useVoiceStore.getState().state !== "speaking") {
                     setState("speaking");

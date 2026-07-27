@@ -40,8 +40,8 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v7";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v8";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -167,6 +167,9 @@ function buildPlayerDocument(opts: {
     configLines.push(`window.EJS_biosUrl = ${JSON.stringify(opts.biosUrl)};`);
   }
   configLines.push(
+    // Signal to parent that the config script has started executing.
+    // If the parent never receives this, the iframe CSP is blocking inline scripts.
+    `try{parent.postMessage({source:"ejs",type:"progress",text:"config script started",buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}`,
     `window.addEventListener("error",(e)=>{try{parent.postMessage({source:"ejs",type:"error",message:(e&&e.message)||"emulator error",buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}});`,
     // Observe the loading text element so the parent knows the exact runtime
     // stage ("Download Game Core 42%", "Decompress Game Core 99%", etc).
@@ -268,7 +271,7 @@ function buildPlayerDocument(opts: {
   const config = configLines.join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body,#game{width:100%;height:100%;margin:0;background:#020204;overflow:hidden}body{font-family:system-ui,sans-serif}</style></head>
-<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${opts.dataPath}loader.js" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${opts.dataPath}loader.js. The data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
+<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${opts.dataPath}loader.js" onload="try{parent.postMessage({source:'ejs',type:'progress',text:'loader.js loaded',buildId:${JSON.stringify(opts.buildId)}},'*')}catch(_){}" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${opts.dataPath}loader.js. The data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
 }
 
 function hasSevenZSignature(buffer: ArrayBuffer): boolean {
