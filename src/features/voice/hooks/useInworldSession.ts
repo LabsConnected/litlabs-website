@@ -33,6 +33,14 @@ interface UseInworldSessionReturn {
   interrupt: () => void;
   /** Speak text via TTS. Connects transport if needed. Does NOT touch the mic. */
   speakText: (text: string) => Promise<void>;
+  /**
+   * Trigger an agent response without sending a new conversation item.
+   * Used after VAD commits the audio buffer and transcription completes
+   * when create_response is false. The user's speech is already in the
+   * Inworld conversation context via the audio buffer — this just asks
+   * Inworld to generate a response to it.
+   */
+  triggerResponse: () => void;
   isConnected: boolean;
   isListening: boolean;
   error: string | null;
@@ -387,7 +395,13 @@ export function useInworldSession(
                           turn_detection: {
                             type: "semantic_vad",
                             eagerness: "low",
-                            create_response: true,
+                            // create_response: false — we manually trigger
+                            // response.create after a real transcript arrives.
+                            // This prevents Inworld from auto-generating
+                            // responses to phantom VAD detections (background
+                            // noise, typing, breathing) which caused LiTT to
+                            // "say things the user didn't say."
+                            create_response: false,
                             interrupt_response: true,
                           },
                         },
@@ -830,6 +844,20 @@ export function useInworldSession(
     };
   }, [stopMicCapture, stopPlayback]);
 
+  // triggerResponse — ask Inworld to generate a response to the last
+  // conversation item (the user's committed audio buffer). Used when
+  // create_response is false so we control WHEN responses generate
+  // (only after a real transcript, not phantom VAD noise).
+  const triggerResponse = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
+    wsRef.current.send(JSON.stringify({
+      type: "response.create",
+      response: {
+        modalities: ["audio"],
+      },
+    }));
+  }, []);
+
   return {
     connect,
     disconnect,
@@ -838,6 +866,7 @@ export function useInworldSession(
     stopListening,
     interrupt,
     speakText,
+    triggerResponse,
     isConnected,
     isListening,
     error,

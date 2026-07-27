@@ -201,6 +201,12 @@ export function VoiceSessionProvider({
   // to the same chat store used by typed messages.
   const voiceResponseBufferRef = useRef("");
   const onVoiceResponseRef = useRef<(text: string) => void>(noop);
+  // Guards against phantom VAD responses: Inworld's turn_detection with
+  // create_response: true auto-generates responses to ANY detected audio
+  // (background noise, typing, breathing). We only flush the assistant
+  // response to chat if a REAL user turn (non-empty transcript) preceded it.
+  // This prevents LiTT from "saying things the user didn't say."
+  const hadRealUserTurnRef = useRef(false);
   const submittedTranscriptRef = useRef("");
   const sessionGenerationRef = useRef(0);
   // Guards for the single microphone entry point — idempotent against
@@ -233,7 +239,16 @@ export function VoiceSessionProvider({
           setTranscript(trimmed);
           setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
           activeRef.current = false;
+          // Mark that a REAL user turn happened — only then will the
+          // assistant response be flushed to chat. This prevents phantom
+          // VAD responses (background noise) from polluting chat.
+          hadRealUserTurnRef.current = true;
           onTurnRef.current(trimmed);
+          // Manually trigger Inworld's response since create_response is
+          // false. The user's speech is already in the conversation context
+          // via the committed audio buffer — this just asks Inworld to
+          // generate a response to it.
+          inworldSession.triggerResponse();
           setTiming({ aiResponseCompletedAt: Date.now() });
         }
       } else {
@@ -267,14 +282,17 @@ export function VoiceSessionProvider({
         setVoiceState("idle");
         voiceStateRef.current = "idle";
       }
-      // Flush the accumulated Inworld agent text to chat. This is the
-      // Option C canonical path: the spoken text and the stored text
-      // come from the same Inworld response, so they always match.
+      // Flush the accumulated Inworld agent text to chat — BUT only if a
+      // real user turn preceded this response. Inworld's VAD with
+      // create_response: true auto-generates responses to phantom audio
+      // (background noise, typing). Without this guard, LiTT would "say
+      // things the user didn't say" — generating responses to nothing.
       const fullResponse = voiceResponseBufferRef.current.trim();
       voiceResponseBufferRef.current = "";
-      if (fullResponse) {
+      if (fullResponse && hadRealUserTurnRef.current) {
         onVoiceResponseRef.current(fullResponse);
       }
+      hadRealUserTurnRef.current = false;
     };
   });
 
