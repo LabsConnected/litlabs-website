@@ -12,9 +12,7 @@ import {
   HardDrive,
   Keyboard,
   LockKeyhole,
-  RotateCcw,
   ShieldCheck,
-  Sparkles,
   Trash2,
   Upload,
   X,
@@ -54,7 +52,6 @@ import {
 } from "@/lib/emulator/core-fallback";
 import {
   WatchdogManager,
-  stateToWatchdogStage,
   type WatchdogFired,
 } from "@/lib/emulator/watchdogs";
 
