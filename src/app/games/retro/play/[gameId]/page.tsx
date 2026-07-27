@@ -431,7 +431,10 @@ export default function RetroPlayerPage() {
   const [cacheClearResult, setCacheClearResult] = useState<string | null>(null);
   const [latestEvent, setLatestEvent] = useState<string | null>(null);
   // Phase 6: runtime source — self-hosted (default) or official CDN fallback.
-  const [runtimeSource, setRuntimeSource] = useState<"self-hosted" | "official-fallback">("official-fallback");
+  // Self-hosted is the default because the official CDN (cdn.emulatorjs.org)
+  // has been dead/unreliable — see comment at EMULATOR_CDN_FALLBACK_PATH.
+  // All 52 assets (~70MB) are shipped in /public/emulatorjs/4.2.3/data/.
+  const [runtimeSource, setRuntimeSource] = useState<"self-hosted" | "official-fallback">("self-hosted");
   // Phase 7: worker error surfaced from inside the iframe.
   const [workerError, setWorkerError] = useState<string | null>(null);
   // Phase 8: track when we first hit 99% decompression so we can apply a
