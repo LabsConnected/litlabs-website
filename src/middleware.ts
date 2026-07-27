@@ -56,7 +56,10 @@ export default clerkMiddleware(async (auth, req) => {
 
 export const config = {
   matcher: [
-    "/((?!_next/static|_next/image|favicon.ico|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    // Exclude: Next.js internals, static images, and the self-hosted
+    // EmulatorJS runtime (large binary .data/.wasm/.js assets in public/).
+    // Running Clerk middleware on these caused 500s and wasted RAM.
+    "/((?!_next/static|_next/image|favicon.ico|emulatorjs|.*\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
     "/__clerk/:path*",
   ],
 };

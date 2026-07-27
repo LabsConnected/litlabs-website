@@ -32,12 +32,30 @@ import { RetroControlsModal } from "@/components/games/RetroControlsModal";
 // Self-hosted EmulatorJS 4.2.3 data directory.
 // Previously: https://cdn.emulatorjs.org/4.2.3/data/ (CDN death / cache corruption broke every launch)
 const EMULATOR_DATA_PATH = "/emulatorjs/4.2.3/data/";
+// Controlled CDN fallback — only used when the self-hosted preflight fails AND
+// the user explicitly clicks "Use official runtime". Never mixed with local.
+const EMULATOR_CDN_FALLBACK_PATH = "https://cdn.emulatorjs.org/4.2.3/data/";
 const EMULATOR_VERSION = "4.2.3";
 // Versioned cache namespace. Bump when upgrading EmulatorJS or changing the
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v2";
+// v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
+//     worker-error surfacing, CDN fallback, 99% finalization grace.
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v3";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
+// At 99% decompression the worker may take a while to finalize without
+// emitting progress. Allow a 30s grace window before declaring a stall, but
+// still fail immediately on a worker-error event.
+const FINALIZATION_GRACE_MS = 30_000;
+const CORE_MIN_BYTES = 800_000;
+// 7z archive signature: 37 7A BC AF 27 1C
+const SEVEN_Z_SIGNATURE = [0x37, 0x7a, 0xbc, 0xaf, 0x27, 0x1c];
+
+// Single source of truth for which NES cores may be offered in the UI.
+// A core is only "available" if its *-wasm.data asset actually shipped.
+const AVAILABLE_NES_CORES = ["fceumm", "nestopia"] as const;
+type NesCore = (typeof AVAILABLE_NES_CORES)[number];
 
 type EmulatorRuntimeState =
   | "loading_rom"
@@ -58,6 +76,7 @@ interface DiagnosticInfo {
   romSize: number;
   biosPresent: boolean;
   dataPath: string;
+  runtimeSource: "self-hosted" | "official-fallback" | "pending";
   loaderStatus: "pending" | "loaded" | "failed";
   coreRequestStatus: "pending" | "downloading" | "decompressing" | "ready" | "failed";
   coreResponseBytes: number | null;
@@ -65,6 +84,26 @@ interface DiagnosticInfo {
   elapsedMs: number | null;
   latestEvent: string | null;
   latestError: string | null;
+  workerError: string | null;
+  assetChecks: AssetCheckEntry[];
+}
+
+interface AssetCheckEntry {
+  url: string;
+  label: string;
+  status: number | null;
+  contentType: string | null;
+  bytes: number | null;
+  validSignature?: boolean;
+  error?: string;
+}
+
+interface AssetVerificationResult {
+  ok: boolean;
+  checks: AssetCheckEntry[];
+  coreBytes?: number;
+  failedUrl?: string;
+  reason?: string;
 }
 
 function detectBrowser(): string {
@@ -98,6 +137,7 @@ function buildPlayerDocument(opts: {
   color: string;
   biosUrl?: string;
   buildId: string;
+  dataPath: string;
 }): string {
   const configLines = [
     `window.EJS_player = "#game";`,
@@ -105,7 +145,7 @@ function buildPlayerDocument(opts: {
     `window.EJS_gameUrl = ${JSON.stringify(opts.gameUrl)};`,
     `window.EJS_gameName = ${JSON.stringify(opts.gameName)};`,
     `window.EJS_gameID = ${numericGameId(opts.gameId)};`,
-    `window.EJS_pathtodata = ${JSON.stringify(EMULATOR_DATA_PATH)};`,
+    `window.EJS_pathtodata = ${JSON.stringify(opts.dataPath)};`,
     `window.EJS_startOnLoaded = false;`,
     `window.EJS_startButtonName = ${JSON.stringify(`Start ${opts.gameName}`)};`,
     `window.EJS_disableAutoLang = true;`,
@@ -129,55 +169,146 @@ function buildPlayerDocument(opts: {
     `const __littWatch=new MutationObserver(()=>{const el=document.querySelector(".ejs_loading_text");if(!el)return;const text=(el.innerText||"").trim();if(text)try{parent.postMessage({source:"ejs",type:"progress",text,buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}});`,
     `const __littBoot=()=>{const root=document.getElementById("game");if(root)__littWatch.observe(root,{subtree:true,childList:true,characterData:true});else setTimeout(__littBoot,50);};`,
     `__littBoot();`,
+    // ── Worker error surfacing ────────────────────────────────────────
+    // EmulatorJS decompression uses a Blob Worker that can crash without
+    // rejecting its promise, leaving the user stuck at "Decompress 99%".
+    // Wrap the native Worker constructor so any worker error or
+    // messageerror is forwarded to the parent immediately.
+    `const __littBuildId=${JSON.stringify(opts.buildId)};`,
+    `const __NativeWorker=window.Worker;`,
+    `window.Worker=class LiTTWorker extends __NativeWorker{`,
+    `  constructor(url,opts2){super(url,opts2);`,
+    `    this.addEventListener("error",(ev)=>{try{parent.postMessage({source:"ejs",type:"worker-error",message:(ev&&ev.message)||"Emulator decompression worker failed",filename:(ev&&ev.filename)||null,lineno:(ev&&ev.lineno)||null,buildId:__littBuildId},"*")}catch(_){}});`,
+    `    this.addEventListener("messageerror",()=>{try{parent.postMessage({source:"ejs",type:"worker-error",message:"Emulator worker returned an unreadable message",buildId:__littBuildId},"*")}catch(_){}});`,
+    `  }`,
+    `};`,
   );
   const config = configLines.join("\n");
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body,#game{width:100%;height:100%;margin:0;background:#020204;overflow:hidden}body{font-family:system-ui,sans-serif}</style></head>
-<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${EMULATOR_DATA_PATH}loader.js" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${EMULATOR_DATA_PATH}loader.js. The self-hosted data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
+<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${opts.dataPath}loader.js" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${opts.dataPath}loader.js. The data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
+}
+
+function hasSevenZSignature(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength < SEVEN_Z_SIGNATURE.length) return false;
+  const view = new Uint8Array(buffer, 0, SEVEN_Z_SIGNATURE.length);
+  for (let i = 0; i < SEVEN_Z_SIGNATURE.length; i++) {
+    if (view[i] !== SEVEN_Z_SIGNATURE[i]) return false;
+  }
+  return true;
+}
+
+function looksLikeHtml(buffer: ArrayBuffer): boolean {
+  if (buffer.byteLength > 1024 * 1024) return false;
+  const head = new TextDecoder().decode(new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 512))).toLowerCase();
+  return (
+    head.includes("<!doctype html") ||
+    head.includes("<html") ||
+    head.includes("<head") ||
+    head.includes("<title>")
+  );
 }
 
 /**
- * Verify that the self-hosted EmulatorJS assets return HTTP 200 with non-zero
- * bodies before we even mount the iframe. Rejects HTML error pages served with
- * status 200, zero-byte responses, and timed-out requests.
+ * Verify that EmulatorJS assets return HTTP 200 with valid bodies before we
+ * mount the iframe. EVERY required asset is checked before returning success
+ * (the previous implementation returned early after the core check, which
+ * meant extract7z.js was never validated).
+ *
+ * Rejects HTML error pages served with status 200, zero-byte responses,
+ * missing 7z archive signatures on core packages, and undersized cores.
+ *
+ * `dataPath` may be the self-hosted path or the official CDN fallback path.
  */
-async function verifyEmulatorAssets(
-  core: string,
-): Promise<{ ok: boolean; failedUrl?: string; reason?: string; coreBytes?: number }> {
-  const checks: Array<{ url: string; label: string; requireNonZero?: boolean }> = [
-    { url: `${EMULATOR_DATA_PATH}loader.js`, label: "loader.js", requireNonZero: true },
-    { url: `${EMULATOR_DATA_PATH}emulator.min.js`, label: "emulator.min.js", requireNonZero: true },
-    { url: `${EMULATOR_DATA_PATH}cores/${core}-wasm.data`, label: `core ${core}-wasm.data`, requireNonZero: true },
-    { url: `${EMULATOR_DATA_PATH}compression/extract7z.js`, label: "extract7z.js", requireNonZero: true },
+async function verifyEmulatorAssets(core: string, dataPath: string): Promise<AssetVerificationResult> {
+  const checks: Array<{ url: string; label: string; requireNonZero?: boolean; isCore?: boolean; minBytes?: number }> = [
+    { url: `${dataPath}loader.js`, label: "loader.js", requireNonZero: true, minBytes: 1_000 },
+    { url: `${dataPath}emulator.min.js`, label: "emulator.min.js", requireNonZero: true, minBytes: 100_000 },
+    { url: `${dataPath}emulator.min.css`, label: "emulator.min.css", requireNonZero: true, minBytes: 1_000 },
+    { url: `${dataPath}cores/${core}-wasm.data`, label: `core ${core}-wasm.data`, isCore: true, minBytes: CORE_MIN_BYTES },
+    { url: `${dataPath}compression/extract7z.js`, label: "extract7z.js", requireNonZero: true, minBytes: 50_000 },
+    { url: `${dataPath}compression/extractzip.js`, label: "extractzip.js", requireNonZero: true, minBytes: 50_000 },
   ];
 
+  const results: AssetCheckEntry[] = [];
+  let allOk = true;
+  let firstFailure: { url: string; reason: string } | null = null;
+  let coreBytes: number | undefined;
+
   for (const check of checks) {
+    const entry: AssetCheckEntry = {
+      url: check.url,
+      label: check.label,
+      status: null,
+      contentType: null,
+      bytes: null,
+    };
     try {
       const res = await fetch(check.url, { method: "GET", cache: "no-store" });
+      entry.status = res.status;
+      entry.contentType = res.headers.get("content-type");
       if (!res.ok) {
-        return { ok: false, failedUrl: check.url, reason: `HTTP ${res.status} ${res.statusText}` };
+        entry.error = `HTTP ${res.status} ${res.statusText}`;
+        results.push(entry);
+        if (allOk) firstFailure = { url: check.url, reason: entry.error };
+        allOk = false;
+        continue;
       }
       const buffer = await res.arrayBuffer();
+      entry.bytes = buffer.byteLength;
       if (check.requireNonZero && buffer.byteLength === 0) {
-        return { ok: false, failedUrl: check.url, reason: "Zero-byte response" };
+        entry.error = "Zero-byte response";
+        results.push(entry);
+        if (allOk) firstFailure = { url: check.url, reason: entry.error };
+        allOk = false;
+        continue;
+      }
+      if (check.minBytes && buffer.byteLength < check.minBytes) {
+        entry.error = `File too small: ${buffer.byteLength} bytes (minimum ${check.minBytes})`;
+        results.push(entry);
+        if (allOk) firstFailure = { url: check.url, reason: entry.error };
+        allOk = false;
+        continue;
       }
       // Reject HTML error pages (some CDNs return 200 + HTML for missing files)
       const contentType = res.headers.get("content-type") ?? "";
-      if (check.label.includes("core") && contentType.includes("text/html")) {
-        return { ok: false, failedUrl: check.url, reason: `Server returned HTML (content-type: ${contentType})` };
+      if (contentType.includes("text/html") || looksLikeHtml(buffer)) {
+        entry.error = `Server returned HTML (content-type: ${contentType})`;
+        results.push(entry);
+        if (allOk) firstFailure = { url: check.url, reason: entry.error };
+        allOk = false;
+        continue;
       }
-      if (check.label.startsWith("core")) {
-        return { ok: true, coreBytes: buffer.byteLength };
+      if (check.isCore) {
+        const validSig = hasSevenZSignature(buffer);
+        entry.validSignature = validSig;
+        if (!validSig) {
+          const view = new Uint8Array(buffer, 0, Math.min(buffer.byteLength, 8));
+          const hex = Array.from(view).map((b) => b.toString(16).padStart(2, "0")).join(" ");
+          entry.error = `Missing 7z archive signature. First bytes: ${hex}`;
+          results.push(entry);
+          if (allOk) firstFailure = { url: check.url, reason: entry.error };
+          allOk = false;
+          continue;
+        }
+        coreBytes = buffer.byteLength;
       }
+      results.push(entry);
     } catch (err) {
-      return {
-        ok: false,
-        failedUrl: check.url,
-        reason: err instanceof Error ? err.message : "Network request failed",
-      };
+      entry.error = err instanceof Error ? err.message : "Network request failed";
+      results.push(entry);
+      if (allOk) firstFailure = { url: check.url, reason: entry.error };
+      allOk = false;
     }
   }
-  return { ok: true };
+
+  return {
+    ok: allOk,
+    checks: results,
+    coreBytes,
+    failedUrl: firstFailure?.url,
+    reason: firstFailure?.reason,
+  };
 }
 
 /**
@@ -276,9 +407,18 @@ export default function RetroPlayerPage() {
   const [elapsedMs, setElapsedMs] = useState<number | null>(null);
   const [lastProgressAt, setLastProgressAt] = useState<number | null>(null);
   const [showDiagnostic, setShowDiagnostic] = useState(false);
-  const [assetCheck, setAssetCheck] = useState<{ ok: boolean; failedUrl?: string; reason?: string; coreBytes?: number } | null>(null);
+  const [assetCheck, setAssetCheck] = useState<AssetVerificationResult | null>(null);
   const [cacheClearResult, setCacheClearResult] = useState<string | null>(null);
   const [latestEvent, setLatestEvent] = useState<string | null>(null);
+  // Phase 6: runtime source — self-hosted (default) or official CDN fallback.
+  const [runtimeSource, setRuntimeSource] = useState<"self-hosted" | "official-fallback">("self-hosted");
+  // Phase 7: worker error surfaced from inside the iframe.
+  const [workerError, setWorkerError] = useState<string | null>(null);
+  // Phase 8: track when we first hit 99% decompression so we can apply a
+  // finalization grace window instead of stalling at 15s.
+  const [hit99At, setHit99At] = useState<number | null>(null);
+  // Phase 9: one-time cache clear for prior build IDs on first v3 launch.
+  const oldBuildsCleared = useRef(false);
 
   // Load the ROM record from IndexedDB.
   useEffect(() => {
@@ -318,6 +458,39 @@ export default function RetroPlayerPage() {
     };
   }, [params.gameId]);
 
+  // Phase 9: on the first v3 launch, clear only old EmulatorJS runtime/cache
+  // records (prior build IDs). NEVER delete the "litt-retro-arcade" IndexedDB
+  // database containing the user's ROMs.
+  useEffect(() => {
+    if (oldBuildsCleared.current) return;
+    oldBuildsCleared.current = true;
+    const storedBuild = (() => {
+      try {
+        return localStorage.getItem("litt:ejs-build-id");
+      } catch {
+        return null;
+      }
+    })();
+    if (storedBuild && PREV_EMULATOR_BUILD_IDS.includes(storedBuild)) {
+      // Old build detected — clear stale emulator cache (ROMs preserved).
+      clearEmulatorCache().then(() => {
+        try {
+          localStorage.setItem("litt:ejs-build-id", EMULATOR_BUILD_ID);
+        } catch {
+          /* ignore */
+        }
+      }).catch(() => {
+        /* non-fatal */
+      });
+    } else {
+      try {
+        localStorage.setItem("litt:ejs-build-id", EMULATOR_BUILD_ID);
+      } catch {
+        /* ignore */
+      }
+    }
+  }, []);
+
   const system = game ? getRetroSystem(game.system) : null;
   // Map our system IDs to EmulatorJS core names.
   // SNES default is snes9x (the only SNES core shipped in EmulatorJS 4.2.3).
@@ -344,7 +517,15 @@ export default function RetroPlayerPage() {
   // Listen for postMessage events from the iframe.
   useEffect(() => {
     function onMessage(event: MessageEvent) {
-      const data = event.data as { source?: string; type?: string; message?: string; text?: string; buildId?: string } | null;
+      const data = event.data as {
+        source?: string;
+        type?: string;
+        message?: string;
+        text?: string;
+        buildId?: string;
+        filename?: string | null;
+        lineno?: number | null;
+      } | null;
       if (!data || data.source !== "ejs") return;
       // Validate buildId to ignore events from a stale iframe.
       if (data.buildId && data.buildId !== EMULATOR_BUILD_ID) return;
@@ -353,6 +534,13 @@ export default function RetroPlayerPage() {
 
       if (data.type === "error" && data.message) {
         setEmulatorError(data.message);
+        setRuntimeState("error");
+      } else if (data.type === "worker-error" && data.message) {
+        // Phase 7: a decompression worker crashed. Fail immediately — do NOT
+        // leave the user waiting for the 15s stall timer.
+        const detail = data.filename ? ` (${data.filename}${data.lineno ? `:${data.lineno}` : ""})` : "";
+        setWorkerError(`${data.message}${detail}`);
+        setEmulatorError(`${data.message}${detail}`);
         setRuntimeState("error");
       } else if (data.type === "ready") {
         // UI loaded — NOT game started. Move to initializing.
@@ -363,6 +551,7 @@ export default function RetroPlayerPage() {
         setRuntimeState("running");
         setEmulatorError(null);
         setProgressText(null);
+        setHit99At(null);
       } else if (data.type === "progress" && data.text) {
         const text = data.text;
         setProgressText(text);
@@ -373,6 +562,11 @@ export default function RetroPlayerPage() {
           setRuntimeState("downloading_core");
         } else if (lower.includes("decompress") && lower.includes("core")) {
           setRuntimeState("decompressing_core");
+          // Phase 8: record when we first hit 99% so the stall detector can
+          // apply a finalization grace window instead of failing at 15s.
+          if (lower.includes("99") && hit99At === null) {
+            setHit99At(Date.now());
+          }
         } else if (lower.includes("loading")) {
           setRuntimeState("initializing");
         }
@@ -380,7 +574,7 @@ export default function RetroPlayerPage() {
     }
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
-  }, []);
+  }, [hit99At]);
 
   // Elapsed time ticker.
   useEffect(() => {
@@ -422,15 +616,25 @@ export default function RetroPlayerPage() {
   }, [runtimeState, launchStartTime, playerAttempt]);
 
   // Stall detection — if no progress event for 15s while loading, mark stalled.
+  // Phase 8: at 99% decompression, allow a 30s finalization grace window
+  // before declaring a stall (the worker may be finalizing without emitting
+  // progress). Still fail immediately on a worker-error event (handled in the
+  // message listener above).
   useEffect(() => {
     if (runtimeState === "running" || runtimeState === "error" || runtimeState === "timed_out") return;
     if (lastProgressAt === null) return;
-    const remaining = STALL_TIMEOUT_MS - (Date.now() - lastProgressAt);
+    // If we're at 99% decompression, use the longer finalization grace window.
+    const at99 = hit99At !== null;
+    const stallLimit = at99 ? FINALIZATION_GRACE_MS : STALL_TIMEOUT_MS;
+    const since = at99 ? hit99At! : lastProgressAt;
+    const remaining = stallLimit - (Date.now() - since);
     if (remaining <= 0) {
       setRuntimeState((current) => {
         if (current === "running" || current === "error" || current === "timed_out") return current;
         setEmulatorError(
-          `Emulator stalled — no progress for ${STALL_TIMEOUT_MS / 1000}s. Last status: "${progressText ?? "unknown"}". The core download or decompression may have hung. Clear the emulator cache and retry.`,
+          at99
+            ? `Emulator stalled at 99% decompression for ${FINALIZATION_GRACE_MS / 1000}s. The core archive may be corrupted. Clear the emulator cache and retry, or try the other NES core.`
+            : `Emulator stalled — no progress for ${STALL_TIMEOUT_MS / 1000}s. Last status: "${progressText ?? "unknown"}". The core download or decompression may have hung. Clear the emulator cache and retry.`,
         );
         return "error";
       });
@@ -440,37 +644,43 @@ export default function RetroPlayerPage() {
       setRuntimeState((current) => {
         if (current === "running" || current === "error" || current === "timed_out") return current;
         setEmulatorError(
-          `Emulator stalled — no progress for ${STALL_TIMEOUT_MS / 1000}s. Last status: "${progressText ?? "unknown"}". The core download or decompression may have hung. Clear the emulator cache and retry.`,
+          at99
+            ? `Emulator stalled at 99% decompression for ${FINALIZATION_GRACE_MS / 1000}s. The core archive may be corrupted. Clear the emulator cache and retry, or try the other NES core.`
+            : `Emulator stalled — no progress for ${STALL_TIMEOUT_MS / 1000}s. Last status: "${progressText ?? "unknown"}". The core download or decompression may have hung. Clear the emulator cache and retry.`,
         );
         return "error";
       });
     }, remaining);
     return () => window.clearTimeout(timer);
-  }, [runtimeState, lastProgressAt, progressText, playerAttempt]);
+  }, [runtimeState, lastProgressAt, progressText, playerAttempt, hit99At]);
+
+  // Active data path — depends on runtime source (self-hosted vs CDN fallback).
+  const activeDataPath = runtimeSource === "official-fallback" ? EMULATOR_CDN_FALLBACK_PATH : EMULATOR_DATA_PATH;
 
   // Pre-flight asset verification before mounting the iframe.
   useEffect(() => {
     if (!game || !romDataUrl) return;
     let active = true;
     (async () => {
-      const result = await verifyEmulatorAssets(ejsCore);
+      const result = await verifyEmulatorAssets(ejsCore, activeDataPath);
       if (!active) return;
       setAssetCheck(result);
       if (!result.ok) {
         setRuntimeState("error");
         setEmulatorError(
-          `Self-hosted emulator asset check failed: ${result.failedUrl} — ${result.reason}. The data directory at ${EMULATOR_DATA_PATH} may be incomplete.`,
+          `${runtimeSource === "official-fallback" ? "Official CDN" : "Self-hosted"} emulator asset check failed: ${result.failedUrl} — ${result.reason}.`,
         );
       }
     })();
     return () => {
       active = false;
     };
-  }, [game, romDataUrl, ejsCore, playerAttempt]);
+  }, [game, romDataUrl, ejsCore, playerAttempt, runtimeSource, activeDataPath]);
 
   const retryPlayer = useCallback((nextCore?: string) => {
     if (nextCore) setCoreOverride(nextCore);
     setEmulatorError(null);
+    setWorkerError(null);
     setProgressText(null);
     setAssetCheck(null);
     setLatestEvent(null);
@@ -478,6 +688,41 @@ export default function RetroPlayerPage() {
     setLaunchStartTime(Date.now());
     setLastProgressAt(null);
     setElapsedMs(null);
+    setHit99At(null);
+    setPlayerAttempt((attempt) => attempt + 1);
+  }, []);
+
+  // Phase 6: switch to the official CDN fallback runtime. Rebuilds the entire
+  // iframe using the CDN path — never mixes a local loader with CDN cores.
+  // The ROM stays as its local Blob URL and is never uploaded.
+  const useOfficialRuntime = useCallback(() => {
+    setRuntimeSource("official-fallback");
+    setEmulatorError(null);
+    setWorkerError(null);
+    setProgressText(null);
+    setAssetCheck(null);
+    setLatestEvent(null);
+    setRuntimeState("loading_loader");
+    setLaunchStartTime(Date.now());
+    setLastProgressAt(null);
+    setElapsedMs(null);
+    setHit99At(null);
+    setPlayerAttempt((attempt) => attempt + 1);
+  }, []);
+
+  // Return to self-hosted runtime (used after a CDN fallback session).
+  const useSelfHostedRuntime = useCallback(() => {
+    setRuntimeSource("self-hosted");
+    setEmulatorError(null);
+    setWorkerError(null);
+    setProgressText(null);
+    setAssetCheck(null);
+    setLatestEvent(null);
+    setRuntimeState("loading_loader");
+    setLaunchStartTime(Date.now());
+    setLastProgressAt(null);
+    setElapsedMs(null);
+    setHit99At(null);
     setPlayerAttempt((attempt) => attempt + 1);
   }, []);
 
@@ -501,8 +746,9 @@ export default function RetroPlayerPage() {
       color: system?.color ?? "#a78bfa",
       biosUrl: isSatellaview && biosDataUrl ? biosDataUrl : undefined,
       buildId: EMULATOR_BUILD_ID,
+      dataPath: activeDataPath,
     });
-  }, [game, romDataUrl, biosDataUrl, isSatellaview, ejsCore, system]);
+  }, [game, romDataUrl, biosDataUrl, isSatellaview, ejsCore, system, activeDataPath]);
 
   async function pickBios(file?: File) {
     if (!file) return;
@@ -533,6 +779,27 @@ export default function RetroPlayerPage() {
   const biosRequired = isSatellaview && !biosDataUrl;
   const canLaunch = !biosRequired;
 
+  // Phase 5: determine which NES core to offer as an alternative. Only offer a
+  // core if it is in AVAILABLE_NES_CORES AND its asset passed verification.
+  const altNesCore: NesCore | null = useMemo(() => {
+    if (!game || game.system !== "nes") return null;
+    const current = ejsCore;
+    for (const candidate of AVAILABLE_NES_CORES) {
+      if (candidate === current) continue;
+      // Check the asset verification result for this candidate core.
+      const candidateCheck = assetCheck?.checks.find(
+        (c) => c.label === `core ${candidate}-wasm.data`,
+      );
+      // If we haven't verified yet, still allow offering it (the preflight
+      // will catch a missing asset). But if we DID verify and it failed, hide it.
+      if (candidateCheck && (!candidateCheck.bytes || candidateCheck.error || candidateCheck.validSignature === false)) {
+        continue;
+      }
+      return candidate;
+    }
+    return null;
+  }, [game, ejsCore, assetCheck]);
+
   const diagnostic: DiagnosticInfo = {
     buildId: EMULATOR_BUILD_ID,
     version: EMULATOR_VERSION,
@@ -541,7 +808,8 @@ export default function RetroPlayerPage() {
     romExtension: game?.fileName.split(".").pop() ?? "—",
     romSize: game?.size ?? 0,
     biosPresent: !!biosDataUrl,
-    dataPath: EMULATOR_DATA_PATH,
+    dataPath: activeDataPath,
+    runtimeSource,
     loaderStatus: assetCheck?.ok ? "loaded" : assetCheck?.ok === false ? "failed" : "pending",
     coreRequestStatus:
       runtimeState === "downloading_core"
@@ -558,6 +826,8 @@ export default function RetroPlayerPage() {
     elapsedMs,
     latestEvent,
     latestError: emulatorError,
+    workerError,
+    assetChecks: assetCheck?.checks ?? [],
   };
 
   if (loading)
@@ -739,6 +1009,11 @@ export default function RetroPlayerPage() {
                     Asset check failed: {assetCheck.failedUrl} ({assetCheck.reason})
                   </p>
                 )}
+                {workerError && (
+                  <p className="mt-1 text-[10px] text-rose-100/60">
+                    Worker error: {workerError}
+                  </p>
+                )}
                 <div className="mt-3 flex flex-wrap gap-2">
                   <button
                     onClick={() => retryPlayer()}
@@ -753,12 +1028,33 @@ export default function RetroPlayerPage() {
                     <Trash2 size={11} className="mr-1 inline" />
                     Clear emulator cache
                   </button>
-                  {game.system === "nes" && (
+                  {/* Phase 5: only offer a core that is in AVAILABLE_NES_CORES
+                      and whose asset passed verification. */}
+                  {altNesCore && (
                     <button
-                      onClick={() => retryPlayer(ejsCore === "fceumm" ? "nestopia" : "fceumm")}
+                      onClick={() => retryPlayer(altNesCore)}
                       className="rounded-lg border border-cyan-400/30 px-3 py-1.5 text-[10px] font-bold text-cyan-200 hover:bg-cyan-400/10"
                     >
-                      Try {ejsCore === "fceumm" ? "Nestopia" : "FCEUmm"}
+                      Try {altNesCore === "fceumm" ? "FCEUmm" : "Nestopia"}
+                    </button>
+                  )}
+                  {/* Phase 6: controlled CDN fallback. Only show when self-hosted
+                      assets failed AND we are not already on the fallback. */}
+                  {runtimeSource === "self-hosted" && assetCheck && !assetCheck.ok && (
+                    <button
+                      onClick={useOfficialRuntime}
+                      className="rounded-lg border border-violet-400/30 px-3 py-1.5 text-[10px] font-bold text-violet-200 hover:bg-violet-400/10"
+                    >
+                      Use official runtime
+                    </button>
+                  )}
+                  {/* Return to self-hosted after using the CDN fallback. */}
+                  {runtimeSource === "official-fallback" && (
+                    <button
+                      onClick={useSelfHostedRuntime}
+                      className="rounded-lg border border-emerald-400/30 px-3 py-1.5 text-[10px] font-bold text-emerald-200 hover:bg-emerald-400/10"
+                    >
+                      Use self-hosted runtime
                     </button>
                   )}
                   <Link
@@ -785,6 +1081,7 @@ export default function RetroPlayerPage() {
                 <div>ROM: .{diagnostic.romExtension} ({diagnostic.romSize.toLocaleString()} bytes)</div>
                 <div>BIOS: {diagnostic.biosPresent ? "present" : "—"}</div>
                 <div>Data path: {diagnostic.dataPath}</div>
+                <div>Runtime: {diagnostic.runtimeSource}</div>
                 <div>Loader: {diagnostic.loaderStatus}</div>
                 <div>Core request: {diagnostic.coreRequestStatus}</div>
                 <div>Core bytes: {diagnostic.coreResponseBytes?.toLocaleString() ?? "—"}</div>
@@ -792,8 +1089,30 @@ export default function RetroPlayerPage() {
                 <div>Elapsed: {diagnostic.elapsedMs !== null ? `${diagnostic.elapsedMs}ms` : "—"}</div>
                 <div>Latest event: {diagnostic.latestEvent ?? "—"}</div>
               </div>
+              {diagnostic.workerError && (
+                <div className="mt-2 text-rose-300">Worker error: {diagnostic.workerError}</div>
+              )}
               {diagnostic.latestError && (
                 <div className="mt-2 text-rose-300">Error: {diagnostic.latestError}</div>
+              )}
+              {diagnostic.assetChecks.length > 0 && (
+                <div className="mt-3 border-t border-white/10 pt-2">
+                  <div className="mb-1 font-bold text-white/80">Asset checks ({diagnostic.assetChecks.length})</div>
+                  <div className="space-y-0.5">
+                    {diagnostic.assetChecks.map((c) => (
+                      <div key={c.url} className="flex items-center gap-2">
+                        <span className={c.error ? "text-rose-300" : "text-emerald-300"}>
+                          {c.error ? "✖" : "✓"}
+                        </span>
+                        <span className="truncate">{c.label}</span>
+                        <span className="ml-auto text-white/40">
+                          {c.status ?? "—"} · {c.bytes?.toLocaleString() ?? "—"} B
+                          {c.validSignature === false ? " · bad sig" : c.validSignature === true ? " · 7z ok" : ""}
+                        </span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -896,7 +1215,9 @@ export default function RetroPlayerPage() {
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-white/35">EmulatorJS</dt>
-                <dd className="font-mono text-[10px] text-white/50">self-hosted {EMULATOR_VERSION}</dd>
+                <dd className="font-mono text-[10px] text-white/50">
+                  {runtimeSource === "official-fallback" ? "CDN fallback" : "self-hosted"} {EMULATOR_VERSION}
+                </dd>
               </div>
               <div className="flex justify-between gap-3">
                 <dt className="text-white/35">Build</dt>

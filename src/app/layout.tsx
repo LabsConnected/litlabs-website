@@ -8,15 +8,10 @@ import { VisualProvider } from "@/context/VisualContext";
 import LayoutShell from "@/components/LayoutShell";
 import {
   DEFAULT_DESCRIPTION,
-  DEFAULT_OG_IMAGE,
   DEFAULT_TITLE,
   SITE_NAME,
   SITE_URL,
-  absoluteUrl,
 } from "@/lib/seo";
-import { GoogleAnalytics } from "@next/third-parties/google";
-import { Analytics } from "@vercel/analytics/react";
-import { SpeedInsights } from "@vercel/speed-insights/react";
 import "./globals.css";
 
 export const viewport: Viewport = {
@@ -74,21 +69,12 @@ export const metadata: Metadata = {
     siteName: SITE_NAME,
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
-    images: [
-      {
-        url: absoluteUrl(DEFAULT_OG_IMAGE),
-        width: 1200,
-        height: 630,
-        alt: `${SITE_NAME} AI creative workspace`,
-      },
-    ],
   },
 
   twitter: {
     card: "summary_large_image",
     title: DEFAULT_TITLE,
     description: DEFAULT_DESCRIPTION,
-    images: [absoluteUrl(DEFAULT_OG_IMAGE)],
   },
 
   verification: googleVerification
@@ -120,31 +106,12 @@ export default function RootLayout({
 
   return (
     <html lang="en">
-      <link rel="preconnect" href="https://fonts.googleapis.com" />
-      <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
-      <link
-        rel="stylesheet"
-        href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Sora:wght@400;500;600;700;800&family=Pixelify+Sans:wght@400;500;600;700&family=Orbitron:wght@400;500;600;700;800;900&family=Press+Start+2P&family=Chakra+Petch:wght@400;500;600;700&family=Rajdhani:wght@300;400;500;600;700&display=swap"
-      />
-      <link
-        rel="preconnect"
-        href="https://accounts.dev"
-        crossOrigin="anonymous"
-      />
       <link
         rel="preconnect"
         href="https://clerk.litlabs.net"
         crossOrigin="anonymous"
       />
-      <link
-        rel="preconnect"
-        href="https://static.cloudflareinsights.com"
-        crossOrigin="anonymous"
-      />
-      <link rel="dns-prefetch" href="https://accounts.dev" />
       <link rel="dns-prefetch" href="https://clerk.litlabs.net" />
-      <link rel="dns-prefetch" href="https://static.cloudflareinsights.com" />
-      <GoogleAnalytics gaId="G-0G4JPF3HXG" />
       <body
         className="antialiased min-h-screen"
         style={{ backgroundColor: "#03050b" }}
@@ -222,8 +189,6 @@ export default function RootLayout({
             {shell}
           </ClerkAuthContextProvider>
         )}
-        <Analytics />
-        <SpeedInsights />
       </body>
     </html>
   );

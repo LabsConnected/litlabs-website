@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
-import { supabaseAdmin } from "@/lib/supabase";
+import { supabaseAdmin, getSupabaseAdmin } from "@/lib/supabase";
 import {
   validateAgentTaskInput,
   checkPromptSafety,
@@ -15,6 +15,13 @@ export async function GET() {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  // Graceful degradation when Supabase service role is not configured
+  // (local dev, preview deploys without secrets). Avoids a 500 that
+  // surfaces as console noise in Lighthouse/captures.
+  if (!getSupabaseAdmin()) {
+    return NextResponse.json({ tasks: [], configured: false });
+  }
+
   const { data, error } = await supabaseAdmin
     .from("agent_tasks")
     .select("id, session_id, assigned_to, dispatcher, task_input, task_output, status, created_at, updated_at")
@@ -23,10 +30,13 @@ export async function GET() {
     .limit(50);
 
   if (error) {
-    return NextResponse.json({ error: "Failed to load missions" }, { status: 500 });
+    return NextResponse.json(
+      { error: `Failed to load missions: ${error.message}`, configured: true },
+      { status: 500 },
+    );
   }
 
-  return NextResponse.json({ tasks: data || [] });
+  return NextResponse.json({ tasks: data || [], configured: true });
 }
 
 export async function POST(request: Request) {

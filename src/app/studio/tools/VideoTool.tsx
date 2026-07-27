@@ -16,6 +16,9 @@ import {
   Sparkles,
   ImagePlus,
   X,
+  Lightbulb,
+  Eye,
+  ArrowRight,
 } from "lucide-react";
 
 const PROMPT_PRESETS = [
@@ -40,6 +43,13 @@ interface VideoGen {
   cost: number;
 }
 
+interface VideoIdea {
+  title: string;
+  prompt: string;
+  motion: string;
+  vibe: string;
+}
+
 export default function VideoTool() {
   const { resolvedColors: T } = useTheme();
   const [prompt, setPrompt] = useState("");
@@ -54,6 +64,9 @@ export default function VideoTool() {
   const [uploadedImageUrl, setUploadedImageUrl] = useState<string | null>(null);
   const [uploadedImagePreview, setUploadedImagePreview] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
+  const [ideas, setIdeas] = useState<VideoIdea[]>([]);
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [ideaError, setIdeaError] = useState<string | null>(null);
   const isHappyHorse = model === "happyhorse";
   const [history, setHistory] = useState<VideoGen[]>(() => {
     if (typeof window === "undefined") return [];
@@ -96,6 +109,29 @@ export default function VideoTool() {
       );
   }, [history]);
 
+  const fetchIdeas = useCallback(async (url: string) => {
+    setIsAnalyzing(true);
+    setIdeaError(null);
+    setIdeas([]);
+    try {
+      const res = await fetch("/api/media/suggest-video-ideas", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageUrl: url }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || `HTTP ${res.status}`);
+      }
+      const data = await res.json();
+      setIdeas(Array.isArray(data.ideas) ? data.ideas : []);
+    } catch (err) {
+      setIdeaError(err instanceof Error ? err.message : "Could not analyze photo");
+    } finally {
+      setIsAnalyzing(false);
+    }
+  }, []);
+
   const handleImageUpload = useCallback(async (file: File) => {
     setIsUploading(true);
     setError(null);
@@ -114,6 +150,8 @@ export default function VideoTool() {
         throw new Error("Upload succeeded but no public URL returned. Supabase Storage may not be configured.");
       }
       setUploadedImageUrl(data.url);
+      // Auto-trigger LiTT's idea analysis the moment the photo is live
+      fetchIdeas(data.url);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Image upload failed");
       setUploadedImagePreview(null);
@@ -121,11 +159,19 @@ export default function VideoTool() {
     } finally {
       setIsUploading(false);
     }
-  }, []);
+  }, [fetchIdeas]);
 
   const handleRemoveImage = () => {
     setUploadedImageUrl(null);
     setUploadedImagePreview(null);
+    setIdeas([]);
+    setIdeaError(null);
+  };
+
+  const applyIdea = (idea: VideoIdea) => {
+    setPrompt(idea.prompt);
+    if (idea.motion) setMotionStyle(idea.motion);
+    setError(null);
   };
 
   const handleGenerate = useCallback(async () => {
@@ -370,77 +416,210 @@ export default function VideoTool() {
             </div>
           </div>
 
-          {/* Image upload for HappyHorse i2v */}
-          {isHappyHorse && (
-            <div
-              className="border rounded-lg p-3"
-              style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+          {/* Image upload — first frame for HappyHorse, reference photo for Veo */}
+          <div
+            className="border rounded-lg p-3"
+            style={{ borderColor: T.borderColor, backgroundColor: T.boxBg }}
+          >
+            <label
+              className="flex items-center gap-1.5 text-[10px] uppercase tracking-widest mb-2"
+              style={{ color: T.textMuted }}
             >
-              <label
-                className="block text-[10px] uppercase tracking-widest mb-2"
-                style={{ color: T.textMuted }}
-              >
-                First Frame Image (required)
-              </label>
-              {uploadedImagePreview ? (
-                <div className="relative rounded-lg overflow-hidden">
-                  {/* blob: URLs are not optimisable by next/image — keep <img> */}
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={uploadedImagePreview}
-                    alt="First frame"
-                    className="w-full max-h-48 object-contain rounded"
-                  />
-                  <button
-                    onClick={handleRemoveImage}
-                    disabled={isGenerating || isUploading}
-                    className="absolute top-2 right-2 p-1 rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+              <Eye size={11} style={{ color: T.accentColor }} />
+              {isHappyHorse ? "First Frame Image (required)" : "Reference Photo (optional)"}
+            </label>
+            {uploadedImagePreview ? (
+              <div className="relative rounded-lg overflow-hidden">
+                {/* blob: URLs are not optimisable by next/image — keep <img> */}
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img
+                  src={uploadedImagePreview}
+                  alt={isHappyHorse ? "First frame" : "Reference photo"}
+                  className="w-full max-h-48 object-contain rounded"
+                />
+                <button
+                  onClick={handleRemoveImage}
+                  disabled={isGenerating || isUploading || isAnalyzing}
+                  className="absolute top-2 right-2 p-1 rounded bg-black/60 text-white hover:bg-black/80 disabled:opacity-50"
+                >
+                  <X size={14} />
+                </button>
+                {uploadedImageUrl && !isAnalyzing && (
+                  <div
+                    className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/80 text-white"
                   >
-                    <X size={14} />
-                  </button>
-                  {uploadedImageUrl && (
-                    <div
-                      className="absolute bottom-2 left-2 px-2 py-0.5 rounded text-[9px] font-bold bg-emerald-500/80 text-white"
-                    >
-                      Ready
+                    Ready
+                  </div>
+                )}
+                {isAnalyzing && (
+                  <div className="absolute inset-0 flex flex-col items-center justify-center bg-black/70 backdrop-blur-sm gap-2">
+                    <div className="relative w-12 h-12">
+                      <div
+                        className="absolute inset-0 rounded-full border-2 animate-ping"
+                        style={{ borderColor: T.accentColor, opacity: 0.5 }}
+                      />
+                      <div
+                        className="absolute inset-0 flex items-center justify-center"
+                        style={{ color: T.accentColor }}
+                      >
+                        <Eye size={18} />
+                      </div>
                     </div>
-                  )}
-                </div>
-              ) : (
-                <label
-                  className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all hover:scale-[1.01]"
+                    <span className="text-[10px] font-bold" style={{ color: T.accentColor }}>
+                      LiTT is studying your photo...
+                    </span>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <label
+                className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed cursor-pointer transition-all hover:scale-[1.01]"
+                style={{
+                  borderColor: T.borderColor,
+                  backgroundColor: T.bgColor,
+                }}
+              >
+                {isUploading ? (
+                  <Loader2 size={20} className="animate-spin" style={{ color: T.accentColor }} />
+                ) : (
+                  <ImagePlus size={20} style={{ color: T.textMuted }} />
+                )}
+                <span className="text-[10px]" style={{ color: T.textMuted }}>
+                  {isUploading ? "Uploading..." : "Click to upload JPEG, PNG, or WebP"}
+                </span>
+                <input
+                  type="file"
+                  accept="image/jpeg,image/png,image/webp"
+                  className="hidden"
+                  disabled={isUploading || isGenerating}
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) handleImageUpload(file);
+                  }}
+                />
+              </label>
+            )}
+            <div
+              className="text-[9px] mt-1.5"
+              style={{ color: T.textMuted }}
+            >
+              {isHappyHorse
+                ? "HappyHorse generates a video starting from this image. LiTT will also suggest ideas."
+                : "Upload a photo and LiTT will instantly suggest video ideas based on what's in it."}
+            </div>
+          </div>
+
+          {/* LiTT's AI idea suggestions — appears after photo analysis */}
+          {uploadedImageUrl && (isAnalyzing || ideas.length > 0 || ideaError) && (
+            <div
+              className="border rounded-lg p-3 space-y-2"
+              style={{
+                borderColor: T.accentColor + "40",
+                backgroundColor: T.accentColor + "08",
+              }}
+            >
+              <div className="flex items-center gap-1.5">
+                <Lightbulb size={12} style={{ color: T.accentColor }} />
+                <span
+                  className="text-[10px] font-black uppercase tracking-widest"
+                  style={{ color: T.accentColor }}
+                >
+                  LiTT&rsquo;s Ideas
+                </span>
+                {ideas.length > 0 && (
+                  <span className="text-[9px] opacity-50 ml-auto">{ideas.length} suggestions</span>
+                )}
+              </div>
+
+              {ideaError && (
+                <div
+                  className="text-[10px] px-2 py-1.5 rounded border"
                   style={{
-                    borderColor: T.borderColor,
-                    backgroundColor: T.bgColor,
+                    borderColor: "#f8514940",
+                    color: "#f85149",
+                    backgroundColor: "#f8514910",
                   }}
                 >
-                  {isUploading ? (
-                    <Loader2 size={20} className="animate-spin" style={{ color: T.accentColor }} />
-                  ) : (
-                    <ImagePlus size={20} style={{ color: T.textMuted }} />
-                  )}
-                  <span className="text-[10px]" style={{ color: T.textMuted }}>
-                    {isUploading ? "Uploading..." : "Click to upload JPEG, PNG, or WebP"}
-                  </span>
-                  <input
-                    type="file"
-                    accept="image/jpeg,image/png,image/webp"
-                    className="hidden"
-                    disabled={isUploading || isGenerating}
-                    onChange={(e) => {
-                      const file = e.target.files?.[0];
-                      if (file) handleImageUpload(file);
-                    }}
-                  />
-                </label>
+                  {ideaError}
+                </div>
               )}
-              <div
-                className="text-[9px] mt-1.5"
-                style={{ color: T.textMuted }}
-              >
-                HappyHorse generates a video starting from this image. The video
-                aspect ratio follows the image.
-              </div>
+
+              {isAnalyzing && ideas.length === 0 && !ideaError && (
+                <div className="space-y-1.5">
+                  {[0, 1, 2].map((i) => (
+                    <div
+                      key={i}
+                      className="h-10 rounded animate-pulse"
+                      style={{ backgroundColor: T.accentColor + "10" }}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {ideas.length > 0 && (
+                <div className="space-y-1.5 max-h-72 overflow-y-auto pr-1">
+                  {ideas.map((idea, i) => (
+                    <button
+                      key={i}
+                      onClick={() => applyIdea(idea)}
+                      disabled={isGenerating}
+                      className="w-full text-left p-2.5 rounded-lg border transition-all hover:scale-[1.02] disabled:opacity-50 disabled:hover:scale-100 group"
+                      style={{
+                        borderColor: T.borderColor,
+                        backgroundColor: T.bgColor,
+                      }}
+                    >
+                      <div className="flex items-start justify-between gap-2">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-1.5 mb-0.5">
+                            <span
+                              className="text-[9px] font-black px-1.5 py-0.5 rounded uppercase tracking-wider"
+                              style={{
+                                backgroundColor: T.accentColor + "20",
+                                color: T.accentColor,
+                              }}
+                            >
+                              {idea.vibe}
+                            </span>
+                            <span
+                              className="text-[9px] font-bold"
+                              style={{ color: T.textMuted }}
+                            >
+                              {idea.motion}
+                            </span>
+                          </div>
+                          <div
+                            className="text-[11px] font-bold mb-0.5"
+                            style={{ color: T.textColor }}
+                          >
+                            {idea.title}
+                          </div>
+                          <div
+                            className="text-[10px] leading-relaxed line-clamp-2"
+                            style={{ color: T.textMuted }}
+                          >
+                            {idea.prompt}
+                          </div>
+                        </div>
+                        <ArrowRight
+                          size={12}
+                          className="shrink-0 mt-1 opacity-30 group-hover:opacity-100 transition-opacity"
+                          style={{ color: T.accentColor }}
+                        />
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+
+              {ideas.length > 0 && (
+                <div
+                  className="text-[9px] pt-1 border-t"
+                  style={{ color: T.textMuted, borderColor: T.borderColor }}
+                >
+                  Click any idea to load it into the scene description
+                </div>
+              )}
             </div>
           )}
 

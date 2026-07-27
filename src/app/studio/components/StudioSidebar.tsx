@@ -393,9 +393,9 @@ export function MobileTabBar({
         >
           <Icon size={18} className="pointer-events-none shrink-0" style={{ color: T.accentColor }} />
           <div className="min-w-0 flex-1">
-            <div className="text-xs font-bold" style={{ color: "rgba(255,255,255,0.85)" }}>{entry.label}</div>
+            <div className="text-xs font-bold" style={{ color: "rgba(255,255,255,0.9)" }}>{entry.label}</div>
             {entry.description && (
-              <div className="text-[10px] leading-tight" style={{ color: "rgba(255,255,255,0.4)" }}>{entry.description}</div>
+              <div className="text-[10px] leading-tight" style={{ color: "rgba(255,255,255,0.65)" }}>{entry.description}</div>
             )}
           </div>
         </Link>
@@ -428,13 +428,13 @@ export function MobileTabBar({
           <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ backgroundColor: "rgba(255,255,255,0.15)" }} />
 
           {/* PRIMARY section */}
-          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">Primary</div>
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/65">Primary</div>
           <div className="mb-3 space-y-1">
             {PRIMARY_ENTRIES.map((entry) => renderEntry(entry, `primary-${entry.label}`))}
           </div>
 
           {/* TOOLS section */}
-          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">Tools</div>
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/65">Tools</div>
           <div className="mb-3 grid grid-cols-4 gap-2">
             {secondaryTools.map((tool) => {
               const Icon = tool.icon;
@@ -460,7 +460,7 @@ export function MobileTabBar({
                     strokeWidth={active ? 2.5 : 1.8}
                     style={{ color: active ? T.accentColor : "rgba(255,255,255,0.5)" }}
                   />
-                  <span className="text-[9px] font-bold" style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}>
+                  <span className="text-[9px] font-bold" style={{ color: active ? T.accentColor : "rgba(255,255,255,0.65)" }}>
                     {tool.label}
                   </span>
                 </button>
@@ -469,7 +469,7 @@ export function MobileTabBar({
           </div>
 
           {/* SYSTEM section */}
-          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/50">System</div>
+          <div className="mb-1 text-[9px] font-black uppercase tracking-widest text-white/65">System</div>
           <div className="space-y-1">
             {SYSTEM_ENTRIES.map((entry) => renderEntry(entry, `system-${entry.label}`))}
           </div>
@@ -496,7 +496,7 @@ export function MobileTabBar({
                 setDrawerOpen(false);
               }}
               className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
-              style={{ color: active ? T.accentColor : "rgba(255,255,255,0.4)" }}
+              style={{ color: active ? T.accentColor : "rgba(255,255,255,0.65)" }}
               aria-label={tool.label}
               title={tool.label}
             >
@@ -516,7 +516,7 @@ export function MobileTabBar({
           type="button"
           onClick={() => setDrawerOpen((v) => !v)}
           className="flex-1 flex min-h-11 flex-col items-center justify-center gap-0.5 transition-all relative"
-          style={{ color: activeIsSecondary ? T.accentColor : "rgba(255,255,255,0.4)" }}
+          style={{ color: activeIsSecondary ? T.accentColor : "rgba(255,255,255,0.65)" }}
           aria-label="More"
           title="More"
         >

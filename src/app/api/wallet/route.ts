@@ -3,6 +3,13 @@ import { auth } from "@clerk/nextjs/server";
 import { withRateLimit } from "@/lib/rate-limiter";
 import { canMutateBalances } from "@/lib/authz";
 import { adjustWalletBalance, getCreditBalances } from "@/lib/wallet-ledger";
+import { getSupabaseAdmin } from "@/lib/supabase";
+
+const EMPTY_WALLET = {
+  balance: 0,
+  balances: { monthly: 0, purchased: 0, beta_promotional: 0 },
+  last_claim_date: null,
+} as const;
 
 /**
  * GET /api/wallet
@@ -15,6 +22,13 @@ async function getHandler() {
       return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
+    // Graceful degradation when Supabase service role is not configured
+    // (local dev, preview deploys without secrets). Avoids a 500 that
+    // surfaces as console noise in Lighthouse/captures.
+    if (!getSupabaseAdmin()) {
+      return NextResponse.json({ ...EMPTY_WALLET, configured: false });
+    }
+
     const wallet = await getCreditBalances(clerkId);
     return NextResponse.json({
       balance: wallet.total,
@@ -24,10 +38,12 @@ async function getHandler() {
         beta_promotional: wallet.betaPromotional,
       },
       last_claim_date: wallet.lastDailyClaim,
+      configured: true,
     });
-  } catch {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Failed to fetch wallet";
     return NextResponse.json(
-      { error: "Failed to fetch wallet" },
+      { error: message, configured: true },
       { status: 500 },
     );
   }

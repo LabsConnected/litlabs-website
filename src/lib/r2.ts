@@ -80,3 +80,42 @@ export function getPublicAudioUrl(key: string) {
   }
   return `https://${BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.dev/${key}`;
 }
+
+export async function uploadBinaryAsset(
+  key: string,
+  body: Buffer,
+  contentType: string,
+  cacheControl = "public, max-age=31536000, immutable",
+) {
+  const command = new PutObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+    Body: body,
+    ContentType: contentType,
+    CacheControl: cacheControl,
+  });
+
+  await r2Client.send(command);
+
+  return {
+    storageKey: key,
+    publicUrl: getPublicAssetUrl(key),
+  };
+}
+
+export async function deleteBinaryAsset(key: string) {
+  const command = new DeleteObjectCommand({
+    Bucket: BUCKET_NAME,
+    Key: key,
+  });
+
+  await r2Client.send(command);
+  return { deleted: true };
+}
+
+export function getPublicAssetUrl(key: string) {
+  if (process.env.R2_PUBLIC_URL) {
+    return `${process.env.R2_PUBLIC_URL}/${key}`;
+  }
+  return `https://${BUCKET_NAME}.${process.env.R2_ACCOUNT_ID}.r2.dev/${key}`;
+}

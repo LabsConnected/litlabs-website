@@ -137,7 +137,7 @@ export default function StudioTopBar({
         className="hidden md:flex items-center gap-1 rounded-lg border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 shrink-0"
         style={{
           borderColor: "rgba(255,255,255,0.08)",
-          color: "rgba(255,255,255,0.55)",
+          color: "rgba(255,255,255,0.72)",
         }}
         title="Back to Dashboard"
         aria-label="Back to Dashboard"
@@ -147,7 +147,7 @@ export default function StudioTopBar({
       </a>
 
       {/* Connection status — truthful */}
-      <div className="hidden md:flex items-center gap-1.5 shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-bold" title={capabilities.connectionSummary} style={{ backgroundColor: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.55)" }}>
+      <div className="hidden md:flex items-center gap-1.5 shrink-0 rounded-lg border px-2.5 py-1 text-[10px] font-bold" title={capabilities.connectionSummary} style={{ backgroundColor: "rgba(255,255,255,0.03)", borderColor: "rgba(255,255,255,0.06)", color: "rgba(255,255,255,0.72)" }}>
         <span className="h-1.5 w-1.5 shrink-0 rounded-full" aria-hidden style={{ backgroundColor: capabilities.connectedProviders.length ? "#22c55e" : "#6b7280", boxShadow: capabilities.connectedProviders.length ? `0 0 4px ${T.success}` : "none" }} />
         {capabilities.connectedProviders.length ? `Connected · ${capabilities.connectedProviders.length}` : "No services connected"}
       </div>
@@ -179,7 +179,7 @@ export default function StudioTopBar({
             }}
           />
           <span className="pointer-events-none hidden sm:inline">{selectedModel.label}</span>
-          <ChevronDown size={10} className="pointer-events-none hidden sm:inline" style={{ color: "rgba(255,255,255,0.4)" }} />
+          <ChevronDown size={10} className="pointer-events-none hidden sm:inline" style={{ color: "rgba(255,255,255,0.65)" }} />
         </button>
         {modelOpen && modelRect &&
           createPortal(
@@ -196,7 +196,7 @@ export default function StudioTopBar({
 
       {/* Fallback notice */}
       {fallbackNotice && (
-        <span className="hidden md:inline text-[9px] font-bold text-amber-300" title={fallbackNotice}>
+        <span className="hidden md:inline text-[9px] font-bold text-amber-200" title={fallbackNotice}>
           ⚠ Fallback
         </span>
       )}
@@ -204,7 +204,7 @@ export default function StudioTopBar({
       {/* Search */}
       <div
         className="relative flex-1 max-w-xs min-w-0 hidden sm:block"
-        style={{ color: "rgba(255,255,255,0.4)" }}
+        style={{ color: "rgba(255,255,255,0.65)" }}
       >
         <Search
           size={12}
@@ -230,7 +230,7 @@ export default function StudioTopBar({
             type="button"
             onClick={() => onSearchChange("")}
             className="absolute right-2 top-1/2 -translate-y-1/2 grid h-7 w-7 place-items-center rounded transition-colors hover:bg-white/10"
-            style={{ color: "rgba(255,255,255,0.4)" }}
+            style={{ color: "rgba(255,255,255,0.65)" }}
             aria-label="Clear search"
             title="Clear search"
           >
@@ -249,7 +249,7 @@ export default function StudioTopBar({
           className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
           style={{
             borderColor: "rgba(255,255,255,0.08)",
-            color: capabilities.connectedProviders.length ? "rgba(255,255,255,0.75)" : "rgba(255,255,255,0.35)",
+            color: capabilities.connectedProviders.length ? "rgba(255,255,255,0.88)" : "rgba(255,255,255,0.6)",
             backgroundColor: "rgba(255,255,255,0.03)",
           }}
           title="Run project"

@@ -162,6 +162,20 @@ function LandingPage() {
                 Explore the community
               </a>
             </div>
+            <figure className="mt-8 max-w-2xl overflow-hidden rounded-3xl border border-white/15 bg-black/30 shadow-[0_24px_80px_rgba(0,0,0,.45)]">
+              <Image
+                src="/og/littree-labstudios.jpg"
+                alt="LiTTree LabStudios creative studio powered by LiTT and Spark"
+                width={1200}
+                height={630}
+                priority
+                sizes="(min-width: 1024px) 40vw, 100vw"
+                className="h-auto w-full object-cover"
+              />
+              <figcaption className="border-t border-white/10 px-4 py-3 text-xs font-semibold tracking-wide text-white/55">
+                LiTTree LabStudios · Build apps, art, media, Projects and Missions with AI
+              </figcaption>
+            </figure>
             <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/45">
               <span>✓ Free to join</span>
               <span>✓ 500 starter credits</span>

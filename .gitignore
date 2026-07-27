@@ -140,3 +140,9 @@ eslint-full.txt
 
 # clerk configuration (can include secrets)
 /.clerk/
+
+# Temp build/log outputs
+build-output*.txt
+build-final.txt
+vitest.stubs/
+

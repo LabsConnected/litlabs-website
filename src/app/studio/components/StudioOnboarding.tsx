@@ -170,7 +170,7 @@ export default function StudioOnboarding({
             >
               <Plus size={20} className="text-lime-300" />
               <div className="mt-4 text-sm font-black text-white">Start from an idea</div>
-              <div className="mt-1 text-xs leading-5 text-white/45">Describe what you want and let LiTT build the first working draft.</div>
+              <div className="mt-1 text-xs leading-5 text-white/65">Describe what you want and let LiTT build the first working draft.</div>
             </button>
             <button
               onClick={() => setSourcesOpen(true)}
@@ -178,7 +178,7 @@ export default function StudioOnboarding({
             >
               <FolderGit2 size={20} className="text-cyan-300" />
               <div className="mt-4 text-sm font-black text-white">Connect a project</div>
-              <div className="mt-1 text-xs leading-5 text-white/45">GitHub, Git URL, GitLab, Bitbucket, Azure DevOps, upload, or deployment.</div>
+              <div className="mt-1 text-xs leading-5 text-white/65">GitHub, Git URL, GitLab, Bitbucket, Azure DevOps, upload, or deployment.</div>
             </button>
             <Link
               href="/studio?tool=chat&mission=Scan%20this%20website%20and%20tell%20me%20what%20you%20find%3A%20"
@@ -186,7 +186,7 @@ export default function StudioOnboarding({
             >
               <Globe2 size={20} className="text-violet-300" />
               <div className="mt-4 text-sm font-black text-white">Scan a website</div>
-              <div className="mt-1 text-xs leading-5 text-white/45">Review design, content, structure, integrations, performance, and next steps.</div>
+              <div className="mt-1 text-xs leading-5 text-white/65">Review design, content, structure, integrations, performance, and next steps.</div>
             </Link>
           </div>
 
@@ -194,7 +194,7 @@ export default function StudioOnboarding({
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               onClick={() => { onToolChange("build"); void onStartBlank?.(); }}
-              className="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-xs font-bold text-white/60 transition hover:border-white/20 hover:bg-white/6 hover:text-white"
+              className="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-xs font-bold text-white/75 transition hover:border-white/20 hover:bg-white/6 hover:text-white"
             >
               Start Blank Project
             </button>
@@ -210,7 +210,7 @@ export default function StudioOnboarding({
         {/* Popular starts + How it works */}
         <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_.8fr]">
           <section className="rounded-3xl border border-white/8 bg-white/2.5 p-5">
-            <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/35">Popular starts</div>
+            <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/55">Popular starts</div>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {templates.map((template) => (
                 <button
@@ -228,7 +228,7 @@ export default function StudioOnboarding({
             </div>
           </section>
           <section className="rounded-3xl border border-white/8 bg-white/2.5 p-5">
-            <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/35">How it works</div>
+            <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/55">How it works</div>
             <ol className="mt-4 space-y-4">
               {[
                 ["1", "Connect", "Bring in an idea, project, or source."],
@@ -239,7 +239,7 @@ export default function StudioOnboarding({
                   <span className="grid h-8 w-8 shrink-0 place-items-center rounded-xl bg-white/5 text-xs font-black text-cyan-200">{number}</span>
                   <span>
                     <b className="block text-xs text-white">{title}</b>
-                    <span className="text-[11px] leading-5 text-white/40">{detail}</span>
+                    <span className="text-[11px] leading-5 text-white/65">{detail}</span>
                   </span>
                 </li>
               ))}
@@ -270,7 +270,7 @@ export default function StudioOnboarding({
             <h2 id="connect-source-title" className="mt-2 text-2xl font-black text-white">
               What should LiTT inspect?
             </h2>
-            <p className="mt-2 text-sm text-white/45">
+            <p className="mt-2 text-sm text-white/65">
               Choose a source type. Available connections are marked. Others are visible so you can see the roadmap.
             </p>
 
@@ -285,7 +285,7 @@ export default function StudioOnboarding({
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${
                       activeCategory === i
                         ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-200"
-                        : "border-white/8 bg-white/2 text-white/50 hover:bg-white/5 hover:text-white/80"
+                        : "border-white/8 bg-white/2 text-white/65 hover:bg-white/5 hover:text-white/90"
                     }`}
                   >
                     <CatIcon size={14} />
@@ -303,7 +303,7 @@ export default function StudioOnboarding({
                   {quickProviders.map(sourceCard)}
                   <button
                     onClick={() => setShowMoreProviders(true)}
-                    className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/2 p-4 text-xs font-bold text-white/50 transition hover:border-white/25 hover:bg-white/4 hover:text-white/80"
+                    className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/2 p-4 text-xs font-bold text-white/65 transition hover:border-white/25 hover:bg-white/4 hover:text-white/90"
                   >
                     More Git Providers <ArrowRight size={14} />
                   </button>
@@ -336,7 +336,7 @@ export default function StudioOnboarding({
                     Continue in Chat
                   </button>
                 </div>
-                <p className="mt-2 text-[10px] leading-4 text-white/35">
+                <p className="mt-2 text-[10px] leading-4 text-white/65">
                   This hands the URL and selected permission mode to LiTT. Private Git authentication and automatic cloning are not enabled yet.
                 </p>
               </div>
@@ -354,7 +354,7 @@ export default function StudioOnboarding({
 
             {/* Permission modes */}
             <div className="mt-6">
-              <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/35">Permission mode</div>
+              <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/55">Permission mode</div>
               <div className="mt-3 grid gap-2 sm:grid-cols-3">
                 {PERMISSION_MODES.map((mode) => {
                   const ModeIcon = mode.icon;
@@ -370,17 +370,17 @@ export default function StudioOnboarding({
                       }`}
                     >
                       <div className="flex items-center gap-2">
-                        <ModeIcon size={14} className={selected ? "text-emerald-300" : "text-white/40"} />
+                        <ModeIcon size={14} className={selected ? "text-emerald-300" : "text-white/65"} />
                         <span className={`text-xs font-black ${selected ? "text-emerald-200" : "text-white/70"}`}>
                           {mode.label}
                         </span>
                         {mode.default && (
-                          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[8px] font-black uppercase text-white/30">
+                          <span className="ml-auto rounded-full bg-white/5 px-2 py-0.5 text-[8px] font-black uppercase text-white/55">
                             Default
                           </span>
                         )}
                       </div>
-                      <p className="mt-2 text-[10px] leading-4 text-white/35">{mode.description}</p>
+                      <p className="mt-2 text-[10px] leading-4 text-white/65">{mode.description}</p>
                     </button>
                   );
                 })}
@@ -392,7 +392,7 @@ export default function StudioOnboarding({
               <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-300" />
               <div>
                 <div className="text-xs font-black text-white">You stay in control</div>
-                <p className="mt-1 text-[10px] leading-5 text-white/40">
+                <p className="mt-1 text-[10px] leading-5 text-white/65">
                   LiTT inspects first. Writes, commands, branches, commits, and deployments remain separately controlled. Switch to Agent Mode only when you want LiTT to act autonomously.
                 </p>
               </div>
@@ -409,13 +409,13 @@ function SourceCard({ source }: { source: SourceOption }) {
   return (
     <>
       <div className="flex items-start justify-between gap-2">
-        <Icon size={18} className={source.available ? "text-cyan-300" : "text-white/25"} />
+        <Icon size={18} className={source.available ? "text-cyan-300" : "text-white/45"} />
         {source.available ? (
           <span className="inline-flex items-center gap-1 rounded-full bg-emerald-300/10 px-2 py-1 text-[8px] font-black uppercase text-emerald-200">
             <Check size={9} /> Available
           </span>
         ) : (
-          <span className="rounded-full bg-white/5 px-2 py-1 text-[8px] font-black uppercase text-white/30">
+          <span className="rounded-full bg-white/5 px-2 py-1 text-[8px] font-black uppercase text-white/55">
             Coming soon
           </span>
         )}

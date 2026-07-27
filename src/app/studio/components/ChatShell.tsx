@@ -453,7 +453,7 @@ export default function ChatShell({
             <span className="text-[10px] font-bold text-white/60">
               Project setup required
             </span>
-            <span className="text-[9px] text-white/40">
+            <span className="text-[9px] text-white/60">
               Connect a repository or start a blank project to enable files, terminal, preview, and code changes.
             </span>
             <div className="flex items-center gap-2 mt-0.5">
@@ -674,7 +674,7 @@ export default function ChatShell({
                     </span>
                     <span className="min-w-0 flex-1">
                       <span className="block text-xs font-black text-white">{agentMeta.displayName} is working</span>
-                      <span className="block truncate text-[9px] text-white/55">Operational trace · {busySeconds}s</span>
+                      <span className="block truncate text-[9px] text-white/80">Operational trace · {busySeconds}s</span>
                     </span>
                     <ChevronDown size={14} className={`pointer-events-none text-white/35 transition ${activityOpen ? "rotate-180" : ""}`} />
                   </button>
@@ -687,19 +687,19 @@ export default function ChatShell({
                           const active = index === activeStage;
                           return (
                             <div key={stage.label} className={`flex items-start gap-3 transition ${index > activeStage ? "opacity-30" : "opacity-100"}`}>
-                              <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg ${complete ? "bg-emerald-400/12 text-emerald-300" : active ? "bg-cyan-300/12 text-cyan-200" : "bg-white/5 text-white/40"}`}>
+                              <span className={`mt-0.5 grid h-6 w-6 shrink-0 place-items-center rounded-lg ${complete ? "bg-emerald-400/12 text-emerald-300" : active ? "bg-cyan-300/12 text-cyan-200" : "bg-white/5 text-white/75"}`}>
                                 {complete ? <CircleCheck size={13} /> : <Icon size={12} className={active ? "animate-pulse" : ""} />}
                               </span>
                               <span className="min-w-0">
                                 <span className="block text-[10px] font-bold text-white/85">{stage.label}</span>
-                                <span className="block text-[9px] leading-4 text-white/65">{stage.detail}</span>
+                                <span className="block text-[9px] leading-4 text-white/75">{stage.detail}</span>
                               </span>
                               {active && <span className="ml-auto mt-2 flex gap-0.5"><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.12s]" /><i className="h-1 w-1 animate-bounce rounded-full bg-cyan-300 [animation-delay:.24s]" /></span>}
                             </div>
                           );
                         })}
                       </div>
-                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/55">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
+                      <p className="mt-3 border-t border-white/7 pt-2 text-[8px] leading-4 text-white/80">Shows verifiable activity, context, and tool use—not private hidden reasoning.</p>
                     </div>
                   )}
                 </section>

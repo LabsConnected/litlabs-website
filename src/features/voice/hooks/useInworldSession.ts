@@ -65,6 +65,20 @@ export function useInworldSession(
   const [isConnected, setIsConnected] = useState(false);
   const [isListening, setIsListening] = useState(false);
   const [error, setErrorState] = useState<string | null>(null);
+  const isListeningRef = useRef(false);
+
+  const ensureAudioContextRunning = useCallback(async (context: AudioContext | null) => {
+    if (!context) return;
+    if (context.state === "closed") {
+      throw new Error("Voice audio context is closed.");
+    }
+    if (context.state !== "running") {
+      await context.resume();
+    }
+    if (context.state !== "running") {
+      throw new Error("Voice audio context could not start.");
+    }
+  }, []);
 
   // --- Audio playback ---
   // Matches the official Inworld quickstart pattern: onended chaining with
@@ -183,6 +197,7 @@ export function useInworldSession(
 
       const audioContext = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
       audioContextRef.current = audioContext;
+      await ensureAudioContextRunning(audioContext);
 
       const source = audioContext.createMediaStreamSource(stream);
 
@@ -229,6 +244,7 @@ export function useInworldSession(
       processor.connect(audioContext.destination);
 
       setIsListening(true);
+      isListeningRef.current = true;
       setState("listening");
 
       // Audio level monitoring
@@ -258,7 +274,7 @@ export function useInworldSession(
       setError(message);
       setState("error");
     }
-  }, [setState, setError]);
+  }, [ensureAudioContextRunning, setState, setError]);
 
   const stopMicCapture = useCallback(() => {
     if (animationFrameRef.current) {
@@ -284,6 +300,7 @@ export function useInworldSession(
     analyserRef.current = null;
     useVoiceStore.getState().setAudioLevel(0);
     setIsListening(false);
+    isListeningRef.current = false;
   }, []);
 
   // --- WebSocket connection ---
@@ -391,7 +408,7 @@ export function useInworldSession(
               case "input_audio_buffer.speech_stopped":
               case "input_audio_buffer.committed":
                 // Turn ended — agent will respond
-                if (isListening) {
+                if (isListeningRef.current) {
                   setState("thinking");
                 }
                 break;
@@ -524,7 +541,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [enqueueAudioChunk, isListening, onError, onAgentText, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
+    [enqueueAudioChunk, onError, onAgentText, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
   );
 
   const disconnect = useCallback(() => {
@@ -540,6 +557,7 @@ export function useInworldSession(
     }
     setIsConnected(false);
     setIsListening(false);
+    isListeningRef.current = false;
     setState("idle");
   }, [setState, stopMicCapture, stopPlayback]);
 
@@ -552,6 +570,11 @@ export function useInworldSession(
   }, [startMicCapture]);
 
   const startListening = useCallback(async () => {
+    if (!playbackContextRef.current) {
+      playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+    }
+    await ensureAudioContextRunning(playbackContextRef.current);
+
     if (!isConnected) {
       await connect();
     }
@@ -567,7 +590,7 @@ export function useInworldSession(
     }
 
     await startMicrophone();
-  }, [isConnected, connect, startMicrophone]);
+  }, [connect, ensureAudioContextRunning, isConnected, startMicrophone]);
 
   const stopListening = useCallback(() => {
     stopMicCapture();
@@ -615,6 +638,7 @@ export function useInworldSession(
       if (!playbackContextRef.current) {
         playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
       }
+      await ensureAudioContextRunning(playbackContextRef.current);
 
       setState("speaking");
 
@@ -636,7 +660,7 @@ export function useInworldSession(
         },
       }));
     },
-    [connect, setError, setState, stopPlayback],
+    [connect, ensureAudioContextRunning, setError, setState, stopPlayback],
   );
 
   useEffect(() => {
