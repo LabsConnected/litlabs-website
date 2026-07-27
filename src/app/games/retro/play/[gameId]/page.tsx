@@ -43,8 +43,14 @@ const EMULATOR_VERSION = "4.2.3";
 // v10: all cores repackaged as STORE (method 0) zip to bypass the
 //      Emscripten extractzip.js deflate decompression worker bug that
 //      stalls at 99% indefinitely. Cores are larger but extract instantly.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v10";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v9", "ejs-4.2.3-litt-v8", "ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+// v11: native-zip-reader.js injected before loader.js — overrides
+//      window.EJS_COMPRESSION with a pure-JS zip reader that bypasses
+//      the broken Emscripten extractzip.js worker entirely (the worker
+//      stalls at 99% even for STORE zips because it never fires the
+//      completion event). The native reader parses the ZIP central
+//      directory and extracts entries directly in the main thread.
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v11";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v10", "ejs-4.2.3-litt-v9", "ejs-4.2.3-litt-v8", "ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -180,9 +186,14 @@ function buildPlayerDocument(opts: {
     `__littBoot();`,
   );
   const config = configLines.join("\n");
+  // native-zip-reader.js MUST load before loader.js so that window.EJS_COMPRESSION
+  // is intercepted before emulator.min.js sets it. This bypasses the broken
+  // Emscripten extractzip.js worker that stalls at 99% decompression.
+  // Always loaded from the self-hosted path (never the CDN fallback).
+  const nativeZipPath = `${EMULATOR_DATA_PATH.replace(/\/data\/$/, "/")}native-zip-reader.js`;
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>html,body,#game{width:100%;height:100%;margin:0;background:#020204;overflow:hidden}body{font-family:system-ui,sans-serif}</style></head>
-<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${opts.dataPath}loader.js" onload="try{parent.postMessage({source:'ejs',type:'progress',text:'loader.js loaded',buildId:${JSON.stringify(opts.buildId)}},'*')}catch(_){}" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${opts.dataPath}loader.js. The data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
+<body><div id="game"></div><script>${escapeForScript(config)}<\/script><script src="${nativeZipPath}" onerror="try{parent.postMessage({source:'ejs',type:'progress',text:'native-zip-reader.js failed to load — using fallback decompression',buildId:${JSON.stringify(opts.buildId)}},'*')}catch(_){}"><\/script><script src="${opts.dataPath}loader.js" onload="try{parent.postMessage({source:'ejs',type:'progress',text:'loader.js loaded',buildId:${JSON.stringify(opts.buildId)}},'*')}catch(_){}" onerror="parent.postMessage({source:'ejs',type:'error',message:'The emulator runtime could not be loaded from ${opts.dataPath}loader.js. The data directory may be missing or blocked.',buildId:${JSON.stringify(opts.buildId)}},'*')"><\/script></body></html>`;
 }
 
 function hasSevenZSignature(buffer: ArrayBuffer): boolean {

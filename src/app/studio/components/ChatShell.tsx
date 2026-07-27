@@ -33,11 +33,13 @@ import {
 } from "../stores/useStudioAgentStore";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { type ConnectionCapabilities } from "../hooks/useConnectionSummary";
+import type { ArtifactAction } from "@/lib/canvas/types";
 
 type Message = {
   role: "user" | "assistant";
   content: string;
   createdAt?: number;
+  actions?: ArtifactAction[];
 };
 
 interface ChatShellProps {

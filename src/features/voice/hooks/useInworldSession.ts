@@ -539,18 +539,26 @@ export function useInworldSession(
           setState("error");
         };
 
-        // Wait for the WebSocket to open before resolving connect()
+        // Wait for the WebSocket to open AND the session to be configured
+        // (session.created → session.update → session.updated) before resolving.
+        //
+        // CRITICAL: The previous code resolved on ws.onopen only. On fast
+        // desktop connections, speakText() would send conversation.item.create
+        // + response.create BEFORE session.updated arrived, and Inworld would
+        // reject with "Voice session error". On mobile, higher latency gave
+        // Inworld time to process the session config first. This race
+        // condition is why TTS worked on mobile but failed on desktop.
         let connectionOpen = false;
+        let sessionReady = false;
         await new Promise<void>((resolve, reject) => {
           const timeout = setTimeout(() => {
-            if (!connectionOpen) {
+            if (!sessionReady) {
               reject(new Error("Voice connection timed out. Please try again."));
             }
-          }, 10_000);
+          }, 15_000);
 
           ws.onopen = () => {
             connectionOpen = true;
-            clearTimeout(timeout);
             handleOpen();
             // Initialize playback context on connection so TTS can play
             // without requiring microphone capture. AudioContext created
@@ -558,7 +566,7 @@ export function useInworldSession(
             if (!playbackContextRef.current) {
               playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
             }
-            resolve();
+            // DO NOT resolve here — wait for session.updated below.
           };
 
           ws.onerror = () => {
@@ -574,14 +582,39 @@ export function useInworldSession(
             clearTimeout(timeout);
             if (!connectionOpen) {
               reject(new Error(`Voice connection closed (code ${event.code}).`));
+            } else if (!sessionReady) {
+              reject(new Error(`Voice connection closed before session was ready (code ${event.code}).`));
             } else {
               handleClose(event);
             }
           };
 
-          // Set up message handler immediately to avoid missing session.created
-          ws.onmessage = handleMessage;
+          // Intercept session.updated to resolve the connect promise.
+          // The regular handleMessage still runs for all other messages.
+          const originalMessageHandler = handleMessage;
+          ws.onmessage = (event: MessageEvent) => {
+            try {
+              const data = JSON.parse(event.data);
+              if (data.type === "session.updated" && !sessionReady) {
+                sessionReady = true;
+                clearTimeout(timeout);
+                resolve();
+              } else if (data.type === "error" && !sessionReady) {
+                clearTimeout(timeout);
+                const errMsg = data.message || "Voice session error";
+                reject(new Error(errMsg));
+                return; // Don't pass errors to the regular handler during connect
+              }
+            } catch {
+              // Non-JSON — fall through to regular handler
+            }
+            originalMessageHandler(event);
+          };
         });
+
+        // Restore the direct message handler now that the session is ready.
+        // The intercepting handler above was only needed during connect().
+        ws.onmessage = handleMessage;
       } catch (err) {
         const message = err instanceof Error ? err.message : "Failed to connect";
         setErrorState(message);

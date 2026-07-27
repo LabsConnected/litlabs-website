@@ -21,6 +21,7 @@ class MockWebSocket {
   onclose: ((ev: { code: number; reason: string }) => void) | null = null;
   onerror: (() => void) | null = null;
   sent: any[] = [];
+  private listeners: Map<string, Set<(ev: any) => void>> = new Map();
 
   constructor(public url: string) {
     MockWebSocket.instances.push(this);
@@ -34,13 +35,24 @@ class MockWebSocket {
     this.readyState = MockWebSocket.CLOSED;
   }
 
+  addEventListener(type: string, listener: (ev: any) => void) {
+    if (!this.listeners.has(type)) this.listeners.set(type, new Set());
+    this.listeners.get(type)!.add(listener);
+  }
+
+  removeEventListener(type: string, listener: (ev: any) => void) {
+    this.listeners.get(type)?.delete(listener);
+  }
+
   // Test helpers
   __fireOpen() {
     this.readyState = MockWebSocket.OPEN;
     this.onopen?.();
   }
   __fireMessage(data: any) {
-    this.onmessage?.({ data: JSON.stringify(data) });
+    const ev = { data: JSON.stringify(data) };
+    this.onmessage?.(ev);
+    this.listeners.get("message")?.forEach((fn) => fn(ev));
   }
   __fireClose(code = 1000, reason = "") {
     this.readyState = MockWebSocket.CLOSED;
@@ -144,7 +156,13 @@ async function connectAndWait(
     await Promise.resolve();
   });
   const ws = MockWebSocket.instances[MockWebSocket.instances.length - 1]!;
+  // connect() now waits for session.updated before resolving (race condition
+  // fix: previously resolved on ws.onopen only, causing speakText to send
+  // conversation.item.create before the session was configured on fast
+  // desktop connections).
   act(() => ws.__fireOpen());
+  act(() => ws.__fireMessage({ type: "session.created" }));
+  act(() => ws.__fireMessage({ type: "session.updated" }));
   await act(async () => {
     await connectPromise;
   });
@@ -275,14 +293,26 @@ describe("useInworldSession — TTS state machine", () => {
     const { result } = renderHook(() => useInworldSession({}));
     const ws = await connectAndWait(result);
 
-    await act(async () => {
-      await result.current.speakText("Hello, world.");
+    // speakText waits for response.done per chunk. Capture the sent messages
+    // and state BEFORE firing response.done (which resets state to idle).
+    let types: string[] = [];
+    let stateBeforeDone = "";
+    const speakPromise = act(async () => {
+      const p = result.current.speakText("Hello, world.");
+      // Give the hook a tick to send the messages
+      await Promise.resolve();
+      await Promise.resolve();
+      types = ws.sent.map((m) => m.type);
+      stateBeforeDone = useVoiceStore.getState().state;
+      // Now fire response.done so the promise resolves
+      ws.__fireMessage({ type: "response.done" });
+      await p;
     });
+    await speakPromise;
 
-    const types = ws.sent.map((m) => m.type);
     expect(types).toContain("conversation.item.create");
     expect(types).toContain("response.create");
-    expect(useVoiceStore.getState().state).toBe("speaking");
+    expect(stateBeforeDone).toBe("speaking");
   });
 
   it("speakText with empty/whitespace text is a no-op", async () => {

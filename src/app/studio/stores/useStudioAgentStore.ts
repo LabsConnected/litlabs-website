@@ -1,4 +1,5 @@
 import { create } from "zustand";
+import type { ArtifactAction } from "@/lib/canvas/types";
 
 export type AgentId = "litt" | "spark";
 
@@ -7,6 +8,8 @@ export interface ChatMessage {
   content: string;
   createdAt?: number;
   images?: string[];
+  /** Canvas actions proposed by LiTT alongside this response. */
+  actions?: ArtifactAction[];
 }
 
 export interface AgentMeta {

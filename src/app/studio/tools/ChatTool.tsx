@@ -142,6 +142,11 @@ export default function ChatTool({
           stream: false,
           userName: profile.displayName || "Member",
           images: attachments,
+          // Pass the active canvas id so the server can detect
+          // append/update intents (not just create intents).
+          activeCanvasId: typeof localStorage !== "undefined"
+            ? localStorage.getItem("litt:canvas:active-id")
+            : null,
           capabilities: {
             repository: capabilities.repository,
             repositoryIndexed: capabilities.repositoryIndexed,
@@ -171,7 +176,14 @@ export default function ChatTool({
       }
       setMessages((current) => [
         ...current,
-        { role: "assistant", content: reply, createdAt: Date.now() },
+        {
+          role: "assistant",
+          content: reply,
+          createdAt: Date.now(),
+          // Carry canvas actions proposed by the server so the UI
+          // can render them as chips (Phase 2).
+          actions: Array.isArray(data.actions) ? data.actions : undefined,
+        },
       ]);
       return reply;
     } catch (error) {

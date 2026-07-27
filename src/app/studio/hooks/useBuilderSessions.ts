@@ -1,8 +1,15 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ArtifactAction } from "@/lib/canvas/types";
 
-export type BuilderMessage = { role: "user" | "assistant"; content: string; createdAt?: number };
+export type BuilderMessage = {
+  role: "user" | "assistant";
+  content: string;
+  createdAt?: number;
+  /** Canvas actions proposed alongside this response. */
+  actions?: ArtifactAction[];
+};
 export type BuilderSessionContext = {
   projectId: string | null;
   repositoryState: "none" | "connected" | "partial" | "read-only";

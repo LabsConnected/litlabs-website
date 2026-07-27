@@ -6,6 +6,7 @@ import { auth } from "@/lib/auth";
 import { getSupabaseAdmin } from "@/lib/supabase";
 import type { Part } from "@google/generative-ai";
 import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/translate";
+import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -245,11 +246,22 @@ async function handler(req: NextRequest) {
       if (userId) {
         await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
+
+      // Detect canvas actions from the user message (explicit) and
+      // from the response (suggested). Explicit actions are ready to
+      // execute; suggested actions are shown as chips.
+      const activeCanvasId = (body.activeCanvasId as string) ?? null;
+      const explicitActions = detectCanvasActions(message, activeCanvasId);
+      const suggestedActions = detectSuggestedActions(cleanText);
+      // Deduplicate — if explicit actions exist, don't also suggest
+      const actions = explicitActions.length > 0 ? explicitActions : suggestedActions;
+
       return NextResponse.json({
         response: cleanText,
         provider: r.provider,
         model: r.model,
         latencyMs: r.latencyMs,
+        actions,
       });
     }
 
@@ -277,7 +289,18 @@ async function handler(req: NextRequest) {
           );
           controller.enqueue(
             encoder.encode(
-              `data: ${JSON.stringify({ done: true, provider: r.provider, model: r.model, latencyMs: r.latencyMs })}\n\n`,
+              `data: ${JSON.stringify({
+                done: true,
+                provider: r.provider,
+                model: r.model,
+                latencyMs: r.latencyMs,
+                actions: (() => {
+                  const activeCanvasId = (body.activeCanvasId as string) ?? null;
+                  const explicit = detectCanvasActions(message, activeCanvasId);
+                  const suggested = detectSuggestedActions(assistantText);
+                  return explicit.length > 0 ? explicit : suggested;
+                })(),
+              })}\n\n`,
             ),
           );
           controller.enqueue(encoder.encode("data: [DONE]\n\n"));
