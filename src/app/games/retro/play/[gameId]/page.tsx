@@ -40,8 +40,8 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v4";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v5";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -186,6 +186,79 @@ function buildPlayerDocument(opts: {
     `    this.addEventListener("messageerror",()=>{try{parent.postMessage({source:"ejs",type:"worker-error",message:"Emulator worker returned an unreadable message",buildId:__littBuildId},"*")}catch(_){}});`,
     `  }`,
     `};`,
+    // ── Main-thread zip decompressor ──────────────────────────────────
+    // The EmulatorJS Worker-based decompression stalls at 99% in our srcdoc
+    // iframe environment. Instead of relying on a Blob Worker (which runs
+    // Emscripten WASM and can silently crash), we decompress zip archives
+    // on the main thread using the native DecompressionStream API.
+    // This completely bypasses Worker creation and eliminates the stall.
+    `const __littUnzip=async function(data){`,
+    `  const ab=data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);`,
+    `  const view=new DataView(ab);`,
+    `  const files={};`,
+    `  let eocd=-1;`,
+    `  for(let i=ab.byteLength-22;i>=0&&i>=ab.byteLength-65557;i--){if(view.getUint32(i,true)===0x06054b50){eocd=i;break;}}`,
+    `  if(eocd<0)throw new Error("zip: EOCD not found");`,
+    `  const cdOff=view.getUint32(eocd+16,true);`,
+    `  const cdCount=view.getUint16(eocd+10,true);`,
+    `  let off=cdOff;`,
+    `  for(let i=0;i<cdCount;i++){`,
+    `    if(view.getUint32(off,true)!==0x02014b50)throw new Error("zip: bad CD entry");`,
+    `    const method=view.getUint16(off+10,true);`,
+    `    const compSize=view.getUint32(off+20,true);`,
+    `    const uncompSize=view.getUint32(off+24,true);`,
+    `    const nameLen=view.getUint16(off+28,true);`,
+    `    const extraLen=view.getUint16(off+30,true);`,
+    `    const commentLen=view.getUint16(off+32,true);`,
+    `    const localOff=view.getUint32(off+42,true);`,
+    `    const name=new TextDecoder().decode(new Uint8Array(ab,off+46,nameLen));`,
+    `    const localNameLen=view.getUint16(localOff+26,true);`,
+    `    const localExtraLen=view.getUint16(localOff+28,true);`,
+    `    const dataOff=localOff+30+localNameLen+localExtraLen;`,
+    `    if(method===0){`,
+    `      files[name]=new Uint8Array(ab.slice(dataOff,dataOff+uncompSize));`,
+    `    }else if(method===8){`,
+    `      const ds=new DecompressionStream("deflate-raw");`,
+    `      const w=ds.writable.getWriter();`,
+    `      w.write(new Uint8Array(ab,dataOff,compSize));`,
+    `      w.close();`,
+    `      const r=ds.readable.getReader();`,
+    `      const chunks=[];let total=0;`,
+    `      while(true){const{done,value}=await r.read();if(done)break;chunks.push(value);total+=value.length;}`,
+    `      const result=new Uint8Array(total);let pos=0;`,
+    `      for(const c of chunks){result.set(c,pos);pos+=c.length;}`,
+    `      files[name]=result;`,
+    `    }else{throw new Error("zip: unsupported method "+method);}`,
+    `    off+=46+nameLen+extraLen+commentLen;`,
+    `  }`,
+    `  return files;`,
+    `};`,
+    // Intercept EJS_COMPRESSION when emulator.min.js defines it, and replace
+    // decompressFile to use our main-thread unzip for zip archives.
+    `let __ejsComp;`,
+    `Object.defineProperty(window,"EJS_COMPRESSION",{`,
+    `  get(){return __ejsComp;},`,
+    `  set(V){`,
+    `    __ejsComp=class extends V{`,
+    `      decompressFile(method,data,updateMsg,fileCbFunc){`,
+    `        if(method==="zip"){`,
+    `          if(updateMsg)updateMsg(" 0%",true);`,
+    `          return __littUnzip(data).then(function(files){`,
+    `            if(typeof fileCbFunc==="function"){for(const k in files){fileCbFunc(k,files[k]);files[k]=true;}}`,
+    `            if(updateMsg)updateMsg(" 100%",true);`,
+    `            return files;`,
+    `          }).catch(function(err){`,
+    `            console.error("[LiTT] Main-thread unzip failed, falling back to worker:",err);`,
+    `            try{parent.postMessage({source:"ejs",type:"worker-error",message:"Main-thread unzip failed: "+(err&&err.message||err),buildId:__littBuildId},"*");}catch(_){}`,
+    `            return V.prototype.decompressFile.call(this,method,data,updateMsg,fileCbFunc);`,
+    `          });`,
+    `        }`,
+    `        return V.prototype.decompressFile.call(this,method,data,updateMsg,fileCbFunc);`,
+    `      }`,
+    `    });`,
+    `  },`,
+    `  configurable:true,`,
+    `});`,
   );
   const config = configLines.join("\n");
   return `<!doctype html>
