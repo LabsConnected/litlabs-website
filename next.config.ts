@@ -193,6 +193,24 @@ const nextConfig: NextConfig = {
           },
         ],
       },
+      // Arcade runtime iframe host — must be frameable by same-origin.
+      // Overrides the global X-Frame-Options: DENY so the emulator iframe
+      // (loaded from /arcade-runtime/emulator-session.html) can be embedded
+      // by the parent page at /games/retro/play/[gameId].
+      // SAMEORIGIN is safe — only litlabs.net can embed these pages.
+      {
+        source: "/arcade-runtime/:path*",
+        headers: [
+          {
+            key: "X-Frame-Options",
+            value: "SAMEORIGIN",
+          },
+          {
+            key: "Cache-Control",
+            value: "public, max-age=0, must-revalidate",
+          },
+        ],
+      },
     ];
   },
 
