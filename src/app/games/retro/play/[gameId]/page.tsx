@@ -186,6 +186,7 @@ export default function RetroPlayerPage() {
   const [lastEvent, setLastEvent] = useState<string | null>(null);
   const [canvasCreated, setCanvasCreated] = useState(false);
   const [firstFrameObserved, setFirstFrameObserved] = useState(false);
+  const [domDiagnostics, setDomDiagnostics] = useState<string | null>(null);
   const [heartbeatAge, setHeartbeatAge] = useState<number | null>(null);
   const [fallbackAttempts, setFallbackAttempts] = useState<CoreFallbackAttempt[]>([]);
   const [bootTime, setBootTime] = useState<number | null>(null);
@@ -474,6 +475,15 @@ export default function RetroPlayerPage() {
       }
     });
 
+    // DOM diagnostics — reports what's inside #game every 2s
+    const unsubDomDiag = bridge.on("runtime.dom_diagnostics", (event) => {
+      const c = event.canvas;
+      const canvasStr = c
+        ? `canvas ${c.width}x${c.height} (${c.parentTag}.${c.parentClass?.slice(0, 30)}) ctx=${event.contextType}`
+        : "no canvas";
+      setDomDiagnostics(`#game children=${event.gameChildren} htmlLen=${event.gameInnerHTMLLen} | ${canvasStr}`);
+    });
+
     return () => {
       unsubAll();
       unsubBoot();
@@ -490,6 +500,7 @@ export default function RetroPlayerPage() {
       unsubDcProgress();
       unsubDcStart();
       unsubHb();
+      unsubDomDiag();
     };
   }, [attempt, ejsCore, useLegacy, handleWatchdogFired]);
 
@@ -858,6 +869,7 @@ export default function RetroPlayerPage() {
                 <div>Attempt: {attempt}</div>
                 <div>Canvas: {canvasCreated ? "✓" : "—"}</div>
                 <div>First frame: {firstFrameObserved ? "✓" : "—"}</div>
+                <div>DOM: {domDiagnostics ?? "—"}</div>
                 <div>Heartbeat age: {heartbeatAge !== null ? `${heartbeatAge}ms` : "—"}</div>
                 <div>Last event: {lastEvent ?? "—"}</div>
                 <div>Boot time: {bootTime ? new Date(bootTime).toISOString().slice(11, 23) : "—"}</div>

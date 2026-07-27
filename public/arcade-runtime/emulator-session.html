@@ -132,11 +132,18 @@
         if (firstFrameEmitted) return;
         var game = document.getElementById("game");
         if (!game) return;
-        var canvas = game.querySelector("canvas");
+        // Search both inside #game AND the entire document — EmulatorJS
+        // may create the canvas in a wrapper div or a different location
+        var canvas = game.querySelector("canvas") || document.querySelector("canvas");
         if (!canvas) return;
         if (!canvasCreated) {
           canvasCreated = true;
-          send("runtime.canvas_created");
+          send("runtime.canvas_created", {
+            width: canvas.width,
+            height: canvas.height,
+            parentTag: canvas.parentElement ? canvas.parentElement.tagName : "unknown",
+            parentClass: canvas.parentElement ? canvas.parentElement.className : "",
+          });
         }
         // First frame = canvas has non-zero dimensions
         if (canvas.width > 0 && canvas.height > 0) {
@@ -166,6 +173,37 @@
         }
       }
       startCanvasWatch();
+
+      // ─── DOM diagnostics — report what's inside #game every 2s ─────
+      // This helps diagnose black screen issues by showing exactly what
+      // EmulatorJS created inside the player element.
+      var diagInterval = setInterval(function () {
+        var game = document.getElementById("game");
+        if (!game) return;
+        var children = game.children.length;
+        var canvas = game.querySelector("canvas") || document.querySelector("canvas");
+        var canvasInfo = canvas ? {
+          tag: canvas.tagName,
+          width: canvas.width,
+          height: canvas.height,
+          cssWidth: canvas.style.width,
+          cssHeight: canvas.style.height,
+          parentTag: canvas.parentElement ? canvas.parentElement.tagName : "none",
+          parentClass: canvas.parentElement ? canvas.parentElement.className.substring(0, 60) : "",
+        } : null;
+        // Check for WebGL context
+        var gl = null;
+        if (canvas) {
+          try { gl = canvas.getContext("webgl2") || canvas.getContext("webgl") || canvas.getContext("2d"); } catch (e) {}
+        }
+        send("runtime.dom_diagnostics", {
+          gameChildren: children,
+          gameInnerHTMLLen: game.innerHTML.length,
+          canvas: canvasInfo,
+          contextType: gl ? (gl.constructor.name || "unknown") : null,
+          bodyChildren: document.body.children.length,
+        });
+      }, 2000);
 
       // ─── Loading text observer (SUPPLEMENTARY only) ────────────
       // We observe the loading text for progress info, but the REAL

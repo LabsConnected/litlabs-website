@@ -32,7 +32,8 @@ export type RuntimeEventType =
   | "runtime.paused"
   | "runtime.error"
   | "runtime.exited"
-  | "runtime.heartbeat";
+  | "runtime.heartbeat"
+  | "runtime.dom_diagnostics";
 
 export interface RuntimeEvent {
   source: "arcade";
@@ -45,6 +46,12 @@ export interface RuntimeEvent {
   core?: string;
   dataPath?: string;
   timestamp?: number;
+  // dom_diagnostics fields
+  gameChildren?: number;
+  gameInnerHTMLLen?: number;
+  canvas?: { width: number; height: number; parentTag: string; parentClass: string } | null;
+  contextType?: string | null;
+  bodyChildren?: number;
 }
 
 // ─── Parent → Iframe commands ────────────────────────────────────
