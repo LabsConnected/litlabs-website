@@ -9,6 +9,7 @@ import StudioTopBar from "./StudioTopBar";
 import StudioOnboarding from "./StudioOnboarding";
 import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 import { VoiceSessionProvider } from "../context/VoiceSessionContext";
+import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
@@ -226,6 +227,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   return (
     <VoiceSessionProvider>
       <AgentVoiceSync />
+      <VoiceDiagnosticsDrawer />
 
       {/* Unified Studio shell — responsive, one layout for mobile + desktop */}
       <div
