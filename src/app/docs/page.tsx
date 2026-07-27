@@ -1,11 +1,15 @@
+import type { Metadata } from "next";
 import { Suspense } from "react";
 import DocsPageClient from "./DocsPageClient";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata = {
-  title: "Docs | LiTTree-LabStudios",
+export const metadata: Metadata = buildMetadata({
+  title: "Docs",
   description:
-    "Quick-start documentation for LiTTree-LabStudios: agents, Studio, flows, gallery, and support.",
-};
+    "Quick-start documentation for LiTTree LabStudios: agents, Studio, flows, gallery, and support.",
+  path: "/docs",
+  index: true,
+});
 
 export default function DocsPage() {
   return (

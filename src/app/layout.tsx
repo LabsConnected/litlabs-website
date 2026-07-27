@@ -6,7 +6,14 @@ import { ProfileProvider } from "@/context/ProfileContext";
 import { WalletProvider } from "@/context/WalletContext";
 import { VisualProvider } from "@/context/VisualContext";
 import LayoutShell from "@/components/LayoutShell";
-import { SITE_URL } from "@/lib/siteConfig";
+import {
+  DEFAULT_DESCRIPTION,
+  DEFAULT_OG_IMAGE,
+  DEFAULT_TITLE,
+  SITE_NAME,
+  SITE_URL,
+  absoluteUrl,
+} from "@/lib/seo";
 import { GoogleAnalytics } from "@next/third-parties/google";
 import { Analytics } from "@vercel/analytics/react";
 import { SpeedInsights } from "@vercel/speed-insights/react";
@@ -19,71 +26,76 @@ export const viewport: Viewport = {
   themeColor: "#03050b",
 };
 
-const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
-const META_DESC =
-  "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
+const googleVerification =
+  process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION;
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
+
   title: {
-    default: META_TITLE,
-    template: "%s | LiTTree-LabStudios",
+    default: DEFAULT_TITLE,
+    template: `%s | ${SITE_NAME}`,
   },
-  description: META_DESC,
-  keywords: [
-    "creator operating system",
-    "AI agents",
-    "creators",
-    "builders",
-    "AI workflow studio",
-    "social distribution",
-    "automation",
-    "artificial intelligence",
-    "NoCode",
-    "LiTTree-LabStudios",
-    "LiTLabs",
-    "litlabs.net",
-    "AI platform",
-  ],
-  authors: [{ name: "LiTTree-LabStudios", url: SITE_URL }],
-  creator: "LiTTree-LabStudios",
-  publisher: "LiTTree-LabStudios",
+
+  description: DEFAULT_DESCRIPTION,
+  applicationName: SITE_NAME,
+
+  authors: [{ name: SITE_NAME, url: SITE_URL }],
+  creator: SITE_NAME,
+  publisher: SITE_NAME,
+
+  icons: {
+    icon: [
+      { url: "/icon.png", type: "image/png" },
+      { url: "/favicon.ico", sizes: "any" },
+    ],
+    shortcut: "/favicon.ico",
+    apple: "/apple-icon.png",
+  },
+
+  manifest: "/manifest.json",
+
   robots: {
     index: true,
     follow: true,
-    googleBot: { index: true, follow: true },
+    googleBot: {
+      index: true,
+      follow: true,
+      "max-image-preview": "large",
+      "max-snippet": -1,
+      "max-video-preview": -1,
+    },
   },
+
   openGraph: {
     type: "website",
     locale: "en_US",
     url: SITE_URL,
-    siteName: "LiTTree-LabStudios",
-    title: META_TITLE,
-    description: META_DESC,
+    siteName: SITE_NAME,
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
     images: [
       {
-        url: "/og-image.webp",
+        url: absoluteUrl(DEFAULT_OG_IMAGE),
         width: 1200,
         height: 630,
-        alt: META_TITLE,
+        alt: `${SITE_NAME} AI creative workspace`,
       },
     ],
   },
+
   twitter: {
     card: "summary_large_image",
-    title: META_TITLE,
-    description: META_DESC,
-    creator: "@litlabs",
-    images: ["/og-image.webp"],
+    title: DEFAULT_TITLE,
+    description: DEFAULT_DESCRIPTION,
+    images: [absoluteUrl(DEFAULT_OG_IMAGE)],
   },
-  icons: {
-    icon: [
-      { url: "/logo.webp", sizes: "192x192", type: "image/webp" },
-      { url: "/logo.webp", sizes: "512x512", type: "image/webp" },
-    ],
-    apple: [{ url: "/logo.webp", sizes: "192x192", type: "image/webp" }],
-  },
-  manifest: "/manifest.json",
+
+  verification: googleVerification
+    ? {
+        google: googleVerification,
+      }
+    : undefined,
 };
 
 const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;

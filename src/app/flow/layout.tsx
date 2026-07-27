@@ -1,9 +1,10 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Flow",
-  description:
-    "Build no-code AI workflows and automate your business processes with LiTTree-LabStudios Flow.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function FlowLayout({

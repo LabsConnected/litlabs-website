@@ -267,7 +267,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
           {/* LiTT assistant drawer — closed by default so tools keep the full workspace */}
           {assistantOpen && projectReady && !isChat && <aside
-            className="fixed bottom-0 right-0 top-12 z-10010 flex w-full max-w-[380px] min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay"
+            className="fixed bottom-0 right-0 top-12 z-10010 flex w-full max-w-95 min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay"
             style={{
               backgroundColor: "rgba(8,9,13,0.96)",
               borderColor: "rgba(255,255,255,0.06)",

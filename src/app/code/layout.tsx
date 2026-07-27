@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Code Scanner",
-  description: "AI-powered code analysis and review. Scan your codebase for issues and improvements.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function CodeLayout({

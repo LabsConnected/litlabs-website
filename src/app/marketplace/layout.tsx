@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Marketplace",
+export const metadata: Metadata = buildMetadata({
+  title: "AI Agent and Creator Marketplace",
   description:
-    "Browse and purchase AI agents, tools, and creative assets on the LiTTree-LabStudios marketplace.",
-};
+    "Discover community-built AI agents, creative tools, templates, themes, and resources for LiTTree LabStudios.",
+  path: "/marketplace",
+  index: true,
+});
 
 export default function MarketplaceLayout({
   children,

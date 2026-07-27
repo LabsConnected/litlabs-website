@@ -82,7 +82,6 @@ export async function POST(
       runtimeError: null,
     });
 
-    const { token } = createTerminalToken(userId);
     const resp = await fetch(`${TERMINAL_BASE()}/internal/workspace/${workspaceId}/preview/start`, {
       method: "POST",
       headers: {
@@ -106,7 +105,9 @@ export async function POST(
       return NextResponse.json({ error: text }, { status: 502 });
     }
 
-    const data = (await resp.json()) as { previewUrl: string; port: number };
+    // Response body is consumed but not needed — we proxy through Next.js
+    // to avoid exposing the terminal-server's internal preview URL/port.
+    await resp.text().catch(() => {});
 
     // Construct the preview URL — proxy through Next.js to avoid exposing terminal-server
     const proxyUrl = `/api/studio-projects/${projectId}/preview/proxy`;

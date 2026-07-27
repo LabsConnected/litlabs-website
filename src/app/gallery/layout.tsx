@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Gallery",
+export const metadata: Metadata = buildMetadata({
+  title: "AI Creation Gallery",
   description:
-    "Explore AI-generated images, videos, and art from the LiTTree-LabStudios community.",
-};
+    "Explore apps, artwork, experiments, and public projects created by the LiTTree LabStudios community.",
+  path: "/gallery",
+  index: true,
+});
 
 export default function GalleryLayout({
   children,

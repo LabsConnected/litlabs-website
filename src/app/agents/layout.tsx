@@ -1,8 +1,10 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Agents",
-  description: "Browse and deploy specialized AI agents for coding, content creation, design, and more.",
+  robots: {
+    index: false,
+    follow: false,
+  },
 };
 
 export default function AgentsLayout({

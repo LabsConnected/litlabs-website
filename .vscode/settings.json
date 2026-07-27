@@ -5,9 +5,15 @@
   "tailwindCSS.lint.recommended": false,
   "tailwindCSS.lint.invalidConfigPath": "ignore",
   "tailwindCSS.lint.cssConflict": "ignore",
-  "mssql.intelliSense.enable": false,
-  "sql.validate.enable": false,
-  "cSpell.words": ["notif"],
+  "mssql.intelliSense.enableErrorChecking": false,
+  "mssql.intelliSense.enableIntelliSense": false,
+  "mssql.intelliSense.enableSuggestions": false,
+  "mssql.intelliSense.enableQuickInfo": false,
+  "cSpell.words": ["notif", "conname", "Vercel", "Supabase", "vercel", "supabase", "timestamptz"],
+  "files.associations": {
+    "**/supabase/**/*.sql": "postgres",
+    "**/*.pg.sql": "postgres"
+  },
   "files.exclude": {
     "**/.git": true,
     "**/node_modules": true,

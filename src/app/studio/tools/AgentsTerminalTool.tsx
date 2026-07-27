@@ -430,7 +430,7 @@ export default function AgentsTerminalTool() {
 
         {/* ── LEFT: Agent List - Terminal Sidebar ── */}
         <div
-          className={`w-full lg:w-[240px] shrink-0 flex flex-col border-r ${isMobile ? "hidden" : "lg:flex"}`}
+          className={`w-full lg:w-60 shrink-0 flex flex-col border-r ${isMobile ? "hidden" : "lg:flex"}`}
           style={{
             borderColor: T.borderColor + "20",
             backgroundColor: "#1a1a1a",
@@ -584,7 +584,7 @@ export default function AgentsTerminalTool() {
               {/* Terminal icon */}
               <Terminal size={12} style={{ color: selectedAgent.color }} />
               <span
-                className="text-[10px] sm:text-[11px] font-bold truncate max-w-[110px] sm:max-w-none"
+                className="text-[10px] sm:text-[11px] font-bold truncate max-w-27.5 sm:max-w-none"
                 style={{ color: T.textColor }}
               >
                 {selectedAgent.name}
@@ -645,7 +645,7 @@ export default function AgentsTerminalTool() {
                 >
                   Model
                 </span>
-                <span className="font-bold truncate max-w-[120px]">
+                <span className="font-bold truncate max-w-30">
                   {providerLabel}
                 </span>
                 <span style={{ color: T.textMuted }}>▾</span>
@@ -871,7 +871,7 @@ export default function AgentsTerminalTool() {
               <div className="flex items-center gap-2 mb-2 px-1 flex-wrap">
                 <span style={{ color: T.textMuted + "60" }}>📎 Attached:</span>
                 <span
-                  className="text-[10px] truncate max-w-[200px]"
+                  className="text-[10px] truncate max-w-50"
                   style={{ color: T.accentColor }}
                 >
                   {attachedImageUrl}
@@ -973,7 +973,7 @@ export default function AgentsTerminalTool() {
 
         {/* ── RIGHT: Info + Logs ── */}
         <div
-          className={`w-full lg:w-[270px] shrink-0 flex flex-col border-l ${isMobile ? "hidden" : "lg:flex"}`}
+          className={`w-full lg:w-67.5 shrink-0 flex flex-col border-l ${isMobile ? "hidden" : "lg:flex"}`}
           style={{
             borderColor: T.borderColor + "20",
             backgroundColor: T.boxBg + "90",

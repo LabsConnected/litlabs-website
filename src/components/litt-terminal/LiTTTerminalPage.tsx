@@ -366,7 +366,7 @@ function LiTTTerminalPageInner() {
 
           {/* Right: context / output panel */}
           {rightOpen && (
-            <aside className="hidden w-[360px] min-w-0 flex-col overflow-hidden border-l border-neutral-800/40 bg-[#060606]/80 backdrop-blur-md lg:flex">
+            <aside className="hidden w-90 min-w-0 flex-col overflow-hidden border-l border-neutral-800/40 bg-[#060606]/80 backdrop-blur-md lg:flex">
               <div className="flex border-b border-neutral-800/40">
                 <button
                   onClick={() => setRightTab("output")}
@@ -436,7 +436,7 @@ function LiTTTerminalPageInner() {
       {/* Mobile menu overlay */}
       {mobileMenuOpen && (
         <div
-          className="fixed inset-0 z-[10000] bg-black/60 lg:hidden"
+          className="fixed inset-0 z-10000 bg-black/60 lg:hidden"
           onClick={() => setMobileMenuOpen(false)}
         />
       )}

@@ -1,131 +1,59 @@
 import type { MetadataRoute } from "next";
-import { SITE_URL } from "@/lib/siteConfig";
+import { absoluteUrl } from "@/lib/seo";
 
 export default function sitemap(): MetadataRoute.Sitemap {
-  const base = SITE_URL;
-  const now = new Date();
-
-  return [
-    { url: base, lastModified: now, changeFrequency: "daily", priority: 1 },
+  const staticPages: MetadataRoute.Sitemap = [
     {
-      url: `${base}/studio`,
-      lastModified: now,
+      url: absoluteUrl("/"),
       changeFrequency: "weekly",
-      priority: 0.9,
+      priority: 1,
     },
     {
-      url: `${base}/marketplace`,
-      lastModified: now,
-      changeFrequency: "daily",
-      priority: 0.9,
-    },
-    {
-      url: `${base}/gallery`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/studio?tool=workflows`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/docs`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.8,
-    },
-    {
-      url: `${base}/social`,
-      lastModified: now,
+      url: absoluteUrl("/marketplace"),
       changeFrequency: "daily",
       priority: 0.8,
     },
     {
-      url: `${base}/flow`,
-      lastModified: now,
+      url: absoluteUrl("/gallery"),
+      changeFrequency: "daily",
+      priority: 0.8,
+    },
+    {
+      url: absoluteUrl("/games"),
       changeFrequency: "weekly",
       priority: 0.7,
     },
     {
-      url: `${base}/games`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.7,
-    },
-    {
-      url: `${base}/dashboard`,
-      lastModified: now,
+      url: absoluteUrl("/social"),
       changeFrequency: "daily",
       priority: 0.7,
     },
     {
-      url: `${base}/code`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/ai-builder`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/showcase`,
-      lastModified: now,
+      url: absoluteUrl("/pricing"),
       changeFrequency: "monthly",
-      priority: 0.6,
+      priority: 0.7,
     },
     {
-      url: `${base}/profile`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.5,
-    },
-    {
-      url: `${base}/wallet`,
-      lastModified: now,
+      url: absoluteUrl("/docs"),
       changeFrequency: "weekly",
       priority: 0.6,
     },
     {
-      url: `${base}/creator`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/studio`,
-      lastModified: now,
-      changeFrequency: "weekly",
-      priority: 0.6,
-    },
-    {
-      url: `${base}/settings`,
-      lastModified: now,
-      changeFrequency: "monthly",
-      priority: 0.5,
-    },
-    {
-      url: `${base}/terms`,
-      lastModified: now,
+      url: absoluteUrl("/privacy"),
       changeFrequency: "yearly",
       priority: 0.3,
     },
     {
-      url: `${base}/privacy`,
-      lastModified: now,
+      url: absoluteUrl("/terms"),
       changeFrequency: "yearly",
       priority: 0.3,
     },
     {
-      url: `${base}/cookies`,
-      lastModified: now,
+      url: absoluteUrl("/cookies"),
       changeFrequency: "yearly",
       priority: 0.3,
     },
   ];
+
+  return staticPages;
 }

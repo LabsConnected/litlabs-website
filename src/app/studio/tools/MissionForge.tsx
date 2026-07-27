@@ -740,7 +740,7 @@ export default function MissionForge() {
     <div className="flex h-full overflow-hidden bg-[#03050a] text-white">
       {/* ── LEFT: Node Library (desktop) ── */}
       <aside
-        className="hidden md:flex w-[260px] shrink-0 flex-col border-r"
+        className="hidden md:flex w-65 shrink-0 flex-col border-r"
         style={{ borderColor: T.borderColor + "20", backgroundColor: T.boxBg + "90" }}
       >
         <div className="px-3 py-3 border-b" style={{ borderColor: T.borderColor + "15" }}>
@@ -1012,7 +1012,7 @@ export default function MissionForge() {
 
           <div className="absolute right-3 top-3 z-20 flex items-center gap-1 rounded-xl border p-1 shadow-2xl backdrop-blur-xl" style={{ backgroundColor: `${T.boxBg}e8`, borderColor: `${T.borderColor}35` }}>
             <button onClick={() => zoomCanvas(viewport.scale / 1.15)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10" title="Zoom out"><Minus size={14} /></button>
-            <button onClick={() => setViewport((current) => ({ ...current, scale: 1 }))} className="min-w-[54px] rounded-lg px-2 py-2 text-[9px] font-black hover:bg-white/10" title="Reset zoom">{Math.round(viewport.scale * 100)}%</button>
+            <button onClick={() => setViewport((current) => ({ ...current, scale: 1 }))} className="min-w-13.5 rounded-lg px-2 py-2 text-[9px] font-black hover:bg-white/10" title="Reset zoom">{Math.round(viewport.scale * 100)}%</button>
             <button onClick={() => zoomCanvas(viewport.scale * 1.15)} className="grid h-8 w-8 place-items-center rounded-lg hover:bg-white/10" title="Zoom in"><Plus size={14} /></button>
             <span className="mx-1 h-5 w-px" style={{ backgroundColor: `${T.borderColor}35` }} />
             <button onClick={fitCanvas} className="flex h-8 items-center gap-1 rounded-lg px-2 text-[9px] font-bold hover:bg-white/10" title="Fit mission to canvas"><Maximize2 size={12} /> Fit</button>
@@ -1024,7 +1024,7 @@ export default function MissionForge() {
         </div>
 
         {/* Execution log (collapsible) */}
-        <div className="h-[120px] border-t shrink-0 flex flex-col" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "40" }}>
+        <div className="h-30 border-t shrink-0 flex flex-col" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "40" }}>
           <div className="flex items-center justify-between px-3 py-1.5 border-b shrink-0" style={{ borderColor: T.borderColor + "10" }}>
             <span className="text-[8px] font-bold uppercase tracking-widest" style={{ color: T.textMuted }}>Execution Log</span>
             <div className="flex items-center gap-2">

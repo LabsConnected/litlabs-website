@@ -1,9 +1,12 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Privacy Policy | LiTTree-LabStudios",
-  description: "Privacy Policy for LiTTree-LabStudios AI Agent Platform.",
-};
+export const metadata: Metadata = buildMetadata({
+  title: "Privacy Policy",
+  description: "Privacy Policy for LiTTree LabStudios AI creative studio.",
+  path: "/privacy",
+  index: true,
+});
 
 export default function PrivacyPage() {
   return (
@@ -74,7 +77,7 @@ export default function PrivacyPage() {
               2. How We Use Your Information
             </h2>
             <p className="mb-2">
-              LiTTree-LabStudios uses the collected data for:
+              LiTTree LabStudios uses the collected data for:
             </p>
             <ul className="list-disc pl-5 space-y-1 opacity-80">
               <li>Providing and maintaining the Platform functionality.</li>

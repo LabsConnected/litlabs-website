@@ -1,10 +1,13 @@
 import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
 
-export const metadata: Metadata = {
-  title: "Social",
+export const metadata: Metadata = buildMetadata({
+  title: "Creator Community",
   description:
-    "Connect with creators, share your AI-generated content, and join the LiTTree-LabStudios community.",
-};
+    "Share creations, meet collaborators, remix public projects, and build your creative world with the LiTTree community.",
+  path: "/social",
+  index: true,
+});
 
 export default function SocialLayout({
   children,

@@ -124,7 +124,7 @@ export default function DemoBootstrap() {
       role="status"
       aria-live="polite"
       data-testid="demo-banner"
-      className="pointer-events-auto fixed inset-x-0 top-0 z-[2147483647] flex h-9 items-center justify-center gap-3 border-b border-amber-300/30 bg-gradient-to-r from-amber-500/95 via-orange-500/95 to-amber-500/95 px-3 text-[12px] font-black text-black shadow-[0_4px_20px_rgba(0,0,0,0.45)]"
+      className="pointer-events-auto fixed inset-x-0 top-0 z-2147483647 flex h-9 items-center justify-center gap-3 border-b border-amber-300/30 bg-linear-to-r from-amber-500/95 via-orange-500/95 to-amber-500/95 px-3 text-[12px] font-black text-black shadow-[0_4px_20px_rgba(0,0,0,0.45)]"
       style={{ paddingTop: "env(safe-area-inset-top)" }}
     >
       <Sparkles size={13} className="shrink-0" />

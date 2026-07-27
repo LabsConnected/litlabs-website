@@ -29,8 +29,47 @@ export type VoiceState =
   | "muted"
   | "error";
 
+/**
+ * Output side of voice — TTS playback. Independent of the microphone.
+ * LiTT can speak while the microphone stays completely off.
+ */
+export type VoiceOutputState = "idle" | "connecting" | "speaking" | "error";
+
+/**
+ * Input side of voice — microphone capture. Starts ONLY from an explicit
+ * user gesture (mic button click) or enabled hands-free mode.
+ */
+export type VoiceInputState =
+  | "idle"
+  | "requesting_permission"
+  | "connecting"
+  | "listening"
+  | "error";
+
+/**
+ * Source label for every microphone-start attempt. Used by the guarded
+ * `requestMicrophoneStart` entry point for instrumentation and validation.
+ */
+export type MicrophoneStartSource =
+  | "composer_mic_click"
+  | "floating_voice_button"
+  | "hands_free_resume"
+  | "mount_effect"
+  | "tts_started"
+  | "tts_finished"
+  | "session_connected"
+  | "store_hydration"
+  | "unknown";
+
 export interface VoiceSessionCtx {
+  /** Derived display state — backward compat for existing consumers. */
   voiceState: VoiceState;
+  /** Independent output (TTS) state. */
+  voiceOutputState: VoiceOutputState;
+  /** Independent input (microphone) state. */
+  voiceInputState: VoiceInputState;
+  /** True when the voice WebSocket transport is connected (TTS-ready). */
+  voiceTransportConnected: boolean;
   transcript: string;
   micLevel: number;
   errorMessage: string | null;
@@ -40,15 +79,21 @@ export interface VoiceSessionCtx {
   voiceMode: "live" | "recording" | null;
   timing: VoiceTimingMetrics;
   latencies: ReturnType<typeof computeLatencies>;
+  /** Whether LiTT speaks responses via TTS. Persisted. Default: true. */
+  ttsEnabled: boolean;
+  /** Whether listening auto-resumes after TTS. Persisted. Default: false. */
+  handsFreeEnabled: boolean;
   // Actions
   startVoice: () => void;
   stopVoice: () => void;
   toggleMute: () => void;
   interrupt: () => void;
-  speakText: (text: string) => void;
+  speakText: (text: string) => Promise<void>;
   stopSpeaking: () => void;
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void) => void;
+  toggleTts: () => void;
+  toggleHandsFree: () => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -65,6 +110,9 @@ const noop = () => {};
 
 const defaultCtx: VoiceSessionCtx = {
   voiceState: "idle",
+  voiceOutputState: "idle",
+  voiceInputState: "idle",
+  voiceTransportConnected: false,
   transcript: "",
   micLevel: 0,
   errorMessage: null,
@@ -74,14 +122,18 @@ const defaultCtx: VoiceSessionCtx = {
   voiceMode: null,
   timing: createInitialTimingMetrics(),
   latencies: computeLatencies(createInitialTimingMetrics()),
+  ttsEnabled: true,
+  handsFreeEnabled: false,
   startVoice: noop,
   stopVoice: noop,
   toggleMute: noop,
   interrupt: noop,
-  speakText: noop,
+  speakText: noop as (text: string) => Promise<void>,
   stopSpeaking: noop,
   selectDevice: noop,
   setOnTurn: noop,
+  toggleTts: noop,
+  toggleHandsFree: noop,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -91,6 +143,8 @@ export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
 // ---------------------------------------------------------------------------
 
 const DEVICE_STORAGE_KEY = "litt:voice:deviceId";
+const TTS_PREF_KEY = "litt:voice:ttsEnabled";
+const HANDS_FREE_PREF_KEY = "litt:voice:handsFreeEnabled";
 
 export function VoiceSessionProvider({
   children,

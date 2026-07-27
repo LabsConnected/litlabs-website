@@ -541,7 +541,7 @@ export default function Gallery() {
               : null;
           if (!featured) return null;
           return (
-            <div className="relative h-[280px] sm:h-[380px] md:h-[480px] group">
+            <div className="relative h-70 sm:h-95 md:h-120 group">
               {brokenImages.has(featured.imageUrl) ? (
                 <div
                   className="absolute inset-0 flex items-center justify-center"
@@ -720,13 +720,13 @@ export default function Gallery() {
                 <button
                   key={item.id}
                   onClick={() => setSelectedItem(item)}
-                  className="shrink-0 w-[140px] sm:w-[180px] text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
+                  className="shrink-0 w-35 sm:w-45 text-left rounded-lg overflow-hidden transition-transform hover:scale-[1.03] group"
                   style={{
                     backgroundColor: T.boxBg,
                     border: `1px solid ${T.borderColor}20`,
                   }}
                 >
-                  <div className="relative h-[90px] sm:h-[110px]">
+                  <div className="relative h-22.5 sm:h-27.5">
                     {brokenImages.has(item.imageUrl) ? (
                       <div
                         className="absolute inset-0 flex items-center justify-center"
@@ -1329,7 +1329,7 @@ export default function Gallery() {
             {[0, 1, 2, 3, 4, 5].map((index) => (
               <div
                 key={index}
-                className="aspect-[4/3] animate-pulse rounded-2xl border"
+                className="aspect-4/3 animate-pulse rounded-2xl border"
                 style={{
                   backgroundColor: `${T.boxBg}b8`,
                   borderColor: `${T.borderColor}30`,

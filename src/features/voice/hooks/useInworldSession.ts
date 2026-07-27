@@ -13,15 +13,26 @@ interface UseInworldSessionOptions {
   onTranscript?: (text: string, final: boolean) => void;
   onAgentText?: (text: string) => void;
   onError?: (message: string) => void;
+  /** Fired when the agent's TTS response finishes (response.done). */
+  onResponseComplete?: () => void;
 }
 
 interface UseInworldSessionReturn {
+  /** Open the WebSocket transport (no microphone). Required for TTS. */
   connect: (agentId?: VoiceAgentId) => Promise<void>;
   disconnect: () => void;
+  /**
+   * Connect transport + start microphone capture.
+   * Kept for backward compatibility — new callers should use
+   * `connect()` + `startMicrophone()` instead.
+   */
   startListening: () => Promise<void>;
+  /** Start microphone capture only. Transport must already be connected. */
+  startMicrophone: () => Promise<void>;
   stopListening: () => void;
   interrupt: () => void;
-  speakText: (text: string) => void;
+  /** Speak text via TTS. Connects transport if needed. Does NOT touch the mic. */
+  speakText: (text: string) => Promise<void>;
   isConnected: boolean;
   isListening: boolean;
   error: string | null;
@@ -30,7 +41,7 @@ interface UseInworldSessionReturn {
 export function useInworldSession(
   options: UseInworldSessionOptions = {},
 ): UseInworldSessionReturn {
-  const { onTranscript, onAgentText, onError } = options;
+  const { onTranscript, onAgentText, onError, onResponseComplete } = options;
 
   const setState = useVoiceStore((store) => store.setState);
   const setError = useVoiceStore((store) => store.setError);
@@ -411,6 +422,7 @@ export function useInworldSession(
               case "response.done":
                 setState("idle");
                 interruptedRef.current = false;
+                onResponseComplete?.();
                 break;
 
               case "conversation.item.input_audio_transcription.completed":
@@ -474,6 +486,12 @@ export function useInworldSession(
             connectionOpen = true;
             clearTimeout(timeout);
             handleOpen();
+            // Initialize playback context on connection so TTS can play
+            // without requiring microphone capture. AudioContext created
+            // here is within the user-gesture chain that triggered connect().
+            if (!playbackContextRef.current) {
+              playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+            }
             resolve();
           };
 
@@ -506,7 +524,7 @@ export function useInworldSession(
         throw err;
       }
     },
-    [enqueueAudioChunk, isListening, onError, onAgentText, onTranscript, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
+    [enqueueAudioChunk, isListening, onError, onAgentText, onTranscript, onResponseComplete, setError, setState, setInterimTranscript, setTranscript, stopMicCapture, stopPlayback],
   );
 
   const disconnect = useCallback(() => {
@@ -525,6 +543,14 @@ export function useInworldSession(
     setState("idle");
   }, [setState, stopMicCapture, stopPlayback]);
 
+  const startMicrophone = useCallback(async () => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+      throw new Error("Voice connection is not active.");
+    }
+    interruptedRef.current = false;
+    await startMicCapture();
+  }, [startMicCapture]);
+
   const startListening = useCallback(async () => {
     if (!isConnected) {
       await connect();
@@ -534,14 +560,14 @@ export function useInworldSession(
       throw new Error("Voice connection is not active.");
     }
 
-    // Initialize playback context on user gesture
+    // Playback context is now initialized in connect(), but keep this as a
+    // safety net for any caller that bypasses connect().
     if (!playbackContextRef.current) {
       playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
     }
 
-    interruptedRef.current = false;
-    await startMicCapture();
-  }, [isConnected, connect, startMicCapture]);
+    await startMicrophone();
+  }, [isConnected, connect, startMicrophone]);
 
   const stopListening = useCallback(() => {
     stopMicCapture();
@@ -560,27 +586,32 @@ export function useInworldSession(
       wsRef.current.send(JSON.stringify({ type: "response.cancel" }));
     }
     setState("interrupted");
-    // Brief pause then restart listening
-    setTimeout(() => {
-      interruptedRef.current = false;
-      if (isListening) {
-        setState("listening");
-      } else {
-        void startListening();
-      }
-    }, 200);
-  }, [isListening, setState, startListening, stopPlayback]);
+    // Do NOT auto-restart the microphone here. Whether listening resumes
+    // after an interrupt is a hands-free decision owned by the caller
+    // (VoiceSessionContext), not the transport layer.
+  }, [setState, stopPlayback]);
 
   const speakText = useCallback(
-    (text: string) => {
+    async (text: string) => {
       if (!text.trim()) return;
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return;
 
       // Stop any current playback (barge-in)
       stopPlayback();
       interruptedRef.current = false;
 
-      // Ensure playback context exists
+      // Ensure the transport is connected. This connects the WebSocket
+      // WITHOUT acquiring the microphone — TTS must work with the mic off.
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        await connect();
+      }
+      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+        setErrorState("Voice transport is not connected.");
+        setError("Voice transport is not connected.");
+        setState("error");
+        return;
+      }
+
+      // Ensure playback context exists (also initialized in connect())
       if (!playbackContextRef.current) {
         playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
       }
@@ -605,7 +636,7 @@ export function useInworldSession(
         },
       }));
     },
-    [setState, stopPlayback],
+    [connect, setError, setState, stopPlayback],
   );
 
   useEffect(() => {
@@ -632,6 +663,7 @@ export function useInworldSession(
     connect,
     disconnect,
     startListening,
+    startMicrophone,
     stopListening,
     interrupt,
     speakText,

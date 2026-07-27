@@ -103,10 +103,10 @@ export default function SettingsPage() {
   return (
     <div
       className="min-h-screen"
-      style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}
+      style={{ color: T.textColor }}
     >
-      {/* Stronger page veil so background art doesn't overpower controls */}
-      <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.82)" }} />
+      {/* Light veil for text contrast — lets the wallpaper show through */}
+      <div className="pointer-events-none absolute inset-0" style={{ backgroundColor: "rgba(5,6,10,0.45)" }} />
 
       {/* ── Desktop: 260px nav + content, wide shell ─────────────────── */}
       <div className="relative mx-auto flex w-full max-w-375 flex-col lg:flex-row">

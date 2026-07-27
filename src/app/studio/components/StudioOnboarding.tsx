@@ -120,7 +120,7 @@ export default function StudioOnboarding({
         <Link
           key={source.id}
           href={`${source.href}${separator}permission=${permissionMode}`}
-          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
+          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/4 p-4 transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
         >
           <SourceCard source={source} />
         </Link>
@@ -134,14 +134,14 @@ export default function StudioOnboarding({
             setInputSource(source.id as "git-url" | "website");
             setSourceInput("");
           }}
-          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/[.04] p-4 text-left transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
+          className="rounded-2xl border border-cyan-300/15 bg-cyan-300/4 p-4 text-left transition hover:border-cyan-300/35 hover:bg-cyan-300/[.07]"
         >
           <SourceCard source={source} />
         </button>
       );
     }
     return (
-      <div key={source.id} className="rounded-2xl border border-white/7 bg-white/[.02] p-4 opacity-75">
+      <div key={source.id} className="rounded-2xl border border-white/7 bg-white/2 p-4 opacity-75">
         <SourceCard source={source} />
       </div>
     );
@@ -194,13 +194,13 @@ export default function StudioOnboarding({
           <div className="mt-4 flex flex-wrap gap-2">
             <button
               onClick={() => { onToolChange("build"); void onStartBlank?.(); }}
-              className="rounded-xl border border-white/10 bg-white/[.03] px-4 py-2 text-xs font-bold text-white/60 transition hover:border-white/20 hover:bg-white/[.06] hover:text-white"
+              className="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-xs font-bold text-white/60 transition hover:border-white/20 hover:bg-white/6 hover:text-white"
             >
               Start Blank Project
             </button>
             <button
               onClick={() => setSourcesOpen(true)}
-              className="rounded-xl border border-white/10 bg-white/[.03] px-4 py-2 text-xs font-bold text-white/60 transition hover:border-white/20 hover:bg-white/[.06] hover:text-white"
+              className="rounded-xl border border-white/10 bg-white/3 px-4 py-2 text-xs font-bold text-white/60 transition hover:border-white/20 hover:bg-white/6 hover:text-white"
             >
               Connect a Source
             </button>
@@ -209,7 +209,7 @@ export default function StudioOnboarding({
 
         {/* Popular starts + How it works */}
         <div className="mt-5 grid gap-5 lg:grid-cols-[1.2fr_.8fr]">
-          <section className="rounded-3xl border border-white/8 bg-white/[.025] p-5">
+          <section className="rounded-3xl border border-white/8 bg-white/2.5 p-5">
             <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/35">Popular starts</div>
             <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-3">
               {templates.map((template) => (
@@ -219,7 +219,7 @@ export default function StudioOnboarding({
                     window.history.replaceState(null, "", `/studio?tool=build&template=${encodeURIComponent(template)}`);
                     onToolChange("build");
                   }}
-                  className="rounded-xl border border-white/8 bg-white/[.03] px-3 py-3 text-left text-xs font-bold text-white/70 transition hover:border-cyan-300/30 hover:bg-cyan-300/5 hover:text-white"
+                  className="rounded-xl border border-white/8 bg-white/3 px-3 py-3 text-left text-xs font-bold text-white/70 transition hover:border-cyan-300/30 hover:bg-cyan-300/5 hover:text-white"
                 >
                   {template}
                   <ArrowRight size={12} className="mt-3 text-white/25" />
@@ -227,7 +227,7 @@ export default function StudioOnboarding({
               ))}
             </div>
           </section>
-          <section className="rounded-3xl border border-white/8 bg-white/[.025] p-5">
+          <section className="rounded-3xl border border-white/8 bg-white/2.5 p-5">
             <div className="text-[10px] font-black uppercase tracking-[.2em] text-white/35">How it works</div>
             <ol className="mt-4 space-y-4">
               {[
@@ -285,7 +285,7 @@ export default function StudioOnboarding({
                     className={`flex items-center gap-2 rounded-xl border px-3 py-2 text-xs font-bold transition ${
                       activeCategory === i
                         ? "border-cyan-300/40 bg-cyan-300/10 text-cyan-200"
-                        : "border-white/8 bg-white/[.02] text-white/50 hover:bg-white/[.05] hover:text-white/80"
+                        : "border-white/8 bg-white/2 text-white/50 hover:bg-white/5 hover:text-white/80"
                     }`}
                   >
                     <CatIcon size={14} />
@@ -303,7 +303,7 @@ export default function StudioOnboarding({
                   {quickProviders.map(sourceCard)}
                   <button
                     onClick={() => setShowMoreProviders(true)}
-                    className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/[.02] p-4 text-xs font-bold text-white/50 transition hover:border-white/25 hover:bg-white/[.04] hover:text-white/80"
+                    className="flex items-center justify-center gap-2 rounded-2xl border border-dashed border-white/15 bg-white/2 p-4 text-xs font-bold text-white/50 transition hover:border-white/25 hover:bg-white/4 hover:text-white/80"
                   >
                     More Git Providers <ArrowRight size={14} />
                   </button>
@@ -314,7 +314,7 @@ export default function StudioOnboarding({
             </div>
 
             {inputSource && (
-              <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/[.04] p-4">
+              <div className="mt-5 rounded-2xl border border-cyan-300/20 bg-cyan-300/4 p-4">
                 <label htmlFor="source-url" className="text-xs font-black text-white">
                   {inputSource === "git-url" ? "Repository URL" : "Website URL"}
                 </label>
@@ -366,7 +366,7 @@ export default function StudioOnboarding({
                       className={`rounded-xl border p-3 text-left transition ${
                         selected
                           ? "border-emerald-300/40 bg-emerald-300/10"
-                          : "border-white/8 bg-white/[.02] hover:bg-white/[.05]"
+                          : "border-white/8 bg-white/2 hover:bg-white/5"
                       }`}
                     >
                       <div className="flex items-center gap-2">
@@ -388,7 +388,7 @@ export default function StudioOnboarding({
             </div>
 
             {/* Approval note */}
-            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-300/15 bg-emerald-300/[.04] p-4">
+            <div className="mt-5 flex items-start gap-3 rounded-2xl border border-emerald-300/15 bg-emerald-300/4 p-4">
               <ShieldCheck size={17} className="mt-0.5 shrink-0 text-emerald-300" />
               <div>
                 <div className="text-xs font-black text-white">You stay in control</div>

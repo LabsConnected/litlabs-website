@@ -1,7 +1,12 @@
-export const metadata = {
-  title: "Terms",
-  description: "Terms of service for LiTTree-LabStudios.",
-};
+import type { Metadata } from "next";
+import { buildMetadata } from "@/lib/seo";
+
+export const metadata: Metadata = buildMetadata({
+  title: "Terms of Service",
+  description: "Terms of service for LiTTree LabStudios AI creative studio.",
+  path: "/terms",
+  index: true,
+});
 
 const UPDATED = "July 2, 2026";
 
@@ -26,7 +31,7 @@ export default function TermsPage() {
               Use of the Platform
             </h2>
             <p>
-              LiTTree-LabStudios provides creative AI tools, agent workflows,
+              LiTTree LabStudios provides creative AI tools, agent workflows,
               gallery features, marketplace experiences, and related services.
               Use the platform lawfully and do not attempt to disrupt, abuse, or
               bypass security controls.
