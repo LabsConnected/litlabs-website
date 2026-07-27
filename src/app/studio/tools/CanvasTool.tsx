@@ -395,7 +395,7 @@ export default function CanvasTool() {
 
   return (
     <div
-      className={`flex flex-col ${isFullscreen ? "fixed inset-0 z-10000" : "h-full"}`}
+      className={`flex flex-col min-h-0 ${isFullscreen ? "fixed inset-0 z-10000" : "h-full"}`}
       style={{ backgroundColor: T.bgColor }}
     >
       {/* Header with Model Switcher */}
@@ -478,7 +478,7 @@ export default function CanvasTool() {
       <div className="flex flex-1 min-h-0 overflow-hidden">
         {/* Chat Panel */}
         <div
-          className="flex flex-col border-r w-full md:w-1/2 lg:w-[42%] shrink-0"
+          className="flex flex-col min-h-0 border-r w-full md:w-1/2 lg:w-[42%] shrink-0"
           style={{ borderColor: T.borderColor + "20" }}
         >
           {/* Messages */}
@@ -728,7 +728,7 @@ export default function CanvasTool() {
         </div>
 
         {/* Code/Preview Panel */}
-        <div className="hidden md:flex flex-col flex-1 min-w-0">
+        <div className="hidden md:flex flex-col flex-1 min-h-0 min-w-0">
           {/* Panel Header */}
           <div
             className="flex items-center justify-between px-3 py-2 border-b shrink-0"
