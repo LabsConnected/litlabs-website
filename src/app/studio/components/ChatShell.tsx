@@ -34,6 +34,7 @@ import {
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import { type ConnectionCapabilities } from "../hooks/useConnectionSummary";
 import type { ArtifactAction } from "@/lib/canvas/types";
+import { ActionChips } from "./canvas/ActionChips";
 
 type Message = {
   role: "user" | "assistant";
@@ -617,6 +618,18 @@ export default function ChatShell({
                         </div>
                       )}
                     </div>
+                    {message.actions && message.actions.length > 0 && (
+                      <ActionChips
+                        actions={message.actions}
+                        onExecute={(action) => {
+                          // Dispatch a custom event that StudioOS listens for
+                          // to execute the action against the Canvas API
+                          window.dispatchEvent(
+                            new CustomEvent("canvas:execute-action", { detail: action }),
+                          );
+                        }}
+                      />
+                    )}
                     <div className="mt-1 flex items-center gap-2 px-1">
                       <span
                         className="text-[9px]"

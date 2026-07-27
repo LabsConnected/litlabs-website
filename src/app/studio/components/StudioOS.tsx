@@ -12,10 +12,12 @@ import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
 import DemoBootstrap from "./DemoBootstrap";
+import type { ArtifactAction } from "@/lib/canvas/types";
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
 const ChatTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
+const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -114,6 +116,8 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [search, setSearch] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
   const [assistantOpen, setAssistantOpen] = useState(false);
+  const [canvasOpen, setCanvasOpen] = useState(false);
+  const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(
     () => !searchParams.has("tool"),
   );
@@ -167,6 +171,21 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
     };
     window.addEventListener("studio:switch-tool", handler);
     return () => window.removeEventListener("studio:switch-tool", handler);
+  }, []);
+
+  // Handle canvas action execution from chat action chips.
+  // When a chip is clicked, ChatShell dispatches "canvas:execute-action"
+  // with the ArtifactAction. We open the Canvas panel and pass the action.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const custom = e as CustomEvent<ArtifactAction>;
+      if (custom.detail) {
+        setPendingCanvasAction(custom.detail);
+        setCanvasOpen(true);
+      }
+    };
+    window.addEventListener("canvas:execute-action", handler);
+    return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
   const handleToolChange = useCallback(
@@ -296,6 +315,40 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
               />
             </div>
           </aside>}
+
+          {/* Canvas panel — split-pane on desktop, overlay on mobile.
+              Opens when a canvas action is executed from chat. */}
+          {canvasOpen && (
+            <aside
+              className="fixed bottom-0 right-0 top-12 z-10009 flex w-full max-w-[520px] min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)]"
+              style={{
+                backgroundColor: "rgba(8,9,13,0.97)",
+                borderColor: "rgba(255,255,255,0.06)",
+              }}
+            >
+              <div
+                className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
+                style={{ borderColor: "rgba(255,255,255,0.06)" }}
+              >
+                <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
+                  Canvas
+                </span>
+                <button
+                  onClick={() => setCanvasOpen(false)}
+                  className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
+                  aria-label="Close Canvas panel"
+                >
+                  ✕
+                </button>
+              </div>
+              <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
+                <CanvasPanel
+                  pendingAction={pendingCanvasAction}
+                  onActionExecuted={() => setPendingCanvasAction(null)}
+                />
+              </div>
+            </aside>
+          )}
         </div>
 
         {/* Mobile bottom tab bar — tool switching */}
