@@ -40,8 +40,8 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v6";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v7";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -245,16 +245,17 @@ function buildPlayerDocument(opts: {
     `    const __origDecompressFile=C.prototype.decompressFile;`,
     `    C.prototype.decompressFile=function(method,data,updateMsg,fileCbFunc){`,
     `      if(method==="zip"){`,
+    `        const self=this;`,
     `        if(updateMsg)updateMsg(" 0%",true);`,
     `        return __littUnzip(data).then(function(files){`,
     `          if(typeof fileCbFunc==="function"){for(const k in files){fileCbFunc(k,files[k]);files[k]=true;}}`,
     `          if(updateMsg)updateMsg(" 100%",true);`,
     `          return files;`,
-    `        }).catch((function(self){return function(err){`,
+    `        }).catch(function(err){`,
     `          console.error("[LiTT] Main-thread unzip failed, falling back to worker:",err);`,
     `          try{parent.postMessage({source:"ejs",type:"worker-error",message:"Main-thread unzip failed: "+(err&&err.message||err),buildId:__littBuildId},"*");}catch(_){}`,
     `          return __origDecompressFile.call(self,method,data,updateMsg,fileCbFunc);`,
-    `        };})(this)));`,
+    `        });`,
     `      }`,
     `      return __origDecompressFile.call(this,method,data,updateMsg,fileCbFunc);`,
     `    };`,
