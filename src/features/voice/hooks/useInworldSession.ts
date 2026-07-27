@@ -58,7 +58,11 @@ export function useInworldSession(
   const analyserRef = useRef<AnalyserNode | null>(null);
   const playbackContextRef = useRef<AudioContext | null>(null);
   const playbackQueueRef = useRef<AudioBuffer[]>([]);
-  const playbackSourceRef = useRef<AudioBufferSourceNode | null>(null);
+  // All currently scheduled (playing or pending) AudioBufferSourceNodes.
+  // Replaced the single `playbackSourceRef` so we can pre-schedule multiple
+  // chunks for seamless playback (no onended-gap clicks) and stop them all
+  // on interrupt.
+  const scheduledSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isPlayingRef = useRef(false);
   const interruptedRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
@@ -82,50 +86,49 @@ export function useInworldSession(
   }, []);
 
   // --- Audio playback ---
-  // Matches the official Inworld quickstart pattern: onended chaining with
-  // nextPlayTime scheduling + 48-sample fades to avoid clicks at chunk boundaries.
+  // Pre-scheduling design: when a chunk arrives, it is immediately scheduled
+  // at `nextPlayTimeRef` (the end time of the last scheduled chunk, or now).
+  // This eliminates the onended-gap clicks that the previous chaining design
+  // suffered from — there is no JS-event-loop delay between chunks because
+  // they are all scheduled ahead of time via `source.start(startTime)`.
   const nextPlayTimeRef = useRef(0);
-  const playNextChunkRef = useRef<() => void>(() => {});
 
-  const playNextChunk = useCallback(() => {
+  const schedulePendingChunks = useCallback(() => {
     if (interruptedRef.current) {
       playbackQueueRef.current = [];
-      isPlayingRef.current = false;
-      nextPlayTimeRef.current = 0;
       return;
     }
-
-    const chunk = playbackQueueRef.current.shift();
-    if (!chunk) {
-      isPlayingRef.current = false;
-      nextPlayTimeRef.current = 0;
-      return;
-    }
-
-    isPlayingRef.current = true;
     const ctx = playbackContextRef.current;
     if (!ctx) return;
 
-    const source = ctx.createBufferSource();
-    source.buffer = chunk;
-    source.connect(ctx.destination);
-    playbackSourceRef.current = source;
+    while (playbackQueueRef.current.length > 0) {
+      const chunk = playbackQueueRef.current.shift()!;
+      const source = ctx.createBufferSource();
+      source.buffer = chunk;
+      source.connect(ctx.destination);
+      scheduledSourcesRef.current.add(source);
 
-    // Schedule this chunk to start exactly when the previous one ends
-    const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
-    nextPlayTimeRef.current = startTime + chunk.duration;
+      // Schedule seamlessly: start exactly when the previous chunk ends, or
+      // now if this is the first chunk / nextPlayTime fell behind (gap).
+      const startTime = Math.max(nextPlayTimeRef.current, ctx.currentTime);
+      nextPlayTimeRef.current = startTime + chunk.duration;
 
-    source.onended = () => {
-      playbackSourceRef.current = null;
-      playNextChunkRef.current();
-    };
+      source.onended = () => {
+        scheduledSourcesRef.current.delete(source);
+        // Playback is done only when all sources finish AND the queue is empty
+        if (
+          scheduledSourcesRef.current.size === 0 &&
+          playbackQueueRef.current.length === 0
+        ) {
+          isPlayingRef.current = false;
+          nextPlayTimeRef.current = 0;
+        }
+      };
 
-    source.start(startTime);
+      source.start(startTime);
+      isPlayingRef.current = true;
+    }
   }, []);
-
-  useEffect(() => {
-    playNextChunkRef.current = playNextChunk;
-  }, [playNextChunk]);
 
   const enqueueAudioChunk = useCallback(
     (base64Pcm16: string) => {
@@ -141,43 +144,59 @@ export function useInworldSession(
         bytes[i] = binary.charCodeAt(i);
       }
 
-      // Convert PCM16 little-endian to Float32
+      // Convert PCM16 little-endian to Float32.
+      //
+      // CRITICAL: the raw bitwise OR `bytes[i*2] | (bytes[i*2+1] << 8)` produces
+      // an UNSIGNED 0-65535 value. Without sign extension, every negative
+      // sample (bit 15 set) becomes a large positive value that clips above
+      // 1.0 — producing harsh, robotic, distorted audio. The `<< 16 >> 16`
+      // idiom sign-extends the 16-bit value to a proper signed Int16.
       const sampleCount = bytes.length / 2;
       const float32 = new Float32Array(sampleCount);
       for (let i = 0; i < sampleCount; i++) {
-        const int16 = bytes[i * 2] | (bytes[i * 2 + 1] << 8);
+        const int16 = (bytes[i * 2] | (bytes[i * 2 + 1] << 8)) << 16 >> 16;
         float32[i] = int16 / 32768;
       }
 
-      // Apply fade in/out to avoid clicks at chunk boundaries
-      const fadeSamples = Math.min(FADE_SAMPLES, sampleCount);
-      for (let i = 0; i < fadeSamples; i++) {
-        const gain = i / fadeSamples;
-        float32[i] *= gain;
-        float32[sampleCount - 1 - i] *= gain;
+      // Apply a short fade-in ONLY to the first chunk of a playback session to
+      // avoid a startup click. The previous code applied fade-in AND fade-out
+      // to EVERY chunk, creating a V-shaped dip to zero at every chunk
+      // boundary (~85ms apart at 24kHz/2048 samples) — audible as a ~12Hz
+      // warble/tremolo. Intermediate chunks must play seamlessly back-to-back;
+      // the end of the response is handled by stopPlayback() which stops the
+      // source node directly.
+      const isFirstChunk =
+        !isPlayingRef.current &&
+        scheduledSourcesRef.current.size === 0 &&
+        playbackQueueRef.current.length === 0;
+      if (isFirstChunk) {
+        const fadeSamples = Math.min(FADE_SAMPLES, sampleCount);
+        for (let i = 0; i < fadeSamples; i++) {
+          float32[i] *= i / fadeSamples;
+        }
       }
 
       const audioBuffer = ctx.createBuffer(1, sampleCount, TARGET_SAMPLE_RATE);
       audioBuffer.copyToChannel(float32, 0);
       playbackQueueRef.current.push(audioBuffer);
 
-      if (!isPlayingRef.current) {
-        playNextChunk();
-      }
+      // Immediately schedule all pending chunks (pre-scheduling for gapless
+      // playback — no onended chaining needed).
+      schedulePendingChunks();
     },
-    [playNextChunk],
+    [schedulePendingChunks],
   );
 
   const stopPlayback = useCallback(() => {
     playbackQueueRef.current = [];
-    if (playbackSourceRef.current) {
+    for (const source of scheduledSourcesRef.current) {
       try {
-        playbackSourceRef.current.stop();
+        source.stop();
       } catch {
         // Already stopped
       }
-      playbackSourceRef.current = null;
     }
+    scheduledSourcesRef.current.clear();
     isPlayingRef.current = false;
     nextPlayTimeRef.current = 0;
   }, []);
@@ -356,14 +375,14 @@ export function useInworldSession(
                     type: "session.update",
                     session: {
                       type: "realtime",
-                      model: "inworld/models/gemma-4-26b-a4b-it",
+                      model: "openai/gpt-4o-mini",
                       instructions: agent === "spark" ? SPARK_INSTRUCTIONS : LITT_INSTRUCTIONS,
                       output_modalities: ["audio"],
                       audio: {
                         input: {
                           format: { type: "audio/pcm", rate: 24000 },
                           transcription: {
-                            model: "assemblyai/u3-rt-pro",
+                            model: "inworld/inworld-stt-1",
                           },
                           turn_detection: {
                             type: "semantic_vad",

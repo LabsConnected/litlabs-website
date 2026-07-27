@@ -31,6 +31,8 @@ import {
   Cpu,
   Shield,
   Coins,
+  Gamepad2,
+  ExternalLink,
 } from "lucide-react";
 
 export type StudioTool =
@@ -294,6 +296,26 @@ export default function StudioSidebar({
                 </button>
               );
             })}
+
+            {/* Divider */}
+            <div
+              className="my-1 h-px"
+              style={{ backgroundColor: "rgba(255,255,255,0.06)" }}
+            />
+
+            {/* Games — external link to /games */}
+            <Link
+              href="/games"
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={() => setMoreOpen(false)}
+              className="flex items-center gap-3 rounded-xl px-3 py-2.5 transition-all hover:bg-white/5"
+              style={{ color: "rgba(255,255,255,0.6)" }}
+            >
+              <Gamepad2 size={18} strokeWidth={1.7} className="pointer-events-none" />
+              <span className="text-xs font-bold">Games</span>
+              <ExternalLink size={11} className="ml-auto opacity-40 pointer-events-none" />
+            </Link>
           </div>
         </div>
       )}

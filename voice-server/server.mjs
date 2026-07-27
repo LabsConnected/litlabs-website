@@ -230,8 +230,12 @@ wss.on("connection", (browserWs, req) => {
     // Log first message for debugging
     try {
       const msg = JSON.parse(data.toString());
-      if (msg.type === "session.created" || msg.type === "error") {
-        console.info(`[voice-proxy] Inworld msg: ${msg.type} (user: ${userId})`, msg.type === "error" ? msg.message || msg.code : "");
+      if (msg.type === "session.created") {
+        console.info(`[voice-proxy] Inworld msg: session.created (user: ${userId})`);
+      } else if (msg.type === "error") {
+        console.error(`[voice-proxy] Inworld error (user: ${userId}):`, JSON.stringify(msg));
+      } else if (msg.type === "session.updated") {
+        console.info(`[voice-proxy] Inworld msg: session.updated (user: ${userId})`);
       }
     } catch {}
     if (browserWs.readyState === WebSocket.OPEN) {
