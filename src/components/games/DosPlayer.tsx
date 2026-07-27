@@ -35,10 +35,12 @@ const JS_DOS_CSS = "/jsdos/js-dos.css";
 const JS_DOS_CDN_SCRIPT = "https://v8.js-dos.com/latest/js-dos.js";
 const JS_DOS_CDN_CSS = "https://v8.js-dos.com/latest/js-dos.css";
 
-// A free demo bundle from dos.zone — a simple DOS prompt
-const DEMO_BUNDLE_URL = "https://cdn.dos.zone/original/2x/3007/game.jsdos";
+// Digger — a classic DOS game, bundled locally to avoid CDN death
+const DEMO_BUNDLE_URL = "/jsdos/demo-digger.jsdos";
 
 type LoadState = "idle" | "loading" | "ready" | "running" | "error";
+
+const INIT_TIMEOUT_MS = 15_000;
 
 export default function DosPlayer({
   bundleUrl,
@@ -55,13 +57,20 @@ export default function DosPlayer({
   const [error, setError] = useState<string | null>(null);
   const [urlInput, setUrlInput] = useState(bundleUrl || "");
   const [scriptLoaded, setScriptLoaded] = useState(false);
+  const [scriptSource, setScriptSource] = useState<"local" | "cdn" | "pending" | "failed">("pending");
+  const [showDiagnostic, setShowDiagnostic] = useState(false);
+  const [activeBundleUrl, setActiveBundleUrl] = useState<string | null>(null);
+  const [initStartTime, setInitStartTime] = useState<number | null>(null);
+  const [elapsedMs, setElapsedMs] = useState<number | null>(null);
 
   /* Load the js-dos script + CSS once, with CDN fallback */
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.Dos) {
-      // Defer setState to avoid cascading renders
-      const id = setTimeout(() => setScriptLoaded(true), 0);
+      const id = setTimeout(() => {
+        setScriptLoaded(true);
+        setScriptSource("local");
+      }, 0);
       return () => clearTimeout(id);
     }
 
@@ -75,7 +84,6 @@ export default function DosPlayer({
     script.async = true;
 
     const loadFromCdn = () => {
-      // Local bundle didn't expose Dos; try CDN
       css = document.createElement("link");
       css.rel = "stylesheet";
       css.href = JS_DOS_CDN_CSS;
@@ -86,24 +94,28 @@ export default function DosPlayer({
       script.async = true;
       script.crossOrigin = "anonymous";
       script.onload = () => {
-        if (window.Dos) setScriptLoaded(true);
-        else {
-          setError("js-dos engine unavailable");
+        if (window.Dos) {
+          setScriptLoaded(true);
+          setScriptSource("cdn");
+        } else {
+          setError("js-dos engine loaded but window.Dos is undefined");
+          setScriptSource("failed");
           setLoadState("error");
         }
       };
       script.onerror = () => {
-        setError("Failed to load js-dos engine from CDN");
+        setError("Failed to load js-dos engine from both local and CDN sources");
+        setScriptSource("failed");
         setLoadState("error");
       };
       document.head.appendChild(script);
     };
 
     script.onload = () => {
-      // Give the bundle a moment to register window.Dos
       setTimeout(() => {
         if (window.Dos) {
           setScriptLoaded(true);
+          setScriptSource("local");
         } else {
           loadFromCdn();
         }
@@ -129,14 +141,57 @@ export default function DosPlayer({
     };
   }, []);
 
+  /* 15-second initialization timeout */
+  useEffect(() => {
+    if (loadState !== "loading" && loadState !== "ready") return;
+    if (initStartTime === null) return;
+
+    const timer = window.setTimeout(() => {
+      setLoadState((current) => {
+        if (current === "loading" || current === "ready") {
+          setElapsedMs(Date.now() - initStartTime);
+          setError(
+            `DOS emulator did not finish initializing within ${INIT_TIMEOUT_MS / 1000}s. ` +
+              "The WASM runtime may be blocked by your browser or a content blocker. " +
+              "Try again or upload a different .jsdos bundle.",
+          );
+          return "error";
+        }
+        return current;
+      });
+    }, INIT_TIMEOUT_MS);
+
+    return () => window.clearTimeout(timer);
+  }, [loadState, initStartTime]);
+
+  /* Track elapsed time while loading */
+  useEffect(() => {
+    if (loadState !== "loading" && loadState !== "ready") {
+      if (initStartTime !== null) {
+        setElapsedMs(Date.now() - initStartTime);
+        setInitStartTime(null);
+      }
+      return;
+    }
+    const interval = window.setInterval(() => {
+      if (initStartTime !== null) {
+        setElapsedMs(Date.now() - initStartTime);
+      }
+    }, 500);
+    return () => window.clearInterval(interval);
+  }, [loadState, initStartTime]);
+
   const startEmulator = useCallback(async (url: string) => {
     if (!window.Dos || !dosRootRef.current) {
-      setError("js-dos engine not ready");
+      setError("js-dos engine not ready — script is still loading or was blocked");
       setLoadState("error");
       return;
     }
     setLoadState("loading");
     setError(null);
+    setActiveBundleUrl(url);
+    setInitStartTime(Date.now());
+    setElapsedMs(null);
 
     // Clean up previous instance
     if (dosInstanceRef.current) {
@@ -157,6 +212,8 @@ export default function DosPlayer({
         onEvent: (event: string) => {
           if (event === "emu-ready") {
             setLoadState("running");
+            setElapsedMs(Date.now() - (initStartTime ?? Date.now()));
+            setInitStartTime(null);
           }
         },
       });
@@ -165,8 +222,9 @@ export default function DosPlayer({
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to start emulator");
       setLoadState("error");
+      setInitStartTime(null);
     }
-  }, []);
+  }, [initStartTime]);
 
   const handleFileUpload = useCallback(
     async (file: File) => {
@@ -282,8 +340,36 @@ export default function DosPlayer({
               <X size={14} />
             </button>
           )}
+          <button
+            onClick={() => setShowDiagnostic((v) => !v)}
+            className="p-1.5 rounded-lg hover:opacity-80 transition-opacity"
+            style={{ color: T.textMuted }}
+            title="Diagnostics"
+          >
+            <Gamepad2 size={14} />
+          </button>
         </div>
       </div>
+
+      {/* Diagnostic panel */}
+      {showDiagnostic && (
+        <div
+          className="px-4 py-3 border-b text-[10px] font-mono space-y-1"
+          style={{
+            backgroundColor: "#0a0a0a",
+            borderColor: `${T.borderColor}30`,
+            color: "#888",
+          }}
+        >
+          <div style={{ color: "#aaa", fontWeight: "bold" }}>DIAGNOSTICS</div>
+          <div>bundle: {activeBundleUrl ?? "—"}</div>
+          <div>script: {scriptSource} (loaded: {String(scriptLoaded)})</div>
+          <div>wasm: {typeof WebAssembly !== "undefined" ? "supported" : "NOT supported"}</div>
+          <div>state: {loadState}</div>
+          <div>elapsed: {elapsedMs !== null ? `${elapsedMs}ms` : "—"}</div>
+          <div style={{ color: error ? "#ef4444" : "#888" }}>error: {error ?? "none"}</div>
+        </div>
+      )}
 
       {/* Body */}
       {loadState === "idle" && (
@@ -430,25 +516,6 @@ export default function DosPlayer({
         </div>
       )}
 
-      {/* Loading state */}
-      {loadState === "loading" && (
-        <div className="flex items-center justify-center h-64">
-          <div className="text-center space-y-3">
-            <Loader2
-              size={32}
-              className="animate-spin mx-auto"
-              style={{ color: T.accentColor }}
-            />
-            <p className="text-sm font-bold" style={{ color: T.textColor }}>
-              Starting DOS emulator...
-            </p>
-            <p className="text-[10px]" style={{ color: T.textMuted }}>
-              Loading WASM runtime & bundle
-            </p>
-          </div>
-        </div>
-      )}
-
       {/* Error state */}
       {loadState === "error" && (
         <div className="flex items-center justify-center h-64 p-6">
@@ -457,29 +524,49 @@ export default function DosPlayer({
             <p className="text-sm font-bold" style={{ color: "#ef4444" }}>
               {error || "Something went wrong"}
             </p>
-            <button
-              onClick={() => {
-                setLoadState("idle");
-                setError(null);
-              }}
-              className="px-4 py-2 rounded-xl text-xs font-bold border"
-              style={{
-                borderColor: `${T.borderColor}40`,
-                color: T.textColor,
-              }}
-            >
-              Try Again
-            </button>
+            {elapsedMs !== null && (
+              <p className="text-[10px]" style={{ color: T.textMuted }}>
+                Failed after {elapsedMs}ms
+              </p>
+            )}
+            <div className="flex items-center justify-center gap-2">
+              {activeBundleUrl && (
+                <button
+                  onClick={() => startEmulator(activeBundleUrl)}
+                  className="px-4 py-2 rounded-xl text-xs font-bold border"
+                  style={{
+                    borderColor: `${T.borderColor}40`,
+                    color: T.textColor,
+                  }}
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                onClick={() => {
+                  setLoadState("idle");
+                  setError(null);
+                  setActiveBundleUrl(null);
+                }}
+                className="px-4 py-2 rounded-xl text-xs font-bold border"
+                style={{
+                  borderColor: `${T.borderColor}40`,
+                  color: T.textColor,
+                }}
+              >
+                Back
+              </button>
+            </div>
           </div>
         </div>
       )}
 
-      {/* Emulator container — always in DOM when ready/running */}
-      {(loadState === "ready" || loadState === "running") && (
+      {/* Emulator container — in DOM during loading/ready/running so js-dos can attach */}
+      {(loadState === "loading" || loadState === "ready" || loadState === "running") && (
         <div className="relative w-full" style={{ aspectRatio: "4/3" }}>
           <div ref={dosRootRef} className="absolute inset-0 w-full h-full" />
-          {loadState === "ready" && (
-            <div className="absolute inset-0 flex items-center justify-center bg-black/60">
+          {loadState !== "running" && (
+            <div className="absolute inset-0 flex items-center justify-center bg-black/80">
               <Loader2
                 size={24}
                 className="animate-spin"

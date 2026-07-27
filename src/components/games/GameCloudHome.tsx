@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useMemo, useEffect } from "react";
+import { useState, useMemo } from "react";
 import {
   GAME_LIBRARY,
   searchGames,
@@ -66,17 +66,6 @@ export default function GameCloudHome() {
     );
     const broken = GAME_LIBRARY.filter((g) => !g.html5Url && !g.externalUrl);
     return { externalOnly, iframeReady, broken };
-  }, []);
-
-  useEffect(() => {
-    console.table(
-      GAME_LIBRARY.map((g) => ({
-        title: g.title,
-        platform: g.platform,
-        embedsInline: !EXTERNAL_PLATFORMS.includes(g.platform),
-        url: g.html5Url || g.externalUrl || "missing",
-      })),
-    );
   }, []);
 
   return (
