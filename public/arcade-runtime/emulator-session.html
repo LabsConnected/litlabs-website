@@ -22,14 +22,39 @@
     EmulatorJS 4.2.3 isolated runtime host.
 
     The parent window injects configuration via URL parameters:
-      ?core=nes          — EJS_core
-      &rom=<blob:url>    — EJS_gameUrl
+      ?core=nes          — EJS_core (e.g. "nes" resolves to fceumm, or "nestopia")
+      &rom=<blob:url>    — EJS_gameUrl (blob URL created by parent)
       &name=<string>     — EJS_gameName
       &dataPath=<url>    — EJS_pathtodata (default: /emulatorjs/4.2.3/data/)
-      &cdnTest=1         — use official CDN for diagnostics
+      &cdnTest=1         — use official CDN for diagnostic control test
+      &color=<hex>       — EJS_color (accent color)
+      &legacy=1          — force legacy cores (EJS_forceLegacyCores = true)
 
     The parent listens for postMessage events from this iframe.
-    All events use { source: "arcade", type: "..." } format.
+    All events use { source: "arcade", type: "runtime.*" } format.
+
+    REAL signals (authoritative):
+      runtime.booting          — iframe script started
+      runtime.loader_loaded    — loader.js fetched successfully
+      runtime.loader_ready     — EJS_ready fired (UI loaded, NOT game started)
+      runtime.canvas_created   — a <canvas> element appeared inside #game
+      runtime.first_frame      — canvas has non-zero dimensions (first frame rendered)
+      runtime.running          — EJS_onGameStart fired (game actually started)
+      runtime.error            — window error or loader error
+      runtime.exited           — shutdown command processed
+      runtime.heartbeat        — periodic heartbeat (every 5s)
+
+    SUPPLEMENTARY signals (for display + watchdog reset only, NOT for state truth):
+      runtime.progress              — loading text changed (e.g. "Download Game Core 42%")
+      runtime.core_download_started — inferred from "Download Game Core" text
+      runtime.core_download_progress— inferred from download percentage
+      runtime.core_decompression_started — inferred from "Decompress Game Core" text
+      runtime.core_decompression_progress — inferred from decompression percentage
+
+    IMPORTANT: "Decompress Game Core 99%" does NOT mean decompression is complete.
+    The only authoritative "done" signal is EJS_ready (UI loaded) followed by
+    EJS_onGameStart (game running). The 99% text is never used as a state
+    transition — it is forwarded as supplementary progress only.
   -->
   <script>
     (function () {
@@ -42,6 +67,7 @@
       var dataPath = params.get("dataPath") || "/emulatorjs/4.2.3/data/";
       var cdnTest = params.get("cdnTest") === "1";
       var color = params.get("color") || "#6366f1";
+      var legacy = params.get("legacy") === "1";
 
       if (cdnTest) {
         dataPath = "https://cdn.emulatorjs.org/4.2.3/data/";
@@ -54,7 +80,7 @@
         } catch (e) { /* parent may be gone */ }
       }
 
-      send("runtime.booting", { core: core, dataPath: dataPath });
+      send("runtime.booting", { core: core, dataPath: dataPath, legacy: legacy });
 
       // ─── EmulatorJS configuration ──────────────────────────────
       window.EJS_player = "#game";
@@ -73,20 +99,119 @@
       window.EJS_alignStartButton = "center";
       window.EJS_color = color;
       window.EJS_threads = false;
-      window.EJS_forceLegacyCores = false;
+      window.EJS_forceLegacyCores = legacy;
 
-      // ─── Runtime event hooks ───────────────────────────────────
-      // EJS_ready = UI loaded (NOT game started)
+      // Track real runtime milestones
+      var loaderReady = false;
+      var canvasCreated = false;
+      var firstFrameEmitted = false;
+      var runningEmitted = false;
+
+      // ─── Runtime event hooks (REAL signals) ────────────────────
+      // EJS_ready = UI loaded (NOT game started). This is the real signal
+      // that the loader finished, the core was downloaded + decompressed,
+      // and the EmulatorJS UI is ready for the user to click Start.
       window.EJS_ready = function () {
+        loaderReady = true;
         send("runtime.loader_ready");
       };
 
-      // EJS_onGameStart = game actually started (canvas rendering)
+      // EJS_onGameStart = game actually started (canvas rendering).
+      // This is the real "running" signal — NOT inferred from loading text.
       window.EJS_onGameStart = function () {
-        send("runtime.running");
+        if (!runningEmitted) {
+          runningEmitted = true;
+          send("runtime.running");
+        }
       };
 
-      // Catch all errors
+      // EJS_onGameStart is the authoritative signal, but we also observe
+      // the canvas directly for first-frame detection. This catches cases
+      // where the game starts rendering before/without the start callback.
+      function checkCanvas() {
+        if (firstFrameEmitted) return;
+        var game = document.getElementById("game");
+        if (!game) return;
+        var canvas = game.querySelector("canvas");
+        if (!canvas) return;
+        if (!canvasCreated) {
+          canvasCreated = true;
+          send("runtime.canvas_created");
+        }
+        // First frame = canvas has non-zero dimensions
+        if (canvas.width > 0 && canvas.height > 0) {
+          firstFrameEmitted = true;
+          send("runtime.first_frame", {
+            width: canvas.width,
+            height: canvas.height,
+          });
+        }
+      }
+
+      // Poll for canvas creation + first frame. requestAnimationFrame is
+      // the most reliable way to detect when the canvas is first painted.
+      function canvasWatchLoop() {
+        checkCanvas();
+        if (!firstFrameEmitted) {
+          requestAnimationFrame(canvasWatchLoop);
+        }
+      }
+      // Start the canvas watch once #game has children (loader injected them)
+      function startCanvasWatch() {
+        var root = document.getElementById("game");
+        if (root && root.children.length > 0) {
+          requestAnimationFrame(canvasWatchLoop);
+        } else {
+          setTimeout(startCanvasWatch, 100);
+        }
+      }
+      startCanvasWatch();
+
+      // ─── Loading text observer (SUPPLEMENTARY only) ────────────
+      // We observe the loading text for progress info, but the REAL
+      // state transitions come from EJS_ready, canvas detection, and
+      // EJS_onGameStart. The 99% text is NEVER used as a state transition.
+      var lastText = "";
+      var textObserver = new MutationObserver(function () {
+        var el = document.querySelector(".ejs_loading_text");
+        if (!el) return;
+        var text = (el.innerText || "").trim();
+        if (text && text !== lastText) {
+          lastText = text;
+          send("runtime.progress", { text: text });
+
+          // Infer stage from text for supplementary events + watchdog reset.
+          // These are NOT authoritative — the parent uses them only to
+          // update the display and reset stage-specific watchdogs.
+          var downloadMatch = text.match(/download.*core.*?(\d+)%/i);
+          if (downloadMatch) {
+            var dlPct = parseInt(downloadMatch[1], 10);
+            send("runtime.core_download_progress", { percent: dlPct, text: text });
+          } else if (/download.*core/i.test(text)) {
+            send("runtime.core_download_started", { text: text });
+          }
+
+          var decompressMatch = text.match(/decompress.*core.*?(\d+)%/i);
+          if (decompressMatch) {
+            var dcPct = parseInt(decompressMatch[1], 10);
+            send("runtime.core_decompression_progress", { percent: dcPct, text: text });
+          } else if (/decompress.*core/i.test(text)) {
+            send("runtime.core_decompression_started", { text: text });
+          }
+        }
+      });
+
+      function startTextObserving() {
+        var root = document.getElementById("game");
+        if (root) {
+          textObserver.observe(root, { subtree: true, childList: true, characterData: true });
+        } else {
+          setTimeout(startTextObserving, 50);
+        }
+      }
+      startTextObserving();
+
+      // ─── Error handling ────────────────────────────────────────
       window.addEventListener("error", function (e) {
         send("runtime.error", {
           message: (e && e.message) || "emulator error",
@@ -95,42 +220,13 @@
         });
       });
 
-      // ─── Loading text observer (supplementary, not primary) ────
-      // We observe the loading text for progress info, but the REAL
-      // state transitions come from EJS_ready and EJS_onGameStart.
-      var lastText = "";
-      var observer = new MutationObserver(function () {
-        var el = document.querySelector(".ejs_loading_text");
-        if (!el) return;
-        var text = (el.innerText || "").trim();
-        if (text && text !== lastText) {
-          lastText = text;
-          send("runtime.progress", { text: text });
-
-          // Infer stage from text for the state machine
-          if (/download.*core/i.test(text)) {
-            send("runtime.core_download_started");
-          } else if (/decompress.*core/i.test(text) && /(\d+)%/.test(text)) {
-            var pct = parseInt(RegExp.$1, 10);
-            send("runtime.core_decompression_progress", { percent: pct });
-            if (pct >= 99) {
-              send("runtime.core_decompression_completed");
-            }
-          }
+      window.addEventListener("unhandledrejection", function (e) {
+        var msg = "Unhandled promise rejection";
+        if (e && e.reason) {
+          msg += ": " + (e.reason.message || String(e.reason));
         }
+        send("runtime.error", { message: msg });
       });
-
-      // Start observing once #game has children
-      function startObserving() {
-        var root = document.getElementById("game");
-        if (root) {
-          observer.observe(root, { subtree: true, childList: true, characterData: true });
-          send("runtime.canvas_created");
-        } else {
-          setTimeout(startObserving, 50);
-        }
-      }
-      startObserving();
 
       // ─── Load the official loader.js ───────────────────────────
       send("runtime.preparing_runtime", { dataPath: dataPath });
@@ -148,6 +244,7 @@
       document.head.appendChild(script);
 
       // ─── Heartbeat ─────────────────────────────────────────────
+      // Sent every 5s so the parent can detect iframe crashes.
       var heartbeatInterval = setInterval(function () {
         send("runtime.heartbeat", { timestamp: Date.now() });
       }, 5000);
@@ -156,21 +253,70 @@
       window.addEventListener("message", function (event) {
         if (!event.data || event.data.source !== "arcade-parent") return;
         var cmd = event.data.type;
-        // Commands: start, pause, resume, reset, fullscreen, save_state, load_state, shutdown
+
         if (cmd === "command.start") {
           try {
-            if (window.EJS_emulator && window.EJS_emulator.start) {
+            if (window.EJS_emulator && typeof window.EJS_emulator.start === "function") {
               window.EJS_emulator.start();
             }
-          } catch (e) { send("runtime.error", { message: "start failed: " + e.message }); }
+          } catch (e) {
+            send("runtime.error", { message: "start failed: " + e.message });
+          }
+        } else if (cmd === "command.pause") {
+          try {
+            if (window.EJS_emulator && typeof window.EJS_emulator.pause === "function") {
+              window.EJS_emulator.pause();
+              send("runtime.paused");
+            }
+          } catch (e) {
+            send("runtime.error", { message: "pause failed: " + e.message });
+          }
+        } else if (cmd === "command.resume") {
+          try {
+            if (window.EJS_emulator && typeof window.EJS_emulator.resume === "function") {
+              window.EJS_emulator.resume();
+              send("runtime.running");
+            }
+          } catch (e) {
+            send("runtime.error", { message: "resume failed: " + e.message });
+          }
+        } else if (cmd === "command.reset") {
+          try {
+            if (window.EJS_emulator && typeof window.EJS_emulator.restart === "function") {
+              window.EJS_emulator.restart();
+            }
+          } catch (e) {
+            send("runtime.error", { message: "reset failed: " + e.message });
+          }
+        } else if (cmd === "command.fullscreen") {
+          try {
+            if (window.EJS_emulator && typeof window.EJS_emulator.toggleFullscreen === "function") {
+              window.EJS_emulator.toggleFullscreen();
+            }
+          } catch (e) {
+            send("runtime.error", { message: "fullscreen failed: " + e.message });
+          }
+        } else if (cmd === "command.save_state") {
+          try {
+            if (window.EJS_emulator && typeof window.EJS_emulator.saveSaveFiles === "function") {
+              window.EJS_emulator.saveSaveFiles();
+            }
+          } catch (e) {
+            send("runtime.error", { message: "save_state failed: " + e.message });
+          }
+        } else if (cmd === "command.load_state") {
+          // State loading is handled via the EmulatorJS UI; the command
+          // is a no-op here but acknowledged so the parent can track it.
+          send("runtime.progress", { text: "load_state requested (use emulator menu)" });
         } else if (cmd === "command.shutdown") {
           clearInterval(heartbeatInterval);
-          observer.disconnect();
+          textObserver.disconnect();
           try {
-            if (window.EJS_emulator && window.EJS_emulator.exit) {
+            if (window.EJS_emulator && typeof window.EJS_emulator.exit === "function") {
               window.EJS_emulator.exit();
             }
           } catch (e) { /* ignore */ }
+          send("runtime.exited");
         }
       });
     })();
