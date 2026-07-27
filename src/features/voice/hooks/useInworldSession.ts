@@ -395,13 +395,15 @@ export function useInworldSession(
                           turn_detection: {
                             type: "semantic_vad",
                             eagerness: "low",
-                            // create_response: false — we manually trigger
-                            // response.create after a real transcript arrives.
-                            // This prevents Inworld from auto-generating
-                            // responses to phantom VAD detections (background
-                            // noise, typing, breathing) which caused LiTT to
-                            // "say things the user didn't say."
-                            create_response: false,
+                            // create_response: true — Inworld auto-generates
+                            // responses after VAD commits the audio buffer.
+                            // We tried create_response: false + manual
+                            // triggerResponse() but it broke the VAD flow
+                            // (mic stuck listening, no responses). Keeping
+                            // auto-response on; phantom responses are
+                            // filtered by hadRealUserTurnRef in
+                            // VoiceSessionContext before they reach chat.
+                            create_response: true,
                             interrupt_response: true,
                           },
                         },
