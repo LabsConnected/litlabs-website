@@ -128,7 +128,7 @@ const defaultCtx: VoiceSessionCtx = {
   stopVoice: noop,
   toggleMute: noop,
   interrupt: noop,
-  speakText: noop as (text: string) => Promise<void>,
+  speakText: noop as unknown as (text: string) => Promise<void>,
   stopSpeaking: noop,
   selectDevice: noop,
   setOnTurn: noop,
@@ -153,6 +153,9 @@ export function VoiceSessionProvider({
 }) {
   // --- State ---
   const [voiceState, setVoiceState] = useState<VoiceState>("idle");
+  const [voiceOutputState, setVoiceOutputState] = useState<VoiceOutputState>("idle");
+  const [voiceInputState, setVoiceInputState] = useState<VoiceInputState>("idle");
+  const [voiceTransportConnected, setVoiceTransportConnected] = useState(false);
   const [transcript, setTranscript] = useState("");
   const [micLevel, setMicLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
@@ -167,6 +170,16 @@ export function VoiceSessionProvider({
     [],
   );
   const [voiceMode, setVoiceMode] = useState<"live" | "recording" | null>(null);
+  // Persisted user preferences only — never persist transient mic state.
+  const [ttsEnabled, setTtsEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return true;
+    const stored = localStorage.getItem(TTS_PREF_KEY);
+    return stored === null ? true : stored === "1";
+  });
+  const [handsFreeEnabled, setHandsFreeEnabled] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    return localStorage.getItem(HANDS_FREE_PREF_KEY) === "1";
+  });
   const voiceStore = useVoiceStore();
   const setTiming = voiceStore.setTiming;
 
@@ -176,15 +189,28 @@ export function VoiceSessionProvider({
   const analyserRef = useRef<AnalyserNode | null>(null);
   const activeRef = useRef(false); // true while a session is live
   const voiceStateRef = useRef<VoiceState>("idle"); // mirror for RAF/async callbacks
+  const voiceInputStateRef = useRef<VoiceInputState>("idle");
+  const voiceOutputStateRef = useRef<VoiceOutputState>("idle");
   const onTurnRef = useRef<(text: string) => void>(noop);
   const submittedTranscriptRef = useRef("");
   const sessionGenerationRef = useRef(0);
+  // Guards for the single microphone entry point — idempotent against
+  // Strict Mode double-invoke and overlapping async starts.
+  const micStartInProgressRef = useRef(false);
+  const micActiveRef = useRef(false);
+  const handsFreeEnabledRef = useRef(handsFreeEnabled);
+  const ttsEnabledRef = useRef(ttsEnabled);
+
+  // Keep pref refs in sync so async callbacks read the latest value.
+  useEffect(() => { handsFreeEnabledRef.current = handsFreeEnabled; }, [handsFreeEnabled]);
+  useEffect(() => { ttsEnabledRef.current = ttsEnabled; }, [ttsEnabled]);
 
   // --- Inworld session (primary voice provider) ---
   // Use refs for callbacks to avoid capturing mutable refs in hook closures
   const inworldOnTranscriptRef = useRef<(text: string, final: boolean) => void>(() => {});
   const inworldOnAgentTextRef = useRef<(delta: string) => void>(() => {});
   const inworldOnErrorRef = useRef<(msg: string) => void>(() => {});
+  const inworldOnResponseCompleteRef = useRef<() => void>(() => {});
 
   // Intentionally no dependency array — the ref callbacks must always reflect
   // the latest closures (so `activeRef`, `submittedTranscriptRef`, `setTiming`,
@@ -211,7 +237,22 @@ export function VoiceSessionProvider({
     inworldOnErrorRef.current = (msg: string) => {
       setVoiceState("error");
       voiceStateRef.current = "error";
+      setVoiceOutputState("error");
+      voiceOutputStateRef.current = "error";
+      setVoiceInputState("error");
+      voiceInputStateRef.current = "error";
       setErrorMessage(msg);
+    };
+    inworldOnResponseCompleteRef.current = () => {
+      // TTS finished — output returns to idle. The microphone is NOT
+      // auto-started here. Hands-free resume is handled by a separate
+      // effect that checks the user preference.
+      setVoiceOutputState("idle");
+      voiceOutputStateRef.current = "idle";
+      if (voiceStateRef.current === "assistant_speaking") {
+        setVoiceState("idle");
+        voiceStateRef.current = "idle";
+      }
     };
   });
 
@@ -219,6 +260,7 @@ export function VoiceSessionProvider({
     onTranscript: (text: string, final: boolean) => inworldOnTranscriptRef.current(text, final),
     onAgentText: (delta: string) => inworldOnAgentTextRef.current(delta),
     onError: (msg: string) => inworldOnErrorRef.current(msg),
+    onResponseComplete: () => inworldOnResponseCompleteRef.current(),
   });
 
   // Sync Inworld connection state to voiceState
@@ -236,6 +278,14 @@ export function VoiceSessionProvider({
   useEffect(() => {
     voiceStateRef.current = voiceState;
   }, [voiceState]);
+
+  useEffect(() => {
+    voiceInputStateRef.current = voiceInputState;
+  }, [voiceInputState]);
+
+  useEffect(() => {
+    voiceOutputStateRef.current = voiceOutputState;
+  }, [voiceOutputState]);
 
   // ---------------------------------------------------------------------------
   // cleanup — fully idempotent
@@ -290,79 +340,178 @@ export function VoiceSessionProvider({
   }, [enumerateDevices]);
 
   // ---------------------------------------------------------------------------
-  // startVoice
+  // requestMicrophoneStart — the SINGLE guarded entry point for mic activation
   // ---------------------------------------------------------------------------
+  //
+  // All microphone activation must go through this function. It validates the
+  // source, logs an instrumentation event, and rejects any caller that is not
+  // an explicit user gesture or an enabled hands-free resume.
+  //
+  // Allowed sources:
+  //   - composer_mic_click      (trusted user gesture)
+  //   - floating_voice_button   (trusted user gesture)
+  //   - hands_free_resume       (only when handsFreeEnabled is true)
+  //
+  // All other sources are rejected and logged.
 
-  const startVoice = useCallback(async () => {
-    const current = voiceStateRef.current;
-    if (current !== "idle" && current !== "error") {
-      console.debug(
-        "[Voice] startVoice ignored — already active, state:",
-        current,
-      );
-      return;
-    }
+  const logMicStart = useCallback(
+    (source: MicrophoneStartSource, accepted: boolean, reason?: string) => {
+      const event = {
+        event: "microphone_start_requested",
+        source,
+        accepted,
+        reason: reason ?? null,
+        eventTrusted:
+          typeof Event !== "undefined" &&
+          typeof window !== "undefined" &&
+          typeof window.event !== "undefined" &&
+          window.event instanceof Event &&
+          (window.event as Event).isTrusted,
+        userActivationActive:
+          typeof navigator !== "undefined" &&
+          "userActivation" in navigator &&
+          (navigator as Navigator & { userActivation?: { isActive: boolean } }).userActivation?.isActive === true,
+        currentState: voiceStateRef.current,
+        inputState: voiceInputStateRef.current,
+        outputState: voiceOutputStateRef.current,
+        handsFreeEnabled: handsFreeEnabledRef.current,
+        timestamp: new Date().toISOString(),
+        // Stack is included for diagnosis only — stripped from production
+        // telemetry by the logging layer if needed.
+        stack: new Error().stack ?? null,
+      };
+      console.debug("[Voice]", event);
+    },
+    [],
+  );
 
-    console.debug("[Voice] session start");
-    setVoiceState("requesting_permission");
-    voiceStateRef.current = "requesting_permission";
-    setErrorMessage(null);
-    setTranscript("");
-    setIsMuted(false);
-    submittedTranscriptRef.current = "";
-    setTiming({ recordingStartedAt: Date.now() });
+  const requestMicrophoneStart = useCallback(
+    async (args: {
+      source: MicrophoneStartSource;
+      trustedUserGesture?: boolean;
+    }): Promise<void> => {
+      const { source, trustedUserGesture = false } = args;
 
-    // Always clean up before starting
-    activeRef.current = false;
-    sessionGenerationRef.current += 1;
-    const generation = sessionGenerationRef.current;
-    cleanup();
-
-    // Check microphone availability (without acquiring — Inworld will acquire it)
-    if (!navigator.mediaDevices?.getUserMedia) {
-      const msg = "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.";
-      setVoiceState("error");
-      voiceStateRef.current = "error";
-      setErrorMessage(msg);
-      return;
-    }
-
-    // --- Inworld is the only voice provider ---
-    // Inworld handles STT + LLM + TTS. It acquires the microphone internally
-    // via startMicCapture(). We no longer do a redundant getUserMedia here.
-    setVoiceState("connecting");
-    voiceStateRef.current = "connecting";
-
-    try {
-      console.debug("[Voice] starting Inworld session");
-      await inworldSession.startListening();
-
-      // Invalidate if user stopped voice while connecting
-      if (generation !== sessionGenerationRef.current) {
-        inworldSession.stopListening();
-        inworldSession.disconnect();
+      // Idempotent guards — prevent duplicate streams / Strict Mode double-invoke.
+      if (micActiveRef.current) {
+        logMicStart(source, false, "already_active");
+        return;
+      }
+      if (micStartInProgressRef.current) {
+        logMicStart(source, false, "start_in_progress");
         return;
       }
 
-      inworldConnectedRef.current = true;
-      activeRef.current = true;
-      setVoiceMode("live");
-      setVoiceState("listening");
-      voiceStateRef.current = "listening";
-      console.debug("[Voice] Inworld session connected");
+      // Source validation. Only explicit user gestures or enabled hands-free
+      // resume may start the microphone.
+      const isExplicitGesture =
+        trustedUserGesture &&
+        (source === "composer_mic_click" || source === "floating_voice_button");
+      const isHandsFreeResume =
+        source === "hands_free_resume" && handsFreeEnabledRef.current;
+      if (!isExplicitGesture && !isHandsFreeResume) {
+        logMicStart(source, false, "rejected_source");
+        return;
+      }
 
-      // Enumerate devices after permission was granted by startMicCapture
-      await enumerateDevices();
-    } catch (inworldErr) {
-      console.warn("[Voice] Inworld failed:", inworldErr);
-      inworldConnectedRef.current = false;
-      const msg = inworldErr instanceof Error ? inworldErr.message : "Voice connection failed.";
-      setVoiceState("error");
-      voiceStateRef.current = "error";
-      setErrorMessage(msg);
+      logMicStart(source, true);
+
+      micStartInProgressRef.current = true;
+      const current = voiceStateRef.current;
+      if (current !== "idle" && current !== "error") {
+        console.debug("[Voice] requestMicrophoneStart ignored — already active, state:", current);
+        micStartInProgressRef.current = false;
+        return;
+      }
+
+      setVoiceState("requesting_permission");
+      voiceStateRef.current = "requesting_permission";
+      setVoiceInputState("requesting_permission");
+      voiceInputStateRef.current = "requesting_permission";
+      setErrorMessage(null);
+      setTranscript("");
+      setIsMuted(false);
+      submittedTranscriptRef.current = "";
+      setTiming({ recordingStartedAt: Date.now() });
+
+      // Always clean up before starting
+      activeRef.current = false;
+      sessionGenerationRef.current += 1;
+      const generation = sessionGenerationRef.current;
       cleanup();
-    }
-  }, [cleanup, enumerateDevices, inworldSession, setTiming]);
+
+      // Check microphone availability (without acquiring — Inworld acquires it)
+      if (!navigator.mediaDevices?.getUserMedia) {
+        const msg = "This browser cannot access microphones. Use a current version of Chrome, Edge, or Firefox.";
+        setVoiceState("error");
+        voiceStateRef.current = "error";
+        setVoiceInputState("error");
+        voiceInputStateRef.current = "error";
+        setErrorMessage(msg);
+        micStartInProgressRef.current = false;
+        return;
+      }
+
+      setVoiceState("connecting");
+      voiceStateRef.current = "connecting";
+      setVoiceInputState("connecting");
+      voiceInputStateRef.current = "connecting";
+
+      try {
+        console.debug("[Voice] starting Inworld session (mic)");
+        // startListening connects the transport (if not already) AND starts mic.
+        await inworldSession.startListening();
+
+        // Invalidate if user stopped voice while connecting
+        if (generation !== sessionGenerationRef.current) {
+          inworldSession.stopListening();
+          inworldSession.disconnect();
+          micStartInProgressRef.current = false;
+          return;
+        }
+
+        inworldConnectedRef.current = true;
+        setVoiceTransportConnected(true);
+        activeRef.current = true;
+        micActiveRef.current = true;
+        setVoiceMode("live");
+        setVoiceState("listening");
+        voiceStateRef.current = "listening";
+        setVoiceInputState("listening");
+        voiceInputStateRef.current = "listening";
+        console.debug("[Voice] Inworld session connected (mic on)");
+
+        // Enumerate devices after permission was granted by startMicCapture
+        await enumerateDevices();
+      } catch (inworldErr) {
+        console.warn("[Voice] Inworld failed:", inworldErr);
+        inworldConnectedRef.current = false;
+        setVoiceTransportConnected(false);
+        const msg = inworldErr instanceof Error ? inworldErr.message : "Voice connection failed.";
+        setVoiceState("error");
+        voiceStateRef.current = "error";
+        setVoiceInputState("error");
+        voiceInputStateRef.current = "error";
+        setErrorMessage(msg);
+        cleanup();
+      } finally {
+        micStartInProgressRef.current = false;
+      }
+    },
+    [cleanup, enumerateDevices, inworldSession, logMicStart, setTiming],
+  );
+
+  // ---------------------------------------------------------------------------
+  // startVoice — backward-compat wrapper around requestMicrophoneStart.
+  // Called from the trusted mic-button click handler.
+  // ---------------------------------------------------------------------------
+
+  const startVoice = useCallback(async () => {
+    await requestMicrophoneStart({
+      source: "composer_mic_click",
+      trustedUserGesture: true,
+    });
+  }, [requestMicrophoneStart]);
 
   // ---------------------------------------------------------------------------
   // stopVoice
@@ -375,11 +524,23 @@ export function VoiceSessionProvider({
       inworldSession.stopListening();
       inworldSession.disconnect();
       inworldConnectedRef.current = false;
+      setVoiceTransportConnected(false);
     }
     activeRef.current = false;
+    micActiveRef.current = false;
+    micStartInProgressRef.current = false;
     sessionGenerationRef.current += 1;
     setVoiceState("idle");
     voiceStateRef.current = "idle";
+    setVoiceInputState("idle");
+    voiceInputStateRef.current = "idle";
+    // Output state is left as-is if TTS is still playing; otherwise idle.
+    if (voiceOutputStateRef.current === "speaking") {
+      // keep speaking — only the mic is being stopped
+    } else {
+      setVoiceOutputState("idle");
+      voiceOutputStateRef.current = "idle";
+    }
     cleanup();
     setTranscript("");
     setMicLevel(0);
@@ -415,29 +576,50 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
-  // speakText
+  // speakText — TTS only. Does NOT activate the microphone.
   // ---------------------------------------------------------------------------
+  //
+  // The transport is connected on demand (without mic capture) so LiTT can
+  // speak while the microphone stays completely off. The microphone input
+  // state is never touched here.
 
   const speakText = useCallback(
-    (text: string) => {
+    async (text: string): Promise<void> => {
       if (!text.trim()) return;
+      if (!ttsEnabledRef.current) return;
 
       const sanitized = sanitizeSpeech(text);
       if (!sanitized) return;
 
-      // If Inworld is connected, use it for TTS (uses the configured Inworld voice)
-      if (inworldConnectedRef.current) {
-        inworldSession.speakText(sanitized);
-        setVoiceState("assistant_speaking");
-        voiceStateRef.current = "assistant_speaking";
-        return;
-      }
+      setVoiceOutputState("connecting");
+      voiceOutputStateRef.current = "connecting";
+      setVoiceState("assistant_speaking");
+      voiceStateRef.current = "assistant_speaking";
+      setErrorMessage(null);
 
-      // Inworld not connected — can't speak
-      console.warn("[Voice] speakText called but Inworld is not connected");
-      setVoiceState("error");
-      voiceStateRef.current = "error";
-      setErrorMessage("Voice session is not active. Start a voice session first.");
+      try {
+        // speakText on the hook connects the transport if needed (no mic)
+        // and sends the TTS request. The microphone is NOT acquired.
+        await inworldSession.speakText(sanitized);
+        inworldConnectedRef.current = true;
+        setVoiceTransportConnected(true);
+        setVoiceOutputState("speaking");
+        voiceOutputStateRef.current = "speaking";
+      } catch (err) {
+        console.warn("[Voice] speakText failed:", err);
+        inworldConnectedRef.current = false;
+        setVoiceTransportConnected(false);
+        const msg = err instanceof Error ? err.message : "Voice transport is not available.";
+        setVoiceOutputState("error");
+        voiceOutputStateRef.current = "error";
+        // Only surface the error to voiceState if we are not actively
+        // listening — otherwise leave the input state alone.
+        if (voiceInputStateRef.current === "idle") {
+          setVoiceState("error");
+          voiceStateRef.current = "error";
+        }
+        setErrorMessage(msg);
+      }
     },
     [inworldSession],
   );
@@ -478,12 +660,74 @@ export function VoiceSessionProvider({
   }, []);
 
   // ---------------------------------------------------------------------------
+  // toggleTts / toggleHandsFree — persisted user preferences only.
+  // Transient mic state is never persisted.
+  // ---------------------------------------------------------------------------
+
+  const toggleTts = useCallback(() => {
+    setTtsEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(TTS_PREF_KEY, next ? "1" : "0");
+      } catch {
+        // ignore storage errors
+      }
+      ttsEnabledRef.current = next;
+      return next;
+    });
+  }, []);
+
+  const toggleHandsFree = useCallback(() => {
+    setHandsFreeEnabled((prev) => {
+      const next = !prev;
+      try {
+        localStorage.setItem(HANDS_FREE_PREF_KEY, next ? "1" : "0");
+      } catch {
+        // ignore storage errors
+      }
+      handsFreeEnabledRef.current = next;
+      return next;
+    });
+  }, []);
+
+  // ---------------------------------------------------------------------------
+  // Hands-free resume — the ONLY path that auto-starts the mic without a
+  // direct user gesture. Fires only when the user has explicitly enabled
+  // hands-free mode AND TTS just finished AND the transport is connected.
+  // ---------------------------------------------------------------------------
+
+  useEffect(() => {
+    if (!handsFreeEnabled) return;
+    if (voiceOutputState !== "idle") return;
+    if (!voiceTransportConnected) return;
+    // Only resume when transitioning out of speaking — not on every idle tick.
+    // The mic must not already be active.
+    if (micActiveRef.current) return;
+    if (micStartInProgressRef.current) return;
+
+    // Wait a brief beat so stale audio drains, then start listening once.
+    const timer = window.setTimeout(() => {
+      // Re-verify the same session is still active and mic is still idle.
+      if (!handsFreeEnabledRef.current) return;
+      if (micActiveRef.current) return;
+      if (micStartInProgressRef.current) return;
+      void requestMicrophoneStart({
+        source: "hands_free_resume",
+        trustedUserGesture: false,
+      });
+    }, 400);
+    return () => window.clearTimeout(timer);
+  }, [handsFreeEnabled, voiceOutputState, voiceTransportConnected, requestMicrophoneStart]);
+
+  // ---------------------------------------------------------------------------
   // Cleanup on unmount
   // ---------------------------------------------------------------------------
 
   useEffect(() => {
     return () => {
       activeRef.current = false;
+      micActiveRef.current = false;
+      micStartInProgressRef.current = false;
       cleanup();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -501,6 +745,9 @@ export function VoiceSessionProvider({
   const ctx = useMemo<VoiceSessionCtx>(
     () => ({
       voiceState,
+      voiceOutputState,
+      voiceInputState,
+      voiceTransportConnected,
       transcript,
       micLevel,
       errorMessage,
@@ -510,6 +757,8 @@ export function VoiceSessionProvider({
       voiceMode,
       timing: voiceStore.timing,
       latencies,
+      ttsEnabled,
+      handsFreeEnabled,
       startVoice,
       stopVoice,
       toggleMute,
@@ -518,9 +767,14 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
+      toggleTts,
+      toggleHandsFree,
     }),
     [
       voiceState,
+      voiceOutputState,
+      voiceInputState,
+      voiceTransportConnected,
       transcript,
       micLevel,
       errorMessage,
@@ -530,6 +784,8 @@ export function VoiceSessionProvider({
       voiceMode,
       voiceStore.timing,
       latencies,
+      ttsEnabled,
+      handsFreeEnabled,
       startVoice,
       stopVoice,
       toggleMute,
@@ -538,6 +794,8 @@ export function VoiceSessionProvider({
       stopSpeaking,
       selectDevice,
       setOnTurn,
+      toggleTts,
+      toggleHandsFree,
     ],
   );
 

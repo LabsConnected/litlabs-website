@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
@@ -69,6 +69,41 @@ export default function StudioTopBar({
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
 
+  // Model dropdown portal positioning — the dropdown is portaled to
+  // document.body so it escapes the header's stacking context (caused by
+  // backdrop-filter) and the studio-shell's overflow-hidden clipping.
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const [modelRect, setModelRect] = useState<DOMRect | null>(null);
+
+  // Track the trigger's position on scroll, resize, and open.
+  const updateModelRect = useCallback(() => {
+    if (modelTriggerRef.current) {
+      setModelRect(modelTriggerRef.current.getBoundingClientRect());
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!modelOpen) return;
+    updateModelRect();
+    window.addEventListener("scroll", updateModelRect, true);
+    window.addEventListener("resize", updateModelRect);
+    return () => {
+      window.removeEventListener("scroll", updateModelRect, true);
+      window.removeEventListener("resize", updateModelRect);
+    };
+  }, [modelOpen, updateModelRect]);
+
+  // Close other top-bar popovers when one opens.
+  const openModel = useCallback(() => {
+    setNotifOpen(false);
+    setModelOpen(true);
+  }, []);
+
+  const openNotif = useCallback(() => {
+    setModelOpen(false);
+    setNotifOpen(true);
+  }, []);
+
   return (
     <header
       className="flex h-12 shrink-0 items-center gap-2 border-b px-2 sm:px-3"
@@ -117,11 +152,13 @@ export default function StudioTopBar({
         {capabilities.connectedProviders.length ? `Connected · ${capabilities.connectedProviders.length}` : "No services connected"}
       </div>
 
-      {/* Model selector dropdown */}
+      {/* Model selector dropdown — portaled to document.body to escape the
+          header's backdrop-filter stacking context and studio-shell overflow. */}
       <div className="relative shrink-0">
         <button
+          ref={modelTriggerRef}
           type="button"
-          onClick={() => setModelOpen((v) => !v)}
+          onClick={() => (modelOpen ? setModelOpen(false) : openModel())}
           className="flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[10px] font-bold transition-all hover:bg-white/5"
           style={{
             backgroundColor: "rgba(255,255,255,0.04)",
@@ -130,6 +167,7 @@ export default function StudioTopBar({
           }}
           aria-label="Select model"
           title="Select AI model"
+          aria-expanded={modelOpen}
         >
           <Cpu size={11} className="pointer-events-none" style={{ color: T.accentColor }} />
           <span
@@ -143,49 +181,17 @@ export default function StudioTopBar({
           <span className="pointer-events-none hidden sm:inline">{selectedModel.label}</span>
           <ChevronDown size={10} className="pointer-events-none hidden sm:inline" style={{ color: "rgba(255,255,255,0.4)" }} />
         </button>
-        {modelOpen && (
-          <>
-            <button className="fixed inset-0 z-10000" onClick={() => setModelOpen(false)} aria-label="Close model selector" />
-            <div
-              className="absolute left-0 top-full mt-1 z-10001 w-56 max-h-80 overflow-auto rounded-xl border py-1.5 shadow-2xl"
-              style={{
-                backgroundColor: "rgba(10,12,18,0.98)",
-                borderColor: "rgba(255,255,255,0.08)",
-                boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
-              }}
-            >
-              {[
-                { label: "Auto Best", filter: (m: SelectedModel) => m.id === "auto" },
-                { label: "Free AI", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "free" },
-                { label: "Fast", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "fast" },
-                { label: "Coding", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "code" },
-                { label: "Creative", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "creative" },
-                { label: "Vision", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "vision" },
-                { label: "BYOK", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "byok" },
-              ].map(({ label, filter }, idx) => {
-                const models = MODELS.filter(filter);
-                if (models.length === 0) return null;
-                return (
-                  <div key={label}>
-                    {idx > 0 && <div className="my-1 border-t border-white/5" />}
-                    <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
-                      {label}
-                    </div>
-                    {models.map((m) => (
-                      <ModelRow
-                        key={m.id}
-                        model={m}
-                        selected={selectedModel.id === m.id}
-                        health={providerHealth[m.provider] ?? "available"}
-                        onSelect={() => { selectModel(m); setModelOpen(false); }}
-                      />
-                    ))}
-                  </div>
-                );
-              })}
-            </div>
-          </>
-        )}
+        {modelOpen && modelRect &&
+          createPortal(
+            <ModelDropdown
+              rect={modelRect}
+              selectedModelId={selectedModel.id}
+              providerHealth={providerHealth}
+              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
+              onClose={() => setModelOpen(false)}
+            />,
+            document.body,
+          )}
       </div>
 
       {/* Fallback notice */}
@@ -306,11 +312,12 @@ export default function StudioTopBar({
       <div className="relative">
         <button
           type="button"
-          onClick={() => setNotifOpen((v) => !v)}
+          onClick={() => (notifOpen ? setNotifOpen(false) : openNotif())}
           className="grid h-9 w-9 place-items-center rounded-lg transition-all hover:bg-white/10"
           style={{ color: "rgba(255,255,255,0.5)" }}
           aria-label="Notifications"
           title="Notifications"
+          aria-expanded={notifOpen}
         >
           <Bell size={14} className="pointer-events-none" />
           <span
@@ -372,17 +379,143 @@ export default function StudioTopBar({
   );
 }
 
+/* ── Model dropdown (portaled) ────────────────────────────────── */
+function ModelDropdown({
+  rect,
+  selectedModelId,
+  providerHealth,
+  onSelect,
+  onClose,
+}: {
+  rect: DOMRect;
+  selectedModelId: string;
+  providerHealth: Record<string, ProviderHealth>;
+  onSelect: (m: SelectedModel) => void;
+  onClose: () => void;
+}) {
+  const listRef = useRef<HTMLDivElement>(null);
+  const [activeIndex, setActiveIndex] = useState(-1);
+
+  // Flatten all models into a single list for keyboard navigation.
+  const allModels = MODELS;
+
+  // Viewport clamping — keep the dropdown inside the viewport.
+  const menuWidth = 256; // w-64
+  const menuMaxHeight = 360;
+  const top = rect.bottom + 4;
+  const left = Math.min(rect.left, window.innerWidth - menuWidth - 8);
+  const clampedTop = top + menuMaxHeight > window.innerHeight ? Math.max(8, rect.top - menuMaxHeight - 4) : top;
+
+  // Keyboard navigation: Escape closes, ArrowUp/Down move, Enter selects.
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowDown") {
+        e.preventDefault();
+        setActiveIndex((i) => Math.min(i + 1, allModels.length - 1));
+      } else if (e.key === "ArrowUp") {
+        e.preventDefault();
+        setActiveIndex((i) => Math.max(i - 1, 0));
+      } else if (e.key === "Enter" && activeIndex >= 0) {
+        e.preventDefault();
+        const m = allModels[activeIndex];
+        if (m) onSelect(m);
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [activeIndex, allModels, onSelect, onClose]);
+
+  // Scroll the active item into view.
+  useEffect(() => {
+    if (activeIndex < 0 || !listRef.current) return;
+    const items = listRef.current.querySelectorAll("[data-model-index]");
+    const item = items[activeIndex] as HTMLElement | undefined;
+    item?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  let runningIndex = -1;
+
+  return (
+    <>
+      {/* Click-outside catcher — fixed, full-screen, below the menu */}
+      <button
+        className="fixed inset-0 z-[1000]"
+        onClick={onClose}
+        aria-label="Close model selector"
+        tabIndex={-1}
+      />
+      <div
+        ref={listRef}
+        role="listbox"
+        className="fixed z-[1001] w-64 max-h-[360px] overflow-auto rounded-xl border py-1.5 shadow-2xl"
+        style={{
+          top: clampedTop,
+          left,
+          backgroundColor: "rgba(10,12,18,0.98)",
+          borderColor: "rgba(255,255,255,0.08)",
+          boxShadow: "0 12px 40px rgba(0,0,0,0.5)",
+          backdropFilter: "blur(16px)",
+          pointerEvents: "auto",
+        }}
+      >
+        {[
+          { label: "Auto Best", filter: (m: SelectedModel) => m.id === "auto" },
+          { label: "Free AI", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "free" },
+          { label: "Fast", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "fast" },
+          { label: "Coding", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "code" },
+          { label: "Creative", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "creative" },
+          { label: "Vision", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "vision" },
+          { label: "BYOK", filter: (m: SelectedModel) => MODELS.find((sm) => sm.id === m.id)?.category === "byok" },
+        ].map(({ label, filter }, idx) => {
+          const models = MODELS.filter(filter);
+          if (models.length === 0) return null;
+          return (
+            <div key={label}>
+              {idx > 0 && <div className="my-1 border-t border-white/5" />}
+              <div className="px-3 py-1 text-[8px] font-black uppercase tracking-[0.15em] text-white/60">
+                {label}
+              </div>
+              {models.map((m) => {
+                runningIndex++;
+                const flatIndex = runningIndex;
+                return (
+                  <ModelRow
+                    key={m.id}
+                    model={m}
+                    selected={selectedModelId === m.id}
+                    health={providerHealth[m.provider] ?? "available"}
+                    onSelect={() => onSelect(m)}
+                    isActive={activeIndex === flatIndex}
+                    dataIndex={flatIndex}
+                  />
+                );
+              })}
+            </div>
+          );
+        })}
+      </div>
+    </>
+  );
+}
+
 /* ── Model row ───────────────────────────────────────────────── */
 function ModelRow({
   model,
   selected,
   health,
   onSelect,
+  isActive,
+  dataIndex,
 }: {
   model: SelectedModel;
   selected: boolean;
   health: ProviderHealth;
   onSelect: () => void;
+  isActive?: boolean;
+  dataIndex?: number;
 }) {
   const dot = HEALTH_DOT[health];
   const isLocked = health === "locked";
@@ -391,9 +524,11 @@ function ModelRow({
       type="button"
       onClick={onSelect}
       disabled={isLocked}
+      data-model-index={dataIndex}
       className="flex w-full items-center gap-2.5 px-3 py-2 text-[11px] font-bold transition-colors hover:bg-white/5 disabled:opacity-40 disabled:cursor-not-allowed"
       style={{
         color: selected ? "#06b6d4" : "rgba(255,255,255,0.7)",
+        backgroundColor: isActive ? "rgba(255,255,255,0.06)" : "transparent",
       }}
     >
       <span
@@ -416,9 +551,9 @@ function NotifPanel({
 }) {
   return (
     <>
-      <button className="fixed inset-0 z-10000" onClick={onClose} aria-label="Close notifications" />
+      <button className="fixed inset-0 z-[1000]" onClick={onClose} aria-label="Close notifications" tabIndex={-1} />
       <div
-        className="fixed right-4 top-14 z-10001 w-72 rounded-2xl border p-3 shadow-2xl"
+        className="fixed right-4 top-14 z-[1001] w-72 rounded-2xl border p-3 shadow-2xl"
         style={{
           backgroundColor: "rgba(10,12,18,0.98)",
           borderColor: "rgba(255,255,255,0.08)",
