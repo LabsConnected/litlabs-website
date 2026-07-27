@@ -442,7 +442,7 @@ function ModelDropdown({
     <>
       {/* Click-outside catcher — fixed, full-screen, below the menu */}
       <button
-        className="fixed inset-0 z-[1000]"
+        className="fixed inset-0 z-1000"
         onClick={onClose}
         aria-label="Close model selector"
         tabIndex={-1}
@@ -450,7 +450,7 @@ function ModelDropdown({
       <div
         ref={listRef}
         role="listbox"
-        className="fixed z-[1001] w-64 max-h-[360px] overflow-auto rounded-xl border py-1.5 shadow-2xl"
+        className="fixed z-1001 w-64 max-h-90 overflow-auto rounded-xl border py-1.5 shadow-2xl"
         style={{
           top: clampedTop,
           left,
@@ -551,9 +551,9 @@ function NotifPanel({
 }) {
   return (
     <>
-      <button className="fixed inset-0 z-[1000]" onClick={onClose} aria-label="Close notifications" tabIndex={-1} />
+      <button className="fixed inset-0 z-1000" onClick={onClose} aria-label="Close notifications" tabIndex={-1} />
       <div
-        className="fixed right-4 top-14 z-[1001] w-72 rounded-2xl border p-3 shadow-2xl"
+        className="fixed right-4 top-14 z-1001 w-72 rounded-2xl border p-3 shadow-2xl"
         style={{
           backgroundColor: "rgba(10,12,18,0.98)",
           borderColor: "rgba(255,255,255,0.08)",
