@@ -13,6 +13,24 @@
       overflow: hidden;
     }
     body { font-family: system-ui, sans-serif; }
+    /* Force the EmulatorJS canvas to fill its container.
+       Without this, the canvas may render at 0x0 or incorrect
+       dimensions, causing a black screen even though the game
+       is running (WebGL is drawing to the canvas). */
+    #game canvas,
+    #game > div > canvas,
+    #game > div > div > canvas {
+      width: 100% !important;
+      height: 100% !important;
+      display: block !important;
+      image-rendering: pixelated;
+      image-rendering: crisp-edges;
+    }
+    /* EmulatorJS creates a wrapper div — make sure it fills #game */
+    #game > div {
+      width: 100% !important;
+      height: 100% !important;
+    }
   </style>
 </head>
 <body>
@@ -101,6 +119,13 @@
       window.EJS_threads = false;
       window.EJS_forceLegacyCores = legacy;
 
+      // Fix file:/// security errors — EmulatorJS may try to load
+      // save files or BIOS from file:// paths. Force all paths to
+      // be relative to the data path (https).
+      window.EJS_loadSaveURL = false;
+      // Use IndexedDB for saves (not file:// paths)
+      window.EJS_gameID = "litt-" + window.EJS_gameID;
+
       // Track real runtime milestones
       var loaderReady = false;
       var canvasCreated = false;
@@ -173,6 +198,38 @@
         }
       }
       startCanvasWatch();
+
+      // ─── Canvas resize observer — force canvas to fill container ──
+      // EmulatorJS sets canvas width/height to the game's native
+      // resolution (e.g. 256x224 for NES, 512x448 for SNES) but the
+      // CSS width/height may not be set, causing a black screen.
+      // This observer watches for the canvas appearing and forces
+      // its CSS dimensions to 100% of the container.
+      var resizeObserver = new ResizeObserver(function (entries) {
+        for (var i = 0; i < entries.length; i++) {
+          var entry = entries[i];
+          var canvas = entry.target;
+          if (canvas.tagName === "CANVAS") {
+            // Force CSS dimensions to fill the container
+            canvas.style.width = "100%";
+            canvas.style.height = "100%";
+            canvas.style.display = "block";
+            canvas.style.objectFit = "contain";
+          }
+        }
+      });
+
+      // Watch for canvas creation and start observing it
+      var canvasObserverInterval = setInterval(function () {
+        var canvas = document.querySelector("canvas");
+        if (canvas) {
+          resizeObserver.observe(canvas);
+          canvas.style.width = "100%";
+          canvas.style.height = "100%";
+          canvas.style.display = "block";
+          clearInterval(canvasObserverInterval);
+        }
+      }, 200);
 
       // ─── DOM diagnostics — report what's inside #game every 2s ─────
       // This helps diagnose black screen issues by showing exactly what
