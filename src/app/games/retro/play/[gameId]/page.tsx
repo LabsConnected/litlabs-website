@@ -287,6 +287,7 @@ export default function RetroPlayerPage() {
       const result = await preflightEmulatorAssets(ejsCore, activeDataPath, {
         manifestPath: EMULATOR_MANIFEST_PATH,
         verifyChecksums: !isCdn,
+        legacy: useLegacy,
       });
       if (!active) return;
       setAssetCheck(result);
@@ -303,7 +304,7 @@ export default function RetroPlayerPage() {
     return () => {
       active = false;
     };
-  }, [game, romDataUrl, ejsCore, sessionState, runtimeSource, activeDataPath]);
+  }, [game, romDataUrl, ejsCore, sessionState, runtimeSource, activeDataPath, useLegacy]);
 
   // ─── Iframe src (built from URL params) ────────────────────────
   const iframeSrc = useMemo(() => {

@@ -13,6 +13,8 @@
  * @see public/arcade-runtime/emulator-session.html
  */
 
+import { getCoreDataFilename } from "@/lib/emulator/types";
+
 // ─── Types ──────────────────────────────────────────────────────
 
 export type EmulatorSessionState =
@@ -194,9 +196,7 @@ export class EmulatorSessionController {
     const checks: AssetCheck[] = [];
     const dataPath = this.config.dataPath;
     const coreEntry = getCoreChain(this.detectSystem())[Math.min(this.coreAttempt, 2)];
-    const coreFile = coreEntry.legacy
-      ? `${coreEntry.core}-legacy-wasm.data`
-      : `${coreEntry.core}-wasm.data`;
+    const coreFile = getCoreDataFilename(coreEntry.core, { legacy: coreEntry.legacy });
 
     const requiredFiles = [
       "loader.js",

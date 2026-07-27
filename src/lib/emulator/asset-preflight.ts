@@ -20,6 +20,7 @@ import type {
 import {
   EMULATOR_MANIFEST_PATH,
   SEVEN_Z_SIGNATURE,
+  getCoreDataFilename,
 } from "./types";
 
 interface ManifestEntry {
@@ -96,11 +97,13 @@ async function sha256(buffer: ArrayBuffer): Promise<string> {
 /**
  * Run the asset preflight for a given core and data path.
  *
- * @param core The EmulatorJS core name (e.g. "fceumm", "nestopia")
+ * @param core The EmulatorJS core name or alias (e.g. "nes", "fceumm", "nestopia")
  * @param dataPath The base data path (self-hosted or CDN)
- * @param manifestPath Path to manifest.json (defaults to the self-hosted manifest)
- * @param verifyChecksums Whether to verify SHA-256 against the manifest
+ * @param options.manifestPath Path to manifest.json (defaults to the self-hosted manifest)
+ * @param options.verifyChecksums Whether to verify SHA-256 against the manifest
  *   (disable for CDN control test — the CDN has no manifest)
+ * @param options.legacy Whether to check the legacy core variant
+ * @param options.threads Whether to check the threaded core variant
  */
 export async function preflightEmulatorAssets(
   core: string,
@@ -108,6 +111,8 @@ export async function preflightEmulatorAssets(
   options?: {
     manifestPath?: string;
     verifyChecksums?: boolean;
+    legacy?: boolean;
+    threads?: boolean;
   },
 ): Promise<EmulatorAssetPreflightResult> {
   const manifestPath = options?.manifestPath ?? EMULATOR_MANIFEST_PATH;
@@ -115,6 +120,12 @@ export async function preflightEmulatorAssets(
 
   // Load manifest for checksum verification (skip for CDN)
   const manifest = verifyChecksums ? await loadManifest(manifestPath) : null;
+
+  // Resolve the actual core .data filename (e.g. "nes" → "fceumm-wasm.data")
+  const coreFileName = getCoreDataFilename(core, {
+    legacy: options?.legacy,
+    threads: options?.threads,
+  });
 
   const checks: Array<{
     url: string;
@@ -127,10 +138,10 @@ export async function preflightEmulatorAssets(
     { url: `${dataPath}emulator.min.css`, label: "emulator.min.css", manifestPath: "data/emulator.min.css" },
     { url: `${dataPath}version.json`, label: "version.json", manifestPath: "data/version.json" },
     {
-      url: `${dataPath}cores/${core}-wasm.data`,
-      label: `core ${core}-wasm.data`,
+      url: `${dataPath}cores/${coreFileName}`,
+      label: `core ${coreFileName}`,
       isCore: true,
-      manifestPath: `data/cores/${core}-wasm.data`,
+      manifestPath: `data/cores/${coreFileName}`,
     },
     { url: `${dataPath}compression/extract7z.js`, label: "extract7z.js", manifestPath: "data/compression/extract7z.js" },
   ];

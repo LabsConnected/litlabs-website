@@ -239,6 +239,63 @@ export const NES_CORE_FALLBACK_SEQUENCE: ReadonlyArray<{ core: string; legacy: b
 
 export const MAX_CORE_FALLBACK_ATTEMPTS = 3;
 
+// ─── Core alias resolution ──────────────────────────────────────
+// EmulatorJS uses system aliases (e.g. "nes", "snes") that resolve to
+// actual libretro core names (e.g. "fceumm", "snes9x"). The preflight
+// must check the ACTUAL core filename, not the alias.
+// @see https://github.com/EmulatorJS/EmulatorJS
+const CORE_ALIASES: Readonly<Record<string, string>> = {
+  nes: "fceumm",
+  snes: "snes9x",
+  gb: "gambatte",
+  gbc: "gambatte",
+  gba: "mgba",
+  n64: "mupen64plus_next",
+  nds: "melonds",
+  psx: "pcsx_rearmed",
+  segaMD: "genesis_plus_gx",
+  segaMS: "genesis_plus_gx",
+  segaCD: "genesis_plus_gx",
+  segaGG: "genesis_plus_gx",
+  sega32x: "picodrive",
+  atari2600: "stella",
+  atari7800: "prosystem",
+  lynx: "handy",
+  jaguar: "virtualjaguar",
+  vb: "beetle_vb",
+  pce: "mednafen_pce",
+  tg16: "mednafen_pce",
+  wswan: "mednafen_supersu",
+  arcade: "fbneo",
+  fbneo: "fbneo",
+  mame2003: "mame2003",
+  mame2010: "mame2010",
+};
+
+/**
+ * Resolve a core alias to the actual libretro core name.
+ * Returns the input unchanged if no alias exists (e.g. "fceumm" → "fceumm").
+ */
+export function resolveCoreName(core: string): string {
+  return CORE_ALIASES[core] ?? core;
+}
+
+/**
+ * Build the actual core .data filename for a given core alias.
+ * Handles legacy + thread variants.
+ */
+export function getCoreDataFilename(
+  core: string,
+  options?: { legacy?: boolean; threads?: boolean },
+): string {
+  const resolved = resolveCoreName(core);
+  const parts = [resolved];
+  if (options?.threads) parts.push("thread");
+  if (options?.legacy) parts.push("legacy");
+  parts.push("wasm.data");
+  return parts.join("-");
+}
+
 // iNES header magic bytes: 4E 45 53 1A
 export const INES_MAGIC = [0x4e, 0x45, 0x53, 0x1a] as const;
 
