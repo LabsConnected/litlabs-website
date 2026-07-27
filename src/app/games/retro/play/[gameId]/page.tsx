@@ -54,6 +54,13 @@ import {
   WatchdogManager,
   type WatchdogFired,
 } from "@/lib/emulator/watchdogs";
+import {
+  type ArcadeLaunchState,
+  EXPECTED_BSX_MD5,
+  validateBsxBios,
+  shouldRenderIframe,
+  launchStatusLabel,
+} from "@/lib/emulator/arcade-launch";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -235,13 +242,26 @@ export default function RetroPlayerPage() {
 
   // ─── Game + ROM state ──────────────────────────────────────────
   const [game, setGame] = useState<RetroGameRecord | null>(null);
-  const [romDataUrl, setRomDataUrl] = useState<string | null>(null);
+  const [romBlob, setRomBlob] = useState<Blob | null>(null); // ROM blob, NOT URL yet
+  const [biosFile, setBiosFile] = useState<File | null>(null);
   const [biosDataUrl, setBiosDataUrl] = useState<string | null>(null);
   const [biosName, setBiosName] = useState<string | null>(null);
+  const [biosHash, setBiosHash] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSatellaview, setIsSatellaview] = useState(false);
   const [showControls, setShowControls] = useState(false);
+
+  // ─── Launch state machine (single source of truth) ────────────
+  const [launchState, setLaunchState] = useState<ArcadeLaunchState>({ status: "loading" });
+  const [runtimeConfig, setRuntimeConfig] = useState<{
+    sessionId: string;
+    romUrl: string;
+    biosUrl: string;
+    core: string;
+    gameName: string;
+  } | null>(null);
+  const biosUrlRef = useRef<string | null>(null);
 
   // ─── Runtime state ─────────────────────────────────────────────
   const [sessionState, setSessionState] = useState<EmulatorSessionState>("idle");
@@ -291,6 +311,8 @@ export default function RetroPlayerPage() {
   const activeDataPath = runtimeSource === "official-fallback" ? EMULATOR_CDN_FALLBACK_PATH : EMULATOR_DATA_PATH;
 
   // ─── Load ROM from IndexedDB ───────────────────────────────────
+  // NOTE: We do NOT create a blob URL or increment launches here.
+  // That only happens when the user clicks Start Game.
   useEffect(() => {
     let active = true;
     (async () => {
@@ -306,35 +328,29 @@ export default function RetroPlayerPage() {
         setRomSha(validation.sha256 ?? null);
 
         if (!validation.valid) {
-          setSessionState("failed");
-          setFailureCode(validation.failureCode ?? "ROM_INVALID");
-          setEmulatorError(validation.error ?? "ROM validation failed.");
-          setLoading(false);
           setGame(record);
           setIsSatellaview(detectSatellaview(record.fileName));
+          setLaunchState({
+            status: "rom-error",
+            message: validation.error ?? "ROM validation failed.",
+          });
+          setLoading(false);
           return;
         }
 
-        // Create blob URL — kept alive for the entire session
-        const blobUrl = createRomBlobUrl(record.rom);
-        if (!active) {
-          revokeRomBlobUrl(blobUrl);
-          return;
-        }
-        romBlobUrlRef.current = blobUrl;
+        // Store the ROM blob — don't create a URL yet
         setGame(record);
         setIsSatellaview(detectSatellaview(record.fileName));
-        setRomDataUrl(blobUrl);
-        setSessionState("checking_assets");
+        setRomBlob(record.rom);
 
-        if (!launchRecorded.current) {
-          launchRecorded.current = true;
-          const updated = await updateRetroGame(record.id, {
-            lastPlayedAt: Date.now(),
-            launches: (record.launches ?? 0) + 1,
-          });
-          if (active) setGame(updated);
+        // Set initial launch state based on whether BIOS is needed
+        if (detectSatellaview(record.fileName)) {
+          setLaunchState({ status: "needs-bios" });
+        } else {
+          // Non-Satellaview: ready to launch immediately
+          setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
         }
+        setSessionState("idle"); // Don't auto-start the runtime
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "The game could not be opened.");
       } finally {
@@ -343,17 +359,22 @@ export default function RetroPlayerPage() {
     })();
     return () => {
       active = false;
-      // Revoke blob URL only when the gameId changes or component unmounts
+      // Revoke ROM blob URL if one was created
       if (romBlobUrlRef.current) {
         revokeRomBlobUrl(romBlobUrlRef.current);
         romBlobUrlRef.current = null;
       }
+      // Revoke BIOS blob URL if one was created
+      if (biosUrlRef.current) {
+        URL.revokeObjectURL(biosUrlRef.current);
+        biosUrlRef.current = null;
+      }
     };
   }, [params.gameId]);
 
-  // ─── Asset preflight ───────────────────────────────────────────
+  // ─── Asset preflight (only when launching) ────────────────────
   useEffect(() => {
-    if (!game || !romDataUrl || sessionState !== "checking_assets") return;
+    if (!game || launchState.status !== "launching") return;
     let active = true;
     (async () => {
       const isCdn = runtimeSource === "official-fallback";
@@ -377,26 +398,27 @@ export default function RetroPlayerPage() {
     return () => {
       active = false;
     };
-  }, [game, romDataUrl, ejsCore, sessionState, runtimeSource, activeDataPath, useLegacy]);
+  }, [game, launchState, ejsCore, sessionState, runtimeSource, activeDataPath, useLegacy]);
 
-  // ─── Iframe src (built from URL params) ────────────────────────
+  // ─── Iframe src (built from runtimeConfig, only when launching) ─
   const iframeSrc = useMemo(() => {
-    if (!romDataUrl || !game) return "";
+    if (!runtimeConfig) return "";
     const searchParams = new URLSearchParams({
-      core: ejsCore,
-      rom: romDataUrl,
-      name: game.title,
+      core: runtimeConfig.core,
+      rom: runtimeConfig.romUrl,
+      name: runtimeConfig.gameName,
       dataPath: activeDataPath,
       color: system?.color ?? "#a78bfa",
       legacy: useLegacy ? "1" : "0",
+      sessionId: runtimeConfig.sessionId,
     });
     // Pass BIOS URL for Satellaview/BS-X titles
-    if (biosDataUrl) {
-      searchParams.set("bios", biosDataUrl);
+    if (runtimeConfig.biosUrl) {
+      searchParams.set("bios", runtimeConfig.biosUrl);
     }
     if (runtimeSource === "official-fallback") searchParams.set("cdnTest", "1");
     return `${EMULATOR_SESSION_HOST}?${searchParams.toString()}`;
-  }, [romDataUrl, game, ejsCore, useLegacy, activeDataPath, runtimeSource, system, biosDataUrl]);
+  }, [runtimeConfig, useLegacy, activeDataPath, runtimeSource, system]);
 
   // ─── Bridge + watchdog setup ───────────────────────────────────
   const handleWatchdogFired = useCallback((fired: WatchdogFired) => {
@@ -478,6 +500,12 @@ export default function RetroPlayerPage() {
       watchdog.stop("core_download");
       watchdog.stop("core_decompression");
       setSessionState("waiting_for_user");
+      // Transition launch state: launching → waiting-for-user
+      setLaunchState((prev) =>
+        prev.status === "launching"
+          ? { status: "waiting-for-user", sessionId: prev.sessionId }
+          : prev,
+      );
     });
 
     // Canvas created
@@ -486,25 +514,30 @@ export default function RetroPlayerPage() {
     });
 
     // First frame — the REAL "running" signal.
-    // EJS_onGameStart fires when the core starts, but the game may
-    // produce no video (e.g. missing BIOS). Only mark "running" after
-    // the canvas has non-zero dimensions (actual pixels rendered).
     const unsubFrame = bridge.on("runtime.first_frame", () => {
       setFirstFrameObserved(true);
       watchdog.stopAll();
       setSessionState("running");
       setProgressText(null);
       watchdog.start("heartbeat", "running");
+      // Update launch state machine — only this transition = "running"
+      setLaunchState((prev) =>
+        prev.status === "launching" || prev.status === "waiting-for-user" || prev.status === "core-starting"
+          ? { status: "running", sessionId: prev.sessionId }
+          : prev,
+      );
     });
 
     // Running — EJS_onGameStart (core started, but video not confirmed yet)
-    // Transition to "waiting_for_first_frame" and start an 8s watchdog.
-    // If no video frame appears within 8s, show a compatibility error.
+    // Transition to "core-starting" in the launch state machine
     const unsubRun = bridge.on("runtime.running", () => {
+      setLaunchState((prev) =>
+        prev.status === "launching" || prev.status === "waiting-for-user"
+          ? { status: "core-starting", sessionId: prev.sessionId }
+          : prev,
+      );
       setSessionState("waiting_for_first_frame");
       setProgressText("Waiting for video…");
-      // 8s no-video watchdog — if no first_frame event, the ROM may
-      // require a BIOS, another core, or additional subsystem support.
       watchdog.start("first_frame", "waiting_for_first_frame");
     });
 
@@ -517,10 +550,11 @@ export default function RetroPlayerPage() {
     const unsubErr = bridge.on("runtime.error", (event) => {
       watchdog.stopAll();
       const msg = event.message ?? "Unknown runtime error";
-      // Include stack trace in diagnostics for real debugging
       const stack = event.stack ? `\n\nStack: ${event.stack}` : "";
       setEmulatorError(`${msg}${stack}`);
       setFailureCode("UNKNOWN_RUNTIME_ERROR");
+      // Update launch state machine
+      setLaunchState({ status: "error", message: msg });
       if (shouldFallbackOnFailure("UNKNOWN_RUNTIME_ERROR") && hasMoreAttempts(attempt)) {
         setSessionState("recovering");
         const currentAttempt = createAttempt(attempt, ejsCore, useLegacy);
@@ -701,28 +735,120 @@ export default function RetroPlayerPage() {
 
   async function pickBios(file?: File) {
     if (!file) return;
+    setBiosFile(file);
+    setBiosName(file.name);
+    setLaunchState({ status: "validating-bios", fileName: file.name });
     try {
+      const result = await validateBsxBios(file);
+      if (!result.ok) {
+        setLaunchState({ status: "invalid-bios", reason: result.error ?? "Invalid BIOS", fileName: file.name });
+        setBiosHash(null);
+        return;
+      }
+      // MD5 matches — store the BIOS
       const b64 = await readRomAsBase64(file);
       const dataUrl = `data:application/octet-stream;base64,${b64}`;
       setBiosDataUrl(dataUrl);
-      setBiosName(file.name);
+      setBiosHash(result.hash ?? null);
+      setLaunchState({ status: "ready", biosHash: result.hash ?? "", biosFileName: file.name });
       setEmulatorError(null);
-      // Persist to IndexedDB so the user doesn't have to re-pick it
+      // Persist to IndexedDB
       try {
         await storeBiosInIndexedDB(file.name, dataUrl);
-      } catch {
-        // IndexedDB failure is non-fatal — BIOS works for this session
-      }
+      } catch { /* non-fatal */ }
     } catch (reason) {
-      setEmulatorError(reason instanceof Error ? reason.message : "Could not read BIOS file.");
+      setLaunchState({
+        status: "invalid-bios",
+        reason: reason instanceof Error ? reason.message : "Could not read BIOS file.",
+        fileName: file.name,
+      });
     }
   }
 
   function clearBios() {
+    setBiosFile(null);
     setBiosDataUrl(null);
     setBiosName(null);
-    // Also remove from IndexedDB
+    setBiosHash(null);
+    setLaunchState({ status: "needs-bios" });
     void clearBiosFromIndexedDB().catch(() => {});
+  }
+
+  // ─── Start Game — the ONLY path that creates blob URLs + iframe ─
+  async function startGame() {
+    if (launchState.status !== "ready") return;
+    if (!romBlob || !game) return;
+
+    // For Satellaview titles, require a valid BIOS
+    if (isSatellaview && !biosDataUrl) return;
+
+    // Create ROM blob URL
+    const romUrl = createRomBlobUrl(romBlob);
+    romBlobUrlRef.current = romUrl;
+
+    // Create BIOS blob URL (for Satellaview)
+    let biosUrl = "";
+    if (isSatellaview && biosFile) {
+      biosUrl = URL.createObjectURL(biosFile);
+      biosUrlRef.current = biosUrl;
+    }
+
+    const sessionId = crypto.randomUUID();
+    const core = game.system === "snes" ? "snes9x" : ejsCore;
+
+    setRuntimeConfig({
+      sessionId,
+      romUrl,
+      biosUrl,
+      core,
+      gameName: game.title,
+    });
+
+    setLaunchState({ status: "launching", sessionId });
+    setSessionState("checking_assets");
+
+    // Increment launch counter — ONLY here, on real session creation
+    if (!launchRecorded.current) {
+      launchRecorded.current = true;
+      try {
+        const updated = await updateRetroGame(game.id, {
+          lastPlayedAt: Date.now(),
+          launches: (game.launches ?? 0) + 1,
+        });
+        setGame(updated);
+      } catch { /* non-fatal */ }
+    }
+  }
+
+  function destroySessionUrls() {
+    if (romBlobUrlRef.current) {
+      revokeRomBlobUrl(romBlobUrlRef.current);
+      romBlobUrlRef.current = null;
+    }
+    if (biosUrlRef.current) {
+      URL.revokeObjectURL(biosUrlRef.current);
+      biosUrlRef.current = null;
+    }
+    setRuntimeConfig(null);
+  }
+
+  function exitGame() {
+    watchdogRef.current?.stopAll();
+    destroySessionUrls();
+    setSessionState("idle");
+    setEmulatorError(null);
+    setFailureCode(null);
+    setProgressText(null);
+    setCanvasCreated(false);
+    setFirstFrameObserved(false);
+    // Return to ready (BIOS still valid) or needs-bios
+    if (isSatellaview && biosDataUrl && biosHash) {
+      setLaunchState({ status: "ready", biosHash, biosFileName: biosName ?? "" });
+    } else if (isSatellaview) {
+      setLaunchState({ status: "needs-bios" });
+    } else {
+      setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
+    }
   }
 
   async function enterFullscreen() {
@@ -733,26 +859,43 @@ export default function RetroPlayerPage() {
     }
   }
 
-  // ─── Derived state ─────────────────────────────────────────────
-
-  const biosRequired = isSatellaview && !biosDataUrl;
-  const canLaunch = !biosRequired;
-  const isRunning = sessionState === "running";
-
-  // Auto-load BIOS from IndexedDB when a Satellaview title is detected
-  // so the user doesn't have to re-pick it every time
+  // ─── Auto-load BIOS from IndexedDB ─────────────────────────────
+  // When a Satellaview title is detected, try to restore a previously
+  // saved BIOS from IndexedDB. Revalidates the MD5 — only restores if
+  // the hash still matches the expected BS-X BIOS.
   useEffect(() => {
-    if (!isSatellaview || biosDataUrl) return;
+    if (!isSatellaview || launchState.status !== "needs-bios") return;
     let cancelled = false;
-    void loadBiosFromIndexedDB().then((stored) => {
+    void loadBiosFromIndexedDB().then(async (stored) => {
       if (cancelled || !stored) return;
-      setBiosDataUrl(stored.dataUrl);
-      setBiosName(stored.name);
+      try {
+        const resp = await fetch(stored.dataUrl);
+        const blob = await resp.blob();
+        const result = await validateBsxBios(blob);
+        if (cancelled) return;
+        if (result.ok) {
+          setBiosDataUrl(stored.dataUrl);
+          setBiosName(stored.name);
+          setBiosHash(result.hash ?? null);
+          setBiosFile(new File([blob], stored.name));
+          setLaunchState({ status: "ready", biosHash: result.hash ?? "", biosFileName: stored.name });
+        } else {
+          await clearBiosFromIndexedDB().catch(() => {});
+        }
+      } catch { /* non-fatal */ }
     }).catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [isSatellaview, biosDataUrl]);
-  const isError = sessionState === "failed" || sessionState === "stopped";
+  }, [isSatellaview, launchState.status]);
+
+  // ─── Derived state ─────────────────────────────────────────────
+
+  // The iframe is ONLY rendered when the launch state allows it.
+  // This is the hard launch gate — no iframe without valid BIOS.
+  const canRenderIframe = shouldRenderIframe(launchState);
+  const isRunning = launchState.status === "running";
+  const isError = launchState.status === "error" || launchState.status === "rom-error";
   const isLoadingState =
+    launchState.status === "launching" ||
     sessionState === "checking_assets" ||
     sessionState === "preparing_runtime" ||
     sessionState === "downloading_core" ||
@@ -848,9 +991,9 @@ export default function RetroPlayerPage() {
             ref={stageRef}
             className="relative aspect-[16/10] min-h-[360px] overflow-hidden rounded-2xl border border-white/10 bg-black shadow-[0_30px_100px_rgba(0,0,0,.55)] sm:min-h-[520px]"
           >
-            {canLaunch && romDataUrl && romValid !== false ? (
+            {canRenderIframe && runtimeConfig ? (
               <iframe
-                key={`${attempt}|${ejsCore}|${useLegacy}|${runtimeSource}`}
+                key={runtimeConfig.sessionId}
                 ref={attachBridge}
                 title={`${game.title} emulator`}
                 src={iframeSrc}
@@ -859,27 +1002,89 @@ export default function RetroPlayerPage() {
                 allow="autoplay; fullscreen; gamepad"
                 allowFullScreen
               />
-            ) : (
+            ) : isSatellaview && launchState.status === "needs-bios" ? (
               <div className="flex h-full items-center justify-center p-6 text-center">
                 <div className="max-w-sm space-y-3">
                   <LockKeyhole className="mx-auto text-cyan-300" size={36} />
                   <h2 className="text-lg font-black">BS-X BIOS required</h2>
                   <p className="text-xs leading-5 text-white/55">
-                    This Satellaview title needs the BS-X BIOS to boot. Load a BIOS file from the panel on the right — it stays in this browser only.
+                    This Satellaview title needs the BS-X BIOS to boot. Select your legally obtained BS-X.bin from the panel on the right — it stays in this browser only.
                   </p>
                 </div>
               </div>
+            ) : isSatellaview && launchState.status === "validating-bios" ? (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <Gamepad2 className="mx-auto animate-pulse text-cyan-300" size={36} />
+                  <h2 className="text-lg font-black">Validating BIOS…</h2>
+                  <p className="text-xs leading-5 text-white/55">
+                    Checking MD5 hash of {launchState.fileName}. Expected: {EXPECTED_BSX_MD5.slice(0, 12)}…
+                  </p>
+                </div>
+              </div>
+            ) : isSatellaview && launchState.status === "invalid-bios" ? (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <LockKeyhole className="mx-auto text-rose-300" size={36} />
+                  <h2 className="text-lg font-black">Invalid BIOS</h2>
+                  <p className="text-xs leading-5 text-rose-300/80">
+                    {launchState.reason}
+                  </p>
+                  <p className="text-xs leading-5 text-white/55">
+                    Select the correct BS-X.bin file from the panel on the right.
+                  </p>
+                </div>
+              </div>
+            ) : launchState.status === "ready" ? (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <Gamepad2 className="mx-auto text-emerald-300" size={36} />
+                  <h2 className="text-lg font-black">Ready to launch</h2>
+                  <p className="text-xs leading-5 text-white/55">
+                    {isSatellaview ? "BIOS validated. " : ""}Press Start Game to begin.
+                  </p>
+                  <button
+                    onClick={startGame}
+                    className="mt-2 inline-flex items-center gap-2 rounded-xl bg-emerald-500 px-5 py-2.5 text-sm font-black text-black hover:bg-emerald-400"
+                  >
+                    <Gamepad2 size={15} /> Start Game
+                  </button>
+                </div>
+              </div>
+            ) : launchState.status === "error" ? (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <LockKeyhole className="mx-auto text-rose-300" size={36} />
+                  <h2 className="text-lg font-black">Runtime error</h2>
+                  <p className="text-xs leading-5 text-rose-300/80">{launchState.message}</p>
+                </div>
+              </div>
+            ) : launchState.status === "rom-error" ? (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <LockKeyhole className="mx-auto text-rose-300" size={36} />
+                  <h2 className="text-lg font-black">ROM error</h2>
+                  <p className="text-xs leading-5 text-rose-300/80">{launchState.message}</p>
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center p-6 text-center">
+                <div className="max-w-sm space-y-3">
+                  <Gamepad2 className="mx-auto animate-pulse text-white/30" size={36} />
+                  <p className="text-xs text-white/40">{launchStatusLabel(launchState)}</p>
+                </div>
+              </div>
             )}
-            {isLoadingState && canLaunch && (
+            {isLoadingState && canRenderIframe && (
               <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-cyan-300/20 bg-black/70 px-3 py-1.5 text-[10px] font-bold text-cyan-100 backdrop-blur">
-                {STATE_LABELS[sessionState]} · {ejsCore}{useLegacy ? " (legacy)" : ""}
+                {launchStatusLabel(launchState)} · {runtimeConfig?.core ?? ejsCore}{useLegacy ? " (legacy)" : ""}
                 {progressText ? ` · ${progressText}` : ""}
               </div>
             )}
             {isRunning && (
               <div className="pointer-events-none absolute left-4 top-4 rounded-full border border-emerald-300/20 bg-black/70 px-3 py-1.5 text-[10px] font-bold text-emerald-100 backdrop-blur">
                 <span className="mr-1 inline-block h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                Running · {ejsCore}{useLegacy ? " (legacy)" : ""}
+                Running · {runtimeConfig?.core ?? ejsCore}{useLegacy ? " (legacy)" : ""}
                 {heartbeatAge !== null ? ` · hb ${heartbeatAge}ms` : ""}
               </div>
             )}
@@ -992,6 +1197,13 @@ export default function RetroPlayerPage() {
                 <div>ROM SHA-256: {romSha ? `${romSha.slice(0, 16)}…` : "—"}</div>
                 <div>ROM header: {romValid ? "✓ valid" : "✗ invalid"}</div>
                 <div>BIOS: {biosDataUrl ? "present" : "—"}</div>
+                <div>BIOS MD5: {biosHash ? `${biosHash.slice(0, 16)}…` : "—"}</div>
+                <div>BIOS valid: {launchState.status === "ready" ? "✓" : launchState.status === "invalid-bios" ? "✗" : "—"}</div>
+                <div>Launch state: {launchState.status}</div>
+                <div>Session ID: {runtimeConfig?.sessionId ?? "—"}</div>
+                <div>ROM URL: {runtimeConfig?.romUrl ? "yes" : "no"}</div>
+                <div>BIOS URL: {runtimeConfig?.biosUrl ? "yes" : "no"}</div>
+                <div>iframe mounted: {canRenderIframe ? "yes" : "no"}</div>
                 <div>Data path: {activeDataPath}</div>
                 <div>Runtime: {runtimeSource}</div>
                 <div>Session: {STATE_LABELS[sessionState]}</div>
@@ -1053,11 +1265,27 @@ export default function RetroPlayerPage() {
                 <h2 className="text-sm font-black">BS-X BIOS required</h2>
               </div>
               <p className="mt-2 text-xs leading-5 text-white/55">
-                Satellaview titles need the BS-X BIOS to boot. Pick a copy here — it stays in this browser only, never uploaded.
+                Satellaview titles need the BS-X BIOS to boot. Select your legally obtained BS-X.bin — it stays in this browser only, never uploaded.
               </p>
-              {biosName ? (
+
+              {/* BIOS validation status */}
+              {launchState.status === "validating-bios" && (
+                <div className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[.06] px-3 py-2 text-xs text-cyan-200">
+                  Validating BIOS… ({launchState.fileName})
+                </div>
+              )}
+              {launchState.status === "invalid-bios" && (
+                <div className="mt-3 rounded-xl border border-rose-400/20 bg-rose-400/[.06] px-3 py-2 text-xs text-rose-200">
+                  <div className="font-bold">Invalid BIOS</div>
+                  <div className="mt-1 text-rose-300/80">{launchState.reason}</div>
+                </div>
+              )}
+              {launchState.status === "ready" && biosName && (
                 <div className="mt-3 flex items-center justify-between gap-2 rounded-xl border border-emerald-400/20 bg-emerald-400/[.06] px-3 py-2 text-xs">
-                  <span className="truncate text-emerald-100">BIOS · {biosName}</span>
+                  <div className="min-w-0">
+                    <div className="truncate text-emerald-100">BIOS · {biosName}</div>
+                    <div className="text-[10px] text-emerald-300/60">MD5 ✓ verified</div>
+                  </div>
                   <button
                     onClick={clearBios}
                     className="rounded p-1 text-white/40 hover:text-white"
@@ -1066,19 +1294,33 @@ export default function RetroPlayerPage() {
                     <X size={13} />
                   </button>
                 </div>
-              ) : (
+              )}
+
+              {/* BIOS file picker — always available when BIOS is needed or invalid */}
+              {(launchState.status === "needs-bios" || launchState.status === "invalid-bios") && (
                 <button
                   onClick={() => biosInputRef.current?.click()}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/10 py-2 text-xs font-black text-cyan-200 hover:bg-cyan-400/15"
                 >
-                  <Upload size={13} /> Load BS-X BIOS
+                  <Upload size={13} /> Select BS-X BIOS
                 </button>
               )}
+
+              {/* Start Game button — only when BIOS is validated */}
+              {launchState.status === "ready" && (
+                <button
+                  onClick={startGame}
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-2.5 text-xs font-black text-black hover:bg-emerald-400"
+                >
+                  <Gamepad2 size={13} /> Start BS-X Game
+                </button>
+              )}
+
               <input
                 ref={biosInputRef}
                 type="file"
                 className="hidden"
-                accept=".sfc,.smc,.bin,.rom"
+                accept=".bin,application/octet-stream"
                 onChange={(event) => {
                   pickBios(event.target.files?.[0]);
                   event.target.value = "";
@@ -1087,17 +1329,48 @@ export default function RetroPlayerPage() {
             </section>
           )}
 
+          {/* Start Game button for non-Satellaview titles */}
+          {!isSatellaview && launchState.status === "ready" && (
+            <button
+              onClick={startGame}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-2.5 text-xs font-black text-black hover:bg-emerald-400"
+            >
+              <Gamepad2 size={13} /> Start Game
+            </button>
+          )}
+
           <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5">
             <h2 className="text-sm font-black">
-              {isError ? "Emulator trouble." : isRunning ? "Game running." : "Launching…"}
+              {launchStatusLabel(launchState)}
             </h2>
             <p className="mt-2 text-sm leading-6 text-white/55">
-              {isError
-                ? emulatorError ?? "The emulator could not start."
-                : isRunning
-                  ? `Your ${system.shortName} cartridge is running locally. Open the emulator menu for saves, control mapping, cheats, screenshots, and other supported tools.`
-                  : `${STATE_LABELS[sessionState]}. The emulator is loading the ${ejsCore} core from the ${runtimeSource === "official-fallback" ? "official CDN" : "self-hosted data directory"}. This usually takes a few seconds.`}
+              {launchState.status === "needs-bios"
+                ? "Select your legally obtained BS-X.bin file. It remains in this browser and is never uploaded."
+                : launchState.status === "ready"
+                  ? isSatellaview
+                    ? "BIOS validated. Press Start BS-X Game to begin."
+                    : "Press Start Game to begin."
+                  : launchState.status === "launching"
+                    ? "Creating local emulator session. The ROM and BIOS are being loaded into the emulator iframe."
+                    : launchState.status === "waiting-for-user"
+                      ? "Runtime ready — press Play inside the emulator to start the game."
+                      : launchState.status === "running"
+                        ? `Your ${system.shortName} cartridge is running locally. Open the emulator menu for saves, control mapping, cheats, screenshots, and other supported tools.`
+                        : launchState.status === "error" || launchState.status === "rom-error"
+                          ? launchState.message
+                          : launchState.status === "invalid-bios"
+                            ? launchState.reason
+                            : `${launchStatusLabel(launchState)}. The emulator is loading the ${runtimeConfig?.core ?? ejsCore} core.`}
             </p>
+            {/* Exit button when running or error */}
+            {(canRenderIframe || launchState.status === "error") && (
+              <button
+                onClick={exitGame}
+                className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-white/10 bg-white/5 py-2 text-xs font-black text-white/70 hover:bg-white/10"
+              >
+                <X size={13} /> Exit Session
+              </button>
+            )}
           </section>
 
           <section className="rounded-2xl border border-white/10 bg-white/[.03] p-5">
@@ -1132,7 +1405,7 @@ export default function RetroPlayerPage() {
               <div className="flex justify-between gap-3">
                 <dt className="text-white/35">ROM</dt>
                 <dd className="max-w-[180px] truncate font-mono text-[10px] text-white/50">
-                  {romDataUrl ? "blob:local" : "—"}
+                  {runtimeConfig?.romUrl ? "blob:local" : romBlob ? "ready" : "—"}
                 </dd>
               </div>
               <div className="flex justify-between gap-3">
@@ -1152,7 +1425,11 @@ export default function RetroPlayerPage() {
             <ShieldCheck className="text-emerald-300" size={19} />
             <h2 className="mt-3 text-sm font-black">Private play</h2>
             <p className="mt-2 text-xs leading-5 text-white/50">
-              The ROM and BIOS were loaded from this browser only — the data stays in memory as a blob URL inside the emulator iframe. LiTT does not upload the file. The emulator runtime is self-hosted and versioned.
+              {canRenderIframe
+                ? "The ROM and BIOS were loaded from this browser only — the data stays in memory as a blob URL inside the emulator iframe. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."
+                : isSatellaview && launchState.status === "needs-bios"
+                  ? "The ROM is available locally. No BIOS has been loaded and the emulator has not started. Select a BS-X.bin to proceed."
+                  : "The ROM is stored in this browser only. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."}
             </p>
           </section>
         </aside>
