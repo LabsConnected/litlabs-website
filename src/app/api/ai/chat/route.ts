@@ -24,7 +24,9 @@ export async function POST(req: NextRequest) {
       {
         role: "system" as const,
         content:
-          "You are LiTT, the AI operating layer for LiTTree-LabStudios. Be direct, useful, and practical.",
+          "You are LiTT, the AI operating layer for LiTTree-LabStudios. Be direct, useful, and practical. " +
+          "Never claim voice, microphone, terminal, repository, or any system capability is working unless the user message includes verified evidence. " +
+          "If asked about system status, say you don't have live capability data and point to the Settings page.",
       },
       { role: "user" as const, content: message },
     ];

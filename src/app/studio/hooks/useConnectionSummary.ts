@@ -16,6 +16,10 @@ export interface ConnectionCapabilities {
   terminalStatus: TerminalStatus;
   terminalSessionId: string | null;
   terminalError: string | null;
+  /** Voice transport connected (TTS-ready). Client-derived from VoiceSessionContext. */
+  voiceTransportConnected: boolean;
+  /** Microphone currently capturing audio. Client-derived from VoiceSessionContext. */
+  voiceMicrophoneOn: boolean;
 }
 
 const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
@@ -30,6 +34,8 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   terminalStatus: "disconnected",
   terminalSessionId: null,
   terminalError: null,
+  voiceTransportConnected: false,
+  voiceMicrophoneOn: false,
 };
 
 export function useConnectionSummary() {

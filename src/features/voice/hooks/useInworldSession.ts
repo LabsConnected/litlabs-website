@@ -47,8 +47,9 @@ export function useInworldSession(
   const setError = useVoiceStore((store) => store.setError);
   const setTranscript = useVoiceStore((store) => store.setTranscript);
   const setInterimTranscript = useVoiceStore((store) => store.setInterimTranscript);
-  const activeAgent = useVoiceStore((store) => store.activeAgent);
-  void activeAgent;
+  // activeAgent is read lazily via useVoiceStore.getState().activeAgent inside
+  // connect() so we don't subscribe to re-renders here (the hook only needs
+  // the value at session-creation time, not on every change).
 
   const wsRef = useRef<WebSocket | null>(null);
   const micStreamRef = useRef<MediaStream | null>(null);
@@ -463,8 +464,11 @@ export function useInworldSession(
                 break;
 
               case "response.done":
-                setState("idle");
+              case "response.completed":
+                // Response finished (normally or via cancel). Reset the
+                // interrupt flag so the next response's audio plays.
                 interruptedRef.current = false;
+                setState("idle");
                 onResponseComplete?.();
                 break;
 

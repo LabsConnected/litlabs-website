@@ -122,6 +122,8 @@ function buildPrompt(
     connectedProviders: capabilities?.connectedProviders as string[] | undefined,
     availableTools: capabilities?.availableTools as string[] | undefined,
     connectionSummary: capabilities?.connectionSummary as string | undefined,
+    voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
+    voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
   };
   const translated = translateCapabilities(rawCaps);
 

@@ -9,6 +9,7 @@ import { useBuilderSessions } from "../hooks/useBuilderSessions";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
 import { detectIntent, type IntentResult } from "../lib/studio-intent";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import {
   useStudioAgentStore,
   AGENT_META,
@@ -30,6 +31,7 @@ export default function ChatTool({
   const [busy, setBusy] = useState(false);
   const sessionManager = useBuilderSessions();
   const { capabilities } = useConnectionSummary();
+  const { voiceTransportConnected, voiceInputState } = useVoiceSession();
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const threads = useStudioAgentStore((s) => s.threads);
@@ -148,6 +150,8 @@ export default function ChatTool({
             connectedProviders: capabilities.connectedProviders,
             availableTools: capabilities.availableTools,
             connectionSummary: capabilities.connectionSummary,
+            voiceTransportConnected,
+            voiceMicrophoneOn: voiceInputState === "listening",
           },
         }),
       });

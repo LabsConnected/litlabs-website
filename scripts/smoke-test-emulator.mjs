@@ -70,7 +70,7 @@ const jsCode = [
   "  gameId: 'smb3-12345',",
   "  color: '#a78bfa',",
   "  biosUrl: undefined,",
-  "  buildId: 'ejs-4.2.3-litt-v8',",
+  "  buildId: 'ejs-4.2.3-litt-v9',",
   "  dataPath: '/emulatorjs/4.2.3/data/',",
   "});",
   "console.log('HTML length:', html.length);",
@@ -117,12 +117,10 @@ const checks = [
   { pattern: /window\.EJS_core\s*=/, label: "EJS_core" },
   { pattern: /window\.EJS_gameUrl\s*=/, label: "EJS_gameUrl" },
   { pattern: /window\.EJS_pathtodata\s*=/, label: "EJS_pathtodata" },
-  { pattern: /__littUnzip/, label: "main-thread unzip function" },
-  { pattern: /__littPatchEjs/, label: "EJS prototype patcher" },
-  { pattern: /DecompressionStream/, label: "DecompressionStream usage" },
-  { pattern: /EJS_COMPRESSION/, label: "EJS_COMPRESSION patch target" },
+  { pattern: /window\.EJS_ready\s*=/, label: "EJS_ready callback" },
+  { pattern: /window\.EJS_onGameStart\s*=/, label: "EJS_onGameStart callback" },
   { pattern: /__littWatch/, label: "MutationObserver progress watcher" },
-  { pattern: /__NativeWorker/, label: "Worker error wrapper" },
+  { pattern: /config script started/, label: "config-started beacon" },
 ];
 
 let allFound = true;
@@ -148,6 +146,12 @@ if (configScript.includes("</script")) {
   allFound = false;
 } else {
   console.log("  ✓ No literal </script> in config script (escapeForScript worked)");
+}
+if (html.includes("loader.js")) {
+  console.log("  ✓ loader.js script tag present in HTML");
+} else {
+  console.error("  ✖ loader.js script tag MISSING from HTML");
+  allFound = false;
 }
 console.log(`  HTML written to: ${htmlPath}`);
 

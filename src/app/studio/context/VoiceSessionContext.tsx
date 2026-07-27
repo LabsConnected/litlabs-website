@@ -519,25 +519,34 @@ export function VoiceSessionProvider({
 
   const stopVoice = useCallback(() => {
     console.debug("[Voice] stopVoice");
-    // Disconnect Inworld if active
+    const wasSpeaking = voiceOutputStateRef.current === "speaking";
+    // Stop the microphone side only. If LiTT is still speaking (TTS),
+    // we keep the transport alive so playback can finish — only the mic
+    // is being stopped. The previous implementation called disconnect()
+    // unconditionally, which closed the WebSocket and the playback
+    // AudioContext, cutting off TTS mid-sentence.
     if (inworldConnectedRef.current) {
       inworldSession.stopListening();
-      inworldSession.disconnect();
-      inworldConnectedRef.current = false;
-      setVoiceTransportConnected(false);
+      if (!wasSpeaking) {
+        inworldSession.disconnect();
+        inworldConnectedRef.current = false;
+        setVoiceTransportConnected(false);
+      }
     }
     activeRef.current = false;
     micActiveRef.current = false;
     micStartInProgressRef.current = false;
     sessionGenerationRef.current += 1;
-    setVoiceState("idle");
-    voiceStateRef.current = "idle";
     setVoiceInputState("idle");
     voiceInputStateRef.current = "idle";
-    // Output state is left as-is if TTS is still playing; otherwise idle.
-    if (voiceOutputStateRef.current === "speaking") {
-      // keep speaking — only the mic is being stopped
+    if (wasSpeaking) {
+      // LiTT is still speaking — keep voiceState as assistant_speaking so
+      // the UI reflects reality. Only the mic input is idle.
+      setVoiceState("assistant_speaking");
+      voiceStateRef.current = "assistant_speaking";
     } else {
+      setVoiceState("idle");
+      voiceStateRef.current = "idle";
       setVoiceOutputState("idle");
       voiceOutputStateRef.current = "idle";
     }

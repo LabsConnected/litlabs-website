@@ -40,8 +40,8 @@ const EMULATOR_VERSION = "4.2.3";
 // data directory so stale IndexedDB / Cache Storage entries are invalidated.
 // v3: nestopia core added, fceumm re-synced, verifyEmulatorAssets repaired,
 //     worker-error surfacing, CDN fallback, 99% finalization grace.
-const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v8";
-const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
+const EMULATOR_BUILD_ID = "ejs-4.2.3-litt-v9";
+const PREV_EMULATOR_BUILD_IDS = ["ejs-4.2.3-litt-v8", "ejs-4.2.3-litt-v7", "ejs-4.2.3-litt-v6", "ejs-4.2.3-litt-v5", "ejs-4.2.3-litt-v4", "ejs-4.2.3-litt-v3", "ejs-4.2.3-litt-v2", "ejs-4.2.3-litt-v1"];
 const INIT_TIMEOUT_MS = 45_000;
 const STALL_TIMEOUT_MS = 15_000;
 // At 99% decompression the worker may take a while to finalize without
@@ -168,7 +168,6 @@ function buildPlayerDocument(opts: {
   }
   configLines.push(
     // Signal to parent that the config script has started executing.
-    // If the parent never receives this, the iframe CSP is blocking inline scripts.
     `try{parent.postMessage({source:"ejs",type:"progress",text:"config script started",buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}`,
     `window.addEventListener("error",(e)=>{try{parent.postMessage({source:"ejs",type:"error",message:(e&&e.message)||"emulator error",buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}});`,
     // Observe the loading text element so the parent knows the exact runtime
@@ -176,97 +175,6 @@ function buildPlayerDocument(opts: {
     `const __littWatch=new MutationObserver(()=>{const el=document.querySelector(".ejs_loading_text");if(!el)return;const text=(el.innerText||"").trim();if(text)try{parent.postMessage({source:"ejs",type:"progress",text,buildId:${JSON.stringify(opts.buildId)}},"*")}catch(_){}});`,
     `const __littBoot=()=>{const root=document.getElementById("game");if(root)__littWatch.observe(root,{subtree:true,childList:true,characterData:true});else setTimeout(__littBoot,50);};`,
     `__littBoot();`,
-    // ── Worker error surfacing ────────────────────────────────────────
-    // EmulatorJS decompression uses a Blob Worker that can crash without
-    // rejecting its promise, leaving the user stuck at "Decompress 99%".
-    // Wrap the native Worker constructor so any worker error or
-    // messageerror is forwarded to the parent immediately.
-    `const __littBuildId=${JSON.stringify(opts.buildId)};`,
-    `const __NativeWorker=window.Worker;`,
-    `window.Worker=class LiTTWorker extends __NativeWorker{`,
-    `  constructor(url,opts2){super(url,opts2);`,
-    `    this.addEventListener("error",(ev)=>{try{parent.postMessage({source:"ejs",type:"worker-error",message:(ev&&ev.message)||"Emulator decompression worker failed",filename:(ev&&ev.filename)||null,lineno:(ev&&ev.lineno)||null,buildId:__littBuildId},"*")}catch(_){}});`,
-    `    this.addEventListener("messageerror",()=>{try{parent.postMessage({source:"ejs",type:"worker-error",message:"Emulator worker returned an unreadable message",buildId:__littBuildId},"*")}catch(_){}});`,
-    `  }`,
-    `};`,
-    // ── Main-thread zip decompressor ──────────────────────────────────
-    // The EmulatorJS Worker-based decompression stalls at 99% in our srcdoc
-    // iframe environment. Instead of relying on a Blob Worker (which runs
-    // Emscripten WASM and can silently crash), we decompress zip archives
-    // on the main thread using the native DecompressionStream API.
-    // This completely bypasses Worker creation and eliminates the stall.
-    `const __littUnzip=async function(data){`,
-    `  const ab=data.buffer.slice(data.byteOffset,data.byteOffset+data.byteLength);`,
-    `  const view=new DataView(ab);`,
-    `  const files={};`,
-    `  let eocd=-1;`,
-    `  for(let i=ab.byteLength-22;i>=0&&i>=ab.byteLength-65557;i--){if(view.getUint32(i,true)===0x06054b50){eocd=i;break;}}`,
-    `  if(eocd<0)throw new Error("zip: EOCD not found");`,
-    `  const cdOff=view.getUint32(eocd+16,true);`,
-    `  const cdCount=view.getUint16(eocd+10,true);`,
-    `  let off=cdOff;`,
-    `  for(let i=0;i<cdCount;i++){`,
-    `    if(view.getUint32(off,true)!==0x02014b50)throw new Error("zip: bad CD entry");`,
-    `    const method=view.getUint16(off+10,true);`,
-    `    const compSize=view.getUint32(off+20,true);`,
-    `    const uncompSize=view.getUint32(off+24,true);`,
-    `    const nameLen=view.getUint16(off+28,true);`,
-    `    const extraLen=view.getUint16(off+30,true);`,
-    `    const commentLen=view.getUint16(off+32,true);`,
-    `    const localOff=view.getUint32(off+42,true);`,
-    `    const name=new TextDecoder().decode(new Uint8Array(ab,off+46,nameLen));`,
-    `    const localNameLen=view.getUint16(localOff+26,true);`,
-    `    const localExtraLen=view.getUint16(localOff+28,true);`,
-    `    const dataOff=localOff+30+localNameLen+localExtraLen;`,
-    `    if(method===0){`,
-    `      files[name]=new Uint8Array(ab.slice(dataOff,dataOff+uncompSize));`,
-    `    }else if(method===8){`,
-    `      const ds=new DecompressionStream("deflate-raw");`,
-    `      const w=ds.writable.getWriter();`,
-    `      w.write(new Uint8Array(ab,dataOff,compSize));`,
-    `      w.close();`,
-    `      const r=ds.readable.getReader();`,
-    `      const chunks=[];let total=0;`,
-    `      while(true){const{done,value}=await r.read();if(done)break;chunks.push(value);total+=value.length;}`,
-    `      const result=new Uint8Array(total);let pos=0;`,
-    `      for(const c of chunks){result.set(c,pos);pos+=c.length;}`,
-    `      files[name]=result;`,
-    `    }else{throw new Error("zip: unsupported method "+method);}`,
-    `    off+=46+nameLen+extraLen+commentLen;`,
-    `  }`,
-    `  return files;`,
-    `};`,
-    // Patch EJS_COMPRESSION.prototype.decompressFile using a polling check.
-    // We can't use Object.defineProperty on window.EJS_COMPRESSION because
-    // the minified emulator.min.js references the class via its local binding,
-    // not window.EJS_COMPRESSION. Patching the prototype after the class is
-    // defined is the only reliable approach.
-    `const __littPatchEjs=()=>{`,
-    `  const C=window.EJS_COMPRESSION;`,
-    `  if(C&&C.prototype&&!C.prototype.__littPatched){`,
-    `    C.prototype.__littPatched=true;`,
-    `    const __origDecompressFile=C.prototype.decompressFile;`,
-    `    C.prototype.decompressFile=function(method,data,updateMsg,fileCbFunc){`,
-    `      if(method==="zip"){`,
-    `        const self=this;`,
-    `        if(updateMsg)updateMsg(" 0%",true);`,
-    `        return __littUnzip(data).then(function(files){`,
-    `          if(typeof fileCbFunc==="function"){for(const k in files){fileCbFunc(k,files[k]);files[k]=true;}}`,
-    `          if(updateMsg)updateMsg(" 100%",true);`,
-    `          return files;`,
-    `        }).catch(function(err){`,
-    `          console.error("[LiTT] Main-thread unzip failed, falling back to worker:",err);`,
-    `          try{parent.postMessage({source:"ejs",type:"worker-error",message:"Main-thread unzip failed: "+(err&&err.message||err),buildId:__littBuildId},"*");}catch(_){}`,
-    `          return __origDecompressFile.call(self,method,data,updateMsg,fileCbFunc);`,
-    `        });`,
-    `      }`,
-    `      return __origDecompressFile.call(this,method,data,updateMsg,fileCbFunc);`,
-    `    };`,
-    `    try{parent.postMessage({source:"ejs",type:"progress",text:"LiTT patch applied",buildId:__littBuildId},"*");}catch(_){}`,
-    `  }`,
-    `  setTimeout(__littPatchEjs,2);`,
-    `};`,
-    `__littPatchEjs();`,
   );
   const config = configLines.join("\n");
   return `<!doctype html>
@@ -509,7 +417,7 @@ export default function RetroPlayerPage() {
   const [cacheClearResult, setCacheClearResult] = useState<string | null>(null);
   const [latestEvent, setLatestEvent] = useState<string | null>(null);
   // Phase 6: runtime source — self-hosted (default) or official CDN fallback.
-  const [runtimeSource, setRuntimeSource] = useState<"self-hosted" | "official-fallback">("self-hosted");
+  const [runtimeSource, setRuntimeSource] = useState<"self-hosted" | "official-fallback">("official-fallback");
   // Phase 7: worker error surfaced from inside the iframe.
   const [workerError, setWorkerError] = useState<string | null>(null);
   // Phase 8: track when we first hit 99% decompression so we can apply a

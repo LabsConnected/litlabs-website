@@ -16,6 +16,10 @@ export interface RawCapabilities {
   connectionSummary?: string;
   terminalStatus?: string;
   terminalSessionId?: string | null;
+  /** Voice transport connected (TTS-ready). Client-derived. */
+  voiceTransportConnected?: boolean;
+  /** Microphone currently capturing audio. Client-derived. */
+  voiceMicrophoneOn?: boolean;
 }
 
 export interface CapabilityTranslation {
@@ -96,6 +100,21 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
       "If the user asks about running commands, say: \"The terminal is not connected. The repository and terminal are separate — you may still have GitHub access without a terminal.\"";
   }
 
+  // ── Voice state (client-derived, defaults to unknown) ──
+  const voiceTransport = caps.voiceTransportConnected === true;
+  const micOn = caps.voiceMicrophoneOn === true;
+  const voiceUnknown = caps.voiceTransportConnected === undefined;
+  let voiceState: string;
+  if (voiceUnknown) {
+    voiceState = "Voice status is unknown (no client snapshot provided).";
+  } else if (voiceTransport && micOn) {
+    voiceState = "Voice transport is connected and microphone is on.";
+  } else if (voiceTransport) {
+    voiceState = "Voice transport is connected (TTS ready) but microphone is off.";
+  } else {
+    voiceState = "Voice is not connected.";
+  }
+
   // ── Full context block for LLM ──
   const parts: string[] = [
     "STUDIO CONNECTION STATE (for your reference — do NOT expose raw field names to the user):",
@@ -109,6 +128,8 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
 
   if (terminalAction) parts.push(`  → Next action: ${terminalAction}`);
 
+  parts.push(`Voice: ${voiceState}`);
+
   parts.push(
     `Other services: ${hasConnections ? connected.join(", ") : "none connected"}`,
   );
@@ -117,10 +138,11 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("RULES:");
   parts.push("- Never use internal field names like \"repository capability\", \"repositoryIndexed\", \"terminalExecution\", or raw enum values in conversation.");
   parts.push("- Always translate state into a clear, user-facing message with one concrete next action.");
-  parts.push("- GitHub connection, repository selection, workspace provisioning, file access, indexing, and terminal (PTY) connection are SEPARATE states. Do not blend them.");
+  parts.push("- GitHub connection, repository selection, workspace provisioning, file access, indexing, terminal (PTY), and voice are SEPARATE states. Do not blend them.");
   parts.push("- A disconnected terminal does NOT mean GitHub is disconnected.");
   parts.push("- A repository can be usable before indexing finishes. Indexing is optional for basic file access.");
-  parts.push("- Never claim you can read files, run commands, or access a repository unless the state above explicitly says it is connected and ready.");
+  parts.push("- Never claim you can read files, run commands, access a repository, or use voice/microphone unless the state above explicitly says it is connected and ready.");
+  parts.push("- If voice status is unknown, do NOT claim voice is working, good, online, or nominal. Say you don't have live voice status and point to the Settings page.");
   parts.push("- If the user wants to see raw diagnostics, they can open the Diagnostics view. Do not dump raw fields in normal conversation.");
 
   return {
