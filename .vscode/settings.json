@@ -114,7 +114,20 @@
     "labstudio",
     "LabStudio",
     "lab",
-    "Lab"
+    "Lab",
+    "Emscripten",
+    "extractzip",
+    "extract7z",
+    "entr",
+    "unstub",
+    "backchannel",
+    "gapless",
+    "DecompressionStream",
+    "NativeZipReader",
+    "libunrar",
+    "nipplejs",
+    "satellaview",
+    "creatomate"
   ],
   "files.associations": {
     "**/supabase/**/*.sql": "sql",
