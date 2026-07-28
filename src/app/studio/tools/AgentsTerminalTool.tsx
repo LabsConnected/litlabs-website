@@ -122,8 +122,10 @@ export default function AgentsTerminalTool() {
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
 
-  /* Real PTY terminal mode */
-  const [ptyMode, setPtyMode] = useState(false);
+  /* Real PTY terminal mode — Phase 2.5: terminal is execution-only.
+     The AI chat mode has been removed. There is one transcript
+     (the main Studio conversation) and one composer. */
+  const [ptyMode, setPtyMode] = useState(true);
   const [projects, setProjects] = useState<
     Array<{ id: string; repository_full_name?: string; owner?: string; repository?: string }>
   >([]);
@@ -671,20 +673,7 @@ export default function AgentsTerminalTool() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
-              {/* PTY / Chat mode toggle */}
-              <button
-                onClick={() => setPtyMode((prev) => !prev)}
-                className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all shrink-0"
-                style={{
-                  backgroundColor: ptyMode ? "#22c55e15" : T.boxBg,
-                  border: `1px solid ${ptyMode ? "#22c55e30" : T.borderColor + "20"}`,
-                  color: ptyMode ? "#22c55e" : T.textMuted,
-                }}
-                title={ptyMode ? "Real PTY terminal" : "AI chat terminal"}
-              >
-                {ptyMode ? <SquareTerminal size={10} /> : <MessageSquare size={10} />}
-                <span className="hidden sm:inline">{ptyMode ? "PTY" : "Chat"}</span>
-              </button>
+              {/* Phase 2.5: PTY/Chat toggle removed — terminal is execution-only. */}
 
               {/* Provider selector */}
               <button

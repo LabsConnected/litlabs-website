@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
-export type AgentId = "litt" | "spark";
+// Phase 2.1: AgentId is now a string to support premium agents.
+// The server resolves the full agent profile from a registry.
+export type AgentId = string;
 
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -22,7 +24,7 @@ export interface AgentMeta {
   placeholder: string;
 }
 
-export const AGENT_META: Record<AgentId, AgentMeta> = {
+export const AGENT_META: Record<string, AgentMeta> = {
   litt: {
     id: "litt",
     displayName: "LiTT",
@@ -44,6 +46,11 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
     tag: "Creative",
   },
 };
+
+/** Get agent meta by ID, falling back to LiTT for unknown agents. */
+export function getAgentMeta(id: AgentId): AgentMeta {
+  return AGENT_META[id] ?? AGENT_META.litt;
+}
 
 interface StudioAgentStore {
   activeAgentId: AgentId;

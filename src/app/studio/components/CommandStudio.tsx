@@ -86,7 +86,10 @@ function AgentVoiceSync() {
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setVoiceAgent = useVoiceStore((s) => s.setActiveAgent);
   useEffect(() => {
-    setVoiceAgent(activeAgentId);
+    // VoiceAgentId is "litt" | "spark" — only sync for known voice agents
+    if (activeAgentId === "litt" || activeAgentId === "spark") {
+      setVoiceAgent(activeAgentId);
+    }
   }, [activeAgentId, setVoiceAgent]);
   return null;
 }
@@ -509,7 +512,7 @@ function StudioWorkSurface({
   onStartBlank,
   onConnectRepo,
 }: {
-  messages: import("../stores/useStudioAgentStore").ChatMessage[];
+  messages: import("../types/conversation").StudioMessage[];
   busy: boolean;
   activeAgentId: import("../stores/useStudioAgentStore").AgentId;
   fallbackNotice: string | null;

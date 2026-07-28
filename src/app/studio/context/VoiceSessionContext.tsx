@@ -133,7 +133,7 @@ const defaultDiagnostics: VoiceDiagnostics = {
   turnNumber: 0,
 };
 
-const defaultCtx: VoiceSessionCtx = {
+export const defaultCtx: VoiceSessionCtx = {
   voiceState: "idle",
   voiceOutputState: "idle",
   voiceInputState: "idle",

@@ -84,7 +84,10 @@ function AgentVoiceSync() {
   const setVoiceAgent = useVoiceStore((s) => s.setActiveAgent);
 
   useEffect(() => {
-    setVoiceAgent(activeAgentId);
+    // VoiceAgentId is "litt" | "spark" — only sync for known voice agents
+    if (activeAgentId === "litt" || activeAgentId === "spark") {
+      setVoiceAgent(activeAgentId);
+    }
   }, [activeAgentId, setVoiceAgent]);
 
   return null;

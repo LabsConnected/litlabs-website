@@ -5,13 +5,14 @@ import ReactMarkdown from "react-markdown";
 import { UserMessageAvatar } from "@/components/chat/MessageAvatar";
 import { parseJarvisActions } from "@/lib/litt-context";
 import { ActionChips } from "./canvas/ActionChips";
+import { MessageEventCard } from "./MessageEventCards";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import {
   AGENT_META,
-  type ChatMessage,
   type AgentId,
 } from "../stores/useStudioAgentStore";
+import type { StudioMessage } from "../types/conversation";
 import type { StudioTool } from "./StudioSidebar";
 
 /**
@@ -29,7 +30,7 @@ export default function StudioTranscript({
   onRouteTool,
   onRegenerate,
 }: {
-  messages: ChatMessage[];
+  messages: StudioMessage[];
   busy: boolean;
   activeAgentId: AgentId;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
@@ -145,6 +146,8 @@ export default function StudioTranscript({
                     </div>
                   )}
                 </div>
+                {/* Phase 2.6: structured event cards from typed data */}
+                {message.event && <MessageEventCard event={message.event} />}
                 {message.actions && message.actions.length > 0 && (
                   <ActionChips
                     actions={message.actions}

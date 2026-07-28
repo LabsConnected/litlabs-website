@@ -22,6 +22,7 @@ import {
   FolderOpen,
   Wand2,
   Cpu,
+  Check,
 } from "lucide-react";
 import { AGENT_AVATAR_META } from "@/lib/avatars";
 import Link from "next/link";
@@ -760,9 +761,9 @@ export default function AgentTool() {
         </div>
       </div>
 
-      {/* ── CENTER: CHAT WORKSPACE ── */}
+      {/* ── CENTER: AGENT MANAGEMENT (no chat — Phase 2.5) ── */}
       <div className="flex-1 flex flex-col min-w-0">
-        {/* Chat header */}
+        {/* Agent header */}
         <div
           className="flex items-center justify-between px-4 h-12 border-b shrink-0"
           style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "50" }}
@@ -774,26 +775,11 @@ export default function AgentTool() {
                 {selectedAgent.name}
               </div>
               <div className="text-[9px] opacity-60 truncate" style={{ color: T.textMuted }}>
-                {selectedAgent.role} · {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ?? "Gemini"} · {enabledCapCount} capabilities
+                {selectedAgent.role} · {enabledCapCount} capabilities
               </div>
             </div>
           </div>
           <div className="flex items-center gap-1.5 shrink-0">
-            <button
-              onClick={() => setProvider(provider === "gemini" ? "openrouter-free" : "gemini")}
-              title="Switch provider"
-              className="text-[9px] px-2 py-0.5 rounded font-bold transition-all"
-              style={{ backgroundColor: T.accentColor + "15", color: T.accentColor, border: `1px solid ${T.accentColor}30` }}
-            >
-              {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ?? "Gemini"}
-            </button>
-            <button
-              onClick={clearChat}
-              className="flex items-center gap-1 text-[9px] px-2 py-1 rounded border opacity-50 hover:opacity-100 transition-all"
-              style={{ borderColor: T.borderColor + "20", color: T.textMuted }}
-            >
-              <Trash2 size={9} /> Clear
-            </button>
             {/* Mobile inspector toggle */}
             <button
               onClick={() => setInspectorOpen(true)}
@@ -805,131 +791,83 @@ export default function AgentTool() {
           </div>
         </div>
 
-        {/* Messages */}
+        {/* Management content — no chat, no composer (Phase 2.5) */}
         <div className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
-          {messages.length === 0 && !streaming && (
-            <div className="flex flex-col items-center justify-center h-full pb-8 text-center px-4">
-              <div className="text-3xl mb-2 opacity-90">{selectedAvatar.emoji}</div>
-              <div className="text-sm font-bold mb-1" style={{ color: selectedAgent.color }}>
-                {selectedAgent.name} is ready.
-              </div>
-              <div className="text-[10px] mb-4 opacity-50 max-w-xs" style={{ color: T.textMuted }}>
-                {selectedAgent.id === "litt"
-                  ? "Build, inspect, automate, or continue a project."
-                  : "Create visuals, refine your brand, write content, or generate media."}
-              </div>
-              <div className="w-full max-w-sm grid grid-cols-1 gap-1.5">
-                {(QUICK_ACTIONS[selectedAgent.id] || []).map((action) => (
-                  <button
-                    key={action.label}
-                    onClick={() => sendMessage(action.label)}
-                    className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
-                    style={{ borderColor: selectedAgent.color + "30", color: T.textColor, backgroundColor: selectedAgent.color + "06" }}
-                  >
-                    <action.icon size={13} style={{ color: selectedAgent.color }} />
-                    {action.label}
-                  </button>
-                ))}
-              </div>
+          <div className="flex flex-col items-center justify-center h-full pb-8 text-center px-4">
+            <div className="text-3xl mb-2 opacity-90">{selectedAvatar.emoji}</div>
+            <div className="text-sm font-bold mb-1" style={{ color: selectedAgent.color }}>
+              {selectedAgent.name}
             </div>
-          )}
+            <div className="text-[10px] mb-4 opacity-50 max-w-xs" style={{ color: T.textMuted }}>
+              {selectedAgent.purpose}
+            </div>
 
-          {messages.map((msg) => (
-            <div key={msg.id} className={`flex gap-2.5 ${msg.role === "user" ? "flex-row-reverse" : "flex-row"}`}>
-              <div
-                className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] mt-0.5"
-                style={{
-                  backgroundColor: msg.role === "user" ? T.accentColor + "20" : selectedAgent.color + "20",
-                  border: `1px solid ${msg.role === "user" ? T.accentColor + "40" : selectedAgent.color + "40"}`,
-                }}
+            {/* Management actions */}
+            <div className="w-full max-w-sm space-y-2">
+              <div className="text-[9px] font-bold uppercase tracking-widest opacity-40" style={{ color: T.textMuted }}>
+                Agent Management
+              </div>
+
+              {/* Set as default */}
+              <button
+                onClick={() => switchAgent(selectedAgent)}
+                className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
+                style={{ borderColor: selectedAgent.color + "30", color: T.textColor, backgroundColor: selectedAgent.color + "06" }}
               >
-                {msg.role === "user" ? "U" : selectedAvatar.initials}
-              </div>
-              <div className="max-w-[80%] space-y-0.5">
-                <div className="text-[9px] font-bold mb-1" style={{ color: msg.role === "user" ? T.accentColor : selectedAgent.color }}>
-                  {msg.role === "user" ? "You" : selectedAgent.name} · {msg.ts}
-                </div>
-                <div
-                  className="px-3 py-2 rounded-xl text-xs leading-relaxed"
-                  style={{
-                    backgroundColor: msg.role === "user" ? T.accentColor + "10" : T.boxBg,
-                    border: `1px solid ${msg.role === "user" ? T.accentColor + "25" : T.borderColor + "20"}`,
-                    color: T.textColor,
-                    borderTopRightRadius: msg.role === "user" ? "4px" : undefined,
-                    borderTopLeftRadius: msg.role !== "user" ? "4px" : undefined,
-                  }}
-                >
-                  {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
-                </div>
-              </div>
-            </div>
-          ))}
+                <Check size={13} style={{ color: selectedAgent.color }} />
+                <span>Set as default agent</span>
+              </button>
 
-          {streaming && (
-            <div className="flex gap-2.5">
-              <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px] mt-0.5" style={{ backgroundColor: selectedAgent.color + "20", border: `1px solid ${selectedAgent.color}40` }}>
-                {selectedAvatar.emoji}
-              </div>
-              <div className="max-w-[80%]">
-                <div className="text-[9px] font-bold mb-1" style={{ color: selectedAgent.color }}>{selectedAgent.name} · now</div>
-                <div className="px-3 py-2 rounded-xl text-xs leading-relaxed" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20`, color: T.textColor, borderTopLeftRadius: "4px" }}>
-                  {renderMarkdown(streaming)}
-                  <span className="animate-pulse ml-0.5">▊</span>
-                </div>
-              </div>
-            </div>
-          )}
+              {/* Capabilities */}
+              <Link
+                href={`/marketplace?assistant=${selectedAgent.id}`}
+                className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
+                style={{ borderColor: T.borderColor + "20", color: T.textColor, backgroundColor: T.bgColor }}
+              >
+                <Package size={13} style={{ color: selectedAgent.color }} />
+                <span>Inspect capabilities ({enabledCapCount} installed)</span>
+                <ChevronRight size={9} className="ml-auto opacity-30" />
+              </Link>
 
-          {isLoading && !streaming && (
-            <div className="flex gap-2.5">
-              <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-[11px]" style={{ backgroundColor: selectedAgent.color + "20", border: `1px solid ${selectedAgent.color}40` }}>
-                {selectedAvatar.emoji}
+              {/* Permissions */}
+              <div className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border"
+                style={{ borderColor: T.borderColor + "20", color: T.textColor, backgroundColor: T.bgColor }}
+              >
+                <Shield size={13} style={{ color: selectedAgent.color }} />
+                <span>Permissions: {selectedAgent.access.join(", ")}</span>
               </div>
-              <div className="px-3 py-2 rounded-xl text-[11px] flex items-center gap-2" style={{ backgroundColor: T.boxBg, border: `1px solid ${T.borderColor}20`, color: T.linkColor }}>
-                <span className="flex gap-0.5">
-                  {[0, 150, 300].map((delay) => (
-                    <span key={delay} className="w-1 h-1 rounded-full animate-bounce" style={{ backgroundColor: selectedAgent.color, animationDelay: `${delay}ms` }} />
-                  ))}
-                </span>
-                <span className="opacity-70">{selectedAgent.name} is thinking...</span>
-              </div>
-            </div>
-          )}
-          <div ref={messagesEndRef} />
-        </div>
 
-        {/* Input */}
-        <div className="px-4 py-3 border-t shrink-0" style={{ borderColor: T.borderColor + "15", backgroundColor: T.boxBg + "40" }}>
-          <div className="flex gap-2 items-end">
-            <textarea
-              ref={textareaRef}
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              placeholder={`Message ${selectedAgent.name}… (Enter to send)`}
-              rows={1}
-              disabled={isLoading}
-              className="flex-1 px-3 py-2 text-xs rounded-lg outline-none resize-none overflow-hidden disabled:opacity-50 transition-all"
-              style={{ backgroundColor: T.bgColor, border: `1px solid ${T.borderColor}30`, color: T.textColor, minHeight: "38px", maxHeight: "120px" }}
-            />
-            <button
-              onClick={() => sendMessage()}
-              disabled={!input.trim() || isLoading}
-              className="px-3 py-2 rounded-lg font-bold disabled:opacity-30 transition-all hover:scale-105 shrink-0"
-              style={{ backgroundColor: selectedAgent.color, color: "#0a0a0f", minHeight: "38px" }}
-            >
-              <Send size={13} />
-            </button>
-          </div>
-          <div className="flex items-center justify-between mt-1.5 px-0.5">
-            <span className="text-[9px] opacity-30" style={{ color: T.textMuted }}>
-              {PROVIDER_OPTIONS.find((p) => p.id === provider)?.label ?? "Gemini"} · Shift+Enter for new line
-            </span>
-            {input.length > 0 && <span className="text-[9px] font-mono opacity-40" style={{ color: T.textMuted }}>{input.length}</span>}
+              {/* Settings */}
+              <Link
+                href="/settings"
+                className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
+                style={{ borderColor: T.borderColor + "20", color: T.textColor, backgroundColor: T.bgColor }}
+              >
+                <Settings size={13} style={{ color: T.accentColor }} />
+                <span>Agent settings</span>
+                <ChevronRight size={9} className="ml-auto opacity-30" />
+              </Link>
+
+              {/* Marketplace discovery */}
+              <Link
+                href="/marketplace"
+                className="w-full flex items-center gap-2 text-left px-3 py-2.5 text-[11px] rounded-lg border transition-all hover:scale-[1.01]"
+                style={{ borderColor: T.borderColor + "20", color: T.textColor, backgroundColor: T.bgColor }}
+              >
+                <Package size={13} style={{ color: T.accentColor }} />
+                <span>Discover premium agents</span>
+                <ChevronRight size={9} className="ml-auto opacity-30" />
+              </Link>
+            </div>
+
+            {/* Info notice */}
+            <div className="mt-6 text-[9px] opacity-40 max-w-xs" style={{ color: T.textMuted }}>
+              Chat with {selectedAgent.name} from the main Studio conversation.
+              This panel is for agent management only.
+            </div>
           </div>
         </div>
       </div>
-
       {/* ── RIGHT: INSPECTOR (desktop) ── */}
       <div
         className="hidden md:flex w-[320px] shrink-0 border-l flex-col"

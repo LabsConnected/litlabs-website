@@ -1,21 +1,17 @@
 "use client";
 
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { useProfile } from "@/context/ProfileContext";
-import { useBuilderSessions } from "./useBuilderSessions";
+import { useStudioConversations } from "./useStudioConversations";
 import { parseBuilderLocalCommand } from "../lib/builder-command-router";
 import { detectIntent, type IntentResult } from "../lib/studio-intent";
 import { useConnectionSummary } from "./useConnectionSummary";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
-import {
-  useStudioAgentStore,
-  AGENT_META,
-  type ChatMessage,
-  type AgentId,
-} from "../stores/useStudioAgentStore";
+import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { StudioTool } from "../components/StudioSidebar";
+import type { StudioMessage } from "../types/conversation";
 
 /**
  * Structured result from the conversation `send` function.
@@ -35,11 +31,14 @@ export interface SendResult {
 
 /**
  * useStudioConversation — the single conversation controller for the
- * Command Studio. Extracted from ChatTool so the new CommandComposer
- * can call the real /api/gemini/chat path directly, without mounting
- * an invisible ChatTool + ChatShell + MultimodalComposer underneath.
+ * Command Studio.
  *
- * One controller, one transcript, one composer. No duplicate chat UI.
+ * Phase 2.1 — now uses the unified useStudioConversations hook as
+ * the single source of truth for conversations, messages, agent
+ * selection, and project context. No more split between
+ * useBuilderSessions (sessions) and useStudioAgentStore (threads).
+ *
+ * One controller, one transcript, one composer, one conversation model.
  */
 export function useStudioConversation({
   onRouteTool,
@@ -47,32 +46,21 @@ export function useStudioConversation({
   onRouteTool?: (tool: StudioTool, command?: string) => void;
 } = {}) {
   const [busy, setBusy] = useState(false);
-  const sessionManager = useBuilderSessions();
+  const conversations = useStudioConversations();
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
-
-  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  const threads = useStudioAgentStore((s) => s.threads);
-  const storeSetMessages = useStudioAgentStore((s) => s.setMessages);
-  const clearThread = useStudioAgentStore((s) => s.clearThread);
 
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const setFallbackNotice = useStudioModelStore((s) => s.setFallbackNotice);
 
-  const messages = useMemo(
-    () => threads[activeAgentId] ?? [],
-    [threads, activeAgentId],
-  );
-  const setMessages = useCallback(
-    (updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[])) =>
-      storeSetMessages(activeAgentId, updater),
-    [storeSetMessages, activeAgentId],
-  );
-
   const { profile } = useProfile();
   const searchParams = useSearchParams();
   const initialPrompt = searchParams.get("mission") || "";
+
+  const messages = conversations.messages;
+  const activeAgentId = conversations.selectedAgentId;
+  const setMessages = conversations.setMessages;
 
   const send = useCallback(
     async (value: string, attachments?: string[]): Promise<SendResult> => {
@@ -87,7 +75,7 @@ export function useStudioConversation({
             setMessages([]);
             return { accepted: true };
           case "new":
-            sessionManager.create();
+            conversations.create();
             return { accepted: true };
           case "terminal":
             onRouteTool?.("terminal");
@@ -95,17 +83,31 @@ export function useStudioConversation({
           case "sessions":
             return { accepted: true };
           case "delete":
-            if (sessionManager.activeSession && window.confirm(`Delete "${sessionManager.activeSession.title}"?`)) sessionManager.remove(sessionManager.activeSession.id);
+            if (conversations.activeConversation && window.confirm(`Delete "${conversations.activeConversation.title}"?`)) {
+              conversations.remove(conversations.activeConversation.id);
+            }
             return { accepted: true };
           case "rename":
-            if (localCommand.title && sessionManager.activeSession) sessionManager.rename(sessionManager.activeSession.id, localCommand.title);
-            else setMessages((current) => [...current, { role: "assistant", content: "Usage: `/rename New session name`", createdAt: Date.now() }]);
+            if (localCommand.title && conversations.activeConversation) {
+              conversations.rename(conversations.activeConversation.id, localCommand.title);
+            } else {
+              setMessages((current) => [
+                ...current,
+                { id: crypto.randomUUID(), role: "assistant", content: "Usage: `/rename New session name`", status: "complete" as const, createdAt: Date.now() },
+              ]);
+            }
             return { accepted: true };
           case "help":
-            setMessages((current) => [...current, { role: "assistant", content: "**Builder commands**\n\n`/new` new session · `/clear` reset this session · `/terminal` open terminal · `/sessions` manage chats · `/rename name` rename · `/delete` delete current session · `/help` show commands", createdAt: Date.now() }]);
+            setMessages((current) => [
+              ...current,
+              { id: crypto.randomUUID(), role: "assistant", content: "**Builder commands**\n\n`/new` new session · `/clear` reset this session · `/terminal` open terminal · `/sessions` manage chats · `/rename name` rename · `/delete` delete current session · `/help` show commands", status: "complete" as const, createdAt: Date.now() },
+            ]);
             return { accepted: true };
           default:
-            setMessages((current) => [...current, { role: "assistant", content: `Unknown local command: \`/${localCommand.command}\`. Type \`/help\`.`, createdAt: Date.now() }]);
+            setMessages((current) => [
+              ...current,
+              { id: crypto.randomUUID(), role: "assistant", content: `Unknown local command: \`/${localCommand.command}\`. Type \`/help\`.`, status: "complete" as const, createdAt: Date.now() },
+            ]);
             return { accepted: true };
         }
       }
@@ -114,10 +116,11 @@ export function useStudioConversation({
       const intent = detectIntent(text);
       if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
         const intentMessage = buildIntentResponseMessage(intent);
+        const now = Date.now();
         setMessages((current) => [
           ...current,
-          { role: "user", content: text, createdAt: Date.now() },
-          { role: "assistant", content: intentMessage, createdAt: Date.now() },
+          { id: crypto.randomUUID(), role: "user", content: text, status: "complete" as const, createdAt: now },
+          { id: crypto.randomUUID(), role: "assistant", content: intentMessage, agentId: activeAgentId, status: "complete" as const, createdAt: now },
         ]);
         if (intent.tool) onRouteTool?.(intent.tool);
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
@@ -131,11 +134,14 @@ export function useStudioConversation({
         ...messages,
         { role: "user" as const, content: text || "(image)" },
       ];
+      const now = Date.now();
       setMessages((current) => [
         ...current,
-        { role: "user" as const, content: text || "(image)", createdAt: Date.now() },
+        { id: crypto.randomUUID(), role: "user", content: text || "(image)", status: "complete" as const, createdAt: now },
       ]);
-      if (sessionManager.activeSession?.title === "New chat") sessionManager.rename(sessionManager.activeSession.id, text.slice(0, 56) || "Image request");
+      if (conversations.activeConversation?.title === "New chat") {
+        conversations.rename(conversations.activeConversation.id, text.slice(0, 56) || "Image request");
+      }
       setBusy(true);
       try {
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
@@ -144,7 +150,9 @@ export function useStudioConversation({
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             agentSlug: activeAgentId,
-            systemPrompt: AGENT_META[activeAgentId].systemPrompt,
+            // Phase 2.3: systemPrompt is NO LONGER sent from the client.
+            // The server resolves the agent's system prompt from a
+            // server-owned registry. The client only sends the agent ID.
             provider: isAutoBest ? undefined : selectedModel.apiProvider || selectedModel.provider,
             category: isAutoBest ? "auto" : selectedModel.category,
             model: selectedModel.model,
@@ -154,8 +162,13 @@ export function useStudioConversation({
             userName: profile.displayName || "Member",
             images: attachments,
             activeCanvasId: typeof localStorage !== "undefined" ? localStorage.getItem("litt:canvas:active-id") : null,
+            // Phase 2.4: complete project context
+            projectId: conversations.activeConversation?.project.projectId,
+            repositoryName: conversations.activeConversation?.project.repositoryName,
+            branch: conversations.activeConversation?.project.branch,
             capabilities: {
               repository: capabilities.repository,
+              repositoryName: capabilities.repositoryName,
               repositoryIndexed: capabilities.repositoryIndexed,
               terminalExecution: capabilities.terminalExecution,
               writeAccess: capabilities.writeAccess,
@@ -170,7 +183,7 @@ export function useStudioConversation({
         });
         if (!response.ok) {
           const err = await response.json().catch(() => ({}));
-          throw new Error(err.detail || err.error || `${AGENT_META[activeAgentId].displayName} is reconnecting`);
+          throw new Error(err.detail || err.error || `${AGENT_META[activeAgentId as "litt" | "spark"]?.displayName ?? "Agent"} is reconnecting`);
         }
         const data = await response.json();
         const reply =
@@ -179,29 +192,34 @@ export function useStudioConversation({
         if (data.usedFallbackModel) {
           setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
         }
+        // The server returns the resolved agent ID — use it if present
+        const resolvedAgentId = data.agentId || activeAgentId;
         setMessages((current) => [
           ...current,
           {
+            id: crypto.randomUUID(),
             role: "assistant",
             content: reply,
+            agentId: resolvedAgentId,
+            status: "complete" as const,
             createdAt: Date.now(),
             actions: Array.isArray(data.actions) ? data.actions : undefined,
           },
         ]);
         return { accepted: true, reply };
       } catch (error) {
-        const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
+        const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId as "litt" | "spark"]?.displayName ?? "Agent"} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
         setMessages((current) => [
           ...current,
-          { role: "assistant", content: reply, createdAt: Date.now() },
+          { id: crypto.randomUUID(), role: "assistant", content: reply, agentId: activeAgentId, status: "failed" as const, createdAt: Date.now() },
         ]);
         return { accepted: true, reply };
       } finally {
         setBusy(false);
       }
     },
-    [busy, messages, setMessages, sessionManager, onRouteTool, selectedModel, activeAgentId, profile, capabilities, voiceTransportConnected, voiceInputState, setFallbackNotice],
+    [busy, messages, setMessages, conversations, onRouteTool, selectedModel, activeAgentId, profile, capabilities, voiceTransportConnected, voiceInputState, setFallbackNotice],
   );
 
   const regenerate = useCallback(() => {
@@ -212,7 +230,7 @@ export function useStudioConversation({
     void send(trimmed[lastUserIndex].content);
   }, [messages, setMessages, send]);
 
-  const clear = useCallback(() => clearThread(activeAgentId), [clearThread, activeAgentId]);
+  const clear = useCallback(() => setMessages([]), [setMessages]);
 
   return {
     messages,
@@ -223,13 +241,17 @@ export function useStudioConversation({
     activeAgentId,
     fallbackNotice,
     initialPrompt,
-    sessions: sessionManager.sessions,
-    activeSessionId: sessionManager.activeId,
-    selectSession: sessionManager.setActiveId,
-    newSession: () => sessionManager.create(),
-    renameSession: sessionManager.rename,
-    deleteSession: sessionManager.remove,
-    deleteAllSessions: sessionManager.removeAll,
+    // Unified conversation API
+    conversations: conversations.conversations,
+    activeConversation: conversations.activeConversation,
+    activeSessionId: conversations.activeId,
+    selectSession: conversations.setActiveId,
+    newSession: () => conversations.create(),
+    renameSession: conversations.rename,
+    deleteSession: conversations.remove,
+    deleteAllSessions: conversations.removeAll,
+    setSelectedAgent: conversations.setSelectedAgent,
+    updateProject: conversations.updateProject,
   };
 }
 
@@ -268,5 +290,5 @@ function sanitizeErrorMessage(raw: string): string {
   return raw;
 }
 
-export type StudioConversation = ReturnType<typeof useStudioConversation>;
-export type { AgentId };
+export type StudioConversationController = ReturnType<typeof useStudioConversation>;
+export type { AgentId, StudioMessage };

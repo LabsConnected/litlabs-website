@@ -47,7 +47,13 @@ vi.mock("@/components/chat/MessageAvatar", () => ({
 }));
 
 import StudioTranscript from "./StudioTranscript";
-import type { ChatMessage, AgentId } from "../stores/useStudioAgentStore";
+import type { StudioMessage } from "../types/conversation";
+import type { AgentId } from "../stores/useStudioAgentStore";
+
+// Helper to create StudioMessage with required fields
+function msg(role: "user" | "assistant", content: string, extra?: Partial<StudioMessage>): StudioMessage {
+  return { id: `test-${Math.random()}`, role, content, status: "complete", createdAt: Date.now(), ...extra };
+}
 
 describe("StudioTranscript — Phase 1.1 functional tests", () => {
   beforeEach(() => {
@@ -55,8 +61,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("renders user message when messages exist", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Build a landing page", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Build a landing page", status: "complete", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -70,9 +76,9 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("renders assistant response when present", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Hello", createdAt: Date.now() },
-      { role: "assistant", content: "I'm ready to help.", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Hello", status: "complete", createdAt: Date.now() },
+      { id: `test-${Math.random()}`, role: "assistant", content: "I'm ready to help.", status: "complete", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -99,8 +105,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("shows busy indicator when busy=true and no pending assistant message", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Working...", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Working...", status: "complete", createdAt: Date.now() },
     ];
     const { container } = render(
       <StudioTranscript
@@ -116,9 +122,9 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("does not render hidden opacity-0 controls", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Test", createdAt: Date.now() },
-      { role: "assistant", content: "Response", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Test", status: "complete", createdAt: Date.now() },
+      { id: `test-${Math.random()}`, role: "assistant", content: "Response", status: "complete", createdAt: Date.now() },
     ];
     const { container } = render(
       <StudioTranscript
@@ -137,8 +143,8 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("renders agent name label (LiTT) for assistant messages", () => {
-    const messages: ChatMessage[] = [
-      { role: "assistant", content: "Hi", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "assistant", content: "Hi", status: "complete", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -153,9 +159,9 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
 
   it("renders regenerate button on last assistant message when not busy", () => {
     const onRegenerate = vi.fn();
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Q", createdAt: Date.now() },
-      { role: "assistant", content: "A", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Q", status: "complete", createdAt: Date.now() },
+      { id: `test-${Math.random()}`, role: "assistant", content: "A", status: "complete", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -170,9 +176,9 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
   });
 
   it("does not render regenerate button when busy", () => {
-    const messages: ChatMessage[] = [
-      { role: "user", content: "Q", createdAt: Date.now() },
-      { role: "assistant", content: "A", createdAt: Date.now() },
+    const messages: StudioMessage[] = [
+      { id: `test-${Math.random()}`, role: "user", content: "Q", status: "complete", createdAt: Date.now() },
+      { id: `test-${Math.random()}`, role: "assistant", content: "A", status: "complete", createdAt: Date.now() },
     ];
     render(
       <StudioTranscript
@@ -186,3 +192,4 @@ describe("StudioTranscript — Phase 1.1 functional tests", () => {
     expect(screen.queryByRole("button", { name: /regenerate/i })).toBeNull();
   });
 });
+

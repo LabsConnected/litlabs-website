@@ -193,15 +193,33 @@ async function handler(req: NextRequest) {
       images = [],
       capabilities = {},
       pageContext,
+      // Phase 2.4: complete project context from the client
+      projectId,
+      repositoryName,
+      branch,
     } = body;
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
     }
 
+    // Phase 2.3: Server-owned agent identity.
+    // The client sends agentSlug or agentId — the server resolves the
+    // full agent profile (system prompt, permissions, capabilities)
+    // from the server-owned registry in src/lib/agents.ts.
+    //
+    // The client MUST NOT define the agent system prompt. Any
+    // client-supplied `systemPrompt` field is intentionally ignored.
+    const resolvedAgentSlug = typeof agentSlug === "string" ? agentSlug : DEFAULT_AGENT_SLUG;
     const agent =
-      AGENTS[agentSlug as keyof typeof AGENTS] ??
+      AGENTS[resolvedAgentSlug as keyof typeof AGENTS] ??
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
+
+    // Reject unknown or inactive agents (Phase 2.3 requirement).
+    // Unknown agents fall back to LiTT rather than silently using a
+    // non-existent profile. The response includes the resolved agent
+    // ID so the client knows which agent actually handled the message.
+    const resolvedAgentId = agent.id;
 
     const uid = userId || "anonymous-dev";
     const memoryContext = userId ? await fetchMemories(message, uid) : "";
@@ -231,7 +249,7 @@ async function handler(req: NextRequest) {
       message,
       userId: userId ?? null,
       conversationId: null, // not yet wired from session
-      projectId: (capabilities as Record<string, unknown>)?.projectId as string | null ?? null,
+      projectId: typeof projectId === "string" ? projectId : null,
       missionId: null,
       canvasId: (body.activeCanvasId as string) ?? null,
       capabilities: kernelCapabilities,
@@ -258,6 +276,15 @@ async function handler(req: NextRequest) {
     };
     const translated = translateCapabilities(rawCaps);
 
+    // Phase 2.4: Complete project context — tell LiTT which project,
+    // repository, and branch are active, and what it can do.
+    const projectContextBlock = [
+      repositoryName ? `ACTIVE REPOSITORY: ${repositoryName}` : null,
+      branch ? `ACTIVE BRANCH: ${branch}` : null,
+      projectId ? `ACTIVE PROJECT ID: ${projectId}` : null,
+      capabilities?.repositoryName ? `REPOSITORY NAME: ${capabilities.repositoryName}` : null,
+    ].filter(Boolean).join("\n");
+
     // Build page context block for the global companion
     const pageContextBlock = pageContext?.surface === "global_companion"
       ? [
@@ -279,6 +306,7 @@ async function handler(req: NextRequest) {
     const systemPrompt = [
       kernelSystemPrompt,
       translated.contextBlock,
+      projectContextBlock,
       pageContextBlock,
       memoryContext,
     ]
@@ -303,6 +331,7 @@ async function handler(req: NextRequest) {
         provider: r.provider,
         model: r.model,
         latencyMs: r.latencyMs,
+        agentId: resolvedAgentId,
       });
     }
 
@@ -362,6 +391,7 @@ async function handler(req: NextRequest) {
         model: r.model,
         latencyMs: r.latencyMs,
         actions,
+        agentId: resolvedAgentId,
       });
     }
 
