@@ -10,7 +10,7 @@ import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/action
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import { clerkClient } from "@clerk/nextjs/server";
-import { parseResponseMode, sanitizeTrustedFirstName } from "./chat-helpers";
+import { parseResponseMode, sanitizeTrustedFirstName, sanitizeResponse } from "./chat-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -45,10 +45,6 @@ async function saveMemory(content: string, userId: string, agentId: string): Pro
   } catch {
     // non-fatal
   }
-}
-
-function sanitizeOutput(text: string): string {
-  return text.replace(/\{\{?userName\}?\}/gi, "there");
 }
 
 function dataUrlToInlineData(dataUrl: string) {
@@ -319,7 +315,7 @@ async function handler(req: NextRequest) {
     const imageArray = Array.isArray(images) ? images : [];
     if (imageArray.length > 0 && !stream) {
       const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
-      const cleanText = sanitizeOutput(r.text);
+      const cleanText = sanitizeResponse(r.text, responseMode);
       if (userId) {
         await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
       }
@@ -366,7 +362,7 @@ async function handler(req: NextRequest) {
         },
         undefined,
       );
-      const cleanText = sanitizeOutput(r.text);
+      const cleanText = sanitizeResponse(r.text, responseMode);
       await logConversation(agent, userId, message, cleanText);
       if (userId) {
         await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
@@ -398,7 +394,7 @@ async function handler(req: NextRequest) {
           const r = await streamText(
             prompt,
             (chunk) => {
-              const cleanChunk = sanitizeOutput(chunk);
+              const cleanChunk = sanitizeResponse(chunk, responseMode);
               assistantText += cleanChunk;
               controller.enqueue(
                 encoder.encode(`data: ${JSON.stringify({ text: cleanChunk })}\n\n`),
