@@ -153,8 +153,47 @@ export async function POST(req: NextRequest) {
       case "checkout.session.completed": {
         const session = event.data.object as Stripe.Checkout.Session;
         const meta = session.metadata || {};
-        const coinAmount = parseInt(meta.coin_amount || "0", 10);
+        const productType = meta.product_type;
         const clerkId = meta.clerk_id;
+
+        // ── Agent purchase fulfillment ──
+        // Marketplace agent purchases use a transactional RPC that verifies
+        // the paid amount and creates the order + entitlement atomically.
+        if (productType === "agent" && clerkId && sb) {
+          const agentVersionId = meta.agent_version_id;
+          const orderId = meta.marketplace_order_id;
+          if (!agentVersionId || !orderId) {
+            // Missing required metadata — cannot fulfill. Let Stripe retry.
+            throw new Error("Agent purchase missing required metadata");
+          }
+          const amountTotal = session.amount_total ?? 0;
+          const currency = session.currency ?? "usd";
+          const paymentIntentId =
+            typeof session.payment_intent === "string"
+              ? session.payment_intent
+              : session.payment_intent?.id ?? null;
+          // Stripe does not expose charge_id on the session; the webhook
+          // can enrich it later from the payment_intent. For now, pass null.
+          const { error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_clerk_id: clerkId,
+            p_agent_version_id: agentVersionId,
+            p_stripe_session_id: session.id,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_charge_id: null,
+            p_amount_cents: amountTotal,
+            p_currency: currency,
+          });
+          if (rpcError) {
+            // RPC raised a PostgreSQL exception — return 500 so Stripe retries.
+            throw new Error(`fulfill_agent_purchase failed: ${rpcError.message}`);
+          }
+          break;
+        }
+
+        // ── Coin pack / plan fulfillment (existing logic) ──
+        const coinAmount = parseInt(meta.coin_amount || "0", 10);
         const planId = meta.plan_id as PlanId | undefined;
         if (coinAmount > 0 && clerkId) {
           await creditCoinPack(clerkId, coinAmount, session.id);
@@ -315,8 +354,32 @@ export async function POST(req: NextRequest) {
         if (!sb) break;
         const charge = event.data.object as Stripe.Charge;
         const refundMeta = charge.metadata || {};
+        const refundProductType = refundMeta.product_type;
         const refundClerkId = refundMeta.clerk_id;
-        if (refundClerkId) {
+
+        // ── Agent refund: revoke entitlement, do NOT debit LBC ──
+        // Agent purchases are not coin packs. Refunding an agent only marks
+        // the order as refunded and revokes the entitlement. LBC is never
+        // debited for agent purchases.
+        if (refundProductType === "agent") {
+          const paymentIntentId = charge.payment_intent as string | undefined;
+          if (paymentIntentId) {
+            const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+              p_stripe_event_id: event.id,
+              p_stripe_event_type: event.type,
+              p_stripe_payment_intent_id: paymentIntentId,
+              p_stripe_refund_id: charge.refunds?.data?.[0]?.id ?? null,
+            });
+            if (rpcError) {
+              throw new Error(`refund_agent_purchase failed: ${rpcError.message}`);
+            }
+          }
+          break;
+        }
+
+        // ── Coin pack / plan refund: debit LBC ──
+        // Only debit LBC for coin_pack or plan refunds — never for agents.
+        if (refundClerkId && (refundProductType === "coin_pack" || refundProductType === "plan" || !refundProductType)) {
           const { data: refundUser } = await sb
             .from("users")
             .select("id")
