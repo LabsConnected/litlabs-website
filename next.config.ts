@@ -127,7 +127,7 @@ const nextConfig: NextConfig = {
               "connect-src 'self' blob: https://*.clerk.com https://*.clerk.accounts.dev https://api.clerk.dev https://clerk.litlabs.net https://clerk-telemetry.com https://*.supabase.co wss://*.supabase.co https://api.openai.com https://openrouter.ai https://api.stripe.com https://fal.run https://fal.ai wss://*.fal.run https://image.pollinations.ai https://cloud.activepieces.com https://api.minimax.chat https://together.xyz https://api.together.xyz https://cloudflareinsights.com https://litlabs.net https://*.up.railway.app wss://*.up.railway.app wss://*.pusher.com https://*.pusher.com ws://localhost:* wss://localhost:* https://cdn.emulatorjs.org https://v8.js-dos.com https://cdn.dos.zone",
               "frame-src 'self' blob: data: https: http: https://open.spotify.com https://js.stripe.com https://accounts.google.com https://challenges.cloudflare.com https://*.clerk.com https://*.clerk.accounts.dev https://*.github.io https://pacman.platzh1rsch.ch https://*.sudoku100.com https://minesweeper.github.io",
               "worker-src 'self' blob: https://litlabs.net https://cdn.emulatorjs.org https://v8.js-dos.com",
-              "media-src 'self' blob:",
+              "media-src 'self' blob: data:",
               "object-src 'none'",
               "base-uri 'self'",
               "form-action 'self'",

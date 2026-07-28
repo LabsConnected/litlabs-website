@@ -644,7 +644,15 @@ export function VoiceSessionProvider({
               ttsAudioRef.current = null;
               browserTtsFallback(sanitized, activeAgent, finishSpeaking);
             };
-            await audio.play();
+            // Handle autoplay rejection — browsers may block audio.play()
+            // without a recent user gesture. Fall back to browser TTS.
+            try {
+              await audio.play();
+            } catch (playErr) {
+              console.warn("[Voice] Audio play() rejected (autoplay policy?), falling back:", playErr);
+              ttsAudioRef.current = null;
+              browserTtsFallback(sanitized, activeAgent, finishSpeaking);
+            }
             return;
           }
         }

@@ -46,7 +46,8 @@ export async function POST(req: NextRequest) {
 
     // Create an ephemeral token via the OpenAI Realtime API.
     // The browser uses this token (not our API key) for the WebRTC SDP exchange.
-    const model = "gpt-4o-realtime-preview-2024-12-17";
+    // Using the latest preview snapshot (2025-06-03) for best performance.
+    const model = "gpt-4o-realtime-preview-2025-06-03";
 
     const tokenRes = await fetch(
       "https://api.openai.com/v1/realtime/sessions",
