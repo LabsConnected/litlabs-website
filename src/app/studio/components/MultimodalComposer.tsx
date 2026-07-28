@@ -161,6 +161,8 @@ export default function MultimodalComposer({
         if (reply) {
           speakText(reply);
         }
+      }).catch((err) => {
+        console.warn("[Voice Pipeline] onSend failed in onTurn:", err);
       });
     });
   }, [onSend, setOnTurn, voiceMode, speakText]);

@@ -483,20 +483,37 @@ export function useInworldSession(
                 break;
 
               case "response.created":
-                // A new response is starting — clear any stale interrupt flag
-                // so its audio chunks are not dropped. This handles both VAD
-                // auto-responses and explicit response.create from speakText.
-                interruptedRef.current = false;
+                // A new response is starting. If this is an auto-response from
+                // VAD (create_response: true) and NOT from an explicit speakText
+                // call, cancel it immediately — the canonical pipeline (transcript
+                // → onSend → speakText) is the only source of assistant responses.
+                // This prevents phantom audio that doesn't match any chat message.
+                if (!explicitTtsRef.current) {
+                  if (wsRef.current?.readyState === WebSocket.OPEN) {
+                    console.debug("[Voice Pipeline] cancelling auto-response (not from speakText)");
+                    wsRef.current.send(JSON.stringify({ type: "response.cancel" }));
+                  }
+                } else {
+                  // Explicit TTS response — clear interrupt flag so audio plays
+                  interruptedRef.current = false;
+                }
                 break;
 
               case "response.cancelled":
-                // Explicit cancel (from interrupt()) — keep interruptedRef true
-                // so in-flight chunks are dropped, and reset state.
-                interruptedRef.current = true;
-                explicitTtsRef.current = false;
-                stopPlayback();
-                setState("idle");
-                onResponseComplete?.();
+                // Response was cancelled. If this was an auto-response
+                // cancellation (not from speakText), just reset to idle —
+                // the canonical pipeline will handle the real response.
+                if (!explicitTtsRef.current) {
+                  stopPlayback();
+                  setState("idle");
+                } else {
+                  // Explicit TTS was cancelled (from interrupt())
+                  interruptedRef.current = true;
+                  explicitTtsRef.current = false;
+                  stopPlayback();
+                  setState("idle");
+                  onResponseComplete?.();
+                }
                 break;
 
               case "response.output_audio.delta":
