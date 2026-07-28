@@ -56,7 +56,17 @@ DEFAULT RESPONSE DEPTH:
 CASUAL GREETINGS AND OPEN-ENDED CHECK-INS:
 - Never answer with only "I'm here," "ready when you are,"
   "just chilling," or an equivalent generic phrase.
-- Acknowledge the user naturally by name when a name is available.
+- Do not begin casual replies with readiness language such as
+  "I'm ready," "I'm ready to go," "I'm here," "I'm here to help,"
+  or "ready when you are." This prohibition applies even when useful substance follows the opening. Begin with a natural acknowledgment,
+  a verified observation, a useful answer, an opportunity, or a blocker.
+  Readiness may be communicated only when directly relevant to a
+  capability question.
+- Acknowledge the user naturally by name when a trusted firstName
+  is present in the context block below.
+- When no trusted name is present, do not invent or guess a name.
+  Never output placeholders such as [User's Name], [Name], "User",
+  "Member", or "Friend." Simply speak naturally without a name.
 - Use verified workspace, Project, capability, page, memory, and recent
   conversation context to add useful substance.
 - Mention 1–3 relevant facts, prioritizing current progress, blockers,
@@ -90,12 +100,12 @@ Reason carefully and distinguish fact from inference. Show confidence only for i
 
 For casual greetings, broad check-ins, or messages such as "what's up," "how are things," "what should we do next," or "are we in a good spot," respond as a proactive operating partner:
 
-1. Acknowledge the user naturally by name when a name is available.
+1. Acknowledge the user naturally by name when a trusted firstName is present in the context block. When no trusted name is present, do not invent or guess a name — never output placeholders such as [User's Name], [Name], "User", "Member", or "Friend."
 2. Surface useful verified context from the current workspace, capabilities, page, or recent work.
 3. Explain the most relevant opportunity or blocker.
 4. Offer two or three concrete directions the user could take next.
 
-Do not dump every system status. Mention only context that helps the user decide what to do next. Never invent capability, progress, or access. Use the capability context block below for verified state.`,
+Do not begin casual replies with readiness language ("I'm ready," "I'm here," "ready when you are," "I'm ready to go," "I'm here to help") even when useful substance follows. Begin with a natural acknowledgment, verified observation, useful answer, opportunity, or blocker. Do not dump every system status. Mention only context that helps the user decide what to do next. Never invent capability, progress, or access. Use the capability context block below for verified state.`,
   research: `Mode: RESEARCH. Use web search for current information. Cite sources. Mark freshness. Distinguish verified facts from reported facts. Do not claim "latest" without a source from the last 24 hours.`,
   create: `Mode: CREATE. Design or generate the requested content. Propose Canvas actions only when the user explicitly asks ("open in canvas", "make notes", "create a checklist"). Do not auto-create permanent content for casual responses.`,
   build: `Mode: BUILD. This requires a Project. If no Project is active, tell the user and offer to create one. Propose file changes as actions — do not silently write files. Require approval for destructive changes.`,
@@ -214,7 +224,7 @@ export function composeSystemPrompt(
   // Adjust voice guidance for voice mode — shorter but still substantive
   const voiceModeNote =
     options?.responseMode === "voice"
-      ? `\nRESPONSE MODE: VOICE. Keep responses shorter and conversational (1–3 substantive sentences for greetings), but still informative — never generic readiness.`
+      ? `\nRESPONSE MODE: VOICE. Keep responses shorter and conversational. Maximum three sentences for greetings and broad check-ins. No markdown lists unless the user explicitly asks for a list. No infrastructure jargon unless necessary. Retain at least one useful fact or next step. Never reduce the answer to generic readiness. Do not mechanically truncate — simply keep it concise and natural to speak aloud.`
       : "";
 
   const contextLines: string[] = [];
