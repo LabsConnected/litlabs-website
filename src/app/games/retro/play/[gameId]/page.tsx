@@ -377,6 +377,16 @@ export default function RetroPlayerPage() {
     };
   }, [params.gameId]);
 
+  // ─── Set document title to the game name ──────────────────────
+  useEffect(() => {
+    if (!game) return;
+    const system = getRetroSystem(game.system);
+    document.title = `${game.title} (${system.shortName}) · LiTTree LabStudios`;
+    return () => {
+      document.title = "LiTTree LabStudios";
+    };
+  }, [game]);
+
   // ─── Asset preflight (only when launching) ────────────────────
   useEffect(() => {
     if (!game || launchState.status !== "launching") return;

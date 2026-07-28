@@ -35,6 +35,13 @@
 </head>
 <body>
   <div id="game"></div>
+  <script>
+    // Click anywhere in the iframe to focus the window — this ensures
+    // gamepad and keyboard events are routed to the iframe, not the parent.
+    document.addEventListener("click", function () {
+      try { window.focus(); } catch (e) {}
+    });
+  </script>
 
   <!--
     EmulatorJS 4.2.3 isolated runtime host.
@@ -125,6 +132,50 @@
       window.EJS_threads = false;
       window.EJS_forceLegacyCores = legacy;
 
+      // ─── Gamepad configuration ─────────────────────────────────
+      // EmulatorJS auto-detects gamepads, but Xbox One controllers
+      // (and other modern gamepads) sometimes need explicit enabling
+      // and a manual poll to pick up already-connected controllers.
+      // The iframe must also receive focus for gamepad events to fire.
+      window.EJS_gamepad = true;
+      window.EJS_gamepadConnected = true;
+
+      // Manually poll for already-connected gamepads on load.
+      // The `gamepadconnected` event only fires on button press, so
+      // if the controller was connected before the iframe loaded,
+      // EmulatorJS may not detect it until a button is pressed.
+      // This poll forces detection on startup.
+      function pollGamepads() {
+        try {
+          var pads = navigator.getGamepads ? navigator.getGamepads() : [];
+          for (var i = 0; i < pads.length; i++) {
+            if (pads[i]) {
+              send("runtime.progress", {
+                text: "gamepad detected: " + pads[i].id.substring(0, 60) +
+                  " (index=" + pads[i].index + ", buttons=" + pads[i].buttons.length +
+                  ", axes=" + pads[i].axes.length + ")"
+              });
+            }
+          }
+        } catch (e) {
+          send("runtime.progress", { text: "gamepad poll error: " + e.message });
+        }
+      }
+
+      // Poll for gamepads after the loader is ready (EJS_ready).
+      // Also listen for gamepadconnected/disconnected events.
+      window.addEventListener("gamepadconnected", function (e) {
+        send("runtime.progress", {
+          text: "gamepadconnected: " + (e.gamepad ? e.gamepad.id.substring(0, 60) : "unknown") +
+            " (index=" + (e.gamepad ? e.gamepad.index : -1) + ")"
+        });
+      });
+      window.addEventListener("gamepaddisconnected", function (e) {
+        send("runtime.progress", {
+          text: "gamepaddisconnected: " + (e.gamepad ? e.gamepad.id.substring(0, 60) : "unknown")
+        });
+      });
+
       // BIOS URL — passed from parent for Satellaview/BS-X titles
       // that require BS-X.bin. The URL is a blob: or data: URL created
       // by the parent from a user-selected file. Stays in browser only.
@@ -152,6 +203,10 @@
       window.EJS_ready = function () {
         loaderReady = true;
         send("runtime.loader_ready");
+        // Poll for already-connected gamepads now that EmulatorJS is ready.
+        // This catches controllers that were connected before the iframe loaded.
+        setTimeout(pollGamepads, 500);
+        setTimeout(pollGamepads, 2000);
       };
 
       // EJS_onGameStart = game actually started (canvas rendering).
@@ -160,6 +215,12 @@
         if (!runningEmitted) {
           runningEmitted = true;
           send("runtime.running");
+          // Auto-focus the iframe window so gamepad events fire here.
+          // Without focus, some browsers route gamepad input to the
+          // parent page instead of the iframe.
+          try { window.focus(); } catch (e) {}
+          // Poll again for gamepads now that the game is running.
+          setTimeout(pollGamepads, 500);
         }
       };
 
