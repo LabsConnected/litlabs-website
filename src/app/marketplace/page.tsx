@@ -17,6 +17,8 @@ import {
   Code2,
   Palette,
   Plug,
+  Crown,
+  Loader2,
 } from "lucide-react";
 
 // --- Types ---
@@ -54,6 +56,18 @@ type MarketplaceStats = {
   installedItems: number;
   availableItems: number;
   comingSoonItems: number;
+};
+
+type PremiumAgent = {
+  id: string;
+  slug: string;
+  name: string;
+  description: string;
+  category: string;
+  price_cents: number;
+  is_featured: boolean;
+  is_core: boolean;
+  features: string[];
 };
 
 // --- Item pricing state ---
@@ -114,9 +128,16 @@ function MarketplaceInner() {
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState<"marketplace" | "beta">(() =>
-    searchParams.get("tab") === "beta" ? "beta" : "marketplace",
-  );
+  const [activeTab, setActiveTab] = useState<"marketplace" | "agents" | "beta">(() => {
+    const tab = searchParams.get("tab");
+    if (tab === "beta") return "beta";
+    if (tab === "agents") return "agents";
+    return "marketplace";
+  });
+  const [premiumAgents, setPremiumAgents] = useState<PremiumAgent[]>([]);
+  const [entitlements, setEntitlements] = useState<Map<string, boolean>>(new Map());
+  const [agentsLoading, setAgentsLoading] = useState(false);
+  const [purchasing, setPurchasing] = useState<string | null>(null);
 
   const showToast = (msg: string, type: "success" | "error" | "info" = "success") => {
     setToast({ msg, type });
@@ -156,13 +177,84 @@ function MarketplaceInner() {
     }
   }, [isSignedIn]);
 
+  // Load premium agents + entitlements
+  const loadAgents = useCallback(async () => {
+    try {
+      const res = await fetch("/api/agents");
+      const data = await res.json();
+      if (Array.isArray(data.agents)) {
+        const paid = data.agents.filter((a: PremiumAgent) => a.price_cents > 0 || a.is_featured);
+        setPremiumAgents(paid);
+      }
+    } catch {
+      // silent
+    }
+  }, []);
+
+  const loadEntitlements = useCallback(async () => {
+    if (!isSignedIn) return;
+    try {
+      const res = await fetch("/api/marketplace/agents/entitlements");
+      if (res.ok) {
+        const data = await res.json();
+        if (Array.isArray(data.entitlements)) {
+          const map = new Map<string, boolean>();
+          for (const e of data.entitlements) {
+            if (e.status === "active") map.set(e.agent_slug, true);
+          }
+          setEntitlements(map);
+        }
+      }
+    } catch {
+      // silent
+    }
+  }, [isSignedIn]);
+
   useEffect(() => {
     const id = requestAnimationFrame(() => {
       loadItems();
       if (isSignedIn) loadInstalled();
+      loadAgents();
+      if (isSignedIn) loadEntitlements();
     });
     return () => cancelAnimationFrame(id);
-  }, [loadItems, loadInstalled, isSignedIn]);
+  }, [loadItems, loadInstalled, isSignedIn, loadAgents, loadEntitlements]);
+
+  // Check for purchase/cancel URL params
+  useEffect(() => {
+    const purchased = searchParams.get("purchased");
+    const canceled = searchParams.get("canceled");
+    if (purchased) {
+      showToast(`${purchased} purchased successfully!`, "success");
+      loadEntitlements();
+    } else if (canceled) {
+      showToast("Purchase canceled.", "info");
+    }
+  }, [searchParams, loadEntitlements]);
+
+  const buyAgent = useCallback(async (agent: PremiumAgent) => {
+    if (!isSignedIn) {
+      showToast("Please sign in to purchase.", "error");
+      return;
+    }
+    setPurchasing(agent.id);
+    try {
+      const res = await fetch(`/api/marketplace/agents/${agent.id}/checkout`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+      });
+      const data = await res.json();
+      if (res.ok && data.url) {
+        window.location.href = data.url;
+      } else {
+        showToast(data.error || "Checkout failed.", "error");
+      }
+    } catch {
+      showToast("Network error during checkout.", "error");
+    } finally {
+      setPurchasing(null);
+    }
+  }, [isSignedIn]);
 
   const installItem = useCallback(async (item: MarketplaceItem) => {
     if (!isSignedIn) {
@@ -352,6 +444,14 @@ function MarketplaceInner() {
             Browse
           </button>
           <button
+            onClick={() => setActiveTab("agents")}
+            className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
+              activeTab === "agents" ? "border-cyan-400 text-cyan-300" : "border-transparent text-white/40 hover:text-white/70"
+            }`}
+          >
+            Agents
+          </button>
+          <button
             onClick={() => setActiveTab("beta")}
             className={`border-b-2 px-4 py-3 text-sm font-bold transition ${
               activeTab === "beta" ? "border-amber-400 text-amber-300" : "border-transparent text-white/40 hover:text-white/70"
@@ -457,6 +557,107 @@ function MarketplaceInner() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* === AGENTS TAB === */}
+      {activeTab === "agents" && (
+        <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
+          <div className="mb-6">
+            <div className="flex items-center gap-2">
+              <Crown size={18} className="text-cyan-400" />
+              <h2 className="text-lg font-black" style={{ color: T.headerColor }}>Premium Agents</h2>
+            </div>
+            <p className="mt-1 text-sm text-white/55">
+              One-time founder access. Buy once, use forever.
+            </p>
+          </div>
+          {premiumAgents.length === 0 ? (
+            <div className="py-12 text-center">
+              <p className="text-white/40">
+                {agentsLoading ? "Loading agents..." : "No premium agents available yet."}
+              </p>
+            </div>
+          ) : (
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+              {premiumAgents.map((agent) => {
+                const owned = entitlements.get(agent.slug);
+                const priceDisplay = agent.price_cents > 0
+                  ? `$${(agent.price_cents / 100).toFixed(0)}`
+                  : "Free";
+                return (
+                  <article
+                    key={agent.id}
+                    className="flex flex-col overflow-hidden rounded-2xl border transition-all hover:-translate-y-1"
+                    style={{ borderColor: T.borderColor + "40", backgroundColor: T.boxBg }}
+                  >
+                    <div className="h-1 w-full bg-cyan-400" />
+                    <div className="flex flex-1 flex-col p-5">
+                      <div className="flex items-start gap-3">
+                        <div
+                          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl text-xl"
+                          style={{ background: "#22d3ee15", border: "1px solid #22d3ee30" }}
+                        >
+                          <Crown size={20} className="text-cyan-400" />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate text-sm font-black" style={{ color: T.headerColor }}>{agent.name}</h3>
+                          <div className="mt-0.5 text-[10px] uppercase tracking-wide" style={{ color: T.textMuted }}>
+                            <span className="text-cyan-400">Agent</span>
+                            <span> · </span>
+                            <span className="capitalize">{agent.category}</span>
+                          </div>
+                        </div>
+                      </div>
+                      <p className="mt-3 line-clamp-2 text-xs leading-relaxed" style={{ color: T.textMuted }}>
+                        {agent.description}
+                      </p>
+                      {agent.features.length > 0 && (
+                        <div className="mt-3 space-y-1">
+                          {agent.features.slice(0, 4).map((f) => (
+                            <div key={f} className="flex items-center gap-1.5 text-[11px]" style={{ color: T.textMuted }}>
+                              <Check size={11} className="shrink-0 text-cyan-400" /> {f}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                      <div className="mt-4 border-t pt-3" style={{ borderColor: T.borderColor + "20" }}>
+                        {owned ? (
+                          <div className="flex items-center justify-between">
+                            <span className="flex items-center gap-1.5 rounded-xl bg-emerald-400/10 px-3 py-2.5 text-xs font-bold text-emerald-300">
+                              <Check size={12} /> Owned
+                            </span>
+                            <Link
+                              href={`/studio?tool=chat`}
+                              className="flex items-center gap-1.5 rounded-xl px-3 py-2.5 text-xs font-bold transition hover:scale-[1.02]"
+                              style={{ background: "#22d3ee20", color: "#22d3ee" }}
+                            >
+                              <ArrowRight size={12} /> Use in Studio
+                            </Link>
+                          </div>
+                        ) : (
+                          <button
+                            onClick={() => buyAgent(agent)}
+                            disabled={purchasing === agent.id}
+                            className="w-full rounded-xl bg-cyan-400 py-2.5 text-xs font-black text-black transition hover:scale-[1.02] disabled:opacity-50"
+                            aria-label={`Buy ${agent.name}`}
+                          >
+                            {purchasing === agent.id ? (
+                              <span className="flex items-center justify-center gap-1.5">
+                                <Loader2 size={12} className="animate-spin" /> Processing...
+                              </span>
+                            ) : (
+                              `Buy — ${priceDisplay}`
+                            )}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
