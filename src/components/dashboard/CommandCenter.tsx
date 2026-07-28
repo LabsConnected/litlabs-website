@@ -5,7 +5,6 @@ import Link from "next/link";
 import { useTheme } from "@/context/ThemeContext";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
-import { FloatingVoiceButton } from "@/features/voice/components/FloatingVoiceButton";
 import MusicPlayer from "@/components/dashboard/MusicPlayer";
 
 /* ---------- Inline SVG icons (lucide-react pinned to old version) ---------- */
@@ -1120,8 +1119,6 @@ export function CommandCenter() {
       {showCustomize && (
         <CustomizePanel widgets={widgets} setWidgets={setWidgets} onClose={() => setShowCustomize(false)} />
       )}
-
-      <FloatingVoiceButton />
     </div>
   );
 }

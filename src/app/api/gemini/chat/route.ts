@@ -192,6 +192,7 @@ async function handler(req: NextRequest) {
       userName,
       images = [],
       capabilities = {},
+      pageContext,
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -256,9 +257,28 @@ async function handler(req: NextRequest) {
     };
     const translated = translateCapabilities(rawCaps);
 
+    // Build page context block for the global companion
+    const pageContextBlock = pageContext?.surface === "global_companion"
+      ? [
+          "",
+          "CURRENT PAGE CONTEXT (global companion — the user is NOT in Studio):",
+          `Page: ${pageContext.pageTitle || "Unknown"}`,
+          `Route: ${pageContext.route || "/"}`,
+          pageContext.activeEntity
+            ? `Viewing: ${pageContext.activeEntity.type.replace("_", " ")} — ${pageContext.activeEntity.name}`
+            : null,
+          pageContext.authenticated ? "User is signed in." : "User is not signed in.",
+          "You are in the global companion panel. You can answer questions, explain features,",
+          "navigate, and suggest actions. If the user needs deep work (files, code, terminal,",
+          "canvas, deployments), suggest they open Studio. Do NOT claim you can edit files",
+          "or run commands from here — those require Studio.",
+        ].filter(Boolean).join("\n")
+      : null;
+
     const systemPrompt = [
       kernelSystemPrompt,
       translated.contextBlock,
+      pageContextBlock,
       memoryContext,
     ]
       .filter(Boolean)

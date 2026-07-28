@@ -8,6 +8,7 @@ import CookieConsent from "@/components/CookieConsent";
 import UserSync from "@/components/UserSync";
 import AnimatedBackgroundWrapper from "@/components/AnimatedBackgroundWrapper";
 import ServiceWorkerRegistration from "@/components/ServiceWorkerRegistration";
+import { GlobalCompanion } from "@/components/companion/GlobalCompanion";
 
 const PUBLIC_PATHS = [
   "/",
@@ -62,6 +63,7 @@ export default function LayoutShell({
         <AnimatedBackgroundWrapper />
         {process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY ? <UserSync /> : null}
         <main className="relative z-10 min-h-screen">{children}</main>
+        <GlobalCompanion />
         <CookieConsent />
         <ServiceWorkerRegistration />
       </>
@@ -84,6 +86,7 @@ export default function LayoutShell({
           </main>
           {!ownChrome && <MobileBottomNav />}
           <FooterWrapper />
+          <GlobalCompanion />
           <CookieConsent />
           <ServiceWorkerRegistration />
         </div>
