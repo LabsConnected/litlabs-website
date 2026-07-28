@@ -31,8 +31,13 @@ import {
 
 // Clerk config check + error boundary — same pattern as ClerkAuth.tsx.
 // In production with Clerk keys, UserButton renders normally.
-// Without Clerk keys (test/dev env), gracefully degrades to a placeholder.
+// Without Clerk keys:
+//   - dev/demo: gracefully degrades to a placeholder avatar
+//   - production: shows an explicit "Authentication is not configured" error
+//     so a misconfigured deployment is visible, not silently hidden.
 const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+const isProduction = process.env.NODE_ENV === "production";
+const allowClerkFallback = !isProduction;
 
 class ClerkBoundary extends Component<{
   fallback: ReactNode;
@@ -52,8 +57,22 @@ function UserAvatarPlaceholder() {
   return (
     <div
       className="h-7 w-7 shrink-0 rounded-full border border-white/10 bg-white/5"
-      title="Clerk not configured"
+      title="Clerk not configured (dev/demo mode)"
     />
+  );
+}
+
+function AuthConfigError() {
+  return (
+    <div
+      className="flex shrink-0 items-center gap-1.5 rounded-lg border border-red-500/40 bg-red-500/10 px-2.5 py-1.5"
+      title="Authentication is not configured — set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY"
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-red-400" />
+      <span className="text-[9px] font-bold uppercase tracking-wider text-red-300">
+        Auth Not Configured
+      </span>
+    </div>
   );
 }
 
@@ -385,7 +404,10 @@ export default function StudioTopBar({
 
       {/* User avatar — Clerk UserButton with styled profile card for dark theme.
           Wrapped in ClerkBoundary (same pattern as ClerkAuth.tsx) so the
-          Studio renders without crashing when Clerk keys are absent. */}
+          Studio renders without crashing when Clerk keys are absent.
+          - dev/demo without Clerk: placeholder avatar (graceful)
+          - production without Clerk: explicit "Auth Not Configured" error
+          - production/dev with Clerk: normal UserButton */}
       <div className="shrink-0">
         {clerkConfigured ? (
           <ClerkBoundary fallback={<UserAvatarPlaceholder />}>
@@ -407,8 +429,10 @@ export default function StudioTopBar({
               }}
             />
           </ClerkBoundary>
-        ) : (
+        ) : allowClerkFallback ? (
           <UserAvatarPlaceholder />
+        ) : (
+          <AuthConfigError />
         )}
       </div>
     </header>

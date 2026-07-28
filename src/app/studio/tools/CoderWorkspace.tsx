@@ -1,14 +1,11 @@
 "use client";
 
 /**
- * CoderWorkspace — canonical coder UI shell (Phase 1).
+ * CoderWorkspace — canonical coder UI shell.
  *
- * This is the replacement for CanvasTool as the default `tool=code` surface.
- * Phase 1 is a SHELL ONLY: it reads from existing Project, files, preview,
- * Canvas, checkpoint, and conversation APIs and displays truthful state.
- * It does NOT call /api/litt/run, does NOT execute AI, and does NOT mutate
- * files. The composer is visible but non-functional — it shows a truthful
- * "not wired yet" state until Phase 2 connects it to the canonical run API.
+ * Phase 2: Composer is connected to /api/litt/run via useLiTTRun.
+ * Messages stream in real time, kernel decisions appear in the
+ * timeline, and Canvas transcript blocks update live.
  *
  * Layout (per Handbook Section 11 + rebuild directive Section 2):
  *   Desktop (≥1024px):
@@ -24,18 +21,6 @@
  *     - Bottom sheet: Files | Code | Preview | Canvas | Terminal
  *
  * @see docs/litt/phase-1-2-plan.md
- *
- * NOTE: This file is a thin orchestrator. Responsibilities are decomposed into
- * focused modules under ./coder-workspace/:
- *   - hooks.ts        — existing-API data loaders (useProjectData, useFilesData, …)
- *   - types.ts        — local API response shapes
- *   - StateViews.tsx  — EmptyState, LoadingState, ErrorState
- *   - ProjectBar.tsx  — top project selector + workspace status
- *   - LeftRail.tsx    — LiTT conversation + Plan/timeline tabs
- *   - RightPane.tsx   — Files | Code | Preview | Review tabs
- *   - BottomDrawer.tsx— Canvas | Terminal drawer (desktop)
- *   - MobileSheet.tsx — bottom sheet (mobile/tablet)
- *   - Composer.tsx    — persistent message input (non-functional in Phase 1)
  */
 
 import { useEffect, useMemo, useState } from "react";
@@ -47,12 +32,16 @@ import { LeftRail } from "./coder-workspace/LeftRail";
 import { MobileSheet } from "./coder-workspace/MobileSheet";
 import { ProjectBar } from "./coder-workspace/ProjectBar";
 import { RightPane } from "./coder-workspace/RightPane";
+import { useLiTTRun } from "./coder-workspace/useLiTTRun";
 
 export default function CoderWorkspace() {
   const { resolvedColors: T } = useTheme();
   const { projects, status: projectsStatus, error: projectsError, refresh } =
     useProjectData();
   const [projectId, setProjectId] = useState("");
+
+  // Phase 2: canonical LiTT run lifecycle
+  const { state: runState, submitMessage, cancelRun, retryRun } = useLiTTRun();
 
   // Auto-select the first project once the list loads.
   useEffect(() => {
@@ -63,6 +52,27 @@ export default function CoderWorkspace() {
     () => projects.find((p) => p.id === projectId) ?? null,
     [projects, projectId],
   );
+
+  // Restore conversation on mount if we have a conversationId in the URL
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const convId = url.searchParams.get("conversationId");
+    if (convId) {
+      // Restore is handled by the hook
+      import("./coder-workspace/useLiTTRun").then(() => {
+        // The hook's restoreConversation would be called here
+        // For now, this is a placeholder for refresh recovery
+      });
+    }
+  }, []);
+
+  const handleSubmit = (message: string) => {
+    void submitMessage(message, {
+      projectId: projectId || undefined,
+    });
+  };
+
+  const canRetry = runState.status === "failed" || runState.status === "cancelled";
 
   return (
     <div
@@ -91,8 +101,15 @@ export default function CoderWorkspace() {
       <div className="grid min-h-0 min-w-0 flex-1 overflow-hidden lg:grid-cols-[minmax(280px,380px)_minmax(0,1fr)]">
         {/* Left rail: conversation + plan/timeline + composer */}
         <div className="flex h-full min-h-0 min-w-0 flex-col">
-          <LeftRail projectId={projectId} T={T} />
-          <Composer T={T} />
+          <LeftRail projectId={projectId} runState={runState} T={T} />
+          <Composer
+            T={T}
+            status={runState.status}
+            onSubmit={handleSubmit}
+            onCancel={() => void cancelRun()}
+            onRetry={() => void retryRun()}
+            canRetry={canRetry}
+          />
         </div>
 
         {/* Right pane: Files | Code | Preview | Review — desktop only */}

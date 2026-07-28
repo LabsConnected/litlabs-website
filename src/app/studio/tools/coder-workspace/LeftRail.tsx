@@ -1,14 +1,17 @@
 /**
  * LeftRail — LiTT conversation + Plan/timeline tabs.
  *
- * Phase 1: conversation tab shows a truthful "ready" state (no AI yet).
- * Plan tab lists existing Canvas artifacts and checkpoints from real APIs.
+ * Phase 2: conversation tab shows live messages from useLiTTRun.
+ * Plan tab displays Kernel mode and run events in the timeline.
  */
+
+"use client";
 
 import { useState } from "react";
 import { useCanvasesData } from "./hooks";
 import { EmptyState, ErrorState, LoadingState } from "./StateViews";
 import type { CanvasSummary } from "./types";
+import type { RunState } from "./useLiTTRun";
 
 interface ThemeColors {
   borderColor: string;
@@ -18,9 +21,11 @@ type LeftTab = "conversation" | "plan";
 
 export function LeftRail({
   projectId,
+  runState,
   T,
 }: {
   projectId: string;
+  runState: RunState;
   T: ThemeColors;
 }) {
   const [tab, setTab] = useState<LeftTab>("conversation");
@@ -50,25 +55,12 @@ export function LeftRail({
 
       <div className="min-h-0 min-w-0 flex-1 overflow-auto">
         {tab === "conversation" ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5">
-              <span className="text-sm">LiTT</span>
-            </div>
-            <p className="text-xs font-bold text-white/60">
-              Conversation ready
-            </p>
-            <p className="max-w-xs text-[11px] leading-relaxed text-white/40">
-              The canonical LiTT run API arrives in Phase 2. Until then, this
-              shell shows real project, file, preview, and canvas state. Type
-              below — the composer will connect to{" "}
-              <code className="text-white/50">/api/litt/run</code> once it
-              exists.
-            </p>
-          </div>
+          <ConversationTab runState={runState} />
         ) : (
           <PlanTab
             canvases={canvases}
             canvasesStatus={canvasesStatus}
+            runState={runState}
           />
         )}
       </div>
@@ -76,15 +68,130 @@ export function LeftRail({
   );
 }
 
+function ConversationTab({ runState }: { runState: RunState }) {
+  const { userMessage, assistantMessage, status, error } = runState;
+
+  if (!userMessage && status === "idle") {
+    return (
+      <div className="flex h-full flex-col items-center justify-center gap-3 p-6 text-center">
+        <div className="flex h-10 w-10 items-center justify-center rounded-full border border-white/10 bg-white/5">
+          <span className="text-sm">LiTT</span>
+        </div>
+        <p className="text-xs font-bold text-white/60">
+          Conversation ready
+        </p>
+        <p className="max-w-xs text-[11px] leading-relaxed text-white/40">
+          Type a message below to start a conversation with LiTT. Your message
+          will be sent to <code className="text-white/50">/api/litt/run</code>{" "}
+          and the response will stream back in real time.
+        </p>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-full flex-col gap-2 p-3">
+      {/* User message */}
+      {userMessage && (
+        <div className="rounded-lg border border-white/10 bg-white/5 px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-white/40">
+              You
+            </span>
+          </div>
+          <p className="whitespace-pre-wrap text-[12px] text-white/80">
+            {userMessage.content}
+          </p>
+        </div>
+      )}
+
+      {/* Assistant message (streaming or complete) */}
+      {assistantMessage && (
+        <div className="rounded-lg border border-white/10 bg-blue-500/5 px-3 py-2">
+          <div className="mb-1 flex items-center gap-1.5">
+            <span className="text-[9px] font-bold uppercase tracking-wider text-blue-300/60">
+              LiTT
+            </span>
+            {assistantMessage.status === "streaming" && (
+              <span className="h-1 w-1 animate-pulse rounded-full bg-blue-400" />
+            )}
+            {assistantMessage.status === "failed" && (
+              <span className="text-[9px] font-bold text-red-400/70">Failed</span>
+            )}
+            {assistantMessage.status === "cancelled" && (
+              <span className="text-[9px] font-bold text-amber-400/70">Cancelled</span>
+            )}
+          </div>
+          <p className="whitespace-pre-wrap text-[12px] text-white/80">
+            {assistantMessage.content || (status === "streaming" ? "…" : "")}
+          </p>
+          {assistantMessage.status === "failed" && error && (
+            <p className="mt-1.5 text-[10px] text-red-400/60">
+              {error.message}
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* Error without assistant message (e.g., run creation failed) */}
+      {!assistantMessage && error && (
+        <div className="rounded-lg border border-red-500/30 bg-red-500/5 px-3 py-2">
+          <p className="text-[10px] font-bold text-red-400/70">Error</p>
+          <p className="mt-0.5 text-[11px] text-red-300/60">{error.message}</p>
+        </div>
+      )}
+    </div>
+  );
+}
+
 function PlanTab({
   canvases,
   canvasesStatus,
+  runState,
 }: {
   canvases: CanvasSummary[];
   canvasesStatus: "idle" | "loading" | "ready" | "error";
+  runState: RunState;
 }) {
   return (
     <div className="flex h-full flex-col gap-2 p-3">
+      {/* Kernel decision summary */}
+      {runState.kernelDecision && (
+        <div className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+            Kernel Decision
+          </p>
+          <div className="mt-1 space-y-0.5 text-[10px] text-white/60">
+            <p>Mode: <span className="text-white/80">{runState.kernelDecision.mode}</span></p>
+            <p>Risk: <span className="text-white/80">{runState.kernelDecision.risk}</span></p>
+            <p>Approval: <span className="text-white/80">{runState.kernelDecision.approvalRequired ? "Required" : "Not required"}</span></p>
+            {runState.kernelDecision.requiresProject && (
+              <p className="text-amber-400/60">Requires project</p>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* Run status */}
+      {runState.runId && (
+        <div className="rounded-md border border-white/10 bg-white/5 px-2 py-1.5">
+          <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
+            Run Status
+          </p>
+          <p className="mt-0.5 text-[10px] text-white/60">
+            <span className={
+              runState.status === "completed" ? "text-green-400/70" :
+              runState.status === "failed" ? "text-red-400/70" :
+              runState.status === "streaming" ? "text-blue-400/70" :
+              runState.status === "cancelled" ? "text-amber-400/70" :
+              "text-white/60"
+            }>
+              {runState.status}
+            </span>
+          </p>
+        </div>
+      )}
+
       <p className="text-[10px] font-bold uppercase tracking-wider text-white/50">
         Canvas artifacts
       </p>
@@ -95,7 +202,7 @@ function PlanTab({
       ) : canvases.length === 0 ? (
         <EmptyState
           title="No canvases"
-          body="Canvas artifacts created by LiTT runs will appear here. No runs have been executed yet."
+          body="Canvas artifacts created by LiTT runs will appear here."
         />
       ) : (
         <ul className="space-y-1">
@@ -118,7 +225,7 @@ function PlanTab({
         </p>
         <EmptyState
           title="No active plan"
-          body="Build plans created by LiTT will appear here once Phase 4 (plan mode) is implemented."
+          body="Build plans created by LiTT will appear here once plan mode is implemented."
         />
       </div>
     </div>
