@@ -282,7 +282,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
                 />
                 <button
                   onClick={() => setCanvasOpen((v) => !v)}
-                  className="absolute bottom-4 right-4 z-40 flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-3 py-2 text-[10px] font-bold text-violet-100 shadow-xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
+                  className="absolute top-4 right-4 z-40 flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-3 py-2 text-[10px] font-bold text-violet-100 shadow-xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
                   title="Toggle Canvas panel"
                 >
                   <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
@@ -318,7 +318,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
           {/* LiTT assistant drawer — closed by default so tools keep the full workspace */}
           {assistantOpen && projectReady && !isChat && <aside
-            className="fixed bottom-0 right-0 top-12 z-10010 flex w-full max-w-95 min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay"
+            className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] right-0 top-12 z-10010 flex w-full max-w-95 min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay md:bottom-0"
             style={{
               backgroundColor: "rgba(8,9,13,0.96)",
               borderColor: "rgba(255,255,255,0.06)",
@@ -352,14 +352,15 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
               Opens when a canvas action is executed from chat. */}
           {canvasOpen && (
             <>
-              {/* Backdrop — mobile only */}
+              {/* Backdrop — mobile only, covers area above the panel only */}
               <button
                 aria-label="Close Canvas"
-                className="fixed inset-0 z-10008 bg-black/60 md:hidden"
+                className="fixed inset-x-0 top-0 z-10008 bg-black/60 md:hidden"
+                style={{ bottom: "calc(55dvh + 56px + env(safe-area-inset-bottom))" }}
                 onClick={() => setCanvasOpen(false)}
               />
               <aside
-                className="fixed z-10009 flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-12 md:w-full md:max-w-[520px] md:min-w-0 md:border-l md:shadow-[-24px_0_70px_rgba(0,0,0,.6)] bottom-0 left-0 right-0 top-auto h-[80dvh] rounded-t-2xl border-t animate-in slide-in-from-bottom-4 md:animate-none md:rounded-none md:border-t-0"
+                className="fixed z-10009 flex flex-col overflow-hidden border shadow-2xl md:bottom-0 md:right-0 md:top-12 md:w-full md:max-w-[520px] md:min-w-0 md:border-l md:shadow-[-24px_0_70px_rgba(0,0,0,.6)] bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 top-auto h-[55dvh] rounded-t-2xl border-t animate-in slide-in-from-bottom-4 md:animate-none md:rounded-none md:border-t-0 md:bottom-0 md:h-auto"
                 style={{
                   backgroundColor: "rgba(8,9,13,0.97)",
                   borderColor: "rgba(255,255,255,0.06)",
