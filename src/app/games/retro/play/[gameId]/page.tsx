@@ -1000,7 +1000,10 @@ export default function RetroPlayerPage() {
         </div>
       </header>
 
-      <div className="mx-auto grid max-w-[1600px] gap-4 p-3 xl:grid-cols-[minmax(0,1fr)_290px] xl:p-5">
+      <div
+        className="mx-auto grid max-w-[1600px] gap-4 p-3 xl:grid-cols-[minmax(0,1fr)_290px] xl:p-5"
+        style={{ paddingTop: "clamp(32px, 5vh, 56px)", paddingBottom: "32px" }}
+      >
         <section className="min-w-0">
           <div
             ref={stageRef}
