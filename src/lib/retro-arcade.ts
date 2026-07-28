@@ -1,5 +1,24 @@
 export type RetroSystemId = "nes" | "snes" | "gb" | "gbc" | "gba" | "segaMD";
 
+/**
+ * Game classification — NOT derived from file extension alone.
+ * Metadata takes priority over filename detection.
+ */
+export type SystemVariant = "standard" | "satellaview" | "super-game-boy" | "special-hardware";
+
+/**
+ * Compatibility status — how well the game runs in the emulator.
+ * "requires-bios" is NOT a failure — it means the user must supply
+ * their own legally obtained firmware.
+ */
+export type CompatibilityStatus = "standard" | "requires-bios" | "experimental" | "unsupported";
+
+/**
+ * Visibility — hidden games don't appear in the normal arcade list.
+ * BS-X titles default to "hidden" so they don't clutter the main UI.
+ */
+export type Visibility = "visible" | "hidden";
+
 export interface RetroSystem {
   id: RetroSystemId;
   name: string;
@@ -13,6 +32,12 @@ export interface RetroGameRecord {
   title: string;
   fileName: string;
   system: RetroSystemId;
+  /** Sub-classification within a system (e.g. Satellaview within SNES). */
+  systemVariant?: SystemVariant;
+  /** How well the game runs — "requires-bios" is not a failure. */
+  compatibility?: CompatibilityStatus;
+  /** Hidden games don't appear in the normal arcade list. */
+  visibility?: Visibility;
   size: number;
   rom: Blob;
   addedAt: number;
@@ -128,11 +153,22 @@ export function getRetroSystem(id: RetroSystemId): RetroSystem {
 }
 
 export async function addRetroGame(file: File, title: string, system: RetroSystemId): Promise<RetroGameRecord> {
+  // Auto-classify the game based on filename + system
+  const { systemVariant, compatibility } = classifyGame(file.name, system);
+
+  // BS-X / Satellaview titles default to hidden so they don't
+  // clutter the normal arcade list. Advanced users can find them
+  // in the "Advanced Systems" section.
+  const visibility: Visibility = systemVariant === "satellaview" ? "hidden" : "visible";
+
   const record: RetroGameRecord = {
     id: crypto.randomUUID(),
     title: title.trim() || titleFromFileName(file.name),
     fileName: file.name,
     system,
+    systemVariant,
+    compatibility,
+    visibility,
     size: file.size,
     rom: file,
     addedAt: Date.now(),
@@ -207,15 +243,18 @@ export async function readRomAsBase64(rom: Blob): Promise<string> {
 }
 
 /**
- * Detect Satellaview / BS-X content.
- * Uses filename pattern matching (the ROM header for BS-X is not
- * reliably distinguishable from normal SNES ROMs in the SNES header
- * format, so filename heuristics are the primary signal).
+ * Detect Satellaview / BS-X content from the filename.
+ *
+ * BS-X games are specialist content that requires a user-provided
+ * BS-X system BIOS. They should NOT be treated as normal SNES games.
  *
  * Matches:
  * - File extensions: .bs, .bsa
- * - Filename patterns: "BS Mario", "BS-X", "Satellaview", "BSX"
- * - The common "(J)" + "BS" prefix pattern used in BS-X ROM dumps
+ * - Filename keywords: "BS", "BS-X", "BSX", "Satellaview",
+ *   "SoundLink", "Broadcast"
+ * - The common "BS " prefix pattern (e.g. "BS Mario Collection")
+ *
+ * Metadata (systemVariant) takes priority over this heuristic.
  */
 export function detectSatellaview(fileName: string): boolean {
   const lower = fileName.toLowerCase();
@@ -225,8 +264,47 @@ export function detectSatellaview(fileName: string): boolean {
   if (lower.includes("satellaview")) return true;
   if (lower.includes("bs-x")) return true;
   if (lower.includes("bsx")) return true;
+  if (lower.includes("soundlink")) return true;
+  if (lower.includes("broadcast")) return true;
   // "BS " prefix pattern — e.g. "BS Mario Collection", "BS Zelda"
   // Match "bs " at start or after a separator, followed by a word char
   if (/(^|[\s._-])bs[\s._-]/i.test(lower)) return true;
   return false;
+}
+
+/**
+ * Classify a game based on filename + system.
+ * Returns the system variant and compatibility status.
+ *
+ * Standard SNES games → standard / standard
+ * Satellaview titles → satellaview / requires-bios
+ */
+export function classifyGame(
+  fileName: string,
+  system: RetroSystemId,
+): { systemVariant: SystemVariant; compatibility: CompatibilityStatus } {
+  // SNES: check for Satellaview
+  if (system === "snes" && detectSatellaview(fileName)) {
+    return { systemVariant: "satellaview", compatibility: "requires-bios" };
+  }
+  // Default: standard game
+  return { systemVariant: "standard", compatibility: "standard" };
+}
+
+/**
+ * Check if a game should appear in the normal arcade list.
+ * Hidden games and Satellaview titles are excluded.
+ */
+export function isStandardPlayable(game: RetroGameRecord): boolean {
+  if (game.visibility === "hidden") return false;
+  if (game.systemVariant === "satellaview") return false;
+  if (game.compatibility === "unsupported") return false;
+  return true;
+}
+
+/**
+ * Check if a game requires external firmware (BIOS).
+ */
+export function requiresBios(game: RetroGameRecord): boolean {
+  return game.compatibility === "requires-bios" || game.systemVariant === "satellaview";
 }

@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, ChevronRight, Gamepad2, HardDrive, Heart, Library, LockKeyhole, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import PageShell from "@/components/PageShell";
-import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getRetroSystem, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
+import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getRetroSystem, isStandardPlayable, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
 import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
 
 type PendingUpload = { file: File; title: string; system: RetroSystemId; legal: boolean };
@@ -18,19 +18,31 @@ export default function RetroArcadePage() {
   const [query, setQuery] = useState("");
   const [systemFilter, setSystemFilter] = useState<RetroSystemId | "all">("all");
   const [message, setMessage] = useState<string | null>(null);
+  const [showAdvanced, setShowAdvanced] = useState(false);
 
   useEffect(() => {
     listRetroGames().then(setGames).catch((error) => setMessage(error.message)).finally(() => setLoading(false));
   }, []);
 
-  const visibleGames = useMemo(() => games.filter((game) => {
+  // Standard playable games — excludes hidden, Satellaview, unsupported
+  const standardGames = useMemo(() => games.filter(isStandardPlayable), [games]);
+
+  // Advanced / specialist games — Satellaview, requires-bios, etc.
+  const advancedGames = useMemo(() => games.filter((g) => !isStandardPlayable(g)), [games]);
+
+  const visibleGames = useMemo(() => standardGames.filter((game) => {
     const matchesSystem = systemFilter === "all" || game.system === systemFilter;
     const matchesSearch = game.title.toLowerCase().includes(query.toLowerCase());
     return matchesSystem && matchesSearch;
-  }), [games, query, systemFilter]);
+  }), [standardGames, query, systemFilter]);
 
-  const recent = games.find((game) => game.lastPlayedAt);
-  const systemsOwned = new Set(games.map((game) => game.system)).size;
+  const visibleAdvanced = useMemo(() => advancedGames.filter((game) => {
+    const matchesSearch = game.title.toLowerCase().includes(query.toLowerCase());
+    return matchesSearch;
+  }), [advancedGames, query]);
+
+  const recent = standardGames.find((game) => game.lastPlayedAt);
+  const systemsOwned = new Set(standardGames.map((game) => game.system)).size;
 
   function chooseFile(file?: File) {
     if (!file) return;
@@ -92,8 +104,8 @@ export default function RetroArcadePage() {
           <aside className="space-y-4">
             <section className="rounded-2xl border border-white/10 bg-white/[.035] p-3 backdrop-blur">
               <div className="mb-3 px-2 text-[10px] font-black uppercase tracking-[.22em] text-white/40">Your collection</div>
-              <button onClick={() => setSystemFilter("all")} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === "all" ? "bg-fuchsia-500/15 text-fuchsia-300" : "text-white/60 hover:bg-white/5 hover:text-white"}`}><span className="flex items-center gap-2"><Library size={15}/> All systems</span><span>{games.length}</span></button>
-              {RETRO_SYSTEMS.map((system) => <button key={system.id} onClick={() => setSystemFilter(system.id)} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === system.id ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/5 hover:text-white"}`}><span className="flex items-center gap-2"><i className="h-2 w-2 rounded-full" style={{ background: system.color, boxShadow: `0 0 10px ${system.color}` }} />{system.shortName}</span><span>{games.filter((game) => game.system === system.id).length}</span></button>)}
+              <button onClick={() => setSystemFilter("all")} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === "all" ? "bg-fuchsia-500/15 text-fuchsia-300" : "text-white/60 hover:bg-white/5 hover:text-white"}`}><span className="flex items-center gap-2"><Library size={15}/> All systems</span><span>{standardGames.length}</span></button>
+              {RETRO_SYSTEMS.map((system) => <button key={system.id} onClick={() => setSystemFilter(system.id)} className={`mb-1 flex w-full items-center justify-between rounded-xl px-3 py-2.5 text-sm font-bold transition ${systemFilter === system.id ? "bg-white/10 text-white" : "text-white/55 hover:bg-white/5 hover:text-white"}`}><span className="flex items-center gap-2"><i className="h-2 w-2 rounded-full" style={{ background: system.color, boxShadow: `0 0 10px ${system.color}` }} />{system.shortName}</span><span>{standardGames.filter((game) => game.system === system.id).length}</span></button>)}
             </section>
             <section className="rounded-2xl border border-emerald-400/15 bg-emerald-400/4 p-4">
               <ShieldCheck className="mb-2 text-emerald-300" size={20}/><h2 className="text-sm font-black">Private by default</h2><p className="mt-1 text-xs leading-5 text-white/45">ROM files stay in this browser&apos;s IndexedDB. LiTT does not upload or provide copyrighted games.</p>
@@ -118,13 +130,69 @@ export default function RetroArcadePage() {
                 <Link href={`/games/retro/play/${game.id}`} className="relative flex h-32 items-center justify-center overflow-hidden" style={{ background: `radial-gradient(circle at 50% 20%, ${system.color}33, transparent 55%), linear-gradient(145deg,#181824,#09090d)` }}><span className="select-none text-5xl font-black tracking-tighter text-white/10">{system.shortName}</span><span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-black" style={{ color: system.color }}>{system.shortName}</span><span className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span></Link>
                 <div className="p-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="truncate font-black">{game.title}</h3><p className="mt-1 truncate text-xs text-white/35">{formatRomSize(game.size)} · {game.launches} {game.launches === 1 ? "launch" : "launches"}</p></div><button onClick={() => toggleFavorite(game)} className={`p-1.5 ${game.favorite ? "text-pink-400" : "text-white/25 hover:text-white"}`} aria-label="Favorite"><Heart size={16} fill={game.favorite ? "currentColor" : "none"}/></button></div><div className="mt-4 flex gap-2"><Link href={`/games/retro/play/${game.id}`} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white/10 py-2 text-xs font-black hover:bg-white/15"><Play size={13}/> Play</Link><button onClick={() => removeGame(game)} className="rounded-lg border border-white/10 px-3 text-white/30 hover:border-red-400/30 hover:text-red-300" aria-label="Remove"><Trash2 size={14}/></button></div></div>
               </article>; })}</div>
-            ) : <button onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }} className="flex min-h-72 w-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/15 bg-white/2.5 p-8 text-center transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/3"><span className="mb-4 rounded-2xl bg-fuchsia-500/10 p-4 text-fuchsia-300"><Upload size={28}/></span><h3 className="text-lg font-black">{games.length ? "No games match that filter" : "Build your private arcade"}</h3><p className="mt-2 max-w-md text-sm leading-6 text-white/40">{games.length ? "Try another system or search." : "Drop a legally obtained ROM here or choose a file. It stays on this device and launches as a real playable game."}</p>{!games.length && <span className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">Choose ROM</span>}</button>}
+            ) : <button onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }} className="flex min-h-72 w-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/15 bg-white/2.5 p-8 text-center transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/3"><span className="mb-4 rounded-2xl bg-fuchsia-500/10 p-4 text-fuchsia-300"><Upload size={28}/></span><h3 className="text-lg font-black">{standardGames.length ? "No games match that filter" : "Build your private arcade"}</h3><p className="mt-2 max-w-md text-sm leading-6 text-white/40">{standardGames.length ? "Try another system or search." : "Drop a legally obtained ROM here or choose a file. It stays on this device and launches as a real playable game."}</p>{!standardGames.length && <span className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">Choose ROM</span>}</button>}
           </section>
 
+          {/* === ADVANCED SYSTEMS (Satellaview / BS-X) === */}
+          {advancedGames.length > 0 && (
+            <section className="min-w-0 space-y-4 xl:col-span-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <p className="text-[10px] font-black uppercase tracking-[.25em] text-amber-400">Advanced Systems</p>
+                  <h2 className="text-lg font-black">Satellaview / BS-X</h2>
+                  <p className="text-xs text-white/40">Specialist content requiring user-provided firmware</p>
+                </div>
+                <button
+                  onClick={() => setShowAdvanced((v) => !v)}
+                  className="flex items-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/5 px-3 py-2 text-xs font-black text-amber-200 hover:bg-amber-400/10"
+                >
+                  {showAdvanced ? "Hide" : "Show"} {advancedGames.length} title{advancedGames.length === 1 ? "" : "s"}
+                </button>
+              </div>
+
+              {showAdvanced && (
+                <>
+                  <div className="rounded-2xl border border-amber-400/20 bg-amber-400/[.04] p-4">
+                    <p className="text-xs leading-5 text-white/50">
+                      <b className="text-amber-200">Advanced setup required.</b> These broadcast cartridges require a user-provided BS-X system BIOS. Most players will not have this file. LiTT does not provide or download copyrighted firmware.
+                    </p>
+                  </div>
+                  {visibleAdvanced.length > 0 ? (
+                    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                      {visibleAdvanced.map((game) => (
+                        <article key={game.id} className="group overflow-hidden rounded-2xl border border-amber-400/15 bg-[#15120a] transition hover:border-amber-400/30">
+                          <Link href={`/games/retro/play/${game.id}`} className="relative flex h-32 items-center justify-center overflow-hidden" style={{ background: "radial-gradient(circle at 50% 20%, rgba(251,191,36,.2), transparent 55%), linear-gradient(145deg,#181410,#0d0a08)" }}>
+                            <span className="select-none text-5xl font-black tracking-tighter text-white/10">BS-X</span>
+                            <span className="absolute left-3 top-3 rounded-lg border border-amber-400/20 bg-black/40 px-2 py-1 text-[10px] font-black text-amber-300">BS-X</span>
+                            <span className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-amber-400 text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span>
+                          </Link>
+                          <div className="p-4">
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <h3 className="truncate font-black">{game.title}</h3>
+                                <p className="mt-1 truncate text-xs text-amber-300/50">Requires external firmware</p>
+                              </div>
+                              <button onClick={() => removeGame(game)} className="rounded-lg border border-white/10 px-3 text-white/30 hover:border-red-400/30 hover:text-red-300" aria-label="Remove"><Trash2 size={14}/></button>
+                            </div>
+                            <div className="mt-4 flex gap-2">
+                              <Link href={`/games/retro/play/${game.id}`} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-amber-400/10 py-2 text-xs font-black text-amber-200 hover:bg-amber-400/15"><Play size={13}/> Advanced Setup</Link>
+                            </div>
+                          </div>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-white/40">No advanced titles match your search.</p>
+                  )}
+                </>
+              )}
+            </section>
+          )}
+
           <aside className="space-y-4">
-            <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5"><Sparkles className="mb-3 text-violet-300"/><div className="text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">{games.length === 0 ? "Your cabinet is ready." : recent ? `Welcome back, player.` : "Pick your first chapter."}</h2><p className="mt-2 text-sm leading-6 text-white/45">{games.length === 0 ? "Add your first game and I’ll organize it by system automatically." : recent ? `${recent.title} is ready where you left it. Your library never leaves this browser.` : `You have ${games.length} ${games.length === 1 ? "game" : "games"} across ${systemsOwned} ${systemsOwned === 1 ? "system" : "systems"}.`}</p></section>
-            <section className="rounded-2xl border border-white/10 bg-white/[.035] p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-black">Arcade progress</h2><span className="text-xs text-white/35">{[games.length > 0, games.some((g) => g.launches > 0), systemsOwned >= 3].filter(Boolean).length}/3</span></div><div className="mt-4 space-y-3">{[
-              ["First cartridge", "Add one game", games.length > 0], ["Power on", "Launch a game", games.some((game) => game.launches > 0)], ["System hopper", "Collect three systems", systemsOwned >= 3]
+            <section className="relative overflow-hidden rounded-2xl border border-violet-400/20 bg-linear-to-b from-violet-500/10 to-transparent p-5"><Sparkles className="mb-3 text-violet-300"/><div className="text-[10px] font-black uppercase tracking-[.22em] text-violet-300">LiTT Companion</div><h2 className="mt-2 text-lg font-black">{standardGames.length === 0 ? "Your cabinet is ready." : recent ? `Welcome back, player.` : "Pick your first chapter."}</h2><p className="mt-2 text-sm leading-6 text-white/45">{standardGames.length === 0 ? "Add your first game and I’ll organize it by system automatically." : recent ? `${recent.title} is ready where you left it. Your library never leaves this browser.` : `You have ${standardGames.length} ${standardGames.length === 1 ? "game" : "games"} across ${systemsOwned} ${systemsOwned === 1 ? "system" : "systems"}.`}</p></section>
+            <section className="rounded-2xl border border-white/10 bg-white/[.035] p-5"><div className="flex items-center justify-between"><h2 className="text-sm font-black">Arcade progress</h2><span className="text-xs text-white/35">{[standardGames.length > 0, standardGames.some((g) => g.launches > 0), systemsOwned >= 3].filter(Boolean).length}/3</span></div><div className="mt-4 space-y-3">{[
+              ["First cartridge", "Add one game", standardGames.length > 0], ["Power on", "Launch a game", standardGames.some((game) => game.launches > 0)], ["System hopper", "Collect three systems", systemsOwned >= 3]
             ].map(([title, detail, done]) => <div key={String(title)} className="flex items-center gap-3"><span className={`flex h-8 w-8 items-center justify-center rounded-full ${done ? "bg-emerald-400/15 text-emerald-300" : "bg-white/5 text-white/20"}`}>{done ? <Check size={15}/> : <LockKeyhole size={13}/>}</span><div><div className="text-xs font-bold">{title}</div><div className="text-[11px] text-white/35">{detail}</div></div></div>)}</div></section>
             <section className="rounded-2xl border border-white/10 bg-white/2.5 p-5"><HardDrive size={18} className="mb-2 text-cyan-300"/><h2 className="text-sm font-black">Supported now</h2><p className="mt-2 text-xs leading-5 text-white/40">NES, SNES, Game Boy, Game Boy Color, Game Boy Advance, and Genesis / Mega Drive.</p><button onClick={() => inputRef.current?.click()} className="mt-4 flex items-center gap-1 text-xs font-black text-cyan-300">Import a game <ChevronRight size={13}/></button></section>
           </aside>

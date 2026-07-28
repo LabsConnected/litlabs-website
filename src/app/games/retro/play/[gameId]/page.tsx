@@ -327,9 +327,13 @@ export default function RetroPlayerPage() {
         setRomValid(validation.valid);
         setRomSha(validation.sha256 ?? null);
 
+        // Determine if this is a Satellaview title.
+        // Metadata (systemVariant) takes priority over filename detection.
+        const satellaview = record.systemVariant === "satellaview" || detectSatellaview(record.fileName);
+
         if (!validation.valid) {
           setGame(record);
-          setIsSatellaview(detectSatellaview(record.fileName));
+          setIsSatellaview(satellaview);
           setLaunchState({
             status: "rom-error",
             message: validation.error ?? "ROM validation failed.",
@@ -340,14 +344,15 @@ export default function RetroPlayerPage() {
 
         // Store the ROM blob — don't create a URL yet
         setGame(record);
-        setIsSatellaview(detectSatellaview(record.fileName));
+        setIsSatellaview(satellaview);
         setRomBlob(record.rom);
 
-        // Set initial launch state based on whether BIOS is needed
-        if (detectSatellaview(record.fileName)) {
+        // Set initial launch state based on whether BIOS is needed.
+        // Satellaview = needs-bios. Standard = ready to launch immediately.
+        if (satellaview) {
           setLaunchState({ status: "needs-bios" });
         } else {
-          // Non-Satellaview: ready to launch immediately
+          // Standard game: ready to launch immediately, no BIOS required
           setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
         }
         setSessionState("idle"); // Don't auto-start the runtime
@@ -1004,12 +1009,36 @@ export default function RetroPlayerPage() {
               />
             ) : isSatellaview && launchState.status === "needs-bios" ? (
               <div className="flex h-full items-center justify-center p-6 text-center">
-                <div className="max-w-sm space-y-3">
-                  <LockKeyhole className="mx-auto text-cyan-300" size={36} />
-                  <h2 className="text-lg font-black">BS-X BIOS required</h2>
-                  <p className="text-xs leading-5 text-white/55">
-                    This Satellaview title needs the BS-X BIOS to boot. Select your legally obtained BS-X.bin from the panel on the right — it stays in this browser only.
+                <div className="max-w-md space-y-4">
+                  <LockKeyhole className="mx-auto text-amber-300" size={40} />
+                  <h2 className="text-xl font-black">Advanced setup required</h2>
+                  <p className="text-sm leading-6 text-white/55">
+                    This broadcast cartridge requires a user-provided BS-X system BIOS.
+                    Most players will not have this file. LiTT does not provide or download
+                    copyrighted firmware.
                   </p>
+                  <div className="flex flex-wrap justify-center gap-3">
+                    <button
+                      onClick={() => biosInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 rounded-xl bg-amber-500 px-5 py-2.5 text-sm font-black text-black hover:bg-amber-400"
+                    >
+                      <Upload size={15} /> Load My BIOS
+                    </button>
+                    <a
+                      href="https://emulatorjs.org/docs/systems/snes/"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/5 px-5 py-2.5 text-sm font-black text-white/70 hover:bg-white/10"
+                    >
+                      Learn More
+                    </a>
+                    <Link
+                      href="/games/retro"
+                      className="inline-flex items-center gap-2 rounded-xl border border-white/10 px-5 py-2.5 text-sm font-black text-white/50 hover:bg-white/5"
+                    >
+                      <ArrowLeft size={15} /> Return to SNES Games
+                    </Link>
+                  </div>
                 </div>
               </div>
             ) : isSatellaview && launchState.status === "validating-bios" ? (
@@ -1257,20 +1286,20 @@ export default function RetroPlayerPage() {
 
         <aside className="space-y-4">
           {isSatellaview && (
-            <section className="rounded-2xl border border-cyan-400/20 bg-cyan-400/[.05] p-5">
+            <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[.05] p-5">
               <div className="flex items-center gap-2">
-                <span className="grid h-5 w-5 place-items-center rounded-full border border-cyan-300/40 text-[10px] font-black text-cyan-200">
+                <span className="grid h-5 w-5 place-items-center rounded-full border border-amber-300/40 text-[10px] font-black text-amber-200">
                   BS
                 </span>
-                <h2 className="text-sm font-black">BS-X BIOS required</h2>
+                <h2 className="text-sm font-black">Requires external firmware</h2>
               </div>
               <p className="mt-2 text-xs leading-5 text-white/55">
-                Satellaview titles need the BS-X BIOS to boot. Select your legally obtained BS-X.bin — it stays in this browser only, never uploaded.
+                This Satellaview title needs a user-provided BS-X system BIOS. LiTT does not provide or download copyrighted firmware. Select your legally obtained BS-X.bin — it stays in this browser only.
               </p>
 
               {/* BIOS validation status */}
               {launchState.status === "validating-bios" && (
-                <div className="mt-3 rounded-xl border border-cyan-400/20 bg-cyan-400/[.06] px-3 py-2 text-xs text-cyan-200">
+                <div className="mt-3 rounded-xl border border-amber-400/20 bg-amber-400/[.06] px-3 py-2 text-xs text-amber-200">
                   Validating BIOS… ({launchState.fileName})
                 </div>
               )}
@@ -1300,9 +1329,9 @@ export default function RetroPlayerPage() {
               {(launchState.status === "needs-bios" || launchState.status === "invalid-bios") && (
                 <button
                   onClick={() => biosInputRef.current?.click()}
-                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-400/20 bg-cyan-400/10 py-2 text-xs font-black text-cyan-200 hover:bg-cyan-400/15"
+                  className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl border border-amber-400/20 bg-amber-400/10 py-2 text-xs font-black text-amber-200 hover:bg-amber-400/15"
                 >
-                  <Upload size={13} /> Select BS-X BIOS
+                  <Upload size={13} /> Load My BIOS
                 </button>
               )}
 
