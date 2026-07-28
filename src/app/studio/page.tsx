@@ -7,7 +7,7 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useTheme } from "@/context/ThemeContext";
-import StudioOS from "./components/StudioOS";
+import CommandStudio from "./components/CommandStudio";
 import { Lock, Sparkles, Terminal, Loader2 } from "lucide-react";
 
 function StudioHub() {
@@ -21,7 +21,7 @@ function StudioHub() {
   const isDemo = searchParams.get("demo") === "1";
 
   if (isDemo) {
-    return <StudioOS isDemo />;
+    return <CommandStudio isDemo />;
   }
 
   if (!isLoaded) {
@@ -150,7 +150,7 @@ function StudioHub() {
     );
   }
 
-  return <StudioOS />;
+  return <CommandStudio />;
 }
 
 export default function StudioPage() {
