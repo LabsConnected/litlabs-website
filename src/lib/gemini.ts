@@ -17,7 +17,7 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY || process.env.G
 // Model configurations (kept for backwards compat)
 export const GEMINI_MODELS = {
   flash: "gemini-2.5-flash",
-  flashLite: "gemini-2.0-flash-lite",
+  flashLite: "gemini-2.5-flash-lite",
   pro: "gemini-2.5-pro",
 } as const;
 

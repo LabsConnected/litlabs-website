@@ -101,7 +101,7 @@ const GROQ_BASE = "https://api.groq.com/openai/v1";
 const GEMINI_PRIMARY_MODEL =
   process.env.GEMINI_PRIMARY_MODEL || "gemini-2.5-flash";
 const GEMINI_FALLBACK_MODEL =
-  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.0-flash";
+  process.env.GEMINI_FALLBACK_MODEL || "gemini-2.5-flash-lite";
 
 export const DEFAULT_MODELS: Record<LLMProvider, string> = {
   gemini: GEMINI_PRIMARY_MODEL,
