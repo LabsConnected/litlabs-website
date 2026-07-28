@@ -6,6 +6,7 @@ import { useTheme } from "@/context/ThemeContext";
 import { useAppUser } from "@/hooks/useClerkAuth";
 import { useProfile } from "@/context/ProfileContext";
 import MusicPlayer from "@/components/dashboard/MusicPlayer";
+import { DailyChallengeWidget } from "@/components/dashboard/DailyChallengeWidget";
 
 /* ---------- Inline SVG icons (lucide-react pinned to old version) ---------- */
 function Icon({ name, size = 16, className = "", style }: { name: string; size?: number; className?: string; style?: CSSProperties }) {
@@ -115,7 +116,7 @@ type InstalledCap = { capability_key: string; name: string; compatible_assistant
 
 /* ---------- Widget Configuration ---------- */
 type WidgetId =
-  | "hero" | "quickActions" | "missions" | "attention" | "projects"
+  | "hero" | "challenge" | "quickActions" | "missions" | "attention" | "projects"
   | "creations" | "connections" | "usage" | "activity" | "suggestions"
   | "deployments" | "capabilities" | "assistants" | "music";
 
@@ -123,19 +124,20 @@ type WidgetConfig = { id: WidgetId; label: string; visible: boolean; order: numb
 
 const DEFAULT_WIDGETS: WidgetConfig[] = [
   { id: "hero", label: "Continue Building", visible: true, order: 0 },
-  { id: "quickActions", label: "Quick Actions", visible: true, order: 1 },
-  { id: "music", label: "Now Playing", visible: true, order: 2 },
-  { id: "missions", label: "Active Missions", visible: true, order: 3 },
-  { id: "attention", label: "Needs Attention", visible: true, order: 4 },
-  { id: "projects", label: "Recent Projects", visible: true, order: 5 },
-  { id: "connections", label: "Connection Health", visible: true, order: 6 },
-  { id: "creations", label: "Recent Creations", visible: true, order: 7 },
-  { id: "usage", label: "Usage & LiTTBits", visible: true, order: 8 },
-  { id: "activity", label: "Live Activity", visible: true, order: 9 },
-  { id: "suggestions", label: "LiTT Suggestions", visible: true, order: 10 },
-  { id: "deployments", label: "Deployments", visible: true, order: 11 },
-  { id: "capabilities", label: "Installed Capabilities", visible: true, order: 12 },
-  { id: "assistants", label: "Assistants", visible: true, order: 13 },
+  { id: "challenge", label: "Daily Challenge", visible: true, order: 1 },
+  { id: "quickActions", label: "Quick Actions", visible: true, order: 2 },
+  { id: "music", label: "Now Playing", visible: true, order: 3 },
+  { id: "missions", label: "Active Missions", visible: true, order: 4 },
+  { id: "attention", label: "Needs Attention", visible: true, order: 5 },
+  { id: "projects", label: "Recent Projects", visible: true, order: 6 },
+  { id: "connections", label: "Connection Health", visible: true, order: 7 },
+  { id: "creations", label: "Recent Creations", visible: true, order: 8 },
+  { id: "usage", label: "Usage & LiTTBits", visible: true, order: 9 },
+  { id: "activity", label: "Live Activity", visible: true, order: 10 },
+  { id: "suggestions", label: "LiTT Suggestions", visible: true, order: 11 },
+  { id: "deployments", label: "Deployments", visible: true, order: 12 },
+  { id: "capabilities", label: "Installed Capabilities", visible: true, order: 13 },
+  { id: "assistants", label: "Assistants", visible: true, order: 14 },
 ];
 
 const WIDGET_STORAGE_KEY = "littree-dashboard-widgets-v1";
@@ -1043,6 +1045,7 @@ export function CommandCenter() {
   const renderWidget = (id: WidgetId): React.ReactNode => {
     switch (id) {
       case "hero": return <HeroWidget data={data} loading={loading} />;
+      case "challenge": return <DailyChallengeWidget />;
       case "quickActions": return <QuickActionsWidget />;
       case "music": return <MusicWidget />;
       case "missions": return <ActiveMissionsWidget data={data} loading={loading} />;
@@ -1062,7 +1065,7 @@ export function CommandCenter() {
 
   /* Column spans for desktop grid */
   const colSpanFor = (id: WidgetId): string => {
-    const wide: WidgetId[] = ["hero", "quickActions"];
+    const wide: WidgetId[] = ["hero", "challenge", "quickActions"];
     const medium: WidgetId[] = ["missions", "projects", "creations", "activity", "music"];
     if (wide.includes(id)) return "lg:col-span-12";
     if (medium.includes(id)) return "lg:col-span-8";
@@ -1070,7 +1073,7 @@ export function CommandCenter() {
   };
 
   /* Whether to wrap in WidgetShell (hero and quickActions are full-width, no shell) */
-  const isFullWidth = (id: WidgetId) => id === "hero" || id === "quickActions";
+  const isFullWidth = (id: WidgetId) => id === "hero" || id === "challenge" || id === "quickActions";
 
   return (
     <div className="min-h-screen backdrop-blur-sm" style={{ backgroundColor: T.bgColor + "d0", color: T.textColor }}>
