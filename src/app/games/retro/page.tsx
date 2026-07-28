@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, Check, ChevronRight, Gamepad2, HardDrive, Heart, Library, LockKeyhole, Play, Search, ShieldCheck, Sparkles, Trash2, Upload, X } from "lucide-react";
 import PageShell from "@/components/PageShell";
-import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getRetroSystem, isStandardPlayable, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
+import { addRetroGame, deleteRetroGame, detectRetroSystem, formatRomSize, getCoverArtUrl, getRetroSystem, isStandardPlayable, listRetroGames, RETRO_SYSTEMS, titleFromFileName, updateRetroGame, type RetroGameRecord, type RetroSystemId } from "@/lib/retro-arcade";
 import { RetroArcadeHero } from "@/components/games/RetroArcadeHero";
 
 type PendingUpload = { file: File; title: string; system: RetroSystemId; legal: boolean };
@@ -114,6 +114,9 @@ export default function RetroArcadePage() {
 
           <section className="min-w-0 space-y-4">
             {recent && <Link href={`/games/retro/play/${recent.id}`} className="group relative flex min-h-40 overflow-hidden rounded-3xl border border-fuchsia-400/20 bg-linear-to-br from-violet-950 via-[#15101e] to-cyan-950 p-6 shadow-[0_25px_80px_rgba(0,0,0,.35)]">
+              {(() => { const coverUrl = getCoverArtUrl(recent); return coverUrl ? (
+                /* eslint-disable-next-line @next/next/no-img-element */
+                <img src={coverUrl} alt="" className="absolute right-0 top-0 h-full w-1/2 object-cover opacity-30 transition group-hover:opacity-40 group-hover:scale-105" loading="lazy" onError={(e) => { (e.target as HTMLImageElement).style.display = "none"; }} />) : null; })()}
               <div className="relative z-10 flex max-w-xl flex-col justify-end"><span className="mb-2 text-[10px] font-black uppercase tracking-[.25em] text-fuchsia-300">Continue playing</span><h2 className="text-3xl font-black">{recent.title}</h2><p className="mt-2 text-sm text-white/50">{getRetroSystem(recent.system).name} · Stored locally</p><span className="mt-4 flex w-fit items-center gap-2 rounded-xl bg-white px-4 py-2 text-sm font-black text-black"><Play size={15} fill="currentColor" /> Resume chapter</span></div>
               <div className="absolute -right-8 -top-20 h-72 w-72 rounded-full bg-fuchsia-500/20 blur-3xl transition group-hover:bg-fuchsia-500/30"/><Gamepad2 className="absolute right-10 top-1/2 -translate-y-1/2 text-white/[.07]" size={180}/>
             </Link>}
@@ -126,8 +129,10 @@ export default function RetroArcadePage() {
             {message && <div className="flex items-center justify-between rounded-xl border border-cyan-400/15 bg-cyan-400/6 px-4 py-3 text-sm text-cyan-100"><span>{message}</span><button onClick={() => setMessage(null)} aria-label="Dismiss"><X size={16}/></button></div>}
 
             {loading ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{[1,2,3].map((item) => <div key={item} className="h-56 animate-pulse rounded-2xl bg-white/5"/>)}</div> : visibleGames.length > 0 ? (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{visibleGames.map((game) => { const system = getRetroSystem(game.system); return <article key={game.id} className="group overflow-hidden rounded-2xl border border-white/10 bg-[#101017] transition hover:-translate-y-1 hover:border-white/20">
-                <Link href={`/games/retro/play/${game.id}`} className="relative flex h-32 items-center justify-center overflow-hidden" style={{ background: `radial-gradient(circle at 50% 20%, ${system.color}33, transparent 55%), linear-gradient(145deg,#181824,#09090d)` }}><span className="select-none text-5xl font-black tracking-tighter text-white/10">{system.shortName}</span><span className="absolute left-3 top-3 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-black" style={{ color: system.color }}>{system.shortName}</span><span className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span></Link>
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{visibleGames.map((game) => { const system = getRetroSystem(game.system); const coverUrl = getCoverArtUrl(game); return <article key={game.id} className="group overflow-hidden rounded-2xl border border-white/10 bg-[#101017] transition hover:-translate-y-1 hover:border-white/20">
+                <Link href={`/games/retro/play/${game.id}`} className="relative flex h-32 items-center justify-center overflow-hidden" style={{ background: `radial-gradient(circle at 50% 20%, ${system.color}33, transparent 55%), linear-gradient(145deg,#181824,#09090d)` }}>{coverUrl ? (
+                  /* eslint-disable-next-line @next/next/no-img-element */
+                  <img src={coverUrl} alt={`${game.title} cover art`} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" onError={(e) => { const img = e.target as HTMLImageElement; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />) : null}<span className="absolute inset-0 hidden select-none items-center justify-center text-5xl font-black tracking-tighter text-white/10" style={{ display: coverUrl ? "none" : "flex" }}>{system.shortName}</span><span className="absolute left-3 top-3 z-10 rounded-lg border border-white/10 bg-black/40 px-2 py-1 text-[10px] font-black" style={{ color: system.color }}>{system.shortName}</span><span className="absolute bottom-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-white text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span></Link>
                 <div className="p-4"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><h3 className="truncate font-black">{game.title}</h3><p className="mt-1 truncate text-xs text-white/35">{formatRomSize(game.size)} · {game.launches} {game.launches === 1 ? "launch" : "launches"}</p></div><button onClick={() => toggleFavorite(game)} className={`p-1.5 ${game.favorite ? "text-pink-400" : "text-white/25 hover:text-white"}`} aria-label="Favorite"><Heart size={16} fill={game.favorite ? "currentColor" : "none"}/></button></div><div className="mt-4 flex gap-2"><Link href={`/games/retro/play/${game.id}`} className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-white/10 py-2 text-xs font-black hover:bg-white/15"><Play size={13}/> Play</Link><button onClick={() => removeGame(game)} className="rounded-lg border border-white/10 px-3 text-white/30 hover:border-red-400/30 hover:text-red-300" aria-label="Remove"><Trash2 size={14}/></button></div></div>
               </article>; })}</div>
             ) : <button onClick={() => inputRef.current?.click()} onDragOver={(event) => event.preventDefault()} onDrop={(event) => { event.preventDefault(); chooseFile(event.dataTransfer.files[0]); }} className="flex min-h-72 w-full flex-col items-center justify-center rounded-3xl border border-dashed border-white/15 bg-white/2.5 p-8 text-center transition hover:border-fuchsia-400/40 hover:bg-fuchsia-400/3"><span className="mb-4 rounded-2xl bg-fuchsia-500/10 p-4 text-fuchsia-300"><Upload size={28}/></span><h3 className="text-lg font-black">{standardGames.length ? "No games match that filter" : "Build your private arcade"}</h3><p className="mt-2 max-w-md text-sm leading-6 text-white/40">{standardGames.length ? "Try another system or search." : "Drop a legally obtained ROM here or choose a file. It stays on this device and launches as a real playable game."}</p>{!standardGames.length && <span className="mt-5 rounded-xl bg-white px-4 py-2 text-sm font-black text-black">Choose ROM</span>}</button>}
@@ -159,12 +164,15 @@ export default function RetroArcadePage() {
                   </div>
                   {visibleAdvanced.length > 0 ? (
                     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                      {visibleAdvanced.map((game) => (
+                      {visibleAdvanced.map((game) => { const coverUrl = getCoverArtUrl(game); return (
                         <article key={game.id} className="group overflow-hidden rounded-2xl border border-amber-400/15 bg-[#15120a] transition hover:border-amber-400/30">
                           <Link href={`/games/retro/play/${game.id}`} className="relative flex h-32 items-center justify-center overflow-hidden" style={{ background: "radial-gradient(circle at 50% 20%, rgba(251,191,36,.2), transparent 55%), linear-gradient(145deg,#181410,#0d0a08)" }}>
-                            <span className="select-none text-5xl font-black tracking-tighter text-white/10">BS-X</span>
-                            <span className="absolute left-3 top-3 rounded-lg border border-amber-400/20 bg-black/40 px-2 py-1 text-[10px] font-black text-amber-300">BS-X</span>
-                            <span className="absolute bottom-3 right-3 flex h-10 w-10 items-center justify-center rounded-full bg-amber-400 text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span>
+                            {coverUrl ? (
+                              /* eslint-disable-next-line @next/next/no-img-element */
+                              <img src={coverUrl} alt={`${game.title} cover art`} className="h-full w-full object-cover transition-transform duration-500 group-hover:scale-105" loading="lazy" onError={(e) => { const img = e.target as HTMLImageElement; img.style.display = "none"; const fallback = img.nextElementSibling as HTMLElement | null; if (fallback) fallback.style.display = "flex"; }} />) : null}
+                            <span className="absolute inset-0 hidden select-none items-center justify-center text-5xl font-black tracking-tighter text-white/10" style={{ display: coverUrl ? "none" : "flex" }}>BS-X</span>
+                            <span className="absolute left-3 top-3 z-10 rounded-lg border border-amber-400/20 bg-black/40 px-2 py-1 text-[10px] font-black text-amber-300">BS-X</span>
+                            <span className="absolute bottom-3 right-3 z-10 flex h-10 w-10 items-center justify-center rounded-full bg-amber-400 text-black opacity-0 shadow-xl transition group-hover:opacity-100"><Play size={16} fill="currentColor"/></span>
                           </Link>
                           <div className="p-4">
                             <div className="flex items-start justify-between gap-2">
@@ -179,7 +187,7 @@ export default function RetroArcadePage() {
                             </div>
                           </div>
                         </article>
-                      ))}
+                      ); })}
                     </div>
                   ) : (
                     <p className="text-sm text-white/40">No advanced titles match your search.</p>

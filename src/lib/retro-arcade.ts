@@ -64,6 +64,47 @@ export const EMULATOR_CORE_BY_SYSTEM: Record<RetroSystemId, string> = {
   segaMD: "segaMD",
 };
 
+// ---------------------------------------------------------------------------
+// Cover art — Libretro thumbnail CDN (free, public, no API key)
+// ---------------------------------------------------------------------------
+// Libretro/RetroArch maintains a public thumbnail repository at:
+//   https://thumbnails.libretro.com/<System>/Named_Boxarts/<Game>.png
+// It has box art for thousands of retro games. We map our RetroSystemId
+// to Libretro's system folder names and build a URL from the game's
+// fileName (which usually matches the No-Intro naming convention that
+// Libretro uses).
+//
+// If the cover isn't found (404), the <img> onError fallback shows the
+// system-colored gradient with the system short name as before.
+
+const LIBRETRO_SYSTEM_MAP: Record<RetroSystemId, string> = {
+  nes: "Nintendo - Nintendo Entertainment System",
+  snes: "Nintendo - Super Nintendo Entertainment System",
+  gb: "Nintendo - Game Boy",
+  gbc: "Nintendo - Game Boy Color",
+  gba: "Nintendo - Game Boy Advance",
+  segaMD: "Sega - Mega Drive - Genesis",
+};
+
+/**
+ * Build a Libretro thumbnail URL for a retro game.
+ * Uses the fileName (without extension) as the lookup key, since Libretro
+ * uses the No-Intro naming convention which matches typical ROM filenames.
+ *
+ * @param game The retro game record
+ * @returns A URL to the box art PNG, or null if the system is unknown
+ */
+export function getCoverArtUrl(game: RetroGameRecord): string | null {
+  const systemFolder = LIBRETRO_SYSTEM_MAP[game.system];
+  if (!systemFolder) return null;
+
+  // Libretro uses the filename without extension as the thumbnail name.
+  // The filename typically matches the No-Intro convention (e.g. "Sonic Spinball (USA)").
+  const baseName = game.fileName.replace(/\.[^.]+$/, "");
+
+  return `https://thumbnails.libretro.com/${encodeURIComponent(systemFolder)}/Named_Boxarts/${encodeURIComponent(baseName)}.png`;
+}
+
 const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
 const DB_VERSION = 1;
