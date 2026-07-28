@@ -487,4 +487,135 @@ describe("stripe/checkout security", () => {
     expect(body["metadata[plan_id]"]).toBe("creator_beta");
     expect(body["metadata[coin_amount]"]).toBeUndefined();
   });
+
+  // 31. Stripe 200 without valid url is treated as failure
+  it("returns 502 when Stripe returns 200 without a checkout URL", async () => {
+    mockProducts["coin_pack_500"] = makeProduct({
+      id: "coin_pack_500",
+      amountCents: 500,
+      credits: 500,
+    });
+    fetchJson = { id: "cs_123", url: "https://evil.com/redirect" };
+    const res = await callRoute({ productId: "coin_pack_500" });
+    expect(res.status).toBe(502);
+    const json = await res.json();
+    expect(json.error).toBe("Unable to create checkout session");
+  });
+
+  it("returns 502 when Stripe returns 200 without a session id", async () => {
+    mockProducts["coin_pack_500"] = makeProduct({
+      id: "coin_pack_500",
+      amountCents: 500,
+      credits: 500,
+    });
+    fetchJson = { url: "https://checkout.stripe.com/s/123" };
+    const res = await callRoute({ productId: "coin_pack_500" });
+    expect(res.status).toBe(502);
+  });
+
+  // ── Strengthened catalog invariants ──────────────────────────────
+
+  // 32. Catalog key must equal product.id
+  it("catalog invariant: key must equal product.id", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({ id: "wrong_id", amountCents: 500, credits: 500 });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        mismatched_key: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 33. currency must be approved lowercase
+  it("catalog invariant: unapproved currency is rejected", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({ id: "bad_cur", amountCents: 500, credits: 500, currency: "USD" });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        bad_cur: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 34. stripePriceId must start with price_
+  it("catalog invariant: stripePriceId must start with price_", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({
+      id: "bad_price",
+      type: "plan",
+      checkoutMode: "subscription",
+      stripePriceId: "not_a_price_id",
+      planId: "creator_beta",
+    });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        bad_price: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 35. credits must be a positive integer
+  it("catalog invariant: non-positive credits is rejected", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({ id: "bad_credits", amountCents: 500, credits: 0 });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        bad_credits: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 36. coin_pack requires credits
+  it("catalog invariant: coin_pack without credits is rejected", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({ id: "no_credits", amountCents: 500, credits: undefined });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        no_credits: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 37. plan requires planId
+  it("catalog invariant: plan without planId is rejected", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({
+      id: "no_planid",
+      type: "plan",
+      checkoutMode: "subscription",
+      stripePriceId: "price_real_sub",
+      planId: undefined,
+    });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        no_planid: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 38. name must be non-empty
+  it("catalog invariant: empty name is rejected", async () => {
+    const mod = await import("@/config/stripe-products");
+    const badProduct = makeProduct({ id: "no_name", amountCents: 500, credits: 500, name: "" });
+    expect(() =>
+      (mod as { validateCatalog: (c: Record<string, unknown>) => void }).validateCatalog({
+        no_name: badProduct,
+      }),
+    ).toThrow();
+  });
+
+  // 39. Response with valid Stripe checkout URL succeeds
+  it("succeeds when Stripe returns valid checkout URL", async () => {
+    mockProducts["coin_pack_500"] = makeProduct({
+      id: "coin_pack_500",
+      amountCents: 500,
+      credits: 500,
+    });
+    fetchJson = { id: "cs_valid_123", url: "https://checkout.stripe.com/s/valid" };
+    const res = await callRoute({ productId: "coin_pack_500" });
+    expect(res.status).toBe(200);
+    const json = await res.json();
+    expect(json.sessionId).toBe("cs_valid_123");
+    expect(json.url).toBe("https://checkout.stripe.com/s/valid");
+  });
 });

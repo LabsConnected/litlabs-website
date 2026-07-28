@@ -211,6 +211,19 @@ export async function POST(req: NextRequest) {
       id?: string;
     };
 
+    // Validate Stripe's response — a 200 without a usable checkout URL and
+    // session id is not a success we can hand back to the browser.
+    if (
+      typeof session.id !== "string" ||
+      typeof session.url !== "string" ||
+      !session.url.startsWith("https://checkout.stripe.com/")
+    ) {
+      console.error(
+        "[stripe/checkout] Stripe returned 2xx without a valid checkout URL/session id",
+      );
+      return stripeFailure();
+    }
+
     return NextResponse.json({ url: session.url, sessionId: session.id });
   } catch (err) {
     // getAppUrl throws for invalid production URLs — surface as 500.

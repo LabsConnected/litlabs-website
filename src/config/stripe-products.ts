@@ -92,7 +92,27 @@ export function getProductById(id: string): ProductDefinition | undefined {
  *    minimum).
  */
 export function validateCatalog(catalog: Record<string, ProductDefinition>): void {
+  const APPROVED_CURRENCIES = new Set(["usd", "eur", "gbp", "cad", "aud"]);
   for (const [id, p] of Object.entries(catalog)) {
+    // Catalog key must match the product's own id.
+    if (p.id !== id) {
+      throw new Error(
+        `Catalog key "${id}" must match product.id "${p.id}"`,
+      );
+    }
+
+    // name must be a non-empty string.
+    if (!p.name || p.name.trim().length === 0) {
+      throw new Error(`Product "${id}" must have a non-empty name`);
+    }
+
+    // currency must be an approved lowercase ISO code.
+    if (!APPROVED_CURRENCIES.has(p.currency)) {
+      throw new Error(
+        `Product "${id}" currency "${p.currency}" is not an approved currency`,
+      );
+    }
+
     const hasAmount = p.amountCents !== undefined && p.amountCents !== null;
     const hasPrice = !!p.stripePriceId;
 
@@ -106,6 +126,11 @@ export function validateCatalog(catalog: Record<string, ProductDefinition>): voi
         `Product "${id}" is a subscription and requires stripePriceId`,
       );
     }
+    if (hasPrice && !p.stripePriceId!.startsWith("price_")) {
+      throw new Error(
+        `Product "${id}" stripePriceId must start with "price_"`,
+      );
+    }
     if (hasAmount) {
       if (
         !Number.isInteger(p.amountCents) ||
@@ -116,11 +141,26 @@ export function validateCatalog(catalog: Record<string, ProductDefinition>): voi
         );
       }
     }
-    if (p.credits !== undefined && p.type !== "coin_pack") {
-      throw new Error(`Product "${id}" credits is only valid for coin_pack`);
+    // credits: positive integer, only for coin_pack, and required for coin_pack.
+    if (p.credits !== undefined) {
+      if (!Number.isInteger(p.credits) || p.credits <= 0) {
+        throw new Error(
+          `Product "${id}" credits must be a positive integer`,
+        );
+      }
+      if (p.type !== "coin_pack") {
+        throw new Error(`Product "${id}" credits is only valid for coin_pack`);
+      }
     }
+    if (p.type === "coin_pack" && p.credits === undefined) {
+      throw new Error(`Product "${id}" is a coin_pack and requires credits`);
+    }
+    // planId: only for plan products, and required for plan products.
     if (p.planId !== undefined && p.type !== "plan") {
       throw new Error(`Product "${id}" planId is only valid for plan products`);
+    }
+    if (p.type === "plan" && p.planId === undefined) {
+      throw new Error(`Product "${id}" is a plan and requires planId`);
     }
   }
 }
