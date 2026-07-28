@@ -2,282 +2,443 @@
 
 import { useState, useCallback } from "react";
 import Link from "next/link";
-import { useTheme } from "@/context/ThemeContext";
+import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
-import { Check, Sparkles, ArrowRight, Loader2, Shield, Coins, RefreshCw, LockKeyhole } from "lucide-react";
-import { PLAN_LIST, formatPrice, formatPriceMonthly, type PlanDefinition } from "@/config/plans";
+import {
+  PLANS,
+  formatPrice,
+  formatPriceMonthly,
+  type PlanDefinition,
+  type PlanId,
+} from "@/config/plans";
 
-const PLAN_ACCENTS: Record<string, string> = {
-  starter: "#6b7280",
-  creator_beta: "#00f0ff",
-  pro_builder_beta: "#8b5cf6",
-  founder: "#fbbf24",
+type Accent = "neutral" | "cyan" | "purple";
+
+type CardPlan = {
+  id: PlanId;
+  name: string;
+  label: string;
+  price: string;
+  suffix: string;
+  futurePrice: string;
+  description: string;
+  credits: string;
+  projects: string;
+  featured?: boolean;
+  accent: Accent;
+  cta: string;
+  free: boolean;
 };
 
-export default function PricingPage() {
-  const { resolvedColors: T } = useTheme();
-  const { isSignedIn } = useClerkAuth();
-  const [loading, setLoading] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+const CARD_PLANS: CardPlan[] = [
+  {
+    id: "starter",
+    name: PLANS.starter.name,
+    label: "Explore LiTTree",
+    price: formatPrice(PLANS.starter.monthlyPriceCents),
+    suffix: "forever",
+    futurePrice: "No credit card required",
+    description: PLANS.starter.description,
+    credits: PLANS.starter.monthlyCredits.toLocaleString(),
+    projects: `${PLANS.starter.activeProjectLimit} active project`,
+    accent: "neutral",
+    cta: "Start free",
+    free: true,
+  },
+  {
+    id: "creator_beta",
+    name: PLANS.creator_beta.name,
+    label: "Best for creators",
+    price: formatPrice(PLANS.creator_beta.monthlyPriceCents),
+    suffix: "/month",
+    futurePrice: `Later ${formatPriceMonthly(PLANS.creator_beta.standardPriceCents)}`,
+    description: PLANS.creator_beta.description,
+    credits: PLANS.creator_beta.monthlyCredits.toLocaleString(),
+    projects: `${PLANS.creator_beta.activeProjectLimit} active projects`,
+    featured: true,
+    accent: "cyan",
+    cta: "Choose Creator",
+    free: false,
+  },
+  {
+    id: "pro_builder_beta",
+    name: PLANS.pro_builder_beta.name,
+    label: "For serious builders",
+    price: formatPrice(PLANS.pro_builder_beta.monthlyPriceCents),
+    suffix: "/month",
+    futurePrice: `Later ${formatPriceMonthly(PLANS.pro_builder_beta.standardPriceCents)}`,
+    description: PLANS.pro_builder_beta.description,
+    credits: PLANS.pro_builder_beta.monthlyCredits.toLocaleString(),
+    projects: `${PLANS.pro_builder_beta.activeProjectLimit} active projects`,
+    accent: "purple",
+    cta: "Choose Pro",
+    free: false,
+  },
+];
 
-  const handleCheckout = useCallback(async (plan: PlanDefinition) => {
-    if (plan.billingType === "free") return;
-    if (!isSignedIn) {
-      window.location.href = "/sign-in?redirect=/pricing";
-      return;
-    }
-    setLoading(plan.id);
-    setError(null);
-    try {
-      const res = await fetch("/api/billing/checkout", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ planId: plan.id }),
-      });
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        setError(data.error || "Failed to start checkout");
-      }
-    } catch {
-      setError("Network error during checkout");
-    } finally {
-      setLoading(null);
-    }
-  }, [isSignedIn]);
+const usageRules = [
+  {
+    title: "One visible balance",
+    copy: "Monthly, promotional, and purchased LiTTBits stay separated behind one honest total.",
+  },
+  {
+    title: "Monthly credits refresh",
+    copy: "Plan LiTTBits refresh each billing period. Purchased LiTTBits do not silently expire.",
+  },
+  {
+    title: "Atomic usage ledger",
+    copy: "Every grant and charge uses an idempotency key to prevent duplicate billing or double-spend.",
+  },
+];
+
+const faq = [
+  {
+    question: "What are LiTTBits?",
+    answer:
+      "LiTTBits are platform credits used for billable AI actions such as chat, code generation, image creation, media processing, and terminal runtime.",
+  },
+  {
+    question: "Do I keep my existing Beta LiTTBits?",
+    answer:
+      "Yes. Existing balances are migrated once into the promotional bucket. Monthly plan credits are used first, followed by promotional and purchased credits.",
+  },
+  {
+    question: "Can I cancel anytime?",
+    answer:
+      "Yes. Cancellation stops future renewals while access continues through the paid period. Downgrading or canceling does not delete projects or assets.",
+  },
+  {
+    question: "Is this unlimited AI?",
+    answer:
+      "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Expensive actions should show an estimate before they run.",
+  },
+];
+
+function CheckIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none">
+      <path
+        d="m4.5 10.5 3.1 3.1 7.9-8"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function ArrowIcon() {
+  return (
+    <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none">
+      <path
+        d="M4 10h11M11 6l4 4-4 4"
+        stroke="currentColor"
+        strokeWidth="1.8"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </svg>
+  );
+}
+
+function PlanCard({
+  plan,
+  loading,
+  onCheckout,
+}: {
+  plan: CardPlan;
+  loading: boolean;
+  onCheckout: (plan: PlanDefinition) => void;
+}) {
+  const accentClass = styles[`accent_${plan.accent}` as const] ?? "";
+  const isLoading = loading;
 
   return (
-    <div className="min-h-screen" style={{ backgroundColor: T.bgColor, color: T.textColor }}>
-      {/* Header */}
-      <div className="border-b border-white/10 px-4 py-12 sm:px-6 sm:py-16">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-amber-400/30 bg-amber-400/10 px-3 py-1 text-[10px] font-black uppercase tracking-wider text-amber-300">
-            <Sparkles size={12} />
-            Founder Beta Pricing
-          </div>
-          <h1 className="text-3xl font-black tracking-tight sm:text-5xl" style={{ color: T.headerColor }}>
-            Lock in lower pricing while LiTTree is in beta
-          </h1>
-          <p className="mx-auto mt-4 max-w-2xl text-sm text-white/55 sm:text-base">
-            Core tools remain free while testing. Paid beta plans unlock higher limits,
-            private projects, GitHub workflows, terminal access, and deployment features.
-          </p>
-          <p className="mt-3 text-xs text-white/40">
-            No plan claims unlimited external compute. LiTTBits cover platform actions, not third-party infrastructure costs.
-          </p>
+    <article
+      className={[styles.planCard, accentClass, plan.featured ? styles.featured : ""]
+        .filter(Boolean)
+        .join(" ")}
+    >
+      {plan.featured ? <div className={styles.topGlow} /> : null}
+
+      <div className={styles.planHeader}>
+        <div>
+          <p className={styles.planLabel}>{plan.label}</p>
+          <h2>{plan.name}</h2>
+        </div>
+        {plan.featured ? <span className={styles.popularBadge}>Most popular</span> : null}
+      </div>
+
+      <div className={styles.priceRow}>
+        <span className={styles.price}>{plan.price}</span>
+        <span className={styles.priceSuffix}>{plan.suffix}</span>
+      </div>
+
+      <p className={styles.futurePrice}>{plan.futurePrice}</p>
+      <p className={styles.planDescription}>{plan.description}</p>
+
+      <div className={styles.allowanceGrid}>
+        <div className={styles.allowance}>
+          <strong>{plan.credits}</strong>
+          <span>LiTTBits monthly</span>
+        </div>
+        <div className={styles.allowance}>
+          <strong>{plan.projects.replace(" active project", "").replace(" active projects", "")}</strong>
+          <span>{plan.projects.includes("projects") ? "active projects" : "active project"}</span>
         </div>
       </div>
 
-      {/* Plan cards */}
-      <div className="mx-auto max-w-6xl px-4 py-10 sm:px-6">
-        <div className="grid gap-5 sm:grid-cols-2 lg:grid-cols-4">
-          {PLAN_LIST.map((plan) => {
-            const accent = PLAN_ACCENTS[plan.id] || T.accentColor;
-            const isFree = plan.billingType === "free";
-            const isFounder = plan.id === "founder";
-            const isRecommended = plan.id === "creator_beta";
-            const isLoading = loading === plan.id;
-
-            return (
-              <div
-                key={plan.id}
-                className="relative flex flex-col overflow-hidden rounded-2xl border-2 transition-all hover:-translate-y-1"
-                style={{
-                  borderColor: isFounder || isRecommended ? `${accent}70` : `${accent}30`,
-                  backgroundColor: `${accent}08`,
-                }}
-              >
-                {/* Founder badge */}
-                {isFounder && (
-                  <div className="absolute right-0 top-0 rounded-bl-xl px-3 py-1 text-[9px] font-black uppercase tracking-wider text-black" style={{ backgroundColor: accent }}>
-                    Limited
-                  </div>
-                )}
-                {isRecommended && (
-                  <div className="absolute right-3 top-3 rounded-full px-2.5 py-1 text-[9px] font-black uppercase tracking-wider text-slate-950" style={{ backgroundColor: accent }}>
-                    Best for creators
-                  </div>
-                )}
-
-                <div className="flex flex-1 flex-col p-5">
-                  {/* Plan name */}
-                  <div className="text-xs font-black uppercase tracking-wider" style={{ color: accent }}>
-                    {plan.name}
-                  </div>
-
-                  {/* Price */}
-                  <div className="mt-2 flex items-baseline gap-1">
-                    <span className="text-3xl font-black" style={{ color: T.headerColor }}>
-                      {plan.billingType === "one_time"
-                        ? formatPrice(plan.monthlyPriceCents)
-                        : formatPriceMonthly(plan.monthlyPriceCents)}
-                    </span>
-                    {plan.billingType === "one_time" && (
-                      <span className="text-[10px] text-white/40">one-time</span>
-                    )}
-                  </div>
-
-                  {/* Standard price comparison */}
-                  {plan.standardPriceCents !== null && plan.standardPriceCents > 0 && (
-                    <div className="mt-1 text-[10px] text-white/40">
-                      Founder pricing · later{" "}
-                      <span className="line-through">{formatPriceMonthly(plan.standardPriceCents)}</span>
-                    </div>
-                  )}
-
-                  {isFree && (
-                    <div className="mt-1 text-[10px] text-white/40">Free forever</div>
-                  )}
-
-                  {/* Description */}
-                  <p className="mt-3 text-[11px] leading-relaxed text-white/50">
-                    {plan.description}
-                  </p>
-
-                  {/* Credits */}
-                  <div className="mt-4 rounded-lg border border-white/5 bg-black/20 px-3 py-2">
-                    <div className="text-lg font-black" style={{ color: accent }}>
-                      {plan.monthlyCredits.toLocaleString()}
-                    </div>
-                    <div className="text-[9px] uppercase tracking-wider text-white/40">
-                      {isFounder ? "included founding LiTTBits" : "monthly LiTTBits"}
-                    </div>
-                  </div>
-
-                  {/* Features */}
-                  <div className="mt-4 flex-1 space-y-1.5">
-                    {plan.features.map((feat) => (
-                      <div key={feat} className="flex items-start gap-2 text-[11px] text-white/70">
-                        <Check size={12} className="mt-0.5 shrink-0" style={{ color: accent }} />
-                        {feat}
-                      </div>
-                    ))}
-                  </div>
-
-                  {/* CTA */}
-                  <div className="mt-5">
-                    {isFree ? (
-                      <Link
-                        href="/studio"
-                        className="flex w-full items-center justify-center gap-1.5 rounded-xl border py-2.5 text-xs font-bold transition hover:bg-white/5"
-                        style={{ borderColor: `${accent}30`, color: accent }}
-                      >
-                        Get Started <ArrowRight size={12} />
-                      </Link>
-                    ) : (
-                      <button
-                        onClick={() => handleCheckout(plan)}
-                        disabled={isLoading}
-                        className="flex w-full items-center justify-center gap-1.5 rounded-xl py-2.5 text-xs font-black text-black transition hover:scale-[1.02] disabled:opacity-50"
-                        style={{ backgroundColor: accent }}
-                      >
-                        {isLoading ? (
-                          <Loader2 size={12} className="animate-spin" />
-                        ) : (
-                          <>
-                            {isFounder ? "Become a Founder" : plan.id === "creator_beta" ? "Choose Creator" : "Choose Pro"}
-                            <ArrowRight size={12} />
-                          </>
-                        )}
-                      </button>
-                    )}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Error message */}
-        {error && (
-          <div className="mt-6 rounded-xl border border-red-400/30 bg-red-400/10 px-4 py-3 text-center text-xs font-bold text-red-300">
-            {error}
-          </div>
-        )}
-
-        <div className="mt-10 grid gap-3 md:grid-cols-3">
-          {[
-            {
-              icon: Coins,
-              title: "One visible balance",
-              copy: "Monthly, promotional, and purchased LiTTBits are shown separately and summed honestly.",
-            },
-            {
-              icon: RefreshCw,
-              title: "Monthly credits reset",
-              copy: "Plan LiTTBits refresh each paid billing period. Purchased LiTTBits do not silently expire.",
-            },
-            {
-              icon: LockKeyhole,
-              title: "Atomic usage ledger",
-              copy: "Every grant and charge has an idempotency key, preventing duplicate billing or double-spend.",
-            },
-          ].map((item) => (
-            <div key={item.title} className="rounded-2xl border border-white/8 bg-white/[0.025] p-4">
-              <item.icon size={17} style={{ color: T.accentColor }} />
-              <h2 className="mt-3 text-sm font-black text-white/90">{item.title}</h2>
-              <p className="mt-1 text-[11px] leading-5 text-white/50">{item.copy}</p>
-            </div>
-          ))}
-        </div>
-
-        {/* Trust section */}
-        <div className="mt-10 rounded-2xl border border-white/10 bg-white/[.02] p-6">
-          <div className="flex items-center gap-2">
-            <Shield size={16} className="text-white/40" />
-            <span className="text-xs font-black uppercase tracking-wider text-white/60">
-              Beta Protection
+      <ul className={styles.featureList}>
+        {PLANS[plan.id].features.map((feature) => (
+          <li key={feature}>
+            <span className={styles.check}>
+              <CheckIcon />
             </span>
+            <span>{feature}</span>
+          </li>
+        ))}
+      </ul>
+
+      {plan.free ? (
+        <Link className={styles.planButton} href="/studio">
+          <span>{plan.cta}</span>
+          <ArrowIcon />
+        </Link>
+      ) : (
+        <button
+          type="button"
+          className={styles.planButton}
+          disabled={isLoading}
+          onClick={() => onCheckout(PLANS[plan.id])}
+        >
+          <span>{plan.cta}</span>
+          {isLoading ? null : <ArrowIcon />}
+        </button>
+      )}
+    </article>
+  );
+}
+
+export default function PricingPage() {
+  const { isSignedIn } = useClerkAuth();
+  const [loading, setLoading] = useState<PlanId | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  const handleCheckout = useCallback(
+    async (plan: PlanDefinition) => {
+      if (plan.billingType === "free") return;
+      if (!isSignedIn) {
+        window.location.href = "/sign-in?redirect=/pricing";
+        return;
+      }
+      setLoading(plan.id);
+      setError(null);
+      try {
+        const res = await fetch("/api/billing/checkout", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ planId: plan.id }),
+        });
+        const data = await res.json();
+        if (data.url) {
+          window.location.href = data.url;
+        } else {
+          setError(data.error || "Failed to start checkout");
+        }
+      } catch {
+        setError("Network error during checkout");
+      } finally {
+        setLoading(null);
+      }
+    },
+    [isSignedIn],
+  );
+
+  const founder = PLANS.founder;
+  const founderLoading = loading === founder.id;
+
+  return (
+    <main className={styles.page}>
+      <div className={styles.wallpaper} aria-hidden="true">
+        <div className={styles.grid} />
+        <div className={styles.orbOne} />
+        <div className={styles.orbTwo} />
+        <div className={styles.orbThree} />
+        <div className={styles.brandTree}>
+          <span className={styles.treeCrown} />
+          <span className={styles.treeTrunk} />
+          <span className={styles.treeRootOne} />
+          <span className={styles.treeRootTwo} />
+          <span className={styles.treeRootThree} />
+        </div>
+      </div>
+
+      <section className={styles.hero}>
+        <div className={styles.heroBadge}>
+          <span className={styles.liveDot} />
+          Founder Beta Pricing
+        </div>
+
+        <h1>
+          Build more.
+          <span> Pay for what actually runs.</span>
+        </h1>
+
+        <p className={styles.heroCopy}>
+          Start free, then unlock private projects, GitHub workflows, voice,
+          terminal runtime, advanced models, and deployment when your work needs
+          it.
+        </p>
+
+        <div className={styles.heroMeta}>
+          <span>No fake unlimited claims</span>
+          <span>Clear LiTTBit allowances</span>
+          <span>Projects stay yours</span>
+        </div>
+      </section>
+
+      <section className={styles.pricingSection} aria-label="Pricing plans">
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Choose your build level</p>
+            <h2>Simple plans. Real limits. No billing tricks.</h2>
           </div>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <div className="flex items-start gap-2 text-[11px] text-white/50">
-              <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-              Existing balances are migrated once and remain visible
+          <p>
+            Founder pricing stays lower during beta. All checkout flows use the
+            existing Stripe price IDs and billing handler.
+          </p>
+        </div>
+
+        <div className={styles.planGrid}>
+          {CARD_PLANS.map((plan) => (
+            <PlanCard
+              key={plan.id}
+              plan={plan}
+              loading={loading === plan.id}
+              onCheckout={handleCheckout}
+            />
+          ))}
+        </div>
+
+        <article className={styles.founderBanner}>
+          <div className={styles.founderMark}>L</div>
+
+          <div className={styles.founderCopy}>
+            <div className={styles.founderTitleRow}>
+              <p>Founding Member</p>
+              <span>Limited</span>
             </div>
-            <div className="flex items-start gap-2 text-[11px] text-white/50">
-              <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-              Downgrades never delete your projects or assets
-            </div>
-            <div className="flex items-start gap-2 text-[11px] text-white/50">
-              <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-              Cancellation preserves access through the paid period
-            </div>
-            <div className="flex items-start gap-2 text-[11px] text-white/50">
-              <Check size={12} className="mt-0.5 shrink-0 text-emerald-400" />
-              Credits use an immutable ledger — no silent balance changes
-            </div>
+            <h2>
+              Permanent Creator-level access for{" "}
+              <strong>{formatPrice(founder.monthlyPriceCents)} once</strong>
+            </h2>
+            <p>
+              Includes {founder.monthlyCredits.toLocaleString()} founding LiTTBits, a Founder
+              badge, early feature access, 20% off future usage packs, higher beta
+              limits, priority feedback, and price protection. One-time purchase
+              that does not renew.
+            </p>
+          </div>
+
+          <button
+            type="button"
+            className={styles.founderButton}
+            disabled={founderLoading}
+            onClick={() => handleCheckout(founder)}
+          >
+            Become a Founder
+            {founderLoading ? null : <ArrowIcon />}
+          </button>
+        </article>
+
+        {error ? <div className={styles.errorBanner}>{error}</div> : null}
+      </section>
+
+      <section className={styles.rulesSection}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Billing integrity</p>
+            <h2>The pricing system should explain itself.</h2>
+          </div>
+          <p>Show users what they receive, what resets, and what never disappears.</p>
+        </div>
+
+        <div className={styles.rulesGrid}>
+          {usageRules.map((item, index) => (
+            <article key={item.title} className={styles.ruleCard}>
+              <span className={styles.ruleNumber}>0{index + 1}</span>
+              <h3>{item.title}</h3>
+              <p>{item.copy}</p>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className={styles.protectionSection}>
+        <div>
+          <p className={styles.eyebrow}>Beta protection</p>
+          <h2>Your work and credits do not vanish when a plan changes.</h2>
+        </div>
+
+        <ul>
+          <li>
+            <CheckIcon />
+            Existing balances are migrated once and remain visible.
+          </li>
+          <li>
+            <CheckIcon />
+            Downgrades never delete projects or assets.
+          </li>
+          <li>
+            <CheckIcon />
+            Cancellation preserves access through the paid period.
+          </li>
+          <li>
+            <CheckIcon />
+            Credits use an immutable ledger with no silent balance changes.
+          </li>
+        </ul>
+      </section>
+
+      <section className={styles.faqSection}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Pricing FAQ</p>
+            <h2>Answer the questions before users have to ask.</h2>
           </div>
         </div>
 
-        {/* FAQ */}
-        <div className="mt-8 space-y-3">
-          <h3 className="text-sm font-black text-white/70">Beta Pricing FAQ</h3>
-          {[
-            {
-              q: "What are LiTTBits?",
-              a: "LiTTBits are platform credits used for AI actions like chat, code generation, image creation, and terminal minutes. Each plan includes a monthly allowance.",
-            },
-            {
-              q: "Do I keep my existing Beta LiTTBits?",
-              a: "Yes. Your existing wallet balance is migrated once into the promotional bucket. Monthly plan credits are used first, then promotional credits, then purchased credits.",
-            },
-            {
-              q: "Can I cancel anytime?",
-              a: "Yes. Cancellation stops future renewals but preserves access through your paid period. Your projects and data are never deleted on cancellation.",
-            },
-            {
-              q: "Is this unlimited AI?",
-              a: "No. Billable AI and runtime actions have a LiTTBit cost. Free navigation, project organization, and local editing do not. Estimated cost should be shown before expensive operations.",
-            },
-          ].map((faq) => (
-            <div key={faq.q} className="rounded-xl border border-white/5 bg-black/20 px-4 py-3">
-              <div className="text-xs font-bold text-white/80">{faq.q}</div>
-              <p className="mt-1 text-[11px] leading-relaxed text-white/50">{faq.a}</p>
-            </div>
+        <div className={styles.faqGrid}>
+          {faq.map((item) => (
+            <details key={item.question} className={styles.faqItem}>
+              <summary>{item.question}</summary>
+              <p>{item.answer}</p>
+            </details>
           ))}
         </div>
-      </div>
-    </div>
+      </section>
+
+      <section className={styles.finalCta}>
+        <div>
+          <p className={styles.eyebrow}>Ready when you are</p>
+          <h2>Turn one idea into a real project inside Studio.</h2>
+          <p>
+            Start free. Upgrade only when you need more projects, private
+            workflows, runtime, or deployment power.
+          </p>
+        </div>
+
+        <div className={styles.ctaActions}>
+          <Link className={styles.primaryCta} href="/studio">
+            Launch Studio
+            <ArrowIcon />
+          </Link>
+          <Link className={styles.secondaryCta} href="/marketplace">
+            Explore Marketplace
+          </Link>
+        </div>
+      </section>
+    </main>
   );
 }
