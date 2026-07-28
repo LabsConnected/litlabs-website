@@ -19,6 +19,7 @@ import "@xterm/xterm/css/xterm.css";
 const HEARTBEAT_INTERVAL_MS = 10_000;
 
 interface TerminalPanelProps {
+  projectId?: string;
   onLog?: (entry: string) => void;
   onCommand?: (cmd: string) => void;
   onConnectionChange?: (connected: boolean) => void;
@@ -34,7 +35,7 @@ export const TerminalPanel = forwardRef<
   TerminalPanelHandle,
   TerminalPanelProps
 >(function TerminalPanel(
-  { onLog, onCommand, onConnectionChange, onTerminalOutput },
+  { projectId, onLog, onCommand, onConnectionChange, onTerminalOutput },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -133,7 +134,7 @@ export const TerminalPanel = forwardRef<
       });
     };
 
-    void getTerminalToken()
+    void getTerminalToken(false, projectId)
       .then((token) => {
         if (disposed) return;
         const connectedSocket = io(wsUrl, {
@@ -279,6 +280,7 @@ export const TerminalPanel = forwardRef<
     isLoaded,
     isSignedIn,
     retryCount,
+    projectId,
     onLog,
     onCommand,
     onConnectionChange,

@@ -13,9 +13,13 @@ import {
   Image as ImageIcon,
   Terminal,
   X,
+  Plug,
+  SquareTerminal,
+  MessageSquare,
 } from "lucide-react";
 import { AGENTS } from "@/lib/agents";
 import SystemTopologyPanel from "@/components/studio/SystemTopologyPanel";
+import { TerminalPanel } from "@/components/litt-terminal/TerminalPanel";
 
 /* ─── Types ──────────────────────────────────────────────────────────── */
 type AgentProfile = (typeof AGENTS)[keyof typeof AGENTS] & {
@@ -117,6 +121,57 @@ export default function AgentsTerminalTool() {
   const [autoScroll, setAutoScroll] = useState(true);
   const [copiedLogs, setCopiedLogs] = useState(false);
   const [liveLogs, setLiveLogs] = useState<LogEntry[]>([]);
+
+  /* Real PTY terminal mode */
+  const [ptyMode, setPtyMode] = useState(false);
+  const [projects, setProjects] = useState<
+    Array<{ id: string; repository_full_name?: string; owner?: string; repository?: string }>
+  >([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<string | null>(null);
+  const [workspaceStatus, setWorkspaceStatus] = useState<
+    "idle" | "preparing" | "ready" | "error"
+  >("idle");
+  const [workspaceError, setWorkspaceError] = useState<string | null>(null);
+  const [ptyConnected, setPtyConnected] = useState(false);
+
+  // Fetch projects when entering PTY mode
+  useEffect(() => {
+    if (!ptyMode) return;
+    fetch("/api/projects", { credentials: "include" })
+      .then((r) => r.json())
+      .then((data) => {
+        const list = data.projects ?? [];
+        setProjects(list);
+        if (list.length === 1) setSelectedProjectId(list[0].id);
+      })
+      .catch(() => {});
+  }, [ptyMode]);
+
+  // Prepare workspace when a project is selected
+  const prepareWorkspace = useCallback(async (projectId: string) => {
+    setWorkspaceStatus("preparing");
+    setWorkspaceError(null);
+    try {
+      const res = await fetch(
+        `/api/studio-projects/${encodeURIComponent(projectId)}/workspace/prepare`,
+        { method: "POST", credentials: "include" },
+      );
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Workspace preparation failed");
+      }
+      setWorkspaceStatus("ready");
+    } catch (err) {
+      setWorkspaceStatus("error");
+      setWorkspaceError(err instanceof Error ? err.message : "Unknown error");
+    }
+  }, []);
+
+  useEffect(() => {
+    if (ptyMode && selectedProjectId && workspaceStatus === "idle") {
+      void prepareWorkspace(selectedProjectId);
+    }
+  }, [ptyMode, selectedProjectId, workspaceStatus, prepareWorkspace]);
 
   const selectedAgent =
     AGENT_LIST.find((a) => a.id === selectedAgentId) ?? AGENT_LIST[0];
@@ -616,6 +671,21 @@ export default function AgentsTerminalTool() {
             </div>
 
             <div className="flex items-center gap-2 flex-wrap justify-end">
+              {/* PTY / Chat mode toggle */}
+              <button
+                onClick={() => setPtyMode((prev) => !prev)}
+                className="flex items-center gap-1 text-[9px] px-2 py-1 rounded transition-all shrink-0"
+                style={{
+                  backgroundColor: ptyMode ? "#22c55e15" : T.boxBg,
+                  border: `1px solid ${ptyMode ? "#22c55e30" : T.borderColor + "20"}`,
+                  color: ptyMode ? "#22c55e" : T.textMuted,
+                }}
+                title={ptyMode ? "Real PTY terminal" : "AI chat terminal"}
+              >
+                {ptyMode ? <SquareTerminal size={10} /> : <MessageSquare size={10} />}
+                <span className="hidden sm:inline">{ptyMode ? "PTY" : "Chat"}</span>
+              </button>
+
               {/* Provider selector */}
               <button
                 type="button"
@@ -684,7 +754,107 @@ export default function AgentsTerminalTool() {
             </div>
           </div>
 
-          {/* Terminal scrollback - PowerShell style */}
+          {/* Terminal scrollback - PowerShell style OR Real PTY */}
+          {ptyMode ? (
+            <div
+              className="flex-1 min-h-0 flex flex-col"
+              style={{ backgroundColor: "#0c0c0c" }}
+            >
+              {/* Project selector + workspace status bar */}
+              <div
+                className="flex items-center gap-2 px-3 py-1.5 border-b shrink-0"
+                style={{
+                  borderColor: T.borderColor + "20",
+                  backgroundColor: "#1a1a1a",
+                }}
+              >
+                <Plug
+                  size={10}
+                  style={{
+                    color: ptyConnected
+                      ? "#22c55e"
+                      : workspaceStatus === "preparing"
+                        ? "#fbbf24"
+                        : workspaceStatus === "error"
+                          ? "#ef4444"
+                          : T.textMuted,
+                  }}
+                />
+                <select
+                  value={selectedProjectId ?? ""}
+                  onChange={(e) => {
+                    setSelectedProjectId(e.target.value || null);
+                    setWorkspaceStatus("idle");
+                    setWorkspaceError(null);
+                  }}
+                  className="text-[10px] font-mono bg-transparent border rounded px-1.5 py-1 outline-none"
+                  style={{
+                    borderColor: T.borderColor + "30",
+                    color: T.textColor,
+                    backgroundColor: T.boxBg,
+                  }}
+                >
+                  <option value="">Select project…</option>
+                  {projects.map((p) => (
+                    <option key={p.id} value={p.id}>
+                      {p.repository_full_name ??
+                        `${p.owner ?? "?"}/${p.repository ?? "?"}`}
+                    </option>
+                  ))}
+                </select>
+                {workspaceStatus === "preparing" && (
+                  <span className="text-[9px] text-amber-400 font-mono">
+                    Preparing workspace…
+                  </span>
+                )}
+                {workspaceStatus === "ready" && (
+                  <span className="text-[9px] text-green-400 font-mono">
+                    Workspace ready
+                  </span>
+                )}
+                {workspaceStatus === "error" && (
+                  <span
+                    className="text-[9px] text-red-400 font-mono truncate"
+                    title={workspaceError ?? ""}
+                  >
+                    {workspaceError ?? "Error"}
+                  </span>
+                )}
+                {workspaceStatus === "idle" && !selectedProjectId && (
+                  <span className="text-[9px] text-neutral-500 font-mono">
+                    Choose a project to provision a workspace
+                  </span>
+                )}
+              </div>
+
+              {/* Real PTY terminal */}
+              <div className="flex-1 min-h-0 p-2">
+                {selectedProjectId && workspaceStatus === "ready" ? (
+                  <TerminalPanel
+                    projectId={selectedProjectId}
+                    onConnectionChange={setPtyConnected}
+                  />
+                ) : (
+                  <div
+                    className="flex items-center justify-center h-full text-center"
+                    style={{ color: T.textMuted + "60" }}
+                  >
+                    <div className="space-y-2">
+                      <SquareTerminal size={24} className="mx-auto opacity-40" />
+                      <div className="text-[11px]">
+                        {workspaceStatus === "preparing"
+                          ? "Provisioning isolated workspace on terminal server…"
+                          : workspaceStatus === "error"
+                            ? (workspaceError ?? "Workspace preparation failed")
+                            : "Select a project to launch a real shell"}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : (
+          <>
           <div
             ref={scrollRef}
             className="flex-1 min-h-0 overflow-y-auto p-3 space-y-1 font-mono text-[11px] leading-relaxed"
@@ -969,6 +1139,9 @@ export default function AgentsTerminalTool() {
               )}
             </div>
           </div>
+          </>
+          )}
+
         </div>
 
         {/* ── RIGHT: Info + Logs ── */}
