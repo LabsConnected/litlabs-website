@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import Image from "next/image";
 import Link from "next/link";
 import styles from "./pricing.module.css";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
@@ -28,6 +29,7 @@ type CardPlan = {
   accent: Accent;
   cta: string;
   free: boolean;
+  icon: string;
 };
 
 const CARD_PLANS: CardPlan[] = [
@@ -44,6 +46,7 @@ const CARD_PLANS: CardPlan[] = [
     accent: "neutral",
     cta: "Start free",
     free: true,
+    icon: "spark",
   },
   {
     id: "creator_beta",
@@ -59,6 +62,7 @@ const CARD_PLANS: CardPlan[] = [
     accent: "cyan",
     cta: "Choose Creator",
     free: false,
+    icon: "litt",
   },
   {
     id: "pro_builder_beta",
@@ -73,6 +77,7 @@ const CARD_PLANS: CardPlan[] = [
     accent: "purple",
     cta: "Choose Pro",
     free: false,
+    icon: "studio",
   },
 ];
 
@@ -114,6 +119,25 @@ const faq = [
   },
 ];
 
+const showcaseItems = [
+  {
+    image: "/brand/litt-agent-hero-v2.png",
+    alt: "LiTT in the neon LiTTree creative command center",
+    eyebrow: "Your creative copilot",
+    title: "LiTT",
+    copy: "Always-there creative copilot. LiTT understands the goal, assembles the right tools, remembers the project, and helps turn the next idea into finished work.",
+    accent: "cyan" as const,
+  },
+  {
+    image: "/brand/spark-agent-hero-v2.png",
+    alt: "Spark, LiTT's neon robotic fox companion",
+    eyebrow: "Companion · Explorer",
+    title: "Spark",
+    copy: "The playful side of the lab. Spark keeps discovery fun, helps you explore new directions, and brings personality, energy, and curiosity to every mission.",
+    accent: "purple" as const,
+  },
+];
+
 function CheckIcon() {
   return (
     <svg aria-hidden="true" viewBox="0 0 20 20" width="16" height="16" fill="none">
@@ -142,6 +166,47 @@ function ArrowIcon() {
   );
 }
 
+function PlanIcon({ icon }: { icon: string }) {
+  if (icon === "litt") {
+    return (
+      <div className={styles.planIconWrap}>
+        <Image
+          src="/brand/litt-mascot-avatar.png"
+          alt=""
+          fill
+          sizes="48px"
+          className={styles.planIconImg}
+        />
+      </div>
+    );
+  }
+  if (icon === "spark") {
+    return (
+      <div className={styles.planIconWrap}>
+        <Image
+          src="/brand/spark-agent-portrait.png"
+          alt=""
+          fill
+          sizes="48px"
+          className={styles.planIconImg}
+        />
+      </div>
+    );
+  }
+  // studio
+  return (
+    <div className={styles.planIconWrap}>
+      <Image
+        src="/studio/creative-engine-hero.png"
+        alt=""
+        fill
+        sizes="48px"
+        className={styles.planIconImg}
+      />
+    </div>
+  );
+}
+
 function PlanCard({
   plan,
   loading,
@@ -163,9 +228,12 @@ function PlanCard({
       {plan.featured ? <div className={styles.topGlow} /> : null}
 
       <div className={styles.planHeader}>
-        <div>
-          <p className={styles.planLabel}>{plan.label}</p>
-          <h2>{plan.name}</h2>
+        <div className={styles.planHeaderLeft}>
+          <PlanIcon icon={plan.icon} />
+          <div>
+            <p className={styles.planLabel}>{plan.label}</p>
+            <h2>{plan.name}</h2>
+          </div>
         </div>
         {plan.featured ? <span className={styles.popularBadge}>Most popular</span> : null}
       </div>
@@ -265,40 +333,59 @@ export default function PricingPage() {
         <div className={styles.orbOne} />
         <div className={styles.orbTwo} />
         <div className={styles.orbThree} />
-        <div className={styles.brandTree}>
-          <span className={styles.treeCrown} />
-          <span className={styles.treeTrunk} />
-          <span className={styles.treeRootOne} />
-          <span className={styles.treeRootTwo} />
-          <span className={styles.treeRootThree} />
-        </div>
       </div>
 
       <section className={styles.hero}>
-        <div className={styles.heroBadge}>
-          <span className={styles.liveDot} />
-          Founder Beta Pricing
+        <div className={styles.heroContent}>
+          <div className={styles.heroBadge}>
+            <span className={styles.liveDot} />
+            Founder Beta Pricing
+          </div>
+
+          <h1>
+            Build more.
+            <span> Pay for what actually runs.</span>
+          </h1>
+
+          <p className={styles.heroCopy}>
+            Start free, then unlock private projects, GitHub workflows, voice,
+            terminal runtime, advanced models, and deployment when your work needs
+            it.
+          </p>
+
+          <div className={styles.heroMeta}>
+            <span>No fake unlimited claims</span>
+            <span>Clear LiTTBit allowances</span>
+            <span>Projects stay yours</span>
+          </div>
+
+          <div className={styles.heroCtaRow}>
+            <a className={styles.heroPrimaryCta} href="#plans">
+              See plans
+              <ArrowIcon />
+            </a>
+            <Link className={styles.heroSecondaryCta} href="/studio">
+              Launch Studio
+            </Link>
+          </div>
         </div>
 
-        <h1>
-          Build more.
-          <span> Pay for what actually runs.</span>
-        </h1>
-
-        <p className={styles.heroCopy}>
-          Start free, then unlock private projects, GitHub workflows, voice,
-          terminal runtime, advanced models, and deployment when your work needs
-          it.
-        </p>
-
-        <div className={styles.heroMeta}>
-          <span>No fake unlimited claims</span>
-          <span>Clear LiTTBit allowances</span>
-          <span>Projects stay yours</span>
+        <div className={styles.heroVisual}>
+          <div className={styles.heroImageFrame}>
+            <Image
+              src="/brand/litt-mascot-hero.png"
+              alt="LiTT — the LiTTree Lab Studios mascot"
+              fill
+              priority
+              sizes="(max-width: 980px) 100vw, 480px"
+              className={styles.heroImage}
+            />
+            <div className={styles.heroImageGlow} />
+          </div>
         </div>
       </section>
 
-      <section className={styles.pricingSection} aria-label="Pricing plans">
+      <section id="plans" className={styles.pricingSection} aria-label="Pricing plans">
         <div className={styles.sectionHeading}>
           <div>
             <p className={styles.eyebrow}>Choose your build level</p>
@@ -322,7 +409,15 @@ export default function PricingPage() {
         </div>
 
         <article className={styles.founderBanner}>
-          <div className={styles.founderMark}>L</div>
+          <div className={styles.founderVisual}>
+            <Image
+              src="/brand/litt-mascot-avatar.png"
+              alt=""
+              fill
+              sizes="80px"
+              className={styles.founderAvatar}
+            />
+          </div>
 
           <div className={styles.founderCopy}>
             <div className={styles.founderTitleRow}>
@@ -355,6 +450,52 @@ export default function PricingPage() {
         {error ? <div className={styles.errorBanner}>{error}</div> : null}
       </section>
 
+      <section className={styles.showcaseSection}>
+        <div className={styles.sectionHeading}>
+          <div>
+            <p className={styles.eyebrow}>Who you build with</p>
+            <h2>Two AI characters. One creative engine.</h2>
+          </div>
+          <p>
+            Every plan includes LiTT and Spark. Upgrade to unlock private projects,
+            voice, terminal, and deployment.
+          </p>
+        </div>
+
+        <div className={styles.showcaseGrid}>
+          {showcaseItems.map((item) => (
+            <article
+              key={item.title}
+              className={
+                item.accent === "cyan" ? styles.showcaseCardCyan : styles.showcaseCardPurple
+              }
+            >
+              <div className={styles.showcaseImage}>
+                <Image
+                  src={item.image}
+                  alt={item.alt}
+                  fill
+                  sizes="(max-width: 980px) 100vw, 560px"
+                  className={styles.showcaseImg}
+                />
+                <div className={styles.showcaseOverlay} />
+              </div>
+              <div className={styles.showcaseBody}>
+                <p
+                  className={
+                    item.accent === "cyan" ? styles.showcaseEyebrowCyan : styles.showcaseEyebrowPurple
+                  }
+                >
+                  {item.eyebrow}
+                </p>
+                <h3>{item.title}</h3>
+                <p>{item.copy}</p>
+              </div>
+            </article>
+          ))}
+        </div>
+      </section>
+
       <section className={styles.rulesSection}>
         <div className={styles.sectionHeading}>
           <div>
@@ -376,29 +517,44 @@ export default function PricingPage() {
       </section>
 
       <section className={styles.protectionSection}>
-        <div>
-          <p className={styles.eyebrow}>Beta protection</p>
-          <h2>Your work and credits do not vanish when a plan changes.</h2>
+        <div className={styles.protectionContent}>
+          <div>
+            <p className={styles.eyebrow}>Beta protection</p>
+            <h2>Your work and credits do not vanish when a plan changes.</h2>
+          </div>
+
+          <ul>
+            <li>
+              <CheckIcon />
+              Existing balances are migrated once and remain visible.
+            </li>
+            <li>
+              <CheckIcon />
+              Downgrades never delete projects or assets.
+            </li>
+            <li>
+              <CheckIcon />
+              Cancellation preserves access through the paid period.
+            </li>
+            <li>
+              <CheckIcon />
+              Credits use an immutable ledger with no silent balance changes.
+            </li>
+          </ul>
         </div>
 
-        <ul>
-          <li>
-            <CheckIcon />
-            Existing balances are migrated once and remain visible.
-          </li>
-          <li>
-            <CheckIcon />
-            Downgrades never delete projects or assets.
-          </li>
-          <li>
-            <CheckIcon />
-            Cancellation preserves access through the paid period.
-          </li>
-          <li>
-            <CheckIcon />
-            Credits use an immutable ledger with no silent balance changes.
-          </li>
-        </ul>
+        <div className={styles.protectionVisual}>
+          <div className={styles.protectionImageFrame}>
+            <Image
+              src="/studio/creative-engine-hero.png"
+              alt="LiTTree Studio creative engine"
+              fill
+              sizes="(max-width: 980px) 100vw, 420px"
+              className={styles.protectionImage}
+            />
+            <div className={styles.protectionImageGlow} />
+          </div>
+        </div>
       </section>
 
       <section className={styles.faqSection}>
@@ -420,23 +576,34 @@ export default function PricingPage() {
       </section>
 
       <section className={styles.finalCta}>
-        <div>
+        <div className={styles.finalCtaContent}>
           <p className={styles.eyebrow}>Ready when you are</p>
           <h2>Turn one idea into a real project inside Studio.</h2>
           <p>
             Start free. Upgrade only when you need more projects, private
             workflows, runtime, or deployment power.
           </p>
+
+          <div className={styles.ctaActions}>
+            <Link className={styles.primaryCta} href="/studio">
+              Launch Studio
+              <ArrowIcon />
+            </Link>
+            <Link className={styles.secondaryCta} href="/marketplace">
+              Explore Marketplace
+            </Link>
+          </div>
         </div>
 
-        <div className={styles.ctaActions}>
-          <Link className={styles.primaryCta} href="/studio">
-            Launch Studio
-            <ArrowIcon />
-          </Link>
-          <Link className={styles.secondaryCta} href="/marketplace">
-            Explore Marketplace
-          </Link>
+        <div className={styles.finalCtaVisual}>
+          <Image
+            src="/brand/litt-base-station.png"
+            alt="LiTTree Lab Studios base station"
+            fill
+            sizes="(max-width: 980px) 0px, 360px"
+            className={styles.finalCtaImage}
+          />
+          <div className={styles.finalCtaImageGlow} />
         </div>
       </section>
     </main>
