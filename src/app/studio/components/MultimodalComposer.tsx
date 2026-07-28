@@ -34,7 +34,11 @@ export type ComposerMode = "text" | "camera";
 interface MultimodalComposerProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: (value: string, attachments?: string[]) => Promise<string>;
+  onSend: (
+    value: string,
+    attachments?: string[],
+    options?: { inputMode?: "text" | "voice" },
+  ) => Promise<string>;
   busy?: boolean;
   modelName?: string;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
@@ -158,7 +162,9 @@ export default function MultimodalComposer({
       // onSend goes through ChatTool.send() → /api/gemini/chat → response stored.
       // The caller (MultimodalComposer submit handler) auto-speaks the reply
       // if voice mode is live.
-      void onSend(text).then((reply) => {
+      // inputMode is "voice" because this turn originated from a spoken
+      // transcript — not a typed message.
+      void onSend(text, [], { inputMode: "voice" }).then((reply) => {
         if (reply) {
           speakText(reply);
         }

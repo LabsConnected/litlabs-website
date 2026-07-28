@@ -47,7 +47,11 @@ interface ChatShellProps {
   selectedModel?: string;
   messages: Message[];
   busy: boolean;
-  onSend: (value: string, attachments?: string[]) => Promise<string>;
+  onSend: (
+    value: string,
+    attachments?: string[],
+    options?: { inputMode?: "text" | "voice" },
+  ) => Promise<string>;
   onNewChat?: () => void;
   onRegenerate?: () => void;
   onRouteTool?: (tool: StudioTool, command?: string) => void;

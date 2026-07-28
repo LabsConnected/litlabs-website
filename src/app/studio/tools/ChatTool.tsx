@@ -57,6 +57,7 @@ export default function ChatTool({
   const send = async (
     value: string,
     attachments?: string[],
+    options?: { inputMode?: "text" | "voice" },
   ): Promise<string> => {
     const text = value.trim();
     if ((!text && !attachments?.length) || busy) return "";
@@ -138,9 +139,10 @@ export default function ChatTool({
           message: text || "Describe what you see.",
           history: historyForApi,
           stream: false,
-          // Voice mode: when the voice transport is connected, the response
-          // will be spoken aloud — tell the server to use shorter guidance.
-          responseMode: voiceTransportConnected ? "voice" : "text",
+          // responseMode is bound to TURN ORIGIN, not transport availability.
+          // A typed message is text even if voice is connected; a voice
+          // transcript is voice even if typed fallback was used.
+          responseMode: options?.inputMode === "voice" ? "voice" : "text",
           images: attachments,
           // Pass the active canvas id so the server can detect
           // append/update intents (not just create intents).

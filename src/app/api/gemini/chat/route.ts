@@ -10,6 +10,7 @@ import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/action
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
 import { clerkClient } from "@clerk/nextjs/server";
+import { parseResponseMode, sanitizeTrustedFirstName } from "./chat-helpers";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -198,8 +199,7 @@ async function handler(req: NextRequest) {
 
     // Validate response mode — only "voice" activates voice guidance;
     // everything else (including missing/invalid) defaults to "text".
-    const responseMode: "text" | "voice" =
-      rawResponseMode === "voice" ? "voice" : "text";
+    const responseMode = parseResponseMode(rawResponseMode);
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
@@ -215,25 +215,14 @@ async function handler(req: NextRequest) {
     // ─── Resolve trusted display name from Clerk (server-side) ──
     // NEVER trust userName from the client request body for the system
     // prompt — that is a prompt-injection surface. We use ONLY Clerk's
-    // firstName, sanitized to a short display token.
+    // firstName, validated (not mutated) by sanitizeTrustedFirstName.
+    // Suspicious values are rejected entirely, not transformed.
     let trustedDisplayName: string | undefined;
     if (clerkId) {
       try {
         const clerk = await clerkClient();
         const clerkUser = await clerk.users.getUser(clerkId);
-        // Use firstName only — a short personal token is enough for
-        // natural personalization and minimizes the attack surface.
-        const raw = clerkUser.firstName;
-        if (raw) {
-          // NFKC normalize, allow only Unicode letters/marks/apostrophe/hyphen,
-          // cap at 32 chars. Instruction-shaped values are stripped entirely.
-          const sanitized = raw
-            .normalize("NFKC")
-            .replace(/[^\p{L}\p{M}'’-]/gu, "")
-            .trim()
-            .slice(0, 32);
-          if (sanitized) trustedDisplayName = sanitized;
-        }
+        trustedDisplayName = sanitizeTrustedFirstName(clerkUser.firstName);
       } catch {
         // Clerk API unavailable — omit the name rather than guess
       }

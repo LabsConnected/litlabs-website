@@ -143,7 +143,9 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   }>({ configured: false, tokenService: "unknown", available: false });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
-  const handleSendRef = useRef<(text: string) => Promise<void>>(async () => {});
+  const handleSendRef = useRef<
+    (text: string, options?: { inputMode?: "text" | "voice" }) => Promise<void>
+  >(async () => {});
 
   // Fetch voice health on mount + when voice state changes
   useEffect(() => {
@@ -179,7 +181,9 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   useEffect(() => {
     setOnTurn((text: string) => {
       if (text.trim()) {
-        void handleSendRef.current(text);
+        // inputMode is "voice" because this turn originated from a spoken
+        // transcript — not a typed message.
+        void handleSendRef.current(text, { inputMode: "voice" });
       }
     });
   }, [setOnTurn]);
@@ -201,7 +205,10 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     [pathname, profile],
   );
 
-  const handleSend = useCallback(async (text: string) => {
+  const handleSend = useCallback(async (
+    text: string,
+    options?: { inputMode?: "text" | "voice" },
+  ) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
 
@@ -221,9 +228,10 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
           message: trimmed,
           history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
           stream: false,
-          // Voice mode: when the voice transport is connected, the response
-          // will be spoken aloud — tell the server to use shorter guidance.
-          responseMode: voiceTransportConnected ? "voice" : "text",
+          // responseMode is bound to TURN ORIGIN, not transport availability.
+          // A typed message is text even if voice is connected; a voice
+          // transcript is voice even if typed fallback was used.
+          responseMode: options?.inputMode === "voice" ? "voice" : "text",
           capabilities: {
             repository: "none",
             repositoryIndexed: false,
