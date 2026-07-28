@@ -253,7 +253,10 @@ export function VoiceSessionProvider({
             lastTranscript: trimmed.slice(0, 60),
           });
           setTiming({ recordingEndedAt: Date.now(), transcriptionCompletedAt: Date.now(), aiResponseStartedAt: Date.now() });
-          activeRef.current = false;
+          // Do NOT set activeRef.current = false here — it prevents hands-free
+          // mode from resuming after TTS finishes. Deduplication is handled by
+          // submittedTranscriptRef above. activeRef stays true so finishSpeaking
+          // can transition back to "listening" in hands-free mode.
           // Canonical pipeline: final transcript → onTurn → onSend →
           // /api/gemini/chat → response stored → speakText (Inworld TTS)
           console.debug("[Voice Pipeline] assistant text request started", { transcript: trimmed.slice(0, 80) });

@@ -420,15 +420,14 @@ export function useInworldSession(
                           turn_detection: {
                             type: "semantic_vad",
                             eagerness: "low",
-                            // create_response: true — Inworld auto-generates
-                            // responses after VAD commits the audio buffer.
-                            // We tried create_response: false + manual
-                            // triggerResponse() but it broke the VAD flow
-                            // (mic stuck listening, no responses). Keeping
-                            // auto-response on; phantom responses are
-                            // filtered by hadRealUserTurnRef in
-                            // VoiceSessionContext before they reach chat.
-                            create_response: true,
+                            // create_response: false — we do NOT want Inworld to
+                            // auto-generate responses after VAD commits. The
+                            // canonical pipeline (transcript → onSend →
+                            // /api/gemini/chat → speakText) sends response.create
+                            // explicitly for TTS. This eliminates the race
+                            // condition where Inworld's auto-response audio leaks
+                            // through before/after speakText's explicit TTS.
+                            create_response: false,
                             interrupt_response: true,
                           },
                         },
@@ -485,10 +484,11 @@ export function useInworldSession(
               case "response.created":
                 // A new response is starting. If this is an auto-response from
                 // VAD (create_response: true) and NOT from an explicit speakText
-                // call, cancel it immediately — the canonical pipeline (transcript
-                // → onSend → speakText) is the only source of assistant responses.
-                // This prevents phantom audio that doesn't match any chat message.
+                // call, cancel it immediately AND set interruptedRef so its audio
+                // chunks are dropped — even if speakText sets explicitTtsRef=true
+                // before the auto-response audio arrives (race condition).
                 if (!explicitTtsRef.current) {
+                  interruptedRef.current = true;
                   if (wsRef.current?.readyState === WebSocket.OPEN) {
                     console.debug("[Voice Pipeline] cancelling auto-response (not from speakText)");
                     wsRef.current.send(JSON.stringify({ type: "response.cancel" }));
@@ -517,10 +517,9 @@ export function useInworldSession(
                 break;
 
               case "response.output_audio.delta":
-                // Only play audio for explicit TTS calls (speakText).
-                // Auto-generated VAD responses are dropped — the canonical
-                // assistant response comes from /api/gemini/chat via onSend.
-                if (explicitTtsRef.current && data.delta) {
+                // Only play audio for explicit TTS calls (speakText) AND
+                // when not interrupted (auto-response cancellation).
+                if (explicitTtsRef.current && !interruptedRef.current && data.delta) {
                   console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
                   const buffer = decodePcm16ToAudioBuffer(data.delta);
                   if (buffer) {
