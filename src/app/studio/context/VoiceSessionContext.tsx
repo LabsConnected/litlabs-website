@@ -622,15 +622,27 @@ export function VoiceSessionProvider({
       };
 
       // Primary: Inworld TTS (uses configured INWORLD_LITT_VOICE / INWORLD_SPARK_VOICE)
-      if (inworldConnectedRef.current) {
-        try {
-          await inworldSession.speakText(sanitized);
-          // Inworld TTS playback completion is handled by the
-          // onResponseComplete callback → finishSpeaking logic above.
-          // But also set a safety timeout in case the event is missed.
-          return;
-        } catch (err) {
-          console.warn("[Voice] Inworld TTS failed, falling back to browser TTS:", err);
+      // Always try Inworld first — inworldSession.speakText auto-connects the
+      // transport if needed. This lets "Speak" work without first starting voice.
+      try {
+        await inworldSession.speakText(sanitized);
+        // Mark transport as connected since speakText auto-connects
+        if (!inworldConnectedRef.current) {
+          inworldConnectedRef.current = true;
+          setVoiceTransportConnected(true);
+          updateDiagnostics({ transportConnected: true });
+        }
+        // Inworld TTS playback completion is handled by the
+        // onResponseComplete callback → finishSpeaking logic above.
+        // But also set a safety timeout in case the event is missed.
+        return;
+      } catch (err) {
+        console.warn("[Voice] Inworld TTS failed, falling back to browser TTS:", err);
+        // Mark transport as disconnected if it failed
+        if (inworldConnectedRef.current) {
+          inworldConnectedRef.current = false;
+          setVoiceTransportConnected(false);
+          updateDiagnostics({ transportConnected: false });
         }
       }
 
