@@ -18,6 +18,22 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 import type { StudioTool } from "../components/StudioSidebar";
 
 /**
+ * Structured result from the conversation `send` function.
+ *
+ * - `accepted: false` — the request was rejected (busy, empty, or
+ *   invalid). The composer should restore the user's text/attachments.
+ * - `accepted: true` — the request was accepted. The controller has
+ *   taken ownership of the message. `reply` is present when an
+ *   assistant response was produced (either from the LLM or from a
+ *   deterministic intent). Local commands like `/clear` return
+ *   `accepted: true` with no `reply`.
+ */
+export interface SendResult {
+  accepted: boolean;
+  reply?: string;
+}
+
+/**
  * useStudioConversation — the single conversation controller for the
  * Command Studio. Extracted from ChatTool so the new CommandComposer
  * can call the real /api/gemini/chat path directly, without mounting
@@ -59,38 +75,38 @@ export function useStudioConversation({
   const initialPrompt = searchParams.get("mission") || "";
 
   const send = useCallback(
-    async (value: string, attachments?: string[]): Promise<string> => {
+    async (value: string, attachments?: string[]): Promise<SendResult> => {
       const text = value.trim();
-      if ((!text && !attachments?.length) || busy) return "";
+      if ((!text && !attachments?.length) || busy) return { accepted: false };
 
-      // 1. Slash commands
+      // 1. Slash commands — accepted local commands, no reply
       const localCommand = parseBuilderLocalCommand(text);
       if (localCommand) {
         switch (localCommand.type) {
           case "clear":
             setMessages([]);
-            return "";
+            return { accepted: true };
           case "new":
             sessionManager.create();
-            return "";
+            return { accepted: true };
           case "terminal":
             onRouteTool?.("terminal");
-            return "";
+            return { accepted: true };
           case "sessions":
-            return "";
+            return { accepted: true };
           case "delete":
             if (sessionManager.activeSession && window.confirm(`Delete "${sessionManager.activeSession.title}"?`)) sessionManager.remove(sessionManager.activeSession.id);
-            return "";
+            return { accepted: true };
           case "rename":
             if (localCommand.title && sessionManager.activeSession) sessionManager.rename(sessionManager.activeSession.id, localCommand.title);
             else setMessages((current) => [...current, { role: "assistant", content: "Usage: `/rename New session name`", createdAt: Date.now() }]);
-            return "";
+            return { accepted: true };
           case "help":
             setMessages((current) => [...current, { role: "assistant", content: "**Builder commands**\n\n`/new` new session · `/clear` reset this session · `/terminal` open terminal · `/sessions` manage chats · `/rename name` rename · `/delete` delete current session · `/help` show commands", createdAt: Date.now() }]);
-            return "";
+            return { accepted: true };
           default:
             setMessages((current) => [...current, { role: "assistant", content: `Unknown local command: \`/${localCommand.command}\`. Type \`/help\`.`, createdAt: Date.now() }]);
-            return "";
+            return { accepted: true };
         }
       }
 
@@ -107,7 +123,7 @@ export function useStudioConversation({
         if (intent.intent === "connect_github" && typeof window !== "undefined") {
           window.location.href = "/api/github/install";
         }
-        return intentMessage;
+        return { accepted: true, reply: intentMessage };
       }
 
       // 3. Real LLM call
@@ -172,7 +188,7 @@ export function useStudioConversation({
             actions: Array.isArray(data.actions) ? data.actions : undefined,
           },
         ]);
-        return reply;
+        return { accepted: true, reply };
       } catch (error) {
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
@@ -180,7 +196,7 @@ export function useStudioConversation({
           ...current,
           { role: "assistant", content: reply, createdAt: Date.now() },
         ]);
-        return reply;
+        return { accepted: true, reply };
       } finally {
         setBusy(false);
       }

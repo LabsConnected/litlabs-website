@@ -45,7 +45,7 @@ export interface ComposerContextLine {
 interface CommandComposerProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: (value: string, attachments?: string[]) => Promise<string>;
+  onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useStudioConversation").SendResult>;
   busy?: boolean;
   onToggleCamera?: () => void;
   cameraActive?: boolean;
@@ -87,8 +87,8 @@ export default function CommandComposer({
   // Canonical voice pipeline: final transcript -> onSend -> speakText.
   useEffect(() => {
     setOnTurn((text) => {
-      void onSend(text).then((reply) => {
-        if (reply) speakText(reply);
+      void onSend(text).then((result) => {
+        if (result.reply) speakText(result.reply);
       }).catch(() => {});
     });
   }, [onSend, setOnTurn, speakText]);
@@ -114,24 +114,32 @@ export default function CommandComposer({
     };
   }, [agentOpen]);
 
+  // Synchronous submission lock — prevents a fast double-click from
+  // entering submit before React applies the busy=true prop.
+  const submittingRef = useRef(false);
+
   const submit = async (e: FormEvent) => {
     e.preventDefault();
-    if (busy) return; // prevent duplicate submits
+    if (busy || submittingRef.current) return; // prevent duplicate submits
     if (!value.trim() && snapshots.length === 0) return;
+    submittingRef.current = true;
     const attachments = [...snapshots];
     const textToSend = value;
     // Clear input immediately for responsiveness — the controller owns
-    // the message now. If the controller rejects (returns ""), we
-    // restore the text so the user can retry.
+    // the message now. If the controller rejects, we restore.
     onChange("");
     setSnapshots([]);
-    const reply = await onSend(textToSend, attachments.length ? attachments : undefined);
-    if (!reply && !value.trim()) {
-      // Controller rejected — restore text and attachments
-      onChange(textToSend);
-      setSnapshots(attachments);
+    try {
+      const result = await onSend(textToSend, attachments.length ? attachments : undefined);
+      if (!result.accepted) {
+        // Controller rejected — restore text and attachments
+        onChange(textToSend);
+        setSnapshots(attachments);
+      }
+      if (result.reply) speakText(result.reply);
+    } finally {
+      submittingRef.current = false;
     }
-    if (reply) speakText(reply);
   };
 
   const handleFile = (file: File) => {

@@ -52,6 +52,15 @@ const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
+/**
+ * Which surface renders inside Studio/Work. The conversation is the
+ * default; the Builder adapter renders when the user explicitly routes
+ * to `build`. This is dynamic state — not derived from the initial URL
+ * — so switching to Work after visiting Build shows the conversation
+ * unless Build is requested again.
+ */
+type WorkSurface = "conversation" | "builder";
+
 // Map legacy tool ids to their components. "chat" is NOT here — the
 // conversation is handled by useStudioConversation + StudioTranscript.
 const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
@@ -91,7 +100,7 @@ function AgentVoiceSync() {
  * (useStudioConversation) is the single source of truth — no invisible
  * ChatTool, no duplicate composer, no custom-event bridge.
  */
-export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: boolean } = {}) {
+export default function CommandStudio() {
   const { theme } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
@@ -116,6 +125,10 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
   const [moreMode, setMoreMode] = useState<MoreMode>((initial.mode as MoreMode) ?? "plugins");
   const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
+  // Dynamic Work surface — not derived from initial.legacyTool after init.
+  const [workSurface, setWorkSurface] = useState<WorkSurface>(
+    initial.legacyTool === "build" ? "builder" : "conversation",
+  );
 
   const [inspectorOpen, setInspectorOpen] = useState<boolean>(!!initial.openInspector);
   const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
@@ -146,7 +159,11 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     }
     const mapped = mapLegacyToolToDestination(tool, command);
     setDestination(mapped.destination);
-    if (mapped.destination === "studio") setStudioMode((mapped.mode as StudioMode) ?? "work");
+    if (mapped.destination === "studio") {
+      setStudioMode((mapped.mode as StudioMode) ?? "work");
+      // Explicit Build route → builder surface; anything else → conversation.
+      setWorkSurface(tool === "build" ? "builder" : "conversation");
+    }
     if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
     if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
     if (mapped.openDrawer) {
@@ -227,6 +244,7 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
   const handleStartBlank = useCallback(() => {
     setDestination("studio");
     setStudioMode("work");
+    setWorkSurface("conversation");
   }, []);
 
   const handleConnectRepo = useCallback(() => {
@@ -260,8 +278,8 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
       if (studioMode === "preview") return "build";
-      // Work mode: conversation by default, Builder if legacy tool was "build"
-      return initial.legacyTool === "build" ? "build" : null;
+      // Work mode: dynamic surface state, not initial URL
+      return workSurface === "builder" ? "build" : null;
     }
     if (destination === "create") {
       if (createMode === "video") return "video";
@@ -273,7 +291,7 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     if (destination === "agents") return "agents";
     if (destination === "more") return moreMode as StudioTool;
     return null;
-  }, [destination, studioMode, createMode, moreMode, initial.legacyTool]);
+  }, [destination, studioMode, createMode, moreMode, workSurface]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
   const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
@@ -340,8 +358,15 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
                       key={t.id}
                       type="button"
                       onClick={() => {
-                        if (destination === "studio") setStudioMode(t.id as StudioMode);
-                        else setCreateMode(t.id as CreateMode);
+                        if (destination === "studio") {
+                          setStudioMode(t.id as StudioMode);
+                          // Clicking the visible Work tab always returns
+                          // to the conversation surface. Build must be
+                          // explicitly routed again to show the Builder.
+                          if (t.id === "work") setWorkSurface("conversation");
+                        } else {
+                          setCreateMode(t.id as CreateMode);
+                        }
                       }}
                       className="rounded-md px-3 py-1.5 text-[11px] font-bold transition"
                       style={{

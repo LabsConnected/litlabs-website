@@ -42,7 +42,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
   });
 
   it("submit calls the real send controller exactly once", async () => {
-    const onSend = vi.fn().mockResolvedValue("Response from LiTT");
+    const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "Response from LiTT" });
     render(
       <CommandComposer
         value="Hello LiTT"
@@ -58,7 +58,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
   });
 
   it("busy state prevents duplicate submit", async () => {
-    const onSend = vi.fn().mockResolvedValue("response");
+    const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "response" });
     render(
       <CommandComposer
         value="Hello"
@@ -76,7 +76,7 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
 
   it("clears text after successful submission", async () => {
     const onChange = vi.fn();
-    const onSend = vi.fn().mockResolvedValue("response");
+    const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "response" });
     render(
       <CommandComposer
         value="Test message"
@@ -106,6 +106,61 @@ describe("CommandComposer — Phase 1.1 functional tests", () => {
     fireEvent.click(sendBtn);
     await new Promise((r) => setTimeout(r, 50));
     expect(onSend).not.toHaveBeenCalled();
+  });
+
+  it("rejected send restores text", async () => {
+    const onChange = vi.fn();
+    const onSend = vi.fn().mockResolvedValue({ accepted: false });
+    render(
+      <CommandComposer
+        value="My message"
+        onChange={onChange}
+        onSend={onSend}
+        busy={false}
+      />,
+    );
+    const sendBtn = screen.getByRole("button", { name: /send message/i });
+    fireEvent.click(sendBtn);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    // Text should be restored after rejection
+    expect(onChange).toHaveBeenCalledWith("My message");
+  });
+
+  it("accepted local command clears text without restoring", async () => {
+    const onChange = vi.fn();
+    const onSend = vi.fn().mockResolvedValue({ accepted: true });
+    render(
+      <CommandComposer
+        value="/clear"
+        onChange={onChange}
+        onSend={onSend}
+        busy={false}
+      />,
+    );
+    const sendBtn = screen.getByRole("button", { name: /send message/i });
+    fireEvent.click(sendBtn);
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    // onChange("") to clear, but NOT restored with "/clear"
+    expect(onChange).toHaveBeenCalledWith("");
+    expect(onChange).not.toHaveBeenCalledWith("/clear");
+  });
+
+  it("two rapid clicks invoke controller once", async () => {
+    const onSend = vi.fn().mockResolvedValue({ accepted: true, reply: "response" });
+    render(
+      <CommandComposer
+        value="Hello"
+        onChange={vi.fn()}
+        onSend={onSend}
+        busy={false}
+      />,
+    );
+    const sendBtn = screen.getByRole("button", { name: /send message/i });
+    fireEvent.click(sendBtn);
+    fireEvent.click(sendBtn); // rapid double-click
+    await waitFor(() => expect(onSend).toHaveBeenCalled());
+    await new Promise((r) => setTimeout(r, 50));
+    expect(onSend).toHaveBeenCalledTimes(1);
   });
 
   it("renders exactly one composer (no duplicate)", () => {
