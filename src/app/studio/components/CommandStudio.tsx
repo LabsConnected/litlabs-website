@@ -9,12 +9,14 @@ import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
+import { useStudioConversation } from "../hooks/useStudioConversation";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
 import CommandStudioNav, { MobileCommandNav } from "./CommandStudioNav";
 import CommandComposer, { type ComposerContextLine } from "./CommandComposer";
 import LiTEmptyState from "./LiTEmptyState";
+import StudioTranscript from "./StudioTranscript";
 import { StudioInspector, StudioDrawer } from "./StudioWorkspaceFrame";
 import {
   mapLegacyToolToDestination,
@@ -29,7 +31,8 @@ import {
 import type { StudioTool } from "./StudioSidebar";
 
 /* ── Legacy tool components (loaded through adapters) ──────────── */
-const ChatTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
+// ChatTool is NOT mounted here — the conversation controller
+// (useStudioConversation) + StudioTranscript + CommandComposer replace it.
 const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
@@ -49,8 +52,9 @@ const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 
 type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | "full";
 
+// Map legacy tool ids to their components. "chat" is NOT here — the
+// conversation is handled by useStudioConversation + StudioTranscript.
 const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
-  chat: ChatTool,
   canvas: CanvasTool,
   image: ImageTool,
   video: VideoTool,
@@ -79,19 +83,20 @@ function AgentVoiceSync() {
 }
 
 /**
- * CommandStudio — Phase 1 visual rescue shell.
+ * CommandStudio — Phase 1.1 functional stabilization.
  *
  * One compact header, five navigation destinations, one dominant LiTT
  * workspace, one persistent composer, one optional inspector, one
- * optional Activity/Terminal drawer. Existing tool components are
- * preserved and routed through adapters — no runtime rewrite.
+ * optional Activity/Terminal drawer. The conversation controller
+ * (useStudioConversation) is the single source of truth — no invisible
+ * ChatTool, no duplicate composer, no custom-event bridge.
  */
 export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: boolean } = {}) {
   const { theme } = useTheme();
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { capabilities, loading: connectionsLoading } = useConnectionSummary();
+  const { capabilities } = useConnectionSummary();
   const projectReady =
     capabilities.repository === "connected" ||
     capabilities.terminalExecution === "available";
@@ -109,13 +114,13 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
   const [studioMode, setStudioMode] = useState<StudioMode>((initial.mode as StudioMode) ?? "work");
   const [createMode, setCreateMode] = useState<CreateMode>((initial.mode as CreateMode) ?? "image");
   const [moreMode, setMoreMode] = useState<MoreMode>((initial.mode as MoreMode) ?? "plugins");
-  const [pendingCommand, setPendingCommand] = useState<string>(initial.command ?? "");
+  const [, setPendingCommand] = useState<string>(initial.command ?? "");
   const [composerValue, setComposerValue] = useState("");
 
-  const [inspectorOpen, setInspectorOpen] = useState(false);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("plan");
-  const [drawerOpen, setDrawerOpen] = useState(false);
-  const [drawerTab, setDrawerTab] = useState<DrawerTab>("activity");
+  const [inspectorOpen, setInspectorOpen] = useState<boolean>(!!initial.openInspector);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>(initial.openInspector ?? "plan");
+  const [drawerOpen, setDrawerOpen] = useState<boolean>(!!initial.openDrawer);
+  const [drawerTab, setDrawerTab] = useState<DrawerTab>(initial.openDrawer ?? "activity");
 
   const [cameraDock, setCameraDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{ open: boolean; pos: DockPosition }>({ open: false, pos: "bottom-left" });
@@ -124,9 +129,51 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
 
   const isInitialMount = useRef(true);
 
+  const handleSelectDestination = useCallback((dest: StudioDestination) => {
+    setDestination(dest);
+  }, []);
+
+  // handleRouteTool must be declared before useStudioConversation so the
+  // conversation controller can reference it without a TDZ error.
+  const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
+    if (tool === "camera") {
+      setCameraDock((v) => ({ ...v, open: true }));
+      return;
+    }
+    if (tool === "screen") {
+      setScreenDock((v) => ({ ...v, open: true }));
+      return;
+    }
+    const mapped = mapLegacyToolToDestination(tool, command);
+    setDestination(mapped.destination);
+    if (mapped.destination === "studio") setStudioMode((mapped.mode as StudioMode) ?? "work");
+    if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
+    if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
+    if (mapped.openDrawer) {
+      setDrawerOpen(true);
+      setDrawerTab(mapped.openDrawer);
+    }
+    if (mapped.openInspector) {
+      setInspectorOpen(true);
+      setInspectorTab(mapped.openInspector);
+    }
+    setPendingCommand(command);
+  }, []);
+
+  // The single conversation controller — calls /api/gemini/chat directly.
+  const conversation = useStudioConversation({
+    onRouteTool: handleRouteTool,
+  });
+
   // Sync destination -> URL ?tool= (preserves legacy bookmarks).
+  // Use a destination-specific mode so Video writes ?tool=video, not ?tool=image.
   useEffect(() => {
-    const legacyTool = destinationToLegacyTool(destination, studioMode ?? createMode ?? moreMode);
+    const activeMode =
+      destination === "studio" ? studioMode :
+      destination === "create" ? createMode :
+      destination === "more" ? moreMode :
+      undefined;
+    const legacyTool = destinationToLegacyTool(destination, activeMode);
     try {
       localStorage.setItem("littree:studio:tool", legacyTool);
     } catch {
@@ -149,15 +196,11 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     const handler = (e: Event) => {
       const tool = (e as CustomEvent<string>).detail as StudioTool;
       if (!tool) return;
-      const mapped = mapLegacyToolToDestination(tool);
-      setDestination(mapped.destination);
-      if (mapped.destination === "studio") setStudioMode((mapped.mode as StudioMode) ?? "work");
-      if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
-      if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
+      handleRouteTool(tool);
     };
     window.addEventListener("studio:switch-tool", handler);
     return () => window.removeEventListener("studio:switch-tool", handler);
-  }, []);
+  }, [handleRouteTool]);
 
   // Handle canvas action execution from chat.
   useEffect(() => {
@@ -172,42 +215,13 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
-  const handleSelectDestination = useCallback((dest: StudioDestination) => {
-    setDestination(dest);
-  }, []);
-
-  const handleRouteTool = useCallback((tool: StudioTool, command = "") => {
-    if (tool === "camera") {
-      setCameraDock((v) => ({ ...v, open: true }));
-      return;
-    }
-    if (tool === "screen") {
-      setScreenDock((v) => ({ ...v, open: true }));
-      return;
-    }
-    const mapped = mapLegacyToolToDestination(tool, command);
-    setDestination(mapped.destination);
-    if (mapped.destination === "studio") setStudioMode((mapped.mode as StudioMode) ?? "work");
-    if (mapped.destination === "create") setCreateMode((mapped.mode as CreateMode) ?? "image");
-    if (mapped.destination === "more") setMoreMode((mapped.mode as MoreMode) ?? "plugins");
-    setPendingCommand(command);
-  }, []);
-
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
-    // Route through the legacy ChatTool by ensuring we're in Studio/Work.
-    if (destination !== "studio") {
-      setDestination("studio");
-      setStudioMode("work");
-    }
-    // The ChatTool component below owns the actual /api/gemini/chat call.
-    // We expose a custom event so ChatTool picks up the outgoing message.
-    window.dispatchEvent(new CustomEvent("command-studio:send", { detail: { value, attachments } }));
-    return "";
-  }, [destination]);
+    // Direct call to the real controller — no custom-event bridge.
+    return conversation.send(value, attachments);
+  }, [conversation]);
 
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
-    // Focus is handled by the composer's auto-focus on value change.
   }, []);
 
   const handleStartBlank = useCallback(() => {
@@ -221,6 +235,16 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     }
   }, []);
 
+  // Header actions — truthful.
+  const handlePreview = useCallback(() => {
+    setDestination("studio");
+    setStudioMode("preview");
+  }, []);
+  const handleOpenActivity = useCallback(() => {
+    setDrawerOpen(true);
+    setDrawerTab("activity");
+  }, []);
+
   // Context line for the composer.
   const contextLine: ComposerContextLine = useMemo(() => ({
     repo: capabilities.repositoryName ?? undefined,
@@ -229,12 +253,15 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
   }), [capabilities.repositoryName, capabilities.writeAccess, searchParams]);
 
   // Resolve the legacy tool to render for the active destination/mode.
+  // Studio/Work renders the conversation (transcript + composer) unless
+  // the legacy tool is "build" (Builder adapter) — not ChatTool.
   const activeLegacyTool: StudioTool | null = useMemo(() => {
     if (destination === "studio") {
       if (studioMode === "code") return "code";
       if (studioMode === "files") return "canvas";
       if (studioMode === "preview") return "build";
-      return "chat";
+      // Work mode: conversation by default, Builder if legacy tool was "build"
+      return initial.legacyTool === "build" ? "build" : null;
     }
     if (destination === "create") {
       if (createMode === "video") return "video";
@@ -244,14 +271,12 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
     }
     if (destination === "assets") return "assets";
     if (destination === "agents") return "agents";
-    if (destination === "more") {
-      return moreMode as StudioTool;
-    }
+    if (destination === "more") return moreMode as StudioTool;
     return null;
-  }, [destination, studioMode, createMode, moreMode]);
+  }, [destination, studioMode, createMode, moreMode, initial.legacyTool]);
 
   const WorkspaceComponent = activeLegacyTool ? TOOL_COMPONENTS[activeLegacyTool] : null;
-  const isStudioWork = destination === "studio" && studioMode === "work";
+  const isStudioWorkConversation = destination === "studio" && studioMode === "work" && activeLegacyTool === null;
   const isCanvas = destination === "studio" && studioMode === "files";
 
   // Studio internal tabs (Work | Preview | Code | Files)
@@ -287,9 +312,10 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
         {/* One compact header — replaces AutonomicLoopBanner + StudioTopBar */}
         <CommandStudioHeader
           branch={contextLine.branch}
-          onOpenActivity={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
-          onDeploy={() => { setDrawerOpen(true); setDrawerTab("activity"); }}
+          onPreview={handlePreview}
+          onOpenActivity={handleOpenActivity}
           projectReady={projectReady}
+          capabilities={capabilities}
         />
 
         {/* Body: nav rail + workspace + inspector */}
@@ -334,15 +360,16 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
             {/* Workspace content */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               <div className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
-                {isStudioWork ? (
+                {isStudioWorkConversation ? (
                   <StudioWorkSurface
-                    projectReady={projectReady}
-                    connectionsLoading={connectionsLoading}
+                    messages={conversation.messages}
+                    busy={conversation.busy}
+                    activeAgentId={conversation.activeAgentId}
+                    fallbackNotice={conversation.fallbackNotice}
                     onRouteTool={handleRouteTool}
-                    onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
-                    cameraActive={cameraDock.open}
-                    pendingCommand={pendingCommand}
+                    onRegenerate={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
+                    hasProject={projectReady}
                     onStartBlank={handleStartBlank}
                     onConnectRepo={handleConnectRepo}
                   />
@@ -376,14 +403,17 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
               onToggle={() => setDrawerOpen((v) => !v)}
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
-            />
+            >
+              {drawerTab === "terminal" ? <TerminalTool /> : null}
+            </StudioDrawer>
 
-            {/* Persistent composer — visible at all times in Studio/Work */}
-            {isStudioWork && (
+            {/* Persistent composer — visible at all times in Studio/Work conversation */}
+            {isStudioWorkConversation && (
               <CommandComposer
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
+                busy={conversation.busy}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
                 contextLine={contextLine}
@@ -428,7 +458,7 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
         </aside>
       )}
 
-      {/* Persistent media overlays (camera/screen docks) — reused from StudioOS */}
+      {/* Persistent media overlays (camera/screen docks) */}
       <MediaOverlayHost
         cameraDock={cameraDock}
         screenDock={screenDock}
@@ -441,55 +471,64 @@ export default function CommandStudio({ isDemo: _isDemo = false }: { isDemo?: bo
   );
 }
 
-/* ── Studio/Work surface: empty state OR chat transcript + composer ─ */
+/* ── Studio/Work surface: empty state OR real transcript ──────── */
 function StudioWorkSurface({
-  projectReady,
-  connectionsLoading,
+  messages,
+  busy,
+  activeAgentId,
+  fallbackNotice,
   onRouteTool,
-  onToggleCamera,
-  cameraActive,
-  pendingCommand,
+  onRegenerate,
   onEmptyAction,
+  hasProject,
   onStartBlank,
   onConnectRepo,
 }: {
-  projectReady: boolean;
-  connectionsLoading: boolean;
+  messages: import("../stores/useStudioAgentStore").ChatMessage[];
+  busy: boolean;
+  activeAgentId: import("../stores/useStudioAgentStore").AgentId;
+  fallbackNotice: string | null;
   onRouteTool: (tool: StudioTool, command?: string) => void;
-  onToggleCamera: () => void;
-  cameraActive: boolean;
-  pendingCommand: string;
+  onRegenerate: () => void;
   onEmptyAction: (prompt: string) => void;
+  hasProject: boolean;
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
-  // The ChatTool owns the conversation state + /api/gemini/chat calls.
-  // We mount it but visually overlay the empty state when there are no
-  // messages. The composer is rendered by the parent (CommandStudio) so
-  // it stays persistent across destination switches.
+  const isEmpty = messages.length === 0;
   return (
     <div className="relative flex h-full min-h-0 flex-col overflow-hidden">
-      {/* Empty state overlay — shown when chat is empty */}
-      {!connectionsLoading && (
-        <div className="absolute inset-0 z-10 overflow-y-auto">
+      {fallbackNotice && (
+        <div
+          className="flex shrink-0 items-center gap-2 border-b px-3 py-2 text-[10px] font-bold"
+          style={{
+            borderColor: "var(--studio-border)",
+            backgroundColor: "rgba(227,179,65,0.08)",
+            color: "#e3b341",
+          }}
+        >
+          <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-amber-400" />
+          {fallbackNotice}
+        </div>
+      )}
+      {isEmpty ? (
+        <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
-            hasProject={projectReady}
+            hasProject={hasProject}
             onPick={onEmptyAction}
             onStartBlank={onStartBlank}
             onConnectRepo={onConnectRepo}
           />
         </div>
-      )}
-      {/* ChatTool mounted underneath so it keeps its session state */}
-      <div className="relative z-0 h-full min-h-0 opacity-0">
-        <ChatTool
+      ) : (
+        <StudioTranscript
+          messages={messages}
+          busy={busy}
+          activeAgentId={activeAgentId}
           onRouteTool={onRouteTool}
-          onToggleCamera={onToggleCamera}
-          cameraActive={cameraActive}
-          requestedTool="chat"
-          pendingCommand={pendingCommand}
+          onRegenerate={onRegenerate}
         />
-      </div>
+      )}
     </div>
   );
 }
@@ -510,8 +549,6 @@ function MediaOverlayHost({
   onCameraPosChange: (pos: DockPosition) => void;
   onScreenPosChange: (pos: DockPosition) => void;
 }) {
-  // Defer to the existing CameraTool/ScreenTool components via dynamic
-  // import when open. Phase 1 keeps the dock chrome minimal.
   if (!cameraDock.open && !screenDock.open) return null;
   return (
     <>

@@ -51,6 +51,10 @@ export interface DestinationState {
   mode?: StudioMode | CreateMode | MoreMode;
   /** Optional command carried over from a legacy route (e.g. `/build ...`). */
   command?: string;
+  /** Open the bottom drawer on this tab (e.g. terminal legacy URL). */
+  openDrawer?: DrawerTab;
+  /** Open the right inspector on this tab (e.g. workflows legacy URL). */
+  openInspector?: InspectorTab;
 }
 
 /**
@@ -63,23 +67,25 @@ export function mapLegacyToolToDestination(
   command?: string,
 ): DestinationState {
   switch (tool) {
-    // Studio / Work surface
+    // Studio / Work surface — the conversation
     case "home":
     case "chat":
       return { destination: "studio", legacyTool: "chat", mode: "work" };
+    // Studio / Files — the Canvas surface
     case "canvas":
-    case "build":
+      return { destination: "studio", legacyTool: "canvas", mode: "files" };
+    // Studio / Code — the code surface
     case "code":
-      return {
-        destination: "studio",
-        legacyTool: tool as StudioTool,
-        mode: tool === "build" ? "work" : tool === "code" ? "code" : "work",
-        command,
-      };
+      return { destination: "studio", legacyTool: "code", mode: "code" };
+    // Studio / Work but rendering the Builder adapter (not ChatTool)
+    case "build":
+      return { destination: "studio", legacyTool: "build", mode: "work", command };
+    // Studio / Work with the bottom drawer open on Terminal
     case "terminal":
-      return { destination: "studio", legacyTool: "terminal", mode: "work", command };
+      return { destination: "studio", legacyTool: "terminal", mode: "work", command, openDrawer: "terminal" };
+    // Studio / Work with the right inspector open on Plan
     case "workflows":
-      return { destination: "studio", legacyTool: "workflows", mode: "work", command };
+      return { destination: "studio", legacyTool: "workflows", mode: "work", command, openInspector: "plan" };
 
     // Create — media workspace
     case "image":

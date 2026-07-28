@@ -24,16 +24,6 @@ import {
 } from "../stores/useStudioAgentStore";
 
 /** Composer execution modes. */
-export type ComposerMode = "auto" | "ask" | "plan" | "build" | "create";
-
-const MODE_LABELS: { id: ComposerMode; label: string; hint: string }[] = [
-  { id: "auto", label: "Auto", hint: "LiTT picks the best approach" },
-  { id: "ask", label: "Ask", hint: "Answer questions, no changes" },
-  { id: "plan", label: "Plan", hint: "Propose a plan before acting" },
-  { id: "build", label: "Build", hint: "Edit code and run checks" },
-  { id: "create", label: "Create", hint: "Generate media" },
-];
-
 const STATUS_LABELS: Record<VoiceState, string> = {
   idle: "",
   requesting_permission: "Requesting microphone…",
@@ -78,14 +68,10 @@ export default function CommandComposer({
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
-  const [mode, setMode] = useState<ComposerMode>("auto");
-  const [modeOpen, setModeOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
   const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
-  const modeTriggerRef = useRef<HTMLButtonElement>(null);
-  const [modeRect, setModeRect] = useState<DOMRect | null>(null);
 
   const {
     voiceState,
@@ -128,25 +114,23 @@ export default function CommandComposer({
     };
   }, [agentOpen]);
 
-  useEffect(() => {
-    if (!modeOpen) return;
-    if (modeTriggerRef.current) setModeRect(modeTriggerRef.current.getBoundingClientRect());
-    const update = () => modeTriggerRef.current && setModeRect(modeTriggerRef.current.getBoundingClientRect());
-    window.addEventListener("scroll", update, true);
-    window.addEventListener("resize", update);
-    return () => {
-      window.removeEventListener("scroll", update, true);
-      window.removeEventListener("resize", update);
-    };
-  }, [modeOpen]);
-
   const submit = async (e: FormEvent) => {
     e.preventDefault();
+    if (busy) return; // prevent duplicate submits
     if (!value.trim() && snapshots.length === 0) return;
     const attachments = [...snapshots];
-    const reply = await onSend(value, attachments.length ? attachments : undefined);
+    const textToSend = value;
+    // Clear input immediately for responsiveness — the controller owns
+    // the message now. If the controller rejects (returns ""), we
+    // restore the text so the user can retry.
     onChange("");
     setSnapshots([]);
+    const reply = await onSend(textToSend, attachments.length ? attachments : undefined);
+    if (!reply && !value.trim()) {
+      // Controller rejected — restore text and attachments
+      onChange(textToSend);
+      setSnapshots(attachments);
+    }
     if (reply) speakText(reply);
   };
 
@@ -337,33 +321,20 @@ export default function CommandComposer({
             document.body,
           )}
 
-        {/* Mode selector */}
-        <button
-          ref={modeTriggerRef}
-          type="button"
-          onClick={() => setModeOpen((v) => !v)}
-          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 transition hover:bg-white/5"
+        {/* Mode label — Phase 1.1 shows only "Auto" until Ask/Plan/Build/Create
+            affect behavior. No dropdown is rendered to avoid implying
+            functionality that does not exist. */}
+        <span
+          className="flex h-10 shrink-0 items-center rounded-xl border px-2.5 text-[11px] font-bold"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: "var(--text-secondary)",
           }}
-          aria-label="Execution mode"
-          title={`Mode: ${mode}`}
-          aria-expanded={modeOpen}
+          title="Auto — LiTT picks the best approach. Additional modes arrive in Phase 2."
         >
-          <span className="hidden sm:inline text-[11px] font-bold capitalize">{mode}</span>
-          <span className="sm:hidden text-[11px] font-bold capitalize">{mode[0].toUpperCase()}</span>
-        </button>
-        {modeOpen && modeRect &&
-          createPortal(
-            <ModePopover
-              rect={modeRect}
-              active={mode}
-              onSelect={(m) => { setMode(m); setModeOpen(false); }}
-              onClose={() => setModeOpen(false)}
-            />,
-            document.body,
-          )}
+          <span className="hidden sm:inline">Auto</span>
+          <span className="sm:hidden">A</span>
+        </span>
 
         {/* Text input — min 14px font */}
         <textarea
@@ -535,76 +506,6 @@ function AgentPopover({
             </div>
             {isActive && (
               <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: accent }} aria-hidden />
-            )}
-          </button>
-        );
-      })}
-    </div>
-  );
-}
-
-/* ── Mode selector popover ─────────────────────────────────────── */
-function ModePopover({
-  rect,
-  active,
-  onSelect,
-  onClose,
-}: {
-  rect: DOMRect;
-  active: ComposerMode;
-  onSelect: (m: ComposerMode) => void;
-  onClose: () => void;
-}) {
-  const ref = useRef<HTMLDivElement>(null);
-  useEffect(() => {
-    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
-    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
-    window.addEventListener("mousedown", onDown);
-    window.addEventListener("keydown", onKey);
-    return () => {
-      window.removeEventListener("mousedown", onDown);
-      window.removeEventListener("keydown", onKey);
-    };
-  }, [onClose]);
-
-  const left = Math.min(rect.left, window.innerWidth - 200);
-  const top = rect.bottom + 6;
-
-  return (
-    <div
-      ref={ref}
-      role="dialog"
-      aria-label="Execution mode"
-      className="fixed z-[200] w-48 overflow-hidden rounded-xl border shadow-2xl"
-      style={{
-        left,
-        top,
-        backgroundColor: "var(--studio-elevated)",
-        borderColor: "var(--studio-border-strong)",
-      }}
-    >
-      <div
-        className="px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
-        style={{ color: "var(--text-secondary)", borderBottom: "1px solid var(--studio-border)" }}
-      >
-        Mode
-      </div>
-      {MODE_LABELS.map((m) => {
-        const isActive = active === m.id;
-        return (
-          <button
-            key={m.id}
-            type="button"
-            onClick={() => onSelect(m.id)}
-            className="flex w-full items-center justify-between px-3 py-2.5 text-left transition hover:bg-white/5"
-            style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
-          >
-            <div>
-              <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
-              <div className="text-[10px]" style={{ color: "var(--text-muted)" }}>{m.hint}</div>
-            </div>
-            {isActive && (
-              <span className="h-1.5 w-1.5 rounded-full" style={{ backgroundColor: "var(--litt-primary)" }} aria-hidden />
             )}
           </button>
         );

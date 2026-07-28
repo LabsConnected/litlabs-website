@@ -21,23 +21,38 @@ describe("studio-destinations", () => {
       });
     });
 
-    it("maps canvas/build/code to Studio with correct modes", () => {
+    it("maps canvas to Studio/Files (Canvas surface)", () => {
       expect(mapLegacyToolToDestination("canvas").destination).toBe("studio");
-      expect(mapLegacyToolToDestination("build").destination).toBe("studio");
-      expect(mapLegacyToolToDestination("build").mode).toBe("work");
+      expect(mapLegacyToolToDestination("canvas").mode).toBe("files");
+      expect(mapLegacyToolToDestination("canvas").legacyTool).toBe("canvas");
+    });
+
+    it("maps build to Studio/Work with legacyTool=build (Builder adapter, not ChatTool)", () => {
+      const result = mapLegacyToolToDestination("build", "next build");
+      expect(result.destination).toBe("studio");
+      expect(result.mode).toBe("work");
+      expect(result.legacyTool).toBe("build");
+      expect(result.command).toBe("next build");
+    });
+
+    it("maps code to Studio/Code", () => {
       expect(mapLegacyToolToDestination("code").destination).toBe("studio");
       expect(mapLegacyToolToDestination("code").mode).toBe("code");
     });
 
-    it("maps terminal to Studio/Work with command", () => {
+    it("maps terminal to Studio/Work with drawer open on Terminal", () => {
       const result = mapLegacyToolToDestination("terminal", "ls -la");
       expect(result.destination).toBe("studio");
       expect(result.mode).toBe("work");
       expect(result.command).toBe("ls -la");
+      expect(result.openDrawer).toBe("terminal");
     });
 
-    it("maps workflows to Studio/Work", () => {
-      expect(mapLegacyToolToDestination("workflows").destination).toBe("studio");
+    it("maps workflows to Studio/Work with inspector open on Plan", () => {
+      const result = mapLegacyToolToDestination("workflows");
+      expect(result.destination).toBe("studio");
+      expect(result.mode).toBe("work");
+      expect(result.openInspector).toBe("plan");
     });
 
     it("maps image/video/audio to Create with correct modes", () => {

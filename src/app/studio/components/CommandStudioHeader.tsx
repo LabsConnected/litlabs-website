@@ -39,20 +39,19 @@ const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
  * No fake readiness or health is ever displayed.
  */
 export default function CommandStudioHeader({
-  projectSelector,
   branch,
+  onPreview,
   onOpenActivity,
-  onDeploy,
   projectReady,
+  capabilities,
 }: {
-  projectSelector?: React.ReactNode;
   branch?: string;
+  onPreview?: () => void;
   onOpenActivity?: () => void;
-  onDeploy?: () => void;
   projectReady?: boolean;
+  capabilities: import("../hooks/useConnectionSummary").ConnectionCapabilities;
 }) {
   const { balance, isLoading: walletLoading } = useWallet();
-  const { capabilities } = useConnectionSummary();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const providerHealth = useStudioModelStore((s) => s.providerHealth);
@@ -80,16 +79,27 @@ export default function CommandStudioHeader({
 
   const providerCount = capabilities.connectedProviders.length;
   const repoConnected = capabilities.repository === "connected";
+  const ptyAvailable = capabilities.terminalExecution === "available";
   const writesAllowed = capabilities.writeAccess;
   const modelHealth = providerHealth[selectedModel.provider] ?? "available";
 
-  // Truthful aggregate status — never fake "ready".
-  const statusColor = providerCount
+  // Truthful aggregate status — calculated from actual capabilities,
+  // never from provider count alone. "Workspace ready" requires a
+  // project (repo OR terminal) AND an AI provider.
+  const hasProject = repoConnected || ptyAvailable;
+  const hasAi = providerCount > 0;
+  const statusColor = hasProject && hasAi
     ? "var(--litt-primary)"
-    : "var(--text-muted)";
-  const statusLabel = providerCount
-    ? "Workspace ready"
-    : "Workspace standby";
+    : hasProject
+      ? "#e3b341"
+      : "var(--text-muted)";
+  const statusLabel = hasProject && hasAi
+    ? "Workspace available"
+    : hasProject
+      ? "AI setup required"
+      : hasAi
+        ? "Project setup required"
+        : "Workspace setup required";
 
   return (
     <header
@@ -118,11 +128,6 @@ export default function CommandStudioHeader({
           LiTT Studio
         </span>
       </div>
-
-      {/* Active project selector (slot) */}
-      {projectSelector && (
-        <div className="min-w-0 shrink-0">{projectSelector}</div>
-      )}
 
       {/* Branch */}
       {branch && (
@@ -183,25 +188,25 @@ export default function CommandStudioHeader({
 
       <div className="flex-1" />
 
-      {/* Preview */}
+      {/* Preview — switches Studio to the Preview surface */}
       <button
         type="button"
         disabled={!projectReady}
-        onClick={onOpenActivity}
+        onClick={onPreview}
         className="flex shrink-0 items-center gap-1.5 rounded-md border px-2 py-1 text-[10px] font-bold transition-all hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
         style={{
           borderColor: "var(--studio-border)",
           color: "var(--text-secondary)",
           backgroundColor: "var(--studio-surface)",
         }}
-        title="Preview"
+        title={projectReady ? "Preview" : "Connect a project to preview"}
         aria-label="Preview"
       >
         <Eye size={11} className="pointer-events-none" />
         <span className="hidden sm:inline pointer-events-none">Preview</span>
       </button>
 
-      {/* Activity */}
+      {/* Activity — opens the Activity drawer */}
       <button
         type="button"
         onClick={onOpenActivity}
@@ -217,18 +222,19 @@ export default function CommandStudioHeader({
         <span className="hidden sm:inline pointer-events-none">Activity</span>
       </button>
 
-      {/* Deploy */}
+      {/* Deploy — truthful. No deploy handler is wired in Phase 1, so
+          the button is disabled with a truthful explanation rather than
+          claiming success or opening the Activity drawer. */}
       <button
         type="button"
-        disabled={!projectReady}
-        onClick={onDeploy}
-        className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black transition-all hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-40"
+        disabled
+        className="flex shrink-0 items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-black transition-all disabled:cursor-not-allowed"
         style={{
-          backgroundColor: projectReady ? "var(--litt-primary)" : "var(--studio-card)",
-          color: projectReady ? "#000" : "var(--text-muted)",
+          backgroundColor: "var(--studio-card)",
+          color: "var(--text-muted)",
         }}
-        title="Deploy"
-        aria-label="Deploy"
+        title="Deploy unavailable — not wired in this phase"
+        aria-label="Deploy unavailable"
       >
         <Rocket size={11} className="pointer-events-none" />
         <span className="hidden sm:inline pointer-events-none">Deploy</span>
