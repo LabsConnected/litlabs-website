@@ -134,6 +134,21 @@ export type ReflectionPolicy =
   | "light"
   | "full";
 
+// ─── Project Info (for prompt composer) ─────────────────────────
+
+export interface ProjectInfo {
+  id?: string;
+  name?: string;
+  repoUrl?: string;
+  description?: string;
+  stack?: string;
+  goals?: string;
+  branch?: string;
+  framework?: string;
+  language?: string;
+  repoOwner?: string;
+}
+
 // ─── Control Decision ───────────────────────────────────────────
 
 /**

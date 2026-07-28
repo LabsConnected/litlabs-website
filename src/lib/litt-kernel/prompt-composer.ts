@@ -21,7 +21,7 @@
  *   - Unverified capability claims
  */
 
-import type { LiTTControlDecision, CapabilityRecord } from "./types";
+import type { LiTTControlDecision, CapabilityRecord, ProjectInfo } from "./types";
 import { isCapabilityReady } from "./principles";
 
 // ─── Constitution (inline — these are immutable and short) ──────
@@ -88,14 +88,37 @@ function buildCapabilityBlock(capabilities: CapabilityRecord[]): string {
 
 // ─── Project context block ──────────────────────────────────────
 
-function buildProjectBlock(decision: LiTTControlDecision): string {
-  if (!decision.context.projectId) {
+function buildProjectBlock(decision: LiTTControlDecision, projectInfo?: ProjectInfo): string {
+  if (!decision.context.projectId && !projectInfo?.id) {
     if (decision.routing.requiresProject) {
       return "Project: REQUIRED but none active. Ask the user to create or select a Project.";
     }
     return "Project: none (not required for this request).";
   }
-  return `Project: ${decision.context.projectId} (active).`;
+
+  // If we have detailed project info, include it
+  if (projectInfo && (projectInfo.name || projectInfo.repoUrl || projectInfo.description || projectInfo.stack)) {
+    const lines: string[] = [];
+    if (projectInfo.name) lines.push(`  Name: ${projectInfo.name}`);
+    if (projectInfo.repoOwner && projectInfo.repoUrl) {
+      lines.push(`  Repository: ${projectInfo.repoOwner}/${projectInfo.repoUrl.replace(/^.*\//, '')}`);
+    } else if (projectInfo.repoUrl) {
+      lines.push(`  Repository: ${projectInfo.repoUrl}`);
+    }
+    if (projectInfo.branch) lines.push(`  Branch: ${projectInfo.branch}`);
+    if (projectInfo.framework) lines.push(`  Framework: ${projectInfo.framework}`);
+    if (projectInfo.language) lines.push(`  Language: ${projectInfo.language}`);
+    if (projectInfo.stack) lines.push(`  Stack: ${projectInfo.stack}`);
+    if (projectInfo.description) lines.push(`  Description: ${projectInfo.description}`);
+    if (projectInfo.goals) lines.push(`  Goals: ${projectInfo.goals}`);
+    return [
+      "Project (active):",
+      ...lines,
+      "Always factor this project context into your response. Reference the project by name. Suggest work relevant to the project's stack and goals.",
+    ].join("\n");
+  }
+
+  return `Project: ${decision.context.projectId ?? projectInfo?.id} (active).`;
 }
 
 // ─── Main composer ──────────────────────────────────────────────
@@ -118,10 +141,11 @@ function buildProjectBlock(decision: LiTTControlDecision): string {
 export function composeSystemPrompt(
   decision: LiTTControlDecision,
   capabilities: CapabilityRecord[],
+  projectInfo?: ProjectInfo,
 ): string {
   const modeGuidance = MODE_GUIDANCE[decision.routing.mode] ?? MODE_GUIDANCE.think;
   const capabilityBlock = buildCapabilityBlock(capabilities);
-  const projectBlock = buildProjectBlock(decision);
+  const projectBlock = buildProjectBlock(decision, projectInfo);
 
   return [
     `# LiTT`,

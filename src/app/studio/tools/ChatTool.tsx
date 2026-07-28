@@ -153,6 +153,7 @@ export default function ChatTool({
             : null,
           capabilities: {
             repository: capabilities.repository,
+            repositoryName: capabilities.repositoryName,
             repositoryIndexed: capabilities.repositoryIndexed,
             terminalExecution: capabilities.terminalExecution,
             writeAccess: capabilities.writeAccess,
@@ -163,6 +164,10 @@ export default function ChatTool({
             voiceMicrophoneOn: voiceInputState === "listening",
             voiceHealth: capabilities.voiceHealth,
           },
+          projectId: typeof localStorage !== "undefined"
+            ? localStorage.getItem("litt:active-project-id")
+            : null,
+          repositoryName: capabilities.repositoryName,
         }),
       });
       if (!response.ok) {
