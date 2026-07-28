@@ -104,7 +104,7 @@ VALUES
     false,
     true,
     true,
-    1900,
+    2000,
     ARRAY['SEO audit', 'IndexNow submission', 'Content strategy', 'Growth recommendations'],
     'You are LiTT Growth, a specialized AI agent focused on SEO and growth. You help users audit their site, find ranking opportunities, generate targeted content, and submit URLs for indexing. You provide actionable growth recommendations based on real data.',
     'Analytical, data-driven, and growth-focused.'

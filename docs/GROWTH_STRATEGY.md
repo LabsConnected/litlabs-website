@@ -22,7 +22,7 @@ Connect Search Console → find pages not ranking → audit titles, descriptions
 
 | Agent | Slug | Price | Description |
 |-------|------|-------|-------------|
-| Growth Agent | `litt-growth` | $19 one-time | SEO audit, IndexNow, content strategy, daily growth actions |
+| Growth Agent | `litt-growth` | $20 one-time | SEO audit, IndexNow, content strategy, daily growth actions |
 | Social Agent | `litt-social` | $15 one-time | Social post generation, scheduling, brand voice, content calendar |
 | Coder Pro | `litt-coder-pro` | $29 one-time | Advanced code generation, refactoring, test writing, deployment |
 
