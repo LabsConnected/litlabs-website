@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, Component, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { UserButton } from "@clerk/nextjs";
@@ -28,6 +28,34 @@ import {
   type SelectedModel,
   type ProviderHealth,
 } from "../stores/useStudioModelStore";
+
+// Clerk config check + error boundary — same pattern as ClerkAuth.tsx.
+// In production with Clerk keys, UserButton renders normally.
+// Without Clerk keys (test/dev env), gracefully degrades to a placeholder.
+const clerkConfigured = Boolean(process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY);
+
+class ClerkBoundary extends Component<{
+  fallback: ReactNode;
+  children: ReactNode;
+}> {
+  state = { hasError: false };
+  static getDerivedStateFromError() {
+    return { hasError: true };
+  }
+  render() {
+    if (this.state.hasError) return this.props.fallback;
+    return this.props.children;
+  }
+}
+
+function UserAvatarPlaceholder() {
+  return (
+    <div
+      className="h-7 w-7 shrink-0 rounded-full border border-white/10 bg-white/5"
+      title="Clerk not configured"
+    />
+  );
+}
 
 const HEALTH_DOT: Record<ProviderHealth, { color: string; label: string }> = {
   available: { color: "#22c55e", label: "Available" },
@@ -355,25 +383,33 @@ export default function StudioTopBar({
         <Settings size={14} className="pointer-events-none" />
       </Link>
 
-      {/* User avatar — Clerk UserButton with styled profile card for dark theme */}
+      {/* User avatar — Clerk UserButton with styled profile card for dark theme.
+          Wrapped in ClerkBoundary (same pattern as ClerkAuth.tsx) so the
+          Studio renders without crashing when Clerk keys are absent. */}
       <div className="shrink-0">
-        <UserButton
-          afterSignOutUrl="/"
-          appearance={{
-            elements: {
-              avatarBox: "w-7 h-7 rounded-full",
-              userButtonPopoverCard: "bg-[#0a0b12] border border-white/10 shadow-2xl",
-              userButtonPopoverActionButton: "text-white/85 hover:bg-white/8",
-              userButtonPopoverActionButtonText: "text-white/85",
-              userButtonPopoverFooter: "text-white/40",
-              userButtonPopoverHeaderTitle: "text-white/90",
-              userButtonPopoverHeaderSubtitle: "text-white/55",
-              userButtonPopoverProfile: "text-white/85",
-              userButtonPopoverProfilePrimaryText: "text-white/90",
-              userButtonPopoverProfileSecondaryText: "text-white/55",
-            },
-          }}
-        />
+        {clerkConfigured ? (
+          <ClerkBoundary fallback={<UserAvatarPlaceholder />}>
+            <UserButton
+              afterSignOutUrl="/"
+              appearance={{
+                elements: {
+                  avatarBox: "w-7 h-7 rounded-full",
+                  userButtonPopoverCard: "bg-[#0a0b12] border border-white/10 shadow-2xl",
+                  userButtonPopoverActionButton: "text-white/85 hover:bg-white/8",
+                  userButtonPopoverActionButtonText: "text-white/85",
+                  userButtonPopoverFooter: "text-white/40",
+                  userButtonPopoverHeaderTitle: "text-white/90",
+                  userButtonPopoverHeaderSubtitle: "text-white/55",
+                  userButtonPopoverProfile: "text-white/85",
+                  userButtonPopoverProfilePrimaryText: "text-white/90",
+                  userButtonPopoverProfileSecondaryText: "text-white/55",
+                },
+              }}
+            />
+          </ClerkBoundary>
+        ) : (
+          <UserAvatarPlaceholder />
+        )}
       </div>
     </header>
   );

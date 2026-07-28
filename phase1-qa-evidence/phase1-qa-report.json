@@ -1,0 +1,255 @@
+{
+  "timestamp": "2026-07-28T05:52:25.047Z",
+  "base": "http://localhost:3000",
+  "route": "/studio?demo=1&tool=code",
+  "summary": {
+    "passed": 22,
+    "failed": 0,
+    "total": 22
+  },
+  "results": [
+    {
+      "tag": "1440x900@80",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1440x900@100",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1440x900@125",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1440x900@150",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1280x720@80",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1280x720@100",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1280x720@125",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1280x720@150",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1024x768@80",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1024x768@100",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1024x768@125",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "1024x768@150",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": false,
+      "rightVis": true,
+      "drawerVis": true,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "390x844@80",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": true,
+      "rightVis": false,
+      "drawerVis": false,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "390x844@100",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": true,
+      "rightVis": false,
+      "drawerVis": false,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "390x844@125",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": true,
+      "rightVis": false,
+      "drawerVis": false,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "390x844@150",
+      "passed": true,
+      "pageScrolls": false,
+      "hOverflow": false,
+      "composerVis": true,
+      "tabsVis": true,
+      "mobileVis": true,
+      "rightVis": false,
+      "drawerVis": false,
+      "desktopOK": true,
+      "mobileOK": true
+    },
+    {
+      "tag": "tool-code",
+      "passed": true,
+      "hasComposer": true
+    },
+    {
+      "tag": "legacy-code",
+      "passed": true,
+      "hasCoderComposer": false
+    },
+    {
+      "tag": "back-forward",
+      "passed": true,
+      "backUrl": "http://localhost:3000/studio?demo=1&tool=chat",
+      "fwdUrl": "http://localhost:3000/studio?demo=1&tool=code"
+    },
+    {
+      "tag": "refresh",
+      "passed": true,
+      "refreshedUrl": "http://localhost:3000/studio?demo=1&tool=code",
+      "hasComposerAfterRefresh": true
+    },
+    {
+      "tag": "no-clerk-crash",
+      "passed": true,
+      "clerkErrorCount": 0,
+      "hasErrorBoundary": false
+    },
+    {
+      "tag": "mobile-sheet",
+      "passed": true,
+      "openVis": true,
+      "opened": true,
+      "closed": true
+    }
+  ]
+}
