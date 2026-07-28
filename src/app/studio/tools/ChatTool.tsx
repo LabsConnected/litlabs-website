@@ -2,7 +2,6 @@
 
 import { useState, useCallback, useMemo } from "react";
 import { useSearchParams } from "next/navigation";
-import { useProfile } from "@/context/ProfileContext";
 import ChatShell from "../components/ChatShell";
 import type { StudioTool } from "../components/StudioSidebar";
 import { useBuilderSessions } from "../hooks/useBuilderSessions";
@@ -52,7 +51,6 @@ export default function ChatTool({
     [storeSetMessages, activeAgentId],
   );
 
-  const { profile } = useProfile();
   const searchParams = useSearchParams();
   const initialPrompt = searchParams.get("mission") || "";
 
@@ -140,7 +138,9 @@ export default function ChatTool({
           message: text || "Describe what you see.",
           history: historyForApi,
           stream: false,
-          userName: profile.displayName || "Member",
+          // Voice mode: when the voice transport is connected, the response
+          // will be spoken aloud — tell the server to use shorter guidance.
+          responseMode: voiceTransportConnected ? "voice" : "text",
           images: attachments,
           // Pass the active canvas id so the server can detect
           // append/update intents (not just create intents).

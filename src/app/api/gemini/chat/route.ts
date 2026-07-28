@@ -193,7 +193,13 @@ async function handler(req: NextRequest) {
       images = [],
       capabilities = {},
       pageContext,
+      responseMode: rawResponseMode,
     } = body;
+
+    // Validate response mode — only "voice" activates voice guidance;
+    // everything else (including missing/invalid) defaults to "text".
+    const responseMode: "text" | "voice" =
+      rawResponseMode === "voice" ? "voice" : "text";
 
     if (!message || typeof message !== "string") {
       return NextResponse.json({ error: "Missing message" }, { status: 400 });
@@ -208,18 +214,26 @@ async function handler(req: NextRequest) {
 
     // ─── Resolve trusted display name from Clerk (server-side) ──
     // NEVER trust userName from the client request body for the system
-    // prompt — that is a prompt-injection surface. The client value is
-    // only used as a display hint for the legacy buildPrompt path.
+    // prompt — that is a prompt-injection surface. We use ONLY Clerk's
+    // firstName, sanitized to a short display token.
     let trustedDisplayName: string | undefined;
     if (clerkId) {
       try {
         const clerk = await clerkClient();
         const clerkUser = await clerk.users.getUser(clerkId);
-        const fullName = [clerkUser.firstName, clerkUser.lastName]
-          .filter(Boolean)
-          .join(" ")
-          .trim();
-        if (fullName) trustedDisplayName = fullName;
+        // Use firstName only — a short personal token is enough for
+        // natural personalization and minimizes the attack surface.
+        const raw = clerkUser.firstName;
+        if (raw) {
+          // NFKC normalize, allow only Unicode letters/marks/apostrophe/hyphen,
+          // cap at 32 chars. Instruction-shaped values are stripped entirely.
+          const sanitized = raw
+            .normalize("NFKC")
+            .replace(/[^\p{L}\p{M}'’-]/gu, "")
+            .trim()
+            .slice(0, 32);
+          if (sanitized) trustedDisplayName = sanitized;
+        }
       } catch {
         // Clerk API unavailable — omit the name rather than guess
       }
@@ -261,6 +275,7 @@ async function handler(req: NextRequest) {
     // the Kernel fails for any reason.
     const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, {
       trustedDisplayName,
+      responseMode,
     });
 
     // Use the Kernel prompt as the base, then layer on the legacy

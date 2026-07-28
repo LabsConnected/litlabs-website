@@ -221,7 +221,9 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
           message: trimmed,
           history: messages.slice(-10).map((m) => ({ role: m.role, content: m.content })),
           stream: false,
-          userName: profile?.displayName || "Member",
+          // Voice mode: when the voice transport is connected, the response
+          // will be spoken aloud — tell the server to use shorter guidance.
+          responseMode: voiceTransportConnected ? "voice" : "text",
           capabilities: {
             repository: "none",
             repositoryIndexed: false,
@@ -261,7 +263,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [activeAgentId, busy, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
+  }, [activeAgentId, busy, messages, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
 
   // Keep handleSendRef in sync so the voice transcript callback always calls the latest
   useEffect(() => {
