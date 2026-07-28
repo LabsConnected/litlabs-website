@@ -32,6 +32,19 @@ export default function GamesPage() {
   });
   const [selectedGame, setSelectedGame] = useState<Game | null>(null);
   const [recentRetro, setRecentRetro] = useState<RetroGameRecord | null>(null);
+  const [iframeLoaded, setIframeLoaded] = useState(false);
+  const [iframeError, setIframeError] = useState<string | null>(null);
+
+  // If the iframe doesn't load within 10s, show a fallback message
+  useEffect(() => {
+    if (!selectedGame || iframeLoaded || iframeError) return;
+    const timer = window.setTimeout(() => {
+      if (!iframeLoaded) {
+        setIframeError("This game is taking too long to load. It may block embedding — try opening in a new tab.");
+      }
+    }, 10_000);
+    return () => window.clearTimeout(timer);
+  }, [selectedGame, iframeLoaded, iframeError]);
 
   useEffect(() => {
     listRetroGames()
@@ -48,6 +61,8 @@ export default function GamesPage() {
       window.open(game.html5Url, "_blank", "noopener,noreferrer");
       return;
     }
+    setIframeLoaded(false);
+    setIframeError(null);
     setSelectedGame(game);
   }, []);
 
@@ -245,7 +260,7 @@ export default function GamesPage() {
             <div className="w-full max-w-5xl">
               <div className="mb-2 flex items-center justify-between rounded-2xl border border-white/10 bg-white/5 px-4 py-3">
                 <div className="flex items-center gap-3">
-                  <button onClick={() => setSelectedGame(null)} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game">
+                  <button onClick={() => { setSelectedGame(null); setIframeLoaded(false); setIframeError(null); }} className="rounded-lg border border-white/10 p-2 text-white/60 hover:bg-white/10 hover:text-white" aria-label="Close game">
                     <X size={16} />
                   </button>
                   <div>
@@ -264,14 +279,41 @@ export default function GamesPage() {
               </div>
               <div className="relative aspect-video overflow-hidden rounded-2xl border border-white/10 bg-black">
                 {selectedGame.html5Url ? (
-                  <iframe
-                    title={`${selectedGame.title} game`}
-                    src={selectedGame.html5Url}
-                    className="h-full w-full border-0"
-                    allow="fullscreen; gamepad"
-                    sandbox="allow-scripts allow-same-origin allow-popups allow-forms"
-                    referrerPolicy="no-referrer"
-                  />
+                  <>
+                    <iframe
+                      title={`${selectedGame.title} game`}
+                      src={selectedGame.html5Url}
+                      className="h-full w-full border-0"
+                      allow="autoplay; fullscreen; gamepad; pointer-lock; cross-origin-isolated"
+                      sandbox="allow-scripts allow-same-origin allow-popups allow-forms allow-pointer-lock allow-modals"
+                      referrerPolicy="origin"
+                      onLoad={() => setIframeLoaded(true)}
+                      onError={() => setIframeError("Failed to load game. Try opening in a new tab.")}
+                    />
+                    {!iframeLoaded && !iframeError && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black">
+                        <div className="text-center">
+                          <div className="mx-auto h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+                          <p className="mt-3 text-xs text-white/40">Loading {selectedGame.title}…</p>
+                        </div>
+                      </div>
+                    )}
+                    {iframeError && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black p-6 text-center">
+                        <div className="max-w-sm space-y-3">
+                          <p className="text-sm text-rose-300">{iframeError}</p>
+                          <a
+                            href={selectedGame.html5Url}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="inline-flex items-center gap-2 rounded-xl bg-white px-4 py-2 text-xs font-black text-black"
+                          >
+                            <ExternalLink size={13} /> Open in new tab
+                          </a>
+                        </div>
+                      </div>
+                    )}
+                  </>
                 ) : (
                   <div className="flex h-full items-center justify-center text-white/40">
                     <p>No playable game available.</p>
