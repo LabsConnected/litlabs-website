@@ -9,6 +9,7 @@ import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/
 import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
+import { clerkClient } from "@clerk/nextjs/server";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -179,7 +180,7 @@ async function handler(req: NextRequest) {
   }
 
   try {
-    const { userId } = await auth();
+    const { userId, clerkId } = await auth();
     const body = await req.json();
     const {
       agentSlug = DEFAULT_AGENT_SLUG,
@@ -189,7 +190,6 @@ async function handler(req: NextRequest) {
       category,
       model: requestedModel,
       stream = false,
-      userName,
       images = [],
       capabilities = {},
       pageContext,
@@ -205,6 +205,25 @@ async function handler(req: NextRequest) {
 
     const uid = userId || "anonymous-dev";
     const memoryContext = userId ? await fetchMemories(message, uid) : "";
+
+    // ─── Resolve trusted display name from Clerk (server-side) ──
+    // NEVER trust userName from the client request body for the system
+    // prompt — that is a prompt-injection surface. The client value is
+    // only used as a display hint for the legacy buildPrompt path.
+    let trustedDisplayName: string | undefined;
+    if (clerkId) {
+      try {
+        const clerk = await clerkClient();
+        const clerkUser = await clerk.users.getUser(clerkId);
+        const fullName = [clerkUser.firstName, clerkUser.lastName]
+          .filter(Boolean)
+          .join(" ")
+          .trim();
+        if (fullName) trustedDisplayName = fullName;
+      } catch {
+        // Clerk API unavailable — omit the name rather than guess
+      }
+    }
 
     // ─── LiTT Kernel routing ──────────────────────────────────
     // The Kernel classifies intent, checks capabilities, and composes
@@ -240,7 +259,9 @@ async function handler(req: NextRequest) {
     // Compose the Kernel system prompt (Constitution + mode guidance +
     // verified capabilities). Falls back to the legacy agent prompt if
     // the Kernel fails for any reason.
-    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, { userName });
+    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, {
+      trustedDisplayName,
+    });
 
     // Use the Kernel prompt as the base, then layer on the legacy
     // capability translation block + memory + history (same as before).

@@ -146,6 +146,40 @@ function buildProjectBlock(decision: LiTTControlDecision): string {
   return `Project: ${decision.context.projectId} (active).`;
 }
 
+// ─── Prompt composer options ─────────────────────────────────────
+
+/**
+ * Options for composeSystemPrompt.
+ *
+ * `trustedDisplayName` MUST come from a server-side trusted source
+ * (Clerk profile, canonical DB record). It must NEVER be sourced from
+ * the client request body, which is a prompt-injection surface.
+ *
+ * `responseMode` adjusts depth guidance: voice responses should be
+ * shorter but still substantive.
+ */
+export type PromptComposerOptions = {
+  trustedDisplayName?: string;
+  responseMode?: "text" | "voice";
+};
+
+/**
+ * Build the user context line from a trusted display name.
+ * Returns null when no trusted name is available — the prompt simply
+ * omits the user line rather than emitting "name unknown".
+ *
+ * The name is sanitized: newlines/tabs stripped, trimmed, capped at 60
+ * chars to prevent injection or abuse of the system prompt.
+ */
+function buildUserContext(displayName?: string): string | null {
+  if (!displayName) return null;
+  const normalized = displayName
+    .replace(/[\r\n\t]/g, " ")
+    .trim()
+    .slice(0, 60);
+  return normalized ? `User display name: ${normalized}` : null;
+}
+
 // ─── Main composer ──────────────────────────────────────────────
 
 /**
@@ -157,24 +191,34 @@ function buildProjectBlock(decision: LiTTControlDecision): string {
  *   3. Mode-specific guidance — based on the control decision
  *   4. Capability context — verified state only
  *   5. Project context — if relevant
+ *   6. User display name — only if from a trusted server-side source
  *
  * The composer does NOT include:
  *   - The conversation history (added by the caller)
  *   - The user message (added by the caller)
  *   - Memory context (added by the caller)
+ *   - Any client-provided name (prompt-injection risk)
  */
 export function composeSystemPrompt(
   decision: LiTTControlDecision,
   capabilities: CapabilityRecord[],
-  options?: { userName?: string },
+  options?: PromptComposerOptions,
 ): string {
   const modeGuidance = MODE_GUIDANCE[decision.routing.mode] ?? MODE_GUIDANCE.think;
   const capabilityBlock = buildCapabilityBlock(capabilities);
   const projectBlock = buildProjectBlock(decision);
-  const userName = options?.userName?.trim();
-  const userBlock = userName
-    ? `User: ${userName}`
-    : `User: (name unknown — acknowledge naturally without a name)`;
+  const userBlock = buildUserContext(options?.trustedDisplayName);
+
+  // Adjust voice guidance for voice mode — shorter but still substantive
+  const voiceModeNote =
+    options?.responseMode === "voice"
+      ? `\nRESPONSE MODE: VOICE. Keep responses shorter and conversational (1–3 substantive sentences for greetings), but still informative — never generic readiness.`
+      : "";
+
+  const contextLines: string[] = [];
+  if (userBlock) contextLines.push(userBlock);
+  contextLines.push(projectBlock);
+  contextLines.push(capabilityBlock);
 
   return [
     `# LiTT`,
@@ -185,14 +229,13 @@ export function composeSystemPrompt(
     ``,
     `# Voice`,
     PERSONA_VOICE,
+    voiceModeNote,
     ``,
     `# Mode Guidance`,
     modeGuidance,
     ``,
     `# Context`,
-    userBlock,
-    projectBlock,
-    capabilityBlock,
+    ...contextLines,
     ``,
   ].join("\n");
 }
