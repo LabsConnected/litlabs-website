@@ -2,29 +2,32 @@
  * Unified LLM client for litlabs.net.
  *
  * Architecture: Vercel AI Gateway controls routing. Google handles the default
- * free experience. OpenRouter supplies model variety and free fallbacks.
- * Groq handles speed and transcription. Users bring OpenAI or Anthropic keys
- * for premium work.
+ * free experience. OpenRouter supplies specific model variety for specialized
+ * tasks. Groq handles speed and transcription. Users bring OpenAI or Anthropic
+ * keys for premium work.
  *
  * Strategy: try providers in order, fail over on 429 / 5xx / network error.
  *
  *   1. Gemini 2.5 Flash  — primary. Generous free tier, fast, 1M context.
  *   2. Groq              — ultra-fast inference, Whisper transcription.
- *   3. OpenRouter        — free models, experimental, fallback variety.
+ *   3. OpenRouter        — specific models only (Qwen, DeepSeek, vision).
+ *                          The random "openrouter/free" pool is NEVER used
+ *                          in automatic chains — it is only reachable via
+ *                          explicit provider selection.
  *
  * Categories (user-facing model selector):
- *   - "auto"     → Best available (Gemini → Groq → OpenRouter free)
- *   - "free"     → Gemini free → OpenRouter free → Groq free
- *   - "fast"     → Groq → Gemini Flash → OpenRouter fallback
- *   - "code"     → Qwen3 Coder (free) → Gemini → OpenRouter free
- *   - "creative" → Gemini (high temp) → OpenRouter free
+ *   - "auto"     → Best available (Gemini → Groq)
+ *   - "free"     → Gemini → Groq
+ *   - "fast"     → Groq → Gemini Flash
+ *   - "code"     → Qwen3 Coder (free) → Gemini
+ *   - "creative" → Gemini (high temp) → Groq
  *   - "vision"   → Gemini (vision-capable) → OpenRouter vision model
  *   - "byok"     → User-supplied OpenAI or Anthropic key
  *
  * Env:
  *   GEMINI_API_KEY     — Google AI Studio key (primary free tier)
  *   GOOGLE_API_KEY     — alias for GEMINI_API_KEY
- *   OPENROUTER_API_KEY — enables the OpenRouter fallback chain
+ *   OPENROUTER_API_KEY — enables specific OpenRouter models (not random free)
  *   GROQ_API_KEY       — enables Groq fast inference + Whisper
  */
 
@@ -147,39 +150,41 @@ function markModelUnavailable(provider: string): void {
 /* ------------------------------------------------------------------ */
 /*  Default chain per task                                             */
 /* ------------------------------------------------------------------ */
-function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
+export function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
   if (opts.provider) return [opts.provider];
 
-  // Category-based routing takes precedence if specified
+  // Category-based routing takes precedence if specified.
+  // openrouter-free (random model pool) is excluded from all automatic
+  // chains — it is only reachable via explicit provider selection.
   if (opts.category) {
     switch (opts.category) {
       case "auto":
-        return ["gemini", "groq", "openrouter-free"];
+        return ["gemini", "groq"];
       case "free":
-        return ["gemini", "openrouter-free", "groq"];
+        return ["gemini", "groq"];
       case "fast":
-        return ["groq", "gemini", "openrouter-free"];
+        return ["groq", "gemini"];
       case "code":
-        return ["openrouter-qwen", "gemini", "openrouter-free"];
+        return ["openrouter-qwen", "gemini"];
       case "creative":
-        return ["gemini", "openrouter-free", "groq"];
+        return ["gemini", "groq"];
       case "vision":
         return ["gemini", "openrouter-vision"];
       case "byok":
         // BYOK is handled by the caller via userApiKey; chain is a fallback
-        return ["gemini", "openrouter-free"];
+        return ["gemini", "groq"];
     }
   }
 
   if (opts.preferFree) {
-    return ["gemini", "openrouter-free", "groq"];
+    return ["gemini", "groq"];
   }
   switch (task) {
     case "code":
-      return ["openrouter-qwen", "gemini", "openrouter-free"];
+      return ["openrouter-qwen", "gemini"];
     case "precise":
     case "json":
-      return ["gemini", "openrouter-deepseek", "openrouter-free"];
+      return ["gemini", "openrouter-deepseek"];
     case "vision":
       return ["gemini", "openrouter-vision"];
     case "transcription":
@@ -187,7 +192,7 @@ function defaultChain(task: LLMTask, opts: LLMOptions): LLMProvider[] {
     case "creative":
     case "chat":
     default:
-      return ["gemini", "groq", "openrouter-free"];
+      return ["gemini", "groq"];
   }
 }
 
