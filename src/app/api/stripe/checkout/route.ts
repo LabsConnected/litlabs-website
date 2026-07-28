@@ -1,92 +1,189 @@
-// Stripe checkout session creation — supports both price IDs and ad-hoc price_data
+// Stripe checkout session creation — server-priced only.
+//
+// The browser sends only `{ "productId": "server-owned-id" }`. Every financial
+// field (price, currency, mode, credits, metadata) is resolved from the
+// server-owned product catalog in src/config/stripe-products.ts. Client-
+// supplied priceData, priceId, amount, metadata, email, and mode are all
+// rejected.
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
+import { z } from "zod";
+import {
+  getProductById,
+  CHECKOUT_VERSION,
+  type ProductDefinition,
+} from "@/config/stripe-products";
+
+export const runtime = "nodejs";
+
+// Strict request schema — `.strict()` rejects any unknown property.
+const RequestSchema = z
+  .object({
+    productId: z.string().trim().min(1).max(100),
+  })
+  .strict();
+
+/**
+ * Resolves the trusted application URL for return redirects. Never reads the
+ * request Origin header. localhost is allowed only in development.
+ */
+function getAppUrl(): string {
+  const raw =
+    process.env.NEXT_PUBLIC_APP_URL ??
+    process.env.APP_URL ??
+    (process.env.NODE_ENV === "development"
+      ? "http://localhost:3000"
+      : "https://litlabs.net");
+
+  let url = raw.trim();
+  // Normalize: remove trailing slashes.
+  url = url.replace(/\/+$/, "");
+
+  // In production, require HTTPS.
+  if (
+    process.env.NODE_ENV === "production" &&
+    !url.startsWith("https://")
+  ) {
+    throw new Error("Production app URL must use HTTPS");
+  }
+
+  return url;
+}
+
+function badRequest(message: string) {
+  return NextResponse.json({ error: message }, { status: 400 });
+}
+
+function unauthorized() {
+  return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+}
+
+function productNotFound() {
+  return NextResponse.json({ error: "Unknown product" }, { status: 404 });
+}
+
+function productUnavailable() {
+  return NextResponse.json(
+    { error: "Product is not available for purchase" },
+    { status: 409 },
+  );
+}
+
+/** Stable public error — never leaks Stripe internals. */
+function stripeFailure() {
+  return NextResponse.json(
+    { error: "Unable to create checkout session" },
+    { status: 502 },
+  );
+}
+
+function serverError() {
+  return NextResponse.json(
+    { error: "Unable to create checkout session" },
+    { status: 500 },
+  );
+}
+
+/** Builds the form-encoded line_items segment from the catalog product. */
+function buildLineItems(
+  product: ProductDefinition,
+  params: URLSearchParams,
+): void {
+  if (product.stripePriceId) {
+    params.append("line_items[0][price]", product.stripePriceId);
+  } else if (product.amountCents !== undefined) {
+    params.append("line_items[0][price_data][currency]", product.currency);
+    params.append(
+      "line_items[0][price_data][unit_amount]",
+      String(product.amountCents),
+    );
+    params.append(
+      "line_items[0][price_data][product_data][name]",
+      product.name,
+    );
+    if (product.description) {
+      params.append(
+        "line_items[0][price_data][product_data][description]",
+        product.description,
+      );
+    }
+  }
+  params.append("line_items[0][quantity]", "1");
+}
 
 export async function POST(req: NextRequest) {
   try {
     const { userId: clerkId } = await auth();
     if (!clerkId) {
-      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+      return unauthorized();
     }
 
-    const body = await req.json();
-    const { priceId, mode = "payment", priceData } = body;
+    let body: unknown;
+    try {
+      body = await req.json();
+    } catch {
+      return badRequest("Invalid JSON body");
+    }
 
-    const origin = req.headers.get("origin") || "https://litlabs.net";
+    // Strict validation — rejects priceData, priceId, amount, metadata, etc.
+    const parsed = RequestSchema.safeParse(body);
+    if (!parsed.success) {
+      return badRequest("Invalid request. Expected { productId: string }.");
+    }
+
+    const product = getProductById(parsed.data.productId);
+    if (!product) {
+      return productNotFound();
+    }
+    if (!product.active) {
+      return productUnavailable();
+    }
 
     const stripeKey = process.env.STRIPE_SECRET_KEY;
     if (!stripeKey) {
-      return NextResponse.json(
-        {
-          error:
-            "Stripe is not configured. Set STRIPE_SECRET_KEY in your environment.",
-          setup_required: true,
-        },
-        { status: 501 },
-      );
+      // Sanitized — does not name the env var to the browser.
+      return serverError();
     }
 
-    const params = new URLSearchParams({
-      mode,
-      success_url: `${origin}/order/success?session_id={CHECKOUT_SESSION_ID}`,
-      cancel_url: `${origin}/marketplace?canceled=true`,
-      allow_promotion_codes: "true",
-      billing_address_collection: "auto",
-      "automatic_tax[enabled]": "false",
-    });
+    const appUrl = getAppUrl();
 
-    // Ad-hoc pricing (coin packs, one-time purchases) — no pre-created products needed
-    if (priceData && typeof priceData === "object") {
-      const { amount, currency = "usd", name, description } = priceData;
-      if (!amount || amount < 50) {
-        return NextResponse.json(
-          { error: "Invalid amount. Minimum 50 cents." },
-          { status: 400 },
-        );
-      }
-      params.append("line_items[0][price_data][currency]", currency);
-      params.append("line_items[0][price_data][unit_amount]", String(amount));
-      params.append(
-        "line_items[0][price_data][product_data][name]",
-        name || "LiTTBits",
-      );
-      if (description)
-        params.append(
-          "line_items[0][price_data][product_data][description]",
-          description,
-        );
-      params.append("line_items[0][quantity]", "1");
-    }
-    // Pre-created price ID (subscriptions, etc.)
-    else if (priceId && priceId.startsWith("price_")) {
-      params.append("line_items[0][price]", priceId);
-      params.append("line_items[0][quantity]", "1");
-    } else {
-      return NextResponse.json(
-        {
-          error:
-            "Provide either priceId (price_xxx) or priceData { amount, currency, name }",
-        },
-        { status: 400 },
-      );
-    }
+    const params = new URLSearchParams();
+    // Product controls the Stripe checkout mode.
+    params.append("mode", product.checkoutMode);
+    params.append(
+      "success_url",
+      `${appUrl}/order/success?session_id={CHECKOUT_SESSION_ID}`,
+    );
+    params.append("cancel_url", `${appUrl}/marketplace?canceled=true`);
+    // Product controls promotion-code permission.
+    params.append(
+      "allow_promotion_codes",
+      product.allowPromotionCodes ? "true" : "false",
+    );
+    params.append("billing_address_collection", "auto");
+    params.append("automatic_tax[enabled]", "false");
 
-    // Metadata: always use authenticated clerk_id (never trust client-supplied value)
-    const metadata: Record<string, string> = { clerk_id: clerkId };
-    if (body.metadata && typeof body.metadata === "object") {
-      Object.entries(body.metadata).forEach(([key, value]) => {
-        if (key !== "clerk_id" && value !== undefined && value !== null) {
-          metadata[key] = String(value);
-        }
-      });
+    buildLineItems(product, params);
+
+    // All metadata is built server-side from auth + catalog. No client
+    // metadata is ever merged.
+    const metadata: Record<string, string> = {
+      clerk_id: clerkId,
+      product_id: product.id,
+      product_type: product.type,
+      checkout_version: CHECKOUT_VERSION,
+    };
+    if (product.type === "coin_pack" && product.credits !== undefined) {
+      metadata.coin_amount = String(product.credits);
     }
-    Object.entries(metadata).forEach(([key, value]) => {
+    if (product.type === "plan" && product.planId) {
+      metadata.plan_id = product.planId;
+    }
+    for (const [key, value] of Object.entries(metadata)) {
       params.append(`metadata[${key}]`, value);
-    });
-
-    if (body.email) {
-      params.append("customer_email", body.email);
     }
+
+    // No customer_email from the browser — let Stripe collect it.
 
     const stripeResponse = await fetch(
       "https://api.stripe.com/v1/checkout/sessions",
@@ -100,20 +197,26 @@ export async function POST(req: NextRequest) {
       },
     );
 
-    const session = await stripeResponse.json();
-
     if (!stripeResponse.ok) {
-      return NextResponse.json(
-        { error: session.error?.message || "Stripe error" },
-        { status: stripeResponse.status },
+      // Log server-side, return sanitized public error.
+      console.error(
+        "[stripe/checkout] Stripe returned non-2xx",
+        stripeResponse.status,
       );
+      return stripeFailure();
     }
 
+    const session = (await stripeResponse.json()) as {
+      url?: string;
+      id?: string;
+    };
+
     return NextResponse.json({ url: session.url, sessionId: session.id });
-  } catch {
-    return NextResponse.json(
-      { error: "Internal server error" },
-      { status: 500 },
-    );
+  } catch (err) {
+    // getAppUrl throws for invalid production URLs — surface as 500.
+    if (err instanceof Error) {
+      console.error("[stripe/checkout] server error:", err.message);
+    }
+    return serverError();
   }
 }
