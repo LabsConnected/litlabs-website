@@ -181,6 +181,35 @@ export async function POST(req: NextRequest) {
             }
           }
         }
+        // Marketplace agent purchase — call Postgres RPC for transactional fulfillment
+        const agentVersionId = meta.agent_version_id;
+        const agentSlug = meta.agent_slug;
+        if (agentVersionId && agentSlug && clerkId && sb) {
+          const paymentIntentId = typeof session.payment_intent === "string"
+            ? session.payment_intent
+            : session.payment_intent?.id ?? null;
+          const { error: rpcError } = await sb.rpc("fulfill_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_clerk_id: clerkId,
+            p_agent_version_id: agentVersionId,
+            p_agent_slug: agentSlug,
+            p_stripe_session_id: session.id,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_charge_id: null,
+            p_amount_cents: session.amount_total ?? 0,
+            p_currency: session.currency ?? "usd",
+          });
+          if (rpcError) {
+            // RPC failed — do not mark event as processed; Stripe will retry
+            return NextResponse.json(
+              { error: "Agent purchase fulfillment failed" },
+              { status: 500 },
+            );
+          }
+          // RPC already marked the event as processed internally
+          return NextResponse.json({ received: true });
+        }
         break;
       }
 
@@ -337,6 +366,27 @@ export async function POST(req: NextRequest) {
               // Ledger not available — skip
             }
           }
+        }
+        // Marketplace agent refund — call Postgres RPC for transactional revocation
+        const paymentIntentId =
+          typeof charge.payment_intent === "string"
+            ? charge.payment_intent
+            : null;
+        if (paymentIntentId && sb) {
+          const refundId = charge.refunds?.data[0]?.id ?? null;
+          const { error: rpcError } = await sb.rpc("refund_agent_purchase", {
+            p_stripe_event_id: event.id,
+            p_stripe_event_type: event.type,
+            p_stripe_payment_intent_id: paymentIntentId,
+            p_stripe_refund_id: refundId,
+          });
+          if (rpcError) {
+            return NextResponse.json(
+              { error: "Agent refund processing failed" },
+              { status: 500 },
+            );
+          }
+          return NextResponse.json({ received: true });
         }
         break;
       }

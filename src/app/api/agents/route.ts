@@ -31,11 +31,11 @@ async function getHandler(req: NextRequest) {
       if (user) query = query.or(`is_core.eq.true,owner_id.eq.${user.id}`);
       else query = query.eq("is_core", true);
     } else {
-      query = query.eq("is_core", true);
+      query = query.or("is_core.eq.true,is_featured.eq.true");
     }
 
     if (roleFilter) query = query.eq("role", roleFilter);
-    if (coreOnly) query = query.eq("is_core", true);
+    if (coreOnly) query = query.or("is_core.eq.true,is_featured.eq.true");
 
     const { data: rows, error } = await query;
 
@@ -58,6 +58,7 @@ async function getHandler(req: NextRequest) {
       personality: a.personality ?? "",
       price_cents: a.price_cents ?? 0,
       is_public: a.is_public ?? true,
+      is_core: a.is_core ?? false,
       is_featured: a.is_featured ?? a.is_core ?? false,
       features: Array.isArray(a.features) ? (a.features as string[]) : [],
       rating: a.rating ? Number(a.rating) : undefined,
