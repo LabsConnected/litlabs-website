@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@clerk/nextjs/server";
 import { getUserWallet, updateWalletBalance } from "@/lib/user-db";
 import { withRateLimit } from "@/lib/rate-limiter";
+import { getAgentMediaDiscount } from "@/lib/entitlements";
 import {
   MEDIA_PROVIDERS,
   MediaFormat,
@@ -39,6 +40,8 @@ type MediaRequest = {
   imageSize?: "1K" | "2K" | "4K";
   /** Optional reference image URL (for image2video / style transfer flows). */
   referenceUrl?: string;
+  /** Optional agent slug for premium agent media discount. */
+  agent_slug?: string;
 };
 
 type MediaResult = {
@@ -484,7 +487,13 @@ async function handler(req: NextRequest) {
   }
 
   // Compute cost (free for pollinations, paid for others)
-  const cost = provider.cost(format);
+  let cost = provider.cost(format);
+
+  // Apply premium agent media discount if agent_slug is provided and user owns the agent
+  if (cost > 0 && body.agent_slug) {
+    const discount = await getAgentMediaDiscount(userId, body.agent_slug);
+    cost = Math.ceil(cost * discount);
+  }
 
   // Check wallet and deduct up-front (free providers skip)
   let wallet = null;

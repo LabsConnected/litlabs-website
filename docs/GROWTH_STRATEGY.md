@@ -28,6 +28,19 @@ Connect Search Console → find pages not ranking → audit titles, descriptions
 
 No subscriptions in V1. One-time founder access pricing.
 
+## Premium Agent Value Proposition
+
+Buying a premium agent grants:
+- **Free chat** with the purchased agent (no LiTTBits consumed for chat)
+- **50% off media generation** when using the purchased agent (image, video, audio, music)
+- **Permanent ownership** — buy once, use forever, no recurring fees
+
+This is fair because:
+- The one-time fee unlocks the specialized agent capability
+- LiTTBits still cover actual AI inference costs for media (at a discount)
+- Users on any plan (including free Starter) can buy and use premium agents
+- Pro Builder Beta users get more LiTTBits to spend on discounted media
+
 ## Go-To-Market Sequence
 
 1. Launch premium agents in marketplace with Stripe one-time checkout

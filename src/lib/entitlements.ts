@@ -123,3 +123,59 @@ export async function getUserEntitlements(clerkId: string): Promise<Entitlements
 export function getEntitlementsForPlan(planId: PlanId): Entitlements {
   return ENTITLEMENTS_BY_PLAN[planId] ?? STARTER_ENTITLEMENTS;
 }
+
+export async function hasAgentEntitlement(
+  clerkId: string,
+  agentSlug: string,
+): Promise<boolean> {
+  const admin = getSupabaseAdmin();
+  if (!admin) return false;
+
+  try {
+    const { data: user } = await admin
+      .from("users")
+      .select("id")
+      .eq("clerk_id", clerkId)
+      .single();
+    if (!user) return false;
+
+    const { data: entitlement } = await admin
+      .from("agent_entitlements")
+      .select("id")
+      .eq("user_id", user.id)
+      .eq("status", "active")
+      .in(
+        "agent_version_id",
+        (
+          await admin
+            .from("agent_versions")
+            .select("id")
+            .in(
+              "agent_id",
+              (
+                await admin
+                  .from("agents")
+                  .select("id")
+                  .eq("slug", agentSlug)
+              ).data?.map((a: { id: string }) => a.id) ?? [],
+            )
+        ).data?.map((v: { id: string }) => v.id) ?? [],
+      )
+      .maybeSingle();
+
+    return !!entitlement;
+  } catch {
+    return false;
+  }
+}
+
+export const PREMIUM_AGENT_MEDIA_DISCOUNT = 0.5;
+
+export async function getAgentMediaDiscount(
+  clerkId: string,
+  agentSlug?: string,
+): Promise<number> {
+  if (!agentSlug) return 1;
+  const owned = await hasAgentEntitlement(clerkId, agentSlug);
+  return owned ? PREMIUM_AGENT_MEDIA_DISCOUNT : 1;
+}

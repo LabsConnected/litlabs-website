@@ -570,6 +570,7 @@ function MarketplaceInner() {
             </div>
             <p className="mt-1 text-sm text-white/55">
               One-time founder access. Buy once, use forever.
+              <span className="text-cyan-400/80"> Free chat + 50% off media</span> with your agent.
             </p>
           </div>
           {premiumAgents.length === 0 ? (
