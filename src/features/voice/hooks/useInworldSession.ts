@@ -347,8 +347,14 @@ export function useInworldSession(
         const conn = await getVoiceConnection();
 
         // Use our WebSocket proxy — the browser can't set Authorization headers
-        // so we connect to our proxy which adds the Inworld API key header
-        const proxyUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL;
+        // so we connect to our proxy which adds the Inworld API key header.
+        // The NEXT_PUBLIC_VOICE_WS_URL env var is the canonical source, but
+        // the Vercel CLI on Windows has trouble piping the value, so we
+        // hardcode the production proxy URL as a fallback. This is a PUBLIC
+        // URL (not secret) — it's the WebSocket endpoint of our voice-server
+        // deployed on Railway.
+        const proxyUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL ||
+          "wss://voice-proxy-production-3f9c.up.railway.app/voice";
         if (!proxyUrl) {
           throw new Error("Voice proxy is not configured. Set NEXT_PUBLIC_VOICE_WS_URL.");
         }

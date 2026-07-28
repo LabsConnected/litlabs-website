@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * VoiceDiagnosticsDrawer — per-stage observability for the voice session.
+ * VoiceDiagnosticsDrawer — per-stage observability for the Inworld voice session.
  *
  * Shows the status of each pipeline stage:
- *   Microphone → Transport → Transcription → Response → TTS → Playback
+ *   Microphone → Transport (WebSocket) → Transcription → Response → TTS → Playback
  *
  * Each stage shows: ready / blocked / error / not-tested
  * Toggle with Ctrl+Shift+V or via the diagnostics button.
@@ -40,82 +40,70 @@ export function VoiceDiagnosticsDrawer() {
   // ── Derive per-stage status from diagnostics ──
 
   const micStage: Stage = (() => {
-    if (diagnostics.micPermission === "denied") {
-      return { name: "Microphone", status: "blocked", detail: "Permission denied" };
-    }
-    if (diagnostics.trackReadyState === "live" && diagnostics.trackEnabled) {
-      return { name: "Microphone", status: "ready", detail: "Stream active" };
-    }
-    if (diagnostics.trackReadyState === "live" && !diagnostics.trackEnabled) {
-      return { name: "Microphone", status: "ready", detail: "Stream open, mic muted" };
-    }
-    if (voiceState === "requesting_permission") {
+    if (voiceInputState === "requesting_permission") {
       return { name: "Microphone", status: "not-tested", detail: "Requesting permission…" };
+    }
+    if (voiceInputState === "error") {
+      return { name: "Microphone", status: "error", detail: errorMessage ?? "Microphone error" };
+    }
+    if (diagnostics.micActive && voiceInputState === "listening") {
+      return { name: "Microphone", status: "ready", detail: "Stream active, capturing audio" };
+    }
+    if (diagnostics.micActive && voiceInputState === "idle") {
+      return { name: "Microphone", status: "ready", detail: "Stream open, mic muted" };
     }
     return { name: "Microphone", status: "not-tested", detail: "Not started — click the mic button" };
   })();
 
   const transportStage: Stage = (() => {
-    if (diagnostics.connectionState === "connected") {
-      return { name: "Transport (WebRTC)", status: "ready", detail: `ICE: ${diagnostics.iceConnectionState ?? "—"}` };
+    if (voiceTransportConnected) {
+      return { name: "Transport (WebSocket)", status: "ready", detail: `Connected to Inworld via proxy` };
     }
-    if (diagnostics.connectionState === "connecting" || voiceState === "connecting") {
-      return { name: "Transport (WebRTC)", status: "not-tested", detail: "Connecting…" };
+    if (voiceState === "connecting") {
+      return { name: "Transport (WebSocket)", status: "not-tested", detail: "Connecting to voice proxy…" };
     }
-    if (diagnostics.connectionState === "failed") {
-      return { name: "Transport (WebRTC)", status: "error", detail: diagnostics.lastError ?? "ICE failed" };
+    if (voiceState === "error" && errorMessage) {
+      return { name: "Transport (WebSocket)", status: "error", detail: errorMessage };
     }
-    if (diagnostics.lastError && !voiceTransportConnected) {
-      return { name: "Transport (WebRTC)", status: "error", detail: diagnostics.lastError };
-    }
-    return { name: "Transport (WebRTC)", status: "not-tested", detail: "Not connected" };
+    return { name: "Transport (WebSocket)", status: "not-tested", detail: "Not connected" };
   })();
 
   const transcriptionStage: Stage = (() => {
-    if (diagnostics.lastTranscriptEvent?.startsWith("final:")) {
-      return { name: "Transcription", status: "ready", detail: diagnostics.lastTranscriptEvent };
-    }
-    if (diagnostics.lastTranscriptEvent?.startsWith("delta:")) {
-      return { name: "Transcription", status: "ready", detail: "Receiving partial transcript" };
+    if (diagnostics.lastTranscript) {
+      return { name: "Transcription (Inworld STT)", status: "ready", detail: `Last: "${diagnostics.lastTranscript}…"` };
     }
     if (voiceInputState === "listening") {
-      return { name: "Transcription", status: "not-tested", detail: "Listening — no speech detected yet" };
+      return { name: "Transcription (Inworld STT)", status: "not-tested", detail: "Listening — no speech detected yet" };
     }
-    return { name: "Transcription", status: "not-tested", detail: "No transcript events yet" };
+    return { name: "Transcription (Inworld STT)", status: "not-tested", detail: "No transcript events yet" };
   })();
 
   const responseStage: Stage = (() => {
-    if (diagnostics.lastAssistantEvent) {
-      return { name: "Model Response", status: "ready", detail: diagnostics.lastAssistantEvent };
+    if (diagnostics.turnNumber > 0) {
+      return { name: "Model Response (/api/gemini/chat)", status: "ready", detail: `${diagnostics.turnNumber} turn(s) completed` };
     }
     if (voiceState === "processing") {
-      return { name: "Model Response", status: "not-tested", detail: "Waiting for response…" };
+      return { name: "Model Response (/api/gemini/chat)", status: "not-tested", detail: "Waiting for response…" };
     }
-    return { name: "Model Response", status: "not-tested", detail: "No response yet" };
+    return { name: "Model Response (/api/gemini/chat)", status: "not-tested", detail: "No responses yet" };
   })();
 
   const ttsStage: Stage = (() => {
-    if (diagnostics.lastPlaybackEvent === "completed") {
-      return { name: "TTS Engine", status: "ready", detail: "Audio played successfully" };
-    }
-    if (diagnostics.lastPlaybackEvent?.startsWith("started:")) {
-      return { name: "TTS Engine", status: "ready", detail: "Audio playing…" };
-    }
-    if (errorMessage && voiceState === "error") {
-      return { name: "TTS Engine", status: "error", detail: errorMessage };
-    }
     if (voiceOutputState === "speaking") {
-      return { name: "TTS Engine", status: "ready", detail: "Speaking…" };
+      return { name: "TTS Engine (Inworld inworld-tts-2)", status: "ready", detail: "Speaking via Inworld TTS…" };
     }
-    return { name: "TTS Engine", status: "not-tested", detail: "Not tested yet" };
+    if (voiceState === "error" && errorMessage) {
+      return { name: "TTS Engine (Inworld inworld-tts-2)", status: "error", detail: errorMessage };
+    }
+    return { name: "TTS Engine (Inworld inworld-tts-2)", status: "not-tested", detail: "Not tested yet" };
   })();
 
   const playbackStage: Stage = (() => {
-    if (diagnostics.lastPlaybackEvent === "completed") {
-      return { name: "Audio Playback", status: "ready", detail: "Playback completed" };
+    if (voiceOutputState === "speaking") {
+      return { name: "Audio Playback", status: "ready", detail: "Playing audio…" };
     }
-    if (diagnostics.lastPlaybackEvent?.startsWith("started:")) {
-      return { name: "Audio Playback", status: "ready", detail: "Playing…" };
+    if (voiceOutputState === "idle" && diagnostics.turnNumber > 0) {
+      return { name: "Audio Playback", status: "ready", detail: "Playback completed" };
     }
     return { name: "Audio Playback", status: "not-tested", detail: "No playback events yet" };
   })();
@@ -209,8 +197,8 @@ export function VoiceDiagnosticsDrawer() {
           <div className="flex justify-between"><span className="text-white/30">Input state</span><span>{voiceInputState}</span></div>
           <div className="flex justify-between"><span className="text-white/30">Output state</span><span>{voiceOutputState}</span></div>
           <div className="flex justify-between"><span className="text-white/30">Turn #</span><span>{diagnostics.turnNumber}</span></div>
-          <div className="flex justify-between"><span className="text-white/30">Data channel</span><span>{diagnostics.dataChannelState ?? "—"}</span></div>
-          <div className="flex justify-between"><span className="text-white/30">Token created</span><span>{diagnostics.tokenCreatedAt ? new Date(diagnostics.tokenCreatedAt).toLocaleTimeString() : "—"}</span></div>
+          <div className="flex justify-between"><span className="text-white/30">Transport</span><span>{voiceTransportConnected ? "connected" : "disconnected"}</span></div>
+          <div className="flex justify-between"><span className="text-white/30">Mic active</span><span>{diagnostics.micActive ? "yes" : "no"}</span></div>
           {diagnostics.lastError && (
             <div className="mt-1 rounded bg-red-500/10 px-1 py-0.5 text-red-400">Error: {diagnostics.lastError}</div>
           )}

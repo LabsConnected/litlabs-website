@@ -54,7 +54,11 @@ export async function GET() {
 
     const littVoice = process.env.INWORLD_LITT_VOICE || "";
     const sparkVoice = process.env.INWORLD_SPARK_VOICE || "";
-    const voiceWsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL || "";
+    // NEXT_PUBLIC_VOICE_WS_URL is the canonical source, but the Vercel CLI
+    // on Windows has trouble piping the value. Hardcode the production proxy
+    // URL as a fallback. This is a PUBLIC URL (not secret).
+    const voiceWsUrl = process.env.NEXT_PUBLIC_VOICE_WS_URL ||
+      "wss://voice-proxy-production-3f9c.up.railway.app/voice";
 
     if (!littVoice || !voiceWsUrl) {
       const missing = [
