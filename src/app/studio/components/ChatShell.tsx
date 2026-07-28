@@ -51,6 +51,8 @@ interface ChatShellProps {
   onNewChat?: () => void;
   onRegenerate?: () => void;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
+  onToggleCamera?: () => void;
+  cameraActive?: boolean;
   requestedTool?: StudioTool;
   pendingCommand?: string;
   initialPrompt?: string;
@@ -137,6 +139,8 @@ export default function ChatShell({
   onNewChat,
   onRegenerate,
   onRouteTool,
+  onToggleCamera,
+  cameraActive = false,
   initialPrompt = "",
   activeAgentId,
   sessions,
@@ -734,6 +738,8 @@ export default function ChatShell({
           busy={busy}
           modelName={selectedModel}
           onRouteTool={onRouteTool}
+          onToggleCamera={onToggleCamera}
+          cameraActive={cameraActive}
           activeAgentId={activeAgentId}
         />
       </div>

@@ -21,15 +21,12 @@ import {
   Upload,
   Sparkles,
 } from "lucide-react";
-import CameraSession from "./CameraSession";
 import {
   useVoiceSession,
   type VoiceState,
 } from "@/app/studio/context/VoiceSessionContext";
 import type { StudioTool } from "./StudioSidebar";
 import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
-
-export type ComposerMode = "text" | "camera";
 
 interface MultimodalComposerProps {
   value: string;
@@ -38,6 +35,8 @@ interface MultimodalComposerProps {
   busy?: boolean;
   modelName?: string;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
+  onToggleCamera?: () => void;
+  cameraActive?: boolean;
   activeAgentId?: AgentId;
 }
 
@@ -101,12 +100,12 @@ export default function MultimodalComposer({
   busy,
   modelName = "Gemini 2.5 Flash",
   onRouteTool,
+  onToggleCamera,
+  cameraActive = false,
   activeAgentId = "litt",
 }: MultimodalComposerProps) {
   const agentMeta = AGENT_META[activeAgentId];
-  const [mode, setMode] = useState<ComposerMode>("text");
   const [snapshots, setSnapshots] = useState<string[]>([]);
-  const cameraCaptureRef = useRef<(() => string | null) | null>(null);
   const [showAdd, setShowAdd] = useState(false);
   const [createMode, setCreateMode] = useState<"image" | "video" | null>(null);
   const [createPrompt, setCreatePrompt] = useState("");
@@ -240,7 +239,7 @@ export default function MultimodalComposer({
     }
     const intent = detectIntent(value);
     if (intent === "camera") {
-      setMode("camera");
+      onToggleCamera?.();
       onChange("");
       return;
     }
@@ -254,12 +253,7 @@ export default function MultimodalComposer({
       onChange("");
       return;
     }
-    // If camera is open, capture a fresh frame and attach it
     const attachments = [...snapshots];
-    if (mode === "camera" && cameraCaptureRef.current) {
-      const liveFrame = cameraCaptureRef.current();
-      if (liveFrame) attachments.push(liveFrame);
-    }
     const reply = await onSend(value, attachments.length ? attachments : undefined);
     onChange("");
     setSnapshots([]);
@@ -392,28 +386,6 @@ export default function MultimodalComposer({
           </section>
         </div>
       )}
-      {/* Mode panels */}
-      {mode === "camera" && (
-        <div className="mb-2">
-          <CameraSession
-            compact
-            visionOnSend
-            onCaptureReady={(capture) => {
-              cameraCaptureRef.current = capture;
-            }}
-            onSnapshot={(url) => {
-              setSnapshots((prev) => [...prev, url]);
-              void onSend("Describe what you see.", [url]);
-            }}
-            onClose={() => {
-              cameraCaptureRef.current = null;
-              setMode("text");
-            }}
-            modelName={modelName}
-          />
-        </div>
-      )}
-
       {/* Voice status strip */}
       {!["idle"].includes(voiceState) && (
         <div
@@ -615,12 +587,12 @@ export default function MultimodalComposer({
         />
         <button
           type="button"
-          onClick={() => setMode(mode === "camera" ? "text" : "camera")}
-          className="relative z-[120] pointer-events-auto touch-manipulation flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-white/60 transition-all hover:bg-white/10 hover:text-white"
-          aria-label={mode === "camera" ? "Close camera" : "Open camera"}
+          onClick={() => onToggleCamera?.()}
+          className={`relative z-[120] pointer-events-auto touch-manipulation flex h-10 w-10 shrink-0 items-center justify-center rounded-full transition-all hover:bg-white/10 hover:text-white ${cameraActive ? "text-cyan-400" : "text-white/60"}`}
+          aria-label={cameraActive ? "Close camera" : "Open camera"}
           title="Camera"
         >
-          <Camera size={18} className={`pointer-events-none shrink-0 ${mode === "camera" ? "text-cyan-400" : ""}`} />
+          <Camera size={18} className="pointer-events-none shrink-0" />
         </button>
         <button
           type="button"

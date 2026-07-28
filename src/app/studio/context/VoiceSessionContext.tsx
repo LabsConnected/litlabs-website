@@ -243,6 +243,7 @@ export function VoiceSessionProvider({
     inworldOnTranscriptRef.current = (text: string, final: boolean) => {
       if (final) {
         const trimmed = text.trim();
+        console.debug("[Voice Pipeline] transcript received", { final, text: trimmed.slice(0, 80) });
         if (trimmed && trimmed !== submittedTranscriptRef.current && activeRef.current) {
           submittedTranscriptRef.current = trimmed;
           setTranscript(trimmed);
@@ -255,6 +256,7 @@ export function VoiceSessionProvider({
           activeRef.current = false;
           // Canonical pipeline: final transcript → onTurn → onSend →
           // /api/gemini/chat → response stored → speakText (Inworld TTS)
+          console.debug("[Voice Pipeline] assistant text request started", { transcript: trimmed.slice(0, 80) });
           onTurnRef.current(trimmed);
           setTiming({ aiResponseCompletedAt: Date.now() });
         }
@@ -625,6 +627,7 @@ export function VoiceSessionProvider({
       // Always try Inworld first — inworldSession.speakText auto-connects the
       // transport if needed. This lets "Speak" work without first starting voice.
       try {
+        console.debug("[Voice Pipeline] TTS request started", { textLength: sanitized.length, preview: sanitized.slice(0, 60) });
         await inworldSession.speakText(sanitized);
         // Mark transport as connected since speakText auto-connects
         if (!inworldConnectedRef.current) {
@@ -637,7 +640,7 @@ export function VoiceSessionProvider({
         // But also set a safety timeout in case the event is missed.
         return;
       } catch (err) {
-        console.warn("[Voice] Inworld TTS failed, falling back to browser TTS:", err);
+        console.warn("[Voice Pipeline] TTS failed (Inworld), falling back to browser TTS:", err);
         // Mark transport as disconnected if it failed
         if (inworldConnectedRef.current) {
           inworldConnectedRef.current = false;
@@ -647,6 +650,7 @@ export function VoiceSessionProvider({
       }
 
       // Fallback: browser SpeechSynthesis
+      console.debug("[Voice Pipeline] browser TTS fallback started");
       if (typeof window === "undefined" || !window.speechSynthesis) {
         console.warn("[Voice] speechSynthesis not available");
         finishSpeaking();
@@ -666,9 +670,12 @@ export function VoiceSessionProvider({
       utterance.rate = agentId === "spark" ? 1.05 : 0.95;
       utterance.pitch = agentId === "spark" ? 1.1 : 0.9;
 
-      utterance.onend = finishSpeaking;
+      utterance.onend = () => {
+        console.debug("[Voice Pipeline] playback ended (browser TTS)");
+        finishSpeaking();
+      };
       utterance.onerror = (e) => {
-        console.warn("[Voice] speechSynthesis error:", e.error);
+        console.warn("[Voice Pipeline] playback failed (browser TTS):", e.error);
         finishSpeaking();
       };
 

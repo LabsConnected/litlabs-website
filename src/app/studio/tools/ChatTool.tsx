@@ -20,11 +20,15 @@ import { useStudioModelStore } from "../stores/useStudioModelStore";
 export default function ChatTool({
   selectedModel: _selectedModel = "auto",
   onRouteTool,
+  onToggleCamera,
+  cameraActive = false,
   requestedTool = "chat",
   pendingCommand = "",
 }: {
   selectedModel?: string;
   onRouteTool?: (tool: StudioTool, command?: string) => void;
+  onToggleCamera?: () => void;
+  cameraActive?: boolean;
   requestedTool?: StudioTool;
   pendingCommand?: string;
 }) {
@@ -218,6 +222,8 @@ export default function ChatTool({
       activeAgentId={activeAgentId}
       onRegenerate={handleRegenerate}
       onRouteTool={onRouteTool}
+      onToggleCamera={onToggleCamera}
+      cameraActive={cameraActive}
       requestedTool={requestedTool}
       pendingCommand={pendingCommand}
       initialPrompt={initialPrompt}

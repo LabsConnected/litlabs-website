@@ -132,7 +132,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [cameraDock, setCameraDock] = useState<{
     open: boolean;
     pos: DockPosition;
-  }>({ open: false, pos: "bottom-right" });
+  }>({ open: false, pos: "top-right" });
   const [screenDock, setScreenDock] = useState<{
     open: boolean;
     pos: DockPosition;
@@ -282,6 +282,13 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
             {isChat ? (
               <ChatTool
                 onRouteTool={handleCommandRoute}
+                onToggleCamera={() =>
+                  setCameraDock((v) => ({
+                    open: !v.open,
+                    pos: "top-right",
+                  }))
+                }
+                cameraActive={cameraDock.open}
                 requestedTool={activeTool}
                 pendingCommand={pendingCommand}
               />
@@ -456,7 +463,10 @@ function MediaOverlayHost({
       {cameraDock.open && (
         <div
           className={`fixed z-1100 flex flex-col gap-2 ${posClass(cameraDock.pos)}`}
-          style={{ width: 320, maxWidth: "calc(100% - 1.5rem)" }}
+          style={{
+            width: cameraDock.pos === "top-right" || cameraDock.pos === "top-left" ? 220 : 320,
+            maxWidth: "calc(100% - 1.5rem)",
+          }}
         >
           <CameraTool />
           <DockBadge

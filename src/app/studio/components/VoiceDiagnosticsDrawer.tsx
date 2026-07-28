@@ -22,8 +22,10 @@ interface Stage {
 }
 
 export function VoiceDiagnosticsDrawer() {
-  const { diagnostics, voiceState, voiceInputState, voiceOutputState, voiceTransportConnected, errorMessage } = useVoiceSession();
+  const { diagnostics, voiceState, voiceInputState, voiceOutputState, voiceTransportConnected, errorMessage, speakText } = useVoiceSession();
   const [open, setOpen] = useState(false);
+  const [testingVoice, setTestingVoice] = useState(false);
+  const [testResult, setTestResult] = useState<"none" | "success" | "failed">("none");
 
   // Toggle with Ctrl+Shift+V
   useEffect(() => {
@@ -110,22 +112,36 @@ export function VoiceDiagnosticsDrawer() {
 
   const stages = [micStage, transportStage, transcriptionStage, responseStage, ttsStage, playbackStage];
 
-  // Overall status
+  // Overall status — truthful, no optimistic labels
   const hasError = stages.some((s) => s.status === "error");
   const hasBlocked = stages.some((s) => s.status === "blocked");
-  const allReady = stages.every((s) => s.status === "ready" || s.status === "not-tested");
-  const overallStatus = hasError ? "error" : hasBlocked ? "blocked" : allReady ? "ready" : "unknown";
+  const allNotTested = stages.every((s) => s.status === "not-tested");
+  const allReadyOrNotTested = stages.every((s) => s.status === "ready" || s.status === "not-tested");
+  const anyReady = stages.some((s) => s.status === "ready");
+
+  const overallStatus = hasError
+    ? "error"
+    : hasBlocked
+      ? "blocked"
+      : allNotTested
+        ? "idle"
+        : allReadyOrNotTested && anyReady
+          ? "ready"
+          : "degraded";
+
   const overallLabel = {
+    idle: "Voice · Idle",
     ready: "Voice · Ready",
+    degraded: "Voice · Degraded",
     error: "Voice · Error",
     blocked: "Voice · Blocked",
-    unknown: "Voice · Unknown",
   }[overallStatus];
   const overallColor = {
+    idle: "#6b7280",
     ready: "#22c55e",
+    degraded: "#f59e0b",
     error: "#ef4444",
     blocked: "#f59e0b",
-    unknown: "#6b7280",
   }[overallStatus];
 
   if (!open) {
@@ -140,6 +156,22 @@ export function VoiceDiagnosticsDrawer() {
       </button>
     );
   }
+
+  const handleTestVoice = async () => {
+    setTestingVoice(true);
+    setTestResult("none");
+    console.debug("[Voice] Test Voice button clicked");
+    try {
+      await speakText("This is a voice test.");
+      setTestResult("success");
+      console.debug("[Voice] Test Voice succeeded");
+    } catch (err) {
+      setTestResult("failed");
+      console.warn("[Voice] Test Voice failed:", err);
+    } finally {
+      setTestingVoice(false);
+    }
+  };
 
   const statusColor = (status: StageStatus) => {
     switch (status) {
@@ -204,6 +236,23 @@ export function VoiceDiagnosticsDrawer() {
           )}
         </div>
       </details>
+
+      {/* Test Voice button */}
+      <div className="mt-2 border-t border-white/10 pt-2">
+        <button
+          onClick={handleTestVoice}
+          disabled={testingVoice}
+          className="w-full rounded-lg border border-cyan-300/30 bg-cyan-300/5 px-2 py-1.5 text-[10px] font-bold text-cyan-200 transition hover:bg-cyan-300/10 disabled:opacity-50"
+        >
+          {testingVoice ? "Testing…" : "Test Voice"}
+        </button>
+        {testResult === "success" && (
+          <div className="mt-1 text-emerald-400">✓ Voice output working</div>
+        )}
+        {testResult === "failed" && (
+          <div className="mt-1 text-red-400">✗ Voice output unavailable</div>
+        )}
+      </div>
 
       <div className="mt-2 border-t border-white/10 pt-1 text-white/30">
         Press Ctrl+Shift+V to toggle

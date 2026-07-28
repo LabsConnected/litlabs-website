@@ -504,6 +504,7 @@ export function useInworldSession(
                 // Auto-generated VAD responses are dropped — the canonical
                 // assistant response comes from /api/gemini/chat via onSend.
                 if (explicitTtsRef.current && data.delta) {
+                  console.debug("[Voice Pipeline] TTS audio received", { chunkSize: data.delta.length });
                   const buffer = decodePcm16ToAudioBuffer(data.delta);
                   if (buffer) {
                     playbackQueueRef.current.push(buffer);
@@ -526,6 +527,7 @@ export function useInworldSession(
               case "response.completed":
                 // Response finished (normally or via cancel). Reset the
                 // interrupt flag so the next response's audio plays.
+                console.debug("[Voice Pipeline] playback ended (Inworld TTS)", { type: data.type });
                 interruptedRef.current = false;
                 setState("idle");
                 onResponseComplete?.();
