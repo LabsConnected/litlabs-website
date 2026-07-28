@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useCallback, useState } from "react";
+import { useEffect, useCallback, useState, useMemo } from "react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
+import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStore";
 import { BlockRenderer } from "./BlockRenderer";
 import { RevisionHistory } from "./RevisionHistory";
 import { cn } from "@/lib/utils";
@@ -43,6 +44,13 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   const [showSwitcher, setShowSwitcher] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
+
+  const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
+  const threads = useStudioAgentStore((s) => s.threads);
+  const chatMessages = useMemo(
+    () => threads[activeAgentId] ?? [],
+    [threads, activeAgentId],
+  );
 
   // ─── Load canvases on mount ─────────────────────────────────
   useEffect(() => {
@@ -292,18 +300,61 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
       {/* Blocks */}
       <div className="flex-1 overflow-y-auto px-4 py-4 space-y-3">
         {activeBlocks.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
-            <div className="text-white/30 text-sm mb-2">
-              {activeCanvas ? "This canvas is empty" : "No canvas selected"}
-            </div>
-            {activeCanvas && (
-              <div className="text-white/20 text-xs">
-                LiTT will add blocks here as you work together.
-                <br />
-                Try saying &quot;make notes&quot; or &quot;open in canvas&quot; in chat.
+          chatMessages.length > 0 ? (
+            <div className="space-y-3">
+              <div className="text-[10px] font-bold uppercase tracking-wider text-white/30 mb-2">
+                Live Conversation
               </div>
-            )}
-          </div>
+              {chatMessages.map((msg, i) => {
+                const isUser = msg.role === "user";
+                const agentMeta = AGENT_META[activeAgentId];
+                return (
+                  <div
+                    key={i}
+                    className={cn(
+                      "rounded-lg border px-3 py-2.5 text-sm",
+                      isUser
+                        ? "border-cyan-500/20 bg-cyan-500/5"
+                        : "border-violet-500/20 bg-violet-500/5",
+                    )}
+                  >
+                    <div className="mb-1 flex items-center gap-1.5">
+                      <span
+                        className="h-4 w-4 rounded-full text-[8px] font-bold grid place-items-center text-white"
+                        style={{ backgroundColor: isUser ? "#06b6d4" : agentMeta.color }}
+                      >
+                        {isUser ? "U" : agentMeta.displayName.charAt(0)}
+                      </span>
+                      <span className="text-[10px] font-bold text-white/50">
+                        {isUser ? "You" : agentMeta.displayName}
+                      </span>
+                      {msg.createdAt && (
+                        <span className="text-[9px] text-white/20 ml-auto">
+                          {new Date(msg.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-white/80 text-xs leading-relaxed whitespace-pre-wrap">
+                      {msg.content}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div className="flex h-full flex-col items-center justify-center text-center">
+              <div className="text-white/30 text-sm mb-2">
+                {activeCanvas ? "This canvas is empty" : "No canvas selected"}
+              </div>
+              {activeCanvas && (
+                <div className="text-white/20 text-xs">
+                  LiTT will add blocks here as you work together.
+                  <br />
+                  Try saying &quot;make notes&quot; or &quot;open in canvas&quot; in chat.
+                </div>
+              )}
+            </div>
+          )
         ) : (
           activeBlocks.map((block) => (
             <BlockRenderer

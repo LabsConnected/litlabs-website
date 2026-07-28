@@ -73,6 +73,7 @@ export function useInworldSession(
   const scheduledSourcesRef = useRef<Set<AudioBufferSourceNode>>(new Set());
   const isPlayingRef = useRef(false);
   const interruptedRef = useRef(false);
+  const explicitTtsRef = useRef(false);
   const animationFrameRef = useRef<number | null>(null);
 
   const [isConnected, setIsConnected] = useState(false);
@@ -100,6 +101,20 @@ export function useInworldSession(
   // suffered from — there is no JS-event-loop delay between chunks because
   // they are all scheduled ahead of time via `source.start(startTime)`.
   const nextPlayTimeRef = useRef(0);
+
+  const decodePcm16ToAudioBuffer = useCallback((base64: string): AudioBuffer | null => {
+    const ctx = playbackContextRef.current;
+    if (!ctx) return null;
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+    const pcm16 = new Int16Array(bytes.buffer);
+    const float32 = new Float32Array(pcm16.length);
+    for (let i = 0; i < pcm16.length; i++) float32[i] = pcm16[i] / 0x8000;
+    const buffer = ctx.createBuffer(1, float32.length, TARGET_SAMPLE_RATE);
+    buffer.copyToChannel(float32, 0);
+    return buffer;
+  }, []);
 
   const schedulePendingChunks = useCallback(() => {
     if (interruptedRef.current) {
@@ -478,18 +493,23 @@ export function useInworldSession(
                 // Explicit cancel (from interrupt()) — keep interruptedRef true
                 // so in-flight chunks are dropped, and reset state.
                 interruptedRef.current = true;
+                explicitTtsRef.current = false;
                 stopPlayback();
                 setState("idle");
                 onResponseComplete?.();
                 break;
 
               case "response.output_audio.delta":
-                // STT-only mode: We use Inworld for speech-to-text only.
-                // Drop Inworld's auto-generated audio — TTS is handled by
-                // browser speechSynthesis in VoiceSessionContext, which
-                // reads the EXACT stored chat message verbatim. This
-                // prevents Inworld's agent personality (different from
-                // /api/gemini/chat LiTT) from speaking divergent responses.
+                // Only play audio for explicit TTS calls (speakText).
+                // Auto-generated VAD responses are dropped — the canonical
+                // assistant response comes from /api/gemini/chat via onSend.
+                if (explicitTtsRef.current && data.delta) {
+                  const buffer = decodePcm16ToAudioBuffer(data.delta);
+                  if (buffer) {
+                    playbackQueueRef.current.push(buffer);
+                    schedulePendingChunks();
+                  }
+                }
                 break;
 
               case "response.output_audio_transcript.delta":
@@ -723,111 +743,116 @@ export function useInworldSession(
       // Stop any current playback (barge-in)
       stopPlayback();
       interruptedRef.current = false;
+      explicitTtsRef.current = true;
 
-      // Ensure the transport is connected. This connects the WebSocket
-      // WITHOUT acquiring the microphone — TTS must work with the mic off.
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        await connect();
-      }
-      if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
-        setErrorState("Voice transport is not connected.");
-        setError("Voice transport is not connected.");
-        setState("error");
-        return;
-      }
+      try {
+        // Ensure the transport is connected. This connects the WebSocket
+        // WITHOUT acquiring the microphone — TTS must work with the mic off.
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+          await connect();
+        }
+        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+          setErrorState("Voice transport is not connected.");
+          setError("Voice transport is not connected.");
+          setState("error");
+          return;
+        }
 
-      // Ensure playback context exists (also initialized in connect())
-      if (!playbackContextRef.current) {
-        playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
-      }
-      await ensureAudioContextRunning(playbackContextRef.current);
+        // Ensure playback context exists (also initialized in connect())
+        if (!playbackContextRef.current) {
+          playbackContextRef.current = new AudioContext({ sampleRate: TARGET_SAMPLE_RATE });
+        }
+        await ensureAudioContextRunning(playbackContextRef.current);
 
-      setState("speaking");
+        setState("speaking");
 
-      // Inworld TTS rejects text longer than 1000 characters with
-      // "tts_invalid_argument: text length should not exceed 1000 characters".
-      // Split the text into sentence-boundary chunks under 900 chars
-      // (leaving headroom) and send each as its own conversation item +
-      // response.create. The audio chunks arrive sequentially and are
-      // played back in order by the playback queue.
-      const MAX_CHUNK = 900;
-      const cleanText = text.replace(/\s+/g, " ").trim();
-      const chunks: string[] = [];
+        // Inworld TTS rejects text longer than 1000 characters with
+        // "tts_invalid_argument: text length should not exceed 1000 characters".
+        // Split the text into sentence-boundary chunks under 900 chars
+        // (leaving headroom) and send each as its own conversation item +
+        // response.create. The audio chunks arrive sequentially and are
+        // played back in order by the playback queue.
+        const MAX_CHUNK = 900;
+        const cleanText = text.replace(/\s+/g, " ").trim();
+        const chunks: string[] = [];
 
-      if (cleanText.length <= MAX_CHUNK) {
-        chunks.push(cleanText);
-      } else {
-        // Split on sentence boundaries first, then hard-wrap if needed
-        const sentences = cleanText.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) ?? [cleanText];
-        let current = "";
-        for (const sentence of sentences) {
-          const s = sentence.trim();
-          if (!s) continue;
-          if ((current + " " + s).trim().length <= MAX_CHUNK) {
-            current = (current + " " + s).trim();
-          } else {
-            if (current) chunks.push(current);
-            if (s.length <= MAX_CHUNK) {
-              current = s;
+        if (cleanText.length <= MAX_CHUNK) {
+          chunks.push(cleanText);
+        } else {
+          // Split on sentence boundaries first, then hard-wrap if needed
+          const sentences = cleanText.match(/[^.!?]+[.!?]+|\S[^.!?]*$/g) ?? [cleanText];
+          let current = "";
+          for (const sentence of sentences) {
+            const s = sentence.trim();
+            if (!s) continue;
+            if ((current + " " + s).trim().length <= MAX_CHUNK) {
+              current = (current + " " + s).trim();
             } else {
-              // Hard-wrap a very long sentence
-              for (let i = 0; i < s.length; i += MAX_CHUNK) {
-                chunks.push(s.slice(i, i + MAX_CHUNK));
+              if (current) chunks.push(current);
+              if (s.length <= MAX_CHUNK) {
+                current = s;
+              } else {
+                // Hard-wrap a very long sentence
+                for (let i = 0; i < s.length; i += MAX_CHUNK) {
+                  chunks.push(s.slice(i, i + MAX_CHUNK));
+                }
+                current = "";
               }
-              current = "";
             }
           }
+          if (current) chunks.push(current);
         }
-        if (current) chunks.push(current);
-      }
 
-      // Send each chunk sequentially. Each conversation.item.create +
-      // response.create produces one TTS audio response. The playback
-      // queue plays them in order.
-      for (const chunk of chunks) {
-        if (interruptedRef.current) break;
-        if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) break;
+        // Send each chunk sequentially. Each conversation.item.create +
+        // response.create produces one TTS audio response. The playback
+        // queue plays them in order.
+        for (const chunk of chunks) {
+          if (interruptedRef.current) break;
+          if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) break;
 
-        wsRef.current.send(JSON.stringify({
-          type: "conversation.item.create",
-          item: {
-            type: "message",
-            role: "user",
-            content: [{ type: "text", text: chunk }],
-          },
-        }));
+          wsRef.current.send(JSON.stringify({
+            type: "conversation.item.create",
+            item: {
+              type: "message",
+              role: "user",
+              content: [{ type: "text", text: chunk }],
+            },
+          }));
 
-        wsRef.current.send(JSON.stringify({
-          type: "response.create",
-          response: {
-            modalities: ["audio"],
-          },
-        }));
+          wsRef.current.send(JSON.stringify({
+            type: "response.create",
+            response: {
+              modalities: ["audio"],
+            },
+          }));
 
-        // Wait for this response to finish before sending the next chunk,
-        // otherwise Inworld may cancel the in-flight TTS.
-        await new Promise<void>((resolve) => {
-          const handler = (event: MessageEvent) => {
-            try {
-              const data = JSON.parse(event.data);
-              if (data.type === "response.done" || data.type === "response.cancelled" || data.type === "error") {
-                wsRef.current?.removeEventListener("message", handler);
-                resolve();
+          // Wait for this response to finish before sending the next chunk,
+          // otherwise Inworld may cancel the in-flight TTS.
+          await new Promise<void>((resolve) => {
+            const handler = (event: MessageEvent) => {
+              try {
+                const data = JSON.parse(event.data);
+                if (data.type === "response.done" || data.type === "response.cancelled" || data.type === "error") {
+                  wsRef.current?.removeEventListener("message", handler);
+                  resolve();
+                }
+              } catch {
+                // ignore
               }
-            } catch {
-              // ignore
-            }
-          };
-          wsRef.current?.addEventListener("message", handler);
-          // Safety timeout — don't wait forever
-          setTimeout(() => {
-            wsRef.current?.removeEventListener("message", handler);
-            resolve();
-          }, 30_000);
-        });
+            };
+            wsRef.current?.addEventListener("message", handler);
+            // Safety timeout — don't wait forever
+            setTimeout(() => {
+              wsRef.current?.removeEventListener("message", handler);
+              resolve();
+            }, 30_000);
+          });
+        }
+      } finally {
+        explicitTtsRef.current = false;
       }
     },
-    [connect, ensureAudioContextRunning, setError, setState, stopPlayback],
+    [connect, decodePcm16ToAudioBuffer, ensureAudioContextRunning, setError, setState, stopPlayback],
   );
 
   useEffect(() => {
