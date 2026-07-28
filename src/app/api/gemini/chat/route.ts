@@ -9,6 +9,8 @@ import { translateCapabilities, type RawCapabilities } from "@/lib/capabilities/
 import { detectCanvasActions, detectSuggestedActions } from "@/lib/canvas/actions";
 import { routeKernel, composeSystemPrompt, adaptLegacyCapability } from "@/lib/litt-kernel";
 import type { CapabilityRecord } from "@/lib/litt-kernel";
+import { buildChatContext } from "@/lib/chat/build-context";
+import { recallMemories, persistMemory } from "@/lib/memory/service";
 
 export const runtime = "nodejs";
 export const maxDuration = 60;
@@ -17,33 +19,6 @@ type HistoryEntry = { role: "user" | "assistant"; content: string };
 
 const DEFAULT_AGENT_SLUG = "litt";
 const HISTORY_LIMIT = 12;
-
-async function fetchMemories(query: string, userId: string): Promise<string> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return "";
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    const results = await sm.search.memories({ q: query, containerTag: userId, limit: 5 });
-    const memories = (results.results || []).map((m: { memory?: string; chunk?: string }) => m.memory || m.chunk || "").filter(Boolean);
-    if (!memories.length) return "";
-    return `\n\nRELEVANT MEMORIES FROM PREVIOUS SESSIONS:\n${memories.join("\n")}\n---`;
-  } catch {
-    return "";
-  }
-}
-
-async function saveMemory(content: string, userId: string, agentId: string): Promise<void> {
-  try {
-    const smKey = process.env.SUPERMEMORY_API_KEY;
-    if (!smKey) return;
-    const { Supermemory } = await import("supermemory");
-    const sm = new Supermemory({ apiKey: smKey });
-    await sm.add({ content, containerTag: userId, metadata: { type: "agent-chat", agent: agentId } });
-  } catch {
-    // non-fatal
-  }
-}
 
 function sanitizeOutput(text: string): string {
   return text.replace(/\{\{?userName\}?\}/gi, "there");
@@ -96,54 +71,6 @@ async function generateWithImages(
   return { text, provider: "gemini", model: modelName, latencyMs: Date.now() - t0 };
 }
 
-function buildPrompt(
-  agent: Agent,
-  message: string,
-  history: HistoryEntry[],
-  memoryContext: string,
-  userName?: string,
-  capabilities?: Record<string, unknown>,
-): string {
-  const recentHistory = history.slice(-HISTORY_LIMIT);
-
-  const transcript = recentHistory
-    .map((entry) =>
-      entry.role === "user"
-        ? `User: ${entry.content}`
-        : `${agent.name}: ${entry.content}`,
-    )
-    .join("\n");
-
-  const resolvedName = userName?.trim() || "Member";
-  const systemPrompt = agent.systemPrompt.replace(/\{\{?userName\}?\}/g, resolvedName);
-
-  const rawCaps: RawCapabilities = {
-    repository: capabilities?.repository as string | undefined,
-    repositoryIndexed: capabilities?.repositoryIndexed as boolean | undefined,
-    terminalExecution: capabilities?.terminalExecution as string | undefined,
-    writeAccess: capabilities?.writeAccess as boolean | undefined,
-    connectedProviders: capabilities?.connectedProviders as string[] | undefined,
-    availableTools: capabilities?.availableTools as string[] | undefined,
-    connectionSummary: capabilities?.connectionSummary as string | undefined,
-    voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
-    voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
-  };
-  const translated = translateCapabilities(rawCaps);
-
-  return [
-    systemPrompt,
-    translated.contextBlock,
-    memoryContext,
-    "",
-    transcript ? `--- Conversation so far ---\n${transcript}\n--- End of history ---\n` : "",
-    `User: ${message}`,
-    "",
-    `${agent.name}:`,
-  ]
-    .filter((line) => line !== undefined)
-    .join("\n");
-}
-
 async function logConversation(
   agent: Agent,
   userId: string | null,
@@ -189,10 +116,11 @@ async function handler(req: NextRequest) {
       category,
       model: requestedModel,
       stream = false,
-      userName,
       images = [],
       capabilities = {},
       pageContext,
+      projectId: bodyProjectId,
+      repositoryName: bodyRepoName,
     } = body;
 
     if (!message || typeof message !== "string") {
@@ -204,7 +132,21 @@ async function handler(req: NextRequest) {
       AGENTS[DEFAULT_AGENT_SLUG as keyof typeof AGENTS];
 
     const uid = userId || "anonymous-dev";
-    const memoryContext = userId ? await fetchMemories(message, uid) : "";
+
+    // ─── Fetch project context via shared builder ─────────────
+    // This is the key fix: LiTT needs to know WHICH project the user
+    // is working on, not just that "something" is connected.
+    const ctx = await buildChatContext(userId, {
+      projectId: bodyProjectId,
+      repositoryName: bodyRepoName,
+    });
+    const projectInfo = ctx.projectInfo;
+    const activeProjectId = ctx.projectId;
+
+    // Recall memories (project-scoped if project is active)
+    const memoryContext = userId
+      ? await recallMemories(message, uid, 5, activeProjectId ?? undefined)
+      : "";
 
     // ─── LiTT Kernel routing ──────────────────────────────────
     // The Kernel classifies intent, checks capabilities, and composes
@@ -231,7 +173,7 @@ async function handler(req: NextRequest) {
       message,
       userId: userId ?? null,
       conversationId: null, // not yet wired from session
-      projectId: (capabilities as Record<string, unknown>)?.projectId as string | null ?? null,
+      projectId: activeProjectId,
       missionId: null,
       canvasId: (body.activeCanvasId as string) ?? null,
       capabilities: kernelCapabilities,
@@ -240,7 +182,7 @@ async function handler(req: NextRequest) {
     // Compose the Kernel system prompt (Constitution + mode guidance +
     // verified capabilities). Falls back to the legacy agent prompt if
     // the Kernel fails for any reason.
-    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
+    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, projectInfo);
 
     // Use the Kernel prompt as the base, then layer on the legacy
     // capability translation block + memory + history (same as before).
@@ -296,7 +238,7 @@ async function handler(req: NextRequest) {
       const r = await generateWithImages(systemPrompt, message, history, imageArray, geminiModel);
       const cleanText = sanitizeOutput(r.text);
       if (userId) {
-        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
+        await persistMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id, activeProjectId ?? undefined);
       }
       return NextResponse.json({
         response: cleanText,
@@ -344,7 +286,7 @@ async function handler(req: NextRequest) {
       const cleanText = sanitizeOutput(r.text);
       await logConversation(agent, userId, message, cleanText);
       if (userId) {
-        await saveMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id);
+        await persistMemory(`User: ${message}\n${agent.name}: ${cleanText}`, uid, agent.id, activeProjectId ?? undefined);
       }
 
       // Detect canvas actions from the user message (explicit) and
@@ -414,7 +356,7 @@ async function handler(req: NextRequest) {
           if (assistantText) {
             await logConversation(agent, userId, message, assistantText);
             if (userId) {
-              await saveMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id);
+              await persistMemory(`User: ${message}\n${agent.name}: ${assistantText}`, uid, agent.id, activeProjectId ?? undefined);
             }
           }
         }
