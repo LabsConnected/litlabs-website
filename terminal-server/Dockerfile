@@ -1,6 +1,6 @@
 # Production Dockerfile for the LiTTree terminal server
-# Build context: repo root (Railway builds from root by default)
-# To build locally: docker build -f terminal-server/Dockerfile . from repo root
+# Build context: terminal-server/ (Railway root directory set to "terminal-server")
+# To build locally: docker build -f Dockerfile . from terminal-server/ directory
 FROM node:20-slim
 
 # Install dependencies for node-pty and optional shell tools
@@ -10,15 +10,15 @@ RUN apt-get update && apt-get install -y \
 
 WORKDIR /app
 
-# Copy terminal server package files (from terminal-server/ subdirectory)
-COPY terminal-server/package.json ./
-COPY terminal-server/tsconfig.json ./
+# Copy terminal server package files
+COPY package.json ./
+COPY tsconfig.json ./
 
 # Install dependencies using npm (no workspace root required)
 RUN npm install
 
 # Copy terminal server source
-COPY terminal-server/ ./
+COPY . .
 
 # Build the terminal server
 RUN npm run build
