@@ -27,6 +27,7 @@ const BuilderTool = dynamic(() => import("../tools/BuilderTool"), {
   ssr: false,
 });
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
+const CoderWorkspace = dynamic(() => import("../tools/CoderWorkspace"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("../tools/GalleryTool"), {
   ssr: false,
@@ -58,7 +59,7 @@ const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   video: VideoTool,
   audio: AudioTool,
   build: BuilderTool,
-  code: CanvasTool,
+  code: CoderWorkspace,
   agents: AgentTool,
   assets: GalleryTool,
   plugins: PluginsTool,
@@ -220,9 +221,16 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
     [],
   );
 
-  // Determine which component to render in the center workspace
+  // Determine which component to render in the center workspace.
+  // ?legacy=code preserves the original CanvasTool for comparison during the rebuild.
   const isChat = activeTool === "chat";
-  const WorkspaceComponent = isChat ? null : TOOL_COMPONENTS[activeTool];
+  const useLegacyCode =
+    activeTool === "code" && searchParams.get("legacy") === "code";
+  const WorkspaceComponent = isChat
+    ? null
+    : useLegacyCode
+      ? CanvasTool
+      : TOOL_COMPONENTS[activeTool];
 
   return (
     <VoiceSessionProvider>
