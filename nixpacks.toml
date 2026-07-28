@@ -1,0 +1,25 @@
+# Nixpacks config for the terminal-server Railway service.
+# Railway builds from the repo root using Nixpacks, which detects the root
+# pnpm-lock.yaml and tries to install ALL dependencies. node-pty requires
+# Python 3 + build tools to compile, which Nixpacks doesn't install by default.
+#
+# This config:
+# 1. Installs Python 3 and build tools (for node-pty compilation)
+# 2. Only installs terminal-server dependencies (not the full monorepo)
+# 3. Builds and starts the terminal server
+
+[phases.setup]
+nixPkgs = ["python3", "gcc", "gnumake", "bash", "git", "curl"]
+
+[phases.install]
+cmds = [
+  "cd terminal-server && npm install --legacy-peer-deps"
+]
+
+[phases.build]
+cmds = [
+  "cd terminal-server && npm run build"
+]
+
+[start]
+cmd = "cd terminal-server && node dist/server.js"
