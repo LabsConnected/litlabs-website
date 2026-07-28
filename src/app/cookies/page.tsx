@@ -80,7 +80,7 @@ export default function CookiesPage() {
           <section>
             <h2 className="text-sm font-bold uppercase tracking-wider mb-2" style={{ color: "var(--header-color)" }}>Third-Party Cookies</h2>
             <p>
-              Some of our pages display content from external providers (e.g., Spotify embeds, Unsplash images). These providers may set their own cookies. We do not control these cookies. Please refer to the respective privacy policies of these third parties for more information.
+              Some of our pages display content from external providers (e.g., YouTube embeds, Unsplash images). These providers may set their own cookies. We do not control these cookies. Please refer to the respective privacy policies of these third parties for more information.
             </p>
           </section>
 

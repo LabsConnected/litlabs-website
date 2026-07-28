@@ -25,7 +25,6 @@ export interface UserProfile {
   website: string;
   interests: string[];
   musicLinks: {
-    spotify?: string;
     youtube?: string;
     soundcloud?: string;
     appleMusic?: string;

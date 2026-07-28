@@ -11,8 +11,6 @@ import MusicPlayer from "./MusicPlayer";
 import RadioPanel from "./RadioPanel";
 import AudioTool from "./AudioTool";
 
-const SpotifyPlayer = dynamic(() => import("./SpotifyPlayer"), { ssr: false });
-
 /* Lazy-load heavy dashboard panes so the initial dashboard bundle stays small */
 const DashboardContent = dynamic(() => import("./DashboardContent"), {
   ssr: false,
@@ -605,7 +603,6 @@ export function CenterStage({
 /*  MusicHub — tabbed music section                                    */
 /* ------------------------------------------------------------------ */
 const MUSIC_TABS = [
-  { id: "spotify", label: "Spotify", color: "#1DB954" },
   { id: "player", label: "LiTT Player", color: "#ff00a0" },
   { id: "radio", label: "Radio", color: "#00f0ff" },
   { id: "tools", label: "Audio Tools", color: "#8b5cf6" },
@@ -615,14 +612,14 @@ type MusicTab = (typeof MUSIC_TABS)[number]["id"];
 
 function MusicHub() {
   const { resolvedColors: T } = useTheme();
-  const [tab, setTab] = useState<MusicTab>("spotify");
+  const [tab, setTab] = useState<MusicTab>("player");
 
   return (
     <div className="space-y-4">
       <HeroCard
         title="Music"
         subtitle="Stream, create & broadcast."
-        color="#1DB954"
+        color="#ff00a0"
       />
 
       {/* Tab bar */}
@@ -653,7 +650,6 @@ function MusicHub() {
       </div>
 
       {/* Tab content */}
-      {tab === "spotify" && <SpotifyPlayer />}
       {tab === "player" && <MusicPlayer mode="full" />}
       {tab === "radio" && <RadioPanel mode="full" />}
       {tab === "tools" && <AudioTool />}
