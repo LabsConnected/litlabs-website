@@ -136,9 +136,36 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [withSpark, setWithSpark] = useState(false);
+  const [voiceHealth, setVoiceHealth] = useState<{
+    configured: boolean;
+    tokenService: "healthy" | "error" | "unknown";
+    available: boolean;
+  }>({ configured: false, tokenService: "unknown", available: false });
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const handleSendRef = useRef<(text: string) => Promise<void>>(async () => {});
+
+  // Fetch voice health on mount + when voice state changes
+  useEffect(() => {
+    let active = true;
+    fetch("/api/voice/health", { cache: "no-store" })
+      .then((r) => r.json())
+      .then((data) => {
+        if (active) {
+          setVoiceHealth({
+            configured: !!data.configured,
+            tokenService: data.tokenService === "healthy" ? "healthy" : "error",
+            available: !!data.available,
+          });
+        }
+      })
+      .catch(() => {
+        if (active) {
+          setVoiceHealth({ configured: false, tokenService: "unknown", available: false });
+        }
+      });
+    return () => { active = false; };
+  }, []);
 
   const activeAgentId = withSpark ? "spark" : "litt";
   const ringColor = deriveRingColor(voiceState, voiceInputState, voiceOutputState);
@@ -205,6 +232,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
             connectionSummary: "global companion",
             voiceTransportConnected,
             voiceMicrophoneOn: voiceInputState === "listening",
+            voiceHealth,
           },
           // Page context so LiTT knows where the user is
           pageContext,
@@ -233,7 +261,7 @@ function CompanionPanel({ onClose }: { onClose: () => void }) {
     } finally {
       setBusy(false);
     }
-  }, [activeAgentId, busy, messages, profile, voiceTransportConnected, voiceInputState, pageContext]);
+  }, [activeAgentId, busy, messages, profile, voiceTransportConnected, voiceInputState, pageContext, voiceHealth]);
 
   // Keep handleSendRef in sync so the voice transcript callback always calls the latest
   useEffect(() => {

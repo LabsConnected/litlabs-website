@@ -254,6 +254,7 @@ async function handler(req: NextRequest) {
       connectionSummary: capabilities?.connectionSummary as string | undefined,
       voiceTransportConnected: capabilities?.voiceTransportConnected as boolean | undefined,
       voiceMicrophoneOn: capabilities?.voiceMicrophoneOn as boolean | undefined,
+      voiceHealth: capabilities?.voiceHealth as RawCapabilities["voiceHealth"],
     };
     const translated = translateCapabilities(rawCaps);
 

@@ -4,6 +4,21 @@ import { useCallback, useEffect, useState } from "react";
 import { useTerminalStore } from "@/stores/useTerminalStore";
 import type { TerminalStatus } from "@/lib/capabilities/types";
 
+export interface VoiceHealthState {
+  /** Inworld env vars are set (server-side check) */
+  configured: boolean;
+  /** Token service actually works (tested by /api/voice/health) */
+  tokenService: "healthy" | "error" | "unknown";
+  /** Voice is available to use (configured + token service healthy) */
+  available: boolean;
+  /** Error code if unavailable */
+  errorCode?: string;
+  /** Human-readable message */
+  message?: string;
+  /** When the health was last checked */
+  checkedAt?: string;
+}
+
 export interface ConnectionCapabilities {
   repository: string;
   repositoryName: string | null;
@@ -20,6 +35,8 @@ export interface ConnectionCapabilities {
   voiceTransportConnected: boolean;
   /** Microphone currently capturing audio. Client-derived from VoiceSessionContext. */
   voiceMicrophoneOn: boolean;
+  /** Voice health from /api/voice/health (server-side check). */
+  voiceHealth: VoiceHealthState;
 }
 
 const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
@@ -36,6 +53,11 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   terminalError: null,
   voiceTransportConnected: false,
   voiceMicrophoneOn: false,
+  voiceHealth: {
+    configured: false,
+    tokenService: "unknown",
+    available: false,
+  },
 };
 
 export function useConnectionSummary() {
@@ -51,9 +73,10 @@ export function useConnectionSummary() {
 
   const refresh = useCallback(async () => {
     try {
-      const [capsRes, termRes] = await Promise.allSettled([
+      const [capsRes, termRes, voiceRes] = await Promise.allSettled([
         fetch("/api/capabilities", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
         fetch("/api/capabilities/project-terminal", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
+        fetch("/api/voice/health", { cache: "no-store", signal: AbortSignal.timeout(8000) }),
       ]);
 
       const next = { ...DEFAULT_CAPABILITIES };
@@ -75,6 +98,28 @@ export function useConnectionSummary() {
           next.connectedProviders.length > 0
             ? `Connected: ${next.connectedProviders.join(", ")}`
             : "No services connected.";
+      }
+
+      // Voice health — server-side check of Inworld configuration + token service
+      if (voiceRes.status === "fulfilled" && voiceRes.value.ok) {
+        const voiceData = await voiceRes.value.json();
+        next.voiceHealth = {
+          configured: !!voiceData.configured,
+          tokenService: voiceData.tokenService === "healthy" ? "healthy" : "error",
+          available: !!voiceData.available,
+          errorCode: voiceData.errorCode,
+          message: voiceData.message,
+          checkedAt: voiceData.checkedAt,
+        };
+      } else {
+        // Health endpoint failed — mark as unknown, don't silently reuse old state
+        next.voiceHealth = {
+          configured: false,
+          tokenService: "unknown",
+          available: false,
+          errorCode: "VOICE_HEALTH_UNREACHABLE",
+          message: "Voice health check failed.",
+        };
       }
 
       // Use client-side terminal store as primary source of truth for PTY status

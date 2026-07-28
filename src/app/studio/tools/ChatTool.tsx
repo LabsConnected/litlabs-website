@@ -157,6 +157,7 @@ export default function ChatTool({
             connectionSummary: capabilities.connectionSummary,
             voiceTransportConnected,
             voiceMicrophoneOn: voiceInputState === "listening",
+            voiceHealth: capabilities.voiceHealth,
           },
         }),
       });
