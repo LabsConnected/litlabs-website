@@ -1,15 +1,16 @@
 # Nixpacks config for the terminal-server Railway service.
-# Railway builds from the repo root using Nixpacks, which detects the root
-# pnpm-lock.yaml and tries to install ALL dependencies. node-pty requires
-# Python 3 + build tools to compile, which Nixpacks doesn't install by default.
+# Railway builds from the repo root, which Nixpacks auto-detects as a Next.js
+# app. We override that detection entirely and build only the terminal-server.
 #
-# This config:
-# 1. Installs Python 3 and build tools (for node-pty compilation)
-# 2. Only installs terminal-server dependencies (not the full monorepo)
-# 3. Builds and starts the terminal server
+# The terminal-server uses node-pty (native module) which requires Python 3
+# and build tools to compile.
+
+# Override auto-detected providers — don't run the Next.js provider
+providers = []
 
 [phases.setup]
-nixPkgs = ["python3", "gcc", "gnumake", "bash", "git", "curl"]
+nixPkgs = ["nodejs_20", "python3", "gcc", "gnumake", "bash", "git", "curl"]
+aptPkgs = ["python3", "make", "g++", "bash", "git", "curl"]
 
 [phases.install]
 cmds = [
