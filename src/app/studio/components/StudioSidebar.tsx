@@ -33,11 +33,13 @@ import {
   Coins,
   Gamepad2,
   ExternalLink,
+  Layout,
 } from "lucide-react";
 
 export type StudioTool =
   | "home"
   | "chat"
+  | "canvas"
   | "image"
   | "video"
   | "audio"
@@ -63,9 +65,10 @@ type ToolItem = {
 
 /* ── Primary rail tools (always visible) ─────────────────────────── */
 const PRIMARY_TOOLS: ToolItem[] = [
+  { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "C" },
+  { id: "canvas", label: "Canvas", icon: Layout, shortcut: "V" },
   { id: "code", label: "Code", icon: Code, shortcut: "K" },
   { id: "build", label: "Build", icon: Hammer, shortcut: "B" },
-  { id: "chat", label: "Chat", icon: MessageSquare, shortcut: "C" },
   { id: "image", label: "Image", icon: ImageIcon, shortcut: "1" },
   { id: "video", label: "Video", icon: Film, shortcut: "2" },
   { id: "audio", label: "Audio", icon: Music, shortcut: "3" },
@@ -86,7 +89,7 @@ const MORE_TOOLS: ToolItem[] = [
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
-const MOBILE_PRIMARY: StudioTool[] = ["chat", "image", "build", "agents"];
+const MOBILE_PRIMARY: StudioTool[] = ["chat", "canvas", "image", "build", "agents"];
 
 /* ── Desktop Tool Rail (72px, expands on hover) ──────────────────── */
 function RailButton({
@@ -430,7 +433,7 @@ export function MobileTabBar({
     <>
       {drawerOpen && (
         <div
-          className="fixed inset-0 z-10000 md:hidden"
+          className="fixed inset-0 z-10030 md:hidden"
           style={{ backgroundColor: "rgba(0,0,0,0.55)" }}
           onClick={() => setDrawerOpen(false)}
         />
@@ -439,7 +442,7 @@ export function MobileTabBar({
       {drawerOpen && (
         <div
           ref={sheetRef}
-          className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-10000 max-h-[min(70dvh,560px)] overflow-y-auto rounded-t-2xl border-t px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden"
+          className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] left-0 right-0 z-10030 max-h-[min(70dvh,560px)] overflow-y-auto rounded-t-2xl border-t px-3 pt-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden"
           style={{
             backgroundColor: "#08090d",
             borderColor: "rgba(255,255,255,0.08)",

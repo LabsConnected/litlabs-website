@@ -724,8 +724,9 @@ export default function ChatShell({
         )}
       </main>
 
-      {/* Composer */}
-      <div className="relative z-20 shrink-0 bg-linear-to-t from-[#05060b] via-[#05060b]/95 to-transparent px-2 pt-2 sm:px-4">
+      {/* Composer — highest interactive layer so Canvas/LiTT overlays never
+          block the mic or send button. */}
+      <div className="relative z-[120] shrink-0 bg-linear-to-t from-[#05060b] via-[#05060b]/95 to-transparent px-2 pt-2 sm:px-4">
         <MultimodalComposer
           value={input}
           onChange={setInput}

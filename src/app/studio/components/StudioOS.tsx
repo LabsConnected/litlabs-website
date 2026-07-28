@@ -20,6 +20,11 @@ type DockPosition = "bottom-right" | "bottom-left" | "top-right" | "top-left" | 
 
 const ChatTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
 const CanvasPanel = dynamic(() => import("./canvas/CanvasPanel").then((m) => m.CanvasPanel), { ssr: false });
+
+function CanvasPanelWrapper() {
+  return <CanvasPanel />;
+}
+
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
@@ -54,6 +59,7 @@ const HomeTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
 const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   home: HomeTool,
   chat: ChatTool,
+  canvas: CanvasPanelWrapper,
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
@@ -117,7 +123,6 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
   const [search, setSearch] = useState("");
   const [pendingCommand, setPendingCommand] = useState("");
-  const [assistantOpen, setAssistantOpen] = useState(false);
   const [canvasOpen, setCanvasOpen] = useState(false);
   const [pendingCanvasAction, setPendingCanvasAction] = useState<ArtifactAction | null>(null);
   const [onboardingOpen, setOnboardingOpen] = useState(
@@ -222,7 +227,8 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
 
   // Determine which component to render in the center workspace
   const isChat = activeTool === "chat";
-  const WorkspaceComponent = isChat ? null : TOOL_COMPONENTS[activeTool];
+  const isCanvas = activeTool === "canvas";
+  const WorkspaceComponent = isChat || isCanvas ? null : TOOL_COMPONENTS[activeTool];
 
   return (
     <VoiceSessionProvider>
@@ -274,21 +280,18 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
               project). The onboarding wall only shows for build tools. */}
           <main className="relative flex h-full min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
             {isChat ? (
-              <>
-                <ChatTool
-                  onRouteTool={handleCommandRoute}
-                  requestedTool={activeTool}
-                  pendingCommand={pendingCommand}
+              <ChatTool
+                onRouteTool={handleCommandRoute}
+                requestedTool={activeTool}
+                pendingCommand={pendingCommand}
+              />
+            ) : isCanvas ? (
+              <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
+                <CanvasPanel
+                  pendingAction={pendingCanvasAction}
+                  onActionExecuted={() => setPendingCanvasAction(null)}
                 />
-                <button
-                  onClick={() => setCanvasOpen((v) => !v)}
-                  className="absolute top-4 right-4 z-40 flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-3 py-2 text-[10px] font-bold text-violet-100 shadow-xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
-                  title="Toggle Canvas panel"
-                >
-                  <span className="h-1.5 w-1.5 rounded-full bg-violet-300" />
-                  {canvasOpen ? "Hide" : "Canvas"}
-                </button>
-              </>
+              </div>
             ) : !connectionsLoading && !projectReady && onboardingOpen ? (
               <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : WorkspaceComponent ? (
@@ -296,57 +299,7 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
                 <WorkspaceComponent />
               </div>
             ) : null}
-            {projectReady && !isChat && (
-              <div className="absolute bottom-4 right-4 z-40 flex flex-col items-end gap-2">
-                <button
-                  onClick={() => setCanvasOpen((v) => !v)}
-                  className="flex items-center gap-2 rounded-full border border-violet-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-violet-100 shadow-2xl backdrop-blur-xl transition hover:border-violet-300/50 hover:bg-violet-300/10"
-                >
-                  <span className="h-2 w-2 rounded-full bg-violet-300 shadow-[0_0_8px_#c4b5fd]" />
-                  {canvasOpen ? "Hide Canvas" : "Canvas"}
-                </button>
-                <button
-                  onClick={() => setAssistantOpen(true)}
-                  className="flex items-center gap-2 rounded-full border border-cyan-300/25 bg-[#0a0c13]/95 px-4 py-3 text-xs font-black text-cyan-100 shadow-2xl backdrop-blur-xl transition hover:border-cyan-300/50 hover:bg-cyan-300/10"
-                >
-                  <span className="h-2 w-2 rounded-full bg-emerald-300 shadow-[0_0_8px_#6ee7b7]" />
-                  Ask LiTT
-                </button>
-              </div>
-            )}
           </main>
-
-          {/* LiTT assistant drawer — closed by default so tools keep the full workspace */}
-          {assistantOpen && projectReady && !isChat && <aside
-            className="fixed bottom-[calc(56px+env(safe-area-inset-bottom))] right-0 top-12 z-10010 flex w-full max-w-95 min-w-0 flex-col overflow-hidden border-l shadow-[-24px_0_70px_rgba(0,0,0,.6)] litt-panel litt-panel--overlay md:bottom-0"
-            style={{
-              backgroundColor: "rgba(8,9,13,0.96)",
-              borderColor: "rgba(255,255,255,0.06)",
-            }}
-          >
-            <div
-              className="flex h-9 shrink-0 items-center justify-between px-3 border-b"
-              style={{ borderColor: "rgba(255,255,255,0.06)" }}
-            >
-              <span className="text-[10px] font-black uppercase tracking-[0.18em] text-white/60">
-                LiTT
-              </span>
-              <button
-                onClick={() => setAssistantOpen(false)}
-                className="grid h-7 w-7 place-items-center rounded-lg text-white/45 hover:bg-white/8 hover:text-white"
-                aria-label="Close LiTT drawer"
-              >
-                ✕
-              </button>
-            </div>
-            <div className="min-h-0 min-w-0 flex-1 overflow-hidden">
-              <ChatTool
-                onRouteTool={handleCommandRoute}
-                requestedTool={activeTool}
-                pendingCommand={pendingCommand}
-              />
-            </div>
-          </aside>}
 
           {/* Canvas panel — bottom sheet on mobile, split-pane on desktop.
               Opens when a canvas action is executed from chat. */}
