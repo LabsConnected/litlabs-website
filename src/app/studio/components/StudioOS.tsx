@@ -269,11 +269,11 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
             />
           </div>
 
-          {/* Center workspace — renders active tool full-screen on mobile */}
+          {/* Center workspace — renders active tool full-screen on mobile.
+              Chat is ALWAYS available (voice + text chat don't require a
+              project). The onboarding wall only shows for build tools. */}
           <main className="relative flex h-full min-w-0 min-h-0 flex-col overflow-hidden overflow-x-hidden">
-            {!connectionsLoading && !projectReady && onboardingOpen ? (
-              <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
-            ) : isChat ? (
+            {isChat ? (
               <>
                 <ChatTool
                   onRouteTool={handleCommandRoute}
@@ -289,6 +289,8 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
                   {canvasOpen ? "Hide" : "Canvas"}
                 </button>
               </>
+            ) : !connectionsLoading && !projectReady && onboardingOpen ? (
+              <StudioOnboarding onToolChange={handleToolChange} onStartBlank={handleStartBlank} />
             ) : WorkspaceComponent ? (
               <div className="studio-tool-surface min-h-0 min-w-0 flex-1 overflow-auto">
                 <WorkspaceComponent />

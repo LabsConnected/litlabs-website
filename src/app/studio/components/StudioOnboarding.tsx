@@ -204,6 +204,12 @@ export default function StudioOnboarding({
             >
               Connect a Source
             </button>
+            <button
+              onClick={() => onToolChange("chat")}
+              className="rounded-xl border border-cyan-300/20 bg-cyan-300/5 px-4 py-2 text-xs font-bold text-cyan-200 transition hover:border-cyan-300/40 hover:bg-cyan-300/10"
+            >
+              Just Chat — No Project Needed
+            </button>
           </div>
         </div>
 

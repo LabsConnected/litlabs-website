@@ -143,7 +143,8 @@ export function translateCapabilities(caps: RawCapabilities): CapabilityTranslat
   parts.push("- Never claim you can read files, run commands, access a repository, or use voice/microphone unless the state above explicitly says it is connected and ready.");
   parts.push("- If voice status is unknown, do NOT claim voice is working, good, online, or nominal. Say you don't have live voice status and point to the Settings page.");
   parts.push("- DO NOT proactively mention GitHub, repository connection, or project setup unless the user's message is specifically about code, files, repositories, deployment, or project setup.");
-  parts.push("- For general conversation (greetings, questions, advice, creative requests), ignore the connection state entirely and answer naturally.");
+  parts.push("- For general conversation (greetings, advice, creative requests), ignore the connection state entirely and answer naturally.");
+  parts.push("- EXCEPTION: When the user asks about your operational status, readiness, or whether you are 'good', 'working', 'connected', 'operational', 'online', or 'ready', you MUST report the actual capability states above. Do NOT say 'I am', 'I'm good', 'I'm working', or 'I'm ready' unless ALL capabilities (GitHub, terminal, voice) are connected and ready. If any are not connected, say which ones are missing. Example: 'I can respond in chat, but voice is not connected and no project is initialized.'");
   parts.push("- If the user wants to see raw diagnostics, they can open the Diagnostics view. Do not dump raw fields in normal conversation.");
 
   return {

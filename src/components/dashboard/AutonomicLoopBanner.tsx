@@ -229,10 +229,10 @@ export default function AutonomicLoopBanner() {
   if (dismissed) return null;
 
   const palette = {
-    ok: { color: "#22c55e", label: "Autonomic Loop · Online" },
-    degraded: { color: "#f59e0b", label: "Autonomic Loop · Degraded" },
-    down: { color: "#ef4444", label: "Autonomic Loop · Offline" },
-    checking: { color: tokens.primary, label: "Autonomic Loop · Probing" },
+    ok: { color: "#22c55e", label: "Director Pipeline · Online" },
+    degraded: { color: "#f59e0b", label: "Director Pipeline · Degraded" },
+    down: { color: "#ef4444", label: "Director Pipeline · Offline" },
+    checking: { color: tokens.primary, label: "Director Pipeline · Probing" },
   }[state];
 
   const StatusIcon =

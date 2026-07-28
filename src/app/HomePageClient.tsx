@@ -31,10 +31,10 @@ import {
 } from "lucide-react";
 
 const powers = [
-  { icon: Code2, label: "Build", copy: "Sites, apps, tools & automations" },
-  { icon: Palette, label: "Create", copy: "Images, video, audio & ideas" },
-  { icon: BrainCircuit, label: "Remember", copy: "Your projects, style & decisions" },
-  { icon: Rocket, label: "Elevate", copy: "Review, improve & ship real work" },
+  { icon: Code2, label: "Build", copy: "Spin up sites, apps, tools, and automations. Your crew writes code, wires APIs, and ships working drafts you can run today." },
+  { icon: Palette, label: "Create", copy: "Generate images, video, audio, and ideas. Iterate on style with agents that learn your taste and keep the whole project on brand." },
+  { icon: BrainCircuit, label: "Remember", copy: "Your projects, style, and decisions stay with you. LiTT carries context across sessions so you never restart from zero." },
+  { icon: Rocket, label: "Elevate", copy: "Review, refine, and ship real work. Get critique, polish drafts, and push from idea to launch with a crew that keeps momentum." },
 ];
 
 const steps = [
@@ -98,7 +98,7 @@ const marketplacePreview = [
 function Header() {
   return (
     <header className="fixed inset-x-0 top-0 z-50 border-b border-cyan-300/10 bg-[#03050a]/78 shadow-[0_12px_50px_rgba(0,0,0,.35)] backdrop-blur-2xl">
-      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 lg:px-8">
+      <div className="mx-auto flex h-16 max-w-screen-2xl items-center justify-between px-5 lg:px-10">
         <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
           <span className="grid h-9 w-9 place-items-center rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_25px_rgba(168,255,47,.18)]">
             <Bot size={18} />
@@ -132,7 +132,7 @@ function LandingPage() {
       <section className="relative min-h-190 border-b border-cyan-300/10 pt-16">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_78%_35%,rgba(169,112,255,.25),transparent_32%),radial-gradient(circle_at_22%_24%,rgba(168,255,47,.14),transparent_27%),radial-gradient(circle_at_50%_100%,rgba(0,229,255,.08),transparent_35%)]" />
         <div className="absolute inset-0 opacity-20 bg-[linear-gradient(rgba(255,255,255,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.06)_1px,transparent_1px)] bg-size-[64px_64px]" />
-        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 py-16 lg:min-h-190 lg:grid-cols-[.92fr_1.08fr] lg:px-8 lg:py-20">
+        <div className="relative mx-auto grid max-w-screen-2xl items-center gap-12 px-5 py-16 lg:min-h-190 lg:grid-cols-[.85fr_1.15fr] lg:px-10 lg:py-20">
           <div className="relative z-10">
             <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/25 bg-[#a8ff2f]/8 px-4 py-2 text-xs font-black uppercase tracking-[.18em] text-[#a8ff2f]">
               <span className="h-2 w-2 animate-pulse rounded-full bg-[#a8ff2f]" />
@@ -145,11 +145,13 @@ function LandingPage() {
                 with your AI crew.
               </span>
             </h1>
-            <p className="mt-7 max-w-xl text-lg leading-8 text-white/65">
+            <p className="mt-7 max-w-2xl text-lg leading-8 text-white/65">
               LiTTree LabStudios is an AI creative studio and social creation platform.
               Build apps, create art, and launch projects alongside LiTT and Spark—your
-              AI crew for creative work. Collaborate, remix public projects, and grow a
-              space that feels unmistakably yours. Free to join, no credit card required.
+              AI crew for creative work. Your crew plans the mission, builds alongside you,
+              and remembers the project so you can ship without starting from zero.
+              Collaborate, remix public projects, and grow a space that feels unmistakably
+              yours. Free to join, no credit card required.
             </p>
             <div className="mt-9 flex flex-col gap-3 sm:flex-row">
               <Link href="/sign-up" className="inline-flex items-center justify-center gap-2 rounded-xl bg-linear-to-r from-[#a8ff2f] to-[#5df5d0] px-6 py-4 text-sm font-black text-[#03050a] shadow-[0_0_40px_rgba(168,255,47,.22)] transition hover:-translate-y-1 hover:shadow-[0_0_55px_rgba(168,255,47,.38)]">
@@ -184,7 +186,7 @@ function LandingPage() {
             </div>
           </div>
 
-          <div className="relative mx-auto w-full max-w-170">
+          <div className="relative mx-auto w-full max-w-[34rem]">
             <div className="absolute inset-10 rounded-full bg-[#a8ff2f]/20 blur-[90px]" />
             <div className="relative overflow-hidden rounded-4xl border border-white/15 bg-black/40 shadow-[0_35px_100px_rgba(0,0,0,.65)]">
               <video
@@ -229,9 +231,9 @@ function LandingPage() {
       </section>
 
       {/* ─── DISCOVER ─── */}
-      <section id="discover" className="relative border-b border-white/10 bg-[#05070d] px-5 py-20 text-white lg:px-8 lg:py-28">
+      <section id="discover" className="relative border-b border-white/10 bg-[#05070d] px-5 py-20 text-white lg:px-10 lg:py-28">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_50%_0%,rgba(101,244,255,.1),transparent_38%)]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="flex flex-col justify-between gap-7 lg:flex-row lg:items-end">
             <div>
               <div className="text-xs font-black uppercase tracking-[.2em] text-[#65f4ff]">Discover what people are making</div>
@@ -278,9 +280,9 @@ function LandingPage() {
       </section>
 
       {/* ─── WHAT WE DO ─── */}
-      <section id="what-we-do" className="relative border-b border-white/10 bg-[#060912] px-5 py-20 text-white lg:px-8 lg:py-28">
+      <section id="what-we-do" className="relative border-b border-white/10 bg-[#060912] px-5 py-20 text-white lg:px-10 lg:py-28">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_15%_40%,rgba(0,229,255,.08),transparent_28%),radial-gradient(circle_at_85%_70%,rgba(169,112,255,.1),transparent_30%)]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="grid gap-8 lg:grid-cols-[.8fr_1.2fr] lg:items-end">
             <div>
               <div className="text-xs font-black uppercase tracking-[.2em] text-[#65f4ff]">What LiTTree LabStudios is for</div>
@@ -305,9 +307,9 @@ function LandingPage() {
         </div>
       </section>
 
-      <section id="crew" className="relative border-b border-white/10 bg-[#080a08] px-5 py-20 lg:px-8 lg:py-28">
+      <section id="crew" className="relative border-b border-white/10 bg-[#080a08] px-5 py-20 lg:px-10 lg:py-28">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(112,52,255,.14),transparent_45%)]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
             <div>
               <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Meet the core crew</div>
@@ -343,9 +345,9 @@ function LandingPage() {
       </section>
 
       {/* ─── YOUR WORLD ─── */}
-      <section id="your-world" className="relative bg-[#050811] px-5 py-20 text-white lg:px-8 lg:py-28">
+      <section id="your-world" className="relative bg-[#050811] px-5 py-20 text-white lg:px-10 lg:py-28">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,rgba(168,255,47,.04),transparent_35%,rgba(169,112,255,.06))]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="overflow-hidden rounded-4xl border border-cyan-300/20 bg-black shadow-[0_30px_100px_rgba(0,0,0,.55),0_0_60px_rgba(0,229,255,.07)]">
             <div className="relative aspect-video">
               <Image src="/brand/litt-base-station.png" alt="The LiTT Base Station creative command center" fill className="object-cover" />
@@ -368,12 +370,12 @@ function LandingPage() {
       </section>
 
       {/* ─── SOCIAL CREATION ─── */}
-      <section className="relative border-b border-white/10 bg-[#050811] px-5 py-20 text-white lg:px-8 lg:py-28">
+      <section className="relative border-b border-white/10 bg-[#050811] px-5 py-20 text-white lg:px-10 lg:py-28">
         <div className="pointer-events-none absolute inset-0 bg-[linear-gradient(110deg,rgba(168,255,47,.04),transparent_35%,rgba(169,112,255,.06))]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="text-xs font-black uppercase tracking-[.2em] text-[#a970ff]">Social creation</div>
           <h2 className="mt-4 text-4xl font-black leading-none tracking-[-.045em] sm:text-6xl">Don&apos;t just like.<br />Remix.</h2>
-          <p className="mt-5 max-w-2xl text-lg leading-8 text-white/55">
+          <p className="mt-5 max-w-3xl text-lg leading-8 text-white/55">
             Every public creation can be appreciated, saved, remixed, or collaborated on.
             Remix is LiTTree&apos;s defining social action—fork any project and make it yours.
           </p>
@@ -394,14 +396,14 @@ function LandingPage() {
       </section>
 
       {/* ─── MARKETPLACE PREVIEW ─── */}
-      <section className="relative border-b border-white/10 bg-[#060912] px-5 py-20 lg:px-8 lg:py-28">
+      <section className="relative border-b border-white/10 bg-[#060912] px-5 py-20 lg:px-10 lg:py-28">
         <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(circle_at_20%_50%,rgba(168,255,47,.06),transparent_35%),radial-gradient(circle_at_80%_50%,rgba(169,112,255,.06),transparent_35%)]" />
-        <div className="relative mx-auto max-w-7xl">
+        <div className="relative mx-auto max-w-screen-2xl">
           <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
             <div>
               <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Marketplace</div>
               <h2 className="mt-4 text-4xl font-black leading-none tracking-[-.045em] sm:text-6xl">Free agents for every mission.</h2>
-              <p className="mt-4 max-w-xl text-sm leading-7 text-white/55">Browse community-built agents, themes, templates, and tools. Install what you need, or publish your own.</p>
+              <p className="mt-4 max-w-xl text-sm leading-7 text-white/55">Browse community-built agents, themes, templates, and tools. Install what you need in one click, or publish your own and put it in front of every creator on LiTTree.</p>
             </div>
             <Link href="/marketplace" className="inline-flex items-center gap-2 text-sm font-black text-[#a8ff2f]">Browse all agents <ArrowRight size={15} /></Link>
           </div>
@@ -422,8 +424,8 @@ function LandingPage() {
         </div>
       </section>
 
-      <section id="how-it-works" className="border-y border-white/10 bg-[#080a08] px-5 py-20 lg:px-8 lg:py-28">
-        <div className="mx-auto max-w-7xl">
+      <section id="how-it-works" className="border-y border-white/10 bg-[#080a08] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-screen-2xl">
           <div className="text-xs font-black uppercase tracking-[.2em] text-[#a970ff]">How it works</div>
           <h2 className="mt-4 text-4xl font-black tracking-[-.045em] sm:text-6xl">You lead. Your crew delivers.</h2>
           <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-3">
@@ -439,13 +441,13 @@ function LandingPage() {
       </section>
 
       {/* ─── 8. OWNERSHIP & PRIVACY ─── */}
-      <section className="relative border-y border-white/10 bg-[#080a08] px-5 py-20 lg:px-8 lg:py-28">
-        <div className="mx-auto max-w-7xl">
+      <section className="relative border-y border-white/10 bg-[#080a08] px-5 py-20 lg:px-10 lg:py-28">
+        <div className="mx-auto max-w-screen-2xl">
           <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Yours. Always.</div>
           <h2 className="mt-4 text-4xl font-black tracking-[-.045em] sm:text-6xl">You own it. You control it.</h2>
           <p className="mt-5 max-w-2xl text-lg leading-8 text-white/55">
             Your profile, community, and creative space will always have a free option.
-            No credit card to join. No lock-in. Your creations stay yours.
+            No credit card to join. No lock-in. Your creations stay yours—your world, your rules.
           </p>
           <div className="mt-12 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             {ownershipPoints.map(({ icon: Icon, title, copy }) => (
@@ -460,10 +462,10 @@ function LandingPage() {
       </section>
 
       {/* ─── 9. FINAL FREE SIGNUP CTA ─── */}
-      <section className="relative overflow-hidden border-y border-[#a8ff2f]/20 bg-[#060912] px-5 py-20 text-white lg:px-8 lg:py-24">
+      <section className="relative overflow-hidden border-y border-[#a8ff2f]/20 bg-[#060912] px-5 py-20 text-white lg:px-10 lg:py-24">
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_15%_30%,rgba(168,255,47,.18),transparent_30%),radial-gradient(circle_at_85%_65%,rgba(169,112,255,.22),transparent_34%)]" />
         <div className="absolute -right-16 -top-20 text-[22rem] font-black leading-none text-white/2.5">L</div>
-        <div className="relative mx-auto flex max-w-7xl flex-col justify-between gap-10 lg:flex-row lg:items-end">
+        <div className="relative mx-auto flex max-w-screen-2xl flex-col justify-between gap-10 lg:flex-row lg:items-end">
           <div>
             <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Free to join · No credit card required</div>
             <h2 className="mt-3 max-w-4xl text-5xl font-black leading-[.95] tracking-tighter sm:text-7xl">Build it. Create it.<br /><span className="bg-linear-to-r from-[#a8ff2f] via-[#65f4ff] to-[#b58cff] bg-clip-text font-serif italic font-normal text-transparent">Make it unforgettable.</span></h2>
@@ -475,8 +477,8 @@ function LandingPage() {
         </div>
       </section>
 
-      <footer className="bg-[#050706] px-5 py-8 lg:px-8">
-        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
+      <footer className="bg-[#050706] px-5 py-8 lg:px-10">
+        <div className="mx-auto flex max-w-screen-2xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
           <div className="flex items-center gap-2 font-black text-white"><Sparkles size={14} className="text-[#a8ff2f]" /> LiTTree LabStudios</div>
           <div className="flex flex-wrap gap-5">
             <Link href="/marketplace">Marketplace</Link>
