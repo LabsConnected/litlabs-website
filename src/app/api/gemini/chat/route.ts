@@ -240,7 +240,7 @@ async function handler(req: NextRequest) {
     // Compose the Kernel system prompt (Constitution + mode guidance +
     // verified capabilities). Falls back to the legacy agent prompt if
     // the Kernel fails for any reason.
-    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities, { userName });
+    const kernelSystemPrompt = composeSystemPrompt(kernelResult.decision, kernelCapabilities);
 
     // Use the Kernel prompt as the base, then layer on the legacy
     // capability translation block + memory + history (same as before).
