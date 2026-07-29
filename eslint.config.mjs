@@ -40,6 +40,8 @@ const eslintConfig = defineConfig([
     "litlabs/**",
     "litlabs-website/**",
     "OmniRoute/**",
+    // CommonJS scripts — require() is correct in .cjs files
+    "scripts/**/*.cjs",
   ]),
   {
     rules: {

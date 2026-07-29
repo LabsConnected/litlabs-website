@@ -108,16 +108,12 @@ export async function recallMemories(
     }
   }
 
-  // Fallback: Supabase text search, always scoped by project_id
+  // Fallback: Supabase text search, always scoped by project_id (not conversation_id)
   try {
-    let textQuery = agentFilter
+    const textQuery = agentFilter
       .ilike("content", `%${query}%`)
       .order("created_at", { ascending: false })
       .limit(limit);
-
-    if (options.conversationId) {
-      textQuery = textQuery.eq("conversation_id", options.conversationId);
-    }
 
     const { data, error } = await textQuery;
     if (error) {
@@ -169,6 +165,11 @@ export async function persistMemory(
   if (containsSecrets(content)) {
     console.warn(`[memory:persist] Blocked attempt to store content with secrets for user ${ownerId}`);
     return { id: null, blocked: true, error: "Content contains secrets and was not stored" };
+  }
+
+  // Selective extraction: skip trivially short exchanges
+  if (content.trim().length < 50) {
+    return { id: null, blocked: false, error: null };
   }
 
   const agentSlug = options.agentSlug ?? null;

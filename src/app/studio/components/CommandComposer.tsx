@@ -45,7 +45,7 @@ export interface ComposerContextLine {
 interface CommandComposerProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useStudioConversation").SendResult>;
+  onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult>;
   busy?: boolean;
   onToggleCamera?: () => void;
   cameraActive?: boolean;

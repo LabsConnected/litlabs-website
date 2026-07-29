@@ -76,8 +76,20 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
   }
 
-  // 2. Validate revision
-  if (conversation.revision !== expectedRevision) {
+  // 2. Atomic revision check-and-increment via RPC (prevents concurrent writes)
+  const admin = getSupabaseAdmin();
+  if (!admin) {
+    return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
+  }
+
+  const { data: newRevision, error: rpcError } = await admin
+    .rpc("try_increment_conversation_revision", {
+      p_conversation_id: conversation.id,
+      p_owner_id: userId,
+      p_expected_revision: expectedRevision,
+    });
+
+  if (rpcError || newRevision === null) {
     return NextResponse.json(
       { error: "Stale revision", detail: `Expected revision ${expectedRevision}, got ${conversation.revision}` },
       { status: 409 },
@@ -108,15 +120,23 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
     return NextResponse.json({ error: "Failed to insert message" }, { status: 500 });
   }
 
-  // If duplicate request, return the existing message
+  // If duplicate request, return the existing message + any assistant response
   if (duplicate) {
     studioLog("message:duplicate", {
       conversationId: conversation.id,
       userId,
       clientRequestId,
     });
+
+    // Look up the assistant message that was generated for this user message
+    const allMsgs = await listMessages(conversation.id, userId);
+    const assistantMsg = allMsgs.find(
+      (m) => m.parentMessageId === userMessage.id && m.role === "assistant",
+    );
+
     return NextResponse.json({
       userMessage,
+      assistantMessage: assistantMsg ?? undefined,
       duplicate: true,
       revision: conversation.revision,
     });
@@ -243,19 +263,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
     // 13. Persist the assistant response
     await updateMessageStatus(assistantMessage.id, userId, "completed", r.text);
 
-    // 14. Increment conversation revision
-    const admin = getSupabaseAdmin();
-    if (admin) {
-      await admin
-        .from("studio_conversations")
-        .update({
-          revision: conversation.revision + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conversation.id)
-        .eq("owner_id", userId)
-        .eq("revision", conversation.revision);
-    }
+    // 14. Revision was already incremented atomically by the RPC at step 2
 
     // 15. Persist memory (project-scoped, non-blocking)
     void persistMemory(
@@ -277,7 +285,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
       provider: r.provider,
       latencyMs: r.latencyMs,
       revisionBefore: conversation.revision,
-      revisionAfter: conversation.revision + 1,
+      revisionAfter: newRevision,
       memoryProvider: process.env.SUPERMEMORY_API_KEY ? "supermemory+supabase" : "supabase",
     });
 
@@ -288,7 +296,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
         content: r.text,
         status: "completed" as const,
       },
-      revision: conversation.revision + 1,
+      revision: newRevision,
       provider: r.provider,
       model: r.model,
       latencyMs: r.latencyMs,

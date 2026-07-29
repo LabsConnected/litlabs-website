@@ -1,4 +1,5 @@
 import { supabaseAdmin } from "@/lib/supabase";
+import { resolveProject } from "./project-resolver";
 import type { Conversation, ConversationMessage, AgentSlug, MessageStatus } from "./types";
 
 interface DbConversation {
@@ -71,6 +72,10 @@ export async function createConversation(
   title: string | null,
   activeAgentSlug: AgentSlug,
 ): Promise<Conversation | null> {
+  // Validate that the user owns the project before creating a conversation
+  const project = await resolveProject(ownerId, projectId);
+  if (!project) return null;
+
   const { data, error } = await supabaseAdmin
     .from("studio_conversations")
     .insert({

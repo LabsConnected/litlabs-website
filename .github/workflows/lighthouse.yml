@@ -19,9 +19,12 @@ jobs:
       - name: Run Lighthouse
         uses: treosh/lighthouse-ci-action@v9
         with:
-          urls: "https://litlabs.net"
+          urls: |
+            https://litlabs.net
+            https://litlabs.net/studio
           uploadArtifacts: true
           temporaryPublicStorage: true
+          budgetPath: .github/budget.config.json
 
       - name: Upload Lighthouse reports
         if: always()

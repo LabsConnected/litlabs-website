@@ -9,7 +9,7 @@ import { VoiceDiagnosticsDrawer } from "./VoiceDiagnosticsDrawer";
 import { useStudioAgentStore } from "../stores/useStudioAgentStore";
 import { useVoiceStore } from "@/features/voice/store/useVoiceStore";
 import { useConnectionSummary } from "../hooks/useConnectionSummary";
-import { useStudioConversation } from "../hooks/useStudioConversation";
+import { useCanonicalConversation } from "../hooks/useCanonicalConversation";
 import type { ArtifactAction } from "@/lib/canvas/types";
 
 import CommandStudioHeader from "./CommandStudioHeader";
@@ -177,8 +177,8 @@ export default function CommandStudio() {
     setPendingCommand(command);
   }, []);
 
-  // The single conversation controller — calls /api/gemini/chat directly.
-  const conversation = useStudioConversation({
+  // The single conversation controller — calls canonical V12 API.
+  const conversation = useCanonicalConversation({
     onRouteTool: handleRouteTool,
   });
 

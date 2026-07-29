@@ -97,14 +97,36 @@ vi.mock("../stores/useStudioAgentStore", () => ({
   useStudioAgentStore: (selector: (s: Record<string, unknown>) => unknown) =>
     selector({
       activeAgentId: "litt",
-      threads: { litt: [], spark: [] },
-      setMessages: vi.fn(),
-      clearThread: vi.fn(),
+      setActiveAgent: vi.fn(),
     }),
   AGENT_META: {
     litt: { displayName: "LiTT", systemPrompt: "", avatar: "" },
     spark: { displayName: "Spark", systemPrompt: "", avatar: "" },
   },
+}));
+
+vi.mock("../hooks/useCanonicalConversation", () => ({
+  useCanonicalConversation: () => ({
+    messages: [],
+    busy: false,
+    send: vi.fn().mockResolvedValue({ accepted: true }),
+    regenerate: vi.fn(),
+    clear: vi.fn(),
+    activeAgentId: "litt",
+    fallbackNotice: null,
+    initialPrompt: "",
+    sessions: [],
+    activeSessionId: "",
+    selectSession: vi.fn(),
+    newSession: vi.fn(),
+    renameSession: vi.fn(),
+    deleteSession: vi.fn(),
+    deleteAllSessions: vi.fn(),
+    switchAgent: vi.fn(),
+    selectedConversationId: null,
+    conversations: [],
+    loading: false,
+  }),
 }));
 
 vi.mock("../stores/useStudioModelStore", () => ({
@@ -152,6 +174,7 @@ vi.mock("../tools/ColorByNumberTool", () => ({ default: () => <div data-testid="
 vi.mock("../tools/SpaceTool", () => ({ default: () => <div data-testid="space-tool" /> }));
 vi.mock("../tools/PluginsTool", () => ({ default: () => <div data-testid="plugins-tool" /> }));
 vi.mock("../tools/CameraTool", () => ({ default: () => <div data-testid="camera-tool" /> }));
+vi.mock("../tools/ScreenTool", () => ({ default: () => <div data-testid="screen-tool" /> }));
 
 vi.mock("@/lib/canvas/types", () => ({ ArtifactAction: {} }));
 vi.mock("@/lib/litt-context", () => ({ parseJarvisActions: () => [] }));

@@ -44,7 +44,7 @@ async function postHandler(req: NextRequest) {
   // Caller-provided id, ownerId, revision are ignored
   const conversation = await createConversation(userId, projectId, title, activeAgentSlug);
   if (!conversation) {
-    return NextResponse.json({ error: "Failed to create conversation" }, { status: 500 });
+    return NextResponse.json({ error: "Project not found or not owned by user" }, { status: 403 });
   }
 
   studioLog("conversation:created", {

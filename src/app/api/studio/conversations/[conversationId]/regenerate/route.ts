@@ -9,6 +9,7 @@ import {
   insertMessage,
   updateMessageStatus,
 } from "@/lib/studio/conversation-service";
+import { getSupabaseAdmin } from "@/lib/supabase";
 import { resolveAgent } from "@/lib/studio/agent-registry";
 import { buildStudioContext, buildProjectContextBlock } from "@/lib/studio/project-resolver";
 import { recallMemories, formatMemoryContext } from "@/lib/studio/memory-service";
@@ -45,6 +46,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
   }
 
   const assistantMessageId = body.assistantMessageId;
+  const expectedRevision = body.expectedRevision;
   if (typeof assistantMessageId !== "string" || !assistantMessageId.trim()) {
     return NextResponse.json({ error: "assistantMessageId is required" }, { status: 400 });
   }
@@ -54,6 +56,28 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
   const conversation = await getConversation(convId, userId);
   if (!conversation) {
     return NextResponse.json({ error: "Not found" }, { status: 404 });
+  }
+
+  // 1b. Atomic revision check-and-increment (if expectedRevision provided)
+  let newRevision: number | null = null;
+  if (typeof expectedRevision === "number" && expectedRevision >= 1) {
+    const admin = getSupabaseAdmin();
+    if (!admin) {
+      return NextResponse.json({ error: "Database unavailable" }, { status: 503 });
+    }
+    const { data: revResult, error: rpcError } = await admin
+      .rpc("try_increment_conversation_revision", {
+        p_conversation_id: conversation.id,
+        p_owner_id: userId,
+        p_expected_revision: expectedRevision,
+      });
+    if (rpcError || revResult === null) {
+      return NextResponse.json(
+        { error: "Stale revision", detail: `Expected revision ${expectedRevision}, got ${conversation.revision}` },
+        { status: 409 },
+      );
+    }
+    newRevision = revResult as number;
   }
 
   // 2. Load the original assistant message
@@ -212,18 +236,21 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
     // 12. Persist the new assistant response
     await updateMessageStatus(newAssistant.id, userId, "completed", r.text);
 
-    // 13. Increment conversation revision
-    const { getSupabaseAdmin } = await import("@/lib/supabase");
-    const admin = getSupabaseAdmin();
-    if (admin) {
-      await admin
-        .from("studio_conversations")
-        .update({
-          revision: conversation.revision + 1,
-          updated_at: new Date().toISOString(),
-        })
-        .eq("id", conversation.id)
-        .eq("owner_id", userId);
+    // 13. Revision was already incremented atomically at step 1b (if expectedRevision provided)
+    // If no expectedRevision was sent, increment non-atomically for backward compat
+    const finalRevision = newRevision ?? (conversation.revision + 1);
+    if (!newRevision) {
+      const admin = getSupabaseAdmin();
+      if (admin) {
+        await admin
+          .from("studio_conversations")
+          .update({
+            revision: finalRevision,
+            updated_at: new Date().toISOString(),
+          })
+          .eq("id", conversation.id)
+          .eq("owner_id", userId);
+      }
     }
 
     studioLog("message:regenerated", {
@@ -233,7 +260,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
       provider: r.provider,
       latencyMs: r.latencyMs,
       revisionBefore: conversation.revision,
-      revisionAfter: conversation.revision + 1,
+      revisionAfter: finalRevision,
     });
 
     return NextResponse.json({
@@ -243,7 +270,7 @@ async function postHandler(req: NextRequest, routeCtx?: RouteParams) {
         status: "completed" as const,
       },
       originalAssistantMessageId: originalAssistant.id,
-      revision: conversation.revision + 1,
+      revision: finalRevision,
       provider: r.provider,
       model: r.model,
       latencyMs: r.latencyMs,
