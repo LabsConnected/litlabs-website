@@ -160,3 +160,11 @@ dev-output.txt
 eslint-sidebar.txt
 
 .vercel
+
+.vercel
+.env*
+
+# Playwright test artifacts
+test-results/
+tests/playwright/screenshots/
+playwright-report/

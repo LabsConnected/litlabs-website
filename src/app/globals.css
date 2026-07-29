@@ -43,6 +43,27 @@
   --radius-md: 14px;
   --radius-lg: 22px;
   --transition: 180ms ease-out;
+
+  /* ============================================================
+     Command Studio — Phase 1 visual tokens
+     Three visible surface depths, LiTT green primary, Spark purple
+     for creative mode only, neon reserved for execution/success.
+     ============================================================ */
+  --studio-bg: #07080d;
+  --studio-surface: #0d1018;
+  --studio-elevated: #131722;
+  --studio-card: #181d2a;
+  --studio-border: rgba(255, 255, 255, 0.06);
+  --studio-border-strong: rgba(255, 255, 255, 0.1);
+  --litt-primary: #72f238;
+  --litt-primary-strong: #42ff18;
+  --spark-primary: #a970ff;
+  --text-primary: #f4f5f8;
+  --text-secondary: #a5a8b5;
+  --text-muted: #6f7485;
+  --studio-header-h: 46px;
+  --studio-nav-w: 64px;
+  --studio-composer-max-w: 960px;
 }
 
 @theme inline {

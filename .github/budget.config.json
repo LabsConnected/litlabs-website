@@ -1,0 +1,26 @@
+[
+  {
+    "path": "/",
+    "timings": [
+      { "metric": "largest-contentful-paint", "budget": 8000 },
+      { "metric": "first-contentful-paint", "budget": 4000 },
+      { "metric": "cumulative-layout-shift", "budget": 0.15 }
+    ],
+    "resourceCounts": [
+      { "resourceType": "script", "budget": 30 },
+      { "resourceType": "stylesheet", "budget": 10 }
+    ]
+  },
+  {
+    "path": "/studio",
+    "timings": [
+      { "metric": "largest-contentful-paint", "budget": 8000 },
+      { "metric": "first-contentful-paint", "budget": 4000 },
+      { "metric": "cumulative-layout-shift", "budget": 0.15 }
+    ],
+    "resourceCounts": [
+      { "resourceType": "script", "budget": 30 },
+      { "resourceType": "stylesheet", "budget": 10 }
+    ]
+  }
+]

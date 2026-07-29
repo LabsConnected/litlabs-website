@@ -47,34 +47,11 @@ export const AGENT_META: Record<AgentId, AgentMeta> = {
 
 interface StudioAgentStore {
   activeAgentId: AgentId;
-  threads: Record<AgentId, ChatMessage[]>;
   setActiveAgent: (id: AgentId) => void;
-  setMessages: (
-    agentId: AgentId,
-    updater: ChatMessage[] | ((prev: ChatMessage[]) => ChatMessage[]),
-  ) => void;
-  clearThread: (agentId: AgentId) => void;
 }
 
 export const useStudioAgentStore = create<StudioAgentStore>((set) => ({
   activeAgentId: "litt",
-  threads: { litt: [], spark: [] },
 
   setActiveAgent: (activeAgentId) => set({ activeAgentId }),
-
-  setMessages: (agentId, updater) =>
-    set((state) => ({
-      threads: {
-        ...state.threads,
-        [agentId]:
-          typeof updater === "function"
-            ? (updater as (prev: ChatMessage[]) => ChatMessage[])(state.threads[agentId] ?? [])
-            : updater,
-      },
-    })),
-
-  clearThread: (agentId) =>
-    set((state) => ({
-      threads: { ...state.threads, [agentId]: [] },
-    })),
 }));

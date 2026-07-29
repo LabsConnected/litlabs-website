@@ -2,7 +2,8 @@
 
 import { useEffect, useCallback, useState, useMemo } from "react";
 import { useCanvasStore, executeAction } from "../../stores/useCanvasStore";
-import { useStudioAgentStore, AGENT_META } from "../../stores/useStudioAgentStore";
+import { useStudioAgentStore, AGENT_META, type ChatMessage } from "../../stores/useStudioAgentStore";
+import { useConversationStore } from "../../stores/useConversationStore";
 import { BlockRenderer } from "./BlockRenderer";
 import { RevisionHistory } from "./RevisionHistory";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,6 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
     appendBlocks,
     updateBlock: updateBlockStore,
     removeBlock: removeBlockStore,
-    removeCanvas,
     setLoading,
     setError,
   } = useCanvasStore();
@@ -46,16 +46,11 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
   const [showPromoteConfirm, setShowPromoteConfirm] = useState(false);
 
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
-  const threads = useStudioAgentStore((s) => s.threads);
+  const canonicalMessages = useConversationStore((s) => s.messagesByConversationId[s.selectedConversationId ?? ""] ?? []);
   const chatMessages = useMemo(
-    () => threads[activeAgentId] ?? [],
-    [threads, activeAgentId],
+    () => canonicalMessages.map((m) => ({ role: m.role as "user" | "assistant", content: m.content, createdAt: new Date(m.createdAt).getTime() || Date.now() }) as ChatMessage),
+    [canonicalMessages],
   );
-
-  // ─── Load canvases on mount ─────────────────────────────────
-  useEffect(() => {
-    void loadCanvases();
-  }, []);
 
   const loadCanvases = useCallback(async () => {
     setLoading(true);
@@ -72,13 +67,6 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
     }
   }, [setLoading, setError]);
 
-  // ─── Load blocks when active canvas changes ─────────────────
-  useEffect(() => {
-    if (!activeCanvasId) return;
-    if (blocks[activeCanvasId]) return; // already loaded
-    void loadBlocks(activeCanvasId);
-  }, [activeCanvasId, blocks]);
-
   const loadBlocks = useCallback(async (canvasId: string) => {
     try {
       const res = await fetch(`/api/canvases/${canvasId}`);
@@ -90,6 +78,18 @@ export function CanvasPanel({ pendingAction, onActionExecuted }: CanvasPanelProp
       setError(err instanceof Error ? err.message : "Failed to load blocks");
     }
   }, [upsertCanvas, setBlocks, setError]);
+
+  // ─── Load canvases on mount ─────────────────────────────────
+  useEffect(() => {
+    void loadCanvases();
+  }, [loadCanvases]);
+
+  // ─── Load blocks when active canvas changes ─────────────────
+  useEffect(() => {
+    if (!activeCanvasId) return;
+    if (blocks[activeCanvasId]) return; // already loaded
+    void loadBlocks(activeCanvasId);
+  }, [activeCanvasId, blocks, loadBlocks]);
 
   // ─── Execute pending action from chat ───────────────────────
   useEffect(() => {
