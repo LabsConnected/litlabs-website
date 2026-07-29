@@ -23,6 +23,9 @@ export interface ConnectionCapabilities {
   repository: string;
   repositoryName: string | null;
   repositoryIndexed: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  defaultBranch: string | null;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
   writeAccess: boolean;
   connectedProviders: string[];
@@ -43,6 +46,9 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   repository: "none",
   repositoryName: null,
   repositoryIndexed: false,
+  projectId: null,
+  projectName: null,
+  defaultBranch: null,
   terminalExecution: "unavailable",
   writeAccess: false,
   connectedProviders: [],
@@ -88,6 +94,9 @@ export function useConnectionSummary() {
         next.repository = repoCap?.status === "ready" ? "connected" : "none";
         next.repositoryName = repoCap?.accountName ?? null;
         next.repositoryIndexed = repoCap?.status === "ready";
+        next.projectId = repoCap?.projectId ?? null;
+        next.projectName = repoCap?.projectName ?? null;
+        next.defaultBranch = repoCap?.defaultBranch ?? null;
         next.connectedProviders = caps
           .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
           .map((c: { id: string }) => c.id);

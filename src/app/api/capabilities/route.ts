@@ -23,6 +23,9 @@ async function handler() {
   // Check GitHub installation status from the database
   let repoStatus: CapabilityStatus = "not_configured";
   let repoAccountName: string | undefined;
+  let projectId: string | undefined;
+  let projectName: string | undefined;
+  let defaultBranch: string | undefined;
   if (userId) {
     try {
       const { data: installations } = await supabaseAdmin
@@ -36,7 +39,7 @@ async function handler() {
         // so that is the source of truth here — not integration_projects.
         const { data: projects } = await supabaseAdmin
           .from("projects")
-          .select("id, repository_full_name, connection_status")
+          .select("id, name, repository_full_name, default_branch, connection_status")
           .eq("user_id", userId)
           .order("updated_at", { ascending: false })
           .limit(1);
@@ -44,6 +47,9 @@ async function handler() {
         if (projects && projects.length > 0) {
           repoStatus = "ready";
           repoAccountName = projects[0].repository_full_name;
+          projectId = projects[0].id;
+          projectName = projects[0].name;
+          defaultBranch = projects[0].default_branch ?? undefined;
         } else {
           // GitHub installed but no repository selected
           repoStatus = "unavailable";
@@ -59,6 +65,9 @@ async function handler() {
     name: "Repository",
     status: repoStatus,
     accountName: repoAccountName,
+    projectId,
+    projectName,
+    defaultBranch,
     lastVerifiedAt: new Date().toISOString(),
   });
 

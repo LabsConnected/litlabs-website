@@ -22,6 +22,8 @@ import {
   AGENT_META,
   type AgentId,
 } from "../stores/useStudioAgentStore";
+import { useStudioModelStore } from "../stores/useStudioModelStore";
+import { ChevronDown } from "lucide-react";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -64,6 +66,7 @@ export default function CommandComposer({
   const activeAgentId = useStudioAgentStore((s) => s.activeAgentId);
   const setActiveAgent = useStudioAgentStore((s) => s.setActiveAgent);
   const agentMeta = AGENT_META[activeAgentId];
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
 
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
@@ -329,19 +332,19 @@ export default function CommandComposer({
             document.body,
           )}
 
-        {/* Mode label — Phase 1.1 shows only "Auto" until Ask/Plan/Build/Create
-            affect behavior. No dropdown is rendered to avoid implying
-            functionality that does not exist. */}
+        {/* Model picker label — shows the currently selected model */}
         <span
-          className="flex h-10 shrink-0 items-center rounded-xl border px-2.5 text-[11px] font-bold"
+          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: "var(--text-secondary)",
           }}
-          title="Auto — LiTT picks the best approach. Additional modes arrive in Phase 2."
+          title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
         >
-          <span className="hidden sm:inline">Auto</span>
-          <span className="sm:hidden">A</span>
+          <span>{selectedModel.icon}</span>
+          <span className="hidden sm:inline">{selectedModel.label}</span>
+          <span className="sm:hidden">{selectedModel.label.split(" ")[0]}</span>
+          <ChevronDown size={10} className="pointer-events-none opacity-50" />
         </span>
 
         {/* Text input — min 14px font */}

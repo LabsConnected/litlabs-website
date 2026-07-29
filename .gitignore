@@ -168,3 +168,6 @@ eslint-sidebar.txt
 test-results/
 tests/playwright/screenshots/
 playwright-report/
+
+.vercel
+.env*

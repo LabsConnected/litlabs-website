@@ -23,7 +23,10 @@ export default function ChatTool({
   const { capabilities } = useConnectionSummary();
   const selectedModel = useStudioModelStore((s) => s.selectedModel);
 
-  const conversation = useCanonicalConversation({ onRouteTool });
+  const conversation = useCanonicalConversation({
+    onRouteTool,
+    serverProjectId: capabilities.projectId,
+  });
 
   const send = async (value: string, attachments?: string[]): Promise<string> => {
     const result = await conversation.send(value, attachments);
@@ -56,6 +59,8 @@ export default function ChatTool({
       onDeleteSession={conversation.deleteSession}
       onDeleteAllSessions={conversation.deleteAllSessions}
       capabilities={capabilities}
+      sendError={conversation.sendError}
+      onClearSendError={conversation.clearSendError}
     />
   );
 }

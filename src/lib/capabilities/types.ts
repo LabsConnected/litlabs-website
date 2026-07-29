@@ -16,6 +16,9 @@ export interface Capability {
   error?: string;
   provider?: string;
   accountName?: string;
+  projectId?: string;
+  projectName?: string;
+  defaultBranch?: string;
   lastVerifiedAt?: string;
 }
 

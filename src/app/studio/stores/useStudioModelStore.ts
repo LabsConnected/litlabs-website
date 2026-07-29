@@ -35,6 +35,20 @@ export const RECOMMENDED_IDS = CHAT_MODELS.filter((m) => m.recommended).map((m) 
 
 const DEFAULT_MODEL = MODELS[0];
 
+function getInitialModel(): SelectedModel {
+  if (typeof window === "undefined") return DEFAULT_MODEL;
+  try {
+    const savedId = localStorage.getItem("litt-selected-model-v2");
+    if (savedId) {
+      const found = MODELS.find((m) => m.id === savedId);
+      if (found) return found;
+    }
+  } catch {
+    // ignore
+  }
+  return DEFAULT_MODEL;
+}
+
 function toSelectedModel(m: StudioModel): SelectedModel {
   return {
     id: m.id,
@@ -61,7 +75,7 @@ interface StudioModelStore {
 }
 
 export const useStudioModelStore = create<StudioModelStore>((set) => ({
-  selectedModel: DEFAULT_MODEL,
+  selectedModel: getInitialModel(),
   providerHealth: {},
   fallbackNotice: null,
 

@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   Camera,
   Mic,
@@ -20,6 +21,8 @@ import {
   X,
   Upload,
   Sparkles,
+  ChevronDown,
+  Check,
 } from "lucide-react";
 import {
   useVoiceSession,
@@ -27,6 +30,7 @@ import {
 } from "@/app/studio/context/VoiceSessionContext";
 import type { StudioTool } from "./StudioSidebar";
 import { AGENT_META, type AgentId } from "../stores/useStudioAgentStore";
+import { useStudioModelStore, MODELS, type SelectedModel } from "../stores/useStudioModelStore";
 
 interface MultimodalComposerProps {
   value: string;
@@ -98,7 +102,7 @@ export default function MultimodalComposer({
   onChange,
   onSend,
   busy,
-  modelName = "Gemini 2.5 Flash",
+  modelName: _modelName = "Gemini 2.5 Flash",
   onRouteTool,
   onToggleCamera,
   cameraActive = false,
@@ -107,6 +111,13 @@ export default function MultimodalComposer({
   const agentMeta = AGENT_META[activeAgentId];
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAdd, setShowAdd] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
+  const [modelRect, setModelRect] = useState<DOMRect | null>(null);
+
+  const selectedModel = useStudioModelStore((s) => s.selectedModel);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
+  const providerHealth = useStudioModelStore((s) => s.providerHealth);
   const [createMode, setCreateMode] = useState<"image" | "video" | null>(null);
   const [createPrompt, setCreatePrompt] = useState("");
   const [createAspect, setCreateAspect] = useState("16:9");
@@ -131,6 +142,28 @@ export default function MultimodalComposer({
       if (mobile) document.documentElement.style.overflow = previousOverflow;
     };
   }, [showAdd]);
+
+  // Position model popover on open.
+  useEffect(() => {
+    if (!modelOpen) return;
+    if (modelTriggerRef.current) setModelRect(modelTriggerRef.current.getBoundingClientRect());
+    const update = () => modelTriggerRef.current && setModelRect(modelTriggerRef.current.getBoundingClientRect());
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [modelOpen]);
+
+  // Persist selected model to localStorage.
+  useEffect(() => {
+    try {
+      localStorage.setItem("litt-selected-model-v2", selectedModel.id);
+    } catch {
+      // ignore
+    }
+  }, [selectedModel.id]);
 
   const {
     voiceState,
@@ -632,8 +665,167 @@ export default function MultimodalComposer({
       </div>
 
       <div className="flex items-center justify-end px-1 text-[9px] text-white/60">
-        <span className="font-bold text-cyan-200/60">{modelName}</span>
+        <button
+          ref={modelTriggerRef}
+          type="button"
+          onClick={() => setModelOpen((v) => !v)}
+          className="flex items-center gap-1 rounded-md px-1.5 py-0.5 font-bold text-cyan-200/70 transition hover:bg-white/5 hover:text-cyan-200"
+          aria-label="Select model"
+          aria-expanded={modelOpen}
+        >
+          <span>{selectedModel.icon}</span>
+          <span className="hidden sm:inline">{selectedModel.label}</span>
+          <span className="sm:hidden">{selectedModel.label.split(" ")[0]}</span>
+          <ChevronDown size={10} className={`pointer-events-none transition ${modelOpen ? "rotate-180" : ""}`} />
+        </button>
+        {modelOpen && modelRect &&
+          createPortal(
+            <ModelPopover
+              rect={modelRect}
+              selectedId={selectedModel.id}
+              providerHealth={providerHealth}
+              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
+              onClose={() => setModelOpen(false)}
+            />,
+            document.body,
+          )}
       </div>
+    </div>
+  );
+}
+
+/* ── Model picker popover ─────────────────────────────────────── */
+
+const CATEGORY_LABELS: Record<string, string> = {
+  auto: "Auto Best",
+  free: "Free Models",
+  fast: "Fast Models",
+  code: "Code Models",
+  creative: "Creative Models",
+  vision: "Vision Models",
+  byok: "BYOK Models",
+};
+
+const CATEGORY_ORDER = ["auto", "free", "fast", "code", "creative", "vision", "byok"];
+
+const SPEED_LABELS: Record<string, string> = {
+  fast: "⚡ Fast",
+  medium: "◐ Medium",
+  slow: "◑ Slow",
+};
+
+const COST_LABELS: Record<string, string> = {
+  free: "FREE",
+  paid: "PAID",
+  hybrid: "AUTO",
+};
+
+function ModelPopover({
+  rect,
+  selectedId,
+  providerHealth,
+  onSelect,
+  onClose,
+}: {
+  rect: DOMRect;
+  selectedId: string;
+  providerHealth: Record<string, string>;
+  onSelect: (m: SelectedModel) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const left = Math.min(rect.left, window.innerWidth - 280);
+  const top = rect.bottom + 6;
+
+  const grouped: Record<string, SelectedModel[]> = {};
+  for (const m of MODELS) {
+    const cat = m.category ?? "free";
+    if (!grouped[cat]) grouped[cat] = [];
+    grouped[cat].push(m);
+  }
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Select model"
+      className="fixed z-[200] max-h-[60dvh] w-72 overflow-y-auto rounded-xl border shadow-2xl"
+      style={{
+        left,
+        top,
+        backgroundColor: "#0a0b12",
+        borderColor: "rgba(255,255,255,0.12)",
+      }}
+    >
+      <div
+        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        style={{
+          color: "rgba(255,255,255,0.7)",
+          borderBottom: "1px solid rgba(255,255,255,0.06)",
+          backgroundColor: "#0a0b12",
+        }}
+      >
+        Model
+      </div>
+      {CATEGORY_ORDER.filter((cat) => grouped[cat]?.length).map((cat) => (
+        <div key={cat}>
+          <div
+            className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider"
+            style={{ color: "rgba(255,255,255,0.4)" }}
+          >
+            {CATEGORY_LABELS[cat] ?? cat}
+          </div>
+          {grouped[cat].map((m) => {
+            const isActive = selectedId === m.id;
+            const health = providerHealth[m.provider];
+            const isLocked = health === "locked" || health === "unavailable";
+            return (
+              <button
+                key={m.id}
+                type="button"
+                onClick={() => onSelect(m)}
+                disabled={isLocked}
+                className="flex w-full items-center gap-2.5 px-3 py-2 text-left transition hover:bg-white/5 disabled:cursor-not-allowed disabled:opacity-40"
+                style={{ backgroundColor: isActive ? "rgba(34,211,238,0.08)" : "transparent" }}
+              >
+                <span className="shrink-0 text-base">{m.icon}</span>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-1.5">
+                    <span className="truncate text-[11px] font-bold text-white">{m.name}</span>
+                    {isActive && <Check size={11} className="shrink-0 text-cyan-300" />}
+                  </div>
+                  <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "rgba(255,255,255,0.4)" }}>
+                    <span>{m.provider}</span>
+                    <span>·</span>
+                    <span>{SPEED_LABELS[m.speed] ?? m.speed}</span>
+                    <span>·</span>
+                    <span
+                      style={{
+                        color: m.cost === "free" ? "#22d3ee" : m.cost === "paid" ? "#f59e0b" : "#a78bfa",
+                        fontWeight: 700,
+                      }}
+                    >
+                      {COST_LABELS[m.cost] ?? m.cost}
+                    </span>
+                    {isLocked && <span style={{ color: "#ef4444" }}>· locked</span>}
+                  </div>
+                </div>
+              </button>
+            );
+          })}
+        </div>
+      ))}
     </div>
   );
 }

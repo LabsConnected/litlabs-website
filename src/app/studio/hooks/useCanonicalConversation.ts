@@ -31,9 +31,11 @@ export interface SendResult {
 
 const ACTIVE_PROJECT_KEY = "litt:active-project-id";
 
-function getActiveProjectId(): string | null {
-  if (typeof window === "undefined") return null;
-  return localStorage.getItem(ACTIVE_PROJECT_KEY);
+function getActiveProjectId(serverProjectId?: string | null): string | null {
+  if (typeof window === "undefined") return serverProjectId ?? null;
+  // Server-resolved project ID is authoritative.
+  // localStorage is only a fallback cache.
+  return serverProjectId ?? localStorage.getItem(ACTIVE_PROJECT_KEY) ?? null;
 }
 
 function generateClientRequestId(): string {
@@ -66,10 +68,13 @@ function toUIMessage(
  */
 export function useCanonicalConversation({
   onRouteTool,
+  serverProjectId,
 }: {
   onRouteTool?: (tool: StudioTool, command?: string) => void;
+  serverProjectId?: string | null;
 } = {}) {
   const [busy, setBusy] = useState(false);
+  const [sendError, setSendError] = useState<string | null>(null);
   const sessionManager = useBuilderSessions();
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
@@ -115,7 +120,7 @@ export function useCanonicalConversation({
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
-    const projectId = getActiveProjectId();
+    const projectId = getActiveProjectId(serverProjectId);
     if (!projectId) return;
 
     store.setLoading(true);
@@ -145,12 +150,15 @@ export function useCanonicalConversation({
     } finally {
       store.setLoading(false);
     }
-  }, [searchParams, store, setActiveAgentId, loadMessages]);
+  }, [searchParams, store, setActiveAgentId, loadMessages, serverProjectId]);
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
-    const projectId = getActiveProjectId();
-    if (!projectId) return null;
+    const projectId = getActiveProjectId(serverProjectId);
+    if (!projectId) {
+      setSendError("LiTT couldn't start this conversation because no active project was resolved.");
+      return null;
+    }
 
     try {
       const res = await fetch("/api/studio/conversations", {
@@ -161,7 +169,10 @@ export function useCanonicalConversation({
           activeAgentSlug: activeAgentId,
         }),
       });
-      if (!res.ok) return null;
+      if (!res.ok) {
+        setSendError(`Failed to create conversation (${res.status}).`);
+        return null;
+      }
       const data = await res.json();
       const conversation = data.conversation as Conversation;
       store.setConversations([conversation, ...store.conversations]);
@@ -170,9 +181,10 @@ export function useCanonicalConversation({
       store.setRevision(1);
       return conversation;
     } catch {
+      setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [store, activeAgentId]);
+  }, [store, activeAgentId, serverProjectId]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
@@ -293,6 +305,9 @@ export function useCanonicalConversation({
         if (!conv) return { accepted: false };
         conversationId = conv.id;
       }
+
+      // Clear any previous send error
+      setSendError(null);
 
       // 4. Real LLM call through canonical API
       const clientRequestId = generateClientRequestId();
@@ -521,6 +536,8 @@ export function useCanonicalConversation({
     selectedConversationId: store.selectedConversationId,
     conversations: store.conversations,
     loading: store.loading,
+    sendError,
+    clearSendError: () => setSendError(null),
   };
 }
 

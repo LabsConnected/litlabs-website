@@ -68,6 +68,8 @@ interface ChatShellProps {
   onDeleteAllSessions: () => void;
   fallbackNotice?: string | null;
   capabilities?: ConnectionCapabilities;
+  sendError?: string | null;
+  onClearSendError?: () => void;
 }
 
 function CopyButton({ text }: { text: string }) {
@@ -154,6 +156,8 @@ export default function ChatShell({
   onDeleteAllSessions,
   fallbackNotice,
   capabilities: _capabilities,
+  sendError,
+  onClearSendError,
 }: ChatShellProps) {
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
@@ -480,6 +484,42 @@ export default function ChatShell({
           </div>
         )}
       </header>
+
+      {/* Send error banner — visible when conversation creation or send fails */}
+      {sendError && (
+        <div
+          className="relative z-10 flex flex-col gap-2 border-b px-3 py-2.5"
+          style={{ backgroundColor: "rgba(239,68,68,0.08)", borderColor: "rgba(239,68,68,0.2)" }}
+        >
+          <div className="flex items-start gap-2">
+            <span className="mt-0.5 h-2 w-2 shrink-0 rounded-full bg-red-400" />
+            <span className="text-[11px] font-bold text-red-300">{sendError}</span>
+            <button
+              type="button"
+              onClick={onClearSendError}
+              className="ml-auto shrink-0 text-[10px] text-white/40 hover:text-white/70"
+              aria-label="Dismiss error"
+            >
+              ✕
+            </button>
+          </div>
+          <div className="flex items-center gap-2">
+            <a
+              href="/api/github/install"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[9px] font-bold text-white/80 transition-colors hover:bg-white/10"
+            >
+              Choose Project
+            </a>
+            <button
+              type="button"
+              onClick={() => { onRouteTool?.("code"); onClearSendError?.(); }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-2.5 py-1 text-[9px] font-bold text-white/80 transition-colors hover:bg-white/10"
+            >
+              Start Blank Project
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Transcript */}
       <main
