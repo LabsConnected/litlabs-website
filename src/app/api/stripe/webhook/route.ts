@@ -47,42 +47,23 @@ async function creditCoinPack(
     if (!user) {
       return;
     }
-    // Try credit_ledger first (new system)
-    try {
-      await sb.rpc("grant_credits", {
-        p_user_id: user.id,
-        p_amount: coinAmount,
-        p_category: "purchase",
-        p_balance_bucket: "purchased",
-        p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-        p_idempotency_key: `coinpack_${sessionId}`,
-        p_reference_type: "stripe_checkout",
-        p_reference_id: sessionId,
-      });
-      return;
-    } catch {
-      // Ledger not available — fall through to legacy wallet update
-    }
-    const { data: wallet } = await sb
-      .from("wallets")
-      .select("balance")
-      .eq("user_id", user.id)
-      .single();
-    const currentBalance = wallet?.balance || 0;
-    const newBalance = currentBalance + coinAmount;
-    await sb
-      .from("wallets")
-      .update({ balance: newBalance, updated_at: new Date().toISOString() })
-      .eq("user_id", user.id);
-    await sb.from("transactions").insert({
-      user_id: user.id,
-      type: "purchase",
-      amount: coinAmount,
-      balance_after: newBalance,
-      description: `Purchased ${coinAmount} LiTTBits via Stripe`,
-      metadata: { stripe_session_id: sessionId, idempotency_key: `coinpack_${sessionId}` },
+    // Use credit_ledger (atomic, idempotent). No legacy fallback —
+    // the non-atomic read-then-write on wallets was a race condition.
+    const { error } = await sb.rpc("grant_credits", {
+      p_user_id: user.id,
+      p_amount: coinAmount,
+      p_category: "purchase",
+      p_balance_bucket: "purchased",
+      p_description: `Purchased ${coinAmount} LiTTBits via Stripe`,
+      p_idempotency_key: `coinpack_${sessionId}`,
+      p_reference_type: "stripe_checkout",
+      p_reference_id: sessionId,
     });
-  } catch (_err) {
+    if (error) {
+      console.error(`[stripe] credit_ledger grant failed for coinpack ${sessionId}: ${error.message}`);
+    }
+  } catch (err) {
+    console.error(`[stripe] creditCoinPack error for session ${sessionId}:`, err instanceof Error ? err.message : String(err));
   }
 }
 
