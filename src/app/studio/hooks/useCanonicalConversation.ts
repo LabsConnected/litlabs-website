@@ -84,7 +84,24 @@ export function useCanonicalConversation({
   const fallbackNotice = useStudioModelStore((s) => s.fallbackNotice);
   const setFallbackNotice = useStudioModelStore((s) => s.setFallbackNotice);
 
-  const store = useConversationStore();
+  // Reactive state slices for render — using selectors avoids the whole-state
+  // subscription that caused infinite re-render loops (every set() created a new
+  // state object, which changed every useCallback identity, which re-ran effects).
+  const selectedConversationId = useConversationStore((s) => s.selectedConversationId);
+  const conversations = useConversationStore((s) => s.conversations);
+  const loadingState = useConversationStore((s) => s.loading);
+
+  // Stable accessor — getState() always returns the latest snapshot and the
+  // action functions are stable references defined once in create().
+  const getStore = useConversationStore.getState;
+  const store = useMemo(
+    () =>
+      new Proxy({} as ReturnType<typeof useConversationStore.getState>, {
+        get: (_target, property) => getStore()[property as keyof ReturnType<typeof getStore>],
+      }),
+    [getStore],
+  );
+
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
@@ -116,19 +133,21 @@ export function useCanonicalConversation({
       const data = await res.json();
       const msgs = (data.messages || []) as ConversationMessage[];
       const chatMsgs = msgs.map(toCanonicalChatMessage);
-      store.setMessages(conversationId, chatMsgs);
-      store.setRevision(data.revision ?? 1);
+      const s = getStore();
+      s.setMessages(conversationId, chatMsgs);
+      s.setRevision(data.revision ?? 1);
     } catch {
       // Non-fatal
     }
-  }, [store]);
+  }, [getStore]);
 
   // Load conversations from server on mount
   const loadConversations = useCallback(async () => {
     const projectId = getActiveProjectId(serverProjectId);
     if (!projectId) return;
 
-    store.setLoading(true);
+    const s = getStore();
+    s.setLoading(true);
     try {
       const res = await fetch(`/api/studio/conversations?projectId=${encodeURIComponent(projectId)}`, {
         cache: "no-store",
@@ -136,26 +155,26 @@ export function useCanonicalConversation({
       if (!res.ok) return;
       const data = await res.json();
       const conversations = (data.conversations || []) as Conversation[];
-      store.setConversations(conversations);
+      s.setConversations(conversations);
 
       const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
       if (conversationId && conversations.some((c) => c.id === conversationId)) {
-        store.selectConversation(conversationId);
+        s.selectConversation(conversationId);
         if (agentSlug) {
-          store.setActiveAgent(agentSlug);
+          s.setActiveAgent(agentSlug);
           setActiveAgentId(agentSlug);
         }
         await loadMessages(conversationId);
       } else if (conversations.length > 0) {
-        store.selectConversation(conversations[0].id);
+        s.selectConversation(conversations[0].id);
         await loadMessages(conversations[0].id);
       }
     } catch {
       // Non-fatal — offline or server unavailable
     } finally {
-      store.setLoading(false);
+      getStore().setLoading(false);
     }
-  }, [searchParams, store, setActiveAgentId, loadMessages, serverProjectId]);
+  }, [searchParams, getStore, setActiveAgentId, loadMessages, serverProjectId]);
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
@@ -207,46 +226,52 @@ export function useCanonicalConversation({
       }
       const data = await res.json();
       const conversation = data.conversation as Conversation;
-      store.setConversations([conversation, ...store.conversations]);
-      store.selectConversation(conversation.id);
-      store.setMessages(conversation.id, []);
-      store.setRevision(1);
+      const s = getStore();
+      s.setConversations([conversation, ...s.conversations]);
+      s.selectConversation(conversation.id);
+      s.setMessages(conversation.id, []);
+      s.setRevision(1);
       return conversation;
     } catch {
       setSendError("Network error while creating conversation.");
       return null;
     }
-  }, [store, activeAgentId, serverProjectId]);
+  }, [getStore, activeAgentId, serverProjectId]);
 
   // Sync URL when conversation or agent changes
   const syncUrl = useCallback(() => {
     if (isSyncingFromUrl.current) return;
     const params = serializeConversationToUrl(
-      store.selectedConversationId,
+      selectedConversationId,
       activeAgentId as AgentSlug,
       searchParams,
     );
-    router.replace(`${pathname}${params.toString() ? `?${params.toString()}` : ""}`, { scroll: false });
-  }, [store.selectedConversationId, activeAgentId, searchParams, router, pathname]);
+    const target = `${pathname}${params.toString() ? `?${params.toString()}` : ""}`;
+    // Avoid router.replace loop — only replace if the URL actually changes
+    if (target !== `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`) {
+      router.replace(target, { scroll: false });
+    }
+  }, [selectedConversationId, activeAgentId, searchParams, router, pathname]);
 
   // Sync from URL on mount and browser navigation
   useEffect(() => {
     isSyncingFromUrl.current = true;
+    const s = getStore();
     const { conversationId, agentSlug } = parseConversationFromUrl(searchParams);
-    if (conversationId !== store.selectedConversationId) {
-      if (conversationId && store.conversations.some((c) => c.id === conversationId)) {
-        store.selectConversation(conversationId);
+    if (conversationId !== s.selectedConversationId) {
+      if (conversationId && s.conversations.some((c) => c.id === conversationId)) {
+        s.selectConversation(conversationId);
         void loadMessages(conversationId);
-      } else if (!conversationId && store.selectedConversationId) {
-        store.selectConversation(null);
+      } else if (!conversationId && s.selectedConversationId) {
+        s.selectConversation(null);
       }
     }
     if (agentSlug && agentSlug !== activeAgentId) {
-      store.setActiveAgent(agentSlug);
+      s.setActiveAgent(agentSlug);
       setActiveAgentId(agentSlug);
     }
     isSyncingFromUrl.current = false;
-  }, [searchParams, store, loadMessages, activeAgentId, setActiveAgentId]);
+  }, [searchParams, getStore, loadMessages, activeAgentId, setActiveAgentId]);
 
   // Sync URL when state changes
   useEffect(() => {
@@ -267,9 +292,10 @@ export function useCanonicalConversation({
       // 1. Slash commands — local, no server call
       const localCommand = parseBuilderLocalCommand(text);
       if (localCommand) {
+        const s = getStore();
         switch (localCommand.type) {
           case "clear":
-            store.setMessages(store.selectedConversationId ?? "", []);
+            s.setMessages(s.selectedConversationId ?? "", []);
             return { accepted: true };
           case "new":
             void createConversation();
@@ -280,13 +306,13 @@ export function useCanonicalConversation({
           case "sessions":
             return { accepted: true };
           case "delete": {
-            const convId = store.selectedConversationId;
-            const conv = store.getSelectedConversation();
+            const convId = s.selectedConversationId;
+            const conv = s.getSelectedConversation();
             if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
               try {
                 await fetch(`/api/studio/conversations/${convId}`, { method: "DELETE" });
-                store.setConversations(store.conversations.filter((c) => c.id !== convId));
-                store.selectConversation(null);
+                s.setConversations(s.conversations.filter((c) => c.id !== convId));
+                s.selectConversation(null);
               } catch {
                 // Non-fatal
               }
@@ -294,15 +320,15 @@ export function useCanonicalConversation({
             return { accepted: true };
           }
           case "rename": {
-            const convId = store.selectedConversationId;
+            const convId = s.selectedConversationId;
             if (localCommand.title && convId) {
               try {
                 await fetch(`/api/studio/conversations/${convId}`, {
                   method: "PATCH",
                   headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ expectedRevision: store.revision, patch: { title: localCommand.title } }),
+                  body: JSON.stringify({ expectedRevision: s.revision, patch: { title: localCommand.title } }),
                 });
-                store.setConversations(store.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
+                s.setConversations(s.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
               } catch {
                 // Non-fatal
               }
@@ -320,9 +346,10 @@ export function useCanonicalConversation({
       const intent = detectIntent(text);
       if (intent && intent.intent !== "generate_code" && intent.intent !== "chat" && intent.intent !== "unknown") {
         const intentMessage = buildIntentResponseMessage(intent);
-        const convId = store.selectedConversationId ?? "";
+        const s = getStore();
+        const convId = s.selectedConversationId ?? "";
         if (convId) {
-          store.addMessage(convId, {
+          s.addMessage(convId, {
             id: `local_user_${Date.now()}`,
             role: "user",
             content: text,
@@ -332,7 +359,7 @@ export function useCanonicalConversation({
             parentMessageId: null,
             regenerationOfMessageId: null,
           });
-          store.addMessage(convId, {
+          s.addMessage(convId, {
             id: `local_assistant_${Date.now()}`,
             role: "assistant",
             content: intentMessage,
@@ -351,7 +378,7 @@ export function useCanonicalConversation({
       }
 
       // 3. Ensure we have a conversation
-      let conversationId = store.selectedConversationId;
+      let conversationId = getStore().selectedConversationId;
       if (!conversationId) {
         const conv = await createConversation();
         if (!conv) return { accepted: false };
@@ -363,11 +390,12 @@ export function useCanonicalConversation({
 
       // 4. Real LLM call through canonical API
       const clientRequestId = generateClientRequestId();
-      const expectedRevision = store.revision;
+      const s = getStore();
+      const expectedRevision = s.revision;
 
       // Optimistic: add user message to UI
       const optimisticUserId = `optimistic_${clientRequestId}`;
-      store.addMessage(conversationId, {
+      s.addMessage(conversationId, {
         id: optimisticUserId,
         role: "user",
         content: text,
@@ -380,7 +408,7 @@ export function useCanonicalConversation({
 
       // Optimistic: add pending assistant message
       const optimisticAssistantId = `optimistic_assistant_${clientRequestId}`;
-      store.addMessage(conversationId, {
+      s.addMessage(conversationId, {
         id: optimisticAssistantId,
         role: "assistant",
         content: "",
@@ -423,7 +451,7 @@ export function useCanonicalConversation({
         }
 
         if (!response.ok) {
-          store.updateMessage(conversationId, optimisticAssistantId, {
+          getStore().updateMessage(conversationId, optimisticAssistantId, {
             status: "failed",
             content: data.error || "Failed to get response",
           });
@@ -432,8 +460,9 @@ export function useCanonicalConversation({
 
         // Check for duplicate (idempotent response)
         if (data.duplicate) {
+          const s2 = getStore();
           const userMsg = data.userMessage as ConversationMessage;
-          store.updateMessage(conversationId, optimisticUserId, {
+          s2.updateMessage(conversationId, optimisticUserId, {
             id: userMsg.id,
             content: userMsg.content,
             createdAt: userMsg.createdAt,
@@ -441,21 +470,21 @@ export function useCanonicalConversation({
 
           if (data.assistantMessage) {
             const assistantMsg = data.assistantMessage as ConversationMessage;
-            store.updateMessage(conversationId, optimisticAssistantId, {
+            s2.updateMessage(conversationId, optimisticAssistantId, {
               id: assistantMsg.id,
               content: assistantMsg.content,
               status: "completed",
               createdAt: assistantMsg.createdAt,
             });
-            store.setRevision(data.revision ?? expectedRevision);
+            s2.setRevision(data.revision ?? expectedRevision);
             return { accepted: true, reply: assistantMsg.content };
           } else {
             // Still processing — remove optimistic assistant, poll for result
-            store.setMessages(
+            s2.setMessages(
               conversationId,
-              store.getMessages().filter((m) => m.id !== optimisticAssistantId),
+              s2.getMessages().filter((m) => m.id !== optimisticAssistantId),
             );
-            store.setRevision(data.revision ?? expectedRevision);
+            s2.setRevision(data.revision ?? expectedRevision);
             setTimeout(() => void loadMessages(conversationId!), 2000);
             return { accepted: true };
           }
@@ -464,21 +493,22 @@ export function useCanonicalConversation({
         // Normal response — replace optimistic messages with real ones
         const userMsg = data.userMessage as ConversationMessage;
         const assistantMsg = data.assistantMessage as ConversationMessage;
+        const s3 = getStore();
 
-        store.updateMessage(conversationId, optimisticUserId, {
+        s3.updateMessage(conversationId, optimisticUserId, {
           id: userMsg.id,
           content: userMsg.content,
           createdAt: userMsg.createdAt,
         });
 
-        store.updateMessage(conversationId, optimisticAssistantId, {
+        s3.updateMessage(conversationId, optimisticAssistantId, {
           id: assistantMsg.id,
           content: assistantMsg.content,
           status: "completed",
           createdAt: assistantMsg.createdAt,
         });
 
-        store.setRevision(data.revision ?? expectedRevision + 1);
+        s3.setRevision(data.revision ?? expectedRevision + 1);
 
         if (data.usedFallbackModel) {
           setFallbackNotice(`${selectedModel.label} was unavailable. This response used ${data.usedFallbackModel}.`);
@@ -488,7 +518,7 @@ export function useCanonicalConversation({
       } catch (error) {
         const rawMessage = error instanceof Error ? error.message : `${AGENT_META[activeAgentId].displayName} is reconnecting`;
         const reply = sanitizeErrorMessage(rawMessage);
-        store.updateMessage(conversationId!, optimisticAssistantId, {
+        getStore().updateMessage(conversationId!, optimisticAssistantId, {
           status: "failed",
           content: reply,
         });
@@ -497,15 +527,16 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, store, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice],
+    [busy, getStore, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice],
   );
 
   // Regenerate — calls canonical regenerate API
   const regenerate = useCallback(async () => {
-    const conversationId = store.selectedConversationId;
+    const s = getStore();
+    const conversationId = s.selectedConversationId;
     if (!conversationId || busy) return;
 
-    const allMessages = store.getMessages();
+    const allMessages = s.getMessages();
     const lastAssistantIdx = allMessages.findLastIndex((m) => m.role === "assistant" && m.status === "completed");
     if (lastAssistantIdx === -1) return;
     const lastAssistant = allMessages[lastAssistantIdx];
@@ -518,7 +549,7 @@ export function useCanonicalConversation({
         body: JSON.stringify({
           assistantMessageId: lastAssistant.id,
           clientRequestId: generateClientRequestId(),
-          expectedRevision: store.revision,
+          expectedRevision: s.revision,
         }),
       });
 
@@ -532,28 +563,31 @@ export function useCanonicalConversation({
       if (!response.ok) return;
 
       const newMsg = data.assistantMessage as ConversationMessage;
-      store.addMessage(conversationId, toCanonicalChatMessage(newMsg));
-      store.setRevision(data.revision ?? store.revision + 1);
+      const s2 = getStore();
+      s2.addMessage(conversationId, toCanonicalChatMessage(newMsg));
+      s2.setRevision(data.revision ?? s2.revision + 1);
     } catch {
       // Non-fatal
     } finally {
       setBusy(false);
     }
-  }, [busy, store, loadMessages]);
+  }, [busy, getStore, loadMessages]);
 
   // Clear — clears visible transcript
   const clear = useCallback(() => {
-    const convId = store.selectedConversationId;
+    const s = getStore();
+    const convId = s.selectedConversationId;
     if (convId) {
-      store.setMessages(convId, []);
+      s.setMessages(convId, []);
     }
-  }, [store]);
+  }, [getStore]);
 
   // Agent switching — stays within the same conversation
   const switchAgent = useCallback((id: AgentId) => {
     setActiveAgentId(id);
-    store.setActiveAgent(id as AgentSlug);
-    const conversationId = store.selectedConversationId;
+    const s = getStore();
+    s.setActiveAgent(id as AgentSlug);
+    const conversationId = s.selectedConversationId;
     if (conversationId) {
       void (async () => {
         try {
@@ -561,7 +595,7 @@ export function useCanonicalConversation({
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              expectedRevision: store.revision,
+              expectedRevision: s.revision,
               patch: { activeAgentSlug: id },
             }),
           });
@@ -570,7 +604,7 @@ export function useCanonicalConversation({
         }
       })();
     }
-  }, [setActiveAgentId, store]);
+  }, [setActiveAgentId, getStore]);
 
   return {
     messages,
@@ -583,9 +617,9 @@ export function useCanonicalConversation({
     initialPrompt,
     // Canonical conversation management (sessions are server-side conversations)
     switchAgent,
-    selectedConversationId: store.selectedConversationId,
-    conversations: store.conversations,
-    loading: store.loading,
+    selectedConversationId,
+    conversations,
+    loading: loadingState,
     sendError,
     clearSendError: () => setSendError(null),
   };
