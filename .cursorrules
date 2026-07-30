@@ -5,7 +5,7 @@
 [ENVIRONMENT]
 - PLATFORM: Windows 11 (native, NOT WSL2). cmd.exe shell.
 - SHELL: PowerShell via the VS Code integrated terminal (not cmd.exe or WSL).
-- WORKSPACE_ROOT: C:\Users\litbi\CascadeProjects\litlab
+- WORKSPACE_ROOT: ${workspaceFolder}
 - RUNTIME: Next.js 16 (Turbopack Engine) | React 19 | Tailwind v4 | pnpm 9.15+
 - NODE: 22+
 
