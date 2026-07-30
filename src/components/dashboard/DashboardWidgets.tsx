@@ -292,7 +292,7 @@ export default function DashboardWidgets({
         <div className="space-y-3">
           {CREATORS.map((c) => (
             <div key={c.handle} className="flex items-center gap-3 group hover:opacity-80 transition-opacity">
-              <Link href="/social" className="flex items-center gap-3 min-w-0 flex-1">
+              <Link href="/discover" className="flex items-center gap-3 min-w-0 flex-1">
                 <div
                   className="w-8 h-8 rounded-full flex items-center justify-center text-[11px] font-black shrink-0"
                   style={{ backgroundColor: `${c.color}20`, color: c.color, border: `1px solid ${c.color}40` }}
@@ -306,7 +306,7 @@ export default function DashboardWidgets({
                   <div className="text-[10px]" style={{ color: T.textMuted }}>{c.handle}</div>
                 </div>
               </Link>
-              <Link href="/social" className="p-1 transition-colors hover:opacity-80" style={{ color: c.color }} title="Follow on Social">
+              <Link href="/discover" className="p-1 transition-colors hover:opacity-80" style={{ color: c.color }} title="Follow on Discover">
                 <Plus size={13} />
               </Link>
             </div>

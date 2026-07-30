@@ -24,7 +24,7 @@ const HIDE_PATHS = [
   "/litt",
   "/builder",
   "/code",
-  "/social",
+  "/discover",
 ];
 
 export default function FooterWrapper() {

@@ -1,10 +1,9 @@
 "use client";
 
 import dynamic from "next/dynamic";
-import AutonomicLoopBanner from "@/components/dashboard/AutonomicLoopBanner";
 
-const CommandCenter = dynamic(
-  () => import("@/components/dashboard/CommandCenter").then((m) => m.CommandCenter),
+const DashboardV2 = dynamic(
+  () => import("@/components/dashboard/DashboardV2").then((m) => m.DashboardV2),
   {
     ssr: false,
     loading: () => (
@@ -16,10 +15,5 @@ const CommandCenter = dynamic(
 );
 
 export default function DashboardView() {
-  return (
-    <>
-      <AutonomicLoopBanner />
-      <CommandCenter />
-    </>
-  );
+  return <DashboardV2 />;
 }

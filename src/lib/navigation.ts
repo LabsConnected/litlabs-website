@@ -128,12 +128,12 @@ export const NAV_GROUPS: NavGroup[] = [
     ],
   },
   {
-    label: "Social",
-    href: "/social",
+    label: "Discover",
+    href: "/discover",
     icon: Users,
     accent: GROUP_ACCENTS.Social,
     items: [
-      { label: "Community", href: "/social", icon: Users },
+      { label: "Community", href: "/discover", icon: Users },
     ],
   },
   {
@@ -182,7 +182,7 @@ export const QUICK_CREATE_ITEMS = [
   { label: "Create Video", href: "/studio?tool=video", icon: Video },
   { label: "Create Agent", href: "/agents", icon: Bot },
   { label: "Create Workflow", href: "/studio?tool=pipeline", icon: Layers },
-  { label: "Create Post", href: "/social", icon: MessagesSquare },
+  { label: "Create Post", href: "/discover", icon: MessagesSquare },
 ];
 
 export function isActive(

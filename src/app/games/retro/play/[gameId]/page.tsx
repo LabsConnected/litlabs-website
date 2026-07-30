@@ -88,6 +88,18 @@ const STATE_LABELS: Record<EmulatorSessionState, string> = {
 
 function detectBrowser(): string {
   if (typeof navigator === "undefined") return "unknown";
+  // Prefer navigator.userAgentData (modern, non-deprecated) over
+  // navigator.userAgent (deprecated in Chromium). Fall back to UA string
+  // for Firefox/Safari which don't support userAgentData yet.
+  const uad = (navigator as Navigator & { userAgentData?: { brands?: { brand: string }[] } }).userAgentData;
+  if (uad?.brands) {
+    const brands = uad.brands.map((b) => b.brand);
+    if (brands.some((b) => b.includes("Firefox"))) return "Firefox";
+    if (brands.some((b) => b.includes("Edge") || b.includes("Microsoft"))) return "Edge";
+    if (brands.some((b) => b.includes("Chrome"))) return "Chrome";
+    if (brands.some((b) => b.includes("Safari"))) return "Safari";
+  }
+  // Fallback for browsers without userAgentData support
   const ua = navigator.userAgent;
   if (ua.includes("Firefox/")) return "Firefox";
   if (ua.includes("Edg/")) return "Edge";
