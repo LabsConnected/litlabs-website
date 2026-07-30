@@ -167,6 +167,9 @@ eslint-sidebar.txt
 # Vercel CLI env export — contains secrets, never commit
 env-vars-raw.json
 update-env.json
+clerk-dev-pub.json
+clerk-dev-secret.json
+prod-only.json
 
 # Playwright test artifacts
 test-results/
