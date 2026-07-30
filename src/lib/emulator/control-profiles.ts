@@ -516,7 +516,11 @@ export function buildEjsDefaultControls(
       };
     }
   }
-  return { 0: player1 };
+  // EmulatorJS 4.2.3 expects all 4 player slots (0-3) to exist. At line 2791
+  // it does `delete this.defaultControllers[1][i]` for unused buttons — if
+  // player 1/2/3 is undefined, this throws TypeError and kills startup.
+  // Players 1-3 default to empty objects (matching initControlVars()).
+  return { 0: player1, 1: {}, 2: {}, 3: {} };
 }
 
 /**

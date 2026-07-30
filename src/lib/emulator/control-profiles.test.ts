@@ -307,6 +307,14 @@ describe("buildEjsDefaultControls", () => {
     // Start has emulatorBinding 3 and keyboardDefault "enter"
     expect(dc[0][3]).toEqual({ value: "enter", value2: "START" });
   });
+
+  it("includes all 4 player slots (EmulatorJS 4.2.3 requires 0-3)", () => {
+    const dc = buildEjsDefaultControls(SEGA_GENESIS_3_BUTTON);
+    expect(dc[0]).toBeDefined();
+    expect(dc[1]).toEqual({});
+    expect(dc[2]).toEqual({});
+    expect(dc[3]).toEqual({});
+  });
 });
 
 // ─── 3/6-button switching preserves shared controls ─────────────────
