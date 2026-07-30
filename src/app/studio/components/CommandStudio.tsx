@@ -230,6 +230,9 @@ export default function CommandStudio() {
     return () => window.removeEventListener("canvas:execute-action", handler);
   }, []);
 
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
     // If no project, save the message and prompt project creation
     if (!capabilities.projectId) {
@@ -249,9 +252,6 @@ export default function CommandStudio() {
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
   }, []);
-
-  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
-  const [creatingProject, setCreatingProject] = useState(false);
 
   const handleStartBlank = useCallback(async () => {
     setCreatingProject(true);

@@ -15,6 +15,7 @@ import {
   Eye,
   Rocket,
   Sparkles,
+  Home,
   CircleAlert,
   CircleCheck,
   CircleDot,
@@ -110,8 +111,13 @@ export default function CommandStudioHeader({
         borderColor: "var(--studio-border)",
       }}
     >
-      {/* LiTT Studio logo */}
-      <div className="flex shrink-0 items-center gap-1.5">
+      {/* LiTT Studio logo — clickable to go home */}
+      <Link
+        href="/"
+        className="flex shrink-0 items-center gap-1.5 rounded-md transition-all hover:opacity-80"
+        aria-label="Go to home"
+        title="Go to home"
+      >
         <div
           className="grid h-6 w-6 place-items-center rounded-md"
           style={{
@@ -127,7 +133,7 @@ export default function CommandStudioHeader({
         >
           LiTT Studio
         </span>
-      </div>
+      </Link>
 
       {/* Branch */}
       {branch && (

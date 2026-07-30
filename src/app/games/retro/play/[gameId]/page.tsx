@@ -247,7 +247,6 @@ export default function RetroPlayerPage() {
   const [biosDataUrl, setBiosDataUrl] = useState<string | null>(null);
   const [biosName, setBiosName] = useState<string | null>(null);
   const [biosHash, setBiosHash] = useState<string | null>(null);
-  const [biosSkipped, setBiosSkipped] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [isSatellaview, setIsSatellaview] = useState(false);
@@ -348,14 +347,10 @@ export default function RetroPlayerPage() {
         setIsSatellaview(satellaview);
         setRomBlob(record.rom);
 
-        // Set initial launch state based on whether BIOS is needed.
-        // Satellaview = needs-bios. Standard = ready to launch immediately.
-        if (satellaview) {
-          setLaunchState({ status: "needs-bios" });
-        } else {
-          // Standard game: ready to launch immediately, no BIOS required
-          setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
-        }
+        // All games (including Satellaview) go straight to ready.
+        // BIOS is optional — the user can load one from the side panel
+        // if the game doesn't boot without it.
+        setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
         setSessionState("idle"); // Don't auto-start the runtime
       } catch (reason) {
         if (active) setError(reason instanceof Error ? reason.message : "The game could not be opened.");
@@ -789,7 +784,6 @@ export default function RetroPlayerPage() {
     setBiosDataUrl(null);
     setBiosName(null);
     setBiosHash(null);
-    setBiosSkipped(false);
     setLaunchState({ status: "needs-bios" });
     void clearBiosFromIndexedDB().catch(() => {});
   }
@@ -801,7 +795,6 @@ export default function RetroPlayerPage() {
     setBiosDataUrl(null);
     setBiosName(null);
     setBiosHash(null);
-    setBiosSkipped(true);
     setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
   }
 
@@ -871,13 +864,9 @@ export default function RetroPlayerPage() {
     setProgressText(null);
     setCanvasCreated(false);
     setFirstFrameObserved(false);
-    // Return to ready (BIOS still valid/skipped) or needs-bios
+    // Return to ready — BIOS is optional, always allow relaunch
     if (isSatellaview && biosDataUrl && biosHash) {
       setLaunchState({ status: "ready", biosHash, biosFileName: biosName ?? "" });
-    } else if (isSatellaview && biosSkipped) {
-      setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
-    } else if (isSatellaview) {
-      setLaunchState({ status: "needs-bios" });
     } else {
       setLaunchState({ status: "ready", biosHash: "", biosFileName: "" });
     }
@@ -893,10 +882,11 @@ export default function RetroPlayerPage() {
 
   // ─── Auto-load BIOS from IndexedDB ─────────────────────────────
   // When a Satellaview title is detected, try to restore a previously
-  // saved BIOS from IndexedDB. Revalidates the MD5 — only restores if
-  // the hash still matches the expected BS-X BIOS.
+  // saved BIOS from IndexedDB. Silently restores it if available so
+  // the emulator has the best chance of booting. Non-blocking — the
+  // game is already in "ready" state and can be launched without it.
   useEffect(() => {
-    if (!isSatellaview || launchState.status !== "needs-bios") return;
+    if (!isSatellaview) return;
     let cancelled = false;
     void loadBiosFromIndexedDB().then(async (stored) => {
       if (cancelled || !stored) return;
@@ -904,20 +894,15 @@ export default function RetroPlayerPage() {
         const resp = await fetch(stored.dataUrl);
         const blob = await resp.blob();
         const result = await validateBsxBios(blob);
-        if (cancelled) return;
-        if (result.ok) {
-          setBiosDataUrl(stored.dataUrl);
-          setBiosName(stored.name);
-          setBiosHash(result.hash ?? null);
-          setBiosFile(new File([blob], stored.name));
-          setLaunchState({ status: "ready", biosHash: result.hash ?? "", biosFileName: stored.name });
-        } else {
-          await clearBiosFromIndexedDB().catch(() => {});
-        }
+        if (cancelled || !result.ok) return;
+        setBiosDataUrl(stored.dataUrl);
+        setBiosName(stored.name);
+        setBiosHash(result.hash ?? null);
+        setBiosFile(new File([blob], stored.name));
       } catch { /* non-fatal */ }
     }).catch(() => { /* non-fatal */ });
     return () => { cancelled = true; };
-  }, [isSatellaview, launchState.status]);
+  }, [isSatellaview]);
 
   // ─── Derived state ─────────────────────────────────────────────
 
@@ -1117,7 +1102,7 @@ export default function RetroPlayerPage() {
                   <Gamepad2 className="mx-auto text-emerald-300" size={36} />
                   <h2 className="text-lg font-black">Ready to launch</h2>
                   <p className="text-xs leading-5 text-white/55">
-                    {isSatellaview && biosHash ? "BIOS loaded. " : isSatellaview ? "No BIOS — trying anyway. " : ""}Press Start Game to begin.
+                    {isSatellaview && biosHash ? "BIOS loaded. " : ""}Press Start Game to begin.
                   </p>
                   <button
                     onClick={startGame}
@@ -1333,16 +1318,16 @@ export default function RetroPlayerPage() {
 
         <aside className="space-y-4">
           {isSatellaview && (
-            <section className="rounded-2xl border border-amber-400/20 bg-amber-400/[.05] p-5">
+            <section className="rounded-2xl border border-white/10 bg-white/[.02] p-5">
               <div className="flex items-center gap-2">
-                <span className="grid h-5 w-5 place-items-center rounded-full border border-amber-300/40 text-[10px] font-black text-amber-200">
+                <span className="grid h-5 w-5 place-items-center rounded-full border border-white/20 text-[10px] font-black text-white/50">
                   BS
                 </span>
-                <h2 className="text-sm font-black">BIOS (recommended)</h2>
+                <h2 className="text-sm font-black text-white/70">BIOS (optional)</h2>
               </div>
-              <p className="mt-2 text-xs leading-5 text-white/55">
-                This Satellaview title may need a BS-X BIOS to boot. Load your legally
-                obtained BS-X.bin, or try launching without it. The file stays in this
+              <p className="mt-2 text-xs leading-5 text-white/45">
+                Most Satellaview games boot without a BIOS. If yours doesn't,
+                load a legally obtained BS-X.bin here. The file stays in this
                 browser and is never uploaded.
               </p>
 
@@ -1390,7 +1375,7 @@ export default function RetroPlayerPage() {
                   onClick={startGame}
                   className="mt-3 flex w-full items-center justify-center gap-2 rounded-xl bg-emerald-500 py-2.5 text-xs font-black text-black hover:bg-emerald-400"
                 >
-                  <Gamepad2 size={13} /> Start BS-X Game
+                  <Gamepad2 size={13} /> Start Game
                 </button>
               )}
 
@@ -1426,7 +1411,7 @@ export default function RetroPlayerPage() {
                 ? "Load a BS-X BIOS file, or try launching without one. The file stays in this browser."
                 : launchState.status === "ready"
                   ? isSatellaview
-                    ? biosHash ? "BIOS loaded. Press Start to begin." : "No BIOS loaded — press Start to try anyway."
+                    ? biosHash ? "BIOS loaded. Press Start to begin." : "Press Start Game to begin. If the game doesn't boot, try loading a BS-X BIOS from the panel above."
                     : "Press Start Game to begin."
                   : launchState.status === "launching"
                     ? "Creating local emulator session. The ROM and BIOS are being loaded into the emulator iframe."
@@ -1506,7 +1491,7 @@ export default function RetroPlayerPage() {
               {canRenderIframe
                 ? "The ROM and BIOS were loaded from this browser only — the data stays in memory as a blob URL inside the emulator iframe. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."
                 : isSatellaview && launchState.status === "needs-bios"
-                  ? "The ROM is available locally. Load a BS-X BIOS or try launching without one."
+                  ? "The ROM is available locally. Press Start to launch."
                   : "The ROM is stored in this browser only. LiTT does not upload the file. The emulator runtime is self-hosted and versioned."}
             </p>
           </section>

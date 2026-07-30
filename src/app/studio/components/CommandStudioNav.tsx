@@ -18,6 +18,7 @@ import {
   X,
   Gamepad2,
   ExternalLink,
+  Home,
 } from "lucide-react";
 import type {
   StudioDestination,
@@ -77,6 +78,38 @@ export default function CommandStudioNav({
           borderRight: "1px solid var(--studio-border)",
         }}
       >
+        {/* Home — navigate back to main site */}
+        <Link
+          href="/"
+          className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
+          style={{ color: "var(--text-muted)" }}
+          title="Home"
+          aria-label="Go to home"
+        >
+          <Home
+            size={18}
+            strokeWidth={1.7}
+            className="pointer-events-none transition-transform duration-200 group-hover:scale-110"
+          />
+          <span
+            className="pointer-events-none absolute left-full ml-2 whitespace-nowrap rounded-lg border px-2 py-1 text-[10px] font-bold opacity-0 transition-opacity duration-200 group-hover:opacity-100 z-50"
+            style={{
+              backgroundColor: "var(--studio-elevated)",
+              borderColor: "var(--studio-border)",
+              color: "var(--text-primary)",
+            }}
+          >
+            Home
+          </span>
+        </Link>
+
+        {/* Divider between home and studio destinations */}
+        <div
+          className="my-1 h-px w-8"
+          style={{ backgroundColor: "var(--studio-border)" }}
+          aria-hidden
+        />
+
         {NAV_ITEMS.map((item) => {
           const Icon = item.icon;
           const isActive = active === item.id;
@@ -218,6 +251,17 @@ export function MobileCommandNav({
         borderTop: "1px solid var(--studio-border)",
       }}
     >
+      {/* Home — navigate back to main site */}
+      <Link
+        href="/"
+        className="flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors"
+        style={{ color: "var(--text-muted)" }}
+        aria-label="Go to home"
+      >
+        <Home size={18} strokeWidth={1.7} className="pointer-events-none" />
+        <span className="text-[9px] font-bold">Home</span>
+      </Link>
+
       {NAV_ITEMS.map((item) => {
         const Icon = item.icon;
         const isActive = active === item.id;
