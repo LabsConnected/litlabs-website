@@ -64,8 +64,6 @@ import {
 import {
   type EmulatorSystemId,
   controlSchemeForSystem,
-  defaultProfileForSystem,
-  buildEjsDefaultControls,
 } from "@/lib/emulator/control-profiles";
 
 // ─── Constants ───────────────────────────────────────────────────
@@ -272,7 +270,6 @@ export default function RetroPlayerPage() {
     core: string;
     systemId: EmulatorSystemId;
     controlScheme: string;
-    defaultControls: string;
     gameName: string;
   } | null>(null);
   const biosUrlRef = useRef<string | null>(null);
@@ -446,8 +443,11 @@ export default function RetroPlayerPage() {
       sessionId: runtimeConfig.sessionId,
       // Control scheme override — mandatory for Sega Genesis so EmulatorJS
       // renders the segaMD layout instead of the ambiguous segaMS fallback.
+      // This alone fixes the "BUTTON 1 / BUTTON 2" label issue.
+      // NOTE: EJS_defaultControls is intentionally NOT injected. EmulatorJS
+      // 4.2.3's setupKeys() crashes if the format isn't exactly right, and
+      // the control scheme override alone is sufficient for correct labels.
       controlScheme: runtimeConfig.controlScheme,
-      defaultControls: runtimeConfig.defaultControls,
     });
     // Pass BIOS URL for Satellaview/BS-X titles
     if (runtimeConfig.biosUrl) {
@@ -845,12 +845,9 @@ export default function RetroPlayerPage() {
     const sessionId = crypto.randomUUID();
     const core = game.system === "snes" ? "snes9x" : ejsCore;
 
-    // Build EJS_defaultControls from the system profile. Only seeds first-
-    // launch keyboard defaults; EmulatorJS preserves user remaps in its own
-    // storage, so this never overwrites a saved custom mapping.
-    const profile = defaultProfileForSystem(emulatorSystemId);
-    const defaultControlsJson = JSON.stringify(buildEjsDefaultControls(profile));
-
+    // EJS_defaultControls is intentionally NOT injected — EmulatorJS 4.2.3's
+    // setupKeys() crashes if the format isn't exactly right. The controlScheme
+    // override alone is sufficient for correct Sega labels.
     setRuntimeConfig({
       sessionId,
       romUrl,
@@ -858,7 +855,6 @@ export default function RetroPlayerPage() {
       core,
       systemId: emulatorSystemId,
       controlScheme,
-      defaultControls: defaultControlsJson,
       gameName: game.title,
     });
 
