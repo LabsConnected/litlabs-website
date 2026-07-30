@@ -158,14 +158,16 @@
       }
 
       // ─── Default controls (keyboard) ───────────────────────────
-      // The parent may pass a JSON-encoded EJS_defaultControls object via the
-      // `defaultControls` URL param, built from the selected system profile.
-      // EmulatorJS officially supports EJS_defaultControls for keyboard +
-      // controller defaults. We only inject it when present — EmulatorJS
-      // itself preserves user-remapped settings in its own storage, so this
-      // only seeds the FIRST-launch defaults, never overwriting remaps.
+      // EJS_defaultControls is intentionally NOT injected. EmulatorJS 4.2.3's
+      // setupKeys() crashes if the object format isn't exactly right (it
+      // accesses this.controls[i][j] for i=0..3, j=0..29 and throws TypeError
+      // if any player slot is missing or malformed). The controlScheme override
+      // alone is sufficient — EmulatorJS uses its own sensible keyboard defaults
+      // for each system, and users can remap via the Control Settings menu.
+      // The `defaultControls` URL param is still parsed for forward compat but
+      // not applied unless explicitly enabled in a future verified fix.
       var defaultControlsJson = params.get("defaultControls") || "";
-      if (defaultControlsJson) {
+      if (defaultControlsJson && params.get("enableDefaultControls") === "1") {
         try {
           window.EJS_defaultControls = JSON.parse(defaultControlsJson);
         } catch (e) {
