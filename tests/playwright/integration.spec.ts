@@ -309,9 +309,9 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       try {
         const page = await contextA.newPage();
         await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-        await page.evaluate(async ({ url, id }) => {
-          await fetch(`${url}/api/studio-projects/${id}`, { method: "DELETE" });
-        }, { url: DEPLOYMENT_URL, id: projectAId });
+        await page.evaluate(async (id) => {
+          await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
+        }, projectAId);
         await page.close();
         console.log(`Cleanup: deleted project ${projectAId}`);
       } catch (err) {
@@ -345,17 +345,26 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     // which automatically includes all auth cookies.
     const page = await contextA.newPage();
     await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(2000);
+    await page.waitForTimeout(3000);
 
-    const result = await page.evaluate(async (url) => {
-      const resp = await fetch(`${url}/api/studio-projects`, {
+    // Debug: check cookies and URL
+    const cookies = await contextA.cookies();
+    console.log(`Cookies: ${cookies.map(c => c.name).join(", ")}`);
+    console.log(`Page URL: ${page.url()}`);
+    const bodyText = await page.locator("body").innerText().catch(() => "");
+    console.log(`Body text (first 200): ${bodyText.substring(0, 200)}`);
+
+    // Use relative URL so fetch is same-origin and cookies are sent automatically
+    const result = await page.evaluate(async () => {
+      const resp = await fetch(`/api/studio-projects`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ sourceType: "blank", name: `e2e-test-${Date.now()}`, templateId: "blank-static" }),
+        credentials: "include",
       });
       const body = await resp.json().catch(() => ({}));
       return { status: resp.status, body };
-    }, DEPLOYMENT_URL);
+    });
 
     console.log(`Project creation: status=${result.status}, body=${JSON.stringify(result.body).substring(0, 200)}`);
     expect(result.status, "Project creation should succeed").toBe(200);
@@ -364,11 +373,11 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     console.log(`Created disposable project: ${projectAId}`);
 
     // Verify User A can read their own project
-    const readResult = await page.evaluate(async ({ url, id }) => {
-      const resp = await fetch(`${url}/api/studio-projects/${id}`);
+    const readResult = await page.evaluate(async (id) => {
+      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
       const body = await resp.json().catch(() => ({}));
       return { status: resp.status, body };
-    }, { url: DEPLOYMENT_URL, id: projectAId });
+    }, projectAId);
 
     expect(readResult.status, "User A should read own project").toBe(200);
     expect(readResult.body.project?.id, "Project ID should match").toBe(projectAId);
@@ -387,12 +396,13 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     // Use page.evaluate for authenticated API call
     const pageB = await contextB.newPage();
     await pageB.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
+    await pageB.waitForTimeout(2000);
 
-    const readResult = await pageB.evaluate(async ({ url, id }) => {
-      const resp = await fetch(`${url}/api/studio-projects/${id}`);
+    const readResult = await pageB.evaluate(async (id) => {
+      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
       const body = await resp.json().catch(() => ({}));
       return { status: resp.status, body };
-    }, { url: DEPLOYMENT_URL, id: projectAId });
+    }, projectAId);
 
     // Should be 403 (forbidden) or 404 (not found) — NOT 200
     expect(
@@ -416,10 +426,10 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     await pageB2.waitForTimeout(2000);
 
     // Attempt to delete User A's project as User B
-    const deleteResult = await pageB2.evaluate(async ({ url, id }) => {
-      const resp = await fetch(`${url}/api/studio-projects/${id}`, { method: "DELETE" });
+    const deleteResult = await pageB2.evaluate(async (id) => {
+      const resp = await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
       return { status: resp.status };
-    }, { url: DEPLOYMENT_URL, id: projectAId });
+    }, projectAId);
 
     expect(
       deleteResult.status,
@@ -432,10 +442,10 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       const pageA2 = await contextA.newPage();
       await pageA2.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
       await pageA2.waitForTimeout(2000);
-      const verifyResult = await pageA2.evaluate(async ({ url, id }) => {
-        const resp = await fetch(`${url}/api/studio-projects/${id}`);
+      const verifyResult = await pageA2.evaluate(async (id) => {
+        const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
         return { status: resp.status };
-      }, { url: DEPLOYMENT_URL, id: projectAId });
+      }, projectAId);
       expect(verifyResult.status, "User A's project should still exist after User B delete attempt").toBe(200);
       console.log(`User A verified project still exists after User B delete attempt`);
       await pageA2.close();
@@ -454,11 +464,11 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     await pageB3.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
     await pageB3.waitForTimeout(2000);
 
-    const storageResult = await pageB3.evaluate(async (url) => {
-      const resp = await fetch(`${url}/api/storage?key=audio/test-clip.mp3&type=audio/mpeg`);
+    const storageResult = await pageB3.evaluate(async () => {
+      const resp = await fetch(`/api/storage?key=audio/test-clip.mp3&type=audio/mpeg`, { credentials: "include" });
       const body = await resp.json().catch(() => ({}));
       return { status: resp.status, body };
-    }, DEPLOYMENT_URL);
+    });
 
     // User B is authenticated, so this should succeed but only for their own namespace
     expect(storageResult.status, "Storage API should respond to authenticated User B").toBeLessThan(500);
@@ -481,11 +491,11 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     const pageA3 = await contextA.newPage();
     await pageA3.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
     await pageA3.waitForTimeout(2000);
-    const readResult = await pageA3.evaluate(async ({ url, id }) => {
-      const resp = await fetch(`${url}/api/studio-projects/${id}`);
+    const readResult = await pageA3.evaluate(async (id) => {
+      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
       const body = await resp.json().catch(() => ({}));
       return { status: resp.status, body };
-    }, { url: DEPLOYMENT_URL, id: projectAId });
+    }, projectAId);
     expect(readResult.status, "User A should still access their project").toBe(200);
     console.log(`User A confirmed retained access to project ${projectAId}`);
     await pageA3.close();
@@ -497,14 +507,15 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     if (projectAId && contextA) {
       const pageA4 = await contextA.newPage();
       await pageA4.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-      await pageA4.evaluate(async ({ url, id }) => {
-        await fetch(`${url}/api/studio-projects/${id}`, { method: "DELETE" });
-      }, { url: DEPLOYMENT_URL, id: projectAId });
+      await pageA4.waitForTimeout(2000);
+      await pageA4.evaluate(async (id) => {
+        await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
+      }, projectAId);
       // Verify it's gone
-      const verifyResult = await pageA4.evaluate(async ({ url, id }) => {
-        const resp = await fetch(`${url}/api/studio-projects/${id}`);
+      const verifyResult = await pageA4.evaluate(async (id) => {
+        const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
         return { status: resp.status };
-      }, { url: DEPLOYMENT_URL, id: projectAId });
+      }, projectAId);
       expect(verifyResult.status, "Deleted project should return 404").toBe(404);
       console.log(`Cleanup verified: project ${projectAId} is deleted`);
       projectAId = null;
