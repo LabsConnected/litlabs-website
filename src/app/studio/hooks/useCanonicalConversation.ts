@@ -14,7 +14,6 @@ import {
   type AgentId,
 } from "../stores/useStudioAgentStore";
 import { useStudioModelStore } from "../stores/useStudioModelStore";
-import { useBuilderSessions } from "./useBuilderSessions";
 import type { StudioTool } from "../components/StudioSidebar";
 import type { AgentSlug, Conversation, ConversationMessage } from "@/lib/studio/types";
 import {
@@ -75,7 +74,6 @@ export function useCanonicalConversation({
 } = {}) {
   const [busy, setBusy] = useState(false);
   const [sendError, setSendError] = useState<string | null>(null);
-  const sessionManager = useBuilderSessions();
   const { capabilities } = useConnectionSummary();
   const { voiceTransportConnected, voiceInputState } = useVoiceSession();
 
@@ -247,16 +245,36 @@ export function useCanonicalConversation({
             return { accepted: true };
           case "sessions":
             return { accepted: true };
-          case "delete":
-            if (sessionManager.activeSession && window.confirm(`Delete "${sessionManager.activeSession.title}"?`)) {
-              sessionManager.remove(sessionManager.activeSession.id);
+          case "delete": {
+            const convId = store.selectedConversationId;
+            const conv = store.getSelectedConversation();
+            if (convId && conv && window.confirm(`Delete "${conv.title || "this conversation"}"?`)) {
+              try {
+                await fetch(`/api/studio/conversations/${convId}`, { method: "DELETE" });
+                store.setConversations(store.conversations.filter((c) => c.id !== convId));
+                store.selectConversation(null);
+              } catch {
+                // Non-fatal
+              }
             }
             return { accepted: true };
-          case "rename":
-            if (localCommand.title && sessionManager.activeSession) {
-              sessionManager.rename(sessionManager.activeSession.id, localCommand.title);
+          }
+          case "rename": {
+            const convId = store.selectedConversationId;
+            if (localCommand.title && convId) {
+              try {
+                await fetch(`/api/studio/conversations/${convId}`, {
+                  method: "PATCH",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ expectedRevision: store.revision, patch: { title: localCommand.title } }),
+                });
+                store.setConversations(store.conversations.map((c) => c.id === convId ? { ...c, title: localCommand.title! } : c));
+              } catch {
+                // Non-fatal
+              }
             }
             return { accepted: true };
+          }
           case "help":
             return { accepted: true };
           default:
@@ -439,7 +457,7 @@ export function useCanonicalConversation({
         setBusy(false);
       }
     },
-    [busy, store, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, sessionManager, setFallbackNotice],
+    [busy, store, createConversation, loadMessages, onRouteTool, selectedModel, activeAgentId, setFallbackNotice],
   );
 
   // Regenerate — calls canonical regenerate API
@@ -523,15 +541,7 @@ export function useCanonicalConversation({
     activeAgentId,
     fallbackNotice,
     initialPrompt,
-    // Session management (preserved for compatibility, messages NOT stored in sessions)
-    sessions: sessionManager.sessions,
-    activeSessionId: sessionManager.activeId,
-    selectSession: sessionManager.setActiveId,
-    newSession: () => sessionManager.create(),
-    renameSession: sessionManager.rename,
-    deleteSession: sessionManager.remove,
-    deleteAllSessions: sessionManager.removeAll,
-    // Canonical conversation management
+    // Canonical conversation management (sessions are server-side conversations)
     switchAgent,
     selectedConversationId: store.selectedConversationId,
     conversations: store.conversations,

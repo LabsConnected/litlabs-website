@@ -49,15 +49,6 @@ export default function ChatTool({
       pendingCommand={pendingCommand}
       initialPrompt={conversation.initialPrompt}
       fallbackNotice={conversation.fallbackNotice}
-      sessions={conversation.sessions}
-      activeSessionId={conversation.activeSessionId}
-      onSelectSession={conversation.selectSession}
-      onNewSession={conversation.newSession}
-      onRenameSession={conversation.renameSession}
-      onPinSession={() => {}}
-      onDuplicateSession={() => {}}
-      onDeleteSession={conversation.deleteSession}
-      onDeleteAllSessions={conversation.deleteAllSessions}
       capabilities={capabilities}
       sendError={conversation.sendError}
       onClearSendError={conversation.clearSendError}

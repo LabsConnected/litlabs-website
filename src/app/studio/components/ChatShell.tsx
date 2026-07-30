@@ -57,15 +57,15 @@ interface ChatShellProps {
   pendingCommand?: string;
   initialPrompt?: string;
   activeAgentId: AgentId;
-  sessions: BuilderSession[];
-  activeSessionId: string;
-  onSelectSession: (id: string) => void;
-  onNewSession: () => void;
-  onRenameSession: (id: string, title: string) => void;
-  onPinSession: (id: string) => void;
-  onDuplicateSession: (session: BuilderSession) => void;
-  onDeleteSession: (id: string) => void;
-  onDeleteAllSessions: () => void;
+  sessions?: BuilderSession[];
+  activeSessionId?: string;
+  onSelectSession?: (id: string) => void;
+  onNewSession?: () => void;
+  onRenameSession?: (id: string, title: string) => void;
+  onPinSession?: (id: string) => void;
+  onDuplicateSession?: (session: BuilderSession) => void;
+  onDeleteSession?: (id: string) => void;
+  onDeleteAllSessions?: () => void;
   fallbackNotice?: string | null;
   capabilities?: ConnectionCapabilities;
   sendError?: string | null;
@@ -219,7 +219,7 @@ export default function ChatShell({
   return (
     <div className="relative flex h-full min-h-0 min-w-0 w-full overflow-hidden bg-[#0a0a0f]">
       {/* Session drawer — floating overlay, not permanent */}
-      {sessionsOpen && (
+      {sessionsOpen && sessions && (
         <>
           <button
             className="fixed inset-0 z-40 bg-black/55"
@@ -234,16 +234,16 @@ export default function ChatShell({
           >
             <SessionSidebar
               sessions={sessions}
-              activeId={activeSessionId}
+              activeId={activeSessionId ?? ""}
               open={true}
               onOpenChange={setSessionsOpen}
-              onSelect={(id) => { onSelectSession(id); setSessionsOpen(false); }}
-              onNew={() => { onNewSession(); setSessionsOpen(false); }}
-              onRename={onRenameSession}
-              onPin={onPinSession}
-              onDuplicate={onDuplicateSession}
-              onDelete={onDeleteSession}
-              onDeleteAll={onDeleteAllSessions}
+              onSelect={(id) => { onSelectSession?.(id); setSessionsOpen(false); }}
+              onNew={() => { onNewSession?.(); setSessionsOpen(false); }}
+              onRename={onRenameSession ?? (() => {})}
+              onPin={onPinSession ?? (() => {})}
+              onDuplicate={onDuplicateSession ?? (() => {})}
+              onDelete={onDeleteSession ?? (() => {})}
+              onDeleteAll={onDeleteAllSessions ?? (() => {})}
             />
           </div>
         </>

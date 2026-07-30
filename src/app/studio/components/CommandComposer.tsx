@@ -558,3 +558,113 @@ function AgentPopover({
     </div>
   );
 }
+
+/* ── Model selector popover ────────────────────────────────────── */
+const MODEL_CATEGORIES: { id: NonNullable<SelectedModel["category"]>; label: string }[] = [
+  { id: "auto", label: "Auto" },
+  { id: "free", label: "Free" },
+  { id: "fast", label: "Fast" },
+  { id: "code", label: "Code" },
+  { id: "creative", label: "Creative" },
+  { id: "vision", label: "Vision" },
+  { id: "byok", label: "BYOK" },
+];
+
+function ModelPopover({
+  rect,
+  selectedId,
+  providerHealth,
+  onSelect,
+  onClose,
+}: {
+  rect: DOMRect;
+  selectedId: string;
+  providerHealth: Record<string, ProviderHealth>;
+  onSelect: (model: SelectedModel) => void;
+  onClose: () => void;
+}) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    const onDown = (e: MouseEvent) => ref.current && !ref.current.contains(e.target as Node) && onClose();
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
+    window.addEventListener("mousedown", onDown);
+    window.addEventListener("keydown", onKey);
+    return () => {
+      window.removeEventListener("mousedown", onDown);
+      window.removeEventListener("keydown", onKey);
+    };
+  }, [onClose]);
+
+  const left = Math.min(rect.left, window.innerWidth - 280);
+  const top = rect.bottom + 6;
+
+  return (
+    <div
+      ref={ref}
+      role="dialog"
+      aria-label="Select model"
+      className="fixed z-[200] max-h-[400px] w-72 overflow-y-auto rounded-xl border shadow-2xl"
+      style={{
+        left,
+        top,
+        backgroundColor: "var(--studio-elevated)",
+        borderColor: "var(--studio-border-strong)",
+      }}
+    >
+      <div
+        className="sticky top-0 px-3 py-2 text-[10px] font-black uppercase tracking-[0.18em]"
+        style={{
+          color: "var(--text-secondary)",
+          borderBottom: "1px solid var(--studio-border)",
+          backgroundColor: "var(--studio-elevated)",
+        }}
+      >
+        Model
+      </div>
+      {MODEL_CATEGORIES.map((cat) => {
+        const models = MODELS.filter((m) => m.category === cat.id);
+        if (models.length === 0) return null;
+        return (
+          <div key={cat.id}>
+            <div
+              className="px-3 py-1.5 text-[9px] font-bold uppercase tracking-wider"
+              style={{ color: "var(--text-muted)" }}
+            >
+              {cat.label}
+            </div>
+            {models.map((m) => {
+              const isActive = selectedId === m.id;
+              const health = providerHealth[m.provider] ?? "available";
+              const healthColor = health === "available" ? "#72f238" : health === "degraded" ? "#e3b341" : health === "locked" ? "#a78bfa" : "#ef4444";
+              return (
+                <button
+                  key={m.id}
+                  type="button"
+                  onClick={() => onSelect(m)}
+                  className="flex w-full items-center gap-2.5 px-3 py-2.5 text-left transition hover:bg-white/5"
+                  style={{ backgroundColor: isActive ? "rgba(114,242,56,0.08)" : "transparent" }}
+                >
+                  <span className="text-base shrink-0">{m.icon}</span>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[12px] font-bold" style={{ color: "var(--text-primary)" }}>{m.label}</div>
+                    <div className="flex items-center gap-1.5 text-[9px]" style={{ color: "var(--text-muted)" }}>
+                      <span>{m.provider}</span>
+                      <span>·</span>
+                      <span style={{ color: m.cost === "free" ? "#72f238" : m.cost === "paid" ? "#e3b341" : "var(--text-muted)" }}>
+                        {m.cost === "free" ? "FREE" : m.cost === "paid" ? "PAID" : "AUTO"}
+                      </span>
+                      <span>·</span>
+                      <span>{m.speed}</span>
+                    </div>
+                  </div>
+                  <span className="h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: healthColor }} aria-hidden />
+                  {isActive && <Check size={12} className="shrink-0" style={{ color: "var(--litt-primary)" }} />}
+                </button>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
