@@ -46,7 +46,7 @@ export async function DELETE(
   const success = await deleteProject(projectId, userId);
 
   if (!success) {
-    return NextResponse.json({ error: "Failed to delete project" }, { status: 500 });
+    return NextResponse.json({ error: "Project not found" }, { status: 404 });
   }
 
   return NextResponse.json({ success: true });

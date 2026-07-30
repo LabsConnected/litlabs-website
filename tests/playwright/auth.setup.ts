@@ -12,6 +12,12 @@ const userBAuthFile = path.join(__dirname, ".clerk", "user-b.json");
 
 setup.describe.configure({ mode: "serial" });
 
+// @clerk/testing expects CLERK_PUBLISHABLE_KEY, but Next.js apps use
+// NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY. Alias it if not already set.
+if (!process.env.CLERK_PUBLISHABLE_KEY && process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY) {
+  process.env.CLERK_PUBLISHABLE_KEY = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
+}
+
 setup("clerk global setup", async () => {
   await clerkSetup();
 });

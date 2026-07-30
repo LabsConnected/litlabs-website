@@ -263,6 +263,7 @@ const userBEmail = process.env.CLERK_TEST_USER_B_EMAIL;
 const hasTestUsers = !!(userAEmail && userBEmail);
 
 test.describe("Authenticated Clerk tests — cross-user isolation", () => {
+  test.describe.configure({ mode: "serial" });
   test.skip(
     !hasTestUsers,
     "Requires CLERK_TEST_USER_A_EMAIL and CLERK_TEST_USER_B_EMAIL env vars",
