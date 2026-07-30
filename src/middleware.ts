@@ -1,6 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse, type NextRequest } from "next/server";
-import { isClerkConfigured } from "@/lib/env";
+import { isAnonymousDevAllowed, isClerkConfigured } from "@/lib/env";
 
 const isProtectedRoute = createRouteMatcher([
   "/marketplace(.*)",
@@ -37,11 +37,14 @@ const isTestAuthDisabled =
   !process.env.VERCEL;
 
 // In production or any deployed environment, Clerk MUST be configured.
-// The test bypass is only valid in local CI/test environments.
-if (!clerkConfigured && !isTestAuthDisabled) {
+// The test bypass is valid in local CI/test environments.
+// ALLOW_ANONYMOUS_DEV=true in non-production lets local dev run without Clerk
+// (matches the behavior of auth() in src/lib/auth.ts).
+if (!clerkConfigured && !isTestAuthDisabled && !isAnonymousDevAllowed()) {
   throw new Error(
     "FATAL: Clerk is not configured. " +
-      "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY. " +
+      "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY, " +
+      "or set ALLOW_ANONYMOUS_DEV=true for local development. " +
       "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
       "and VERCEL is absent.",
   );

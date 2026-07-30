@@ -93,11 +93,18 @@ export function useCanonicalConversation({
   const { profile } = useProfile();
   const initialPrompt = searchParams.get("mission") || "";
 
+  // Subscribe to the messages slice reactively (selector pattern, matching
+  // CanvasPanel). The no-selector + store.getMessages() approach relies on the
+  // whole-state object identity changing on every set(), which is fragile.
+  const canonicalMessages = useConversationStore(
+    (s) => s.messagesByConversationId[s.selectedConversationId ?? ""] ?? [],
+  );
+
   // Convert canonical store messages to UI ChatMessage format
-  const messages = useMemo(() => {
-    const canonical = store.getMessages();
-    return canonical.map(toUIMessage);
-  }, [store]);
+  const messages = useMemo(
+    () => canonicalMessages.map(toUIMessage),
+    [canonicalMessages],
+  );
 
   // Load messages for a conversation
   const loadMessages = useCallback(async (conversationId: string) => {
@@ -152,7 +159,34 @@ export function useCanonicalConversation({
 
   // Create a new conversation
   const createConversation = useCallback(async (): Promise<Conversation | null> => {
-    const projectId = getActiveProjectId(serverProjectId);
+    let projectId = getActiveProjectId(serverProjectId);
+
+    // Auto-provision a blank project if the user has none yet. Without this,
+    // chat is completely dead for new users — createConversation fails and the
+    // only feedback is a buried red banner, so the transcript stays empty.
+    if (!projectId) {
+      try {
+        const projRes = await fetch("/api/studio-projects", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            sourceType: "blank",
+            name: "My First Project",
+            templateId: "blank-static",
+          }),
+        });
+        if (projRes.ok) {
+          const projData = await projRes.json();
+          projectId = projData.project?.id ?? null;
+          if (projectId && typeof window !== "undefined") {
+            localStorage.setItem(ACTIVE_PROJECT_KEY, projectId);
+          }
+        }
+      } catch {
+        // fall through to the error below
+      }
+    }
+
     if (!projectId) {
       setSendError("LiTT couldn't start this conversation because no active project was resolved.");
       return null;
@@ -360,6 +394,10 @@ export function useCanonicalConversation({
       setBusy(true);
       try {
         const isAutoBest = selectedModel.id === "auto" || selectedModel.category === "auto";
+        // Abort after 55s so a hanging provider doesn't leave an empty
+        // streaming bubble forever (the route has maxDuration=60s).
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 55_000);
         const response = await fetch(`/api/studio/conversations/${conversationId}/messages`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -373,7 +411,9 @@ export function useCanonicalConversation({
             model: selectedModel.model,
             images: attachments,
           }),
+          signal: controller.signal,
         });
+        clearTimeout(timeoutId);
 
         const data = await response.json();
 
