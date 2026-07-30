@@ -61,6 +61,12 @@ import {
   shouldRenderIframe,
   launchStatusLabel,
 } from "@/lib/emulator/arcade-launch";
+import {
+  type EmulatorSystemId,
+  controlSchemeForSystem,
+  defaultProfileForSystem,
+  buildEjsDefaultControls,
+} from "@/lib/emulator/control-profiles";
 
 // ─── Constants ───────────────────────────────────────────────────
 
@@ -251,6 +257,11 @@ export default function RetroPlayerPage() {
   const [error, setError] = useState<string | null>(null);
   const [isSatellaview, setIsSatellaview] = useState(false);
   const [showControls, setShowControls] = useState(false);
+  // Sega Genesis controller type: 3-button (default for Lion King) or 6-button.
+  // Only affects which controls the LiTTree modal displays; the EmulatorJS
+  // runtime always uses the full segaMD control scheme (which includes
+  // X/Y/Z/Mode), so switching never resets emulator shortcuts.
+  const [controllerType, setControllerType] = useState<"3-button" | "6-button">("3-button");
 
   // ─── Launch state machine (single source of truth) ────────────
   const [launchState, setLaunchState] = useState<ArcadeLaunchState>({ status: "loading" });
@@ -259,6 +270,9 @@ export default function RetroPlayerPage() {
     romUrl: string;
     biosUrl: string;
     core: string;
+    systemId: EmulatorSystemId;
+    controlScheme: string;
+    defaultControls: string;
     gameName: string;
   } | null>(null);
   const biosUrlRef = useRef<string | null>(null);
@@ -285,6 +299,14 @@ export default function RetroPlayerPage() {
   const [loaderReadyTime, setLoaderReadyTime] = useState<number | null>(null);
 
   const system = game ? getRetroSystem(game.system) : null;
+
+  // ─── System identity (product-facing) vs core identity ──────────
+  // systemId drives the control scheme + labels; coreId (ejsCore) drives
+  // which libretro core runs the game. These are deliberately separate so
+  // that, e.g., Sega Genesis loads genesis_plus_gx but renders the segaMD
+  // controller layout (not the ambiguous segaMS "BUTTON 1/2" fallback).
+  const emulatorSystemId: EmulatorSystemId = (game?.system ?? "nes") as EmulatorSystemId;
+  const controlScheme = controlSchemeForSystem(emulatorSystemId);
 
   // ─── Core config for current attempt ───────────────────────────
   const coreConfig = useMemo(() => {
@@ -422,6 +444,10 @@ export default function RetroPlayerPage() {
       color: system?.color ?? "#a78bfa",
       legacy: useLegacy ? "1" : "0",
       sessionId: runtimeConfig.sessionId,
+      // Control scheme override — mandatory for Sega Genesis so EmulatorJS
+      // renders the segaMD layout instead of the ambiguous segaMS fallback.
+      controlScheme: runtimeConfig.controlScheme,
+      defaultControls: runtimeConfig.defaultControls,
     });
     // Pass BIOS URL for Satellaview/BS-X titles
     if (runtimeConfig.biosUrl) {
@@ -819,11 +845,20 @@ export default function RetroPlayerPage() {
     const sessionId = crypto.randomUUID();
     const core = game.system === "snes" ? "snes9x" : ejsCore;
 
+    // Build EJS_defaultControls from the system profile. Only seeds first-
+    // launch keyboard defaults; EmulatorJS preserves user remaps in its own
+    // storage, so this never overwrites a saved custom mapping.
+    const profile = defaultProfileForSystem(emulatorSystemId);
+    const defaultControlsJson = JSON.stringify(buildEjsDefaultControls(profile));
+
     setRuntimeConfig({
       sessionId,
       romUrl,
       biosUrl,
       core,
+      systemId: emulatorSystemId,
+      controlScheme,
+      defaultControls: defaultControlsJson,
       gameName: game.title,
     });
 
@@ -1502,6 +1537,9 @@ export default function RetroPlayerPage() {
         systemId={system.id}
         systemName={system.name}
         systemShort={system.shortName}
+        emulatorSystemId={emulatorSystemId}
+        controllerType={controllerType}
+        onControllerTypeChange={setControllerType}
         open={showControls}
         onClose={() => setShowControls(false)}
       />
