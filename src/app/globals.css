@@ -2796,3 +2796,53 @@ main {
     animation: none !important;
   }
 }
+
+/* ── LiTTPresence animations ──────────────────────────────────── */
+
+@keyframes litt-hover-idle {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-4px); }
+}
+
+@keyframes litt-hover-working {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-6px); }
+}
+
+@keyframes litt-hover-listening {
+  0%, 100% { transform: translateY(0) scale(1); }
+  50% { transform: translateY(-3px) scale(1.02); }
+}
+
+@keyframes litt-flicker-error {
+  0%, 100% { opacity: 1; }
+  20% { opacity: 0.7; }
+  40% { opacity: 1; }
+  60% { opacity: 0.8; }
+  80% { opacity: 1; }
+}
+
+.litt-hover-idle {
+  animation: litt-hover-idle 3s ease-in-out infinite;
+}
+
+.litt-hover-working {
+  animation: litt-hover-working 2s ease-in-out infinite;
+}
+
+.litt-hover-listening {
+  animation: litt-hover-listening 1.5s ease-in-out infinite;
+}
+
+.litt-flicker-error {
+  animation: litt-flicker-error 0.8s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .litt-hover-idle,
+  .litt-hover-working,
+  .litt-hover-listening,
+  .litt-flicker-error {
+    animation: none !important;
+  }
+}

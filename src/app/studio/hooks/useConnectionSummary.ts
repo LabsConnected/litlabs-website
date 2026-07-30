@@ -26,6 +26,9 @@ export interface ConnectionCapabilities {
   projectId: string | null;
   projectName: string | null;
   defaultBranch: string | null;
+  sourceType: "github" | "blank" | "template" | null;
+  workspaceStatus: string | null;
+  githubInstalled: boolean;
   terminalExecution: "available" | "unavailable" | "connecting" | "degraded" | "error";
   writeAccess: boolean;
   connectedProviders: string[];
@@ -49,6 +52,9 @@ const DEFAULT_CAPABILITIES: ConnectionCapabilities = {
   projectId: null,
   projectName: null,
   defaultBranch: null,
+  sourceType: null,
+  workspaceStatus: null,
+  githubInstalled: false,
   terminalExecution: "unavailable",
   writeAccess: false,
   connectedProviders: [],
@@ -91,12 +97,16 @@ export function useConnectionSummary() {
         const data = await capsRes.value.json();
         const caps = data.capabilities ?? [];
         const repoCap = caps.find((c: { id: string }) => c.id === "repository");
+        const projectCap = caps.find((c: { id: string }) => c.id === "project");
         next.repository = repoCap?.status === "ready" ? "connected" : "none";
         next.repositoryName = repoCap?.accountName ?? null;
         next.repositoryIndexed = repoCap?.status === "ready";
-        next.projectId = repoCap?.projectId ?? null;
-        next.projectName = repoCap?.projectName ?? null;
+        // Prefer the project capability for projectId — a blank project
+        // is valid even without a repository.
+        next.projectId = projectCap?.projectId ?? repoCap?.projectId ?? null;
+        next.projectName = projectCap?.projectName ?? repoCap?.projectName ?? null;
         next.defaultBranch = repoCap?.defaultBranch ?? null;
+        next.githubInstalled = repoCap?.status === "unavailable";
         next.connectedProviders = caps
           .filter((c: { status: string }) => c.status === "ready" || c.status === "running")
           .map((c: { id: string }) => c.id);

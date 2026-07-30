@@ -41,7 +41,7 @@ const BuilderTool = dynamic(() => import("../tools/BuilderTool"), { ssr: false }
 const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const AgentTool = dynamic(() => import("../tools/AgentTool"), { ssr: false });
 const GalleryTool = dynamic(() => import("../tools/GalleryTool"), { ssr: false });
-const TerminalTool = dynamic(() => import("../tools/AgentsTerminalTool"), { ssr: false });
+const StudioTerminalDrawer = dynamic(() => import("./StudioTerminalDrawer"), { ssr: false });
 const MissionForge = dynamic(() => import("../tools/MissionForge"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), { ssr: false });
 const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), { ssr: false });
@@ -75,7 +75,6 @@ const TOOL_COMPONENTS: Partial<Record<StudioTool, React.ComponentType>> = {
   plugins: PluginsTool,
   camera: CameraTool,
   screen: ScreenTool,
-  terminal: TerminalTool,
   workflows: MissionForge,
   space: SpaceTool,
   clibridge: CLIBridgeTool,
@@ -105,10 +104,8 @@ export default function CommandStudio() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { capabilities } = useConnectionSummary();
-  const projectReady =
-    capabilities.repository === "connected" ||
-    capabilities.terminalExecution === "available";
+  const { capabilities, refresh: refreshCapabilities } = useConnectionSummary();
+  const projectReady = Boolean(capabilities.projectId);
 
   // Resolve initial destination from legacy ?tool= query.
   const initial = useMemo(() => {
@@ -180,6 +177,7 @@ export default function CommandStudio() {
   // The single conversation controller — calls canonical V12 API.
   const conversation = useCanonicalConversation({
     onRouteTool: handleRouteTool,
+    serverProjectId: capabilities.projectId,
   });
 
   // Sync destination -> URL ?tool= (preserves legacy bookmarks).
@@ -233,19 +231,68 @@ export default function CommandStudio() {
   }, []);
 
   const handleComposerSend = useCallback(async (value: string, attachments?: string[]) => {
+    // If no project, save the message and prompt project creation
+    if (!capabilities.projectId) {
+      setPendingMessage(value);
+      setComposerValue("");
+      return;
+    }
     // Direct call to the real controller — no custom-event bridge.
-    return conversation.send(value, attachments);
-  }, [conversation]);
+    try {
+      return await conversation.send(value, attachments);
+    } catch {
+      // Restore the typed message so the user doesn't lose input
+      setComposerValue(value);
+    }
+  }, [conversation, capabilities.projectId]);
 
   const handleEmptyAction = useCallback((prompt: string) => {
     setComposerValue(prompt);
   }, []);
 
-  const handleStartBlank = useCallback(() => {
-    setDestination("studio");
-    setStudioMode("work");
-    setWorkSurface("conversation");
-  }, []);
+  const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [creatingProject, setCreatingProject] = useState(false);
+
+  const handleStartBlank = useCallback(async () => {
+    setCreatingProject(true);
+    try {
+      const res = await fetch("/api/studio-projects", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          sourceType: "blank",
+          name: "Untitled Project",
+          templateId: "blank-static",
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        console.error("[handleStartBlank] Failed to create project:", err);
+        return;
+      }
+      const { project } = await res.json();
+      // Update URL with project ID
+      const params = new URLSearchParams(searchParams.toString());
+      params.set("project", project.id);
+      router.replace(`${pathname}?${params.toString()}`, { scroll: false });
+      // Refresh capabilities so projectId propagates
+      await refreshCapabilities();
+      setDestination("studio");
+      setStudioMode("work");
+      setWorkSurface("conversation");
+      // Retry pending message if any
+      if (pendingMessage) {
+        const msg = pendingMessage;
+        setPendingMessage(null);
+        setComposerValue("");
+        await conversation.send(msg);
+      }
+    } catch (err) {
+      console.error("[handleStartBlank] Error:", err);
+    } finally {
+      setCreatingProject(false);
+    }
+  }, [searchParams, pathname, router, refreshCapabilities, pendingMessage, conversation]);
 
   const handleConnectRepo = useCallback(() => {
     if (typeof window !== "undefined") {
@@ -395,6 +442,10 @@ export default function CommandStudio() {
                     onRegenerate={conversation.regenerate}
                     onEmptyAction={handleEmptyAction}
                     hasProject={projectReady}
+                    projectId={capabilities.projectId}
+                    projectName={capabilities.projectName}
+                    sourceType={capabilities.sourceType}
+                    githubInstalled={capabilities.githubInstalled}
                     onStartBlank={handleStartBlank}
                     onConnectRepo={handleConnectRepo}
                   />
@@ -429,16 +480,53 @@ export default function CommandStudio() {
               activeTab={drawerTab}
               onTabChange={setDrawerTab}
             >
-              {drawerTab === "terminal" ? <TerminalTool /> : null}
+              {drawerTab === "terminal" ? <StudioTerminalDrawer projectId={capabilities.projectId} /> : null}
             </StudioDrawer>
 
             {/* Persistent composer — visible at all times in Studio/Work conversation */}
+            {/* Send error banner — visible when conversation creation fails */}
+            {isStudioWorkConversation && conversation.sendError && (
+              <div
+                className="flex shrink-0 items-center gap-3 border-b px-3 py-2.5 text-[12px]"
+                style={{
+                  borderColor: "rgba(239,68,68,0.3)",
+                  backgroundColor: "rgba(239,68,68,0.08)",
+                  color: "#fca5a5",
+                }}
+              >
+                <span className="flex-1 font-medium">{conversation.sendError}</span>
+                <button
+                  type="button"
+                  onClick={() => conversation.clearSendError()}
+                  className="rounded px-2 py-1 text-[10px] font-bold hover:bg-white/10"
+                  aria-label="Dismiss error"
+                >
+                  ✕
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { window.location.href = "/api/github/install"; }}
+                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10"
+                >
+                  Choose Project
+                </button>
+                <button
+                  type="button"
+                  onClick={() => { void handleStartBlank(); conversation.clearSendError(); }}
+                  disabled={creatingProject}
+                  className="rounded border border-red-400/30 px-2 py-1 text-[10px] font-bold hover:bg-red-500/10 disabled:opacity-50"
+                >
+                  {creatingProject ? "Creating…" : "Start Blank"}
+                </button>
+              </div>
+            )}
+
             {isStudioWorkConversation && (
               <CommandComposer
                 value={composerValue}
                 onChange={setComposerValue}
                 onSend={handleComposerSend}
-                busy={conversation.busy}
+                busy={conversation.busy || creatingProject}
                 onToggleCamera={() => setCameraDock((v) => ({ ...v, open: !v.open }))}
                 cameraActive={cameraDock.open}
                 contextLine={contextLine}
@@ -506,6 +594,10 @@ function StudioWorkSurface({
   onRegenerate,
   onEmptyAction,
   hasProject,
+  projectId,
+  projectName,
+  sourceType,
+  githubInstalled,
   onStartBlank,
   onConnectRepo,
 }: {
@@ -517,6 +609,10 @@ function StudioWorkSurface({
   onRegenerate: () => void;
   onEmptyAction: (prompt: string) => void;
   hasProject: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  sourceType: "github" | "blank" | "template" | null;
+  githubInstalled: boolean;
   onStartBlank: () => void;
   onConnectRepo: () => void;
 }) {
@@ -540,6 +636,10 @@ function StudioWorkSurface({
         <div className="min-h-0 flex-1 overflow-y-auto">
           <LiTEmptyState
             hasProject={hasProject}
+            projectId={projectId}
+            projectName={projectName}
+            sourceType={sourceType}
+            githubInstalled={githubInstalled}
             onPick={onEmptyAction}
             onStartBlank={onStartBlank}
             onConnectRepo={onConnectRepo}

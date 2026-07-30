@@ -35,6 +35,7 @@ type MarketplaceItem = {
   capability_key: string;
   version: string;
   icon: string;
+  author_name: string | null;
   is_featured: boolean;
   is_official: boolean;
   is_beta: boolean;
@@ -86,6 +87,16 @@ const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   creative_pack: "Creative Pack",
 };
 
+type SortOption = "featured" | "name" | "newest" | "price-low" | "price-high";
+
+const SORT_OPTIONS: { id: SortOption; label: string }[] = [
+  { id: "featured", label: "Featured" },
+  { id: "name", label: "Name A-Z" },
+  { id: "newest", label: "Newest" },
+  { id: "price-low", label: "Price: Low to High" },
+  { id: "price-high", label: "Price: High to Low" },
+];
+
 const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
   skill: Zap,
   tool: Code2,
@@ -111,6 +122,8 @@ function MarketplaceInner() {
   const [items, setItems] = useState<MarketplaceItem[]>([]);
   const [installations, setInstallations] = useState<Map<string, Installation>>(new Map());
   const [selectedCategory, setSelectedCategory] = useState<string>("all");
+  const [selectedType, setSelectedType] = useState<string>("all");
+  const [sortBy, setSortBy] = useState<SortOption>("featured");
   const [searchQuery, setSearchQuery] = useState("");
   const [toast, setToast] = useState<{ msg: string; type: "success" | "error" | "info" } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -239,17 +252,34 @@ function MarketplaceInner() {
     }
   }, [installations]);
 
-  const filteredItems = useMemo(() =>
-    items
+  const filteredItems = useMemo(() => {
+    const filtered = items
       .filter((item) => selectedCategory === "all" || item.category === selectedCategory)
+      .filter((item) => selectedType === "all" || item.item_type === selectedType)
       .filter(
         (item) =>
           !searchQuery ||
           item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-          item.description.toLowerCase().includes(searchQuery.toLowerCase()),
-      ),
-    [items, selectedCategory, searchQuery],
-  );
+          item.description.toLowerCase().includes(searchQuery.toLowerCase()) ||
+          (item.author_name || "").toLowerCase().includes(searchQuery.toLowerCase()),
+      );
+
+    // Sort
+    switch (sortBy) {
+      case "name":
+        return [...filtered].sort((a, b) => a.name.localeCompare(b.name));
+      case "newest":
+        // No created_at in the type; featured-first as fallback
+        return [...filtered].sort((a, b) => Number(b.is_featured) - Number(a.is_featured));
+      case "price-low":
+        return [...filtered].sort((a, b) => (a.price_cents || 0) - (b.price_cents || 0));
+      case "price-high":
+        return [...filtered].sort((a, b) => (b.price_cents || 0) - (a.price_cents || 0));
+      case "featured":
+      default:
+        return [...filtered].sort((a, b) => Number(b.is_featured) - Number(a.is_featured));
+    }
+  }, [items, selectedCategory, selectedType, sortBy, searchQuery]);
 
   const featuredItems = useMemo(() => filteredItems.filter((item) => item.is_featured), [filteredItems]);
   const nonFeaturedItems = useMemo(() => filteredItems.filter((item) => !item.is_featured), [filteredItems]);
@@ -365,30 +395,72 @@ function MarketplaceInner() {
       {/* === MARKETPLACE TAB === */}
       {activeTab === "marketplace" && (
         <div className="mx-auto max-w-6xl px-4 py-6 sm:px-6">
-          {/* Filters + Search */}
-          <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex flex-wrap gap-2">
-              {CATEGORIES.map((cat) => (
-                <button
-                  key={cat.id}
-                  onClick={() => setSelectedCategory(cat.id)}
-                  className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition ${
-                    selectedCategory === cat.id ? "border-orange-500/50 bg-orange-500/10 text-orange-400" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
-                  }`}
+          {/* Filters + Search + Sort */}
+          <div className="mb-6 space-y-3">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              {/* Category filters */}
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((cat) => (
+                  <button
+                    key={cat.id}
+                    onClick={() => setSelectedCategory(cat.id)}
+                    className={`rounded-lg border px-3 py-1.5 text-[11px] font-bold uppercase tracking-wide transition ${
+                      selectedCategory === cat.id ? "border-orange-500/50 bg-orange-500/10 text-orange-400" : "border-white/10 text-white/45 hover:bg-white/5 hover:text-white/70"
+                    }`}
+                  >
+                    {cat.label}
+                  </button>
+                ))}
+              </div>
+              {/* Search + Sort */}
+              <div className="flex items-center gap-2">
+                <div className="relative w-full max-w-48">
+                  <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" size={14} />
+                  <input
+                    type="text"
+                    placeholder="Search..."
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-orange-500/40"
+                  />
+                </div>
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="rounded-xl border border-white/10 bg-white/5 py-2 pl-3 pr-7 text-xs font-bold text-white/70 outline-none focus:border-orange-500/40"
+                  aria-label="Sort by"
                 >
-                  {cat.label}
-                </button>
-              ))}
+                  {SORT_OPTIONS.map((opt) => (
+                    <option key={opt.id} value={opt.id} className="bg-[#0a0a0f] text-white">{opt.label}</option>
+                  ))}
+                </select>
+              </div>
             </div>
-            <div className="relative w-full max-w-48">
-              <SearchIcon className="absolute left-3 top-1/2 -translate-y-1/2 text-white/25" size={14} />
-              <input
-                type="text"
-                placeholder="Search..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="w-full rounded-xl border border-white/10 bg-white/5 py-2 pl-9 pr-3 text-sm text-white outline-none placeholder:text-white/25 focus:border-orange-500/40"
-              />
+            {/* Type filter chips */}
+            <div className="flex flex-wrap items-center gap-2">
+              <span className="text-[10px] font-bold uppercase tracking-wider text-white/30">Type:</span>
+              <button
+                onClick={() => setSelectedType("all")}
+                className={`rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition ${
+                  selectedType === "all" ? "bg-white/15 text-white" : "text-white/40 hover:bg-white/5 hover:text-white/70"
+                }`}
+              >
+                All
+              </button>
+              {(Object.keys(TYPE_LABELS) as MarketplaceItemType[]).map((type) => {
+                const Icon = TYPE_ICONS[type];
+                return (
+                  <button
+                    key={type}
+                    onClick={() => setSelectedType(type)}
+                    className={`flex items-center gap-1 rounded-md px-2.5 py-1 text-[10px] font-bold uppercase tracking-wide transition ${
+                      selectedType === type ? "bg-white/15 text-white" : "text-white/40 hover:bg-white/5 hover:text-white/70"
+                    }`}
+                  >
+                    <Icon size={10} /> {TYPE_LABELS[type]}
+                  </button>
+                );
+              })}
             </div>
           </div>
 
@@ -432,7 +504,7 @@ function MarketplaceInner() {
                       : `No items found matching "${searchQuery}".`}
                 </p>
                 {searchQuery && (
-                  <button onClick={() => { setSearchQuery(""); setSelectedCategory("all"); }} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">
+                  <button onClick={() => { setSearchQuery(""); setSelectedCategory("all"); setSelectedType("all"); }} className="mt-3 rounded-lg border border-white/10 px-4 py-2 text-sm text-white/60 hover:bg-white/5">
                     Clear filters
                   </button>
                 )}
@@ -659,6 +731,13 @@ const MarketplaceCard = memo(function MarketplaceCard({
           {item.description}
         </p>
 
+        {/* Author */}
+        {item.author_name && (
+          <div className="mt-2 text-[10px]" style={{ color: textMuted }}>
+            by <span className="font-bold" style={{ color: headerColor }}>{item.author_name}</span>
+          </div>
+        )}
+
         {/* Compatibility */}
         <div className="mt-3 flex items-center gap-2 text-[10px]" style={{ color: textMuted }}>
           <span>Works with:</span>
@@ -680,7 +759,7 @@ const MarketplaceCard = memo(function MarketplaceCard({
           </div>
         )}
 
-        {/* Status badge */}
+        {/* Status badge + price */}
         <div className="mt-2 flex items-center gap-2 text-[10px]">
           {isComingSoon ? (
             <span className="rounded-md bg-amber-400/10 px-2 py-0.5 font-bold text-amber-300">Coming soon</span>
@@ -694,6 +773,17 @@ const MarketplaceCard = memo(function MarketplaceCard({
             <span className="rounded-md bg-white/5 px-2 py-0.5 font-bold" style={{ color: textMuted }}>Available</span>
           )}
           <span className="text-[9px]" style={{ color: textMuted }}>v{item.version}</span>
+          {/* Price badge */}
+          {!isComingSoon && (
+            <span className="ml-auto rounded-md px-2 py-0.5 font-bold" style={{
+              backgroundColor: (item.price_cents || 0) === 0 ? "#10b98115" : `${categoryColor}15`,
+              color: (item.price_cents || 0) === 0 ? "#34d399" : categoryColor,
+            }}>
+              {(item.price_cents || 0) === 0
+                ? (ALL_ITEMS_FREE_DURING_BETA ? "Free (Beta)" : "Free")
+                : `$${(item.price_cents / 100).toFixed(2)}`}
+            </span>
+          )}
         </div>
 
         {/* Action */}
@@ -747,7 +837,9 @@ const MarketplaceCard = memo(function MarketplaceCard({
               style={{ background: categoryColor }}
               aria-label={`Install ${item.name}`}
             >
-              {ALL_ITEMS_FREE_DURING_BETA ? "Install — Free during beta" : "Install"}
+              {(item.price_cents || 0) === 0
+                ? (ALL_ITEMS_FREE_DURING_BETA ? "Install — Free during beta" : "Install Free")
+                : `Install — $${(item.price_cents / 100).toFixed(2)}`}
             </button>
           )}
         </div>

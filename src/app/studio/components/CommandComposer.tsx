@@ -22,8 +22,8 @@ import {
   AGENT_META,
   type AgentId,
 } from "../stores/useStudioAgentStore";
-import { useStudioModelStore } from "../stores/useStudioModelStore";
-import { ChevronDown } from "lucide-react";
+import { useStudioModelStore, MODELS, type SelectedModel, type ProviderHealth } from "../stores/useStudioModelStore";
+import { ChevronDown, Check } from "lucide-react";
 
 /** Composer execution modes. */
 const STATUS_LABELS: Record<VoiceState, string> = {
@@ -47,7 +47,7 @@ export interface ComposerContextLine {
 interface CommandComposerProps {
   value: string;
   onChange: (value: string) => void;
-  onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult>;
+  onSend: (value: string, attachments?: string[]) => Promise<import("../hooks/useCanonicalConversation").SendResult | undefined>;
   busy?: boolean;
   onToggleCamera?: () => void;
   cameraActive?: boolean;
@@ -71,10 +71,15 @@ export default function CommandComposer({
   const [snapshots, setSnapshots] = useState<string[]>([]);
   const [showAttach, setShowAttach] = useState(false);
   const [agentOpen, setAgentOpen] = useState(false);
+  const [modelOpen, setModelOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const agentTriggerRef = useRef<HTMLButtonElement>(null);
+  const modelTriggerRef = useRef<HTMLButtonElement>(null);
   const [agentRect, setAgentRect] = useState<DOMRect | null>(null);
+  const [modelRect, setModelRect] = useState<DOMRect | null>(null);
+  const selectModel = useStudioModelStore((s) => s.selectModel);
+  const providerHealth = useStudioModelStore((s) => s.providerHealth);
 
   const {
     voiceState,
@@ -91,7 +96,7 @@ export default function CommandComposer({
   useEffect(() => {
     setOnTurn((text) => {
       void onSend(text).then((result) => {
-        if (result.reply) speakText(result.reply);
+        if (result?.reply) speakText(result.reply);
       }).catch(() => {});
     });
   }, [onSend, setOnTurn, speakText]);
@@ -104,7 +109,7 @@ export default function CommandComposer({
     ta.style.height = Math.min(ta.scrollHeight, 160) + "px";
   }, [value]);
 
-  // Position popovers on open.
+  // Position agent popover on open.
   useEffect(() => {
     if (!agentOpen) return;
     if (agentTriggerRef.current) setAgentRect(agentTriggerRef.current.getBoundingClientRect());
@@ -116,6 +121,19 @@ export default function CommandComposer({
       window.removeEventListener("resize", update);
     };
   }, [agentOpen]);
+
+  // Position model popover on open.
+  useEffect(() => {
+    if (!modelOpen) return;
+    if (modelTriggerRef.current) setModelRect(modelTriggerRef.current.getBoundingClientRect());
+    const update = () => modelTriggerRef.current && setModelRect(modelTriggerRef.current.getBoundingClientRect());
+    window.addEventListener("scroll", update, true);
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update, true);
+      window.removeEventListener("resize", update);
+    };
+  }, [modelOpen]);
 
   // Synchronous submission lock — prevents a fast double-click from
   // entering submit before React applies the busy=true prop.
@@ -134,12 +152,12 @@ export default function CommandComposer({
     setSnapshots([]);
     try {
       const result = await onSend(textToSend, attachments.length ? attachments : undefined);
-      if (!result.accepted) {
+      if (!result?.accepted) {
         // Controller rejected — restore text and attachments
         onChange(textToSend);
         setSnapshots(attachments);
       }
-      if (result.reply) speakText(result.reply);
+      if (result?.reply) speakText(result.reply);
     } finally {
       submittingRef.current = false;
     }
@@ -332,20 +350,36 @@ export default function CommandComposer({
             document.body,
           )}
 
-        {/* Model picker label — shows the currently selected model */}
-        <span
-          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold"
+        {/* Model picker — interactive button + popover */}
+        <button
+          ref={modelTriggerRef}
+          type="button"
+          onClick={() => setModelOpen((v) => !v)}
+          className="flex h-10 shrink-0 items-center gap-1 rounded-xl border px-2.5 text-[11px] font-bold transition hover:bg-white/5"
           style={{
             borderColor: "var(--studio-border-strong)",
             color: "var(--text-secondary)",
           }}
           title={`${selectedModel.label} · ${selectedModel.provider} · ${selectedModel.cost}`}
+          aria-label="Select model"
+          aria-expanded={modelOpen}
         >
           <span>{selectedModel.icon}</span>
           <span className="hidden sm:inline">{selectedModel.label}</span>
           <span className="sm:hidden">{selectedModel.label.split(" ")[0]}</span>
           <ChevronDown size={10} className="pointer-events-none opacity-50" />
-        </span>
+        </button>
+        {modelOpen && modelRect &&
+          createPortal(
+            <ModelPopover
+              rect={modelRect}
+              selectedId={selectedModel.id}
+              providerHealth={providerHealth}
+              onSelect={(m) => { selectModel(m); setModelOpen(false); }}
+              onClose={() => setModelOpen(false)}
+            />,
+            document.body,
+          )}
 
         {/* Text input — min 14px font */}
         <textarea

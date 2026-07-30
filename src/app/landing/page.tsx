@@ -12,9 +12,9 @@ import { LandingFooter } from "./_components/LandingFooter";
 import { LandingBackground } from "./_components/LandingBackground";
 
 export const metadata: Metadata = {
-  title: "LiTT Labs — Stop chatting. Start shipping.",
+  title: "LiTTree LabStudios — Bring the idea. LiTT helps you build the rest.",
   description:
-    "LiTT Labs gives your project an AI crew that can see the work, change the files, test the result, and help you ship. Connect your repo, assign a mission, watch your agents work.",
+    "Build apps, create art, make media, and launch real projects with an AI crew that remembers your goals, style, and decisions. Free to join.",
 };
 
 export default function ModernLandingPage() {

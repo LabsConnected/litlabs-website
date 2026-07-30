@@ -10,6 +10,7 @@ import {
   Upload,
   FilePlus2,
 } from "lucide-react";
+import LiTTPresence from "./LiTTPresence";
 
 /* Inline GitHub mark — lucide-react is pinned to ^1.24.0 and lacks Github. */
 function GithubMark({ size = 16, className }: { size?: number; className?: string }) {
@@ -55,11 +56,19 @@ const PROJECT_SUGGESTIONS = [
 
 export default function LiTEmptyState({
   hasProject,
+  projectId,
+  projectName,
+  sourceType,
+  githubInstalled,
   onPick,
   onConnectRepo,
   onStartBlank,
 }: {
   hasProject: boolean;
+  projectId: string | null;
+  projectName: string | null;
+  sourceType: "github" | "blank" | "template" | null;
+  githubInstalled: boolean;
   onPick: (prompt: string) => void;
   onConnectRepo?: () => void;
   onStartBlank?: () => void;
@@ -71,31 +80,9 @@ export default function LiTEmptyState({
       className="flex min-h-full flex-col items-center justify-center px-4 py-8"
       style={{ color: "var(--text-primary)" }}
     >
-      {/* Restrained LiTT presence — 104px, no giant mascot */}
-      <div
-        className="relative mb-5 grid place-items-center rounded-2xl"
-        style={{
-          width: 104,
-          height: 104,
-          background: "radial-gradient(circle at 50% 40%, rgba(114,242,56,0.18), transparent 70%)",
-        }}
-        aria-hidden
-      >
-        <div
-          className="grid h-16 w-16 place-items-center rounded-2xl border"
-          style={{
-            borderColor: "rgba(114,242,56,0.35)",
-            backgroundColor: "rgba(114,242,56,0.08)",
-            boxShadow: "0 0 32px rgba(114,242,56,0.15)",
-          }}
-        >
-          <span
-            className="text-2xl font-black"
-            style={{ color: "var(--litt-primary)", fontFamily: "var(--font-space-grotesk)" }}
-          >
-            L
-          </span>
-        </div>
+      {/* LiTT cutout mascot — full body with green platform */}
+      <div className="mb-4">
+        <LiTTPresence state="idle" variant="empty-state" size="md" />
       </div>
 
       {/* Headline */}
@@ -159,6 +146,30 @@ export default function LiTEmptyState({
       <div className="mt-6 w-full max-w-md">
         {hasProject ? (
           <div className="flex flex-col gap-1.5">
+            {sourceType === "blank" && (
+              <div
+                className="mb-1 rounded-lg border px-3 py-2 text-[11px] font-bold"
+                style={{
+                  borderColor: "rgba(114,242,56,0.25)",
+                  backgroundColor: "rgba(114,242,56,0.06)",
+                  color: "var(--litt-primary)",
+                }}
+              >
+                Blank project ready — {projectName ?? "Untitled"}
+              </div>
+            )}
+            {sourceType === "github" && projectName && (
+              <div
+                className="mb-1 rounded-lg border px-3 py-2 text-[11px] font-bold"
+                style={{
+                  borderColor: "rgba(114,242,56,0.25)",
+                  backgroundColor: "rgba(114,242,56,0.06)",
+                  color: "var(--litt-primary)",
+                }}
+              >
+                {projectName}
+              </div>
+            )}
             <div
               className="px-1 text-[10px] font-black uppercase tracking-[0.18em]"
               style={{ color: "var(--text-muted)" }}
@@ -182,7 +193,33 @@ export default function LiTEmptyState({
               </button>
             ))}
           </div>
+        ) : githubInstalled ? (
+          /* GitHub installed but no project selected */
+          <div className="flex flex-col gap-2">
+            <div
+              className="px-1 text-[10px] font-black uppercase tracking-[0.18em]"
+              style={{ color: "var(--text-muted)" }}
+            >
+              GitHub connected — select a repository
+            </div>
+            <p className="text-[12px]" style={{ color: "var(--text-secondary)" }}>
+              Your GitHub app is installed, but no repository has been linked to a project yet.
+            </p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              <NoProjectAction
+                icon={GithubMark}
+                label="Connect repo"
+                onClick={onConnectRepo}
+              />
+              <NoProjectAction
+                icon={FilePlus2}
+                label="Start blank"
+                onClick={onStartBlank}
+              />
+            </div>
+          </div>
         ) : (
+          /* No GitHub installation at all */
           <div className="flex flex-col gap-2">
             <div
               className="px-1 text-[10px] font-black uppercase tracking-[0.18em]"
