@@ -56,7 +56,8 @@ export type StudioTool =
   | "space"
   | "clibridge"
   | "color"
-  | "loops";
+  | "loops"
+  | "musiclab";
 
 type ToolItem = {
   id: StudioTool;
@@ -89,6 +90,7 @@ const MORE_TOOLS: ToolItem[] = [
   { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
   { id: "loops", label: "Loops", icon: Repeat, shortcut: "L" },
+  { id: "musiclab", label: "Music Lab", icon: Music, shortcut: "U" },
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
