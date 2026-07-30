@@ -63,26 +63,26 @@ export async function GET(req: Request) {
       try {
         switch (tool) {
           case "qwen":
-            childProcess = spawn("qwen", [], {
-              cwd: process.env.HOME || "/home/litbit",
+                        childProcess = spawn("qwen", [], {
+              cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
               env: { ...process.env, TERM: "xterm-256color" },
             });
             break;
           case "hermes":
-            childProcess = spawn("hermes", [], {
-              cwd: process.env.HOME || "/home/litbit",
+                        childProcess = spawn("hermes", [], {
+              cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
               env: { ...process.env, TERM: "xterm-256color" },
             });
             break;
           case "openclaw":
-            childProcess = spawn("openclaw", [], {
-              cwd: process.env.HOME || "/home/litbit",
+                        childProcess = spawn("openclaw", [], {
+              cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
               env: { ...process.env, TERM: "xterm-256color" },
             });
             break;
           case "gemini":
-            childProcess = spawn("gemini", [], {
-              cwd: process.env.HOME || "/home/litbit",
+                        childProcess = spawn("gemini", [], {
+              cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
               env: {
                 ...process.env,
                 TERM: "xterm-256color",
@@ -91,8 +91,8 @@ export async function GET(req: Request) {
             });
             break;
           default:
-            childProcess = spawn("bash", ["-i"], {
-              cwd: process.env.HOME || "/home/litbit",
+                        childProcess = spawn("bash", ["-i"], {
+              cwd: process.env.HOME || process.env.USERPROFILE || process.cwd(),
               env: { ...process.env, TERM: "xterm-256color" },
             });
         }
