@@ -167,6 +167,7 @@ eslint-sidebar.txt
 # Playwright test artifacts
 test-results/
 tests/playwright/screenshots/
+tests/playwright/.auth/
 playwright-report/
 
 .vercel
