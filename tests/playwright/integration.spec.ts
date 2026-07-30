@@ -307,12 +307,9 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     // Cleanup: delete the test project if it was created
     if (projectAId && contextA) {
       try {
-        const page = await contextA.newPage();
-        await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-        await page.evaluate(async (id) => {
-          await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
-        }, projectAId);
-        await page.close();
+        await contextA.request.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+          headers: bypassHeaders(),
+        });
         console.log(`Cleanup: deleted project ${projectAId}`);
       } catch (err) {
         console.error(`Cleanup failed for project ${projectAId}:`, err);
@@ -341,48 +338,25 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       contextA = result.context;
     }
 
-    // Use page.evaluate to make the API call from within the browser,
-    // which automatically includes all auth cookies.
-    const page = await contextA.newPage();
-    await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await page.waitForTimeout(3000);
-
-    // Debug: check cookies and URL
-    const cookies = await contextA.cookies();
-    console.log(`Cookies: ${cookies.map(c => c.name).join(", ")}`);
-    console.log(`Page URL: ${page.url()}`);
-    const bodyText = await page.locator("body").innerText().catch(() => "");
-    console.log(`Body text (first 200): ${bodyText.substring(0, 200)}`);
-
-    // Use relative URL so fetch is same-origin and cookies are sent automatically
-    const result = await page.evaluate(async () => {
-      const resp = await fetch(`/api/studio-projects`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ sourceType: "blank", name: `e2e-test-${Date.now()}`, templateId: "blank-static" }),
-        credentials: "include",
-      });
-      const body = await resp.json().catch(() => ({}));
-      return { status: resp.status, body };
+    // Use context.request which shares cookies with the browser context
+    const request = contextA.request;
+    const resp = await request.post(`${DEPLOYMENT_URL}/api/studio-projects`, {
+      data: { sourceType: "blank", name: `e2e-test-${Date.now()}`, templateId: "blank-static" },
+      headers: { "Content-Type": "application/json", ...bypassHeaders() },
     });
-
-    console.log(`Project creation: status=${result.status}, body=${JSON.stringify(result.body).substring(0, 200)}`);
-    expect(result.status, "Project creation should succeed").toBe(200);
-    projectAId = result.body.project?.id || result.body.id;
+    const respText = await resp.text();
+    console.log(`Project creation: status=${resp.status()}, body=${respText.substring(0, 200)}`);
+    expect(resp.status(), "Project creation should succeed").toBe(201);
+    const body = JSON.parse(respText);
+    projectAId = body.project?.id || body.id;
     expect(projectAId, "Project ID should be returned").toBeTruthy();
     console.log(`Created disposable project: ${projectAId}`);
 
     // Verify User A can read their own project
-    const readResult = await page.evaluate(async (id) => {
-      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
-      const body = await resp.json().catch(() => ({}));
-      return { status: resp.status, body };
-    }, projectAId);
-
-    expect(readResult.status, "User A should read own project").toBe(200);
-    expect(readResult.body.project?.id, "Project ID should match").toBe(projectAId);
-    console.log(`User A confirmed access to project ${projectAId}`);
-    await page.close();
+    const getResp = await request.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+      headers: bypassHeaders(),
+    });
+    expect(getResp.status(), "User A should read own project").toBe(200);
   });
 
   test("User B signs in and cannot read User A's project", async ({ browser }) => {
@@ -393,24 +367,18 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
     // Wait for project A to exist (depends on prior test)
     expect(projectAId, "Project A must be created before this test").toBeTruthy();
 
-    // Use page.evaluate for authenticated API call
-    const pageB = await contextB.newPage();
-    await pageB.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await pageB.waitForTimeout(2000);
-
-    const readResult = await pageB.evaluate(async (id) => {
-      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
-      const body = await resp.json().catch(() => ({}));
-      return { status: resp.status, body };
-    }, projectAId);
+    // Use context.request which shares cookies with the browser context
+    const reqB = contextB.request;
+    const getResp = await reqB.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+      headers: bypassHeaders(),
+    });
 
     // Should be 403 (forbidden) or 404 (not found) — NOT 200
     expect(
-      readResult.status,
-      `User B should get 403/404 for User A's project, got ${readResult.status}`,
+      getResp.status(),
+      `User B should get 403/404 for User A's project, got ${getResp.status()}`,
     ).toMatch(/403|404/);
-    console.log(`User B got ${readResult.status} for User A's project ${projectAId}`);
-    await pageB.close();
+    console.log(`User B got ${getResp.status()} for User A's project ${projectAId}`);
   });
 
   test("User B cannot modify or delete User A's project", async ({ browser }) => {
@@ -420,37 +388,28 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       contextB = result.context;
     }
 
-    // Use page.evaluate for authenticated API call
-    const pageB2 = await contextB.newPage();
-    await pageB2.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await pageB2.waitForTimeout(2000);
+    // Use context.request which shares cookies with the browser context
+    const reqB2 = contextB.request;
 
     // Attempt to delete User A's project as User B
-    const deleteResult = await pageB2.evaluate(async (id) => {
-      const resp = await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
-      return { status: resp.status };
-    }, projectAId);
+    const deleteResp = await reqB2.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+      headers: bypassHeaders(),
+    });
 
     expect(
-      deleteResult.status,
-      `User B should not delete User A's project, got ${deleteResult.status}`,
+      deleteResp.status(),
+      `User B should not delete User A's project, got ${deleteResp.status()}`,
     ).toMatch(/403|404|401/);
-    console.log(`User B delete attempt: ${deleteResult.status}`);
+    console.log(`User B delete attempt: ${deleteResp.status()}`);
 
     // Verify User A's project still exists after User B's delete attempt
     if (contextA) {
-      const pageA2 = await contextA.newPage();
-      await pageA2.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-      await pageA2.waitForTimeout(2000);
-      const verifyResult = await pageA2.evaluate(async (id) => {
-        const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
-        return { status: resp.status };
-      }, projectAId);
-      expect(verifyResult.status, "User A's project should still exist after User B delete attempt").toBe(200);
+      const verifyResp = await contextA.request.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+        headers: bypassHeaders(),
+      });
+      expect(verifyResp.status(), "User A's project should still exist after User B delete attempt").toBe(200);
       console.log(`User A verified project still exists after User B delete attempt`);
-      await pageA2.close();
     }
-    await pageB2.close();
   });
 
   test("User B cannot access User A's R2 objects via storage API", async ({ browser }) => {
@@ -459,25 +418,23 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       contextB = result.context;
     }
 
-    // Use page.evaluate for authenticated API call
-    const pageB3 = await contextB.newPage();
-    await pageB3.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await pageB3.waitForTimeout(2000);
-
-    const storageResult = await pageB3.evaluate(async () => {
-      const resp = await fetch(`/api/storage?key=audio/test-clip.mp3&type=audio/mpeg`, { credentials: "include" });
-      const body = await resp.json().catch(() => ({}));
-      return { status: resp.status, body };
-    });
+    // Use context.request which shares cookies with the browser context
+    const reqB3 = contextB.request;
+    const storageResp = await reqB3.get(
+      `${DEPLOYMENT_URL}/api/storage?key=audio/test-clip.mp3&type=audio/mpeg`,
+      { headers: bypassHeaders() },
+    );
 
     // User B is authenticated, so this should succeed but only for their own namespace
-    expect(storageResult.status, "Storage API should respond to authenticated User B").toBeLessThan(500);
-    if (storageResult.status === 200 && storageResult.body?.path) {
-      expect(storageResult.body.path, "Storage path should not contain another user's ID").not.toContain(userAEmail!);
-      console.log(`User B storage path: ${storageResult.body.path} (correctly scoped)`);
+    expect(storageResp.status(), "Storage API should respond to authenticated User B").toBeLessThan(500);
+    if (storageResp.status() === 200) {
+      const storageBody = await storageResp.json();
+      if (storageBody.path) {
+        expect(storageBody.path, "Storage path should not contain another user's ID").not.toContain(userAEmail!);
+        console.log(`User B storage path: ${storageBody.path} (correctly scoped)`);
+      }
     }
-    console.log(`User B storage API: ${storageResult.status}`);
-    await pageB3.close();
+    console.log(`User B storage API: ${storageResp.status()}`);
   });
 
   test("User A retains access to their project after User B attempts", async ({ browser }) => {
@@ -487,39 +444,29 @@ test.describe("Authenticated Clerk tests — cross-user isolation", () => {
       contextA = result.context;
     }
 
-    // Use page.evaluate for authenticated API call
-    const pageA3 = await contextA.newPage();
-    await pageA3.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-    await pageA3.waitForTimeout(2000);
-    const readResult = await pageA3.evaluate(async (id) => {
-      const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
-      const body = await resp.json().catch(() => ({}));
-      return { status: resp.status, body };
-    }, projectAId);
-    expect(readResult.status, "User A should still access their project").toBe(200);
+    // Use context.request which shares cookies with the browser context
+    const reqA3 = contextA.request;
+    const getResp = await reqA3.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+      headers: bypassHeaders(),
+    });
+    expect(getResp.status(), "User A should still access their project").toBe(200);
     console.log(`User A confirmed retained access to project ${projectAId}`);
-    await pageA3.close();
   });
 
   test("test-created resources are cleaned up", async () => {
     // The afterAll hook handles deletion, but this test explicitly verifies
     // that cleanup was attempted and succeeds.
     if (projectAId && contextA) {
-      const pageA4 = await contextA.newPage();
-      await pageA4.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
-      await pageA4.waitForTimeout(2000);
-      await pageA4.evaluate(async (id) => {
-        await fetch(`/api/studio-projects/${id}`, { method: "DELETE", credentials: "include" });
-      }, projectAId);
+      await contextA.request.delete(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+        headers: bypassHeaders(),
+      });
       // Verify it's gone
-      const verifyResult = await pageA4.evaluate(async (id) => {
-        const resp = await fetch(`/api/studio-projects/${id}`, { credentials: "include" });
-        return { status: resp.status };
-      }, projectAId);
-      expect(verifyResult.status, "Deleted project should return 404").toBe(404);
+      const verifyResp = await contextA.request.get(`${DEPLOYMENT_URL}/api/studio-projects/${projectAId}`, {
+        headers: bypassHeaders(),
+      });
+      expect(verifyResp.status(), "Deleted project should return 404").toBe(404);
       console.log(`Cleanup verified: project ${projectAId} is deleted`);
       projectAId = null;
-      await pageA4.close();
     } else {
       console.log("No project to clean up (tests may have been skipped)");
     }
