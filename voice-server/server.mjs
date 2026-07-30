@@ -73,13 +73,44 @@ function verifyToken(token) {
 }
 
 const server = createServer(async (req, res) => {
-  // Railway healthcheck — lightweight, no auth
-  if (req.url === "/health" || req.url === "/") {
+  // Liveness check — process is alive
+  if (req.url === "/health/live") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(
       JSON.stringify({
-        status: "ok",
         service: "voice-proxy",
+        status: "alive",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    return;
+  }
+
+  // Readiness check — dependencies are usable
+  if (req.url === "/health/ready" || req.url === "/health" || req.url === "/") {
+    const inworldConfigured = !!INWORLD_API_KEY && INWORLD_API_KEY.length > 0;
+    const authConfigured = !!VOICE_AUTH_SECRET && VOICE_AUTH_SECRET.length >= 32;
+    const allReady = inworldConfigured && authConfigured;
+
+    res.writeHead(allReady ? 200 : 503, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        service: "voice-proxy",
+        status: allReady ? "ok" : "degraded",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        readiness: allReady ? "ready" : "not_ready",
+        checks: {
+          inworldConfigured,
+          authConfigured,
+        },
+        reasons: allReady
+          ? []
+          : [
+              !inworldConfigured ? "INWORLD_API_KEY not configured" : "",
+              !authConfigured ? "VOICE_AUTH_SECRET not configured (min 32 chars)" : "",
+            ].filter(Boolean),
         activeSessions: totalActiveSessions.size,
         activeUsers: activeSessionsByUser.size,
       }),
@@ -287,3 +318,20 @@ server.listen(PORT, () => {
   console.log(`[voice-proxy] Listening on ws://localhost:${PORT}${PATH}`);
   console.log(`[voice-proxy] Proxying to ${INWORLD_ENDPOINT}`);
 });
+
+// Graceful shutdown
+function shutdown(signal) {
+  console.log(`[voice-proxy] Received ${signal}, shutting down...`);
+  server.close(() => {
+    console.log("[voice-proxy] HTTP server closed.");
+    process.exit(0);
+  });
+  // Force exit after 10s if connections don't close
+  setTimeout(() => {
+    console.error("[voice-proxy] Forcing exit after timeout.");
+    process.exit(1);
+  }, 10_000);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));

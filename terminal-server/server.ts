@@ -85,12 +85,72 @@ interface Session {
 
 const sessions = new Map<string, Session>();
 
-app.get("/health", (_req, res) => {
+app.get("/health/live", (_req, res) => {
   res.json({
-    ok: true,
+    service: "terminal-server",
+    status: "alive",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+  });
+});
+
+app.get("/health/ready", (_req, res) => {
+  const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
+  const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const workspaceReady = workspaceRoot.length > 0;
+
+  const checks = {
+    authConfigured,
+    internalServiceConfigured,
+    workspaceRoot: workspaceReady,
     docker: USE_DOCKER,
-    authConfigured: (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32,
-    internalServiceConfigured: (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32,
+  };
+
+  const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+
+  res.status(allReady ? 200 : 503).json({
+    service: "terminal-server",
+    readiness: allReady ? "ready" : "not_ready",
+    timestamp: new Date().toISOString(),
+    checks,
+    reasons: allReady
+      ? []
+      : [
+          !authConfigured ? "TERMINAL_AUTH_SECRET not configured (min 32 chars)" : "",
+          !internalServiceConfigured ? "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars)" : "",
+          !workspaceReady ? "TERMINAL_WORKSPACE_ROOT not set" : "",
+        ].filter(Boolean),
+  });
+});
+
+// Backward-compatible /health — returns readiness check
+app.get("/health", (_req, res) => {
+  const authConfigured = (process.env.TERMINAL_AUTH_SECRET?.length ?? 0) >= 32;
+  const internalServiceConfigured = (process.env.TERMINAL_INTERNAL_SERVICE_KEY?.length ?? 0) >= 32;
+  const workspaceRoot = process.env.TERMINAL_WORKSPACE_ROOT ?? "";
+  const workspaceReady = workspaceRoot.length > 0;
+  const allReady = authConfigured && internalServiceConfigured && workspaceReady;
+
+  res.status(allReady ? 200 : 503).json({
+    service: "terminal-server",
+    status: allReady ? "ok" : "degraded",
+    uptime: process.uptime(),
+    timestamp: new Date().toISOString(),
+    readiness: allReady ? "ready" : "not_ready",
+    checks: {
+      authConfigured,
+      internalServiceConfigured,
+      workspaceRoot: workspaceReady,
+      docker: USE_DOCKER,
+    },
+    reasons: allReady
+      ? []
+      : [
+          !authConfigured ? "TERMINAL_AUTH_SECRET not configured (min 32 chars)" : "",
+          !internalServiceConfigured ? "TERMINAL_INTERNAL_SERVICE_KEY not configured (min 32 chars)" : "",
+          !workspaceReady ? "TERMINAL_WORKSPACE_ROOT not set" : "",
+        ].filter(Boolean),
   });
 });
 
@@ -675,3 +735,28 @@ server.listen(PORT, "0.0.0.0", () => {
   console.log(`   Workspace root: ${WORKSPACE_ROOT}`);
   console.log(`   Docker mode: ${USE_DOCKER}`);
 });
+
+// Graceful shutdown
+function shutdown(signal: string) {
+  console.log(`[terminal-server] Received ${signal}, shutting down...`);
+  for (const [id, session] of sessions) {
+    try {
+      session.ptyProcess.kill();
+    } catch {}
+    sessions.delete(id);
+  }
+  io.close(() => {
+    server.close(() => {
+      console.log("[terminal-server] All connections closed.");
+      process.exit(0);
+    });
+  });
+  // Force exit after 10s if connections don't close
+  setTimeout(() => {
+    console.error("[terminal-server] Forcing exit after timeout.");
+    process.exit(1);
+  }, 10_000);
+}
+
+process.on("SIGINT", () => shutdown("SIGINT"));
+process.on("SIGTERM", () => shutdown("SIGTERM"));
