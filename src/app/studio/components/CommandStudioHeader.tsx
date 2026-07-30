@@ -111,12 +111,12 @@ export default function CommandStudioHeader({
         borderColor: "var(--studio-border)",
       }}
     >
-      {/* LiTT Studio logo — clickable to go home */}
+      {/* LiTT Studio logo — clickable to go to dashboard */}
       <Link
-        href="/"
+        href="/dashboard"
         className="flex shrink-0 items-center gap-1.5 rounded-md transition-all hover:opacity-80"
-        aria-label="Go to home"
-        title="Go to home"
+        aria-label="Go to dashboard"
+        title="Go to dashboard"
       >
         <div
           className="grid h-6 w-6 place-items-center rounded-md"

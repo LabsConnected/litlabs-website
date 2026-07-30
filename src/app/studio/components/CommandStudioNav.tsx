@@ -78,13 +78,13 @@ export default function CommandStudioNav({
           borderRight: "1px solid var(--studio-border)",
         }}
       >
-        {/* Home — navigate back to main site */}
+        {/* Home — navigate back to dashboard */}
         <Link
-          href="/"
+          href="/dashboard"
           className="group relative flex h-10 w-10 items-center justify-center rounded-xl transition-all hover:bg-white/8"
           style={{ color: "var(--text-muted)" }}
-          title="Home"
-          aria-label="Go to home"
+          title="Dashboard"
+          aria-label="Go to dashboard"
         >
           <Home
             size={18}
@@ -251,12 +251,12 @@ export function MobileCommandNav({
         borderTop: "1px solid var(--studio-border)",
       }}
     >
-      {/* Home — navigate back to main site */}
+      {/* Home — navigate back to dashboard */}
       <Link
-        href="/"
+        href="/dashboard"
         className="flex flex-1 flex-col items-center justify-center gap-0.5 transition-colors"
         style={{ color: "var(--text-muted)" }}
-        aria-label="Go to home"
+        aria-label="Go to dashboard"
       >
         <Home size={18} strokeWidth={1.7} className="pointer-events-none" />
         <span className="text-[9px] font-bold">Home</span>
