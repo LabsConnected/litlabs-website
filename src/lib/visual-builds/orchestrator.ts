@@ -432,9 +432,11 @@ export async function runVisualBuild(input: {
       throw new Error(`Preview capture failed for ${spec.viewport}: ${error instanceof Error ? error.message : String(error)}`);
     });
     const screenshotUrl = result.screenshot.length > 0 ? (await import("@/lib/r2")).uploadBinaryAsset(
-      `projects/${input.projectId}/visual-builds/${build.id}/captures/${spec.viewport}.png`,
+      input.userId,
+      `${spec.viewport}.png`,
       result.screenshot,
       "image/png",
+      "image",
     ).then((uploaded) => uploaded.publicUrl) : null;
     const capture = await createPreviewCapture({
       projectId: input.projectId,
@@ -532,9 +534,11 @@ export async function runVisualBuild(input: {
         const result = await capturePreviewWithChrome({ url: repairedPreviewUrl, ...spec, timeoutMs: budget.timeoutSeconds * 1000 });
         const screenshotUrl = result.screenshot.length > 0
           ? (await import("@/lib/r2")).uploadBinaryAsset(
-            `projects/${input.projectId}/visual-builds/${build.id}/captures/${spec.viewport}-repair.png`,
+            input.userId,
+            `${spec.viewport}-repair.png`,
             result.screenshot,
             "image/png",
+            "image",
           ).then((uploaded) => uploaded.publicUrl)
           : null;
         const capture = await updatePreviewCapture(
