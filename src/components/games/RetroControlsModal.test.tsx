@@ -99,6 +99,15 @@ describe("RetroControlsModal — Sega Genesis", () => {
     expect(screen.getByText("Quick Load")).toBeDefined();
     expect(screen.getByText("Rewind")).toBeDefined();
   });
+
+  it("shows a diagnostic 'Test controller' section that does not alter mappings", () => {
+    renderModal("segaMD");
+    expect(screen.getByText("Test controller")).toBeDefined();
+    // The diagnostic-only disclaimer is present.
+    expect(screen.getByText(/diagnostic only/i)).toBeDefined();
+    // Raw input toggle is present and starts hidden.
+    expect(screen.getByRole("button", { name: /Show raw input/i })).toBeDefined();
+  });
 });
 
 describe("RetroControlsModal — responsive layout", () => {
@@ -160,8 +169,10 @@ describe("RetroControlsModal — non-Sega systems", () => {
 
   it("SNES shows A, B, X, Y, L, R", () => {
     renderModal("snes");
+    // These labels now appear in both the mapping rows and the test-controller
+    // indicators, so use getAllByText.
     for (const label of ["A", "B", "X", "Y", "L", "R"]) {
-      expect(screen.getByText(label)).toBeDefined();
+      expect(screen.getAllByText(label).length).toBeGreaterThan(0);
     }
   });
 });

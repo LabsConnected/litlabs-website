@@ -79,6 +79,13 @@ export function RetroControlsModal({
   // Initialized from the profile defaults, overridden by any saved mapping.
   const [mapping, setMapping] = useState<Record<string, { keyboard: string | null; gamepad: number | null }>>({});
 
+  // ─── Controller input test mode (diagnostic only) ──────────────
+  // Live-press indicators + raw input view. Does NOT alter mappings.
+  const [showRawInput, setShowRawInput] = useState(false);
+  const [pressedButtons, setPressedButtons] = useState<Set<number>>(new Set());
+  const [axisValues, setAxisValues] = useState<number[]>([]);
+  const [lastPressedButton, setLastPressedButton] = useState<number | null>(null);
+
   // Reset mapping when the profile changes (system or controller type).
   useEffect(() => {
     if (!open) return;
@@ -130,6 +137,61 @@ export function RetroControlsModal({
       window.removeEventListener("gamepaddisconnected", onDisconnect);
     };
   }, [open, detectedGamepadId]);
+
+  // ─── Controller input test polling (diagnostic only) ───────────
+  // Polls navigator.getGamepads() via requestAnimationFrame while the modal
+  // is open. Lights up the semantic control for each pressed physical button
+  // and feeds the raw-input view. This NEVER writes to mappings — it is
+  // read-only diagnostics to prove the physical controller mapping.
+  useEffect(() => {
+    if (!open) return;
+    let raf = 0;
+    let active = true;
+    const loop = () => {
+      if (!active) return;
+      try {
+        const pads = navigator.getGamepads?.() ?? [];
+        const pad = Array.from(pads).find((p) => p != null);
+        if (pad) {
+          const pressed = new Set<number>();
+          for (let i = 0; i < pad.buttons.length; i++) {
+            if (pad.buttons[i]?.pressed) pressed.add(i);
+          }
+          setPressedButtons((prev) => {
+            // Track the most-recently pressed button for the "Button N → X" display.
+            for (const idx of pressed) {
+              if (!prev.has(idx)) setLastPressedButton(idx);
+            }
+            return pressed;
+          });
+          setAxisValues(Array.from(pad.axes));
+        } else {
+          setPressedButtons(new Set());
+          setAxisValues([]);
+        }
+      } catch {
+        /* non-fatal */
+      }
+      raf = requestAnimationFrame(loop);
+    };
+    raf = requestAnimationFrame(loop);
+    return () => {
+      active = false;
+      cancelAnimationFrame(raf);
+      setPressedButtons(new Set());
+      setAxisValues([]);
+    };
+  }, [open]);
+
+  // Reverse map: standardGamepadButton index → semantic control label, built
+  // from the active profile so the test indicators match the current layout.
+  const gamepadToControl = useMemo(() => {
+    const m = new Map<number, string>();
+    for (const c of profile.controls) {
+      if (c.standardGamepadButton != null) m.set(c.standardGamepadButton, c.label);
+    }
+    return m;
+  }, [profile]);
 
   // Escape closes; capture focus on open; restore focus on close.
   // While a remap button is waiting for input, game input is disabled by
@@ -384,6 +446,69 @@ export function RetroControlsModal({
               </div>
             ))}
           </div>
+
+          {/* Test controller — diagnostic only, does NOT alter mappings */}
+          <h3 className="mb-2 mt-5 text-[11px] font-black uppercase tracking-wider text-white/40">
+            Test controller
+          </h3>
+          <p className="mb-2 text-[10px] leading-relaxed text-white/40">
+            Press a physical button to light its semantic Sega control. This is
+            diagnostic only — it never changes your mappings.
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {profile.controls.map((c) => {
+              const isPressed = c.standardGamepadButton != null && pressedButtons.has(c.standardGamepadButton);
+              return (
+                <span
+                  key={c.id}
+                  className={`rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition ${
+                    isPressed
+                      ? "border-emerald-400 bg-emerald-500/25 text-emerald-100 shadow-[0_0_8px_rgba(52,211,153,0.4)]"
+                      : "border-white/10 bg-white/[.02] text-white/50"
+                  }`}
+                >
+                  {c.label}
+                </span>
+              );
+            })}
+          </div>
+
+          {/* Last-pressed mapping display: "Button N → Genesis X" */}
+          {lastPressedButton != null && (
+            <div className="mt-2 rounded-lg border border-white/10 bg-black/40 px-3 py-2 font-mono text-[10px] text-white/70">
+              Button {lastPressedButton} → {gamepadToControl.get(lastPressedButton) ?? "unmapped"}
+            </div>
+          )}
+
+          {/* Raw input toggle */}
+          <button
+            type="button"
+            onClick={() => setShowRawInput((v) => !v)}
+            className="mt-2 min-h-[36px] rounded-lg border border-white/10 px-3 py-1.5 text-[10px] font-bold text-white/55 transition hover:bg-white/5"
+            aria-expanded={showRawInput}
+          >
+            {showRawInput ? "Hide raw input" : "Show raw input"}
+          </button>
+          {showRawInput && (
+            <div className="mt-2 space-y-1 rounded-lg border border-white/10 bg-black/50 p-3 font-mono text-[10px] leading-relaxed text-white/60">
+              <div>
+                <span className="text-white/40">gamepad id:</span>{" "}
+                {detectedGamepadId ?? "none"}
+              </div>
+              <div>
+                <span className="text-white/40">mapping type:</span>{" "}
+                standard gamepad
+              </div>
+              <div>
+                <span className="text-white/40">pressed buttons:</span>{" "}
+                {pressedButtons.size > 0 ? Array.from(pressedButtons).sort((a, b) => a - b).join(", ") : "—"}
+              </div>
+              <div>
+                <span className="text-white/40">axes:</span>{" "}
+                {axisValues.length > 0 ? axisValues.map((v) => v.toFixed(2)).join(", ") : "—"}
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Sticky footer */}
