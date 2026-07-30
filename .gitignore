@@ -162,9 +162,11 @@ dev-output.txt
 eslint-sidebar.txt
 
 .vercel
-
-.vercel
 .env*
+
+# Vercel CLI env export — contains secrets, never commit
+env-vars-raw.json
+update-env.json
 
 # Playwright test artifacts
 test-results/
