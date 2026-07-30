@@ -1,4 +1,5 @@
 import { test, expect, type Browser, type BrowserContext, type APIResponse } from "@playwright/test";
+import { clerk } from "@clerk/testing/playwright";
 
 const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
 const VERCEL_BYPASS_SECRET = process.env.VERCEL_PROTECTION_BYPASS_SECRET;
@@ -251,91 +252,33 @@ const userAEmail = process.env.CLERK_TEST_USER_A_EMAIL;
 const userAPassword = process.env.CLERK_TEST_USER_A_PASSWORD;
 const userBEmail = process.env.CLERK_TEST_USER_B_EMAIL;
 const userBPassword = process.env.CLERK_TEST_USER_B_PASSWORD;
-const CLERK_SECRET_KEY = process.env.CLERK_SECRET_KEY || process.env.CLERK_TEST_SECRET_KEY;
 const hasTestUsers = !!(userAEmail && userAPassword && userBEmail && userBPassword);
 const hasBypassSecret = !!VERCEL_BYPASS_SECRET;
-const hasClerkSecret = !!CLERK_SECRET_KEY;
 
-/** Helper: create an authenticated browser context via Clerk Backend API. */
+/** Helper: sign in via @clerk/testing and return the authenticated context. */
 async function signInAsUser(
   browser: Browser,
   email: string,
-  password: string,
+  _password: string,
   label: string,
 ): Promise<{ context: BrowserContext; page: import("@playwright/test").Page }> {
-  if (!CLERK_SECRET_KEY) {
-    throw new Error("CLERK_SECRET_KEY or CLERK_TEST_SECRET_KEY env var required for authenticated tests");
-  }
-
-  // 1. Find the user by email via Clerk Backend API
-  const userResp = await fetch(
-    `https://api.clerk.com/v1/users?email_address=${encodeURIComponent(email)}&limit=1`,
-    { headers: { Authorization: `Bearer ${CLERK_SECRET_KEY}` } },
-  );
-  if (!userResp.ok) {
-    throw new Error(`Failed to find user ${email}: ${userResp.status} ${await userResp.text()}`);
-  }
-  const usersData = await userResp.json();
-  const users = Array.isArray(usersData) ? usersData : usersData.data;
-  const userId = users?.[0]?.id;
-  if (!userId) {
-    throw new Error(`User not found in Clerk dev instance: ${email}`);
-  }
-  console.log(`[${label}] Found Clerk user: ${userId}`);
-
-  // 2. Create a session for the user via Clerk Backend API
-  const sessionResp = await fetch("https://api.clerk.com/v1/sessions", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${CLERK_SECRET_KEY}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ user_id: userId }),
-  });
-  if (!sessionResp.ok) {
-    throw new Error(`Failed to create session: ${sessionResp.status} ${await sessionResp.text()}`);
-  }
-  const sessionData = await sessionResp.json();
-  const sessionId = sessionData.id;
-  console.log(`[${label}] Created session: ${sessionId}`);
-
-  // 3. Get the session token (JWT)
-  const tokenResp = await fetch(`https://api.clerk.com/v1/sessions/${sessionId}/tokens`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${CLERK_SECRET_KEY}`,
-      "Content-Type": "application/json",
-    },
-  });
-  if (!tokenResp.ok) {
-    throw new Error(`Failed to get session token: ${tokenResp.status} ${await tokenResp.text()}`);
-  }
-  const tokenData = await tokenResp.json();
-  const jwt = tokenData.jwt;
-  console.log(`[${label}] Got session JWT (length: ${jwt.length})`);
-
-  // 4. Create a browser context with Vercel bypass + Clerk session cookie
   const context = await createBypassedContext(browser);
-
-  // Set the Clerk dev JWT cookie
-  const deploymentUrl = new URL(DEPLOYMENT_URL);
-  await context.addCookies([
-    {
-      name: "__clerk_db_jwt",
-      value: jwt,
-      domain: deploymentUrl.hostname,
-      path: "/",
-      httpOnly: true,
-      secure: deploymentUrl.protocol === "https:",
-      sameSite: "Lax",
-    },
-  ]);
-
-  // 5. Verify the session works by hitting an API endpoint
   const page = await context.newPage();
+
+  // Navigate to the deployment root so Clerk can initialize
+  await page.goto(`${DEPLOYMENT_URL}`, { waitUntil: "domcontentloaded" });
+  console.log(`[${label}] Home page URL: ${page.url()}`);
+
+  // Use @clerk/testing to handle the full sign-in flow (dev browser token, cookies, etc.)
+  await clerk.signIn({ page, emailAddress: email });
+  console.log(`[${label}] Clerk signIn completed`);
+
+  // Verify we're signed in
   await page.goto(`${DEPLOYMENT_URL}/dashboard`, { waitUntil: "domcontentloaded" });
   await page.waitForTimeout(2000);
-  console.log(`[${label}] Dashboard URL: ${page.url()}`);
+  const url = page.url();
+  console.log(`[${label}] Dashboard URL: ${url}`);
+  expect(url, `[${label}] should be signed in, not on sign-in page`).not.toMatch(/sign-in|login|vercel\.com\/login/);
 
   // Verify auth via API
   const testResp = await context.request.get(`${DEPLOYMENT_URL}/api/studio-projects`, {
@@ -349,8 +292,8 @@ async function signInAsUser(
 
 test.describe("Authenticated Clerk tests — cross-user isolation", () => {
   test.skip(
-    !hasTestUsers || !hasBypassSecret || !hasClerkSecret,
-    "Requires CLERK_TEST_USER_A/B, CLERK_SECRET_KEY, and VERCEL_PROTECTION_BYPASS_SECRET env vars",
+    !hasTestUsers || !hasBypassSecret,
+    "Requires CLERK_TEST_USER_A/B and VERCEL_PROTECTION_BYPASS_SECRET env vars",
   );
   test.setTimeout(180_000);
 

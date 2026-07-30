@@ -16,6 +16,11 @@ const hasRealClerk = (() => {
   );
 })();
 
+const hasTestUsers = !!(
+  process.env.CLERK_TEST_USER_A_EMAIL &&
+  process.env.CLERK_TEST_USER_B_EMAIL
+);
+
 export default defineConfig({
   testDir: "./tests/playwright",
   timeout: 60_000,
@@ -65,16 +70,38 @@ export default defineConfig({
       testMatch: /smoke\.spec\.ts/,
       use: { ...devices["Desktop Chrome"] },
     },
-    ...(hasRealClerk
+    // Clerk authenticated setup — runs before integration tests
+    ...(hasRealClerk && hasTestUsers
+      ? [
+          {
+            name: "clerk-setup",
+            testMatch: /auth\.setup\.ts/,
+            use: { ...devices["Desktop Chrome"] },
+          },
+        ]
+      : []),
+    // Integration tests — depends on clerk-setup for auth state files
+    ...(hasRealClerk && hasTestUsers
       ? [
           {
             name: "preview-integration",
             testMatch: /integration\.spec\.ts/,
+            dependencies: ["clerk-setup"],
             use: {
               ...devices["Desktop Chrome"],
             },
           },
         ]
-      : []),
+      : hasRealClerk
+        ? [
+            {
+              name: "preview-integration",
+              testMatch: /integration\.spec\.ts/,
+              use: {
+                ...devices["Desktop Chrome"],
+              },
+            },
+          ]
+        : []),
   ],
 });
