@@ -1361,7 +1361,7 @@ export default function RetroPlayerPage() {
                 <h2 className="text-sm font-black text-white/70">BIOS (optional)</h2>
               </div>
               <p className="mt-2 text-xs leading-5 text-white/45">
-                Most Satellaview games boot without a BIOS. If yours doesn't,
+                Most Satellaview games boot without a BIOS. If yours doesn&apos;t,
                 load a legally obtained BS-X.bin here. The file stays in this
                 browser and is never uploaded.
               </p>
