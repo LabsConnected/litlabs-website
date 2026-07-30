@@ -3,6 +3,8 @@
 .env*.local
 .env.vercel-production
 .env.vercel-secrets
+.env.preview
+.env.production
 .sb_anon_key
 
 # Devin CLI — personal overrides only (rest of .devin/ is committed)
@@ -160,15 +162,18 @@ dev-output.txt
 eslint-sidebar.txt
 
 .vercel
-
-.vercel
 .env*
+
+# Vercel CLI env export — contains secrets, never commit
+env-vars-raw.json
+update-env.json
+clerk-dev-pub.json
+clerk-dev-secret.json
+prod-only.json
 
 # Playwright test artifacts
 test-results/
 tests/playwright/screenshots/
 tests/playwright/.auth/
 playwright-report/
-
-.vercel
-.env*
+tests/playwright/.clerk/

@@ -1,5 +1,6 @@
 import path from "path";
 import fs from "fs";
+import http from "http";
 import { AgentWorkerMatrix } from "../src/lib/agent-worker";
 
 // Load .env.local if present (for local daemon runs outside Next.js)
@@ -63,12 +64,74 @@ const worker = new AgentWorkerMatrix({
   maxConcurrency,
 });
 
+// Health endpoint for orchestration / monitoring
+const HEALTH_PORT = Number(process.env.WORKER_HEALTH_PORT || 4003);
+const healthServer = http.createServer((req, res) => {
+  const url = new URL(req.url ?? "/", `http://localhost:${HEALTH_PORT}`);
+
+  if (url.pathname === "/health/live") {
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        service: "litt-worker",
+        status: "alive",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+      }),
+    );
+    return;
+  }
+
+  if (url.pathname === "/health/ready" || url.pathname === "/health" || url.pathname === "/") {
+    const supabaseUrl = process.env.SUPABASE_URL || process.env.NEXT_PUBLIC_SUPABASE_URL;
+    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    const openrouterKey = process.env.OPENROUTER_API_KEY;
+
+    const checks = {
+      supabaseUrl: !!supabaseUrl?.trim(),
+      supabaseServiceRoleKey: !!supabaseKey?.trim(),
+      openrouterApiKey: !!openrouterKey?.trim(),
+    };
+
+    const allReady = checks.supabaseUrl && checks.supabaseServiceRoleKey && checks.openrouterApiKey;
+
+    res.writeHead(allReady ? 200 : 503, { "Content-Type": "application/json" });
+    res.end(
+      JSON.stringify({
+        service: "litt-worker",
+        status: allReady ? "ok" : "degraded",
+        uptime: process.uptime(),
+        timestamp: new Date().toISOString(),
+        readiness: allReady ? "ready" : "not_ready",
+        agent: agentSlug,
+        concurrency: maxConcurrency,
+        checks,
+        reasons: allReady
+          ? []
+          : [
+              !checks.supabaseUrl ? "SUPABASE_URL (or NEXT_PUBLIC_SUPABASE_URL) not set" : "",
+              !checks.supabaseServiceRoleKey ? "SUPABASE_SERVICE_ROLE_KEY not set" : "",
+              !checks.openrouterApiKey ? "OPENROUTER_API_KEY not set" : "",
+            ].filter(Boolean),
+      }),
+    );
+    return;
+  }
+
+  res.writeHead(404, { "Content-Type": "application/json" });
+  res.end(JSON.stringify({ error: "Not found" }));
+});
+healthServer.listen(HEALTH_PORT, () => {
+  console.log(`[🔱 DAEMON] Health endpoint on http://0.0.0.0:${HEALTH_PORT}/health`);
+});
+
 // Graceful shutdown: mark worker stopped in DB and exit cleanly
 function shutdown(signal: string) {
   console.log(`\x1b[33m[🔱 DAEMON] Received ${signal}, shutting down...\x1b[0m`);
   try {
     worker.stop();
   } catch {}
+  healthServer.close();
   // Give heartbeat/stop a moment
   setTimeout(() => process.exit(0), 250);
 }

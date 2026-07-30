@@ -10,9 +10,9 @@ echo "========================================"
 echo ""
 
 # Ensure Node/npx available
-export PATH="/home/litbit/.nvm/versions/node/v22.22.3/bin:$PATH"
+export PATH="${HOME}/.nvm/versions/node/v22.22.3/bin:$PATH"
 
-PROJECT_DIR="/mnt/c/home/litbit/LiTTreeLabstudios/home/litbit/LiTTreeLabstudios"
+PROJECT_DIR="${HOME}/LiTTreeLabStudios"
 cd "$PROJECT_DIR"
 
 # Step 1: Pull env vars from Vercel

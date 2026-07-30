@@ -20,8 +20,7 @@ export async function POST(req: NextRequest) {
     if (result.taskStatus === "SUCCEEDED" && result.videoUrl && saveToR2) {
       try {
         const buffer = await downloadVideo(result.videoUrl);
-        const key = `videos/${userId}/happyhorse-${taskId}.mp4`;
-        const saved = await uploadAudio(key, buffer, "video/mp4");
+        const saved = await uploadAudio(userId, `happyhorse-${taskId}.mp4`, buffer, "video/mp4", "video");
         return NextResponse.json({
           done: true,
           taskStatus: result.taskStatus,

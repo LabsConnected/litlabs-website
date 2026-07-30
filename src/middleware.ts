@@ -1,5 +1,6 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
-import { NextResponse } from "next/server";
+import { NextResponse, type NextRequest } from "next/server";
+import { isClerkConfigured } from "@/lib/env";
 
 const isProtectedRoute = createRouteMatcher([
   "/marketplace(.*)",
@@ -16,43 +17,95 @@ const isProtectedRoute = createRouteMatcher([
   "/api/orchestrate",
 ]);
 
-const clerkKey = process.env.NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY;
-const clerkSecretKey = process.env.CLERK_SECRET_KEY;
-const isClerkConfigured = !!(clerkKey && clerkSecretKey);
+const clerkConfigured = isClerkConfigured();
 
-// Always call clerkMiddleware() so detectClerkMiddleware(req) succeeds in
-// API routes. When Clerk env vars are missing, auth() returns { userId: null }
-// instead of throwing, and API routes respond with 401 as designed.
-// The isClerkConfigured flag only gates the protected-route redirect logic.
-export default clerkMiddleware(async (auth, req) => {
-  let userId: string | null = null;
-  if (isClerkConfigured) {
-    try {
-      const authResult = await auth();
-      userId = authResult.userId;
-    } catch {
-      // Clerk unreachable — allow request through
-    }
-  }
+/**
+ * Test-only auth bypass.
+ *
+ * PLAYWRIGHT_AUTH_DISABLED is ONLY accepted when ALL of these are true:
+ *   - CI === "true"
+ *   - PLAYWRIGHT_TEST === "true"
+ *   - VERCEL env var is absent (not a deployed environment)
+ *
+ * Any deployed environment (Vercel, Railway, Docker, etc.) will reject this
+ * flag and fail fast if Clerk is not configured.
+ */
+const isTestAuthDisabled =
+  process.env.PLAYWRIGHT_AUTH_DISABLED === "true" &&
+  process.env.CI === "true" &&
+  process.env.PLAYWRIGHT_TEST === "true" &&
+  !process.env.VERCEL;
 
-  const response = NextResponse.next();
+// In production or any deployed environment, Clerk MUST be configured.
+// The test bypass is only valid in local CI/test environments.
+if (!clerkConfigured && !isTestAuthDisabled) {
+  throw new Error(
+    "FATAL: Clerk is not configured. " +
+      "Set NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY and CLERK_SECRET_KEY. " +
+      "PLAYWRIGHT_AUTH_DISABLED is only valid when CI=true, PLAYWRIGHT_TEST=true, " +
+      "and VERCEL is absent.",
+  );
+}
 
-  if (["/about", "/contact", "/docs", "/pricing"].includes(req.nextUrl.pathname)) {
-    response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
-  }
+// Also reject if someone sets PLAYWRIGHT_AUTH_DISABLED in a deployed environment
+if (process.env.PLAYWRIGHT_AUTH_DISABLED === "true" && !isTestAuthDisabled) {
+  throw new Error(
+    "FATAL: PLAYWRIGHT_AUTH_DISABLED is set but not in a valid test environment. " +
+      "This flag requires CI=true, PLAYWRIGHT_TEST=true, and VERCEL absent.",
+  );
+}
 
-  if (req.nextUrl.pathname.startsWith("/login") || req.nextUrl.pathname.startsWith("/signup")) {
-    response.headers.set("Cache-Control", "no-store, must-revalidate");
-  }
+const useClerkMiddleware = clerkConfigured && !isTestAuthDisabled;
+const middleware = useClerkMiddleware
+  ? clerkMiddleware(async (auth, req) => {
+      let userId: string | null = null;
+      try {
+        const authResult = await auth();
+        userId = authResult.userId;
+      } catch {
+        // Clerk unreachable — allow request through, API will 401
+      }
 
-  response.headers.set("Vary", "Accept-Encoding");
+      const response = NextResponse.next();
 
-  if (isClerkConfigured && isProtectedRoute(req) && !userId) {
-    return NextResponse.redirect(new URL("/sign-in", req.url));
-  }
+      if (["/about", "/contact", "/docs", "/pricing"].includes(req.nextUrl.pathname)) {
+        response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
+      }
 
-  return response;
-});
+      if (req.nextUrl.pathname.startsWith("/login") || req.nextUrl.pathname.startsWith("/signup")) {
+        response.headers.set("Cache-Control", "no-store, must-revalidate");
+      }
+
+      response.headers.set("Vary", "Accept-Encoding");
+
+      if (isProtectedRoute(req) && !userId) {
+        return NextResponse.redirect(new URL("/sign-in", req.url));
+      }
+
+      return response;
+    })
+  : function passthroughMiddleware(req: NextRequest) {
+      const response = NextResponse.next();
+
+      if (["/about", "/contact", "/docs", "/pricing"].includes(req.nextUrl.pathname)) {
+        response.headers.set("Cache-Control", "public, max-age=1800, stale-while-revalidate=3600");
+      }
+
+      if (req.nextUrl.pathname.startsWith("/login") || req.nextUrl.pathname.startsWith("/signup")) {
+        response.headers.set("Cache-Control", "no-store, must-revalidate");
+      }
+
+      response.headers.set("Vary", "Accept-Encoding");
+
+      // Redirect protected routes to sign-in when Clerk is not configured
+      if (isProtectedRoute(req)) {
+        return NextResponse.redirect(new URL("/sign-in", req.url));
+      }
+
+      return response;
+    };
+
+export default middleware;
 
 export const config = {
   matcher: [

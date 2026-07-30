@@ -4,10 +4,10 @@
 
 [ENVIRONMENT]
 - PLATFORM: Windows 11 (native, NOT WSL2).
-- WORKSPACE_ROOT: C:\Users\litbi\CascadeProjects\litlab
+- WORKSPACE_ROOT: ${workspaceFolder}
 - SHELL: PowerShell 7 / Windows PowerShell. VS Code's workspace default is PowerShell.
-- START_DIRECTORY: Always verify `Get-Location` is exactly
-  `C:\Users\litbi\CascadeProjects\litlab` before running project commands.
+- START_DIRECTORY: Always verify `Get-Location` matches the repository root
+  (`${workspaceFolder}`) before running project commands.
 - RUNTIME: Next.js 16 (Turbopack Engine) | React 19 | Tailwind v4 | pnpm 9.15+
 - NODE: 22+ (verified: v22.22.3, pnpm 9.15.9)
 
@@ -47,9 +47,8 @@
    `src/components/dashboard/AutonomicLoopBanner.tsx` for the pattern.
 9. Use PowerShell syntax only. Never use `head`, `tail`, `grep`, `findstr`, `if exist`, `2>nul`,
    `%ERRORLEVEL%`, `&&`, or Unix shell redirection. Do not mix cmd.exe, bash, and PowerShell.
-10. Do not run `cd C:\Users\litbi\CascadeProjects\litlab`; that is a different sibling checkout.
-    If the current directory is wrong, use
-    `Set-Location -LiteralPath 'C:\Users\litbi\CascadeProjects\litlabs\reference-repo'`.
+10. Do not switch to a different sibling checkout. The current working directory is the
+    repository root — all project commands should be run from here.
 11. Before editing, read the exact current file region. Use Cline's native file-edit tool with a
     complete valid edit block. If an edit fails, re-read the file before retrying; never guess at
     stale context.
