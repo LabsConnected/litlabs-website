@@ -34,7 +34,8 @@ export type StudioTool =
   | "space"
   | "clibridge"
   | "color"
-  | "canvas";
+  | "canvas"
+  | "loops";
 
 type ToolItem = {
   id: StudioTool;

@@ -200,14 +200,43 @@
 .agentAvatar { color: #fff; background: linear-gradient(145deg, #7c3aed, #22d3ee); }
 .statusDot { width: 9px; height: 9px; justify-self: center; border-radius: 50%; background: #42f59b; box-shadow: 0 0 12px #42f59b; }
 .askButton { width: 100%; min-height: 48px; display: flex; align-items: center; justify-content: center; gap: 8px; margin-top: 14px; border: 1px solid #30e7ff44; border-radius: 14px; color: #8cecf4; background: #30e7ff0b; font-weight: 800; cursor: pointer; }
+@keyframes messageIn {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes micPulse {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: 0 0 14px var(--cyan);
+  }
+}
+
 .message {
   display: flex;
   gap: 8px;
   margin: 0 0 18px;
   align-items: flex-start;
+  animation: messageIn 0.35s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 .message.user {
   justify-content: flex-end;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    animation: none;
+    transform: none;
+  }
 }
 .avatar {
   flex: 0 0 32px;
@@ -366,10 +395,18 @@
 .mic {
   color: var(--cyan) !important;
   background: #12323a !important;
+  transition: transform 0.15s ease-out, box-shadow 0.15s ease-out;
+}
+.mic:not(:disabled):active {
+  transform: scale(0.92);
+}
+.mic.listening {
+  animation: micPulse 1.4s ease-in-out infinite;
 }
 .send {
   background: var(--orange) !important;
   color: #130902 !important;
+  transition: transform 0.15s ease-out, opacity 0.15s ease-out, box-shadow 0.15s ease-out;
 }
 .send:focus-visible {
   outline: 2px solid #fff;
@@ -377,6 +414,16 @@
 }
 .send:disabled {
   opacity: 0.35;
+}
+.send:not(:disabled):active {
+  transform: scale(0.95);
+}
+.composer {
+  transition: border-color 0.2s ease-out, box-shadow 0.2s ease-out;
+}
+.composer:focus-within {
+  border-color: color-mix(in srgb, var(--cyan) 60%, transparent);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--cyan) 20%, transparent), 0 10px 35px #000c;
 }
 @media (min-width: 700px) {
   .shell {
@@ -403,13 +450,74 @@
 }
 
 /* Embedded mode: used inside LITTTerminalShell */
-.embedded .messages {
-  padding-bottom: 24px;
+.shell.embedded {
+  display: flex;
+  flex-direction: column;
+  min-height: auto;
+  height: 100%;
+  overflow: hidden;
 }
-.embedded .dock {
+.shell.embedded .messages {
+  flex: 1 1 0;
+  min-height: 0;
+  padding-bottom: 24px;
+  overflow-y: auto;
+}
+.shell.embedded .dock {
   position: relative;
   left: auto;
   transform: none;
   width: 100%;
-  padding-bottom: 8px;
+  padding: 8px 10px calc(8px + env(safe-area-inset-bottom));
+  flex: 0 0 auto;
+}
+
+@media (max-width: 699px) {
+  .shell.embedded .messages {
+    padding: 8px 10px 12px;
+  }
+
+  .shell.embedded .home {
+    padding: 6px 0 12px;
+  }
+
+  .shell.embedded .heroMark {
+    width: 38px;
+    height: 38px;
+    margin-bottom: 9px;
+    border-radius: 12px;
+  }
+
+  .shell.embedded .home h1 {
+    font-size: clamp(25px, 8.5vw, 34px);
+  }
+
+  .shell.embedded .intro {
+    margin: 9px auto 15px;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .shell.embedded .createGrid {
+    gap: 8px;
+  }
+
+  .shell.embedded .createGrid button {
+    min-height: 66px;
+    grid-template-columns: 38px 1fr 18px;
+    gap: 9px;
+    padding: 10px 11px;
+    border-radius: 15px;
+  }
+
+  .shell.embedded .actionIcon {
+    width: 38px;
+    height: 38px;
+    border-radius: 12px;
+  }
+
+  .shell.embedded .homeGrid,
+  .shell.embedded .askButton {
+    display: none;
+  }
 }

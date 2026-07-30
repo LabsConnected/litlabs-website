@@ -9,20 +9,24 @@ export type CameraState = "idle" | "requesting" | "active" | "error";
 
 interface CameraSessionProps {
   onSnapshot?: (dataUrl: string) => void;
+  onCaptureReady?: (capture: (() => string | null) | null) => void;
   onClose?: () => void;
   modelName?: string;
   initialStream?: MediaStream | null;
   initialError?: string | null;
   compact?: boolean;
+  visionOnSend?: boolean;
 }
 
 export default function CameraSession({
   onSnapshot,
+  onCaptureReady,
   onClose,
   modelName = "Gemini 2.5 Flash Vision",
   initialStream = null,
   initialError = null,
   compact = false,
+  visionOnSend = false,
 }: CameraSessionProps) {
   const { resolvedColors: T } = useTheme();
   const { lastError, requestVideo, resetPermission } = useMediaPermissions();
@@ -35,6 +39,14 @@ export default function CameraSession({
   const [activeDeviceLabel, setActiveDeviceLabel] = useState("Camera");
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
+
+  const attachStream = useCallback(() => {
+    const video = videoRef.current;
+    const stream = streamRef.current;
+    if (!video || !stream) return;
+    if (video.srcObject !== stream) video.srcObject = stream;
+    void video.play().catch(() => {});
+  }, []);
 
   const identifyStream = useCallback(async (stream: MediaStream) => {
     const track = stream.getVideoTracks()[0];
@@ -54,11 +66,6 @@ export default function CameraSession({
     if (!initialStream) return;
     streamRef.current = initialStream;
     setState("active");
-    const video = videoRef.current;
-    if (video) {
-      video.srcObject = initialStream;
-      void video.play();
-    }
     void identifyStream(initialStream);
   }, [identifyStream, initialStream]);
 
@@ -88,10 +95,6 @@ export default function CameraSession({
         return;
       }
       streamRef.current = stream;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        videoRef.current.play().catch(() => {});
-      }
       await identifyStream(stream);
       setState("active");
     },
@@ -122,18 +125,31 @@ export default function CameraSession({
     };
   }, [stopStream]);
 
-  const capture = useCallback(() => {
+  useEffect(() => {
+    if (state === "active") attachStream();
+  }, [attachStream, state]);
+
+  const captureFrame = useCallback(() => {
     const video = videoRef.current;
-    if (!video || video.videoWidth === 0) return;
+    if (!video || video.videoWidth === 0) return null;
     const canvas = document.createElement("canvas");
     canvas.width = Math.min(video.videoWidth, 1280);
     canvas.height = Math.min(video.videoHeight, 720);
     const ctx = canvas.getContext("2d");
-    if (!ctx) return;
+    if (!ctx) return null;
     ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-    const dataUrl = canvas.toDataURL("image/jpeg", 0.92);
-    onSnapshot?.(dataUrl);
-  }, [onSnapshot]);
+    return canvas.toDataURL("image/jpeg", 0.9);
+  }, []);
+
+  const capture = useCallback(() => {
+    const dataUrl = captureFrame();
+    if (dataUrl) onSnapshot?.(dataUrl);
+  }, [captureFrame, onSnapshot]);
+
+  useEffect(() => {
+    onCaptureReady?.(state === "active" ? captureFrame : null);
+    return () => onCaptureReady?.(null);
+  }, [captureFrame, onCaptureReady, state]);
 
   const close = useCallback(() => {
     stopStream();
@@ -221,7 +237,7 @@ export default function CameraSession({
         <div className="flex items-center gap-1.5">
           <ScanFace size={12} style={{ color: T.success }} />
           <span className="text-[10px] font-bold" style={{ color: T.success }}>
-            {modelName}
+            {visionOnSend ? "LiTT sees on send" : modelName}
           </span>
         </div>
       </div>
@@ -231,6 +247,7 @@ export default function CameraSession({
         autoPlay
         playsInline
         muted
+        onLoadedData={attachStream}
         className={compact ? "aspect-[4/3] w-full object-cover" : "aspect-video w-full object-cover"}
       />
 
@@ -263,7 +280,9 @@ export default function CameraSession({
             className={compact ? "hidden" : "hidden text-[10px] sm:inline"}
             style={{ color: T.textMuted }}
           >
-            Point and tap Snapshot to ask LiTT what it sees
+            {visionOnSend
+              ? "A fresh frame is shared when you send a message"
+              : "Point and tap Snapshot to ask LiTT what it sees"}
           </span>
         </div>
         <div className="ml-auto flex items-center gap-2">

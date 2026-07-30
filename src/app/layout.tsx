@@ -30,12 +30,12 @@ export const viewport: Viewport = {
   width: "device-width",
   initialScale: 1,
   maximumScale: 5,
-  themeColor: "#1a1210",
+  themeColor: "#050706",
 };
 
-const META_TITLE = "LiTTree-LabStudios — AI Agents for Creators";
+const META_TITLE = "LiTT Labs — Build a World With AI";
 const META_DESC =
-  "Build, automate, and publish with an agent-powered creator operating system for studio work, workflows, marketplaces, and community.";
+  "Meet LiTT and Spark—your creative AI crew for building products, making art, exploring ideas, and turning imagination into something real.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
@@ -76,7 +76,7 @@ export const metadata: Metadata = {
     description: META_DESC,
     images: [
       {
-        url: "/og-image.webp",
+        url: "/og.png",
         width: 1200,
         height: 630,
         alt: META_TITLE,
@@ -88,7 +88,7 @@ export const metadata: Metadata = {
     title: META_TITLE,
     description: META_DESC,
     creator: "@litlabs",
-    images: ["/og-image.webp"],
+    images: ["/og.png"],
   },
   icons: {
     icon: [

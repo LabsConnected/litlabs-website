@@ -8,49 +8,68 @@ import {
   useMemo,
   type ComponentType,
 } from "react";
-import { useRouter } from "next/navigation";
+import type { TerminalStatus, TerminalToolHandle } from "../tools/TerminalTool";
+import {
+  createTerminalBlock,
+  updateTerminalBlock,
+  type TerminalBlock,
+} from "@/app/studio/lib/builder-blocks";
+import { useRouter, useSearchParams } from "next/navigation";
+import { UserButton } from "@clerk/nextjs";
 import { useTheme } from "@/context/ThemeContext";
 import { useProfile } from "@/context/ProfileContext";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
-import { requestCameraStream } from "@/app/studio/hooks/useMediaPermissions";
 import { cn } from "@/lib/utils";
 import { parseLiTTActions } from "@/lib/litt-context";
 import { AGENTS } from "@/lib/agents";
 import { AGENT_AVATAR_META } from "@/lib/avatars";
-import type { StudioTool } from "./StudioSidebar";
+export type StudioTool =
+  | "chat"
+  | "image"
+  | "video"
+  | "audio"
+  | "agents"
+  | "terminal"
+  | "builder"
+  | "pipeline"
+  | "gallery"
+  | "canvas"
+  | "clibridge"
+  | "color"
+  | "space"
+  | "loops";
+
+
 import {
   Terminal,
   FolderKanban,
-  GitBranch,
   Bot,
   FolderOpen,
-  BookOpen,
-  Boxes,
   Settings,
   Send,
   Plus,
+  Upload,
   Camera,
+  ScreenShare,
   Mic,
   MicOff,
   X,
   Sparkles,
   LayoutGrid,
-  Activity,
   Zap,
   Copy,
   Check,
   Square,
-  Trash2,
   Loader2,
-  MessageSquare,
   Image as ImageIcon,
   Film,
   Music,
-  Palette,
   Hammer,
   Code,
-  Shell,
+  Rocket,
+  Menu,
 } from "lucide-react";
+
 import dynamic from "next/dynamic";
 
 const PluginPanel = dynamic(() => import("./PluginPanel"), { ssr: false });
@@ -74,9 +93,6 @@ import {
 const ImageTool = dynamic(() => import("../tools/ImageTool"), { ssr: false });
 const VideoTool = dynamic(() => import("../tools/VideoTool"), { ssr: false });
 const AudioTool = dynamic(() => import("../tools/AudioTool"), { ssr: false });
-const BuilderTool = dynamic(() => import("../tools/BuilderTool"), {
-  ssr: false,
-});
 const PipelineTool = dynamic(() => import("../tools/PipelineTool"), {
   ssr: false,
 });
@@ -87,15 +103,22 @@ const CanvasTool = dynamic(() => import("../tools/CanvasTool"), { ssr: false });
 const CLIBridgeTool = dynamic(() => import("../tools/CLIBridgeTool"), {
   ssr: false,
 });
-const ColorByNumberTool = dynamic(() => import("../tools/ColorByNumberTool"), {
+const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
+const LoopsTool = dynamic(() => import("../tools/LoopsTool"), { ssr: false });
+const TerminalTool = dynamic(() => import("../tools/TerminalTool"), {
+  ssr: false,
+  loading: () => (
+    <div className="p-4 text-xs text-neutral-500">Loading terminal…</div>
+  ),
+});
+
+const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
+const ImageGenPopover = dynamic(() => import("./ImageGenPopover"), {
   ssr: false,
 });
-const SpaceTool = dynamic(() => import("../tools/SpaceTool"), { ssr: false });
-const AgentsTerminalTool = dynamic(
-  () => import("../tools/AgentsTerminalTool"),
-  { ssr: false },
-);
-const ChatShell = dynamic(() => import("./ChatShell"), { ssr: false });
+const ProjectDrawer = dynamic(() => import("./ProjectDrawer"), {
+  ssr: false,
+});
 
 type Message = {
   role: "user" | "assistant";
@@ -118,26 +141,24 @@ type ToolRailItem = {
   icon: typeof Terminal;
   tool?: StudioTool;
   href?: string;
+  drawer?: "projects";
 };
 
 const TOOL_RAIL: ToolRailItem[] = [
-  { id: "chat", label: "Chat", icon: MessageSquare, tool: "chat" },
-  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
-  { id: "projects", label: "Projects", icon: FolderKanban, href: "/projects" },
-  { id: "pipelines", label: "Pipelines", icon: GitBranch, tool: "pipeline" },
-  { id: "agents", label: "Agents", icon: Bot, tool: "agents" },
-  { id: "image", label: "Image", icon: ImageIcon, tool: "image" },
+  { id: "builder", label: "Create", icon: Hammer, tool: "builder" },
+  { id: "projects", label: "Projects", icon: FolderKanban, drawer: "projects" },
+  { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
   { id: "video", label: "Video", icon: Film, tool: "video" },
   { id: "audio", label: "Audio", icon: Music, tool: "audio" },
-  { id: "builder", label: "Build", icon: Hammer, tool: "builder" },
   { id: "canvas", label: "Code", icon: Code, tool: "canvas" },
-  { id: "assets", label: "Assets", icon: FolderOpen, tool: "gallery" },
-  { id: "color", label: "Color", icon: Palette, tool: "color" },
-  { id: "clibridge", label: "CLI", icon: Shell, tool: "clibridge" },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen, href: "/docs" },
-  { id: "spaces", label: "Spaces", icon: Boxes, tool: "space" },
+  { id: "terminal", label: "Terminal", icon: Terminal, tool: "terminal" },
+  { id: "pipeline", label: "Pipeline", icon: LayoutGrid, tool: "pipeline" },
+  { id: "loops", label: "Loops", icon: Zap, tool: "loops" },
+  { id: "space", label: "Space", icon: Rocket, tool: "space" },
+  { id: "clibridge", label: "CLI", icon: Terminal, tool: "clibridge" },
   { id: "settings", label: "Settings", icon: Settings, href: "/settings" },
 ];
+
 
 const SLASH_CHIPS: {
   id: string;
@@ -150,7 +171,8 @@ const SLASH_CHIPS: {
   { id: "audio", label: "/audio", desc: "Generate Audio", tool: "audio" },
   { id: "build", label: "/build", desc: "Build Anything", tool: "builder" },
   { id: "code", label: "/code", desc: "Generate Code", tool: "canvas" },
-  { id: "agent", label: "/agent", desc: "Run Agent", tool: "agents" },
+  { id: "agent", label: "/agent", desc: "Run Agent", tool: "builder" },
+  { id: "terminal", label: "/terminal", desc: "Open Terminal", tool: "terminal" },
 ];
 
 const QUICK_START = ["Show me around", "Help me build", "Analyze this"];
@@ -172,22 +194,22 @@ const AGENT_QUICK: Record<string, string[]> = {
   ],
 };
 
-const TOOL_COMPONENTS: Record<
-  Exclude<StudioTool, "chat" | "agents">,
+const TOOL_COMPONENTS: Partial<Record<
+  Exclude<StudioTool, "chat" | "agents" | "builder">,
   ComponentType
-> = {
+>> = {
   image: ImageTool,
   video: VideoTool,
   audio: AudioTool,
-  builder: BuilderTool,
-  terminal: AgentsTerminalTool,
+  terminal: TerminalTool,
   pipeline: PipelineTool,
   gallery: GalleryTool,
   canvas: CanvasTool,
   clibridge: CLIBridgeTool,
-  color: ColorByNumberTool,
   space: SpaceTool,
+  loops: LoopsTool,
 };
+
 
 const PLUGINS = [
   "git",
@@ -319,60 +341,7 @@ function Waveform({ active = true }: { active?: boolean }) {
 }
 
 function TelemetryBar() {
-  const metrics = [
-    { label: "GPU", value: 68, color: "#22d3ee" },
-    { label: "CPU", value: 32, color: "#f97316" },
-    { label: "RAM", value: 72, color: "#a855f7" },
-    { label: "NET", value: 42, color: "#34d399" },
-  ];
-  return (
-    <div className="flex min-w-0 items-center gap-2 px-3 text-[9px] font-mono text-gray-300 sm:gap-4 sm:px-4 sm:text-[10px]">
-      <div className="flex items-center gap-1.5">
-        <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 shadow-[0_0_6px_#34d399]" />
-        <span className="text-emerald-400">NEURAL LINK</span>
-        <span>STABLE</span>
-      </div>
-      <div className="hidden h-3 w-px bg-white/10 sm:block" />
-      {metrics.map((m) => (
-        <div key={m.label} className="hidden items-center gap-1.5 sm:flex">
-          <span className="uppercase">{m.label}</span>
-          <div className="h-1 w-16 overflow-hidden rounded-full bg-white/5">
-            <div
-              className="h-full rounded-full transition-all duration-700"
-              style={{ width: `${m.value}%`, backgroundColor: m.color }}
-            />
-          </div>
-          <span style={{ color: m.color }}>{m.value}%</span>
-        </div>
-      ))}
-      <div className="ml-auto hidden items-center gap-1.5 md:flex">
-        <Activity size={10} className="text-cyan-400" />
-        <span>NET</span>
-        <span className="text-cyan-400">42ms</span>
-      </div>
-    </div>
-  );
-}
-
-function LiveClock() {
-  const [time, setTime] = useState("--:--:--");
-  useEffect(() => {
-    const tick = () => {
-      const now = new Date();
-      setTime(
-        now.toLocaleTimeString("en-GB", {
-          hour12: false,
-          hour: "2-digit",
-          minute: "2-digit",
-          second: "2-digit",
-        }) + " UTC+0",
-      );
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
-  }, []);
-  return <span className="font-mono text-[10px] text-gray-300">{time}</span>;
+  return null;
 }
 
 function ActiveCommandTabs({
@@ -485,30 +454,27 @@ function AttachmentStrip({
 }
 
 function LITTTerminalShellInner({
-  activeTool = "chat",
+  activeTool = "builder",
   onToolChangeAction,
 }: {
   activeTool?: StudioTool;
   onToolChangeAction?: (tool: StudioTool) => void;
 }) {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { resolvedColors: T } = useTheme();
   const { profile } = useProfile();
   const {
     voiceState,
-    interimTranscript,
-    micLevel,
     errorMessage,
-    listeningDurationMs,
-    availableDevices,
-    selectedDeviceId,
+    cooldownRemaining,
     speakText,
     startVoice,
     stopVoice,
-    interrupt,
-    selectDevice,
     setOnTurn,
     setActivity,
+    timings,
+    markTiming,
   } = useVoiceSession();
   const { persona } = usePersona();
   const [messages, setMessages] = useState<Message[]>([]);
@@ -517,10 +483,11 @@ function LITTTerminalShellInner({
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [cameraOpen, setCameraOpen] = useState(false);
-  const [cameraStream, setCameraStream] = useState<MediaStream | null>(null);
-  const [cameraError, setCameraError] = useState<string | null>(null);
-  const [cameraRequesting, setCameraRequesting] = useState(false);
-  const [presencePanelVisible, setPresencePanelVisible] = useState(false);
+  const [plusMenuOpen, setPlusMenuOpen] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+  const [imageGenOpen, setImageGenOpen] = useState(false);
+  const [projectDrawerOpen, setProjectDrawerOpen] = useState(false);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   type ActiveCommand = {
     id: string;
     label: string;
@@ -531,9 +498,15 @@ function LITTTerminalShellInner({
   const [agentId, setAgentId] = useState<keyof typeof AGENTS>("littcode");
   const [agentChats, setAgentChats] = useState<Record<string, Message[]>>({});
   const [pendingAgentQuery, setPendingAgentQuery] = useState("");
+  const [terminalDrawerOpen, setTerminalDrawerOpen] = useState(false);
+  const [terminalBlocks, setTerminalBlocks] = useState<TerminalBlock[]>([]);
+  const [terminalStatus, setTerminalStatus] = useState<TerminalStatus>("disconnected");
+  const terminalRef = useRef<TerminalToolHandle | null>(null);
+  const activeTerminalBlockRef = useRef<string | null>(null);
   const transcriptRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const cameraInputRef = useRef<HTMLInputElement>(null);
+  const cameraCaptureRef = useRef<(() => string | null) | null>(null);
   const textInputRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
   const prevPersonaRef = useRef(persona.id);
@@ -548,25 +521,11 @@ function LITTTerminalShellInner({
     () => AGENT_AVATAR_META[agentId] || AGENT_AVATAR_META.littcode,
     [agentId],
   );
-  const selectedMicDevice = useMemo(
-    () =>
-      availableDevices.find((device) => device.deviceId === selectedDeviceId) ||
-      availableDevices[0],
-    [availableDevices, selectedDeviceId],
-  );
-  const cameraDocked =
-    presencePanelVisible && !pluginsOpen && activeTool !== "agents";
-
-  useEffect(() => {
-    const mediaQuery = window.matchMedia("(min-width: 1024px)");
-    const update = () => setPresencePanelVisible(mediaQuery.matches);
-    update();
-    mediaQuery.addEventListener("change", update);
-    return () => mediaQuery.removeEventListener("change", update);
-  }, []);
   const ActiveTool = useMemo<ComponentType | null>(() => {
-    if (activeTool === "chat" || activeTool === "agents") return null;
-    return TOOL_COMPONENTS[activeTool];
+    // chat, agents, and builder have dedicated rendering branches.
+    if (activeTool === "chat" || activeTool === "agents" || activeTool === "builder")
+      return null;
+    return TOOL_COMPONENTS[activeTool] ?? null;
   }, [activeTool]);
   const agentMessages = useMemo(
     () => agentChats[activeAgent.id] || [],
@@ -579,28 +538,41 @@ function LITTTerminalShellInner({
         role: m.role as "user" | "assistant",
         content: m.content,
         createdAt: m.createdAt,
+        type: m.type,
+        mediaUrl: m.mediaUrl,
+        status: m.status,
       })),
     [messages],
   );
   const isAgentEmpty = agentMessages.length === 0;
-  const micActive =
-    voiceState === "requesting_permission" ||
-    voiceState === "connecting" ||
-    voiceState === "listening" ||
-    voiceState === "speech_detected" ||
+  const micActive = voiceState !== "idle";
+  const micDisabled =
     voiceState === "transcribing" ||
-    voiceState === "sending" ||
     voiceState === "thinking" ||
-    voiceState === "using_tool" ||
-    voiceState === "reading_files" ||
-    voiceState === "writing_files" ||
-    voiceState === "running_command" ||
-    voiceState === "testing" ||
-    voiceState === "generating_response" ||
     voiceState === "speaking" ||
-    voiceState === "muted" ||
-    voiceState === "paused" ||
-    voiceState === "error";
+    voiceState === "cooldown";
+
+  // Auto-open the image generation popover when navigated with ?openImage=1
+  useEffect(() => {
+    if (searchParams?.get("openImage") === "1") {
+      setImageGenOpen(true);
+      // Clean the param so it doesn't re-open on every render
+      const params = new URLSearchParams(searchParams.toString());
+      params.delete("openImage");
+      const query = params.toString();
+      router.replace(`/studio${query ? `?${query}` : ""}`, { scroll: false });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
+
+  // Sync active project from URL ?project=ID
+  useEffect(() => {
+    const urlProject = searchParams?.get("project");
+    if (urlProject && urlProject !== activeProjectId) {
+      setActiveProjectId(urlProject);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => {
     const el = transcriptRef.current;
@@ -652,12 +624,6 @@ function LITTTerminalShellInner({
     abortRef.current?.abort();
   }, []);
 
-  const clearChat = useCallback(() => {
-    if (busy) abortRef.current?.abort();
-    setMessages([]);
-    setAttachments([]);
-  }, [busy]);
-
   const handleFiles = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
     const files = Array.from(e.target.files ?? []);
     if (!files.length) return;
@@ -688,52 +654,171 @@ function LITTTerminalShellInner({
       });
   }, []);
 
+  const handleScreenCapture = useCallback(async () => {
+    if (typeof navigator === "undefined" || !navigator.mediaDevices?.getDisplayMedia) {
+      return;
+    }
+    try {
+      const stream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+      });
+      const video = document.createElement("video");
+      video.srcObject = stream;
+      video.muted = true;
+      video.playsInline = true;
+      await new Promise<void>((resolve, reject) => {
+        video.onloadedmetadata = () => resolve();
+        video.onerror = () => reject();
+      });
+      await video.play();
+      const canvas = document.createElement("canvas");
+      canvas.width = video.videoWidth || 1280;
+      canvas.height = video.videoHeight || 720;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) return;
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+      stream.getTracks().forEach((track) => track.stop());
+      const dataUrl = canvas.toDataURL("image/png");
+      setAttachments((prev) =>
+        [...prev, { url: dataUrl, name: "screenshot.png", type: "image/png" }].slice(0, 8),
+      );
+    } catch {
+      // ignore cancellation or errors
+    }
+  }, []);
+
   const removeAttachment = useCallback((idx: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== idx));
   }, []);
+
+  // Helpers: route message adds/updates to the correct state depending on
+  // whether we're in agents mode (agentChats) or chat mode (messages).
+  const addToolMessage = useCallback(
+    (msg: Message) => {
+      if (activeTool === "agents") {
+        setAgentChats((prev) => ({
+          ...prev,
+          [activeAgent.id]: [...(prev[activeAgent.id] || []), msg],
+        }));
+      } else {
+        setMessages((prev) => [...prev, msg]);
+      }
+    },
+    [activeTool, activeAgent.id],
+  );
+
+  const updateLastToolMessage = useCallback(
+    (updates: Partial<Message>) => {
+      if (activeTool === "agents") {
+        setAgentChats((prev) => {
+          const msgs = [...(prev[activeAgent.id] || [])];
+          if (msgs.length > 0) {
+            msgs[msgs.length - 1] = { ...msgs[msgs.length - 1], ...updates };
+          }
+          return { ...prev, [activeAgent.id]: msgs };
+        });
+      } else {
+        setMessages((current) => {
+          if (current.length === 0) return current;
+          const next = current.slice();
+          next[next.length - 1] = { ...next[next.length - 1], ...updates };
+          return next;
+        });
+      }
+    },
+    [activeTool, activeAgent.id],
+  );
 
   // Run slash commands like /image, /audio, /video inline in the chat
   const runSlashCommand = useCallback(
     async (text: string) => {
       const match = text.match(
-        /^\/(image|audio|video|build|code|agent)\s*(.*)/i,
+        /^\/(image|audio|video|build|code|agent|terminal)\s*(.*)/i,
       );
       if (!match) return false;
       const [, cmd, raw] = match;
       const prompt = raw.trim();
 
       if (cmd === "agent") {
-        if (activeTool === "agents") return false;
-        setPendingAgentQuery(prompt);
-        onToolChangeAction?.("agents");
+        if (!prompt) {
+          addToolMessage({
+            role: "assistant",
+            content:
+              "Add a prompt after `/agent`, e.g. `/agent review my React component`.",
+            createdAt: Date.now(),
+          });
+          return true;
+        }
+        addToolMessage({
+          role: "assistant",
+          content: `Asking ${activeAgent.name}…`,
+          createdAt: Date.now(),
+          status: "pending",
+        });
+        try {
+          const res = await fetch("/api/agents/chat", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              agentId: activeAgent.id,
+              message: prompt,
+            }),
+          });
+          if (!res.ok) {
+            const err = await res.json().catch(() => ({}));
+            throw new Error(
+              err.error || err.detail || "Agent service error",
+            );
+          }
+          const data = (await res.json()) as {
+            response?: string;
+            agent?: { name?: string };
+          };
+          const reply = data.response || "I'm on it.";
+          updateLastToolMessage({
+            content: reply,
+            status: "complete",
+          });
+        } catch (err) {
+          const msg =
+            err instanceof Error
+              ? err.message
+              : "Agent service unavailable";
+          updateLastToolMessage({
+            content: msg,
+            type: "error",
+            status: "error",
+          });
+        }
         return true;
       }
 
-      const placeholderIndex = messages.length + 1;
+      // In agents mode, show the user's command as a user message first
+      if (activeTool === "agents") {
+        addToolMessage({
+          role: "user",
+          content: text,
+          createdAt: Date.now(),
+        });
+      }
 
       if (cmd === "image") {
         if (!prompt) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "Add a prompt after `/image`, e.g. `/image a futuristic city at sunset`.",
-              createdAt: Date.now(),
-            },
-          ]);
+          addToolMessage({
+            role: "assistant",
+            content:
+              "Add a prompt after `/image`, e.g. `/image a futuristic city at sunset`.",
+            createdAt: Date.now(),
+          });
           return true;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `Generating image: “${prompt}”…`,
-            createdAt: Date.now(),
-            type: "image",
-            status: "pending",
-          },
-        ]);
+        addToolMessage({
+          role: "assistant",
+          content: `Generating image: "${prompt}"…`,
+          createdAt: Date.now(),
+          type: "image",
+          status: "pending",
+        });
         try {
           const res = await fetch("/api/media/generate", {
             method: "POST",
@@ -748,29 +833,17 @@ function LITTTerminalShellInner({
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || "Image generation failed");
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content: `Generated image: ${prompt}`,
-              mediaUrl: data.downloadUrl,
-              status: "complete",
-            };
-            return next;
+          updateLastToolMessage({
+            content: `Generated image: ${prompt}`,
+            mediaUrl: data.downloadUrl,
+            status: "complete",
           });
         } catch (err) {
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content:
-                err instanceof Error ? err.message : "Image generation failed",
-              type: "error",
-              status: "error",
-            };
-            return next;
+          updateLastToolMessage({
+            content:
+              err instanceof Error ? err.message : "Image generation failed",
+            type: "error",
+            status: "error",
           });
         }
         return true;
@@ -778,27 +851,21 @@ function LITTTerminalShellInner({
 
       if (cmd === "audio") {
         if (!prompt) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "Add a prompt after `/audio`, e.g. `/audio a cinematic sci-fi trailer voiceover`.",
-              createdAt: Date.now(),
-            },
-          ]);
+          addToolMessage({
+            role: "assistant",
+            content:
+              "Add a prompt after `/audio`, e.g. `/audio a cinematic sci-fi trailer voiceover`.",
+            createdAt: Date.now(),
+          });
           return true;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `Generating audio: “${prompt}”…`,
-            createdAt: Date.now(),
-            type: "audio",
-            status: "pending",
-          },
-        ]);
+        addToolMessage({
+          role: "assistant",
+          content: `Generating audio: "${prompt}"…`,
+          createdAt: Date.now(),
+          type: "audio",
+          status: "pending",
+        });
         try {
           const res = await fetch("/api/media/generate-audio", {
             method: "POST",
@@ -807,29 +874,17 @@ function LITTTerminalShellInner({
           });
           const data = await res.json().catch(() => ({}));
           if (!res.ok) throw new Error(data.error || "Audio generation failed");
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content: `Generated audio: ${prompt}`,
-              mediaUrl: data.audioBase64,
-              status: "complete",
-            };
-            return next;
+          updateLastToolMessage({
+            content: `Generated audio: ${prompt}`,
+            mediaUrl: data.audioBase64,
+            status: "complete",
           });
         } catch (err) {
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content:
-                err instanceof Error ? err.message : "Audio generation failed",
-              type: "error",
-              status: "error",
-            };
-            return next;
+          updateLastToolMessage({
+            content:
+              err instanceof Error ? err.message : "Audio generation failed",
+            type: "error",
+            status: "error",
           });
         }
         return true;
@@ -837,27 +892,21 @@ function LITTTerminalShellInner({
 
       if (cmd === "video") {
         if (!prompt) {
-          setMessages((prev) => [
-            ...prev,
-            {
-              role: "assistant",
-              content:
-                "Add a prompt after `/video`, e.g. `/video a drone flying over a neon city`.",
-              createdAt: Date.now(),
-            },
-          ]);
+          addToolMessage({
+            role: "assistant",
+            content:
+              "Add a prompt after `/video`, e.g. `/video a drone flying over a neon city`.",
+            createdAt: Date.now(),
+          });
           return true;
         }
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: `Starting video generation: “${prompt}”…`,
-            createdAt: Date.now(),
-            type: "video",
-            status: "pending",
-          },
-        ]);
+        addToolMessage({
+          role: "assistant",
+          content: `Starting video generation: "${prompt}"…`,
+          createdAt: Date.now(),
+          type: "video",
+          status: "pending",
+        });
         try {
           const res = await fetch("/api/media/generate-video", {
             method: "POST",
@@ -883,16 +932,10 @@ function LITTTerminalShellInner({
               const pollData = await pollRes.json().catch(() => ({}));
               if (pollData.error) throw new Error(pollData.error);
               if (pollData.done && pollData.videoUri) {
-                setMessages((current) => {
-                  if (placeholderIndex >= current.length) return current;
-                  const next = current.slice();
-                  next[placeholderIndex] = {
-                    ...next[placeholderIndex],
-                    content: `Generated video: ${prompt}`,
-                    mediaUrl: pollData.videoUri,
-                    status: "complete",
-                  };
-                  return next;
+                updateLastToolMessage({
+                  content: `Generated video: ${prompt}`,
+                  mediaUrl: pollData.videoUri,
+                  status: "complete",
                 });
                 return;
               }
@@ -901,33 +944,21 @@ function LITTTerminalShellInner({
           };
 
           void poll().catch((err) => {
-            setMessages((current) => {
-              if (placeholderIndex >= current.length) return current;
-              const next = current.slice();
-              next[placeholderIndex] = {
-                ...next[placeholderIndex],
-                content:
-                  err instanceof Error
-                    ? err.message
-                    : "Video generation failed",
-                type: "error",
-                status: "error",
-              };
-              return next;
+            updateLastToolMessage({
+              content:
+                err instanceof Error
+                  ? err.message
+                  : "Video generation failed",
+              type: "error",
+              status: "error",
             });
           });
         } catch (err) {
-          setMessages((current) => {
-            if (placeholderIndex >= current.length) return current;
-            const next = current.slice();
-            next[placeholderIndex] = {
-              ...next[placeholderIndex],
-              content:
-                err instanceof Error ? err.message : "Video generation failed",
-              type: "error",
-              status: "error",
-            };
-            return next;
+          updateLastToolMessage({
+            content:
+              err instanceof Error ? err.message : "Video generation failed",
+            type: "error",
+            status: "error",
           });
         }
         return true;
@@ -935,38 +966,95 @@ function LITTTerminalShellInner({
 
       if (cmd === "build") {
         onToolChangeAction?.("builder");
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: prompt
-              ? `Switched to the Build tool. Use it to build: ${prompt}`
-              : "Switched to the Build tool.",
-            createdAt: Date.now(),
-          },
-        ]);
+        addToolMessage({
+          role: "assistant",
+          content: prompt
+            ? `Switched to the Build tool. Use it to build: ${prompt}`
+            : "Switched to the Build tool.",
+          createdAt: Date.now(),
+        });
         return true;
       }
 
       if (cmd === "code") {
         onToolChangeAction?.("canvas");
-        setMessages((prev) => [
-          ...prev,
-          {
-            role: "assistant",
-            content: prompt
-              ? `Switched to the Code tool. Prompt: ${prompt}`
-              : "Switched to the Code tool.",
-            createdAt: Date.now(),
-          },
-        ]);
+        addToolMessage({
+          role: "assistant",
+          content: prompt
+            ? `Switched to the Code tool. Prompt: ${prompt}`
+            : "Switched to the Code tool.",
+          createdAt: Date.now(),
+        });
+        return true;
+      }
+
+      if (cmd === "terminal") {
+        setTerminalDrawerOpen(true);
+        if (prompt) {
+          executeTerminalCommand(prompt, "user");
+        }
         return true;
       }
 
       return false;
     },
-    [activeTool, messages.length, onToolChangeAction],
+    [
+      activeTool,
+      addToolMessage,
+      updateLastToolMessage,
+      onToolChangeAction,
+      activeAgent.id,
+      activeAgent.name,
+    ],
   );
+
+  const executeTerminalCommand = useCallback(
+    async (command: string, startedBy: "user" | "litt" = "user") => {
+      const block = createTerminalBlock(command, startedBy);
+      activeTerminalBlockRef.current = block.id;
+      setTerminalBlocks((prev) => [...prev, block]);
+      setTerminalDrawerOpen(true);
+
+      const handle = terminalRef.current;
+      if (!handle || terminalStatus !== "connected" || handle.getStatus() !== "connected") {
+        const message = "The embedded shell is open, but the real PTY is not connected. Start `pnpm terminal:dev`, then connect the PTY.";
+        setTerminalBlocks((prev) => prev.map((b) => b.id === block.id ? updateTerminalBlock(b, { status: "disconnected", output: message, durationMs: 0 }) : b));
+        setMessages((current) => [...current, { role: "assistant", content: message, createdAt: Date.now() }]);
+        return { command, output: "", exitCode: null, durationMs: 0, error: message };
+      }
+
+      setTerminalBlocks((prev) => prev.map((b) => b.id === block.id ? updateTerminalBlock(b, { status: "running" }) : b));
+      const result = await handle.runCommand(command);
+      const status = result.error || result.exitCode !== 0 ? "failed" : "success";
+      setTerminalBlocks((prev) => prev.map((b) => b.id === block.id ? updateTerminalBlock(b, {
+        status,
+        output: result.output || result.error || "",
+        exitCode: result.exitCode ?? undefined,
+        durationMs: result.durationMs,
+      }) : b));
+      const summary = result.error
+        ? `Command failed: \`${command}\`\n\n${result.error}\n\nExit code: ${result.exitCode ?? "unavailable"} · Duration: ${result.durationMs}ms`
+        : `Command completed: \`${command}\`\n\n\`\`\`text\n${result.output || "(no output)"}\n\`\`\`\n\nExit code: ${result.exitCode} · Duration: ${result.durationMs}ms`;
+      setMessages((current) => [...current, { role: "assistant", content: summary, createdAt: Date.now() }]);
+      return result;
+    },
+    [terminalStatus],
+  );
+
+  const handleTerminalOutput = useCallback((data: string) => {
+    const blockId = activeTerminalBlockRef.current;
+    if (!blockId) return;
+    setTerminalBlocks((prev) =>
+      prev.map((block) =>
+        block.id === blockId
+          ? updateTerminalBlock(block, {
+              status: "running",
+              output: `${block.output || ""}${data}`.slice(-12000),
+            })
+          : block,
+      ),
+    );
+  }, []);
 
   const sendAgent = useCallback(
     async (value: string) => {
@@ -1043,7 +1131,21 @@ function LITTTerminalShellInner({
       const text = value.trim();
       const attachList =
         attachmentsArg ?? attachments.map((a) => a.url).filter(Boolean);
+      if (!attachmentsArg && cameraOpen && cameraCaptureRef.current) {
+        const liveFrame = cameraCaptureRef.current();
+        if (liveFrame) attachList.push(liveFrame);
+      }
       if ((!text && !attachList.length) || busy) return "";
+
+      // Terminal commands: "$ command" or "/run command"
+      const termMatch = text.match(/^\$\s+(.+)/) || text.match(/^\/run\s+(.+)/i);
+      if (termMatch) {
+        const cmd = termMatch[1].trim();
+        void executeTerminalCommand(cmd, "user");
+        setInput("");
+        setAttachments([]);
+        return "";
+      }
 
       if (activeTool === "agents") {
         setBusy(true);
@@ -1064,6 +1166,48 @@ function LITTTerminalShellInner({
       }
 
       const userMessage = text || "(image attachment)";
+
+      // Route ordinary creation language through Builder capabilities. Users
+      // should not need to know slash commands to generate an artifact.
+      const imageIntent = /\b(?:make|create|generate|design|draw)\b[\s\S]*\b(?:logo|image|picture|graphic|icon|illustration|artwork|poster|banner|thumbnail)\b/i.test(text);
+      if (imageIntent) {
+        setMessages((current) => [
+          ...current,
+          { role: "user", content: userMessage, createdAt: Date.now() },
+        ]);
+        setInput("");
+        setAttachments([]);
+        await runSlashCommand(`/image ${text}`);
+        return "";
+      }
+
+      // Let creators ask for the common project build in plain English. Keep
+      // this deliberately narrow so ordinary discussion never executes code.
+      const buildIntent = /^(?:please\s+)?(?:run|start|do)\s+(?:the\s+)?build\b/i.test(text)
+        || /^(?:please\s+)?build\s+(?:the\s+)?(?:project|app|site|repo|from here)\b/i.test(text);
+      if (buildIntent) {
+        if (terminalStatus !== "connected") {
+          const disconnectedMessage = "The embedded shell is open, but the real PTY is not connected. Start `pnpm terminal:dev`, then connect the PTY.";
+          setMessages((current) => [...current, { role: "user", content: text, createdAt: Date.now() }, { role: "assistant", content: disconnectedMessage, createdAt: Date.now() }]);
+          setTerminalDrawerOpen(true);
+          setInput("");
+          setAttachments([]);
+          return disconnectedMessage;
+        }
+        setMessages((current) => [
+          ...current,
+          { role: "user", content: text, createdAt: Date.now() },
+          {
+            role: "assistant",
+            content: "Running the project build in the Studio terminal. You can watch it live below.",
+            createdAt: Date.now(),
+          },
+        ]);
+        void executeTerminalCommand("pnpm build", "litt");
+        setInput("");
+        setAttachments([]);
+        return "Running the project build in the Studio terminal.";
+      }
 
       // Multimodal snapshots go through the Gemini image-chat path because the
       // unified streaming endpoint does not accept image data yet.
@@ -1102,6 +1246,7 @@ function LITTTerminalShellInner({
             throw new Error(err.detail || err.error || "Image chat failed");
           }
           const data = (await response.json()) as { response?: string };
+          markTiming("AI_first_token");
           const reply =
             data.response ||
             "I\u2019m ready. Tell me what we\u2019re building.";
@@ -1113,6 +1258,7 @@ function LITTTerminalShellInner({
               createdAt: Date.now(),
             },
           ]);
+          markTiming("AI_complete");
           return reply;
         } catch (error) {
           const reply =
@@ -1163,6 +1309,7 @@ function LITTTerminalShellInner({
       ]);
 
       let fullText = "";
+      let receivedFirstToken = false;
       try {
         const response = await fetch("/api/chat/unified", {
           method: "POST",
@@ -1207,6 +1354,10 @@ function LITTTerminalShellInner({
                 done?: boolean;
               };
               if (typeof json.text === "string" && json.text.length > 0) {
+                if (!receivedFirstToken) {
+                  receivedFirstToken = true;
+                  markTiming("AI_first_token");
+                }
                 fullText += json.text;
                 setMessages((current) => {
                   if (placeholderIndex >= current.length) return current;
@@ -1241,6 +1392,7 @@ function LITTTerminalShellInner({
         // object so the click handler can do something smarter (run a
         // command, ask for confirmation, etc.) when the shape allows.
         const actionObjects = parseLiTTActions(fullText);
+        markTiming("AI_complete");
         setActiveCommands(
           actionObjects.map((a, i) => ({
             id: `${a.type}-${i}`,
@@ -1300,15 +1452,19 @@ function LITTTerminalShellInner({
       persona.id,
       setActivity,
       runSlashCommand,
+      executeTerminalCommand,
+      markTiming,
+      cameraOpen,
     ],
   );
 
   // Voice transcripts are finalised after a silence gap — auto-send and speak reply
   useEffect(() => {
-    setOnTurn(async (text) => {
+    setOnTurn((text) => {
       if (!text) return;
-      const reply = await send(text);
-      if (reply) speakText(reply);
+      void send(text).then((reply) => {
+        if (reply) speakText(reply);
+      });
     });
     return () => setOnTurn(() => {});
   }, [send, speakText, setOnTurn]);
@@ -1339,6 +1495,12 @@ function LITTTerminalShellInner({
   };
 
   const handleChip = (chip: string) => {
+    // /image opens the inline image generation popover instead of just
+    // inserting the slash command text.
+    if (chip === "/image") {
+      setImageGenOpen(true);
+      return;
+    }
     setInput((prev) => {
       const base = prev.replace(/\s+/g, " ").trim();
       return base ? `${base} ${chip} ` : `${chip} `;
@@ -1350,54 +1512,82 @@ function LITTTerminalShellInner({
   };
 
   const toggleMic = () => {
-    if (micActive && voiceState !== "error") {
+    if (micDisabled) return;
+    if (micActive) {
       stopVoice();
     } else {
-      startVoice();
+      void startVoice();
     }
   };
 
-  const openCameraFromTap = useCallback(async () => {
-    if (cameraOpen || cameraRequesting) return;
-
-    setCameraRequesting(true);
-    setCameraError(null);
-    try {
-      const stream = await requestCameraStream("user");
-      setCameraStream(stream);
-      setCameraOpen(true);
-    } catch (cause) {
-      const error = cause as DOMException;
-      setCameraError(
-        error.name === "NotAllowedError" ||
-          error.name === "PermissionDeniedError"
-          ? "Camera permission was denied. Allow camera access for litlabs.net and try again."
-          : error.message || "LiTT couldn't start the camera.",
-      );
-      setCameraOpen(true);
-    } finally {
-      setCameraRequesting(false);
-    }
-  }, [cameraOpen, cameraRequesting]);
-
-  const closeCamera = useCallback(() => {
-    setCameraOpen(false);
-    setCameraStream(null);
-    setCameraError(null);
-  }, []);
-
-  const snapshotCamera = useCallback(
-    (url: string) => {
-      if (activeTool !== "chat") {
-        onToolChangeAction?.("chat");
-      }
-      void send("Describe what you see.", [url]).then((reply) => {
-        if (reply) speakText(reply);
-      });
-      closeCamera();
+  const plusActions = [
+    {
+      id: "upload",
+      label: "Upload",
+      icon: Upload,
+      onClick: () => fileInputRef.current?.click(),
     },
-    [activeTool, closeCamera, onToolChangeAction, send, speakText],
-  );
+    {
+      id: "camera",
+      label: "Camera",
+      icon: Camera,
+      onClick: () => setCameraOpen(true),
+    },
+    {
+      id: "screen",
+      label: "Screen capture",
+      icon: ScreenShare,
+      onClick: handleScreenCapture,
+    },
+    {
+      id: "image",
+      label: "Image",
+      icon: ImageIcon,
+      onClick: () => setImageGenOpen(true),
+    },
+    {
+      id: "video",
+      label: "Video",
+      icon: Film,
+      onClick: () => onToolChangeAction?.("video"),
+    },
+    {
+      id: "audio",
+      label: "Audio",
+      icon: Music,
+      onClick: () => onToolChangeAction?.("audio"),
+    },
+    {
+      id: "build",
+      label: "Build",
+      icon: Hammer,
+      onClick: () => onToolChangeAction?.("builder"),
+    },
+    {
+      id: "code",
+      label: "Code",
+      icon: Code,
+      onClick: () => onToolChangeAction?.("canvas"),
+    },
+    {
+      id: "plugins",
+      label: "Plugins",
+      icon: LayoutGrid,
+      onClick: () => setPluginsOpen(true),
+    },
+    {
+      id: "assets",
+      label: "Assets",
+      icon: FolderOpen,
+      onClick: () => onToolChangeAction?.("gallery"),
+    },
+    {
+      id: "agent",
+      label: "Add agent/skill",
+      icon: Bot,
+      onClick: () => onToolChangeAction?.("agents"),
+    },
+  ];
 
   // When the user clicks a chip body, we treat it as a follow-up turn so
   // the chat path picks up the chip's intent. Destructive action types
@@ -1449,7 +1639,7 @@ function LITTTerminalShellInner({
 
   return (
     <div
-      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#080a13] text-neutral-100"
+      className="flex h-full min-h-0 w-full flex-col overflow-hidden bg-[#030308] text-neutral-100"
       style={{ color: T.textColor }}
     >
       {/* Hidden file input — driven by the toolbar buttons */}
@@ -1476,221 +1666,16 @@ function LITTTerminalShellInner({
         onChange={handleFiles}
       />
 
-      {/* ── TOP BAR ── */}
-      <header className="hidden h-12 shrink-0 items-center justify-between border-b border-white/10 bg-[#0c0f1a]/95 px-4 backdrop-blur-md md:flex">
-        <div className="flex items-center gap-3">
-          <div className="flex items-center gap-2">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-gradient-to-br from-cyan-400 to-blue-600">
-              <Sparkles size={12} className="text-white" />
-            </div>
-            <span className="text-sm font-black tracking-[0.15em]">LITT</span>
-          </div>
-          <div className="ml-4 flex items-center gap-2 rounded-full border border-amber-500/20 bg-amber-500/10 px-2.5 py-1">
-            <span className="h-1.5 w-1.5 animate-pulse rounded-full bg-amber-400" />
-            <span className="text-[9px] font-bold uppercase tracking-wider text-amber-400">
-              Mission Active
-            </span>
-            <span className="text-[9px] text-gray-300">
-              Everything is under control.
-            </span>
-          </div>
-          {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              title="Start a new chat"
-              className="ml-2 flex items-center gap-1 rounded-md border border-white/10 bg-white/2 px-2 py-1 text-[10px] text-gray-300 transition hover:border-rose-500/30 hover:text-rose-300"
-            >
-              <Trash2 size={10} />
-              New Chat
-            </button>
-          )}
-        </div>
-
-        <div className="flex items-center gap-4">
-          <button
-            onClick={() => setPluginsOpen((v) => !v)}
-            aria-label="Toggle plugin registry"
-            className={`flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-[9px] font-bold uppercase tracking-wider transition ${
-              pluginsOpen
-                ? "border-cyan-500/30 bg-cyan-500/10 text-cyan-400"
-                : "border-white/10 bg-white/5 text-gray-300 hover:text-white"
-            }`}
-          >
-            <LayoutGrid size={12} />
-            Plugins
-          </button>
-          <div className="flex items-center gap-1.5 text-cyan-400">
-            <Camera size={12} />
-            <span className="text-[9px] font-bold uppercase tracking-wider">
-              Vision On
-            </span>
-          </div>
-          <div className="flex flex-col items-end">
-            <LiveClock />
-          </div>
-          <div
-            className="flex h-7 w-7 items-center justify-center rounded-full border border-white/10 bg-white/5 text-[10px] font-bold"
-            title={displayName}
-          >
-            {displayName.slice(0, 2).toUpperCase()}
-          </div>
-        </div>
-      </header>
-
       {/* ── BODY ── */}
       <div className="flex min-h-0 flex-1">
-        {/* LEFT RAIL */}
-        <aside
-          className={cn(
-            "hidden shrink-0 flex-col items-center gap-1 overflow-y-auto border-r border-white/10 bg-[#0d101c]/95 py-3 md:flex",
-            activeTool === "agents" ? "w-44" : "w-16",
-          )}
-        >
-          {TOOL_RAIL.map((item) => {
-            const Icon = item.icon;
-            const active = activeTool === item.tool;
-            return (
-              <button
-                key={item.id}
-                onClick={() => {
-                  if (item.href) {
-                    router.push(item.href);
-                  } else if (item.tool) {
-                    onToolChangeAction?.(item.tool);
-                  }
-                }}
-                aria-label={item.label}
-                className={cn(
-                  "group relative flex flex-col items-center justify-center gap-1 rounded-xl py-2.5 transition-colors",
-                  activeTool === "agents" ? "w-full px-2" : "w-11",
-                  active ? "bg-cyan-500/10" : "hover:bg-white/5",
-                )}
-                title={item.label}
-              >
-                {active && (
-                  <span className="absolute left-0 top-1/2 h-5 w-[3px] -translate-y-1/2 rounded-r-full bg-cyan-400 shadow-[0_0_8px_#22d3ee]" />
-                )}
-                <div
-                  className={cn(
-                    "flex items-center gap-2",
-                    activeTool === "agents" ? "w-full px-2" : "",
-                  )}
-                >
-                  <Icon
-                    size={activeTool === "agents" ? 16 : 18}
-                    className={
-                      active
-                        ? "text-cyan-400"
-                        : "text-gray-300 group-hover:text-white"
-                    }
-                    aria-hidden="true"
-                  />
-                  <span
-                    className={cn(
-                      "text-[8px] font-bold",
-                      active ? "text-cyan-400" : "text-gray-300",
-                      activeTool === "agents" ? "inline" : "hidden",
-                    )}
-                  >
-                    {item.label}
-                  </span>
-                </div>
-              </button>
-            );
-          })}
-
-          {activeTool === "agents" && (
-            <>
-              <div className="w-full border-t border-white/5" />
-              <div className="flex w-full flex-col gap-1 px-2">
-                <div className="px-1 text-[8px] font-bold uppercase tracking-widest text-gray-500">
-                  Agents
-                </div>
-                {agentList.map((agent) => {
-                  const avatar =
-                    AGENT_AVATAR_META[agent.id] || AGENT_AVATAR_META.littcode;
-                  const isActive = activeAgent.id === agent.id;
-                  return (
-                    <button
-                      key={agent.id}
-                      onClick={() =>
-                        setAgentId(agent.id as keyof typeof AGENTS)
-                      }
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-2 text-left transition-colors",
-                        isActive ? "bg-cyan-500/10" : "hover:bg-white/5",
-                      )}
-                    >
-                      <span className="text-base">{avatar.emoji}</span>
-                      <span
-                        className={cn(
-                          "text-[10px] font-bold",
-                          isActive ? "text-cyan-400" : "text-gray-300",
-                        )}
-                      >
-                        {agent.name}
-                      </span>
-                      <span
-                        className="ml-auto h-1.5 w-1.5 rounded-full"
-                        style={{
-                          backgroundColor: agent.color,
-                          opacity: isActive ? 1 : 0.4,
-                        }}
-                      />
-                    </button>
-                  );
-                })}
-                <div className="px-1 pt-2 text-[8px] font-bold uppercase tracking-widest text-gray-500">
-                  Sessions
-                </div>
-                {Object.keys(agentChats).length === 0 && (
-                  <div className="px-1 text-[9px] text-gray-500">
-                    No sessions yet
-                  </div>
-                )}
-                {Object.keys(agentChats).map((id) => {
-                  const agent = AGENTS[id] || activeAgent;
-                  return (
-                    <button
-                      key={id}
-                      onClick={() => setAgentId(id as keyof typeof AGENTS)}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-white/5",
-                        activeAgent.id === id ? "bg-cyan-500/5" : "",
-                      )}
-                    >
-                      <span className="text-[10px] text-gray-300">
-                        {agent.name} ({agentChats[id]?.length || 0})
-                      </span>
-                    </button>
-                  );
-                })}
-              </div>
-            </>
-          )}
-
-          <div className="w-full border-t border-white/5" />
-          <PersonaSwitcher />
-          <div className="mt-auto flex flex-col items-center gap-2 py-2">
-            <div className="text-center">
-              <div className="text-[9px] font-black text-cyan-400">LITT OS</div>
-              <div className="text-[8px] text-gray-300">v2.2.0</div>
-            </div>
-            <div className="flex items-center gap-1 text-[8px] text-emerald-400">
-              <span className="h-1 w-1 rounded-full bg-emerald-400" />
-              ONLINE
-            </div>
-          </div>
-        </aside>
-
         {/* MAIN STAGE */}
         <main className="relative flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* Ambient background - simplified on mobile to reduce paint */}
           <div
-            className="pointer-events-none absolute inset-0 hidden opacity-40 sm:block"
+            className="pointer-events-none absolute inset-0 hidden opacity-50 sm:block"
             style={{
               backgroundImage:
-                "radial-gradient(circle at 50% 60%, rgba(34,211,238,0.10) 0%, transparent 45%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.08) 0%, transparent 35%)",
+                "radial-gradient(circle at 20% 30%, rgba(34,211,238,0.12) 0%, transparent 40%), radial-gradient(circle at 80% 20%, rgba(168,85,247,0.12) 0%, transparent 35%), radial-gradient(circle at 60% 80%, rgba(236,72,153,0.08) 0%, transparent 45%), linear-gradient(to bottom, transparent, rgba(3,3,8,0.9))",
             }}
           />
           <div
@@ -1703,412 +1688,239 @@ function LITTTerminalShellInner({
           />
 
           {/* Stage header */}
-          <div className="relative z-10 flex min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:border-0 sm:px-6 sm:pt-5">
+          <div className="relative z-10 hidden min-h-14 shrink-0 items-center justify-between border-b border-white/5 px-4 py-2 sm:flex sm:border-0 sm:px-6 sm:pt-5">
             <div className="flex items-center gap-3">
-              <div
-                className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10"
-                style={
-                  activeTool === "agents"
-                    ? {
-                        borderColor: `${activeAgent.color}40`,
-                        backgroundColor: `${activeAgent.color}10`,
-                      }
-                    : {}
-                }
-              >
-                {activeTool === "agents" ? (
-                  <span className="text-base">{activeAgentAvatar.emoji}</span>
-                ) : (
-                  <Terminal size={16} className="text-cyan-400" />
-                )}
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-cyan-500/20 bg-cyan-500/10">
+                <Terminal size={16} className="text-cyan-400" />
               </div>
               <div>
                 <div className="text-sm font-black tracking-wide text-white">
-                  {activeTool === "agents"
-                    ? "Agent Console"
-                    : activeTool === "chat"
-                      ? "LITT Terminal"
-                      : activeTool.charAt(0).toUpperCase() +
-                        activeTool.slice(1)}
+                  Builder
                 </div>
                 <div className="hidden text-[10px] text-gray-300 sm:block">
-                  {activeTool === "agents"
-                    ? `${activeAgent.name} · ${activeAgent.role}`
+                  {activeProjectId
+                    ? `Project · ${activeProjectId.slice(0, 12)}`
                     : "Your intelligent workspace. One command away."}
                 </div>
               </div>
             </div>
             <div className="flex items-center gap-2 text-[10px]">
-              <span className="flex items-center gap-1.5 rounded-full border border-white/5 bg-white/5 px-2 py-1 text-gray-300">
-                <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                <span className="hidden sm:inline">Systems nominal</span>
-                <span className="sm:hidden">Online</span>
-              </span>
-              <span className="hidden font-mono text-gray-300 sm:inline">
-                MEM 78%
-              </span>
-              <span className="hidden font-mono text-gray-300 lg:inline">
-                128K
-              </span>
+              <UserButton
+                afterSignOutUrl="/sign-in"
+                appearance={{
+                  elements: {
+                    userButtonAvatarBox:
+                      "h-7 w-7 rounded-full border border-white/10",
+                  },
+                }}
+              />
             </div>
           </div>
 
-          {/* Scrollable content */}
+          {cameraOpen && (
+            <div className="absolute right-4 top-14 z-60 w-64 sm:top-16">
+              <CameraSession
+                compact
+                visionOnSend
+                onCaptureReady={(capture) => {
+                  cameraCaptureRef.current = capture;
+                }}
+                onSnapshot={(url) => {
+                  if (
+                    activeTool !== "builder" &&
+                    activeTool !== "chat" &&
+                    activeTool !== "image"
+                  ) {
+                    onToolChangeAction?.("builder");
+                  }
+                  void send("Describe what you see.", [url]).then(
+                    (reply) => {
+                      if (reply) speakText(reply);
+                    },
+                  );
+                }}
+                onClose={() => {
+                  cameraCaptureRef.current = null;
+                  setCameraOpen(false);
+                }}
+                modelName={persona.name}
+              />
+            </div>
+          )}
+
+          {/* Inline image generation popover — opened from the + menu */}
+          <ImageGenPopover
+            open={imageGenOpen}
+            onClose={() => setImageGenOpen(false)}
+            initialPrompt={input}
+            onInsert={(url, name) => {
+              setAttachments((prev) =>
+                [
+                  ...prev,
+                  { url, name, type: "image/png" },
+                ].slice(0, 8),
+              );
+            }}
+          />
+
+          {/* Project drawer — opened from the Projects rail item */}
+          <ProjectDrawer
+            open={projectDrawerOpen}
+            onClose={() => setProjectDrawerOpen(false)}
+            activeProjectId={activeProjectId}
+            onSelect={(projectId) => {
+              setActiveProjectId(projectId);
+              setProjectDrawerOpen(false);
+              // Update URL with project param
+              const params = new URLSearchParams(
+                searchParams?.toString() ?? "",
+              );
+              params.set("project", projectId);
+              params.set("tool", "builder");
+              router.push(`/studio?${params.toString()}`, { scroll: false });
+            }}
+          />
+
+          {/* Scrollable content — ChatShell is always mounted as the persistent Builder */}
           <div
             ref={transcriptRef}
-            className="relative z-10 min-h-0 flex-1 overflow-y-auto px-4 py-4 sm:px-6"
-          >
-            {activeTool === "chat" ? (
-              <ChatShell
-                embedded
-                hideDock
-                messages={chatMessages}
-                sending={busy}
-                systemLines={[]}
-                onSend={handleChatSend}
-                onToolSelect={onToolChangeAction}
-              />
-            ) : activeTool === "agents" ? (
-              isAgentEmpty ? (
-                <div className="mx-auto flex min-h-0 max-w-3xl flex-col items-center justify-start gap-3 py-4 sm:min-h-full sm:justify-center sm:gap-6 sm:py-6">
-                  <div className="text-4xl sm:text-5xl">
-                    {activeAgentAvatar.emoji}
-                  </div>
-                  <div
-                    className="text-sm font-bold"
-                    style={{ color: activeAgent.color }}
-                  >
-                    {activeAgent.name}
-                  </div>
-                  <div className="text-xs text-gray-300">
-                    {activeAgent.role}
-                  </div>
-                  <div className="text-xs max-w-sm text-center text-gray-400">
-                    {activeAgent.personality}
-                  </div>
-                  <div className="grid w-full max-w-xs grid-cols-1 gap-2 sm:max-w-lg sm:grid-cols-2">
-                    {(AGENT_QUICK[activeAgent.id] || [])
-                      .slice(0, 3)
-                      .map((q) => (
-                        <button
-                          key={q}
-                          onClick={() => void send(q)}
-                          className="rounded-xl border p-3 text-left text-sm transition-all hover:scale-[1.02] sm:text-xs"
-                          style={{
-                            borderColor: activeAgent.color + "40",
-                            color: activeAgent.color,
-                            backgroundColor: activeAgent.color + "10",
-                          }}
-                        >
-                          {q}
-                        </button>
-                      ))}
-                  </div>
-                </div>
-              ) : (
-                <div className="mx-auto flex max-w-3xl flex-col gap-4">
-                  {agentMessages.map((message, index) => {
-                    const isUser = message.role === "user";
-                    return (
-                      <div
-                        key={index}
-                        className={`flex gap-3 ${isUser ? "flex-row-reverse" : "flex-row"}`}
-                      >
-                        <div
-                          className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-full ${
-                            isUser
-                              ? "border border-orange-500/20 bg-orange-500/10"
-                              : "border border-cyan-500/20 bg-cyan-500/10"
-                          }`}
-                          style={
-                            !isUser
-                              ? {
-                                  borderColor: activeAgent.color + "40",
-                                  backgroundColor: activeAgent.color + "10",
-                                }
-                              : undefined
-                          }
-                        >
-                          {isUser ? (
-                            <span className="text-[10px] font-bold text-orange-400">
-                              {displayName.slice(0, 1).toUpperCase()}
-                            </span>
-                          ) : (
-                            <span
-                              className="text-[10px] font-bold"
-                              style={{ color: activeAgent.color }}
-                            >
-                              {activeAgentAvatar.initials}
-                            </span>
-                          )}
-                        </div>
-                        <div
-                          className={`flex max-w-[85%] flex-col ${
-                            isUser ? "items-end" : "items-start"
-                          }`}
-                        >
-                          <div className="overflow-hidden rounded-2xl border border-white/10 bg-white/3 px-3.5 py-2.5 text-xs leading-relaxed shadow-sm">
-                            {message.type === "error" ? (
-                              <div className="text-xs leading-relaxed text-rose-300">
-                                {message.content}
-                              </div>
-                            ) : (
-                              <div className="prose prose-invert prose-sm max-w-none prose-p:my-1 prose-pre:my-1">
-                                <ReactMarkdown>{message.content}</ReactMarkdown>
-                              </div>
-                            )}
-                          </div>
-                          <div className="mt-1 flex items-center gap-2 px-1">
-                            <span className="text-[9px] text-gray-300">
-                              {message.createdAt
-                                ? new Date(
-                                    message.createdAt,
-                                  ).toLocaleTimeString([], {
-                                    hour: "2-digit",
-                                    minute: "2-digit",
-                                  })
-                                : ""}
-                            </span>
-                            {!isUser && message.content && (
-                              <>
-                                <CopyButton text={message.content} />
-                                <button
-                                  onClick={() => speakText(message.content)}
-                                  className="flex items-center gap-1 text-[9px] text-gray-300 transition hover:text-cyan-400"
-                                >
-                                  <Zap size={10} /> Speak
-                                </button>
-                              </>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {busy && (
-                    <div
-                      className="flex items-center gap-2 text-[10px]"
-                      style={{ color: activeAgent.color }}
-                    >
-                      <Loader2 size={12} className="animate-spin" />
-                      {activeAgent.name} is thinking…
-                    </div>
-                  )}
-                </div>
-              )
-            ) : ActiveTool ? (
-              <ActiveTool />
-            ) : (
-              <div className="flex h-full items-center justify-center text-xs text-gray-300">
-                Tool not available
-              </div>
+            className={cn(
+              "relative z-10 min-h-0 flex-1 overflow-y-auto",
+              activeTool === "builder" || activeTool === "chat"
+                ? "px-0 py-0"
+                : "px-0 py-0",
             )}
+          >
+            {/* ChatShell is always rendered — the permanent Builder stream */}
+            <ChatShell
+              embedded
+              hideDock={true}
+              builderMode={true}
+              messages={chatMessages}
+              sending={busy}
+              systemLines={[]}
+              onSend={handleChatSend}
+              onToolSelect={onToolChangeAction}
+              onOpenImageGen={() => setImageGenOpen(true)}
+            />
           </div>
 
           {/* Mobile tool rail removed in favor of the global bottom nav. */}
 
-          {/* COMMAND BAR */}
-          <div className="relative z-20 shrink-0 bg-linear-to-t from-[#080a13] via-[#080a13]/98 to-transparent px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-3 sm:px-6 sm:py-3">
-            <div className="mx-auto flex max-w-4xl flex-col gap-2">
-              {cameraOpen && !cameraDocked && (
-                <div className="mb-1 overflow-hidden rounded-2xl border border-white/10 bg-black shadow-2xl">
-                  <CameraSession
-                    initialStream={cameraStream}
-                    initialError={cameraError}
-                    onSnapshot={snapshotCamera}
-                    onClose={closeCamera}
-                    modelName={persona.name}
-                  />
-                </div>
-              )}
+          {/* COMMAND BAR — single persistent bottom composer */}
+              <div className="relative z-20 shrink-0 overflow-x-hidden border-t border-white/5 bg-[#030308]/95 px-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] pt-2 backdrop-blur-md sm:px-6 sm:py-3">
+            <div className="mx-auto flex max-w-4xl flex-col gap-1.5">
+              {/* Compact voice state strip — replaces the old giant panel */}
               {micActive && (
-                <div className="mb-1 overflow-hidden rounded-xl border border-white/10 bg-white/5 p-3">
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex min-w-0 items-center gap-3">
-                      <div className="relative flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-cyan-500/10">
-                        <Waveform
-                          active={
-                            voiceState === "listening" ||
-                            voiceState === "speech_detected" ||
-                            voiceState === "connecting"
-                          }
-                        />
-                        {(voiceState === "listening" ||
-                          voiceState === "speech_detected") && (
-                          <span className="absolute -bottom-0.5 -right-0.5 h-2.5 w-2.5 rounded-full bg-emerald-400 ring-2 ring-[#080a13]" />
-                        )}
-                      </div>
-                      <div className="min-w-0">
-                        <div className="text-xs font-bold text-white truncate">
-                          {voiceState === "requesting_permission" &&
-                            "Allow microphone"}
-                          {voiceState === "connecting" && "Connecting..."}
-                          {voiceState === "listening" && "Listening"}
-                          {voiceState === "speech_detected" && "Hearing you"}
-                          {voiceState === "transcribing" && "Transcribing"}
-                          {voiceState === "sending" && "Sending"}
-                          {voiceState === "thinking" && "Thinking..."}
-                          {voiceState === "using_tool" && "Using tool..."}
-                          {voiceState === "reading_files" && "Reading files..."}
-                          {voiceState === "writing_files" && "Writing files..."}
-                          {voiceState === "running_command" &&
-                            "Running command..."}
-                          {voiceState === "testing" && "Running tests..."}
-                          {voiceState === "generating_response" &&
-                            "Generating response..."}
-                          {voiceState === "speaking" && "LiTT is speaking"}
-                          {voiceState === "muted" && "Paused"}
-                          {voiceState === "error" && "Voice error"}
-                        </div>
-                        <div className="text-[10px] text-gray-300 truncate">
-                          {errorMessage
-                            ? errorMessage
-                            : interimTranscript ||
-                              `00:${Math.floor(listeningDurationMs / 1000)
-                                .toString()
-                                .padStart(2, "0")}`}
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex shrink-0 items-center gap-2">
-                      {voiceState === "speaking" && (
-                        <button
-                          onClick={interrupt}
-                          className="rounded-md border border-white/10 bg-white/5 px-2 py-1 text-[10px] font-bold text-neutral-300 transition hover:bg-white/10"
-                        >
-                          Interrupt
-                        </button>
-                      )}
-                      <button
-                        onClick={stopVoice}
-                        className="rounded-md border border-rose-500/20 bg-rose-500/10 px-2 py-1 text-[10px] font-bold text-rose-300 transition hover:bg-rose-500/20"
-                      >
-                        End conversation
-                      </button>
-                    </div>
-                  </div>
-                  {(voiceState === "listening" ||
-                    voiceState === "speech_detected" ||
-                    voiceState === "connecting") && (
-                    <div className="mt-2 h-1 w-full overflow-hidden rounded-full bg-white/5">
-                      <div
-                        className="h-full bg-cyan-400 transition-all duration-100"
-                        style={{ width: `${Math.max(5, micLevel * 100)}%` }}
-                      />
-                    </div>
-                  )}
-                  {(voiceState === "speech_detected" ||
-                    voiceState === "transcribing" ||
-                    voiceState === "sending" ||
-                    voiceState === "thinking" ||
-                    voiceState === "using_tool" ||
-                    voiceState === "reading_files" ||
-                    voiceState === "writing_files" ||
-                    voiceState === "running_command" ||
-                    voiceState === "testing" ||
-                    voiceState === "generating_response" ||
-                    voiceState === "speaking") && (
-                    <div className="mt-2 flex items-center gap-2 overflow-x-auto text-[10px] text-gray-300 scrollbar-none">
-                      {[
-                        { key: "hear", label: "Heard", done: true },
-                        {
-                          key: "transcribe",
-                          label: "Transcribed",
-                          done: voiceState !== "speech_detected",
-                        },
-                        {
-                          key: "think",
-                          label: "Thinking",
-                          done: ["generating_response", "speaking"].includes(
-                            voiceState,
-                          ),
-                        },
-                        {
-                          key: "respond",
-                          label: "Responding",
-                          done: voiceState === "speaking",
-                        },
-                      ].map((step, idx, arr) => (
-                        <span
-                          key={step.key}
-                          className="flex shrink-0 items-center gap-1"
-                        >
-                          <span className={step.done ? "text-emerald-400" : ""}>
-                            {step.done ? "✓" : "○"}
-                          </span>
-                          <span className={step.done ? "text-neutral-300" : ""}>
-                            {step.label}
-                          </span>
-                          {idx < arr.length - 1 && (
-                            <span className="text-white/10">›</span>
-                          )}
+                <div className="flex items-center gap-2 px-1 text-[11px]">
+                  {(() => {
+                    if (voiceState === "cooldown") {
+                      return (
+                        <>
+                          <span className="text-amber-400 font-bold">Voice limit reached</span>
+                          <span className="text-amber-400">· Retry available in {cooldownRemaining}s</span>
+                        </>
+                      );
+                    }
+                    if (voiceState === "error") {
+                      return (
+                        <span className="text-rose-400 truncate">
+                          {errorMessage || "Voice session error"}
                         </span>
-                      ))}
-                    </div>
-                  )}
-                  {availableDevices.length > 0 && (
-                    <div className="mt-2 flex items-center gap-2 border-t border-white/5 pt-2">
-                      <span className="text-[10px] text-gray-300">Mic:</span>
-                      <select
-                        name="mic-device"
-                        id="litt-mic-device"
-                        value={selectedDeviceId ?? ""}
-                        onChange={(e) => selectDevice(e.target.value)}
-                        className="max-w-[180px] rounded border border-white/10 bg-white/3 px-2 py-1 text-[10px] text-neutral-300 outline-none"
-                      >
-                        {availableDevices.map((d) => (
-                          <option key={d.deviceId} value={d.deviceId}>
-                            {d.label || "Microphone"}
-                          </option>
-                        ))}
-                      </select>
-                    </div>
+                      );
+                    }
+                    const steps = [
+                      { label: "Listening", active: voiceState === "listening" },
+                      { label: "Transcribing", active: voiceState === "transcribing" },
+                      { label: "Thinking", active: voiceState === "thinking" },
+                      { label: "Speaking", active: voiceState === "speaking" },
+                    ];
+                    const activeIdx = steps.findIndex((s) => s.active);
+	                    return steps.map((step, idx) => (
+                      <span key={step.label} className="flex shrink-0 items-center gap-1">
+                        <span className={idx <= activeIdx && activeIdx >= 0 ? "text-cyan-400" : idx < activeIdx ? "text-emerald-400" : "text-white/20"}>
+                          {idx < activeIdx ? "✓" : idx === activeIdx ? "●" : "○"}
+                        </span>
+                        <span className={idx === activeIdx ? "text-neutral-200 font-bold" : idx < activeIdx ? "text-neutral-400" : "text-white/20"}>{step.label}</span>
+                        {idx < steps.length - 1 && <span className="text-white/10">›</span>}
+                      </span>
+	                    ));
+	                  })()}
+                  {timings.speech_end && timings.playback_started && (
+                    <span className="ml-auto hidden text-[10px] text-white/45 sm:inline">
+                      Transcription: {timings.transcription_complete ? Math.round(timings.transcription_complete - timings.speech_end) : "…"}ms · AI: {timings.AI_complete && timings.transcription_complete ? Math.round(timings.AI_complete - timings.transcription_complete) : "…"}ms · TTS: {timings.TTS_first_audio && timings.TTS_request ? Math.round(timings.TTS_first_audio - timings.TTS_request) : "…"}ms · Total: {Math.round(timings.playback_started - timings.speech_end)}ms
+                    </span>
                   )}
                 </div>
               )}
 
-              <div className="rounded-2xl border border-white/15 bg-[#111522]/98 p-2 shadow-[0_18px_45px_rgba(0,0,0,0.35)] ring-1 ring-cyan-400/[0.04]">
-                <AttachmentStrip
-                  attachments={attachments}
-                  onRemove={removeAttachment}
-                />
-                <div className="flex items-center gap-1.5 sm:gap-2">
-                <button
-                  aria-label="Add attachment"
-                  onClick={() => fileInputRef.current?.click()}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-white/10 bg-white/5 text-neutral-300 transition hover:bg-white/10 sm:h-11 sm:w-11"
-                >
-                  <Plus size={15} aria-hidden="true" />
-                </button>
-                <button
-                  aria-label="Capture from camera"
-                  onClick={() => void openCameraFromTap()}
-                  disabled={cameraRequesting}
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition disabled:opacity-50 sm:h-11 sm:w-11 ${
-                    cameraOpen || cameraRequesting
-                      ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
-                  }`}
-                >
-                  <Camera size={15} aria-hidden="true" />
-                </button>
-                <button
-                  aria-label={micActive ? "Stop voice" : "Start voice"}
-                  onClick={toggleMic}
-                  className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border transition sm:h-11 sm:w-11 ${
-                    micActive && voiceState !== "error"
-                      ? "border-rose-500/40 bg-rose-500/10 text-rose-300 hover:bg-rose-500/20"
-                      : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
-                  }`}
-                >
-                  {micActive && voiceState !== "error" ? (
-                    <MicOff size={15} aria-hidden="true" />
-                  ) : (
-                    <Mic size={15} aria-hidden="true" />
+              <AttachmentStrip
+                attachments={attachments}
+                onRemove={removeAttachment}
+              />
+              <div className="flex items-end gap-2 sm:items-center">
+                {/* + button — single, opens bottom sheet */}
+                <div className="relative">
+                  <button
+                    aria-label="Open creation menu"
+                    aria-expanded={plusMenuOpen}
+                    onClick={() => setPlusMenuOpen((v) => !v)}
+                    className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
+                      plusMenuOpen
+                        ? "border-cyan-500/40 bg-cyan-500/10 text-cyan-400"
+                        : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                    }`}
+                  >
+                    <Plus size={16} aria-hidden="true" />
+                  </button>
+                  {plusMenuOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-90 bg-black/60 sm:bg-transparent"
+                        onClick={() => setPlusMenuOpen(false)}
+                        aria-hidden="true"
+                      />
+                      <div
+                        className="fixed bottom-0 left-0 right-0 z-100 rounded-t-2xl border border-white/10 bg-[#0a0a0f] p-4 shadow-2xl sm:absolute sm:bottom-full sm:left-0 sm:top-auto sm:mb-2 sm:w-56 sm:rounded-xl sm:p-2"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        <div className="flex items-center justify-between pb-2 sm:hidden">
+                          <span className="text-xs font-black text-white">
+                            Create & attach
+                          </span>
+                          <button
+                            onClick={() => setPlusMenuOpen(false)}
+                            aria-label="Close creation menu"
+                            className="rounded-md p-1 text-neutral-300 hover:bg-white/10"
+                          >
+                            <X size={16} />
+                          </button>
+                        </div>
+                        <div className="grid grid-cols-3 gap-2 sm:grid-cols-1">
+                          {plusActions.map((action) => {
+                            const Icon = action.icon;
+                            return (
+                              <button
+                                key={action.id}
+                                onClick={() => {
+                                  setPlusMenuOpen(false);
+                                  action.onClick();
+                                }}
+                                className="flex flex-col items-center gap-1 rounded-lg p-2 text-[10px] text-neutral-200 transition hover:bg-white/5 sm:flex-row sm:gap-2 sm:px-3 sm:py-2 sm:text-xs"
+                              >
+                                <Icon size={16} className="text-cyan-400" />
+                                <span>{action.label}</span>
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </>
                   )}
-                </button>
+                </div>
 
-                <div className="relative flex min-w-0 flex-1 items-center">
+                {/* Text input — placeholder shows voice state when mic active */}
+                <div className="relative flex min-w-0 flex-1 items-end">
                   <textarea
                     ref={textInputRef}
                     name="litt-message"
@@ -2117,10 +1929,25 @@ function LITTTerminalShellInner({
                     onChange={(e) => setInput(e.target.value)}
                     onKeyDown={handleKeyDown}
                     aria-label="Message LITT"
-                    placeholder="Ask LiTT..."
+                    placeholder={
+                      micActive
+                        ? voiceState === "speaking"
+                          ? "LiTT is speaking..."
+                          : voiceState === "transcribing"
+                            ? "Transcribing..."
+                            : voiceState === "thinking"
+                              ? "LiTT is thinking..."
+                              : voiceState === "listening"
+                                ? "Listening..."
+                                : voiceState === "cooldown"
+                                  ? "Voice temporarily unavailable"
+                                  : "Voice active..."
+                        : "Ask LiTT anything..."
+                    }
                     rows={1}
-                    className="max-h-32 min-h-11 w-full min-w-0 resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
+                    className="max-h-32 min-h-11 w-full resize-none rounded-xl border border-white/10 bg-white/3 py-2.5 pl-3 pr-12 text-sm leading-5 text-neutral-100 outline-none placeholder:text-gray-400 focus:border-cyan-500/30 focus:bg-white/5 sm:min-h-12 sm:py-3 sm:pl-4 sm:text-base"
                   />
+                  {/* Contextual send/stop button inside textarea */}
                   <button
                     aria-label={busy ? "Stop" : "Send message"}
                     onClick={handleSend}
@@ -2141,17 +1968,38 @@ function LITTTerminalShellInner({
                   </button>
                 </div>
 
-                </div>
+                {/* Mic button — tap to start, tap again to cancel */}
+                <button
+                  aria-label={
+                    micDisabled ? "Voice busy" : micActive ? "Cancel voice" : "Start voice"
+                  }
+                  onClick={toggleMic}
+                  disabled={micDisabled}
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border transition ${
+                    micDisabled
+                      ? "border-white/5 bg-white/5 text-neutral-500 cursor-not-allowed"
+                      : micActive
+                        ? "border-rose-500/40 bg-rose-500/10 text-rose-300"
+                        : "border-white/10 bg-white/5 text-neutral-300 hover:bg-white/10"
+                  }`}
+                >
+                  {micDisabled ? (
+                    <Loader2 size={15} aria-hidden="true" />
+                  ) : micActive ? (
+                    <MicOff size={15} aria-hidden="true" />
+                  ) : (
+                    <Mic size={15} aria-hidden="true" />
+                  )}
+                </button>
+              </div>
 
-                <div className="mt-2 flex items-center gap-1.5 overflow-x-auto border-t border-white/5 pt-2 scrollbar-none [&::-webkit-scrollbar]:hidden">
+              {/* Slash + plugin chips: secondary actions, hidden on mobile
+                  (they live in the + menu there) to keep the composer compact. */}
+              <div className="hidden items-center gap-1.5 overflow-x-auto pb-1 scrollbar-none sm:flex [&::-webkit-scrollbar]:hidden">
                 {SLASH_CHIPS.map((chip) => (
                   <button
                     key={chip.id}
-                    onClick={() =>
-                      onToolChangeAction
-                        ? onToolChangeAction(chip.tool)
-                        : handleChip(chip.label)
-                    }
+                    onClick={() => handleChip(chip.label)}
                     className="flex shrink-0 items-center gap-1 rounded-md border border-white/5 bg-white/2 px-2 py-1 text-[11px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
                   >
                     <span className="text-cyan-500">{chip.label}</span>
@@ -2191,7 +2039,12 @@ function LITTTerminalShellInner({
                       /{plugin}
                     </button>
                   ))}
-                </div>
+                  <span
+                    title="More plugins coming soon"
+                    className="shrink-0 cursor-not-allowed rounded-md px-1.5 py-1 text-[11px] text-gray-300 opacity-40"
+                  >
+                    +8
+                  </span>
                 </div>
               </div>
             </div>
@@ -2204,7 +2057,7 @@ function LITTTerminalShellInner({
           </div>
 
           {/* FOOTER TELEMETRY */}
-          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/10 bg-[#0c0f1a]/95 sm:flex">
+          <div className="relative z-20 hidden h-8 shrink-0 items-center border-t border-white/5 bg-[#030308]/90">
             <TelemetryBar />
             <div className="ml-auto flex items-center gap-2 px-4 text-[10px] text-gray-400">
               <span>&ldquo;Greatness is built, not generated.&rdquo;</span>
@@ -2213,228 +2066,36 @@ function LITTTerminalShellInner({
               </span>
             </div>
           </div>
-        </main>
 
-        {/* RIGHT PRESENCE PANEL / PLUGIN REGISTRY */}
-        {pluginsOpen && (
+          {/* Persistent terminal drawer. It stays mounted so PTY sessions and
+              command history survive closing and reopening the panel. */}
           <div
-            className="fixed inset-0 z-40 bg-black/60 md:hidden"
-            onClick={() => setPluginsOpen(false)}
-            aria-hidden="true"
-          />
-        )}
-        <aside
-          className={cn(
-            "shrink-0 flex-col border-l border-white/10 bg-[#0d101c]/95",
-            pluginsOpen
-              ? "fixed inset-y-0 right-0 z-50 flex w-[85%] md:relative md:inset-auto md:w-[300px] lg:relative"
-              : "hidden w-[300px] lg:flex",
-          )}
-        >
-          {pluginsOpen ? (
-            <PluginPanel onClose={() => setPluginsOpen(false)} />
-          ) : activeTool === "agents" ? (
-            <div className="flex h-full flex-col overflow-y-auto">
-              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
-                  Agent Details
-                </span>
-                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  ONLINE
-                </div>
-              </div>
-
-              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-6">
-                <div className="text-5xl">{activeAgentAvatar.emoji}</div>
-                <div className="text-center">
-                  <div className="text-sm font-black text-white">
-                    {activeAgent.name}
+            className={`fixed inset-0 z-50 flex items-end justify-center transition ${terminalDrawerOpen ? "pointer-events-auto bg-black/50 backdrop-blur-sm" : "pointer-events-none bg-transparent"}`}
+            onClick={() => setTerminalDrawerOpen(false)}
+            aria-hidden={!terminalDrawerOpen}
+          >
+              <div
+                className={`relative flex h-[72dvh] max-h-[760px] w-full max-w-5xl flex-col overflow-hidden rounded-t-2xl border border-white/10 bg-[#05050a] shadow-2xl transition-transform duration-300 ${terminalDrawerOpen ? "translate-y-0" : "translate-y-full"}`}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-center justify-between border-b border-white/5 px-4 py-2">
+                  <div className="flex items-center gap-2 text-sm font-bold text-cyan-400">
+                    <Terminal size={14} /> Terminal
                   </div>
-                  <div className="text-[10px] text-gray-300">
-                    {activeAgent.role}
-                  </div>
-                </div>
-                <div className="text-center text-[10px] text-gray-400">
-                  {activeAgent.personality}
-                </div>
-                <div className="flex w-full flex-wrap justify-center gap-1">
-                  {activeAgent.domains.slice(0, 6).map((domain) => (
-                    <span
-                      key={domain}
-                      className="rounded-full border border-white/10 bg-white/5 px-2 py-0.5 text-[9px] text-gray-300"
-                    >
-                      {domain}
-                    </span>
-                  ))}
-                </div>
-              </div>
-
-              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Activity
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-300">
-                  {busy
-                    ? `${activeAgent.name} is thinking…`
-                    : `Last active ${activeAgent.lastActivity || "just now"}`}
-                  <div className="mt-2 flex items-center gap-2 text-[9px] text-gray-400">
-                    <span>{agentMessages.length} messages</span>
-                    <span>·</span>
-                    <span>
-                      {activeAgent.memory.length > 0
-                        ? "Memory attached"
-                        : "No memory"}
-                    </span>
-                  </div>
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Runs
-                </div>
-                <div className="rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
-                  No active runs
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Artifacts
-                </div>
-                <div className="flex flex-1 rounded-xl border border-white/5 bg-white/2 p-3 text-[10px] text-gray-400">
-                  Agent artifacts will appear here
-                </div>
-              </div>
-            </div>
-          ) : (
-            <>
-              <div className="flex items-center gap-2 border-b border-white/5 px-4 py-3">
-                <span className="text-xs font-black uppercase tracking-[0.18em] text-gray-300">
-                  LITT Presence
-                </span>
-                <div className="ml-auto flex items-center gap-1 text-[10px] text-emerald-400">
-                  <span className="h-1.5 w-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                  ONLINE
-                </div>
-              </div>
-
-              {cameraOpen && cameraDocked && (
-                <div className="border-b border-white/5 p-3">
-                  <div className="mb-2 flex items-center justify-between text-[9px] font-black uppercase tracking-[0.16em] text-gray-400">
-                    <span>LiTT Vision</span>
-                    <span className="text-cyan-400">One-click live</span>
-                  </div>
-                  <CameraSession
-                    initialStream={cameraStream}
-                    initialError={cameraError}
-                    onSnapshot={snapshotCamera}
-                    onClose={closeCamera}
-                    modelName={persona.name}
-                    compact
-                  />
-                </div>
-              )}
-
-              <div className="flex flex-col items-center gap-3 border-b border-white/5 px-4 py-5">
-                <LiTTAvatar size={cameraDocked && cameraOpen ? 58 : 90} />
-                <div className="text-center">
-                  <div className="text-sm font-black text-white">
-                    {persona.name}
-                  </div>
-                  <div className="flex items-center justify-center gap-2 text-[10px] text-gray-300">
-                    <span style={{ color: persona.color }}>{persona.tag}</span>
-                    <span>·</span>
-                    <span>Omni</span>
-                    <span>·</span>
-                    <span>128K Context</span>
-                  </div>
-                </div>
-                <div className="flex w-full items-center justify-between rounded-lg border border-white/5 bg-white/2 px-3 py-2">
-                  <span className="text-[10px] font-bold text-gray-300">
-                    Voice
-                  </span>
-                  <span
-                    className="text-[10px] font-bold"
-                    style={{ color: persona.color }}
+                  <button
+                    onClick={() => setTerminalDrawerOpen(false)}
+                    className="flex h-7 w-7 items-center justify-center rounded-lg border border-white/10 bg-white/5 text-gray-400 transition hover:bg-white/10 hover:text-white"
+                    aria-label="Close terminal"
                   >
-                    {persona.name}
-                  </span>
-                  <span className="flex items-center gap-1 text-[9px] text-emerald-400">
-                    <span className="h-1.5 w-1.5 rounded-full bg-emerald-400" />
-                    {micActive ? "Listening" : "Live"}
-                  </span>
+                    ✕
+                  </button>
                 </div>
-                {availableDevices.length > 0 && (
-                  <label className="flex w-full items-center gap-2 rounded-lg border border-white/5 bg-white/2 px-3 py-2">
-                    <Mic size={12} className="shrink-0 text-cyan-400" />
-                    <span className="sr-only">Microphone device</span>
-                    <select
-                      value={selectedDeviceId ?? selectedMicDevice?.deviceId ?? ""}
-                      onChange={(event) => selectDevice(event.target.value)}
-                      className="min-w-0 flex-1 truncate bg-transparent text-[9px] text-gray-300 outline-none"
-                      title={selectedMicDevice?.label || "Default microphone"}
-                    >
-                      {availableDevices.map((device, index) => (
-                        <option key={device.deviceId} value={device.deviceId}>
-                          {device.label || `Microphone ${index + 1}`}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                )}
-              </div>
-
-              <div className="flex flex-1 flex-col gap-3 overflow-hidden px-4 py-4">
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Speaking Now
-                </div>
-                <Waveform active={busy || micActive} />
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Recent Transcript
-                </div>
-                <div className="flex flex-1 flex-col gap-2 overflow-y-auto rounded-xl border border-white/5 bg-white/2 p-3">
-                  {messages.length === 0 ? (
-                    <div className="text-[10px] leading-relaxed text-gray-300">
-                      Hey, I am {persona.name}.
-                      <br />
-                      Need help building something?
-                      <br />
-                      <br />I can see your workspace and talk you through it.
-                    </div>
-                  ) : (
-                    messages.slice(-6).map((m, i) => (
-                      <div
-                        key={i}
-                        className={`flex items-start gap-2 text-[10px] ${
-                          m.role === "user" ? "text-gray-300" : "text-cyan-400"
-                        }`}
-                      >
-                        <span className="mt-0.5 shrink-0 text-[8px] text-gray-300">
-                          {m.role === "user" ? "You" : "LITT"}
-                        </span>
-                        <span className="line-clamp-3">{m.content}</span>
-                      </div>
-                    ))
-                  )}
-                </div>
-
-                <div className="text-[10px] font-black uppercase tracking-[0.18em] text-gray-300">
-                  Quick Replies
-                </div>
-                <div className="flex flex-wrap gap-2">
-                  {QUICK_START.map((q) => (
-                    <button
-                      key={q}
-                      onClick={() => void send(q)}
-                      className="rounded-full border border-white/10 bg-white/3 px-2.5 py-1 text-[10px] text-gray-300 transition hover:border-cyan-500/20 hover:text-cyan-400"
-                    >
-                      {q}
-                    </button>
-                  ))}
+                <div className="min-h-0 flex-1">
+                  <TerminalTool ref={terminalRef} onOutput={handleTerminalOutput} onStatusChange={setTerminalStatus} />
                 </div>
               </div>
-            </>
-          )}
-        </aside>
+          </div>
+        </main>
       </div>
     </div>
   );

@@ -24,7 +24,31 @@ const VALID_TOOLS: StudioTool[] = [
   "clibridge",
   "color",
   "space",
+  "loops",
 ];
+
+const MIGRATED_TOOLS: Partial<Record<StudioTool, StudioTool>> = {
+  chat: "builder",
+  terminal: "builder",
+  image: "builder",
+  video: "builder",
+  audio: "builder",
+  agents: "builder",
+  pipeline: "builder",
+  gallery: "builder",
+  canvas: "builder",
+  clibridge: "builder",
+  color: "builder",
+  space: "builder",
+  loops: "builder",
+};
+
+function normalizeTool(tool: string | null): StudioTool {
+  if (!tool) return "builder";
+  const t = tool as StudioTool;
+  if (MIGRATED_TOOLS[t]) return MIGRATED_TOOLS[t]!;
+  return "builder";
+}
 
 export default function StudioOS() {
   const router = useRouter();
@@ -33,18 +57,16 @@ export default function StudioOS() {
 
   const urlTool = searchParams.get("tool");
 
-  const initialTool: StudioTool =
-    urlTool && VALID_TOOLS.includes(urlTool as StudioTool)
-      ? (urlTool as StudioTool)
-      : "chat";
+  const initialTool: StudioTool = normalizeTool(urlTool);
 
   const [activeTool, setActiveTool] = useState<StudioTool>(initialTool);
   const isInitialMount = useRef(true);
 
   useEffect(() => {
     const storedTool = localStorage.getItem("littree:studio:tool");
-    if (storedTool && VALID_TOOLS.includes(storedTool as StudioTool)) {
-      setActiveTool(storedTool as StudioTool);
+    if (storedTool) {
+      const normalized = normalizeTool(storedTool);
+      setActiveTool(normalized);
     }
   }, []);
 
@@ -59,7 +81,7 @@ export default function StudioOS() {
       return;
     }
     const params = new URLSearchParams(searchParams.toString());
-    if (activeTool !== "chat") params.set("tool", activeTool);
+    if (activeTool !== "builder") params.set("tool", activeTool);
     else params.delete("tool");
     const query = params.toString();
     router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
@@ -67,8 +89,9 @@ export default function StudioOS() {
 
   const terminalToolChange = useCallback(
     (tool: StudioTool) => {
-      if (VALID_TOOLS.includes(tool)) {
-        setActiveTool(tool);
+      const normalized = MIGRATED_TOOLS[tool] ?? tool;
+      if (VALID_TOOLS.includes(normalized)) {
+        setActiveTool(normalized);
       }
     },
     [setActiveTool],

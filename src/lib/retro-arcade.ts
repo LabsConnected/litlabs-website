@@ -32,7 +32,6 @@ export const RETRO_SYSTEMS: RetroSystem[] = [
 
 const DB_NAME = "litt-retro-arcade";
 const STORE_NAME = "roms";
-const DB_VERSION = 1;
 
 function openRetroDatabase(): Promise<IDBDatabase> {
   return new Promise((resolve, reject) => {
@@ -40,7 +39,9 @@ function openRetroDatabase(): Promise<IDBDatabase> {
       reject(new Error("Local game storage is not available in this browser."));
       return;
     }
-    const request = indexedDB.open(DB_NAME, DB_VERSION);
+    // Open the latest existing schema. Requesting an older hard-coded version
+    // throws VersionError and locks users out of their local ROM library.
+    const request = indexedDB.open(DB_NAME);
     request.onupgradeneeded = () => {
       const db = request.result;
       if (!db.objectStoreNames.contains(STORE_NAME)) {

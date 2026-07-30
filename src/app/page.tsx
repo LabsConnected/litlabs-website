@@ -1,598 +1,262 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useEffect, useState } from "react";
+import { useEffect } from "react";
 import { useClerkAuth } from "@/hooks/useClerkAuth";
 import { useSupabaseAuthHook } from "@/hooks/useSupabaseAuth";
 import {
-  Bot,
   ArrowRight,
+  Bot,
+  BrainCircuit,
+  Code2,
+  Palette,
+  Play,
+  Rocket,
   Sparkles,
-  Shield,
-  GitBranch,
-  Cloud,
-  Zap,
-  Terminal,
-  Image as ImageIcon,
-  Cpu,
+  WandSparkles,
 } from "lucide-react";
 
-const STEPS = [
-  {
-    step: "01",
-    title: "Connect a project",
-    desc: "Link GitHub, pick a repo, and define the outcome you want.",
-    color: "#22d3ee",
-  },
-  {
-    step: "02",
-    title: "Direct your crew",
-    desc: "Describe the work. LiTT Director plans the steps, assigns tools, and asks before acting.",
-    color: "#a855f7",
-  },
-  {
-    step: "03",
-    title: "Review and ship",
-    desc: "Preview changes, approve diffs, verify the result, and deploy or open a PR.",
-    color: "#22c55e",
-  },
+const powers = [
+  { icon: Code2, label: "Build", copy: "Sites, apps, tools & automations" },
+  { icon: Palette, label: "Create", copy: "Images, video, audio & ideas" },
+  { icon: BrainCircuit, label: "Remember", copy: "Your projects, style & decisions" },
+  { icon: Rocket, label: "Elevate", copy: "Review, improve & ship real work" },
 ];
 
-const INTEGRATIONS = [
-  { name: "GitHub", icon: GitBranch, color: "#e2e8f0" },
-  { name: "Supabase", icon: Cloud, color: "#3ecf8e" },
-  { name: "Vercel", icon: Zap, color: "#ffffff" },
-  { name: "Clerk", icon: Shield, color: "#6c47ff" },
+const steps = [
+  ["01", "Tell LiTT the mission", "Bring an idea, a problem, or a project already in motion."],
+  ["02", "Your crew gets to work", "LiTT directs the plan while specialist agents create, code, research, and refine."],
+  ["03", "You stay in command", "See the work, guide every decision, and ship when it feels right."],
 ];
 
-const CAPABILITIES = [
-  { text: "Conversational project director", icon: Cpu },
-  { text: "Multi-agent task routing", icon: Bot },
-  { text: "Image, audio, and code generation", icon: ImageIcon },
-  { text: "Live diff preview and approval", icon: GitBranch },
-  { text: "Deployment status and build logs", icon: Terminal },
-  { text: "Artifact museum and version history", icon: Sparkles },
-];
-
-const PREVIEW_MESSAGES = [
-  { role: "user", text: "Build a landing page for LiTT Labs." },
-  {
-    role: "director",
-    text: "Got it. I'll scaffold the hero, features, and CTA sections. Reviewing your repo first...",
-  },
-  { role: "tool", text: "✓ Scanned 12 files · Plan ready · Awaiting approval" },
-];
-
-function PublicHeader() {
-  const { isSignedIn: clerkSignedIn, isLoaded: clerkLoaded } = useClerkAuth();
-  const { isSignedIn: supabaseSignedIn, loading: supabaseLoading } =
-    useSupabaseAuthHook();
-  const authLoaded = clerkLoaded || supabaseLoading === false;
-  const signedIn = clerkSignedIn || supabaseSignedIn;
-  const [mobileOpen, setMobileOpen] = useState(false);
-
+function Header() {
   return (
-    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/5 bg-[#06060e]/90 backdrop-blur-xl">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
-        <Link
-          href="/"
-          className="flex items-center gap-2 text-sm font-black text-white"
-        >
-          <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-linear-to-br from-cyan-400 to-fuchsia-500">
-            <Bot size={14} className="text-black" />
-          </div>
-          LiTT Labs
+    <header className="fixed inset-x-0 top-0 z-50 border-b border-white/10 bg-[#050706]/80 backdrop-blur-2xl">
+      <div className="mx-auto flex h-16 max-w-7xl items-center justify-between px-5 lg:px-8">
+        <Link href="/" className="flex items-center gap-2.5 font-black tracking-tight text-white">
+          <span className="grid h-9 w-9 place-items-center rounded-xl border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 text-[#a8ff2f] shadow-[0_0_25px_rgba(168,255,47,.18)]">
+            <Bot size={18} />
+          </span>
+          <span>LiTT Labs</span>
         </Link>
-        <nav className="hidden items-center gap-6 text-xs font-medium text-neutral-400 md:flex">
-          <Link href="/studio" className="transition hover:text-cyan-300">
-            Product
-          </Link>
-          <Link href="/agents" className="transition hover:text-cyan-300">
-            Agents
-          </Link>
-          <Link href="/marketplace" className="transition hover:text-cyan-300">
-            Marketplace
-          </Link>
-          <Link href="/docs" className="transition hover:text-cyan-300">
-            Docs
-          </Link>
+        <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
+          <a href="#crew" className="transition hover:text-[#a8ff2f]">The crew</a>
+          <a href="#what-we-do" className="transition hover:text-[#a8ff2f]">What we do</a>
+          <a href="#how-it-works" className="transition hover:text-[#a8ff2f]">How it works</a>
         </nav>
         <div className="flex items-center gap-2">
-          {!authLoaded ? (
-            <span className="h-7 w-16 animate-pulse rounded-lg bg-white/5" />
-          ) : signedIn ? (
-            <>
-              <Link
-                href="/dashboard"
-                className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
-              >
-                Dashboard
-              </Link>
-              <Link
-                href="/api/auth/logout"
-                prefetch={false}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-1.5 text-xs font-bold text-white transition hover:border-white/20 hover:bg-white/10"
-              >
-                Sign out
-              </Link>
-            </>
-          ) : (
-            <>
-              <Link
-                href="/sign-in"
-                className="hidden px-3 py-1.5 text-xs font-semibold text-neutral-400 transition hover:text-white sm:block"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/sign-up"
-                className="inline-flex items-center gap-1.5 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-1.5 text-xs font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
-              >
-                Start building <ArrowRight size={11} />
-              </Link>
-            </>
-          )}
-          <button
-            type="button"
-            aria-label="Open menu"
-            aria-expanded={mobileOpen}
-            className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white transition hover:border-white/20 hover:bg-white/5 md:hidden"
-            onClick={() => setMobileOpen(true)}
-          >
-            <svg
-              xmlns="http://www.w3.org/2000/svg"
-              width="18"
-              height="18"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              strokeWidth="2"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            >
-              <line x1="4" y1="6" x2="20" y2="6" />
-              <line x1="4" y1="12" x2="20" y2="12" />
-              <line x1="4" y1="18" x2="20" y2="18" />
-            </svg>
-          </button>
+          <Link href="/sign-in" className="hidden px-3 py-2 text-sm font-bold text-white/60 transition hover:text-white sm:block">
+            Sign in
+          </Link>
+          <Link href="/sign-up" className="inline-flex items-center gap-2 rounded-full bg-[#a8ff2f] px-4 py-2 text-sm font-black text-black transition hover:scale-[1.03] hover:bg-white">
+            Meet your crew <ArrowRight size={14} />
+          </Link>
         </div>
       </div>
-
-      {/* Mobile menu */}
-      {mobileOpen && (
-        <>
-          <div
-            className="fixed inset-0 z-40 bg-black/60 backdrop-blur-sm md:hidden"
-            onClick={() => setMobileOpen(false)}
-            aria-hidden="true"
-          />
-          <div className="fixed inset-y-0 right-0 z-50 flex w-72 flex-col border-l border-white/10 bg-[#0a0a14] p-6 shadow-2xl md:hidden">
-            <div className="mb-6 flex items-center justify-between">
-              <span className="text-sm font-black text-white">Menu</span>
-              <button
-                type="button"
-                aria-label="Close menu"
-                className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/10 text-white transition hover:border-white/20 hover:bg-white/5"
-                onClick={() => setMobileOpen(false)}
-              >
-                <svg
-                  xmlns="http://www.w3.org/2000/svg"
-                  width="18"
-                  height="18"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                >
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
-              </button>
-            </div>
-            <nav className="flex flex-col gap-1">
-              <Link
-                href="/studio"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-              >
-                Product
-              </Link>
-              <Link
-                href="/agents"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-              >
-                Agents
-              </Link>
-              <Link
-                href="/marketplace"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-              >
-                Marketplace
-              </Link>
-              <Link
-                href="/docs"
-                onClick={() => setMobileOpen(false)}
-                className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-              >
-                Docs
-              </Link>
-            </nav>
-            <div className="mt-6 flex flex-col gap-3 border-t border-white/10 pt-6">
-              {!authLoaded ? (
-                <span className="h-8 w-full animate-pulse rounded-lg bg-white/5" />
-              ) : signedIn ? (
-                <>
-                  <Link
-                    href="/dashboard"
-                    onClick={() => setMobileOpen(false)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-                  >
-                    Dashboard
-                  </Link>
-                  <Link
-                    href="/api/auth/logout"
-                    prefetch={false}
-                    onClick={() => setMobileOpen(false)}
-                    className="inline-flex items-center gap-1.5 rounded-lg border border-white/10 bg-white/5 px-3 py-2 text-sm font-bold text-white transition hover:border-white/20 hover:bg-white/10"
-                  >
-                    Sign out
-                  </Link>
-                </>
-              ) : (
-                <>
-                  <Link
-                    href="/sign-in"
-                    onClick={() => setMobileOpen(false)}
-                    className="rounded-lg px-3 py-2 text-sm font-medium text-neutral-400 transition hover:bg-white/5 hover:text-cyan-300"
-                  >
-                    Sign in
-                  </Link>
-                  <Link
-                    href="/sign-up"
-                    onClick={() => setMobileOpen(false)}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-linear-to-r from-cyan-500 to-cyan-400 px-3 py-2 text-sm font-bold text-black shadow-[0_0_16px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_24px_rgba(34,211,238,0.6)]"
-                  >
-                    Start building <ArrowRight size={12} />
-                  </Link>
-                </>
-              )}
-            </div>
-          </div>
-        </>
-      )}
     </header>
   );
 }
 
 function LandingPage() {
   return (
-    <div className="min-h-screen overflow-x-hidden bg-[#06060e] text-[#e2e2e9]">
-      <PublicHeader />
+    <main className="min-h-screen overflow-hidden bg-[#050706] text-white">
+      <Header />
 
-      {/* Background glows */}
-      <div className="pointer-events-none fixed inset-0 z-0">
-        <div className="absolute -top-40 left-1/2 h-[600px] w-[600px] -translate-x-1/2 rounded-full bg-cyan-500/8 blur-[120px]" />
-        <div className="absolute top-1/3 -right-40 h-[400px] w-[400px] rounded-full bg-fuchsia-500/8 blur-[120px]" />
-        <div className="absolute bottom-1/4 -left-40 h-[400px] w-[400px] rounded-full bg-purple-500/8 blur-[120px]" />
-      </div>
-
-      {/* Hero */}
-      <section className="relative z-10 px-4 pb-20 pt-32 md:pt-44">
-        <div className="mx-auto max-w-4xl text-center">
-          <div className="mb-6 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/5 px-4 py-1.5 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-            <Sparkles size={10} />
-            AI operating system for builders
+      <section className="relative min-h-[760px] border-b border-white/10 pt-16">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_75%_38%,rgba(123,48,255,.24),transparent_34%),radial-gradient(circle_at_25%_25%,rgba(168,255,47,.12),transparent_26%)]" />
+        <div className="absolute inset-0 opacity-20 [background-image:linear-gradient(rgba(255,255,255,.06)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.06)_1px,transparent_1px)] [background-size:64px_64px]" />
+        <div className="relative mx-auto grid max-w-7xl items-center gap-10 px-5 py-16 lg:min-h-[760px] lg:grid-cols-[.92fr_1.08fr] lg:px-8 lg:py-20">
+          <div className="relative z-10">
+            <div className="mb-7 inline-flex items-center gap-2 rounded-full border border-[#a8ff2f]/25 bg-[#a8ff2f]/8 px-4 py-2 text-xs font-black uppercase tracking-[.18em] text-[#a8ff2f]">
+              <span className="h-2 w-2 animate-pulse rounded-full bg-[#a8ff2f]" />
+              Your creative AI crew is online
+            </div>
+            <h1 className="max-w-3xl text-5xl font-black leading-[.94] tracking-[-.055em] sm:text-6xl lg:text-7xl xl:text-[5.5rem]">
+              Don&apos;t just chat with AI.
+              <span className="mt-3 block bg-gradient-to-r from-[#a8ff2f] via-[#7efbff] to-[#a970ff] bg-clip-text text-transparent">
+                Build a world with it.
+              </span>
+            </h1>
+            <p className="mt-7 max-w-xl text-lg leading-8 text-white/65">
+              LiTT Labs is your creative command center—one place to build products,
+              make art, explore ideas, and turn imagination into something real.
+            </p>
+            <div className="mt-9 flex flex-col gap-3 sm:flex-row">
+              <Link href="/sign-up" className="inline-flex items-center justify-center gap-2 rounded-xl bg-[#a8ff2f] px-6 py-4 text-sm font-black text-black shadow-[0_0_40px_rgba(168,255,47,.22)] transition hover:-translate-y-1 hover:bg-white">
+                Start building free <ArrowRight size={16} />
+              </Link>
+              <a href="#crew" className="inline-flex items-center justify-center gap-2 rounded-xl border border-white/15 bg-white/5 px-6 py-4 text-sm font-bold transition hover:border-[#a970ff]/60 hover:bg-white/10">
+                <Play size={15} fill="currentColor" /> Meet LiTT & Spark
+              </a>
+            </div>
+            <div className="mt-7 flex flex-wrap gap-x-5 gap-y-2 text-xs font-semibold text-white/45">
+              <span>✓ Free during beta</span>
+              <span>✓ You approve the work</span>
+              <span>✓ Your data stays yours</span>
+            </div>
           </div>
 
-          <h1 className="mb-6 text-4xl font-black leading-[1.1] tracking-tight text-white md:text-6xl lg:text-7xl">
-            Build, verify, and ship{" "}
-            <span
-              className="bg-clip-text text-transparent"
-              style={{
-                backgroundImage:
-                  "linear-gradient(135deg, #22d3ee 0%, #a855f7 50%, #ec4899 100%)",
-              }}
-            >
-              real digital products
-            </span>
-            <br />
-            with an AI crew.
-          </h1>
-
-          <p className="mx-auto mb-10 max-w-2xl text-base leading-relaxed text-neutral-400 md:text-lg">
-            LiTT Labs is a control tower where you connect a project, direct an
-            AI team, review actual changes, and deploy — instead of chatting
-            into the void.
-          </p>
-
-          <div className="flex flex-col items-center justify-center gap-3 sm:flex-row">
-            <Link
-              href="/sign-up"
-              className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-7 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.35)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.5)]"
-            >
-              Start building free <ArrowRight size={16} />
-            </Link>
-            <Link
-              href="/studio"
-              className="inline-flex items-center gap-2 rounded-xl border border-white/10 bg-white/5 px-7 py-3.5 text-sm font-semibold text-white backdrop-blur-sm transition hover:border-white/20 hover:bg-white/8"
-            >
-              <Terminal size={14} className="text-cyan-400" />
-              Open Studio
-            </Link>
-          </div>
-
-          <div className="mt-8 text-[11px] text-neutral-600">
-            Free during beta · No credit card required
-          </div>
-        </div>
-      </section>
-
-      {/* Product preview */}
-      <section className="relative z-10 px-4 pb-20">
-        <div className="mx-auto max-w-5xl">
-          <div className="overflow-hidden rounded-2xl border border-white/8 bg-[#0a0a14] shadow-[0_0_80px_rgba(34,211,238,0.06),0_0_0_1px_rgba(255,255,255,0.04)]">
-            {/* Window chrome */}
-            <div className="flex items-center gap-2 border-b border-white/6 bg-white/2 px-4 py-2.5">
-              <div className="h-2.5 w-2.5 rounded-full bg-red-500/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-amber-500/60" />
-              <div className="h-2.5 w-2.5 rounded-full bg-green-500/60" />
-              <div className="ml-3 flex items-center gap-1.5 rounded-md bg-white/4 px-2.5 py-1 text-[9px] font-bold uppercase tracking-widest text-cyan-400">
-                <div className="h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-400" />
-                LiTT Studio — Mission Active
+          <div className="relative mx-auto w-full max-w-[680px]">
+            <div className="absolute inset-10 rounded-full bg-[#a8ff2f]/20 blur-[90px]" />
+            <div className="relative overflow-hidden rounded-[2rem] border border-white/15 bg-black/40 shadow-[0_35px_100px_rgba(0,0,0,.65)]">
+              <video
+                autoPlay
+                muted
+                loop
+                playsInline
+                preload="metadata"
+                poster="/brand/litt-alive-poster.webp"
+                aria-label="LiTT comes to life and welcomes you to the lab"
+                className="aspect-[4/4.55] w-full object-cover object-center motion-reduce:hidden"
+              >
+                <source src="/brand/litt-alive.mp4" type="video/mp4" />
+              </video>
+              <Image
+                src="/brand/litt-alive-poster.webp"
+                alt="LiTT, your friendly AI creative director"
+                width={1280}
+                height={784}
+                priority
+                className="hidden aspect-[4/4.55] w-full object-cover object-center motion-reduce:block"
+              />
+              <div className="absolute inset-x-0 bottom-0 bg-gradient-to-t from-black via-black/70 to-transparent px-6 pb-6 pt-24">
+                <div className="flex items-end justify-between gap-4">
+                  <div>
+                    <div className="text-xs font-black uppercase tracking-[.22em] text-[#a8ff2f]">Crew 01 · Director</div>
+                    <div className="mt-1 text-2xl font-black">LiTT</div>
+                    <p className="mt-1 text-sm text-white/60">Plans the mission. Protects your vision. Keeps everything moving.</p>
+                  </div>
+                  <span className="shrink-0 rounded-full border border-[#a8ff2f]/30 bg-[#a8ff2f]/10 px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[#a8ff2f]">Online</span>
+                </div>
               </div>
             </div>
-
-            <div className="grid min-h-[360px] md:grid-cols-[200px_1fr_180px]">
-              {/* Left sidebar */}
-              <div className="hidden border-r border-white/6 p-4 md:block">
-                <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Project
-                </div>
-                <div className="space-y-2">
-                  {["litlabs-website", "api-routes", "components"].map(
-                    (f, i) => (
-                      <div
-                        key={f}
-                        className={`flex items-center gap-2 rounded-lg px-2 py-1.5 text-[10px] font-medium ${i === 0 ? "bg-cyan-500/10 text-cyan-300" : "text-neutral-500"}`}
-                      >
-                        <div
-                          className={`h-1.5 w-1.5 rounded-full ${i === 0 ? "bg-cyan-400" : "bg-neutral-700"}`}
-                        />
-                        {f}
-                      </div>
-                    ),
-                  )}
-                </div>
-                <div className="mt-4 mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Agents
-                </div>
-                <div className="space-y-1.5">
-                  {["Director", "Visionary", "Builder"].map((a) => (
-                    <div
-                      key={a}
-                      className="flex items-center gap-2 text-[10px] text-neutral-500"
-                    >
-                      <div className="h-1.5 w-1.5 rounded-full bg-green-400" />
-                      {a}
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              {/* Main chat */}
-              <div className="flex flex-col justify-end space-y-3 p-5">
-                {PREVIEW_MESSAGES.map((m, i) => (
-                  <div
-                    key={i}
-                    className={`flex gap-3 ${m.role === "user" ? "justify-end" : ""}`}
-                  >
-                    {m.role !== "user" && (
-                      <div
-                        className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full text-[9px] font-black ${m.role === "director" ? "bg-cyan-500/20 text-cyan-300" : "bg-amber-500/20 text-amber-300"}`}
-                      >
-                        {m.role === "director" ? "L" : "✓"}
-                      </div>
-                    )}
-                    <div
-                      className={`max-w-[80%] rounded-xl px-3 py-2 text-[11px] leading-relaxed ${m.role === "user" ? "bg-cyan-500/15 text-cyan-100" : m.role === "tool" ? "border border-green-500/20 bg-green-500/5 font-mono text-green-400" : "bg-white/5 text-neutral-300"}`}
-                    >
-                      {m.text}
-                    </div>
-                  </div>
-                ))}
-                <div className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/3 px-3 py-2">
-                  <span className="flex-1 text-[11px] text-neutral-500">
-                    Ask LiTT to build, fix, or create...
-                  </span>
-                  <div className="rounded-lg bg-cyan-500/20 p-1.5">
-                    <ArrowRight size={10} className="text-cyan-400" />
-                  </div>
-                </div>
-              </div>
-
-              {/* Right panel */}
-              <div className="hidden border-l border-white/6 p-4 md:block">
-                <div className="mb-3 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Output
-                </div>
-                <div className="space-y-2">
-                  <div className="rounded-lg bg-green-500/10 px-2 py-1.5 text-[9px] font-bold text-green-400">
-                    ✓ Plan approved
-                  </div>
-                  <div className="rounded-lg bg-cyan-500/10 px-2 py-1.5 text-[9px] font-bold text-cyan-400">
-                    ⟳ Writing files…
-                  </div>
-                  <div className="h-2 w-4/5 rounded bg-white/5" />
-                  <div className="h-2 w-3/5 rounded bg-white/5" />
-                </div>
-                <div className="mt-4 mb-2 text-[9px] font-black uppercase tracking-widest text-neutral-500">
-                  Deploy
-                </div>
-                <div className="rounded-lg border border-white/8 bg-white/3 px-2 py-2 text-[9px] text-neutral-500">
-                  Vercel · main · 2s ago
-                </div>
+            <div className="absolute -bottom-5 -left-4 rounded-2xl border border-white/15 bg-[#10120f]/90 p-4 shadow-2xl backdrop-blur-xl sm:-left-10">
+              <div className="flex items-center gap-3">
+                <span className="grid h-10 w-10 place-items-center rounded-xl bg-[#a970ff] text-black"><WandSparkles size={18} /></span>
+                <div><div className="text-xs font-black">Ready for a mission</div><div className="text-[11px] text-white/45">Build · Create · Play · Elevate</div></div>
               </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* How it works */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20 md:py-28">
-        <div className="mx-auto max-w-5xl">
-          <div className="mb-12 text-center">
-            <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-              The loop
+      <section id="what-we-do" className="border-b border-black/10 bg-[#f2efe6] px-5 py-20 text-black lg:px-8 lg:py-28">
+        <div className="mx-auto max-w-7xl">
+          <div className="grid gap-8 lg:grid-cols-[.8fr_1.2fr] lg:items-end">
+            <div>
+              <div className="text-xs font-black uppercase tracking-[.2em] text-[#6d42e8]">What LiTT Labs is for</div>
+              <h2 className="mt-4 text-4xl font-black leading-none tracking-[-.045em] sm:text-6xl">Bring the idea.<br />We&apos;ll build the momentum.</h2>
             </div>
-            <h2 className="text-2xl font-black text-white md:text-3xl">
-              How it works
-            </h2>
-            <p className="mt-2 text-sm text-neutral-500">
-              One loop from idea to shipped product.
+            <p className="max-w-xl text-lg leading-8 text-black/60 lg:justify-self-end">
+              This is for creators, founders, learners, and curious people who want
+              AI to do more than answer questions. Your crew helps you make, learn,
+              experiment, and finish.
             </p>
           </div>
-          <div className="grid gap-4 md:grid-cols-3">
-            {STEPS.map((s) => (
-              <div
-                key={s.step}
-                className="group relative overflow-hidden rounded-2xl border border-white/6 bg-white/2 p-6 transition hover:border-white/12"
-                style={{ boxShadow: `0 0 40px ${s.color}08` }}
-              >
-                <div
-                  className="absolute inset-0 opacity-0 transition-opacity group-hover:opacity-100"
-                  style={{
-                    background: `radial-gradient(circle at 0% 0%, ${s.color}08 0%, transparent 60%)`,
-                  }}
-                />
-                <div
-                  className="mb-5 flex h-9 w-9 items-center justify-center rounded-xl text-xs font-black"
-                  style={{ backgroundColor: `${s.color}15`, color: s.color }}
-                >
-                  {s.step}
-                </div>
-                <h3 className="mb-2 text-sm font-black text-white">
-                  {s.title}
-                </h3>
-                <p className="text-xs leading-relaxed text-neutral-500">
-                  {s.desc}
-                </p>
+          <div className="mt-14 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {powers.map(({ icon: Icon, label, copy }, index) => (
+              <div key={label} className={`group min-h-56 rounded-2xl border border-black/15 p-6 transition hover:-translate-y-1 ${index === 1 ? "bg-[#11130f] text-white" : "bg-white/50"}`}>
+                <Icon size={26} className={index === 1 ? "text-[#a8ff2f]" : "text-[#6d42e8]"} />
+                <div className="mt-14 text-3xl font-black">{label}</div>
+                <p className={`mt-2 text-sm leading-6 ${index === 1 ? "text-white/55" : "text-black/55"}`}>{copy}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Capabilities */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20 md:py-28">
-        <div className="mx-auto max-w-5xl">
-          <div className="grid gap-12 md:grid-cols-[1fr_1.4fr]">
+      <section id="crew" className="relative border-b border-white/10 bg-[#080a08] px-5 py-20 lg:px-8 lg:py-28">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_50%,rgba(112,52,255,.14),transparent_45%)]" />
+        <div className="relative mx-auto max-w-7xl">
+          <div className="flex flex-col justify-between gap-6 sm:flex-row sm:items-end">
             <div>
-              <div className="mb-3 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-                Capabilities
-              </div>
-              <h2 className="text-2xl font-black text-white md:text-3xl">
-                Everything in one OS.
-              </h2>
-              <p className="mt-3 text-sm leading-relaxed text-neutral-500">
-                One workspace. Every tool your project needs — code, visuals,
-                deployments, agents, memory.
-              </p>
-              <Link
-                href="/studio"
-                className="mt-6 inline-flex items-center gap-2 rounded-xl border border-cyan-500/20 bg-cyan-500/8 px-4 py-2 text-xs font-bold text-cyan-300 transition hover:bg-cyan-500/12"
-              >
-                See it live <ArrowRight size={12} />
-              </Link>
+              <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">Meet the core crew</div>
+              <h2 className="mt-4 max-w-2xl text-4xl font-black leading-none tracking-[-.045em] sm:text-6xl">Real characters.<br />Real roles. One mission.</h2>
             </div>
-            <div className="grid gap-3 sm:grid-cols-2">
-              {CAPABILITIES.map(({ text, icon: Icon }) => (
-                <div
-                  key={text}
-                  className="flex items-start gap-3 rounded-xl border border-white/5 bg-white/2 p-3 transition hover:border-cyan-500/15"
-                >
-                  <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-cyan-500/10">
-                    <Icon size={13} className="text-cyan-400" />
-                  </div>
-                  <span className="text-xs leading-snug text-neutral-300">
-                    {text}
-                  </span>
-                </div>
-              ))}
+            <Link href="/agents" className="inline-flex items-center gap-2 text-sm font-black text-[#a970ff]">Explore all agents <ArrowRight size={15} /></Link>
+          </div>
+          <div className="mt-12 grid gap-5 lg:grid-cols-2">
+            <article className="group overflow-hidden rounded-[1.75rem] border border-white/15 bg-[#11130f]">
+              <div className="relative aspect-[16/10] overflow-hidden">
+                <Image src="/brand/litt-mascot-character-sheet.png" alt="LiTT agent character views" fill className="object-cover transition duration-700 group-hover:scale-105" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#11130f] via-transparent to-transparent" />
+              </div>
+              <div className="p-7">
+                <div className="text-[10px] font-black uppercase tracking-[.2em] text-[#a8ff2f]">Director · Builder · Guide</div>
+                <h3 className="mt-2 text-3xl font-black">LiTT</h3>
+                <p className="mt-3 max-w-xl leading-7 text-white/55">Your always-there creative director. LiTT understands the goal, assembles the right tools, remembers the project, and helps turn the next idea into finished work.</p>
+              </div>
+            </article>
+            <article className="group overflow-hidden rounded-[1.75rem] border border-white/15 bg-[#11130f]">
+              <div className="relative aspect-[16/10] overflow-hidden">
+                <Image src="/brand/spark-agent-portrait.png" alt="Spark, LiTT's playful robotic fox companion" fill className="object-cover transition duration-700 group-hover:scale-105" />
+                <div className="absolute inset-0 bg-gradient-to-t from-[#11130f] via-transparent to-transparent" />
+              </div>
+              <div className="p-7">
+                <div className="text-[10px] font-black uppercase tracking-[.2em] text-[#a970ff]">Companion · Explorer · Creative spark</div>
+                <h3 className="mt-2 text-3xl font-black">Spark</h3>
+                <p className="mt-3 max-w-xl leading-7 text-white/55">The playful side of the lab. Spark keeps discovery fun, helps you explore new directions, and brings personality, energy, and curiosity to every mission.</p>
+              </div>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section className="bg-[#f2efe6] px-5 py-20 text-black lg:px-8 lg:py-28">
+        <div className="mx-auto max-w-7xl">
+          <div className="overflow-hidden rounded-[2rem] border border-black/15 bg-black shadow-[12px_12px_0_#a8ff2f]">
+            <div className="relative aspect-[16/9]">
+              <Image src="/brand/litt-base-station.png" alt="The LiTT Base Station creative command center" fill className="object-cover" />
+              <div className="absolute inset-0 bg-gradient-to-r from-black/90 via-black/25 to-transparent" />
+              <div className="absolute inset-y-0 left-0 flex max-w-xl flex-col justify-center p-7 sm:p-12">
+                <div className="text-xs font-black uppercase tracking-[.2em] text-[#a8ff2f]">The vision</div>
+                <h2 className="mt-3 text-3xl font-black leading-tight text-white sm:text-5xl">A creative home that grows with you.</h2>
+                <p className="mt-4 hidden max-w-md leading-7 text-white/60 sm:block">Agents, projects, memories, tools, and play—all connected in one space that feels like yours.</p>
+              </div>
             </div>
           </div>
         </div>
       </section>
 
-      {/* Integrations */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-16">
-        <div className="mx-auto max-w-5xl text-center">
-          <div className="mb-6 text-[10px] font-bold uppercase tracking-widest text-neutral-500">
-            Connects to the stack you already use
-          </div>
-          <div className="flex flex-wrap items-center justify-center gap-3">
-            {INTEGRATIONS.map((i) => (
-              <div
-                key={i.name}
-                className="flex items-center gap-2 rounded-xl border border-white/8 bg-white/3 px-4 py-2.5 text-xs font-semibold text-neutral-300 backdrop-blur-sm transition hover:border-white/15"
-              >
-                <i.icon size={13} style={{ color: i.color }} />
-                {i.name}
+      <section id="how-it-works" className="border-y border-white/10 bg-[#080a08] px-5 py-20 lg:px-8 lg:py-28">
+        <div className="mx-auto max-w-7xl">
+          <div className="text-xs font-black uppercase tracking-[.2em] text-[#a970ff]">How it works</div>
+          <h2 className="mt-4 text-4xl font-black tracking-[-.045em] sm:text-6xl">You lead. Your crew delivers.</h2>
+          <div className="mt-12 grid gap-px overflow-hidden rounded-2xl border border-white/10 bg-white/10 lg:grid-cols-3">
+            {steps.map(([number, title, copy]) => (
+              <div key={number} className="bg-[#0c0f0b] p-7 sm:p-9">
+                <div className="font-mono text-xs font-black text-[#a8ff2f]">{number}</div>
+                <h3 className="mt-10 text-2xl font-black">{title}</h3>
+                <p className="mt-3 leading-7 text-white/50">{copy}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      {/* Footer CTA */}
-      <section className="relative z-10 border-t border-white/5 px-4 py-20">
-        <div className="mx-auto max-w-3xl overflow-hidden rounded-2xl border border-cyan-500/15 bg-linear-to-br from-cyan-500/5 via-transparent to-fuchsia-500/5 p-10 text-center shadow-[0_0_80px_rgba(34,211,238,0.08)] md:p-14">
-          <div className="mb-3 inline-flex items-center gap-2 rounded-full border border-cyan-500/20 bg-cyan-500/8 px-3 py-1 text-[10px] font-bold uppercase tracking-widest text-cyan-300">
-            <Sparkles size={9} /> Beta · Free to start
+      <section className="relative overflow-hidden bg-[#a8ff2f] px-5 py-20 text-black lg:px-8 lg:py-24">
+        <div className="absolute -right-16 -top-20 text-[22rem] font-black leading-none text-black/8">L</div>
+        <div className="relative mx-auto flex max-w-7xl flex-col justify-between gap-10 lg:flex-row lg:items-end">
+          <div>
+            <div className="text-xs font-black uppercase tracking-[.2em]">Your next idea is waiting</div>
+            <h2 className="mt-3 max-w-4xl text-5xl font-black leading-[.95] tracking-[-.05em] sm:text-7xl">Build it. Create it.<br /><span className="font-serif italic font-normal">Have fun with it.</span></h2>
           </div>
-          <h2 className="mb-3 text-2xl font-black text-white md:text-3xl">
-            Ready to ship with your AI crew?
-          </h2>
-          <p className="mb-8 text-sm text-neutral-500">
-            Connect your first project in Studio. Your AI crew is standing by.
-          </p>
-          <Link
-            href="/sign-up"
-            className="inline-flex items-center gap-2 rounded-xl bg-linear-to-r from-cyan-500 to-cyan-400 px-8 py-3.5 text-sm font-black text-black shadow-[0_0_32px_rgba(34,211,238,0.4)] transition hover:shadow-[0_0_48px_rgba(34,211,238,0.6)]"
-          >
-            Get started free <ArrowRight size={16} />
+          <Link href="/sign-up" className="inline-flex w-fit items-center gap-2 rounded-xl bg-black px-6 py-4 text-sm font-black text-white transition hover:-translate-y-1 hover:bg-[#6d42e8]">
+            Enter LiTT Labs <ArrowRight size={16} />
           </Link>
         </div>
       </section>
 
-      {/* Footer */}
-      <footer className="relative z-10 border-t border-white/5 px-4 py-8">
-        <div className="mx-auto flex max-w-6xl flex-col items-center justify-between gap-4 text-xs text-neutral-600 md:flex-row">
-          <div className="flex items-center gap-2 text-sm font-black text-white">
-            <div className="flex h-6 w-6 items-center justify-center rounded-md bg-linear-to-br from-cyan-400 to-fuchsia-500">
-              <Bot size={11} className="text-black" />
-            </div>
-            LiTT Labs
-          </div>
-          <div className="flex items-center gap-6">
-            <Link href="/docs" className="transition hover:text-white">
-              Docs
-            </Link>
-            <Link href="/privacy" className="transition hover:text-white">
-              Privacy
-            </Link>
-            <Link href="/terms" className="transition hover:text-white">
-              Terms
-            </Link>
-          </div>
-          <div>© {new Date().getFullYear()} LiTTree Labs. Beta.</div>
+      <footer className="bg-[#050706] px-5 py-8 lg:px-8">
+        <div className="mx-auto flex max-w-7xl flex-col items-center justify-between gap-4 text-xs text-white/35 sm:flex-row">
+          <div className="flex items-center gap-2 font-black text-white"><Sparkles size={14} className="text-[#a8ff2f]" /> LiTT Labs</div>
+          <div>Build · Create · Have fun · Elevate</div>
+          <div className="flex gap-5"><Link href="/privacy">Privacy</Link><Link href="/terms">Terms</Link></div>
         </div>
       </footer>
-    </div>
+    </main>
   );
 }
 
@@ -604,10 +268,7 @@ export default function HomePage() {
 
   useEffect(() => {
     if (!clerkLoaded || supabaseLoading) return;
-
-    if (clerkSignedIn || supabaseSignedIn) {
-      router.replace("/studio");
-    }
+    if (clerkSignedIn || supabaseSignedIn) router.replace("/studio");
   }, [clerkSignedIn, supabaseSignedIn, clerkLoaded, supabaseLoading, router]);
 
   return <LandingPage />;

@@ -11,9 +11,10 @@ export default function GitHubSetupPage() {
   const { isLoaded, isSignedIn } = useClerkAuth();
   const { tokens } = useTheme();
   const [status, setStatus] = useState<
-    "loading" | "ready" | "unconfigured" | "error"
+    "loading" | "ready" | "connected" | "unconfigured" | "error"
   >("loading");
   const [error, setError] = useState<string | null>(null);
+  const [connectedAccount, setConnectedAccount] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isLoaded) return;
@@ -33,7 +34,16 @@ export default function GitHubSetupPage() {
           const data = await res.json().catch(() => ({}));
           throw new Error(data.error || "GitHub connection failed");
         }
-        setStatus("ready");
+        const data = await res.json();
+        const installations = Array.isArray(data.installations)
+          ? data.installations
+          : [];
+        if (installations.length > 0) {
+          setConnectedAccount(installations[0]?.account || null);
+          setStatus("connected");
+        } else {
+          setStatus("ready");
+        }
       })
       .catch((err) => {
         setStatus("error");
@@ -131,6 +141,29 @@ export default function GitHubSetupPage() {
           >
             Install GitHub App <ArrowRight size={14} />
           </button>
+        )}
+
+        {status === "connected" && (
+          <div className="space-y-3">
+            <div
+              className="rounded-xl border p-3 text-xs"
+              style={{
+                borderColor: `${tokens.primary}50`,
+                backgroundColor: `${tokens.primary}10`,
+                color: tokens.text,
+              }}
+            >
+              GitHub connected
+              {connectedAccount ? ` as ${connectedAccount}` : ""}.
+            </div>
+            <button
+              onClick={() => router.push("/projects")}
+              className="flex w-full items-center justify-center gap-2 rounded-xl py-2.5 text-xs font-black transition hover:opacity-90"
+              style={{ backgroundColor: tokens.primary, color: tokens.text }}
+            >
+              Choose a repository <ArrowRight size={14} />
+            </button>
+          </div>
         )}
 
         {status === "error" && (

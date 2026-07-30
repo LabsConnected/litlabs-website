@@ -57,6 +57,7 @@ const STATUS_LABELS: Record<VoiceState, string> = {
   speaking: "LiTT speaking",
   muted: "Muted",
   paused: "Paused",
+  cooldown: "Voice temporarily unavailable",
   complete: "",
   error: "",
 };

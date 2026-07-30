@@ -1,10 +1,16 @@
 "use client";
 
 import { FormEvent, useEffect, useMemo, useState } from "react";
-import Link from "next/link";
 import { ArrowRight, Bot, Code2, Image as ImageIcon, Sparkles } from "lucide-react";
-import type { StudioTool } from "./StudioSidebar";
+import type { StudioTool } from "./LITTTerminalShell";
 import { useVoiceSession } from "@/app/studio/context/VoiceSessionContext";
+import { cn } from "@/lib/utils";
+import {
+  createChatMessageBlock,
+  createThinkingBlock,
+  type BuilderBlock,
+} from "@/app/studio/lib/builder-blocks";
+import BuilderStream from "./BuilderStream";
 import styles from "./ChatShell.module.css";
 
 export type StudioMessage = {
@@ -12,6 +18,9 @@ export type StudioMessage = {
   role: "user" | "assistant" | "system";
   content: string;
   createdAt?: string | number | Date;
+  type?: "text" | "image" | "video" | "audio" | "error";
+  mediaUrl?: string;
+  status?: string;
 };
 
 type Props = {
@@ -20,19 +29,13 @@ type Props = {
   systemLines?: string[];
   onSend: (text: string) => string | Promise<string | void>;
   onToolSelect?: (tool: StudioTool) => void;
+  onOpenImageGen?: () => void;
   embedded?: boolean;
   hideDock?: boolean;
+  builderMode?: boolean;
 };
 
 const actions = ["/scan", "/status", "/image", "/code", "/agent", "/voice"];
-
-function timeLabel(value?: string | number | Date) {
-  if (!value) return "Now";
-  return new Intl.DateTimeFormat(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
-  }).format(new Date(value));
-}
 
 export function ChatShell({
   messages,
@@ -40,14 +43,17 @@ export function ChatShell({
   systemLines = [],
   onSend,
   onToolSelect,
+  onOpenImageGen,
   embedded = false,
   hideDock = false,
+  builderMode = false,
 }: Props) {
   const [draft, setDraft] = useState("");
   const [activityOpen, setActivityOpen] = useState(false);
   const {
     voiceState,
     state,
+    cooldownRemaining,
     startVoice,
     stopVoice,
     speakText,
@@ -57,23 +63,50 @@ export function ChatShell({
   const voiceLabel =
     voiceState === "speaking"
       ? "Speaking"
-      : voiceState === "listening" || voiceState === "speech_detected"
+      : voiceState === "listening"
         ? "Listening"
         : voiceState === "transcribing"
           ? "Transcribing"
-          : voiceState === "sending" || voiceState === "thinking"
+          : voiceState === "thinking"
             ? "Thinking"
-            : voiceState === "error"
-              ? "Voice error"
-              : "Voice ready";
+            : voiceState === "cooldown"
+              ? "Voice temporarily unavailable"
+              : voiceState === "error"
+                ? "Voice error"
+                : "Voice ready";
   const visibleMessages = useMemo(
     () => messages.filter((m) => m.role !== "system"),
     [messages],
   );
+
+  const blocks: BuilderBlock[] = useMemo(() => {
+    const list = visibleMessages.flatMap<BuilderBlock>((m, index): BuilderBlock[] => {
+      const message = createChatMessageBlock(
+        m.role === "user" || m.role === "assistant" ? m.role : "assistant",
+        m.content,
+        m.createdAt,
+        m.id ?? `msg-${index}`,
+      );
+      if (!m.mediaUrl) return [message];
+      if (m.type === "image") return [message, { type: "image", id: `${message.id}-image`, url: m.mediaUrl, alt: m.content, prompt: m.content }];
+      if (m.type === "video") return [message, { type: "video", id: `${message.id}-video`, url: m.mediaUrl, title: m.content }];
+      if (m.type === "audio") return [message, { type: "audio", id: `${message.id}-audio`, url: m.mediaUrl, title: m.content }];
+      return [message];
+    });
+    if (sending) {
+      list.push(createThinkingBlock("LiTT is working"));
+    }
+    return list;
+  }, [visibleMessages, sending]);
+
   const voiceActive =
-    voiceState !== "idle" &&
-    voiceState !== "error" &&
-    voiceState !== "complete";
+    voiceState !== "idle";
+
+  const micDisabled =
+    voiceState === "transcribing" ||
+    voiceState === "thinking" ||
+    voiceState === "speaking" ||
+    voiceState === "cooldown";
 
   useEffect(() => {
     setOnTurn(async (text) => {
@@ -145,17 +178,17 @@ export function ChatShell({
             </p>
 
             <div className={styles.createGrid}>
-              <button onClick={() => onToolSelect?.("image")}>
+              <button onClick={() => builderMode ? (onOpenImageGen ? onOpenImageGen() : setDraft("/image create an image of ")) : onToolSelect?.("image")}>
                 <span className={styles.actionIcon}><ImageIcon size={21} /></span>
                 <span><b>Create an image</b><small>Generate art, ads, and product visuals</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              <button onClick={() => onToolSelect?.("builder")}>
+              <button onClick={() => builderMode ? setDraft("/build ") : onToolSelect?.("builder")}>
                 <span className={styles.actionIcon}><Code2 size={21} /></span>
                 <span><b>Build an app</b><small>Turn a plain-English idea into working code</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
               </button>
-              <button onClick={() => onToolSelect?.("agents")}>
+              <button onClick={() => builderMode ? setDraft("/agent ") : onToolSelect?.("builder")}>
                 <span className={styles.actionIcon}><Bot size={21} /></span>
                 <span><b>Launch an agent</b><small>Delegate research, coding, and repeat work</small></span>
                 <ArrowRight size={17} aria-hidden="true" />
@@ -166,13 +199,13 @@ export function ChatShell({
               <section className={styles.homePanel}>
                 <div className={styles.panelHeading}>
                   <span>Recent projects</span>
-                  <Link href="/projects">View all</Link>
+                  <button className={styles.viewAll} onClick={() => onToolSelect?.("builder")}>View all</button>
                 </div>
-                <Link href="/projects" className={styles.projectRow}>
+                <button className={styles.projectRow} onClick={() => onToolSelect?.("builder")}>
                   <span className={styles.projectBadge}>LL</span>
                   <span><b>LiTTree Lab Studios</b><small>Updated today</small></span>
                   <ArrowRight size={15} aria-hidden="true" />
-                </Link>
+                </button>
               </section>
 
               <section className={styles.homePanel}>
@@ -190,54 +223,12 @@ export function ChatShell({
             </button>
           </div>
         )}
-        {visibleMessages.map((message, index) => (
-          <article
-            key={message.id ?? index}
-            className={`${styles.message} ${styles[message.role]}`}
-          >
-            {message.role === "assistant" && (
-              <div className={styles.avatar}>⌁</div>
-            )}
-            <div className={styles.bubble}>
-              <div className={styles.copy}>{message.content}</div>
-              <time>{timeLabel(message.createdAt)}</time>
-              {message.role === "assistant" && (
-                <div className={styles.messageActions}>
-                  <button
-                    onClick={() =>
-                      state === "speaking"
-                        ? stopSpeaking()
-                        : speakText(message.content)
-                    }
-                    aria-label={
-                      state === "speaking"
-                        ? "Stop speaking"
-                        : "Speak this message"
-                    }
-                    aria-pressed={state === "speaking"}
-                  >
-                    {state === "speaking" ? "■ Stop" : "◖ Speak"}
-                  </button>
-                  <button
-                    onClick={() =>
-                      navigator.clipboard.writeText(message.content)
-                    }
-                    aria-label="Copy message to clipboard"
-                  >
-                    ▣ Copy
-                  </button>
-                </div>
-              )}
-            </div>
-          </article>
-        ))}
-        {sending && (
-          <div className={styles.thinking}>
-            <i />
-            <i />
-            <i /> LiTT is working
-          </div>
-        )}
+        <BuilderStream
+          blocks={blocks}
+          isSpeaking={state === "speaking"}
+          onSpeak={speakText}
+          stopSpeaking={stopSpeaking}
+        />
       </section>
 
       {!hideDock && (
@@ -250,7 +241,13 @@ export function ChatShell({
             ))}
           </div>
           <div className={styles.voiceStatus} role="status" aria-live="polite">
-            <i /> {voiceLabel} · clean speech
+            {voiceState === "cooldown" ? (
+              <span className="text-amber-400">Retry available in {cooldownRemaining}s</span>
+            ) : (
+              <>
+                <i /> {voiceLabel} · clean speech
+              </>
+            )}
           </div>
           <form className={styles.composer} onSubmit={submit}>
             <button type="button" aria-label="Attach file" title="Attach file">
@@ -270,12 +267,24 @@ export function ChatShell({
             />
             <button
               type="button"
-              className={styles.mic}
+              className={cn(styles.mic, voiceState === "listening" && styles.listening)}
+              disabled={micDisabled}
               aria-label={
-                voiceActive ? "Stop voice input" : "Start voice input"
+                micDisabled
+                  ? "Voice busy"
+                  : voiceActive
+                    ? "Stop voice input"
+                    : "Start voice input"
               }
-              title={voiceActive ? "Stop voice" : "Voice input"}
-              onClick={voiceActive ? stopVoice : startVoice}
+              title={micDisabled ? "Voice busy" : voiceActive ? "Stop voice" : "Voice input"}
+              onClick={() => {
+                if (micDisabled) return;
+                if (voiceActive) {
+                  stopVoice();
+                } else {
+                  void startVoice();
+                }
+              }}
             >
               🎙
             </button>

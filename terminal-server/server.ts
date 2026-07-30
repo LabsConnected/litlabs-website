@@ -5,6 +5,7 @@ import cors from "cors";
 import { Server } from "socket.io";
 import * as pty from "node-pty";
 import { randomUUID } from "crypto";
+import { exec } from "child_process";
 import { isAbsolute, relative, resolve } from "path";
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync, rmSync } from "fs";
 import type { NextFunction, Request, Response } from "express";
@@ -252,6 +253,54 @@ io.on("connection", (socket) => {
 
     ptyProcess.write(data);
   });
+
+  socket.on(
+    "terminal:execute",
+    (
+      payload: { command?: string },
+      acknowledge: (result: {
+        command: string;
+        output: string;
+        exitCode: number | null;
+        durationMs: number;
+        error?: string;
+      }) => void,
+    ) => {
+      const command = typeof payload?.command === "string" ? payload.command.trim() : "";
+      const startedAt = Date.now();
+      if (!command || isBlockedCommand(command)) {
+        acknowledge({
+          command,
+          output: "",
+          exitCode: null,
+          durationMs: Date.now() - startedAt,
+          error: command ? "Blocked unsafe command." : "Command is required.",
+        });
+        return;
+      }
+
+      exec(
+        command,
+        {
+          cwd: workspace,
+          env: { ...process.env, TERM: "xterm-256color" },
+          timeout: 300_000,
+          maxBuffer: 2_000_000,
+          windowsHide: true,
+        },
+        (error, stdout, stderr) => {
+          const exitCode = typeof error?.code === "number" ? error.code : error ? 1 : 0;
+          acknowledge({
+            command,
+            output: `${stdout}${stderr}`,
+            exitCode,
+            durationMs: Date.now() - startedAt,
+            ...(error ? { error: error.killed ? "Command timed out." : error.message } : {}),
+          });
+        },
+      );
+    },
+  );
 
     socket.on("litt-code:command", async (input: string) => {
     if (typeof input !== "string") return;

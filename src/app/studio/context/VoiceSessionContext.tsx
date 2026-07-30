@@ -33,6 +33,7 @@ export type VoiceState =
   | "speaking"
   | "muted"
   | "paused"
+  | "cooldown"
   | "complete"
   | "error";
 
@@ -53,8 +54,19 @@ export type VoiceActivity =
   | { type: "generating_response" }
   | { type: "speaking" }
   | { type: "paused" }
+  | { type: "cooldown"; seconds: number }
   | { type: "complete" }
   | { type: "error"; message: string };
+
+export type VoiceTimingStage =
+  | "speech_end"
+  | "transcription_complete"
+  | "AI_first_token"
+  | "AI_complete"
+  | "TTS_request"
+  | "TTS_first_audio"
+  | "playback_started";
+export type VoiceTimings = Partial<Record<VoiceTimingStage, number>>;
 
 export interface VoiceSessionCtx {
   voiceState: VoiceState;
@@ -67,7 +79,9 @@ export interface VoiceSessionCtx {
   selectedDeviceId: string | null;
   availableDevices: MediaDeviceInfo[];
   listeningDurationMs: number;
+  cooldownRemaining: number;
   activity: VoiceActivity;
+  timings: VoiceTimings;
   // Actions
   startVoice: () => void;
   stopVoice: () => void;
@@ -78,6 +92,7 @@ export interface VoiceSessionCtx {
   selectDevice: (deviceId: string) => void;
   setOnTurn: (handler: (text: string) => void | Promise<void>) => void;
   setActivity: (activity: VoiceActivity) => void;
+  markTiming: (stage: VoiceTimingStage) => void;
 }
 
 // ---------------------------------------------------------------------------
@@ -97,7 +112,9 @@ const defaultCtx: VoiceSessionCtx = {
   selectedDeviceId: null,
   availableDevices: [],
   listeningDurationMs: 0,
+  cooldownRemaining: 0,
   activity: { type: "idle" },
+  timings: {},
   startVoice: noop,
   stopVoice: noop,
   toggleMute: noop,
@@ -107,6 +124,7 @@ const defaultCtx: VoiceSessionCtx = {
   selectDevice: noop,
   setOnTurn: noop,
   setActivity: noop,
+  markTiming: noop,
 };
 
 export const VoiceSessionContext = createContext<VoiceSessionCtx>(defaultCtx);
@@ -178,9 +196,14 @@ export function VoiceSessionProvider({
     [],
   );
   const [listeningDurationMs, setListeningDurationMs] = useState(0);
+  const [cooldownRemaining, setCooldownRemaining] = useState(0);
   const [activity, setActivityState] = useState<VoiceActivity>({
     type: "idle",
   });
+  const [timings, setTimings] = useState<VoiceTimings>({});
+  const markTiming = useCallback((stage: VoiceTimingStage) => {
+    setTimings((current) => ({ ...current, [stage]: performance.now() }));
+  }, []);
 
   const state: "idle" | "loading" | "speaking" | "error" = useMemo(() => {
     if (voiceState === "speaking") return "speaking";
@@ -225,6 +248,20 @@ export function VoiceSessionProvider({
   useEffect(() => {
     activityRef.current = activity;
   }, [activity]);
+
+  useEffect(() => {
+    if (voiceState !== "cooldown" || cooldownRemaining <= 0) return;
+    const timer = window.setTimeout(() => {
+      setCooldownRemaining((current) => {
+        if (current > 1) return current - 1;
+        setVoiceState("idle");
+        voiceStateRef.current = "idle";
+        setActivityState({ type: "idle" });
+        return 0;
+      });
+    }, 1000);
+    return () => window.clearTimeout(timer);
+  }, [cooldownRemaining, voiceState]);
 
   const setActivity = useCallback((next: VoiceActivity) => {
     activityRef.current = next;
@@ -328,6 +365,7 @@ export function VoiceSessionProvider({
   // ---------------------------------------------------------------------------
 
   const finalizeRecording = useCallback(() => {
+    markTiming("speech_end");
     if (mediaRecorderRef.current?.state === "recording") {
       try {
         mediaRecorderRef.current.stop();
@@ -335,7 +373,7 @@ export function VoiceSessionProvider({
         // ignore
       }
     }
-  }, []);
+  }, [markTiming]);
 
   const sendForTranscription = useCallback(
     async (chunks: Blob[]) => {
@@ -372,6 +410,23 @@ export function VoiceSessionProvider({
             typeof err.error === "string"
               ? err.error
               : `Transcription API error ${res.status}`;
+          if (res.status === 429) {
+            const retryAfterHeader = Number(res.headers.get("retry-after"));
+            const retryAfterBody =
+              typeof err.retryAfter === "number" ? err.retryAfter : 0;
+            const seconds = Math.max(
+              1,
+              Number.isFinite(retryAfterHeader) ? retryAfterHeader : 0,
+              retryAfterBody,
+              30,
+            );
+            setCooldownRemaining(seconds);
+            setVoiceState("cooldown");
+            voiceStateRef.current = "cooldown";
+            setActivity({ type: "cooldown", seconds });
+            setErrorMessage(clean);
+            return;
+          }
           throw new Error(clean);
         }
 
@@ -380,6 +435,7 @@ export function VoiceSessionProvider({
           confidence?: number;
         };
         const text = data.text?.trim();
+        markTiming("transcription_complete");
 
         if (
           !text ||
@@ -417,7 +473,7 @@ export function VoiceSessionProvider({
         setErrorMessage(msg);
       }
     },
-    [setActivity],
+    [markTiming, setActivity],
   );
 
   // ---------------------------------------------------------------------------
@@ -753,6 +809,7 @@ export function VoiceSessionProvider({
 
       stopSpeaking();
       ttsCancelledRef.current = false;
+      markTiming("TTS_request");
 
       // Pause recording while speaking to avoid echo loops
       if (mediaRecorderRef.current?.state === "recording") {
@@ -800,6 +857,7 @@ export function VoiceSessionProvider({
         .then(async (res) => {
           if (!res.ok) throw new Error(`TTS ${res.status}`);
           const blob = await res.blob();
+          markTiming("TTS_first_audio");
           const src = URL.createObjectURL(blob);
 
           const audio = new Audio(src);
@@ -827,6 +885,7 @@ export function VoiceSessionProvider({
 
           try {
             await audio.play();
+            markTiming("playback_started");
           } catch (err) {
             URL.revokeObjectURL(src);
             if (ttsCancelledRef.current) return;
@@ -844,7 +903,7 @@ export function VoiceSessionProvider({
           fallbackSynth(text, onSpeechEnd);
         });
     },
-    [stopSpeaking, startMicLevelLoop, setActivity],
+    [markTiming, stopSpeaking, startMicLevelLoop, setActivity],
   );
 
   // ---------------------------------------------------------------------------
@@ -948,7 +1007,9 @@ export function VoiceSessionProvider({
       selectedDeviceId,
       availableDevices,
       listeningDurationMs,
+      cooldownRemaining,
       activity,
+      timings,
       startVoice,
       stopVoice,
       toggleMute,
@@ -958,6 +1019,7 @@ export function VoiceSessionProvider({
       selectDevice,
       setOnTurn,
       setActivity,
+      markTiming,
     }),
     [
       voiceState,
@@ -970,7 +1032,9 @@ export function VoiceSessionProvider({
       selectedDeviceId,
       availableDevices,
       listeningDurationMs,
+      cooldownRemaining,
       activity,
+      timings,
       startVoice,
       stopVoice,
       toggleMute,
@@ -980,6 +1044,7 @@ export function VoiceSessionProvider({
       selectDevice,
       setOnTurn,
       setActivity,
+      markTiming,
     ],
   );
 
