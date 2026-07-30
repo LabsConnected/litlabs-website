@@ -55,6 +55,7 @@ const PluginsTool = dynamic(() => import("../tools/PluginsTool"), {
 const CameraTool = dynamic(() => import("../tools/CameraTool"), { ssr: false });
 const ScreenTool = dynamic(() => import("../tools/ScreenTool"), { ssr: false });
 const HomeTool = dynamic(() => import("../tools/ChatTool"), { ssr: false });
+const LoopsTool = dynamic(() => import("../tools/LoopsTool"), { ssr: false });
 
 const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   home: HomeTool,
@@ -75,6 +76,7 @@ const TOOL_COMPONENTS: Record<StudioTool, React.ComponentType> = {
   space: SpaceTool,
   clibridge: CLIBridgeTool,
   color: ColorByNumberTool,
+  loops: LoopsTool,
 };
 
 const VALID_TOOLS = Object.keys(TOOL_COMPONENTS) as StudioTool[];

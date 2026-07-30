@@ -34,6 +34,7 @@ import {
   Gamepad2,
   ExternalLink,
   Layout,
+  Repeat,
 } from "lucide-react";
 
 export type StudioTool =
@@ -54,7 +55,8 @@ export type StudioTool =
   | "workflows"
   | "space"
   | "clibridge"
-  | "color";
+  | "color"
+  | "loops";
 
 type ToolItem = {
   id: StudioTool;
@@ -86,6 +88,7 @@ const MORE_TOOLS: ToolItem[] = [
   { id: "space", label: "Space", icon: Rocket, shortcut: "9" },
   { id: "workflows", label: "Mission Forge", icon: Network, shortcut: "7" },
   { id: "clibridge", label: "CLI Bridge", icon: Shell, shortcut: "0" },
+  { id: "loops", label: "Loops", icon: Repeat, shortcut: "L" },
 ];
 
 const ALL_TOOLS = [...PRIMARY_TOOLS, ...MORE_TOOLS];
