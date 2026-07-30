@@ -45,10 +45,10 @@ export const APPS = [
   },
   {
     id: "social",
-    label: "Social",
+    label: "Discover",
     icon: MessageSquare,
     color: "#ff00a0",
-    href: "/social",
+    href: "/discover",
   },
   {
     id: "marketplace",

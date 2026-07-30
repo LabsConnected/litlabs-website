@@ -88,7 +88,7 @@ function Header() {
         <nav className="hidden items-center gap-7 text-sm font-semibold text-white/60 md:flex">
           <a href="#explore" className="transition hover:text-[#a8ff2f]">Explore</a>
           <Link href="/studio" className="transition hover:text-[#a8ff2f]">Studio</Link>
-          <Link href="/social" className="transition hover:text-[#a8ff2f]">Community</Link>
+          <Link href="/discover" className="transition hover:text-[#a8ff2f]">Community</Link>
           <Link href="/marketplace" className="transition hover:text-[#a8ff2f]">Marketplace</Link>
           <a href="#how-it-works" className="transition hover:text-[#a8ff2f]">How it works</a>
         </nav>
@@ -528,7 +528,7 @@ function LandingPage() {
             <Link href="/marketplace">Marketplace</Link>
             <Link href="/gallery">Gallery</Link>
             <Link href="/games">Games</Link>
-            <Link href="/social">Community</Link>
+            <Link href="/discover">Community</Link>
             <Link href="/pricing">Pricing</Link>
             <Link href="/privacy">Privacy</Link>
             <Link href="/terms">Terms</Link>

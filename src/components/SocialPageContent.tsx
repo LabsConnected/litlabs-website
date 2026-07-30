@@ -51,25 +51,6 @@ type ApiPost = {
   }[];
 };
 
-const TRENDING = [
-  { tag: "#AIAgents", posts: "2.4k" },
-  { tag: "#CodeChampion", posts: "1.8k" },
-  { tag: "#LiTT Code LabStudios", posts: "956" },
-  { tag: "#AgentBuilder", posts: "743" },
-  { tag: "#NeonVibes", posts: "521" },
-];
-
-const ONLINE_AGENTS = [
-  { name: "Code Champ", icon: "💻", status: "online", task: "Coding..." },
-  {
-    name: "Creative Muse",
-    icon: "🎨",
-    status: "online",
-    task: "Generating...",
-  },
-  { name: "Data Slayer", icon: "📊", status: "busy", task: "Analyzing..." },
-  { name: "Writing Coach", icon: "✍️", status: "online", task: "Drafting..." },
-];
 
 function timeAgo(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -238,11 +219,11 @@ export default function SocialPageContent() {
               className="text-sm sm:text-lg font-black uppercase"
               style={{ color: C.headerColor }}
             >
-              ⚡ LiTT Code
+              ⚡ LiTTree Discover
             </Link>
             <div className="hidden sm:flex items-center gap-1 text-[10px] opacity-50">
               <span className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-              SOCIAL FEED
+              DISCOVER FEED
             </div>
           </div>
           <div className="flex items-center gap-1 sm:gap-2">
@@ -250,7 +231,7 @@ export default function SocialPageContent() {
               onClick={() => loadPosts(activeTab)}
               className="p-1.5 border hover:opacity-80"
               style={{ borderColor: C.borderColor }}
-              aria-label="Refresh social feed"
+              aria-label="Refresh discover feed"
             >
               <RefreshCw size={12} style={{ color: C.textMuted }} />
             </button>
@@ -353,8 +334,8 @@ export default function SocialPageContent() {
               </div>
               {[
                 {
-                  label: "Feed",
-                  href: "/social",
+                  label: "Discover",
+                  href: "/discover",
                   icon: TrendingUp,
                   active: true,
                 },
@@ -378,34 +359,6 @@ export default function SocialPageContent() {
               ))}
             </div>
 
-            {/* Live Agents */}
-            <div
-              className="border-2 p-3"
-              style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
-            >
-              <div
-                className="text-xs font-bold mb-3 uppercase"
-                style={{ color: C.success }}
-              >
-                🔴 Live Agents
-              </div>
-              {ONLINE_AGENTS.map((agent, i) => (
-                <div
-                  key={i}
-                  className="flex items-center gap-2 p-2 border mb-1"
-                  style={{ borderColor: C.borderColor }}
-                >
-                  <span className="text-lg">{agent.icon}</span>
-                  <div className="flex-1 min-w-0">
-                    <div className="text-xs font-bold">{agent.name}</div>
-                    <div className="text-[9px] opacity-50">{agent.task}</div>
-                  </div>
-                  <span
-                    className={`w-2 h-2 rounded-full ${agent.status === "online" ? "bg-green-500 animate-pulse" : "bg-yellow-500"}`}
-                  />
-                </div>
-              ))}
-            </div>
           </aside>
 
           {/* CENTER — FEED */}
@@ -748,39 +701,6 @@ export default function SocialPageContent() {
 
           {/* RIGHT COLUMN - Hidden on mobile */}
           <aside className="hidden lg:block space-y-4">
-            {/* Trending */}
-            <div
-              className="border-2 p-3"
-              style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}
-            >
-              <div
-                className="text-xs font-bold mb-3 uppercase"
-                style={{ color: C.linkColor }}
-              >
-                🔥 Trending
-              </div>
-              {TRENDING.map((trend, i) => (
-                <div
-                  key={trend.tag}
-                  className="flex items-center justify-between p-2 border-b last:border-0"
-                  style={{ borderColor: C.borderColor }}
-                >
-                  <div>
-                    <div className="text-xs font-bold">{trend.tag}</div>
-                    <div className="text-[9px] opacity-50">
-                      {trend.posts} posts
-                    </div>
-                  </div>
-                  <span
-                    className="text-[10px] px-1.5 py-0.5 border"
-                    style={{ borderColor: C.borderColor, color: C.textMuted }}
-                  >
-                    #{i + 1}
-                  </span>
-                </div>
-              ))}
-            </div>
-
             {/* Sign up CTA for guests */}
             {!isSignedIn && (
               <div
@@ -791,11 +711,10 @@ export default function SocialPageContent() {
                   className="text-xs font-bold mb-2"
                   style={{ color: C.accentColor }}
                 >
-                  Join LiTT Code LabStudios
+                  Join LiTTree Discover
                 </div>
                 <p className="text-[11px] opacity-60 mb-3">
-                  Build AI agents, generate media, and connect with 50k+
-                  builders.
+                  Build AI agents, generate media, and connect with the community.
                 </p>
                 <Link
                   href="/sign-up"
@@ -807,7 +726,7 @@ export default function SocialPageContent() {
               </div>
             )}
 
-            {/* Stats */}
+            {/* Stats — real data from API */}
             <div
               className="border-2 p-3"
               style={{ backgroundColor: C.boxBg, borderColor: C.borderColor }}

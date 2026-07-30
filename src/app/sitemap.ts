@@ -24,7 +24,7 @@ export default function sitemap(): MetadataRoute.Sitemap {
       priority: 0.7,
     },
     {
-      url: absoluteUrl("/social"),
+      url: absoluteUrl("/discover"),
       changeFrequency: "daily",
       priority: 0.7,
     },

@@ -9,7 +9,7 @@ export const metadata: Metadata = buildMetadata({
   index: true,
 });
 
-export default function SocialLayout({
+export default function DiscoverLayout({
   children,
 }: {
   children: React.ReactNode;
