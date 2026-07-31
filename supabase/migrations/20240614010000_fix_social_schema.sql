@@ -82,9 +82,18 @@ END $$;
 -- 2. FIX NOTIFICATIONS TABLE: add missing columns to match existing API
 -- Existing API uses: recipient_id, actor_id, type, entity_type, entity_id, content
 -- Migration created: user_id, actor_id, type, title, message, read, post_id
+-- Guard: notifications table may not exist yet in a fresh migration replay
+-- (it is created by 20240614030000_social_graph.sql which runs after this)
 
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'notifications'
+  ) THEN
+    RETURN;
+  END IF;
+
   -- Rename user_id → recipient_id if user_id exists and recipient_id doesn't
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
