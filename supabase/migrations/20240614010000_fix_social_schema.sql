@@ -17,14 +17,25 @@ BEGIN
   END IF;
 END $$;
 
--- Also rename the FK constraint if it exists
-ALTER TABLE public.follows
-  DROP CONSTRAINT IF EXISTS follows_following_id_fkey;
+-- Also rename the FK constraint if it exists (guard: table may not exist on fresh reset)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) THEN
+    ALTER TABLE public.follows
+      DROP CONSTRAINT IF EXISTS follows_following_id_fkey;
+  END IF;
+END $$;
 
 -- Add followee_id FK if missing
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.table_constraints
     WHERE constraint_schema = 'public'
       AND constraint_name = 'follows_followee_id_fkey'
@@ -39,7 +50,10 @@ END $$;
 -- Ensure follower_id FK exists
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.table_constraints
     WHERE constraint_schema = 'public'
       AND constraint_name = 'follows_follower_id_fkey'
@@ -51,12 +65,19 @@ BEGIN
   END IF;
 END $$;
 
--- Update RLS policies to use followee_id
-DROP POLICY IF EXISTS "follows_insert" ON public.follows;
-CREATE POLICY "follows_insert" ON public.follows FOR INSERT WITH CHECK (auth.uid() = follower_id);
-
-DROP POLICY IF EXISTS "follows_delete" ON public.follows;
-CREATE POLICY "follows_delete" ON public.follows FOR DELETE USING (auth.uid() = follower_id);
+-- Update RLS policies to use followee_id (guard: table may not exist on fresh reset)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) THEN
+    DROP POLICY IF EXISTS "follows_insert" ON public.follows;
+    CREATE POLICY "follows_insert" ON public.follows FOR INSERT WITH CHECK (auth.uid() = follower_id);
+    DROP POLICY IF EXISTS "follows_delete" ON public.follows;
+    CREATE POLICY "follows_delete" ON public.follows FOR DELETE USING (auth.uid() = follower_id);
+  END IF;
+END $$;
 
 -- 2. FIX NOTIFICATIONS TABLE: add missing columns to match existing API
 -- Existing API uses: recipient_id, actor_id, type, entity_type, entity_id, content
@@ -113,15 +134,21 @@ BEGIN
   END IF;
 END $$;
 
--- Ensure notifications RLS policies use recipient_id
-DROP POLICY IF EXISTS "notifications_select" ON public.notifications;
-CREATE POLICY "notifications_select" ON public.notifications FOR SELECT USING (auth.uid() = recipient_id);
-
-DROP POLICY IF EXISTS "notifications_update" ON public.notifications;
-CREATE POLICY "notifications_update" ON public.notifications FOR UPDATE USING (auth.uid() = recipient_id);
-
-DROP POLICY IF EXISTS "notifications_delete" ON public.notifications;
-CREATE POLICY "notifications_delete" ON public.notifications FOR DELETE USING (auth.uid() = recipient_id);
+-- Ensure notifications RLS policies use recipient_id (guard: table may not exist on fresh reset)
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'notifications'
+  ) THEN
+    DROP POLICY IF EXISTS "notifications_select" ON public.notifications;
+    CREATE POLICY "notifications_select" ON public.notifications FOR SELECT USING (auth.uid() = recipient_id);
+    DROP POLICY IF EXISTS "notifications_update" ON public.notifications;
+    CREATE POLICY "notifications_update" ON public.notifications FOR UPDATE USING (auth.uid() = recipient_id);
+    DROP POLICY IF EXISTS "notifications_delete" ON public.notifications;
+    CREATE POLICY "notifications_delete" ON public.notifications FOR DELETE USING (auth.uid() = recipient_id);
+  END IF;
+END $$;
 
 -- 3. FIX POSTS TABLE: ensure likes_count and comments_count exist
 DO $$
