@@ -24,7 +24,9 @@ CREATE TABLE IF NOT EXISTS public.agent_tasks (
 -- Agent Logs table
 CREATE TABLE IF NOT EXISTS public.agent_logs (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  agent_id TEXT REFERENCES public.agents(id) ON DELETE SET NULL,
+  -- agent_id is TEXT, not UUID — agents.id is UUID so a FK would be a type mismatch.
+  -- Application-level validation is used instead of a database FK constraint.
+  agent_id TEXT,
   level TEXT NOT NULL CHECK (level IN ('info', 'warn', 'error', 'success')),
   message TEXT NOT NULL,
   metadata JSONB,

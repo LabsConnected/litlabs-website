@@ -4,7 +4,6 @@
 /* ═══════════════════════════════════════════════════════════════
    1. FUNCTION SEARCH PATH MUTABLE (7 functions)
    Fix: Add SET search_path = '' to all functions
-   Guard: functions may not exist yet in a fresh migration replay
    ═══════════════════════════════════════════════════════════════ */
 
 DO $$
@@ -35,13 +34,18 @@ END $$;
 /* ═══════════════════════════════════════════════════════════════
    2. RLS POLICY ALWAYS TRUE — site_events INSERT
    Fix: Replace permissive INSERT policy with a restricted one
-   Guard: site_events table may not exist in all environments
    ═══════════════════════════════════════════════════════════════ */
 
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'site_events') THEN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'site_events'
+  ) THEN
+    -- Drop the overly permissive policy
     DROP POLICY IF EXISTS "Anyone can insert events" ON public.site_events;
+
+    -- Create a proper INSERT policy (authenticated users only)
     DROP POLICY IF EXISTS "Authenticated users can insert events" ON public.site_events;
     CREATE POLICY "Authenticated users can insert events"
       ON public.site_events
@@ -70,15 +74,17 @@ CREATE POLICY "Media objects are publicly readable"
 /* ═══════════════════════════════════════════════════════════════
    4. SECURITY DEFINER FUNCTIONS EXECUTABLE BY PUBLIC
    Fix: Revoke EXECUTE on cleanup_old_events from public roles
-   Guard: function may not exist in a fresh migration replay
    ═══════════════════════════════════════════════════════════════ */
 
 DO $$
 BEGIN
   IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'cleanup_old_events' AND pronamespace = 'public'::regnamespace) THEN
+    -- Remove public access to the SECURITY DEFINER cleanup function
     REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM anon;
     REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM authenticated;
     REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM PUBLIC;
+
+    -- Only service_role (Supabase admin) should call this
     GRANT EXECUTE ON FUNCTION public.cleanup_old_events() TO service_role;
   END IF;
 END $$;
