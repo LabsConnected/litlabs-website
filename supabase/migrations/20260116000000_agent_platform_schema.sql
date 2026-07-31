@@ -50,12 +50,11 @@ CREATE TABLE IF NOT EXISTS public.agent_analytics (
   UNIQUE(agent_id, date)
 );
 
--- Notifications system (Jarvis)
--- NOTE: notifications table may already exist from social_graph migration
--- (with recipient_id instead of user_id). CREATE TABLE IF NOT EXISTS is a no-op
--- in that case. Index and policy creation below are guarded with column
--- existence checks to avoid errors when user_id is absent.
-CREATE TABLE IF NOT EXISTS public.notifications (
+-- Agent system notifications (separate from the social/user notifications table
+-- which is defined in 20240614030000_social_graph.sql with recipient_id schema).
+-- The social notifications table is the canonical user inbox; this table is for
+-- agent/platform-level alerts (sales, signups, system alerts, marketing).
+CREATE TABLE IF NOT EXISTS public.agent_system_notifications (
   id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
   user_id UUID REFERENCES public.users(id) ON DELETE CASCADE,
   type TEXT NOT NULL CHECK (type IN ('sale', 'signup', 'agent_created', 'system_alert', 'chat', 'marketing')),
@@ -131,29 +130,19 @@ CREATE INDEX IF NOT EXISTS idx_conversation_messages_conversation_id ON public.c
 CREATE INDEX IF NOT EXISTS idx_conversation_messages_created_at ON public.conversation_messages(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_user_id ON public.agent_sessions(user_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sessions_status ON public.agent_sessions(status);
-CREATE INDEX IF NOT EXISTS idx_notifications_type ON public.notifications(type);
+CREATE INDEX IF NOT EXISTS idx_agent_system_notifications_type ON public.agent_system_notifications(type);
 CREATE INDEX IF NOT EXISTS idx_agent_sales_buyer_id ON public.agent_sales(buyer_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sales_seller_id ON public.agent_sales(seller_id);
 CREATE INDEX IF NOT EXISTS idx_agent_sales_created_at ON public.agent_sales(created_at);
 CREATE INDEX IF NOT EXISTS idx_agent_reviews_agent_id ON public.agent_reviews(agent_id);
 
--- Notifications index: only create if user_id column exists
--- (table may already exist from social_graph migration with recipient_id instead)
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'user_id'
-  ) THEN
-    CREATE INDEX IF NOT EXISTS idx_notifications_user_id_read ON public.notifications(user_id, read_at);
-  END IF;
-END $$;
+CREATE INDEX IF NOT EXISTS idx_agent_system_notifications_user_id_read ON public.agent_system_notifications(user_id, read_at);
 
 -- RLS Policies
 ALTER TABLE public.conversations ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.conversation_messages ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_sessions ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.notifications ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.agent_system_notifications ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_sales ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.creator_earnings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.agent_reviews ENABLE ROW LEVEL SECURITY;
@@ -172,19 +161,9 @@ CREATE POLICY conversation_messages_user_isolation ON public.conversation_messag
     )
   );
 
--- Notifications policy: only create if user_id column exists
--- (table may already exist from social_graph migration with recipient_id instead)
-DO $$
-BEGIN
-  IF EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'notifications' AND column_name = 'user_id'
-  ) THEN
-    DROP POLICY IF EXISTS notifications_user_isolation ON public.notifications;
-    CREATE POLICY notifications_user_isolation ON public.notifications
-      FOR ALL USING (user_id = auth.uid()::UUID);
-  END IF;
-END $$;
+DROP POLICY IF EXISTS agent_system_notifications_user_isolation ON public.agent_system_notifications;
+CREATE POLICY agent_system_notifications_user_isolation ON public.agent_system_notifications
+  FOR ALL USING (user_id = auth.uid()::UUID);
 
 DROP POLICY IF EXISTS agent_sales_buyer_isolation ON public.agent_sales;
 CREATE POLICY agent_sales_buyer_isolation ON public.agent_sales

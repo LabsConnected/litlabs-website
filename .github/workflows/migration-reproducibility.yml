@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "supabase/migrations/**"
+      - "supabase/tests/**"
       - "supabase/config.toml"
       - ".github/workflows/migration-reproducibility.yml"
   workflow_dispatch:
@@ -53,6 +54,11 @@ jobs:
             echo "ERROR: No migration files found"
             exit 1
           fi
+
+      - name: Run database contract tests
+        run: npx supabase test db
+        env:
+          CI: true
 
       - name: Stop Supabase
         if: always()

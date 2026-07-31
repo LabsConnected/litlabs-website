@@ -53,7 +53,9 @@ class LiTT {
     const results: boolean[] = [];
 
     try {
-      await supabase.from("notifications").insert({
+      // Insert into agent_system_notifications (separate from the social
+      // notifications table which uses recipient_id schema).
+      await supabase.from("agent_system_notifications").insert({
         user_id: payload.userId || null,
         type: payload.type,
         priority: payload.priority,
