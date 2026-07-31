@@ -6,17 +6,21 @@
 // The browser sends only the agent ID in the URL — no price, no metadata,
 // no email. The server:
 //   1. Authenticates with Clerk and resolves the internal user.
-//   2. Loads the published agent version from the database (never trusts
-//      client input for price, slug, or version status).
-//   3. Validates that a Stripe Price ID is configured.
-//   4. Checks for existing active entitlement (prevents duplicate purchases).
-//   5. Creates a pending marketplace order before Stripe Checkout.
-//   6. Stores the database order ID in Stripe metadata.
-//   7. Uses the Idempotency-Key HTTP header (not the form body).
-//   8. Puts classification metadata on both the Checkout Session and
+//   2. Validates the agent is public and listed (available or beta).
+//   3. Loads the latest published agent version from the database (never
+//      trusts client input for price, slug, or version status).
+//   4. Validates that a Stripe Price ID is configured.
+//   5. Checks for existing active entitlement (prevents duplicate purchases).
+//   6. Calls create_pending_agent_order() RPC to atomically create the
+//      pending order AND its order item (with agent_id) in one transaction.
+//   7. Stores the database order ID in Stripe metadata.
+//   8. Uses the Idempotency-Key HTTP header (not the form body).
+//   9. Puts classification metadata on both the Checkout Session and
 //      the PaymentIntent (so refund handlers can find the order).
-//   9. Uses trusted APP_URL configuration for return URLs — never request Origin.
-//  10. Returns a sanitized checkout URL on success.
+//  10. Uses trusted APP_URL configuration for return URLs — never request Origin.
+//  11. Returns a sanitized checkout URL on success.
+//
+// Private or unlisted agents return 404 — they must not reveal product existence.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -25,13 +29,8 @@ import { withRateLimit } from "@/lib/rate-limiter";
 
 export const runtime = "nodejs";
 
-// Marketplace checkout version — stored in Stripe metadata for webhook classification.
 const MARKETPLACE_CHECKOUT_VERSION = "marketplace-agent-v1";
 
-/**
- * Resolves the trusted application URL for return redirects. Never reads the
- * request Origin header. localhost is allowed only in development.
- */
 function getAppUrl(): string {
   const raw =
     process.env.NEXT_PUBLIC_APP_URL ??
@@ -43,10 +42,7 @@ function getAppUrl(): string {
   let url = raw.trim();
   url = url.replace(/\/+$/, "");
 
-  if (
-    process.env.NODE_ENV === "production" &&
-    !url.startsWith("https://")
-  ) {
+  if (process.env.NODE_ENV === "production" && !url.startsWith("https://")) {
     throw new Error("Production app URL must use HTTPS");
   }
 
@@ -66,28 +62,19 @@ function conflict(message: string) {
 }
 
 function serverError() {
-  return NextResponse.json(
-    { error: "Unable to create checkout session" },
-    { status: 500 },
-  );
+  return NextResponse.json({ error: "Unable to create checkout session" }, { status: 500 });
 }
 
 function stripeFailure() {
-  return NextResponse.json(
-    { error: "Unable to create checkout session" },
-    { status: 502 },
-  );
+  return NextResponse.json({ error: "Unable to create checkout session" }, { status: 502 });
 }
 
 async function handler(
   req: NextRequest,
   ctx?: { params: Promise<{ id: string }> },
 ) {
-  // 1. Authenticate with Clerk.
   const { clerkId } = await auth();
-  if (!clerkId) {
-    return unauthorized();
-  }
+  if (!clerkId) return unauthorized();
 
   if (!ctx?.params) {
     return NextResponse.json({ error: "Missing route params" }, { status: 400 });
@@ -105,14 +92,33 @@ async function handler(
     return notFound("User not found");
   }
 
-  // 3. Load the published agent version from the database.
-  // Do NOT select system_prompt — it's not needed for checkout and should
-  // not be exposed in the checkout flow.
+  // 3. Validate the agent is public.
+  const { data: agent } = await supabaseAdmin
+    .from("agents")
+    .select("id, slug, is_public")
+    .eq("id", agentId)
+    .maybeSingle();
+
+  if (!agent || !agent.is_public) {
+    return notFound("Agent not found or not available for purchase");
+  }
+
+  // 4. Validate the marketplace listing is available or beta.
+  const { data: listing } = await supabaseAdmin
+    .from("marketplace_items")
+    .select("status, item_type")
+    .eq("agent_id", agentId)
+    .eq("item_type", "agent")
+    .maybeSingle();
+
+  if (!listing || (listing.status !== "available" && listing.status !== "beta")) {
+    return notFound("Agent not found or not available for purchase");
+  }
+
+  // 5. Load the latest published agent version from the database.
   const { data: version, error: versionError } = await supabaseAdmin
     .from("agent_versions")
-    .select(
-      "id, agent_id, version, stripe_price_id, price_cents, currency, status",
-    )
+    .select("id, agent_id, version, stripe_price_id, price_cents, currency, status")
     .eq("agent_id", agentId)
     .eq("status", "published")
     .order("published_at", { ascending: false })
@@ -123,24 +129,17 @@ async function handler(
     return notFound("Agent not found or not available for purchase");
   }
 
-  // 4. Validate that a Stripe Price ID is configured.
+  // 6. Validate that a Stripe Price ID is configured.
   if (!version.stripe_price_id) {
-    return NextResponse.json(
-      { error: "Agent is not yet available for purchase" },
-      { status: 501 },
-    );
+    return NextResponse.json({ error: "Agent is not yet available for purchase" }, { status: 501 });
   }
 
-  // Validate Price ID format (must start with price_).
   if (!version.stripe_price_id.startsWith("price_")) {
-    console.error(
-      "[marketplace/checkout] Invalid Stripe Price ID for agent version",
-      version.id,
-    );
+    console.error("[marketplace/checkout] Invalid Stripe Price ID for agent version", version.id);
     return serverError();
   }
 
-  // 5. Check for existing active entitlement (prevent duplicate purchases).
+  // 7. Check for existing active entitlement (prevent duplicate purchases).
   const { data: existing } = await supabaseAdmin
     .from("agent_entitlements")
     .select("id")
@@ -153,40 +152,29 @@ async function handler(
     return conflict("You already own this agent");
   }
 
-  // 6. Look up agent slug for metadata (server-side only).
-  const { data: agent } = await supabaseAdmin
-    .from("agents")
-    .select("slug")
-    .eq("id", agentId)
-    .maybeSingle();
+  // 8. Call create_pending_agent_order() RPC to atomically create the
+  //    pending order AND its order item (with agent_id) in one transaction.
+  const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+  const { data: orderResult, error: orderError } = await supabaseAdmin.rpc(
+    "create_pending_agent_order",
+    {
+      p_user_id: user.id,
+      p_agent_id: agentId,
+      p_agent_version_id: version.id,
+      p_price_cents: version.price_cents,
+      p_currency: version.currency,
+      p_expires_at: expiresAt,
+    },
+  );
 
-  if (!agent) {
-    return notFound("Agent not found");
-  }
-
-  // 7. Create a pending marketplace order before Stripe Checkout.
-  // This order will be updated to 'paid' by the webhook RPC.
-  const { data: order, error: orderError } = await supabaseAdmin
-    .from("marketplace_orders")
-    .insert({
-      user_id: user.id,
-      status: "pending",
-      total_cents: version.price_cents,
-      currency: version.currency,
-      expires_at: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
-    })
-    .select("id")
-    .single();
-
-  if (orderError || !order) {
-    console.error(
-      "[marketplace/checkout] Failed to create pending order",
-      orderError?.message,
-    );
+  if (orderError || !orderResult) {
+    console.error("[marketplace/checkout] create_pending_agent_order RPC failed", orderError?.message);
     return serverError();
   }
 
-  // 8. Build Stripe Checkout session parameters.
+  const orderId = orderResult.order_id as string;
+
+  // 9. Build Stripe Checkout session parameters.
   const stripeKey = process.env.STRIPE_SECRET_KEY;
   if (!stripeKey) {
     console.error("[marketplace/checkout] STRIPE_SECRET_KEY not configured");
@@ -207,20 +195,15 @@ async function handler(
   params.append("success_url", `${appUrl}/marketplace?purchased=${agent.slug}`);
   params.append("cancel_url", `${appUrl}/marketplace?canceled=true`);
 
-  // Server-generated metadata on the Checkout Session — the browser cannot override these.
   params.append("metadata[checkout_version]", MARKETPLACE_CHECKOUT_VERSION);
   params.append("metadata[product_type]", "agent");
-  params.append("metadata[marketplace_order_id]", order.id);
+  params.append("metadata[marketplace_order_id]", orderId);
   params.append("metadata[agent_id]", agentId);
   params.append("metadata[agent_version_id]", version.id);
   params.append("metadata[clerk_id]", clerkId);
 
-  // Also put metadata on the PaymentIntent so refund handlers can find the order.
-  // Stripe copies PaymentIntent metadata to the Charge, so charge.refunded events
-  // will carry this metadata. This is the documented way to propagate metadata
-  // from Checkout to the Charge.
   params.append("payment_intent_data[metadata][product_type]", "agent");
-  params.append("payment_intent_data[metadata][marketplace_order_id]", order.id);
+  params.append("payment_intent_data[metadata][marketplace_order_id]", orderId);
   params.append("payment_intent_data[metadata][agent_id]", agentId);
   params.append("payment_intent_data[metadata][agent_version_id]", version.id);
   params.append("payment_intent_data[metadata][clerk_id]", clerkId);
@@ -228,9 +211,7 @@ async function handler(
   params.append("billing_address_collection", "auto");
   params.append("automatic_tax[enabled]", "false");
 
-  // 9. Create the Stripe Checkout session.
-  // Idempotency-Key goes in the HTTP header, NOT the form body.
-  // Stripe's V1 API expects idempotency through the header.
+  // 10. Create the Stripe Checkout session.
   let stripeResponse: Response;
   try {
     stripeResponse = await fetch("https://api.stripe.com/v1/checkout/sessions", {
@@ -238,7 +219,7 @@ async function handler(
       headers: {
         Authorization: `Bearer ${stripeKey}`,
         "Content-Type": "application/x-www-form-urlencoded",
-        "Idempotency-Key": `marketplace_order_${order.id}`,
+        "Idempotency-Key": `marketplace_order_${orderId}`,
       },
       body: params.toString(),
     });
@@ -248,35 +229,26 @@ async function handler(
   }
 
   if (!stripeResponse.ok) {
-    console.error(
-      "[marketplace/checkout] Stripe returned non-2xx",
-      stripeResponse.status,
-    );
+    console.error("[marketplace/checkout] Stripe returned non-2xx", stripeResponse.status);
     return stripeFailure();
   }
 
-  const session = (await stripeResponse.json()) as {
-    id?: string;
-    url?: string;
-  };
+  const session = (await stripeResponse.json()) as { id?: string; url?: string };
 
-  // 10. Validate the Stripe Checkout session response.
   if (
     typeof session.id !== "string" ||
     typeof session.url !== "string" ||
     !session.url.startsWith("https://checkout.stripe.com/")
   ) {
-    console.error(
-      "[marketplace/checkout] Stripe returned 2xx without a valid checkout URL/session id",
-    );
+    console.error("[marketplace/checkout] Stripe returned 2xx without a valid checkout URL/session id");
     return stripeFailure();
   }
 
-  // 11. Store the Stripe checkout session ID on the pending order.
+  // 12. Store the Stripe checkout session ID on the pending order.
   await supabaseAdmin
     .from("marketplace_orders")
     .update({ stripe_checkout_session_id: session.id })
-    .eq("id", order.id);
+    .eq("id", orderId);
 
   return NextResponse.json({ url: session.url, sessionId: session.id });
 }

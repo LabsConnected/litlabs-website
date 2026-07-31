@@ -30,10 +30,20 @@ vi.mock("@/lib/auth", () => ({
 let mockUser: { id: string } | null = { id: "user-uuid-123" };
 let mockVersion: Record<string, unknown> | null = null;
 let mockExistingEntitlement: unknown = null;
-let mockAgent: { slug: string } | null = { slug: "litt-growth" };
+let mockAgent: { id: string; slug: string; is_public: boolean } | null = {
+  id: "agent-uuid-001",
+  slug: "litt-growth",
+  is_public: true,
+};
+let mockListing: { status: string; item_type: string } | null = {
+  status: "available",
+  item_type: "agent",
+};
 let mockOrderInsert: { id: string } | null = { id: "order-uuid-456" };
 let mockOrderUpdateError: unknown = null;
 let mockSupabaseError: unknown = null;
+let mockRpcResult: unknown = { order_id: "order-uuid-456", order_item_id: "item-uuid-789" };
+let mockRpcError: unknown = null;
 
 // Helper: create a chainable that resolves to the given result.
 function makeChainable(resultFn: () => Promise<{ data: unknown; error: unknown }>) {
@@ -65,6 +75,7 @@ vi.mock("@/lib/supabase", () => ({
         if (table === "agent_versions") return { data: mockVersion, error: mockSupabaseError };
         if (table === "agent_entitlements") return { data: mockExistingEntitlement, error: null };
         if (table === "agents") return { data: mockAgent, error: null };
+        if (table === "marketplace_items") return { data: mockListing, error: null };
         return { data: null, error: null };
       });
 
@@ -85,6 +96,7 @@ vi.mock("@/lib/supabase", () => ({
         eq: vi.fn(() => selectChain),
       };
     }),
+    rpc: vi.fn(async () => ({ data: mockRpcResult, error: mockRpcError })),
   },
 }));
 
@@ -116,10 +128,13 @@ beforeEach(() => {
     status: "published",
   };
   mockExistingEntitlement = null;
-  mockAgent = { slug: "litt-growth" };
+  mockAgent = { id: "agent-uuid-001", slug: "litt-growth", is_public: true };
+  mockListing = { status: "available", item_type: "agent" };
   mockOrderInsert = { id: "order-uuid-456" };
   mockOrderUpdateError = null;
   mockSupabaseError = null;
+  mockRpcResult = { order_id: "order-uuid-456", order_item_id: "item-uuid-789" };
+  mockRpcError = null;
   fetchStatus = 200;
   fetchJson = { id: "cs_test_123", url: "https://checkout.stripe.com/s/test" };
   lastFetchBody = null;

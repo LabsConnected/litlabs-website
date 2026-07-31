@@ -8,6 +8,12 @@
 // Authorization is re-checked on every request. The browser cannot
 // install a paid agent without an entitlement, even if it sends a
 // valid agent ID.
+//
+// Re-enable (POST when installed+disabled, or PATCH action=enable) requires
+// canEnable: installed AND disabled AND public AND listed AND compatible
+// version AND not refunded AND (free OR plan-included OR compatible entitlement).
+// A lapsed plan, refunded purchase, private agent, or incompatible version
+// must not be re-enabled.
 
 import { NextRequest, NextResponse } from "next/server";
 import { auth } from "@/lib/auth";
@@ -47,6 +53,8 @@ async function postHandler(
   const { id: agentId } = await ctx.params;
 
   const state = await getAgentAuthorization(clerkId, agentId);
+
+  // Private or unlisted agents return 404 — do not reveal existence.
   if (state.denyReason === "user_not_found") return notFound("User not found");
   if (state.denyReason === "agent_not_found") return notFound("Agent not found");
 
@@ -54,7 +62,21 @@ async function postHandler(
     return forbidden("Access revoked — this agent was refunded.");
   }
 
+  // If installed and disabled, attempt re-enable via canEnable.
   if (state.isInstalled && state.isDisabled) {
+    if (!state.canEnable) {
+      const reason = state.denyReason ?? "not_authorized";
+      if (reason === "upgrade_required") {
+        return forbidden("Upgrade required to re-enable this agent.");
+      }
+      if (reason === "payment_required") {
+        return forbidden("Active subscription or entitlement required to re-enable.");
+      }
+      if (reason === "version_unavailable") {
+        return forbidden("This agent version is not available.");
+      }
+      return forbidden("Cannot re-enable this agent.");
+    }
     const result = await enableAgent(clerkId, agentId);
     if (!result.success) {
       return NextResponse.json({ error: result.error }, { status: 400 });
@@ -76,6 +98,12 @@ async function postHandler(
     }
     if (result.error === "version_unavailable") {
       return forbidden("This agent version is not available for installation.");
+    }
+    if (result.error === "upgrade_required") {
+      return forbidden("Upgrade required — your entitlement does not cover this version.");
+    }
+    if (result.error === "agent_not_found") {
+      return notFound("Agent not found");
     }
     return NextResponse.json({ error: result.error }, { status: 400 });
   }
@@ -131,13 +159,21 @@ async function patchHandler(
   }
 
   if (action === "enable") {
-    const state = await getAgentAuthorization(clerkId, agentId);
-    if (state.isRefunded) {
-      return forbidden("Access revoked — cannot enable a refunded agent.");
-    }
-
+    // canEnable is enforced inside enableAgent via getAgentAuthorization.
     const result = await enableAgent(clerkId, agentId);
     if (!result.success) {
+      if (result.error === "access_revoked") {
+        return forbidden("Access revoked — cannot enable a refunded agent.");
+      }
+      if (result.error === "upgrade_required") {
+        return forbidden("Upgrade required to enable this agent.");
+      }
+      if (result.error === "payment_required") {
+        return forbidden("Active subscription or entitlement required to enable.");
+      }
+      if (result.error === "agent_not_found") {
+        return notFound("Agent not found");
+      }
       return NextResponse.json({ error: result.error }, { status: 400 });
     }
     return NextResponse.json({ message: "Agent enabled", state: "open" });
