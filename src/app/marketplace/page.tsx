@@ -21,7 +21,7 @@ import {
 
 // --- Types ---
 
-type MarketplaceItemType = "skill" | "tool" | "workflow" | "template" | "integration" | "creative_pack";
+type MarketplaceItemType = "skill" | "tool" | "workflow" | "template" | "integration" | "creative_pack" | "agent";
 
 type MarketplaceItem = {
   id: string;
@@ -41,6 +41,11 @@ type MarketplaceItem = {
   is_beta: boolean;
   price_cents: number;
   required_connections: string[];
+  // Agent-specific fields (null for non-agent items)
+  agent_id?: string | null;
+  agent_version_id?: string | null;
+  billing_model?: string | null;
+  risk_level?: string | null;
 };
 
 type Installation = {
@@ -85,6 +90,7 @@ const TYPE_LABELS: Record<MarketplaceItemType, string> = {
   template: "Template",
   integration: "Integration",
   creative_pack: "Creative Pack",
+  agent: "Agent",
 };
 
 type SortOption = "featured" | "name" | "newest" | "price-low" | "price-high";
@@ -104,6 +110,7 @@ const TYPE_ICONS: Record<MarketplaceItemType, typeof Code2> = {
   template: FileText,
   integration: Plug,
   creative_pack: Palette,
+  agent: Sparkles,
 };
 
 const CONNECTION_LABELS: Record<string, string> = {
