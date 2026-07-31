@@ -351,7 +351,7 @@ BEGIN
   ON CONFLICT (stripe_event_id) DO NOTHING
   RETURNING true AS inserted INTO v_event_inserted;
 
-  IF NOT v_event_inserted THEN
+  IF v_event_inserted IS NOT TRUE THEN
     RETURN jsonb_build_object('status', 'already_processed');
   END IF;
 
@@ -519,7 +519,7 @@ BEGIN
   ON CONFLICT (stripe_event_id) DO NOTHING
   RETURNING true AS inserted INTO v_event_inserted;
 
-  IF NOT v_event_inserted THEN
+  IF v_event_inserted IS NOT TRUE THEN
     RETURN jsonb_build_object('status', 'already_processed');
   END IF;
 
@@ -691,9 +691,9 @@ SELECT
   a.role,
   'available',
   ARRAY['litt'],
-  NULL,
+  a.slug,
   '1.0.0',
-  NULL,
+  '🤖',
   true,
   false,
   '{}',
