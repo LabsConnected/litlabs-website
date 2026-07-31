@@ -4,31 +4,52 @@
 /* ═══════════════════════════════════════════════════════════════
    1. FUNCTION SEARCH PATH MUTABLE (7 functions)
    Fix: Add SET search_path = '' to all functions
+   Guard: functions may not exist yet in a fresh migration replay
    ═══════════════════════════════════════════════════════════════ */
 
-ALTER FUNCTION public.update_updated_at_column() SET search_path = '';
-ALTER FUNCTION public.cleanup_old_events() SET search_path = '';
-ALTER FUNCTION public.handle_updated_at() SET search_path = '';
-ALTER FUNCTION public.increment_post_likes(UUID) SET search_path = '';
-ALTER FUNCTION public.decrement_post_likes(UUID) SET search_path = '';
-ALTER FUNCTION public.increment_post_comments(UUID) SET search_path = '';
-ALTER FUNCTION public.set_updated_at() SET search_path = '';
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'update_updated_at_column' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.update_updated_at_column() SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'cleanup_old_events' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.cleanup_old_events() SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'handle_updated_at' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.handle_updated_at() SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'increment_post_likes' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.increment_post_likes(UUID) SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'decrement_post_likes' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.decrement_post_likes(UUID) SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'increment_post_comments' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.increment_post_comments(UUID) SET search_path = '';
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'set_updated_at' AND pronamespace = 'public'::regnamespace) THEN
+    ALTER FUNCTION public.set_updated_at() SET search_path = '';
+  END IF;
+END $$;
 
 /* ═══════════════════════════════════════════════════════════════
    2. RLS POLICY ALWAYS TRUE — site_events INSERT
    Fix: Replace permissive INSERT policy with a restricted one
+   Guard: site_events table may not exist in all environments
    ═══════════════════════════════════════════════════════════════ */
 
--- Drop the overly permissive policy
-DROP POLICY IF EXISTS "Anyone can insert events" ON public.site_events;
-
--- Create a proper INSERT policy (authenticated users only)
-DROP POLICY IF EXISTS "Authenticated users can insert events" ON public.site_events;
-CREATE POLICY "Authenticated users can insert events"
-  ON public.site_events
-  FOR INSERT
-  TO authenticated
-  WITH CHECK (true);
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'site_events') THEN
+    DROP POLICY IF EXISTS "Anyone can insert events" ON public.site_events;
+    DROP POLICY IF EXISTS "Authenticated users can insert events" ON public.site_events;
+    CREATE POLICY "Authenticated users can insert events"
+      ON public.site_events
+      FOR INSERT
+      TO authenticated
+      WITH CHECK (true);
+  END IF;
+END $$;
 
 /* ═══════════════════════════════════════════════════════════════
    3. PUBLIC BUCKET ALLOWS LISTING — media bucket
@@ -49,15 +70,18 @@ CREATE POLICY "Media objects are publicly readable"
 /* ═══════════════════════════════════════════════════════════════
    4. SECURITY DEFINER FUNCTIONS EXECUTABLE BY PUBLIC
    Fix: Revoke EXECUTE on cleanup_old_events from public roles
+   Guard: function may not exist in a fresh migration replay
    ═══════════════════════════════════════════════════════════════ */
 
--- Remove public access to the SECURITY DEFINER cleanup function
-REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM anon;
-REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM authenticated;
-REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM PUBLIC;
-
--- Only service_role (Supabase admin) should call this
-GRANT EXECUTE ON FUNCTION public.cleanup_old_events() TO service_role;
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM pg_proc WHERE proname = 'cleanup_old_events' AND pronamespace = 'public'::regnamespace) THEN
+    REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM anon;
+    REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM authenticated;
+    REVOKE EXECUTE ON FUNCTION public.cleanup_old_events() FROM PUBLIC;
+    GRANT EXECUTE ON FUNCTION public.cleanup_old_events() TO service_role;
+  END IF;
+END $$;
 
 /* ═══════════════════════════════════════════════════════════════
    5. AUTH LEAKED PASSWORD PROTECTION

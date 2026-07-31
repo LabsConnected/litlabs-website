@@ -18,13 +18,25 @@ BEGIN
 END $$;
 
 -- Also rename the FK constraint if it exists
-ALTER TABLE public.follows
-  DROP CONSTRAINT IF EXISTS follows_following_id_fkey;
+-- Guard: follows table may not exist yet in a fresh migration replay
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) THEN
+    ALTER TABLE public.follows
+      DROP CONSTRAINT IF EXISTS follows_following_id_fkey;
+  END IF;
+END $$;
 
 -- Add followee_id FK if missing
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.table_constraints
     WHERE constraint_schema = 'public'
       AND constraint_name = 'follows_followee_id_fkey'
@@ -39,7 +51,10 @@ END $$;
 -- Ensure follower_id FK exists
 DO $$
 BEGIN
-  IF NOT EXISTS (
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) AND NOT EXISTS (
     SELECT 1 FROM information_schema.table_constraints
     WHERE constraint_schema = 'public'
       AND constraint_name = 'follows_follower_id_fkey'
@@ -52,18 +67,35 @@ BEGIN
 END $$;
 
 -- Update RLS policies to use followee_id
-DROP POLICY IF EXISTS "follows_insert" ON public.follows;
-CREATE POLICY "follows_insert" ON public.follows FOR INSERT WITH CHECK (auth.uid() = follower_id);
-
-DROP POLICY IF EXISTS "follows_delete" ON public.follows;
-CREATE POLICY "follows_delete" ON public.follows FOR DELETE USING (auth.uid() = follower_id);
+-- Guard: follows table may not exist yet
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'follows'
+  ) THEN
+    DROP POLICY IF EXISTS "follows_insert" ON public.follows;
+    CREATE POLICY "follows_insert" ON public.follows FOR INSERT WITH CHECK (auth.uid() = follower_id);
+    DROP POLICY IF EXISTS "follows_delete" ON public.follows;
+    CREATE POLICY "follows_delete" ON public.follows FOR DELETE USING (auth.uid() = follower_id);
+  END IF;
+END $$;
 
 -- 2. FIX NOTIFICATIONS TABLE: add missing columns to match existing API
 -- Existing API uses: recipient_id, actor_id, type, entity_type, entity_id, content
 -- Migration created: user_id, actor_id, type, title, message, read, post_id
+-- Guard: notifications table may not exist yet in a fresh migration replay
+-- (it is created by 20240614030000_social_graph.sql which runs after this)
 
 DO $$
 BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'notifications'
+  ) THEN
+    RETURN;
+  END IF;
+
   -- Rename user_id → recipient_id if user_id exists and recipient_id doesn't
   IF EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -114,34 +146,47 @@ BEGIN
 END $$;
 
 -- Ensure notifications RLS policies use recipient_id
-DROP POLICY IF EXISTS "notifications_select" ON public.notifications;
-CREATE POLICY "notifications_select" ON public.notifications FOR SELECT USING (auth.uid() = recipient_id);
-
-DROP POLICY IF EXISTS "notifications_update" ON public.notifications;
-CREATE POLICY "notifications_update" ON public.notifications FOR UPDATE USING (auth.uid() = recipient_id);
-
-DROP POLICY IF EXISTS "notifications_delete" ON public.notifications;
-CREATE POLICY "notifications_delete" ON public.notifications FOR DELETE USING (auth.uid() = recipient_id);
-
--- 3. FIX POSTS TABLE: ensure likes_count and comments_count exist
+-- Guard: notifications table may not exist yet
 DO $$
 BEGIN
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'posts' AND column_name = 'likes_count'
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'notifications'
   ) THEN
-    ALTER TABLE public.posts ADD COLUMN likes_count integer DEFAULT 0;
-  END IF;
-
-  IF NOT EXISTS (
-    SELECT 1 FROM information_schema.columns
-    WHERE table_schema = 'public' AND table_name = 'posts' AND column_name = 'comments_count'
-  ) THEN
-    ALTER TABLE public.posts ADD COLUMN comments_count integer DEFAULT 0;
+    DROP POLICY IF EXISTS "notifications_select" ON public.notifications;
+    CREATE POLICY "notifications_select" ON public.notifications FOR SELECT USING (auth.uid() = recipient_id);
+    DROP POLICY IF EXISTS "notifications_update" ON public.notifications;
+    CREATE POLICY "notifications_update" ON public.notifications FOR UPDATE USING (auth.uid() = recipient_id);
+    DROP POLICY IF EXISTS "notifications_delete" ON public.notifications;
+    CREATE POLICY "notifications_delete" ON public.notifications FOR DELETE USING (auth.uid() = recipient_id);
   END IF;
 END $$;
 
--- 4. VERIFY
+-- 3. FIX POSTS TABLE: ensure likes_count and comments_count exist
+-- Guard: posts table may not exist in some environments
+DO $$
+BEGIN
+  IF EXISTS (
+    SELECT 1 FROM information_schema.tables
+    WHERE table_schema = 'public' AND table_name = 'posts'
+  ) THEN
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'posts' AND column_name = 'likes_count'
+    ) THEN
+      ALTER TABLE public.posts ADD COLUMN likes_count integer DEFAULT 0;
+    END IF;
+
+    IF NOT EXISTS (
+      SELECT 1 FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = 'posts' AND column_name = 'comments_count'
+    ) THEN
+      ALTER TABLE public.posts ADD COLUMN comments_count integer DEFAULT 0;
+    END IF;
+  END IF;
+END $$;
+
+-- 4. VERIFY (information_schema query is safe — returns empty set if tables don't exist)
 SELECT table_name, column_name
 FROM information_schema.columns
 WHERE table_schema = 'public'

@@ -1,5 +1,5 @@
 import { test as setup, expect } from "@playwright/test";
-import { clerk, clerkSetup } from "@clerk/testing/playwright";
+import { clerk, clerkSetup, setupClerkTestingToken } from "@clerk/testing/playwright";
 import path from "path";
 
 const DEPLOYMENT_URL = process.env.SMOKE_TEST_URL || "http://localhost:3000";
@@ -39,6 +39,10 @@ setup("authenticate User A and save storage state", async ({ page, context }) =>
     context.setExtraHTTPHeaders({ "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET });
   }
 
+  // Set up the Clerk testing token before navigating, so the Development
+  // instance allows passwordless sign-in via clerk.signIn().
+  await setupClerkTestingToken({ page });
+
   await page.goto(DEPLOYMENT_URL);
   await clerk.signIn({ page, emailAddress: userAEmail! });
 
@@ -61,6 +65,10 @@ setup("authenticate User B and save storage state", async ({ page, context }) =>
   if (isVercelPreview && VERCEL_BYPASS_SECRET) {
     context.setExtraHTTPHeaders({ "x-vercel-protection-bypass": VERCEL_BYPASS_SECRET });
   }
+
+  // Set up the Clerk testing token before navigating, so the Development
+  // instance allows passwordless sign-in via clerk.signIn().
+  await setupClerkTestingToken({ page });
 
   await page.goto(DEPLOYMENT_URL);
   await clerk.signIn({ page, emailAddress: userBEmail! });
