@@ -308,14 +308,18 @@ CREATE TRIGGER trg_agent_versions_updated_at
 --   1. Atomically claims the Stripe event (INSERT ... ON CONFLICT DO NOTHING).
 --   2. Loads the user by clerk_id from the database.
 --   3. Loads the authoritative agent version from the database.
---   4. Verifies the paid amount and currency against the stored version price.
---   5. Creates or updates the marketplace order to 'paid'.
---   6. Creates the order item (UNIQUE prevents duplicates).
---   7. Creates the agent-level entitlement (UNIQUE(user_id, agent_id) prevents dups).
---   8. Returns {"status":"ok"} or {"status":"already_processed"}.
+--   4. Locks the exact pending order created at checkout time (by order ID).
+--   5. Verifies the order belongs to the resolved user and is still pending.
+--   6. Verifies the paid amount and currency against the stored version price.
+--   7. Attaches the Checkout Session ID and PaymentIntent ID to the order.
+--   8. Marks the exact order as 'paid'.
+--   9. Creates the order item (UNIQUE prevents duplicates).
+--  10. Creates the agent-level entitlement (UNIQUE(user_id, agent_id) prevents dups).
+--  11. Returns {"status":"ok"} or {"status":"already_processed"}.
 --
 -- On any failure, raises a PostgreSQL exception so the webhook returns 500
--- and Stripe retries.
+-- and Stripe retries. This prevents orphan pending orders and duplicate paid
+-- orders.
 
 CREATE OR REPLACE FUNCTION public.fulfill_agent_purchase(
   p_stripe_event_id TEXT,
@@ -323,6 +327,7 @@ CREATE OR REPLACE FUNCTION public.fulfill_agent_purchase(
   p_clerk_id TEXT,
   p_agent_id UUID,
   p_agent_version_id UUID,
+  p_marketplace_order_id UUID,
   p_stripe_session_id TEXT,
   p_stripe_payment_intent_id TEXT,
   p_stripe_charge_id TEXT,
@@ -336,6 +341,7 @@ AS $$
 DECLARE
   v_user_id UUID;
   v_order_id UUID;
+  v_order RECORD;
   v_version RECORD;
   v_event_inserted BOOLEAN;
 BEGIN
@@ -372,40 +378,76 @@ BEGIN
     RAISE EXCEPTION 'agent_version_not_purchasable: status=%', v_version.status;
   END IF;
 
-  -- 4. Verify the paid amount and currency against the stored version price.
+  -- 4. Lock and verify the exact pending order created at checkout time.
+  -- This prevents orphan pending orders and duplicate paid orders.
+  -- FOR UPDATE locks the row so concurrent webhook deliveries cannot race.
+  SELECT id, user_id, status, total_cents, currency, stripe_checkout_session_id
+  INTO v_order
+  FROM public.marketplace_orders
+  WHERE id = p_marketplace_order_id
+  FOR UPDATE;
+
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'order_not_found: order_id=%', p_marketplace_order_id;
+  END IF;
+
+  -- Verify the order belongs to the resolved user.
+  IF v_order.user_id != v_user_id THEN
+    RAISE EXCEPTION 'order_user_mismatch: order belongs to %, webhook clerk_id resolves to %',
+      v_order.user_id, v_user_id;
+  END IF;
+
+  -- Verify the order is still pending (not already paid, failed, or expired).
+  IF v_order.status != 'pending' THEN
+    -- If already paid, this is a duplicate webhook — return ok.
+    IF v_order.status = 'paid' THEN
+      RETURN jsonb_build_object('status', 'already_processed', 'order_id', v_order.id);
+    END IF;
+    RAISE EXCEPTION 'order_not_pending: status=%', v_order.status;
+  END IF;
+
+  -- 5. Verify the paid amount and currency against the stored version price
+  --    AND the order's expected total.
   IF p_amount_cents != v_version.price_cents THEN
     RAISE EXCEPTION 'amount_mismatch: paid=%, expected=%', p_amount_cents, v_version.price_cents;
+  END IF;
+
+  IF p_amount_cents != v_order.total_cents THEN
+    RAISE EXCEPTION 'order_amount_mismatch: paid=%, order_total=%', p_amount_cents, v_order.total_cents;
   END IF;
 
   IF lower(p_currency) != lower(v_version.currency) THEN
     RAISE EXCEPTION 'currency_mismatch: paid=%, expected=%', p_currency, v_version.currency;
   END IF;
 
-  -- 5. Create or update the marketplace order.
-  INSERT INTO public.marketplace_orders (
-    user_id, stripe_checkout_session_id, stripe_payment_intent_id, stripe_charge_id,
-    status, total_cents, currency
-  ) VALUES (
-    v_user_id, p_stripe_session_id, p_stripe_payment_intent_id, p_stripe_charge_id,
-    'paid', p_amount_cents, lower(p_currency)
-  )
-  ON CONFLICT (stripe_checkout_session_id) DO UPDATE
-    SET
-      status = 'paid',
-      stripe_payment_intent_id = EXCLUDED.stripe_payment_intent_id,
-      stripe_charge_id = EXCLUDED.stripe_charge_id,
-      total_cents = EXCLUDED.total_cents,
-      updated_at = now()
+  -- 6. Verify the Checkout Session ID is not already assigned to another order.
+  IF p_stripe_session_id IS NOT NULL THEN
+    IF v_order.stripe_checkout_session_id IS NOT NULL AND v_order.stripe_checkout_session_id != p_stripe_session_id THEN
+      RAISE EXCEPTION 'session_id_mismatch: order has %, webhook sends %',
+        v_order.stripe_checkout_session_id, p_stripe_session_id;
+    END IF;
+  END IF;
+
+  -- 7. Mark the exact order as paid and attach Stripe identifiers.
+  UPDATE public.marketplace_orders
+  SET
+    status = 'paid',
+    stripe_checkout_session_id = p_stripe_session_id,
+    stripe_payment_intent_id = p_stripe_payment_intent_id,
+    stripe_charge_id = p_stripe_charge_id,
+    total_cents = p_amount_cents,
+    currency = lower(p_currency),
+    updated_at = now()
+  WHERE id = v_order.id
   RETURNING id INTO v_order_id;
 
-  -- 6. Create the order item (UNIQUE(order_id, agent_version_id) prevents duplicates).
+  -- 8. Create the order item (UNIQUE(order_id, agent_version_id) prevents duplicates).
   INSERT INTO public.marketplace_order_items (order_id, agent_version_id, agent_slug, price_cents, currency)
   VALUES (v_order_id, v_version.id, v_version.agent_slug, v_version.price_cents, v_version.currency)
   ON CONFLICT (order_id, agent_version_id) DO NOTHING;
 
-  -- 7. Create the agent-level entitlement (UNIQUE(user_id, agent_id) prevents dups).
+  -- 9. Create the agent-level entitlement (UNIQUE(user_id, agent_id) prevents dups).
   -- V1 policy: includes_future_updates = true, maximum_version = same major version.
-  -- Extract major version from the purchased version string (e.g. '1.0.0' → '1.x')
   INSERT INTO public.agent_entitlements (
     user_id, agent_id, purchased_version_id,
     includes_future_updates, minimum_version, maximum_version,
@@ -417,7 +459,6 @@ BEGIN
     v_version.id,
     true,
     v_version.version,
-    -- maximum_version: same major version (e.g. '1.0.0' → '1.999.999')
     substring(v_version.version from '^[0-9]+') || '.999.999',
     v_order_id,
     'active'
@@ -439,10 +480,10 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION public.fulfill_agent_purchase(
-  TEXT, TEXT, TEXT, UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TEXT
+  TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TEXT
 ) FROM public, anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.fulfill_agent_purchase(
-  TEXT, TEXT, TEXT, UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TEXT
+  TEXT, TEXT, TEXT, UUID, UUID, UUID, TEXT, TEXT, TEXT, INTEGER, TEXT
 ) TO service_role;
 
 -- ═══════════════════════════════════════════════════════════════════════
