@@ -161,13 +161,21 @@ export default function StudioOS({ isDemo = false }: { isDemo?: boolean } = {}) 
       const params = new URLSearchParams(searchParams.toString());
       params.set("tool", activeTool);
       const query = params.toString();
-      router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+      const target = `${pathname}${query ? `?${query}` : ""}`;
+      const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+      if (target !== current) {
+        router.replace(target, { scroll: false });
+      }
       return;
     }
     const params = new URLSearchParams(searchParams.toString());
     params.set("tool", activeTool);
     const query = params.toString();
-    router.replace(`${pathname}${query ? `?${query}` : ""}`, { scroll: false });
+    const target = `${pathname}${query ? `?${query}` : ""}`;
+    const current = `${pathname}${searchParams.toString() ? `?${searchParams.toString()}` : ""}`;
+    if (target !== current) {
+      router.replace(target, { scroll: false });
+    }
   }, [activeTool, pathname, router, searchParams]);
 
   // Handle tool switches emitted from inside workspaces.
