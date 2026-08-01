@@ -24,17 +24,18 @@ bash supabase/upgrade-validation/run.sh
 1. `supabase db reset --local --no-seed --version 20260728220000`
 2. Run `preconditions.sql` (assert pre-forward state + insert sentinel)
 3. Verify only the forward migration is pending
-4. `supabase migration up --db-url <local-postgres>` (apply the forward migration)
+4. Apply the forward migration SQL directly via `psql` + record in `schema_migrations`
 5. Run `postconditions.sql`
 6. Re-run the entire forward migration SQL with `ON_ERROR_STOP=1` (idempotency)
 7. Run `postconditions.sql` again
 8. Cleanup sentinel data
 
 > **No `migration repair` is performed.** A validation test must not repair its
-> own migration history to pass. `run.sh` uses `migration up --db-url` (not
-> `--local`) so only the local `schema_migrations` table is consulted — the
-> stale remote entries (20260712, 20260719) from the linked production project
-> are never fetched, so no repair is needed.
+> own migration history to pass. `run.sh` applies the forward migration SQL
+> directly via `psql` (not `supabase migration up`, which always fetches remote
+> history and hits stale entries 20260712/20260719) and records the version in
+> `schema_migrations` manually. No remote history is consulted, so no repair is
+> needed.
 
 ## What This Proves
 

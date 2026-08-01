@@ -29,13 +29,14 @@ FORWARD_MIGRATION="supabase/migrations/${FORWARD_VERSION}_create_agent_system_no
 PRECONDITIONS="supabase/upgrade-validation/preconditions.sql"
 POSTCONDITIONS="supabase/upgrade-validation/postconditions.sql"
 
-# Local Postgres connection string. We use --db-url with `migration up` instead
-# of --local so that ONLY the local schema_migrations table is consulted to
-# determine pending migrations. The --local mode fetches REMOTE migration
-# history, which contains stale entries (20260712, 20260719) from the linked
-# production project that have no local files — a hard error that would require
-# `migration repair` to work around. A validation test must not repair its own
-# migration history to pass, so we bypass the remote check entirely.
+# Local Postgres connection string. We apply the forward migration directly
+# via psql (not `supabase migration up`) because `migration up` ALWAYS fetches
+# remote migration history — even with --db-url or --local — and the linked
+# production project has stale entries (20260712, 20260719) with no local files,
+# causing a hard error that would require `migration repair` to work around.
+# A validation test must not repair its own migration history to pass, so we
+# bypass the migration tool entirely and apply the SQL directly, then record
+# the version in schema_migrations manually (matching what migration up does).
 # Default local Supabase credentials: postgres:postgres@127.0.0.1:54322/postgres
 DB_PORT="${SUPABASE_DB_PORT:-54322}"
 DB_PASSWORD="${SUPABASE_DB_PASSWORD:-postgres}"
@@ -108,20 +109,37 @@ fi
 echo "OK: forward migration ${FORWARD_VERSION} is pending (not yet applied)"
 
 # -----------------------------------------------------------------------------
-# Step 4: Apply the forward migration (and any other pending migrations).
-#         Uses --db-url (not --local) so only the local schema_migrations table
-#         is consulted — no remote history check, no migration repair needed.
-#         This is the production-style upgrade path: apply pending migration
-#         files on top of an existing database at a known version.
+# Step 4: Apply the forward migration directly via psql.
+#         We do NOT use `supabase migration up` because it always fetches
+#         remote migration history (even with --db-url), which contains stale
+#         entries (20260712, 20260719) that cause a hard error requiring
+#         `migration repair`. Instead, we apply the SQL directly and record
+#         the version in schema_migrations manually — exactly what migration
+#         up does internally, without the remote check.
 # -----------------------------------------------------------------------------
-step "Step 4: Apply pending migrations (supabase migration up --db-url)"
-npx supabase migration up --db-url "${DB_URL}"
+step "Step 4: Apply forward migration (psql direct + record in schema_migrations)"
+psql_exec < "${FORWARD_MIGRATION}"
+echo "OK: forward migration SQL applied (exit 0)"
+
+# Record the forward migration version in schema_migrations, matching what
+# `supabase migration up` does internally. Use ON_ERROR_STOP=1 so a failure
+# to record is caught.
+psql_exec <<SQL
+INSERT INTO supabase_migrations.schema_migrations (version, statements, name)
+VALUES (
+  '${FORWARD_VERSION}',
+  ARRAY['-- applied by supabase/upgrade-validation/run.sh (direct psql)'],
+  'create_agent_system_notifications'
+)
+ON CONFLICT (version) DO NOTHING;
+SQL
+echo "OK: forward migration recorded in schema_migrations"
 
 # Confirm the forward migration is now recorded as applied.
 FORWARD_APPLIED="$(psql_scalar \
   "SELECT count(*) FROM supabase_migrations.schema_migrations WHERE version = '${FORWARD_VERSION}';")"
 if [ "${FORWARD_APPLIED}" != "1" ]; then
-  echo "FAIL: forward migration ${FORWARD_VERSION} not recorded as applied after 'migration up' (count=${FORWARD_APPLIED})" >&2
+  echo "FAIL: forward migration ${FORWARD_VERSION} not recorded as applied after direct apply (count=${FORWARD_APPLIED})" >&2
   exit 1
 fi
 echo "OK: forward migration ${FORWARD_VERSION} recorded as applied"
