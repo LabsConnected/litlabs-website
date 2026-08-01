@@ -1,8 +1,8 @@
 # Upgrade-Path Validation
 
-These scripts validate the REAL upgrade path for the `agent_system_notifications`
-forward migration (`20260801000000`). They are NOT pgTAP tests and are NOT run
-by `supabase test db` — they require a specific database state and must be
+These scripts validate the REAL upgrade path for forward migrations on top of a
+pre-forward database. They are NOT pgTAP tests and are NOT run by
+`supabase test db` — they require a specific database state and must be
 executed in order.
 
 ## Automated (CI)
@@ -23,15 +23,16 @@ bash supabase/upgrade-validation/run.sh
 
 1. `supabase db reset --local --no-seed --version 20260728220000`
 2. Run `preconditions.sql` (assert pre-forward state + insert sentinel)
-3. Verify only the forward migration is pending
-4. Apply the forward migration SQL directly via `psql` + record in `schema_migrations`
+3. Verify at least 1 migration file is pending (newer than reset version)
+4. Apply ALL pending migration SQL files directly via `psql` (in version order)
+   + record each in `schema_migrations`
 5. Run `postconditions.sql`
-6. Re-run the entire forward migration SQL with `ON_ERROR_STOP=1` (idempotency)
+6. Re-run ALL pending migration SQL files with `ON_ERROR_STOP=1` (idempotency)
 7. Run `postconditions.sql` again
 8. Cleanup sentinel data
 
 > **No `migration repair` is performed.** A validation test must not repair its
-> own migration history to pass. `run.sh` applies the forward migration SQL
+> own migration history to pass. `run.sh` applies each pending migration SQL
 > directly via `psql` (not `supabase migration up`, which always fetches remote
 > history and hits stale entries 20260712/20260719) and records the version in
 > `schema_migrations` manually. No remote history is consulted, so no repair is
