@@ -212,10 +212,7 @@ BEGIN
     auth_grants, service_grants;
 END $$;
 
--- ============================================
--- 9. Cleanup sentinel data
--- ============================================
-DELETE FROM public.notifications WHERE content = 'SENTINEL_UPGRADE_TEST_ROW';
-DELETE FROM public.users WHERE clerk_id = 'sentinel_upgrade_test';
-
-DO $$ BEGIN RAISE NOTICE 'Cleanup: sentinel data removed'; END $$;
+-- Cleanup of sentinel data is intentionally NOT performed here so this file
+-- can be executed multiple times (once after `migration up`, again after the
+-- idempotency re-run). The orchestrating run.sh removes the sentinel as its
+-- final step.
