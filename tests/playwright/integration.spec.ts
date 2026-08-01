@@ -183,7 +183,7 @@ test.describe("Vercel Preview — API endpoints (bypassed)", () => {
 
   test("stripe checkout API returns 401 (not 500)", async ({ request }) => {
     const resp = await request.post(`${DEPLOYMENT_URL}/api/stripe/checkout`, {
-      data: { priceId: "price_test_invalid" },
+      data: { productId: "test_invalid" },
       headers: { "Content-Type": "application/json", ...bypassHeaders() },
     });
     expect(resp.status()).toBeLessThan(500);
