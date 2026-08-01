@@ -29,6 +29,18 @@ FORWARD_MIGRATION="supabase/migrations/${FORWARD_VERSION}_create_agent_system_no
 PRECONDITIONS="supabase/upgrade-validation/preconditions.sql"
 POSTCONDITIONS="supabase/upgrade-validation/postconditions.sql"
 
+# Local Postgres connection string. We use --db-url with `migration up` instead
+# of --local so that ONLY the local schema_migrations table is consulted to
+# determine pending migrations. The --local mode fetches REMOTE migration
+# history, which contains stale entries (20260712, 20260719) from the linked
+# production project that have no local files — a hard error that would require
+# `migration repair` to work around. A validation test must not repair its own
+# migration history to pass, so we bypass the remote check entirely.
+# Default local Supabase credentials: postgres:postgres@127.0.0.1:54322/postgres
+DB_PORT="${SUPABASE_DB_PORT:-54322}"
+DB_PASSWORD="${SUPABASE_DB_PASSWORD:-postgres}"
+DB_URL="postgresql://postgres:${DB_PASSWORD}@127.0.0.1:${DB_PORT}/postgres"
+
 # -----------------------------------------------------------------------------
 # Discover the local Supabase Postgres container name (derived from project_id
 # in supabase/config.toml, but discovered dynamically for robustness).
@@ -97,11 +109,13 @@ echo "OK: forward migration ${FORWARD_VERSION} is pending (not yet applied)"
 
 # -----------------------------------------------------------------------------
 # Step 4: Apply the forward migration (and any other pending migrations).
-#         --include-all applies migrations absent from the remote history table,
-#         which is the production-style upgrade path.
+#         Uses --db-url (not --local) so only the local schema_migrations table
+#         is consulted — no remote history check, no migration repair needed.
+#         This is the production-style upgrade path: apply pending migration
+#         files on top of an existing database at a known version.
 # -----------------------------------------------------------------------------
-step "Step 4: Apply pending migrations (supabase migration up --local --include-all)"
-npx supabase migration up --local --include-all
+step "Step 4: Apply pending migrations (supabase migration up --db-url)"
+npx supabase migration up --db-url "${DB_URL}"
 
 # Confirm the forward migration is now recorded as applied.
 FORWARD_APPLIED="$(psql_scalar \
