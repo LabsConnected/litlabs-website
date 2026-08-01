@@ -10,7 +10,7 @@ CREATE EXTENSION IF NOT EXISTS pgtap;
 -- ============================================
 -- Plan: number of test assertions
 -- ============================================
-SELECT plan(30);
+SELECT plan(44);
 
 -- ============================================
 -- 1. Users table: internal UUID + clerk_id
@@ -87,9 +87,39 @@ SELECT has_column('public', 'notifications', 'entity_type', 'notifications.entit
 SELECT has_column('public', 'notifications', 'entity_id', 'notifications.entity_id exists');
 SELECT has_column('public', 'notifications', 'content', 'notifications.content exists');
 
--- Verify agent_system_notifications is separate
-SELECT has_table('public', 'agent_system_notifications', 'agent_system_notifications table exists (separate from social notifications)');
-SELECT has_column('public', 'agent_system_notifications', 'user_id', 'agent_system_notifications.user_id exists');
+-- Verify canonical notifications does NOT have user_id (recipient_id schema untouched)
+SELECT hasnt_column('public', 'notifications', 'user_id',
+    'notifications does NOT have user_id (canonical recipient_id schema untouched by forward migration)');
+
+-- ============================================
+-- 4b. agent_system_notifications: forward migration contract
+-- ============================================
+SELECT has_table('public', 'agent_system_notifications',
+    'agent_system_notifications table exists (created by forward migration 20260801000000)');
+SELECT has_column('public', 'agent_system_notifications', 'user_id',
+    'agent_system_notifications.user_id exists');
+SELECT col_type_is('public', 'agent_system_notifications', 'user_id', 'uuid',
+    'agent_system_notifications.user_id is UUID');
+SELECT has_column('public', 'agent_system_notifications', 'type',
+    'agent_system_notifications.type exists');
+SELECT has_column('public', 'agent_system_notifications', 'priority',
+    'agent_system_notifications.priority exists');
+SELECT has_column('public', 'agent_system_notifications', 'title',
+    'agent_system_notifications.title exists');
+SELECT has_column('public', 'agent_system_notifications', 'body',
+    'agent_system_notifications.body exists');
+SELECT has_column('public', 'agent_system_notifications', 'data',
+    'agent_system_notifications.data exists');
+SELECT has_column('public', 'agent_system_notifications', 'channels',
+    'agent_system_notifications.channels exists');
+SELECT has_column('public', 'agent_system_notifications', 'read_at',
+    'agent_system_notifications.read_at exists');
+SELECT has_column('public', 'agent_system_notifications', 'sent_at',
+    'agent_system_notifications.sent_at exists');
+SELECT has_column('public', 'agent_system_notifications', 'created_at',
+    'agent_system_notifications.created_at exists');
+SELECT has_column('public', 'agent_system_notifications', 'updated_at',
+    'agent_system_notifications.updated_at exists (added by forward migration trigger)');
 
 -- ============================================
 -- 5. RLS enabled on critical tables
@@ -109,6 +139,18 @@ SELECT ok(
 SELECT ok(
     (SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'notifications'),
     'RLS enabled on notifications'
+);
+SELECT ok(
+    (SELECT rowsecurity FROM pg_tables WHERE schemaname = 'public' AND tablename = 'agent_system_notifications'),
+    'RLS enabled on agent_system_notifications'
+);
+
+-- Verify agent_system_notifications_user_isolation policy exists
+SELECT ok(
+    (SELECT COUNT(*) > 0 FROM pg_policies
+     WHERE schemaname = 'public' AND tablename = 'agent_system_notifications'
+       AND policyname = 'agent_system_notifications_user_isolation'),
+    'agent_system_notifications_user_isolation policy exists'
 );
 
 -- ============================================
