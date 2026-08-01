@@ -16,7 +16,10 @@ function getSupermemory() {
 export async function POST(req: NextRequest) {
   try {
     const { userId } = await auth();
-    const uid = userId || "anonymous";
+    if (!userId) {
+      return NextResponse.json({ error: "Authentication required" }, { status: 401 });
+    }
+    const uid = userId;
 
     const { messages, model = "gemini-flash" } = await req.json();
     if (!messages || !messages.length) {

@@ -2,6 +2,7 @@ import { createHash } from "crypto";
 import { createMission, createRun, createStep, getMission, updateMissionStatus, updateRunStatus, updateStepStatus } from "@/lib/missions/mission-repository";
 import { getProject, updateProjectRuntime, verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { logFileOperation } from "@/lib/file-audit";
 import { capturePreviewWithChrome } from "./capture";
 import { buildAssetQuery, createImageGenerationProvider, createStockAssetProvider } from "./providers";
 import { assetInspectionIsValid, DEFAULT_VISUAL_ASSET_ALLOWLIST, inspectAsset, inspectAssetBuffer } from "./security";
@@ -52,6 +53,7 @@ interface VisualBuildExecutionResult {
 async function writeWorkspaceFile(input: {
   workspaceId: string;
   userId: string;
+  projectId: string;
   path: string;
   content: string;
 }) {
@@ -65,7 +67,20 @@ async function writeWorkspaceFile(input: {
     },
     body: JSON.stringify({ path: input.path, content: input.content }),
   });
-  if (!response.ok) {
+  const ok = response.ok;
+  // Audit log the AI-driven file write
+  await logFileOperation({
+    userId: input.userId,
+    projectId: input.projectId,
+    workspaceId: input.workspaceId,
+    action: "write",
+    path: input.path,
+    contentLength: input.content.length,
+    source: "mission",
+    ok,
+    error: ok ? undefined : "Visual build file write failed",
+  }).catch(() => {});
+  if (!ok) {
     throw new Error(await response.text().catch(() => "Failed to write workspace file"));
   }
 }
@@ -402,6 +417,7 @@ export async function runVisualBuild(input: {
   await writeWorkspaceFile({
     workspaceId,
     userId: input.userId,
+    projectId: input.projectId,
     path: landingPath,
     content: workspaceSource,
   });
@@ -511,7 +527,7 @@ export async function runVisualBuild(input: {
       });
       const diff = makeDiff(currentSource, repairedSource);
       changedFiles.push({ path: landingPath, diff, reason: visualReview.findings.map((finding) => finding.repairInstruction).join(" | ") });
-      await writeWorkspaceFile({ workspaceId, userId: input.userId, path: landingPath, content: repairedSource });
+      await writeWorkspaceFile({ workspaceId, userId: input.userId, projectId: input.projectId, path: landingPath, content: repairedSource });
       currentSource = repairedSource;
       build = await updateVisualBuild(build.id, {
         status: "repairing",

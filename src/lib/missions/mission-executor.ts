@@ -13,6 +13,7 @@
 import { generateText } from "@/lib/llm";
 import { verifyProjectWorkspace } from "@/lib/projects/project-repository";
 import { createTerminalToken } from "@/lib/terminal-auth";
+import { logFileOperation } from "@/lib/file-audit";
 import {
   createMission,
   getMission,
@@ -186,6 +187,18 @@ export async function resolveMissionApproval(
   }
 
   await writeWorkspaceFile(workspaceId, userId, filePath, approval.patch);
+  // Audit log the AI-driven file write (approved via the mission approval flow)
+  await logFileOperation({
+    userId,
+    projectId: approval.projectId,
+    workspaceId,
+    action: "write",
+    path: filePath,
+    contentLength: approval.patch.length,
+    source: "mission",
+    approvalId: approval.id,
+    ok: true,
+  }).catch(() => {});
   await updateStepStatus(approval.stepId, "completed", { applied: true });
 
   // Run validation
